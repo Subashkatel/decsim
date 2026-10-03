@@ -10,9 +10,9 @@ derived from those rows at read time, which is sinter's shape
 seconds and a Counter of custom counts, __add__ sums them, and every
 rate or interval is computed from the summed row); gem5 keeps its
 Distribution statistics the same way, as counts per bucket summed
-across simulations. So sweep.csv and links.csv read the same whether
-one process ran every shot or many ran a piece each: a run's shots are
-pieces too, and the fold of the pieces builds both files.
+across simulations. So sweep.csv reads the same whether one process
+ran every shot or many ran a piece each: a run's shots are pieces too,
+and the fold of the pieces builds it.
 
 What a summary needs off those rows is a count, a true count, a sum, a
 max and an exact mean per sweep point, and none of those grows with the
@@ -50,7 +50,6 @@ import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
-import decsim.observe.data_movement as data_movement
 import decsim.records.windows as window_records
 
 # the measurement's fields that are not columns of shots.csv: the
@@ -66,16 +65,6 @@ NON_COLUMN_FIELDS = (
     "trace_path",
     "window_statuses",
     "confidence",
-)
-# the counters shot_data_movement.csv carries per path, as
-# observe/data_movement.py's json_value names them
-MOVEMENT_COUNTERS = (
-    "copies",
-    "copied_rounds",
-    "copy_bits",
-    "moves",
-    "moved_rounds",
-    "move_bits",
 )
 # the counters a hold books for the whole shot: a reference is a token
 # on a store's slot and belongs to no path, so these repeat on every row
@@ -125,7 +114,7 @@ SHOT_MAXES = (
     *LOAD_MAXES,
 )
 # the windows by final status and the replaced provisional ones left
-# uncorrected, summed per point and per piece (pieces.write)
+# uncorrected, summed per point
 STATUS_SUMS = (
     *measure.WINDOW_STATUS_COLUMNS,
     "provisional_no_correction_windows",
@@ -163,15 +152,6 @@ CONFIDENCE_BINS_PER_DECIBEL = 10
 # shot's failure, Toshio's P(e|g) (2510.25222 lines 807-841)
 WINDOW_HISTOGRAM = "window"
 SHOT_MINIMUM_HISTOGRAM = "shot_minimum"
-# links.csv is the mean of these over a point's shots, one row per link
-LINK_MEANS = (
-    "transfers",
-    "payload_bits",
-    "unknown_payload_transfers",
-    "queue_wait_us",
-    "serialization_us",
-    "propagation_us",
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -333,37 +313,6 @@ def write_csv(rows: list, path: Path, swept: Optional[dict] = None) -> None:
         writer.writerows(rows)
 
 
-def terminal_lines(rows: list, report_dir: Path) -> list:
-    """The terminal summary: one labeled block per sweep point.
-
-    Full names, no abbreviations; the full record is sweep.csv. Under
-    each point come the bits its shots copied and moved, grouped by the
-    memory class the hop crossed, read back from the folder's
-    data_movement.csv. A run with observation.data_movement off wrote no
-    such file and says so once at the end, because a run that counted
-    nothing has no counts and a row of zeros would claim otherwise.
-    """
-    movement = _data_movement_of(report_dir)
-    point_ids = [row["point_id"] for row in rows]
-    swept = run_folder.swept_values(report_dir, point_ids)
-    blocks = []
-    for row in rows:
-        values = swept[row["point_id"]]
-        block = _terminal_block(row, values)
-        at_point = _movement_at_point(movement, row)
-        with_classes = _block_with_classes(block, at_point)
-        blocks.append(with_classes)
-    joined_blocks = "\n\n".join(blocks)
-    lines = joined_blocks.split("\n")
-    if not movement:
-        lines.append("")
-        lines.append(
-            "data movement: observation.data_movement was off, so this run "
-            "counted no copies, references or moves"
-        )
-    return lines
-
-
 def shot_data_movement_rows(measurements: list) -> list:
     """One row per shot per path: that shot's own copy and move counters.
 
@@ -408,11 +357,9 @@ def shot_rows(measurements: list) -> list:
 def shot_link_rows(measurements: list) -> list:
     """One row per shot per link: that shot's own ledger counters.
 
-    links.csv is the mean of these over a point's shots. They are a
-    file of their own rather than sixty more columns of shots.csv
-    because the link set is data and not schema: the counters are the
-    columns links.csv already has, so the summary is a mean over rows,
-    and a topology with another link adds rows and moves no column.
+    They are a file of their own rather than sixty more columns of
+    shots.csv because the link set is data and not schema: a topology
+    with another link adds rows and moves no column.
     """
     rows = []
     for measurement in measurements:
@@ -586,15 +533,6 @@ def read_rows(path: Path) -> list:
     return rows
 
 
-def rows_by_point(run_dir: Path) -> dict:
-    """sweep.csv's rows, keyed by their point id."""
-    sweep_path = run_dir / "sweep.csv"
-    rows = {}
-    for row in read_rows(sweep_path):
-        rows[row["point_id"]] = row
-    return rows
-
-
 def fold_pieces(
     run_dir: Path,
     folders: list,
@@ -624,90 +562,6 @@ def fold_pieces(
     return _fold_the_folders(folders, order, out_dir, swept, rules)
 
 
-def refuse_pieces_of_another_tree(folders: list) -> None:
-    """Refuse a collect onto a point whose saved pieces ran another tree.
-
-    A collect names this tree in its results folder's run.json before
-    its first shot and folds the pieces it adds with the saved ones, so
-    it asks the fold's own refusal first, this tree standing for the
-    pieces it would add, and a refused collect spends no shot and leaves
-    the results folder as the earlier tree wrote it.
-    """
-    identity = run_folder.piece_identity()
-    this_code = _code_of(identity)
-    code_by_point = _pieces_by_point_and_value(folders, _code_of)
-    for by_code in code_by_point.values():
-        by_code.setdefault(this_code, "this collect")
-    _refuse_a_point_of_two_trees(code_by_point)
-
-
-class _PointMovement:
-    """One sweep point's data-movement totals, one row at a time.
-
-    A row carries one shot's counters on one path, so it belongs to that
-    path's totals and to the totals of the memory class the path
-    crosses. It also carries the shot's own hold counters, which belong
-    to no path and are read once per shot: the rows of one shot are
-    together in the order a run writes them and in the merged order of
-    several folders, so a seed that differs from the last one is the
-    next shot.
-    """
-
-    def __init__(self) -> None:
-        self.by_shot = fold.RowTotals(sums=REFERENCE_COUNTERS)
-        self.by_group = {}
-        self.last_seed = None
-
-    def add(self, row: dict) -> None:
-        """One shot's row on one path, into the three totals it belongs to."""
-        seed = row["seed"]
-        if seed != self.last_seed:
-            self.by_shot.add(row)
-            self.last_seed = seed
-        at_path = self._group_totals("path", row["path"])
-        at_path.add(row)
-        at_class = self._group_totals("memory_class", row["memory_class"])
-        at_class.add(row)
-
-    def paths(self) -> list:
-        """Every path the point's shots copied or moved along, in order."""
-        return self._names_of("path")
-
-    def classes(self) -> list:
-        """The memory classes these rows crossed, cheapest first.
-
-        The order is observe/data_movement.py's own CLASS_ORDER, so the
-        grouped table reads the way the counters group it.
-        """
-        crossed = self._names_of("memory_class")
-        listed = []
-        for memory_class in data_movement.CLASS_ORDER:
-            if memory_class.value in crossed:
-                listed.append(memory_class.value)
-        return listed
-
-    def totals_of(self, grouping: str, name: str):
-        """One path's or one memory class's counter sums."""
-        return self.by_group[(grouping, name)]
-
-    def _group_totals(self, grouping: str, name: str):
-        """The totals of one path or class, made the first time it shows."""
-        key = (grouping, name)
-        totals = self.by_group.get(key)
-        if totals is None:
-            totals = fold.RowTotals(sums=MOVEMENT_COUNTERS)
-            self.by_group[key] = totals
-        return totals
-
-    def _names_of(self, grouping: str) -> list:
-        """The names one grouping holds, sorted."""
-        names = []
-        for group, name in self.by_group:
-            if group == grouping:
-                names.append(name)
-        return sorted(names)
-
-
 def _refused_or_ordered(folders: list, point_ids: list):
     """The fold's row order, once the folders pass every refusal.
 
@@ -717,7 +571,6 @@ def _refused_or_ordered(folders: list, point_ids: list):
     positions = _task_positions(point_ids)
     order = functools.partial(_row_task_and_seed, positions)
     _refuse_folders_of_different_columns(folders)
-    _refuse_a_point_this_tree_cannot_place(folders)
     _refuse_pieces_that_recorded_confidence_apart(folders)
     _refuse_pieces_that_ran_different_code(folders)
     _refuse_a_repeated_shot(folders, order)
@@ -731,8 +584,8 @@ def _fold_the_folders(
 
     A pass reads one file of every folder at once, writes the folded
     file row by row and feeds the totals its summary needs, so no pass
-    holds a folder's rows. The three derived files come last, off the
-    totals the passes built, each point's swept values beside its rows.
+    holds a folder's rows. The derived files come off the totals the
+    passes built, each point's swept values beside its rows.
     """
     shot_totals, prefixes = _fold_shots(folders, order, out_dir, swept, rules)
     counts = _folded_counts(folders)
@@ -742,14 +595,8 @@ def _fold_the_folders(
     samples_path = out_dir / "window_samples.csv"
     samples_rows = _rows_of_counts(counts, list(shot_totals))
     _write_rows(samples_rows, samples_path, swept)
-    link_totals = _fold_shot_links(folders, order, out_dir, swept)
-    per_link = _link_rows_of(link_totals)
-    links_path = out_dir / "links.csv"
-    write_csv(per_link, links_path, swept)
-    movement_totals = _fold_shot_movement(folders, order, out_dir, swept)
-    per_movement = _movement_rows_of(movement_totals)
-    movement_path = out_dir / "data_movement.csv"
-    _write_rows(per_movement, movement_path, swept)
+    _fold_shot_links(folders, order, out_dir, swept)
+    _fold_shot_movement(folders, order, out_dir, swept)
     _fold_latency_samples(folders, order, out_dir, swept)
     _fold_window_confidence(folders, order, out_dir, swept)
     histogram = _folded_confidence_histogram(folders)
@@ -778,24 +625,18 @@ def _add_a_folded_shot(
     _add_to_the_prefix(prefixes, rules, row)
 
 
-def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> dict:
-    """Every folder's shot_links.csv into one, and the per-link totals."""
-    totals = {}
-    add_a_link = functools.partial(_add_a_shot_link, totals)
+def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> None:
+    """Every folder's shot_links.csv into one; no summary reads it."""
     name = "shot_links.csv"
-    _fold_one_file(folders, name, order, out_dir, swept, add_a_link)
-    return totals
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
 
 
 def _fold_shot_movement(
     folders: list, order, out_dir: Path, swept: dict
-) -> dict:
-    """Every folder's shot_data_movement.csv into one, and its totals."""
-    totals = {}
-    add_a_row = functools.partial(_add_a_movement_row, totals)
+) -> None:
+    """Every folder's shot_data_movement.csv into one; no summary reads it."""
     name = "shot_data_movement.csv"
-    _fold_one_file(folders, name, order, out_dir, swept, add_a_row)
-    return totals
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
 
 
 def _fold_latency_samples(
@@ -1130,74 +971,6 @@ def _add_a_shot(totals: dict, row: dict) -> None:
     at_point.add(row)
 
 
-def _add_a_shot_link(totals: dict, row: dict) -> None:
-    """One shot's row on one link into that point's and link's totals."""
-    point = sweep_point_of(row)
-    at_point = totals.get(point)
-    if at_point is None:
-        at_point = {}
-        totals[point] = at_point
-    link = row["link"]
-    at_link = at_point.get(link)
-    if at_link is None:
-        at_link = fold.RowTotals(means=LINK_MEANS)
-        at_point[link] = at_link
-    at_link.add(row)
-
-
-def _link_rows_of(totals: dict) -> list:
-    """One row per point per link, the points and the links in order."""
-    rows = []
-    for point in totals:
-        at_point = totals[point]
-        for path in sorted(at_point):
-            row = _link_row(point, path, at_point[path])
-            rows.append(row)
-    return rows
-
-
-def _add_a_movement_row(totals: dict, row: dict) -> None:
-    """One shot's row on one path into its sweep point's totals."""
-    point = sweep_point_of(row)
-    at_point = totals.get(point)
-    if at_point is None:
-        at_point = _PointMovement()
-        totals[point] = at_point
-    at_point.add(row)
-
-
-def _movement_rows_of(totals: dict) -> list:
-    """One point's paths and then its memory classes, point by point.
-
-    Two tables in one file, told apart by the grouping column. The
-    second one is the grouping the classical sources ask for: a DRAM
-    access costs "a couple of orders-of-magnitude higher than the cost
-    of an internal cache access" (Horowitz, ISSCC 2014 lines 232-247)
-    and an accelerator's access costs what the memory it reads costs
-    (Dally, CACM 2020 lines 231-234), so a copy into a register and a
-    copy across a cryostat link may not be summed into one count. Every
-    number is a mean over the point's shots.
-    """
-    rows = []
-    for point in totals:
-        at_point = totals[point]
-        for row in _movement_rows_at_point(point, at_point):
-            rows.append(row)
-    return rows
-
-
-def _movement_rows_at_point(point: tuple, movement: _PointMovement) -> list:
-    """One point's two tables: a row per path, then a row per class."""
-    rows = []
-    for path in movement.paths():
-        row = _movement_row(point, "path", path, movement)
-        rows.append(row)
-    for memory_class in movement.classes():
-        row = _movement_row(point, "memory_class", memory_class, movement)
-        rows.append(row)
-    return rows
-
-
 def _write_rows(rows: list, path: Path, swept: dict) -> None:
     """One file of the record, left unwritten when it has no rows."""
     if not rows:
@@ -1350,64 +1123,6 @@ def _refuse_folders_of_different_columns(run_dirs: list) -> None:
         _refuse_one_files_different_columns(run_dirs, name)
 
 
-def _refuse_a_point_this_tree_cannot_place(run_dirs: list) -> None:
-    """Every folder's window samples name a point this tree measures.
-
-    window_samples.csv is the one folded file read by a column's values
-    and not by its header: every row names a latency point, and the
-    fold writes that point's counts where the point sits among this
-    tree's own (_point_and_name_order calls measure.POINTS.index). A
-    folder whose rows name a point this tree does not measure, which is
-    the other half of two trees measuring different points, has no
-    place in that order, and the sort would fail with sweep.csv and
-    shots.csv already written. It is checked here, at the boundary,
-    before out_dir exists, the way the folded files' columns are, and it
-    costs one pass over the small file: one folder's window_samples.csv
-    of a weak_ler sweep is 188 rows and 9 KB.
-
-    Only the names are checked, not that the folders name the same set.
-    A point may hold a column and no sample at all, measured:
-    csb_stall_per_round has a mean column in every shots.csv and no
-    window sample on a weak-only tree, because no round reached the
-    strong store. And the counts add per (sweep point, latency point),
-    so a folder with no sample of a point contributes none and the
-    fold's multiset is still the one a single run over the same shots
-    would have written. What would be wrong, a folder written by a tree
-    whose points are not this tree's, is already refused by the columns:
-    shot_rows writes one _mean_us column per point of the tree that
-    wrote it, so the folded files' headers already pin every folder to
-    one points list.
-    """
-    for run_dir in run_dirs:
-        path = Path(run_dir) / "window_samples.csv"
-        if not path.is_file():
-            continue
-        names = _window_sample_names(path)
-        _refuse_the_point(run_dir, names)
-
-
-def _window_sample_names(path: Path) -> list:
-    """The latency points one folder's window samples name, sorted."""
-    names = set()
-    for row in fold.row_stream(path):
-        names.add(row["name"])
-    return sorted(names)
-
-
-def _refuse_the_point(run_dir, names: list) -> None:
-    """Say which folder names which point that this tree cannot place."""
-    for name in names:
-        if name in measure.POINTS:
-            continue
-        raise refusal.RefusalError(
-            f"{run_dir} holds window samples of the latency point {name!r}, "
-            "which this tree does not measure; a fold writes a point's "
-            "counts where that point sits among this tree's own, so a "
-            "folder naming one it has no place for is refused before the "
-            "fold reads a row"
-        )
-
-
 def _refuse_one_files_different_columns(run_dirs: list, name: str) -> None:
     """One folded file's columns, the same in every piece of one point.
 
@@ -1514,13 +1229,13 @@ def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
 
 
 def _refuse_pieces_that_ran_different_code(run_dirs: list) -> None:
-    """A point's pieces must have run one tree: one commit, clean or dirty.
+    """A point's pieces must have run one tree: one commit, one patch.
 
     A point's estimate pools its pieces' shots, and the results folder's
-    run.json names one tree, so pieces of two
-    trees would pool two simulators under one name. A dirty tree's
-    changes are not recorded per piece, so two dirty pieces of one
-    commit pass, and a clean and a dirty one do not.
+    run.json names one tree, so pieces of two trees would pool two
+    simulators under one name. Each piece records its commit, whether
+    the tree was dirty, and the sha256 of the tree's code state patch,
+    so two dirty trees of one commit are two trees too.
     """
     code_by_point = _pieces_by_point_and_value(run_dirs, _code_of)
     _refuse_a_point_of_two_trees(code_by_point)
@@ -1549,14 +1264,18 @@ def _confidence_coverage_of(piece: dict):
 
 
 def _code_of(piece: dict) -> tuple:
-    return (piece["commit"], piece["dirty"])
+    """A piece's tree; a piece written before the patch hash has None."""
+    return (piece["commit"], piece["dirty"], piece.get("patch_sha256"))
 
 
 def _refuse_the_code(point_id: str, by_code: dict):
     """Say which pieces of the point ran which tree."""
     pieces_named = []
-    for (commit, is_dirty), run_dir in by_code.items():
-        pieces_named.append(f"{run_dir} (commit {commit}, dirty {is_dirty})")
+    for (commit, is_dirty, patch_sha256), run_dir in by_code.items():
+        pieces_named.append(
+            f"{run_dir} (commit {commit}, dirty {is_dirty}, "
+            f"patch {patch_sha256})"
+        )
     listed = ", ".join(pieces_named)
     raise refusal.RefusalError(
         f"the pieces of point {point_id} ran different code: {listed}; "
@@ -1676,113 +1395,6 @@ def _add_tier_split_columns(row: dict, counts: dict, point: tuple) -> None:
         row[f"{prefix}_p99_us"] = percentile_of_counts(multiset, 0.99)
 
 
-def _terminal_block(row: dict, values: dict) -> str:
-    """One sweep point's terminal block, one labeled line per number.
-
-    The block opens with the point's value at each swept path. The
-    lines above the latency ones are columns every row has. The failures
-    and their rate are of the scored shots, which the rate's label says,
-    and the unscored shots are counted beside them. The latency lines
-    are the points the row holds (_points_held), because a row folded
-    from an older tree's folders holds only the points that tree
-    measured.
-    """
-    algorithm = row["algorithm"]
-    algorithm_text = _algorithm_text(algorithm)
-    unscored_fraction = row["unscored_shots"] / row["shots"]
-    rate_text = _terminal_rate_text(row)
-    lines = []
-    for path, value in values.items():
-        lines.append(f"{path}: {value}")
-    lines += [
-        f"algorithm: {algorithm_text}",
-        f"load (service per window / window inter-arrival): {row['load']:.2f}",
-        f"logical failures: {row['logical_failures']} of "
-        f"{row['scored_shots']} scored shots",
-        f"logical error rate among scored shots: {rate_text}",
-        f"unscored shots: {row['unscored_shots']} of {row['shots']} "
-        f"({unscored_fraction:.3g})",
-        f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
-    ]
-    latency_lines = _terminal_latency_lines(row)
-    lines.extend(latency_lines)
-    return "\n".join(lines)
-
-
-def _terminal_rate_text(row: dict) -> str:
-    """The estimate with its 95 percent limits and the prefix's state.
-
-    A cap with no failure has its upper limit alone, and a point with
-    no estimate, adaptive or unscored, says so.
-    """
-    state = row["state"]
-    rate = row["logical_error_rate_estimate"]
-    high = row["logical_error_rate_high"]
-    if rate is not None:
-        low = row["logical_error_rate_low"]
-        return f"{rate:.3g}, 95% {low:.3g} to {high:.3g} ({state})"
-    if high is not None:
-        return f"below {high:.3g} at 95% ({state})"
-    return f"none ({state})"
-
-
-def _terminal_latency_lines(row: dict) -> list:
-    """The block's latency lines, for the points the row holds.
-
-    A point the row does not hold gets no line at all, not a line of
-    zeros and not a placeholder, for the reason it gets no column
-    either (_points_held): a zero here would say the windows took no
-    time, when what happened is that nobody measured them. sinter
-    prints the same way, a counter a file does not carry being simply
-    absent from what the folded table shows
-    (.pydeps/sinter/_data/_task_stats.py:71, custom_counts is a
-    Counter[str]).
-    """
-    held = _points_held(row)
-    lines = []
-    if "queue_wait" in held:
-        lines.append(f"queue wait, mean: {row['queue_wait_mean_us']:.3f} us")
-    if "service" in held:
-        lines.append(
-            f"service time per window, mean: {row['service_mean_us']:.3f} us"
-        )
-    if "buffer0_ready_to_frame" in held:
-        lines.append(
-            f"ready to frame commit: median "
-            f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
-            f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us"
-        )
-    return lines
-
-
-def _algorithm_text(algorithm) -> str:
-    """A named algorithm as its name, a latency card as its microseconds."""
-    if isinstance(algorithm, str):
-        return algorithm
-    return f"{algorithm:g} us"
-
-
-def _link_row(point: tuple, path: str, totals) -> dict:
-    """One link's averaged counters at one sweep point."""
-    transfers = totals.mean("transfers")
-    payload_bits = totals.mean("payload_bits")
-    bits_per_transfer = 0.0
-    if transfers:
-        bits_per_transfer = payload_bits / transfers
-    row = point_columns(point)
-    row["link"] = path
-    row["transfers_per_shot"] = transfers
-    row["payload_bits_per_shot"] = payload_bits
-    row["bits_per_transfer"] = bits_per_transfer
-    row["unknown_payload_transfers_per_shot"] = totals.mean(
-        "unknown_payload_transfers"
-    )
-    row["queue_wait_us_per_shot"] = totals.mean("queue_wait_us")
-    row["serialization_us_per_shot"] = totals.mean("serialization_us")
-    row["propagation_us_per_shot"] = totals.mean("propagation_us")
-    return row
-
-
 def _paths_counted(counted: dict) -> list:
     """Every path one shot copied or moved along, in path order."""
     paths = set(counted["copies_by_path"])
@@ -1824,75 +1436,6 @@ def _tally_of(counters: Optional[dict], name: str) -> int:
     if counters is None:
         return 0
     return counters[name]
-
-
-def _movement_row(
-    point: tuple, grouping: str, name: str, movement: _PointMovement
-) -> dict:
-    """One point's mean over shots for one path or one memory class.
-
-    The reference columns are the point's own, the same on every row: a
-    reference belongs to the shot and not to a path, so it is counted
-    over the point's shots and not over the rows of one path, which some
-    of the point's shots may not have at all.
-    """
-    row = point_columns(point)
-    row["grouping"] = grouping
-    row["name"] = name
-    group = movement.totals_of(grouping, name)
-    shots = movement.by_shot.rows
-    for counter in MOVEMENT_COUNTERS:
-        total = group.sums[counter]
-        row[f"{counter}_per_shot"] = total / shots
-    for counter in REFERENCE_COUNTERS:
-        held = movement.by_shot.sums[counter]
-        row[f"{counter}_per_shot"] = held / shots
-    return row
-
-
-def _data_movement_of(report_dir: Path) -> list:
-    """A folder's per-point data-movement rows, empty when it wrote none."""
-    path = Path(report_dir) / "data_movement.csv"
-    if not path.is_file():
-        return []
-    return read_rows(path)
-
-
-def _movement_at_point(movement: list, row: dict) -> list:
-    """The memory-class rows of one sweep point, in cost order."""
-    point = sweep_point_of(row)
-    found = []
-    for movement_row in movement:
-        if movement_row["grouping"] != "memory_class":
-            continue
-        if sweep_point_of(movement_row) == point:
-            found.append(movement_row)
-    return found
-
-
-def _block_with_classes(block: str, at_point: list) -> str:
-    """One point's block with its by-class bit lines under it."""
-    if not at_point:
-        return block
-    lines = [block]
-    copied = _class_bits_line("bits copied per shot", at_point, "copy_bits")
-    lines.append(copied)
-    moved = _class_bits_line("bits moved per shot", at_point, "move_bits")
-    lines.append(moved)
-    return "\n".join(lines)
-
-
-def _class_bits_line(label: str, at_point: list, counter: str) -> str:
-    """One line: a class and its bits per shot, the classes it crossed."""
-    named = []
-    for row in at_point:
-        bits = row[f"{counter}_per_shot"]
-        if bits:
-            named.append(f"{row['name']} {bits:.0f}")
-    if not named:
-        return f"{label} by memory class: none"
-    listed = ", ".join(named)
-    return f"{label} by memory class: {listed}"
 
 
 def _window_confidence_row(

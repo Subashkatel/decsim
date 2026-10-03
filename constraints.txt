@@ -57,12 +57,10 @@ markupsafe==3.0.3
     # via jinja2
 matplotlib==3.10.9 ; python_full_version < '3.11'
     # via
-    #   decsim (pyproject.toml)
     #   pymatching
     #   sinter
 matplotlib==3.11.2 ; python_full_version >= '3.11'
     # via
-    #   decsim (pyproject.toml)
     #   pymatching
     #   sinter
 mpmath==1.3.0

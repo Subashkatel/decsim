@@ -82,7 +82,7 @@ NO_STRONG_SIDE_CELLS = {
 def every_hop_copies(distance: int) -> machine_settings.MachineSettings:
     """Block 1: the weak tier on copies, every copy counted and traced.
 
-    One traced shot a point feeds residence.csv.
+    One traced shot a point records where every round sat.
     """
     base = machine_settings.weak_decoder_baseline(
         distance,

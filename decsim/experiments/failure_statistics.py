@@ -1,39 +1,22 @@
-"""Estimates, exact intervals and paired tests of logical failure rates.
+"""Estimates and exact intervals of logical failure rates.
 
-Pure functions over failure counts and failure bits. A point stops by a
-truncated inverse binomial rule: at the shot where its scored failures
-reach the target, no earlier than a minimum shot count, or at a cap. The
-intervals are exact for that rule, and the confidence sequences hold at
-every shot, so at any stop (Howard et al., arXiv 1810.08240, Lemma 3).
+Pure functions over failure counts. A point stops by a truncated inverse
+binomial rule: at the shot where its scored failures reach the target,
+no earlier than a minimum shot count, or at a cap. The intervals are
+exact for that rule.
 """
 
 import dataclasses
 import enum
 import math
-from collections.abc import Sequence
 from typing import Optional
 
-import numpy
 import scipy.stats
 
 # The 95 percent intervals put 2.5 percent on each side (NIST/SEMATECH
 # e-Handbook 7.2.4.1).
 LOWER_QUANTILE = 0.025
 UPPER_QUANTILE = 0.975
-# Ville's inequality (Ville 1939): a nonnegative martingale of mean one
-# ever reaches 1/alpha with chance at most alpha; Howard et al. Lemma 3
-# makes that the same as reaching it at any stopping time.
-MIXTURE_EVIDENCE_LEVEL = 20.0
-LOG_MIXTURE_EVIDENCE_LEVEL = math.log(MIXTURE_EVIDENCE_LEVEL)
-LOG_HALF = math.log(0.5)
-LOG_TWO_PI = math.log(math.tau)
-# Stirling's series for log(k!) minus Stirling's approximation, the
-# coefficients of 1/k, 1/k^3, ... 1/k^9 (Loader 2000, as R's stirlerr
-# uses them past k = 15, where the next term is below 1e-16).
-STIRLING_SERIES = (1 / 12, -1 / 360, 1 / 1260, -1 / 1680, 1 / 1188)
-# Below this count the direct difference is used: its terms are small,
-# so nothing large cancels.
-STIRLING_SERIES_FLOOR = 16
 
 
 class StopKind(enum.Enum):
@@ -182,124 +165,6 @@ def per_output_round_rate(shot_rate: float, outputs: int, rounds: int) -> float:
     return per_round_rate(output_rate, rounds)
 
 
-def is_mixture_difference(
-    first_only_failures: int, second_only_failures: int
-) -> bool:
-    """Whether the discordant seeds show a difference, at any stop.
-
-    The beta-binomial mixture of Robbins (1970), Howard et al. Proposition
-    7 with g = h = 1/2 and a uniform prior on theta, the chance that the
-    first point is the one failing on a discordant seed:
-    M(1/2) = B(a + 1, b + 1) / (B(1, 1) (1/2)^(a + b)), where B(1, 1) is
-    one. Under the null, each discordant sign a fair coin given every
-    earlier seed, M is a nonnegative martingale of mean one, so it ever
-    reaches 20 with chance at most 0.05 (Ville 1939), and so at any stop
-    (Lemma 3).
-
-    B(a + 1, b + 1) = 1 / ((n + 1) C(n, a)), so log M is -log(n + 1)
-    minus the log of the fair-coin probability of the counts, taken in
-    Loader's form: at a billion seeds the log-gamma terms of the beta
-    function are near 1e10 and cancel to less than the decision needs.
-    """
-    discordant_count = first_only_failures + second_only_failures
-    log_fair_probability = _log_fair_binomial(
-        first_only_failures, second_only_failures
-    )
-    log_count_factor = math.log1p(discordant_count)
-    log_evidence = -log_fair_probability - log_count_factor
-    return log_evidence >= LOG_MIXTURE_EVIDENCE_LEVEL
-
-
-def empirical_bernstein_sequence(
-    values: Sequence[float],
-) -> Optional[tuple]:
-    """The 95 percent confidence sequence for the mean of values in [0, 1].
-
-    Howard et al. (arXiv 1810.08240) eq. (24), Theorem 4 with the
-    polynomial stitched boundary (c = 1, eta = 2, m = 1, h(k) ~ k^1.4):
-    mean_t +- [1.7 sqrt(V (log log 2V + 3.8)) + 3.4 log log 2V + 13] / t,
-    with V = max(1, sum of (X_i - mean_(i-1))^2). It covers mu_t, the
-    average of each value's expectation given every earlier value
-    (section 2), with no common mean assumed, at every t and so at any
-    stop. On a learning run's failure bits it bounds the average
-    conditional failure probability. Returns (low, high), or None with
-    no value, as estimate gives nothing with no scored shot.
-    """
-    outcomes = numpy.asarray(values, dtype=float)
-    count = len(outcomes)
-    if count == 0:
-        return None
-    indexes = numpy.arange(count)
-    positions = indexes + 1
-    running_sums = numpy.cumsum(outcomes)
-    running_means = running_sums / positions
-    # Theorem 4 takes any prediction in [0, 1] before the first value.
-    predictions = numpy.zeros(count)
-    predictions[1:] = running_means[:-1]
-    deviations = outcomes - predictions
-    squared_deviations = deviations * deviations
-    deviation_sum = numpy.sum(squared_deviations)
-    boundary = _stitched_boundary(deviation_sum)
-    radius = boundary / count
-    mean = running_means[-1]
-    low = mean - radius
-    high = mean + radius
-    return (float(low), float(high))
-
-
-def difference_sequence(
-    first_failures: Sequence[bool], second_failures: Sequence[bool]
-) -> Optional[tuple]:
-    """The 95 percent sequence for the average difference of two rates.
-
-    Howard et al. Theorem 4 on X_s = fail_first - fail_second in [-1, 1],
-    as eq. (24) on (X + 1) / 2 in [0, 1]. It covers the average over the
-    seeds of p_first(s | past) - p_second(s | past), the seeds being
-    those both points scored, with no common mean assumed. Returns
-    (low, high), or None with no seed.
-
-    Raises:
-        ValueError: the two lists do not pair seed by seed.
-    """
-    first = numpy.asarray(first_failures, dtype=float)
-    second = numpy.asarray(second_failures, dtype=float)
-    if len(first) != len(second):
-        raise ValueError(
-            "the two points' failures pair seed by seed, but the first "
-            f"has {len(first)} seeds and the second {len(second)}"
-        )
-    if len(first) == 0:
-        return None
-    differences = first - second
-    shifted = differences + 1
-    rescaled = shifted / 2
-    rescaled_low, rescaled_high = empirical_bernstein_sequence(rescaled)
-    doubled_low = 2 * rescaled_low
-    doubled_high = 2 * rescaled_high
-    low = doubled_low - 1
-    high = doubled_high - 1
-    return (low, high)
-
-
-def _stitched_boundary(deviation_sum: float) -> float:
-    """Eq. (24)'s boundary at V, the radius times t.
-
-    1.7 sqrt(V (log log 2V + 3.8)) + 3.4 log log 2V + 13, with V the
-    deviation sum floored at one.
-    """
-    variance = max(deviation_sum, 1.0)
-    doubled_variance = 2 * variance
-    log_doubled = math.log(doubled_variance)
-    iterated_log = math.log(log_doubled)
-    shifted_log = iterated_log + 3.8
-    root_argument = variance * shifted_log
-    root = math.sqrt(root_argument)
-    root_term = 1.7 * root
-    log_term = 3.4 * iterated_log
-    terms = root_term + log_term
-    return terms + 13
-
-
 def _upper_limit(
     failures: int, scored_shots: int, stop_kind: StopKind
 ) -> float:
@@ -311,61 +176,3 @@ def _upper_limit(
         first_shape = failures
     high = scipy.stats.beta.ppf(UPPER_QUANTILE, first_shape, successes)
     return float(high)
-
-
-def _log_fair_binomial(first_count: int, second_count: int) -> float:
-    """Log of Binomial(a; a + b, 1/2), exact to rounding at any count.
-
-    Loader, "Fast and accurate computation of binomial probabilities"
-    (2000), the form of R's dbinom_raw: the Stirling remainders of the
-    three factorials, less each count's deviance from half the trials,
-    plus half the log of n / (2 pi a b). Every term stays small.
-    """
-    trials = first_count + second_count
-    if first_count == 0 or second_count == 0:
-        return trials * LOG_HALF
-    half_trials = trials / 2
-    first_deviance = _deviance(first_count, half_trials)
-    second_deviance = _deviance(second_count, half_trials)
-    trials_remainder = _stirling_remainder(trials)
-    first_remainder = _stirling_remainder(first_count)
-    second_remainder = _stirling_remainder(second_count)
-    remainder = trials_remainder - first_remainder - second_remainder
-    deviance = first_deviance + second_deviance
-    counts_product = first_count * second_count
-    log_trials = math.log(trials)
-    log_product = math.log(counts_product)
-    log_spread = log_trials - LOG_TWO_PI - log_product
-    return remainder - deviance + log_spread / 2
-
-
-def _deviance(count: int, mean: float) -> float:
-    """Count log(count / mean) + mean - count, with no cancellation."""
-    difference = count - mean
-    relative_difference = difference / mean
-    log_ratio = math.log1p(relative_difference)
-    weighted = count * log_ratio
-    return weighted - difference
-
-
-def _stirling_remainder(count: int) -> float:
-    """log(count!) minus Stirling's (count + 1/2) log count - count + ..."""
-    if count < STIRLING_SERIES_FLOOR:
-        return _direct_stirling_remainder(count)
-    inverse = 1 / count
-    inverse_squared = inverse * inverse
-    power = inverse
-    remainder = 0.0
-    for coefficient in STIRLING_SERIES:
-        remainder += coefficient * power
-        power *= inverse_squared
-    return remainder
-
-
-def _direct_stirling_remainder(count: int) -> float:
-    count_plus_one = count + 1
-    log_factorial = math.lgamma(count_plus_one)
-    log_count = math.log(count)
-    power_term = (count + 0.5) * log_count
-    approximation = power_term - count + LOG_TWO_PI / 2
-    return log_factorial - approximation

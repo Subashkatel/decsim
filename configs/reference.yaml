@@ -1351,13 +1351,10 @@ observation:                       # what a run records beyond its results
                                    # shot, holding every hop of every round and window
                                    # of that shot: 69 kB for this file's d3, 15-round
                                    # point, growing with the rounds and windows a shot
-                                   # has. `decsim run` draws timeline.png from it,
-                                   # and `decsim trace follow` reads one round's or
-                                   # window's path out of it. `decsim run` also
-                                   # reads the traced shots back into residence.csv:
-                                   # how long a round or window sat in each store and
-                                   # unit memory, and how long a move waited on each
-                                   # link path
+                                   # has. `decsim trace follow` reads one round's or
+                                   # window's path out of it: how long a round or
+                                   # window sat in each store and unit memory, and
+                                   # how long a move waited on each link path
   trace_shots: [0]                 # the shots the trace is written for; a sweep point
                                    # of 2000 shots writes one file, not 2000
   record_switching_windows: false  # true keeps every decode request record
@@ -1370,10 +1367,9 @@ observation:                       # what a run records beyond its results
                                    # (detection_events), on the RunResult without
                                    # the trace, and writes the counts to the run
                                    # folder:
-                                   # shot_data_movement.csv, one row per shot per path,
-                                   # and data_movement.csv, the point's mean over shots
-                                   # by path and then by memory class. false writes
-                                   # neither file, because a run that counted nothing
+                                   # shot_data_movement.csv, one row per shot per path
+                                   # with the memory class it crosses. false writes
+                                   # no file, because a run that counted nothing
                                    # has no counts and a row of zeros would say
                                    # otherwise
   confidence_shot_count: 100       # a count of shots from seed 0, or all. When a

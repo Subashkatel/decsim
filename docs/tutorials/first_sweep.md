@@ -51,47 +51,22 @@ saves whole the moment it ends; step 5 shows what that buys. Shots
 inside a piece stay serial, which is what keeps a shot's result a
 function of its seed alone.
 
-The summary, from a run of it. Its counts are yours too; its ticks are
-that host's, because this run file names a decoder rather than pricing
-one:
+It prints the folder it writes, then one line per point as the point
+finishes:
 
 ```
+run dir: results/first_sweep
+
 {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
 {"qpu.distance": 5, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
 {"qpu.distance": 7, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
-workload.arguments.physical_error_probability: 0.003
-qpu.distance: 3
-qpu.round_period_microseconds: 1.0
-algorithm: pymatching
-load (service per window / window inter-arrival): 7.50
-logical failures: 16 of 400 scored shots
-logical error rate among scored shots: 0.04, 95% 0.023 to 0.0641 (cap)
-unscored shots: 0 of 400 (0)
-throughput: 0.151 rounds per us
-queue wait, mean: 63.694 us
-service time per window, mean: 22.486 us
-ready to frame commit: median 102.760 us, p99 198.264 us
-
-workload.arguments.physical_error_probability: 0.003
-qpu.distance: 5
-...
-logical failures: 12 of 400 scored shots
-logical error rate among scored shots: 0.03, 95% 0.0156 to 0.0518 (cap)
-unscored shots: 0 of 400 (0)
-...
-workload.arguments.physical_error_probability: 0.003
-qpu.distance: 7
-...
-logical failures: 8 of 400 scored shots
-logical error rate among scored shots: 0.02, 95% 0.00867 to 0.039 (cap)
-unscored shots: 0 of 400 (0)
-...
 ```
 
-Sixteen failures out of 400 at distance 3, twelve at distance 5, eight
-at distance 7. The logical error rate falls as the code gets bigger,
-which is what a code below its threshold does: more physical qubits buy
-a better logical qubit.
+Its `sweep.csv`, which step 3 reads, counts sixteen failures out of 400
+at distance 3, twelve at distance 5 and eight at distance 7. Those
+counts are yours too, since they follow from the seeds. The logical
+error rate falls as the code gets bigger, which is what a code below its
+threshold does: more physical qubits buy a better logical qubit.
 
 Decoding in windows costs a little accuracy. A sliding window commits
 its correction without the rounds a whole-circuit decode can see, so
@@ -164,29 +139,11 @@ interval, or quote the point as an upper bound.
 ## Step 4. Draw it
 
 decsim writes the numbers and leaves the figure to you, since only you
-know what it should show. `sweep.csv` is a plain csv file:
-
-```python
-import csv
-
-import matplotlib.pyplot as plt
-
-with open("results/first_sweep/sweep.csv", newline="") as sweep_file:
-    rows = list(csv.DictReader(sweep_file))
-distances = [int(row["qpu.distance"]) for row in rows]
-estimates = [float(row["logical_error_rate_estimate"]) for row in rows]
-lows = [float(row["logical_error_rate_low"]) for row in rows]
-highs = [float(row["logical_error_rate_high"]) for row in rows]
-below = [estimate - low for estimate, low in zip(estimates, lows)]
-above = [high - estimate for estimate, high in zip(estimates, highs)]
-figure, axes = plt.subplots()
-axes.errorbar(distances, estimates, yerr=[below, above], fmt="o-")
-axes.set_xlabel("code distance")
-axes.set_ylabel("logical error rate")
-figure.savefig("ler.png")
-```
-
-The error bars are the limit columns you just read.
+know what it should show. `sweep.csv` holds one row per point: its
+`point_id`, one column per swept path, its counts, and the estimate
+with its limits, `logical_error_rate_estimate`, `logical_error_rate_low`
+and `logical_error_rate_high`. Read it with any csv reader and draw the
+error bars from the limit columns you just read.
 
 ## Step 5. Stop it and pick it up again
 
@@ -222,8 +179,25 @@ seed and the shot's position, so shot 173 of distance 5 is the same
 shot whichever process runs it and whenever. Stopping a sweep and
 picking it up changes nothing about the result. The tick columns do
 move a little between the two, because this run is charged its
-decoder's measured wall clock. `decsim run --slurm` uses the same
-pieces on a cluster.
+decoder's measured wall clock.
+
+On a cluster the same pieces run as Slurm jobs. `decsim run
+examples/my_first_sweep.py --slurm --out $PWD/results/first_sweep`
+records every point, so a machine that cannot be built stops it before
+anything is queued. It writes `run.sbatch`, one array whose task `i`
+runs point `i` until the point stops, and `fold.sbatch`, one job that
+folds every saved piece after the array ends, however its tasks ended.
+Then it submits both; `--dry-run` writes them and submits nothing. A
+task asks for `--cores` cores (4), `--hours` hours (24) and
+`--memory-mb` megabytes (16384), and logs to `logs/<i>.log`. A task
+starts no piece past its point's stop, so a point with `max_failures`
+stops near its target. If a task dies or runs out of time, submit the
+same command again: each task starts from its point's saved pieces, and
+a point that stopped runs nothing. `decsim run --fold --out
+results/first_sweep` folds the saved pieces at any time, even while
+tasks run. The launch refuses a checkout with uncommitted changes
+unless `ALLOW_DIRTY=1` is set, and sbatch reads the account, partition
+and QOS from SBATCH_ACCOUNT, SBATCH_PARTITION and SBATCH_QOS.
 
 ## What you learned
 

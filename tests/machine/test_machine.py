@@ -93,6 +93,7 @@ import examples.deltakit_example as finite_example
 import examples.live_memory_example as live_example
 import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
+import tests.decoders.test_union_find_cycle_count as cycle_count_tests
 import tests.escalation.test_strong_window_shapes as shape_tests
 import tests.machine.decoder_arrangements as decoder_arrangements
 import tests.qpu.memory_programs as memory_programs
@@ -1711,6 +1712,24 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     assert union_find_ticks > 3 * matching_ticks
 
 
+def _priced_by_cards(walk_microseconds: float):
+    """The cluster gap memory, its decode on the cycle count of Helios's core.
+
+    The walk is priced by its card at walk_microseconds.
+    """
+    settings = _switching_memory("union_find", "cluster_gap")
+    weak_decoder = settings.weak_decoder
+    helios_timed = dataclasses.replace(
+        weak_decoder.algorithm, timing=cycle_count_tests.TRACED_CYCLE_COUNT
+    )
+    weak_decoder = dataclasses.replace(weak_decoder, algorithm=helios_timed)
+    walk = cluster.ClusterGap.Settings(walk_microseconds=walk_microseconds)
+    switching = dataclasses.replace(settings.switching, confidence=walk)
+    return dataclasses.replace(
+        settings, weak_decoder=weak_decoder, switching=switching
+    )
+
+
 def _confidence_charges(machine) -> list:
     """The ticks each CONFIDENCE line of the run charged, in order."""
     charged = []
@@ -1734,22 +1753,35 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     charges one walk per window on the weak unit, and each weak decode
     gives its unit back after the decode and the walk it fed. Seed 1 is
     a shot in which no window escalates, so every decode is a weak one.
+
+    The decode runs on Helios's cycle count and the walk is priced by a
+    card, so no tick of the run is the host's. The same shot with the
+    walk 1 us longer finishes each decode later by 1 us for its own walk
+    and 1 us for each walk before it, since the one unit decodes the
+    windows in turn.
     """
-    settings = _switching_memory("union_find", "cluster_gap")
+    settings = _priced_by_cards(1.0)
+    longer_settings = _priced_by_cards(2.0)
     machine, _result, decodes = _run_hearing_decodes(settings, 1)
+    _machine, _result, longer_decodes = _run_hearing_decodes(longer_settings, 1)
     charged = _confidence_charges(machine)
-    assert len(charged) == len(decodes.finished)
-    for ticks in charged:
-        assert ticks > 0
+    one_microsecond = config.microseconds_to_ticks(1.0)
+    window_count = len(decodes.finished)
+    assert charged == [one_microsecond] * window_count
     named = []
     for line in machine.observation.log.lines:
         if "CONFIDENCE" in line:
             named.append(line)
     # the weak tier of this card is the default pool's one unit
     assert "on unit default#0" in named[0]
-    service_ticks = _decode_span_ticks(decodes)
-    assert min(service_ticks) > max(charged)
-    assert sum(service_ticks) > sum(charged)
+    later_by = []
+    paired = zip(decodes.finished, longer_decodes.finished, strict=True)
+    for finished, longer in paired:
+        later_by.append(longer.finish_ticks - finished.finish_ticks)
+    walks_before_and_own = range(1, window_count + 1)
+    assert later_by == [
+        one_microsecond * walks for walks in walks_before_and_own
+    ]
     for record in machine.observation.decode_records.requests:
         assert record.soft_output is not None
 

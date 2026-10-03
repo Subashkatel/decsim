@@ -6,9 +6,14 @@ refused with a sentence, the swept distance reaches the rounds policy,
 and a run writes its run.json and its per-shot records.
 """
 
+import csv
 import dataclasses
+import functools
 import json
+import pathlib
 import re
+import shutil
+import sys
 
 import pytest
 import yaml
@@ -18,15 +23,42 @@ import decsim.config as config_module
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
+import decsim.experiments.collection as collection
+import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
+import decsim.experiments.fold as fold
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.settings as machine_settings
 import tests.experiments.yaml_configs as yaml_configs
+
+CONFIGS = yaml_configs.CONFIGS_DIR
+REFERENCE_YAML = CONFIGS / "reference.yaml"
+# the data-movement grid's fourth block, the one with the strong tier
+DATA_MOVEMENT_SWITCHING_BLOCK = 3
+FOUR_POINT_SWEEP = {
+    "sweep": [
+        {
+            "axes": {
+                "workload.arguments.physical_error_probability": [0.001, 0.003],
+                "qpu.distance": [3, 5],
+                "qpu.round_period_microseconds": [1.0],
+            },
+            "collection": {"max_shots": 2},
+        }
+    ]
+}
+NOISY_AXES = {
+    "workload.arguments.physical_error_probability": [0.02],
+    "qpu.distance": [3],
+    "qpu.round_period_microseconds": [1.0],
+}
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
@@ -902,7 +934,7 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
         for seed in range(2)
     ]
     rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
-    links_path = run_dir / "links.csv"
+    links_path = run_dir / "shot_links.csv"
     per_link = report.read_rows(links_path)
     assert len(rows) == 1
     assert rows[0]["algorithm"] == 0.028
@@ -964,7 +996,7 @@ def test_a_run_writes_its_run_record_and_per_shot_records(
     tmp_path, monkeypatch
 ):
     # One tiny run end to end: a dated results folder that holds
-    # run.json, the config copy, shots.csv, sweep.csv and links.csv.
+    # run.json, the config copy, shots.csv, sweep.csv and shot_links.csv.
     import csv
 
     config_path = yaml_configs.write_config(tmp_path, {})
@@ -988,7 +1020,8 @@ def test_a_run_writes_its_run_record_and_per_shot_records(
 
     assert run_dir.parent.name == "results"
     assert run_dir.name.endswith("_unit_test_config")
-    assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
+    assert (run_dir / "sweep.csv").exists()
+    assert (run_dir / "shot_links.csv").exists()
 
 
 def test_a_points_record_holds_the_sections_it_resolved_to(tmp_path):
@@ -1113,3 +1146,967 @@ def test_two_config_files_of_one_name_are_both_copied(tmp_path):
     base_copy = run_dir / "config" / base_path.name
     assert child_copy.read_text() == child_path.read_text()
     assert base_copy.read_text() == base_path.read_text()
+
+
+def test_a_yaml_point_keeps_the_id_its_task_has(tmp_path):
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    (task,) = config.tasks()
+
+    study = config.experiment()
+
+    (point,) = study.points
+    point_task = experiment.task_of(point)
+    point_id = task.strong_id()
+    assert point_task.strong_id() == point_id
+    assert point.name == point_id[:12]
+
+
+def test_a_yaml_point_two_blocks_name_is_one_point(tmp_path):
+    block = yaml_configs.MINIMAL_CONFIG["sweep"][0]
+    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block, block]})
+    config = experiment.load_experiment(config_path)
+
+    study = config.experiment()
+
+    assert len(study.points) == 1
+
+
+def test_one_point_reads_no_point_past_the_one_it_chooses(
+    tmp_path, monkeypatch
+):
+    """A point's read runs its maker, so a narrated shot reads no other.
+
+    Without a name only the first point is read; with one, the points up
+    to the named one, since a yaml point is named by its id.
+    """
+    axes = {
+        "qpu.distance": [3, 5, 7],
+        "workload.arguments.physical_error_probability": [0.001],
+        "qpu.round_period_microseconds": [1.0],
+    }
+    card = {"sweep": [{"axes": axes, "collection": {"max_shots": 2}}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    study = config.experiment()
+    second_name = study.points[1].name
+    read_distances = []
+    point_task = experiment.ExperimentConfig.point_task
+
+    def counted_point_task(self, values):
+        distance = values["qpu.distance"]
+        read_distances.append(distance)
+        return point_task(self, values)
+
+    monkeypatch.setattr(
+        experiment.ExperimentConfig, "point_task", counted_point_task
+    )
+
+    config.one_point()
+    first_reads = list(read_distances)
+    read_distances.clear()
+    config.one_point(second_name)
+
+    assert first_reads == [3]
+    assert read_distances == [3, 5]
+
+
+def _record_options_of(tmp_path, overrides: dict):
+    """The record options and settings the yaml's first point reads to."""
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    return task.record_options, task.settings
+
+
+def test_the_record_options_are_read_beside_what_they_record(tmp_path):
+    """They are written under observation, run-owned.
+
+    The machine never reads them, so they are on the task beside the
+    settings and no part of the point's id.
+    """
+    overrides = yaml_configs.fixed_threshold_switching()
+    overrides["observation"] = {"confidence_shot_count": "all"}
+    written, settings = _record_options_of(tmp_path, overrides)
+    unset, _settings = _record_options_of(tmp_path, {})
+
+    assert written == collect.RecordOptions(None)
+    assert unset == collect.RecordOptions(100)
+    a_billion = 10**9
+    assert written.samples_confidence_of(a_billion)
+    assert unset.samples_confidence_of(99)
+    assert not unset.samples_confidence_of(100)
+    assert not hasattr(settings.observation, "confidence_shot_count")
+
+
+@pytest.mark.parametrize("written", [-1, True, "some", 2.5])
+def test_a_confidence_shot_count_that_is_no_count_is_refused(tmp_path, written):
+    """A count of shots from seed 0, or the word all; nothing else."""
+    overrides = {"observation": {"confidence_shot_count": written}}
+
+    with pytest.raises(ValueError, match="confidence_shot_count must be"):
+        _record_options_of(tmp_path, overrides)
+
+
+def test_a_swept_section_keeps_its_column_beside_every_measured_one(
+    tmp_path,
+):
+    """A whole yaml section is an axis, and no measured column shares it.
+
+    A row takes its swept values first and its measured values after
+    (report._with_swept_values), so a measured column named as a section
+    would overwrite the swept value in its cell. The swept windows cell
+    is the section's compact json (run_folder.swept_values), and no csv
+    column the run wrote is named as another yaml section.
+    """
+    windows = yaml_configs.MINIMAL_CONFIG["windows"]
+    block = dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])
+    block["axes"] = dict(block["axes"], windows=[windows])
+    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
+    out_dir = tmp_path / "out"
+    run_dir, _ = collect_command.run_experiment(config_path, out_dir)
+    shots_path = run_dir / "shots.csv"
+    shot, *_ = _csv_rows(shots_path)
+    columns = _columns_of_every_csv(run_dir)
+    sections_written = columns & set(machine_settings.SECTIONS)
+
+    assert json.loads(shot["windows"]) == windows
+    assert int(shot["decoded_windows"]) > 0
+    assert sections_written == {"windows"}
+
+
+def test_a_task_named_by_two_blocks_runs_once(tmp_path):
+    raw = _reference_yaml()
+    raw["sweep"] = [raw["sweep"][0], dict(raw["sweep"][0])]
+    raw["collection"]["max_shots"] = 2
+    twice_path = tmp_path / "twice.yaml"
+    twice = _written_yaml(raw, twice_path)
+    config = experiment.load_experiment(twice)
+    tasks = config.tasks()
+    out_dir = tmp_path / "out"
+
+    run_dir, _ = collect_command.run_experiment(twice, out_dir)
+
+    shots_path = run_dir / "shots.csv"
+    shots = _csv_rows(shots_path)
+    seeds = [shot["seed"] for shot in shots]
+    assert len(tasks) == 2
+    assert seeds == ["0", "1"]
+
+
+def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
+    """A yaml link rate is an exact Fraction and enters the id as its text.
+
+    sinter's strong id is the sha256 of every value's json text
+    (sinter/_data/_task.py strong_id_value), so two values give two ids.
+    """
+    narrow, wide = _bandwidth_tasks(tmp_path, (8, 64))
+
+    unique = collect.unique_tasks([narrow, wide])
+    narrow_shot = collect.run_shot(narrow, 0)
+    wide_shot = collect.run_shot(wide, 0)
+
+    assert narrow.strong_id() != wide.strong_id()
+    assert len(unique) == 2
+    assert _readout_rate(narrow_shot) == "2000"
+    assert _readout_rate(wide_shot) == "16000"
+    assert collect.json_value(narrow.settings) != collect.json_value(
+        wide.settings
+    )
+
+
+def test_one_yaml_saved_under_two_names_names_its_points_alike(tmp_path):
+    """A point is named by what it runs, not by the file that says it.
+
+    sinter keeps a task's circuit_path out of its strong id and hashes
+    the circuit's text (sinter/_data/_task.py:157, 167-204). The
+    reference yaml saved as t2.yaml and as t6.yaml runs the same points,
+    so its points' ids are equal, though the links card's labels name
+    the two files.
+    """
+    first_path = tmp_path / "t2.yaml"
+    second_path = tmp_path / "t6.yaml"
+    shutil.copyfile(REFERENCE_YAML, first_path)
+    shutil.copyfile(REFERENCE_YAML, second_path)
+
+    first_ids = _point_ids_of(first_path)
+    second_ids = _point_ids_of(second_path)
+
+    assert first_ids
+    assert first_ids == second_ids
+
+
+def _reference_yaml() -> dict:
+    text = REFERENCE_YAML.read_text()
+    return yaml.safe_load(text)
+
+
+def _written_yaml(raw: dict, path: pathlib.Path) -> pathlib.Path:
+    text = yaml.safe_dump(raw)
+    path.write_text(text)
+    return path
+
+
+def _columns_of_every_csv(run_dir) -> set:
+    """Every column name any csv file under the folder holds."""
+    columns = set()
+    for path in run_dir.rglob("*.csv"):
+        header = fold.header_of(path)
+        columns.update(header)
+    return columns
+
+
+def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
+    """The data-movement grid's switching task, its readout hop at each width.
+
+    The weak base the grid extends holds the hop, and that one file is
+    edited in place between loads, so the tasks differ in the hop's rate
+    and in nothing else, the path included.
+    """
+    configs = tmp_path / "configs"
+    shutil.copytree(CONFIGS, configs)
+    path = configs / "bases" / "weak_decoder_baseline.yaml"
+    grid = configs / "experiments" / "data_movement" / "data_movement.yaml"
+    text = path.read_text()
+    unpriced = "clock: fridge, bits_per_cycle: null}"
+    readout_hop = f"qpu_to_controller:  {{latency_cycles: 1, {unpriced}"
+    assert readout_hop in text
+    tasks = []
+    for bits_per_cycle in widths:
+        priced = f"clock: fridge, bits_per_cycle: {bits_per_cycle}}}"
+        priced_hop = readout_hop.replace(unpriced, priced)
+        priced_text = text.replace(readout_hop, priced_hop)
+        path.write_text(priced_text)
+        config = experiment.load_experiment(grid)
+        task = _switching_task(config)
+        tasks.append(task)
+    return tasks
+
+
+def _switching_task(config: experiment.ExperimentConfig):
+    """The grid's switching block, its first point at p = 0.001."""
+    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
+    points = switching_block.points()
+    values = dict(points[0])
+    values[yaml_configs.ERROR_RATE_PATH] = 0.001
+    return config.point_task(values)
+
+
+def _readout_rate(shot) -> str:
+    """The readout hop's rate, the one setting two bandwidth tasks differ in."""
+    capacity = shot.task.settings.links.qpu_to_controller.channel.capacity
+    return str(capacity.input_bits_per_microsecond)
+
+
+def _point_ids_of(config_path: pathlib.Path) -> list:
+    config = experiment.load_experiment(config_path)
+    point_ids = []
+    for task, _collection in config.point_tasks():
+        point_id = task.strong_id()
+        point_ids.append(point_id)
+    return point_ids
+
+
+def _csv_rows(path: pathlib.Path) -> list:
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)
+
+
+@pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
+def test_show_lists_every_sections_kind_of_every_shipped_config(name):
+    config_path = CONFIGS / name
+    config = experiment.load_experiment(config_path)
+    first_point = config.first_point_task()
+    lines = experiment.resolved_description(config, first_point.settings)
+    text = "\n".join(lines)
+    assert f"config: {config_path}" in lines[0]
+    assert "qpu: kind stim_device" in text
+    assert "sweep block 1:" in text
+    assert "log: " in text
+    assert "trace: " in text
+
+
+@pytest.mark.parametrize(
+    "qpu_kind, sentence",
+    [
+        ("recorded_stim", "required positional arguments: 'measurements'"),
+        ("streaming_stim", "required positional argument: 'programs'"),
+    ],
+)
+@pytest.mark.parametrize(
+    "verb, options", [("show", []), ("run", ["--seed", "0"])]
+)
+def test_show_and_run_stop_at_a_source_the_yaml_cannot_build(
+    tmp_path, verb, options, qpu_kind, sentence
+):
+    """The first point's machine is built, so show stops where a shot would."""
+    qpu = {"qpu": {"kind": qpu_kind}}
+    config_path = yaml_configs.write_config(tmp_path, qpu)
+
+    with pytest.raises(TypeError, match=sentence):
+        command.main([verb, str(config_path), *options])
+
+
+@pytest.mark.parametrize("verb", ["show", "run"])
+def test_show_and_run_refuse_a_maker_that_is_not_there_in_one_line(
+    tmp_path, capsys, verb
+):
+    """The first point makes the workload, so show refuses what run would."""
+    workload = {
+        "kind": "producer",
+        "function": "decsim.producers:no_such_maker",
+        "arguments": {},
+    }
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main([verb, str(config_path)])
+    printed = capsys.readouterr()
+
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "names no maker" in printed.err
+
+
+def test_show_builds_a_point_whose_threshold_learns_online(tmp_path, capsys):
+    """The first point's threshold is built per point, as the run builds it."""
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+
+    command.main(["show", str(config_path)])
+    printed = capsys.readouterr()
+
+    assert "escalation: kind switching" in printed.out
+
+
+def test_show_names_the_fabric_card_the_run_resolved_to():
+    """The card is one line, because every hop on it is priced.
+
+    A null card is the reference profile's numbers for that path
+    (decsim/links/link_profiles.py logical_reference_profile), so the
+    reader needs the card's name and nothing else.
+    """
+    config_path = CONFIGS / "reference.yaml"
+    config = experiment.load_experiment(config_path)
+    first_point = config.first_point_task()
+    lines = experiment.resolved_description(config, first_point.settings)
+    text = "\n".join(lines)
+    assert "links: card reference.yaml" in text
+
+
+def _line_number_of(path, text: str) -> int:
+    file_text = path.read_text()
+    lines = file_text.splitlines()
+    return lines.index(text) + 1
+
+
+def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
+    """Every value, the layer that set it and the yaml line it came from.
+
+    A value your file writes, one a preset it extends writes, a swept
+    one and one no file writes (its line is the one reference.yaml
+    documents it on).
+    """
+    reference_path = CONFIGS / "reference.yaml"
+    preset_path = tmp_path / "preset.yaml"
+    preset_path.write_text(
+        f"extends: {reference_path}\n"
+        "controller:\n"
+        "  clock: fridge\n"
+        "  readout_to_bits_cycles: 0\n"
+        "  packing_cycles_per_round: 0\n"
+        "  decision_to_pulse_cycles: 3\n"
+    )
+    config_path = tmp_path / "mine.yaml"
+    config_path.write_text(
+        "extends: preset.yaml\n"
+        "pauli_frame:\n"
+        "  kind: logical_register\n"
+        "  clock: fridge\n"
+        "  write_cycles: 5\n"
+    )
+    config = experiment.load_experiment(config_path)
+
+    first_point = config.first_point_task()
+    lines = experiment.value_lines(config, first_point.settings)
+
+    sweep_line = _line_number_of(reference_path, "sweep:")
+    last_sweep_line = _line_number_of(
+        reference_path, "      qpu.round_period_microseconds: [1.0]"
+    )
+    bound_line = _line_number_of(
+        reference_path,
+        "  packing_rounds_in_flight: null   # packing assembly workspace: "
+        "rounds in flight",
+    )
+    assert (
+        f"controller.decision_to_pulse_cycles = 3  [preset preset.yaml, "
+        f"{preset_path}:6]"
+    ) in lines
+    assert (
+        f"pauli_frame.write_cycles = 5  [your file, {config_path}:5]" in lines
+    )
+    assert (
+        f"qpu.distance = [3]  [sweep, {reference_path}:{sweep_line}-"
+        f"{last_sweep_line}]"
+    ) in lines
+    assert (
+        "controller.packing_rounds_in_flight = null  "
+        f"[default, configs/reference.yaml:{bound_line}]"
+    ) in lines
+
+
+def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
+    """A derived or renamed value prints no source, never a guessed one.
+
+    A channel's ticks come from its card's latency and clock, and a
+    section's clock period from the domain it names and that domain's
+    frequency; neither is one yaml key's value. unit_memory.bits is its
+    own key's.
+    """
+    reference_path = CONFIGS / "reference.yaml"
+    config_path = tmp_path / "mine.yaml"
+    config_path.write_text(
+        f"extends: {reference_path}\n"
+        "links:\n"
+        "  qpu_to_controller:\n"
+        "    clock: fridge\n"
+        "    bits_per_cycle: null\n"
+        "    latency_cycles: 7\n"
+    )
+    config = experiment.load_experiment(config_path)
+
+    first_point = config.first_point_task()
+    lines = experiment.value_lines(config, first_point.settings)
+
+    bits_line = _first_line_starting(reference_path, "    bits: null")
+    assert (
+        "links.qpu_to_controller.channel.propagation_latency_ticks = 28000"
+    ) in lines
+    assert "controller.clock = null" in lines
+    assert (
+        "weak_decoder.unit_memory.bits = null  "
+        f"[preset reference.yaml, {reference_path}:{bits_line}]"
+    ) in lines
+
+
+@functools.cache
+def _key_paths_by_line(path) -> dict:
+    """Each line of a yaml file that writes a mapping key, and that key."""
+    with open(path) as handle:
+        root = yaml.compose(handle)
+    by_line = {}
+    pending = [((), root)]
+    while pending:
+        prefix, node = pending.pop()
+        if node.id != "mapping":
+            continue
+        for key_node, value_node in node.value:
+            key = prefix + (key_node.value,)
+            line = key_node.start_mark.line + 1
+            by_line[line] = key
+            pending.append((key, value_node))
+    return by_line
+
+
+def _cited_line(value_line: str) -> tuple:
+    """The file and the first line a value line's bracket cites."""
+    _, _, bracket = value_line.rpartition("  [")
+    origin = bracket.removesuffix("]")
+    _, _, source = origin.rpartition(", ")
+    file_text, _, lines = source.rpartition(":")
+    first_line, _, _ = lines.partition("-")
+    return file_text, int(first_line)
+
+
+def _value_key(value_line: str) -> tuple:
+    """The yaml key a value line's value is read from, a swept one's sweep."""
+    dotted, _, rest = value_line.partition(" = ")
+    if "  [sweep, " in rest:
+        return ("sweep",)
+    names = dotted.split(".")
+    path = tuple(names)
+    return experiment._yaml_key(path)
+
+
+def _cited_lines(lines: list) -> list:
+    cited = []
+    for line in lines:
+        if "  [" in line:
+            cited.append(line)
+    return cited
+
+
+def _miscited_lines(cited: list) -> list:
+    miscited = []
+    for line in cited:
+        if not _cites_its_own_key(line):
+            miscited.append(line)
+    return miscited
+
+
+def _cites_its_own_key(value_line: str) -> bool:
+    """Whether the line a value line cites writes that value's key."""
+    file_text, first_line = _cited_line(value_line)
+    cited_path = CONFIGS.parent / file_text
+    key_paths = _key_paths_by_line(cited_path)
+    return key_paths[first_line] == _value_key(value_line)
+
+
+@pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
+def test_every_line_show_cites_holds_the_key_of_its_value(name):
+    """Run on a shipped config, show cites only its values' own keys."""
+    config_path = CONFIGS / name
+    config = experiment.load_experiment(config_path)
+    point = config.first_point_task()
+    lines = experiment.value_lines(config, point.settings)
+    cited = _cited_lines(lines)
+
+    miscited = _miscited_lines(cited)
+
+    assert cited
+    assert miscited == []
+
+
+def _first_line_starting(path, start: str) -> int:
+    text = path.read_text()
+    lines = text.splitlines()
+    for number, line in enumerate(lines, start=1):
+        if line.startswith(start):
+            return number
+    raise AssertionError(f"{path} has no line starting {start!r}")
+
+
+def test_show_prints_every_value_after_the_sections(capsys):
+    config_path = CONFIGS / "reference.yaml"
+    config = experiment.load_experiment(config_path)
+    first_point = config.first_point_task()
+    value_lines = experiment.value_lines(config, first_point.settings)
+
+    command.main(["show", str(config_path)])
+    printed = capsys.readouterr()
+
+    lines = printed.out.splitlines()
+    values_at = lines.index("values:")
+    assert lines[values_at + 1 :] == value_lines
+
+
+def test_show_names_the_class_of_a_row_that_takes_no_setting():
+    """The held boundary row has no field, so its class is its one line."""
+    config_path = CONFIGS / "examples" / "two_tiers.yaml"
+    config = experiment.load_experiment(config_path)
+    point = config.first_point_task()
+
+    lines = experiment.value_lines(config, point.settings)
+
+    held = "decsim.windows.boundary_policies.Held.Settings"
+    assert f'windows.boundary_policy.class = "{held}"' in lines
+
+
+# A maker that answers a longer memory each time it is called, so a
+# point made twice records one workload and runs another.
+GROWING_MAKER = """
+import decsim.producers as producers
+
+CALLS = []
+
+
+def growing_memory(distance, physical_error_probability):
+    CALLS.append(distance)
+    rounds = 15 + 3 * (len(CALLS) - 1)
+    return producers.memory_circuit(
+        "surface_code:rotated_memory_z",
+        rounds,
+        distance,
+        physical_error_probability,
+    )
+"""
+
+
+def test_a_collect_makes_each_points_workload_once(tmp_path, monkeypatch):
+    """The workload recorded in inputs/ is the one the shots ran."""
+    maker_path = tmp_path / "growing_maker.py"
+    maker_path.write_text(GROWING_MAKER)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.delitem(sys.modules, "growing_maker", raising=False)
+    workload = {
+        "kind": "producer",
+        "function": "growing_maker:growing_memory",
+        "arguments": {"distance": "${qpu.distance}"},
+    }
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    run_dir = tmp_path / "run"
+
+    command.main(["run", str(config_path), "--out", str(run_dir)])
+
+    growing_maker = sys.modules["growing_maker"]
+    assert growing_maker.CALLS == [3]
+
+
+def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
+    """The files row reads inputs/ back, and the shot is the same shot."""
+    config_path = yaml_configs.write_config(tmp_path, {})
+    first_dir = tmp_path / "first"
+    _run_one_shot(config_path, seed=0, out_dir=first_dir)
+    resolved_dir = first_dir / "points"
+    resolved_path = _one_file(resolved_dir, "*/machine.json")
+    inputs_dir = resolved_path.parent / "inputs"
+    operations_path = inputs_dir / "operations.json"
+    files = {"kind": "files", "operations": str(operations_path)}
+    rerun_folder = tmp_path / "rerun"
+    rerun_folder.mkdir()
+    rerun_card = {"workload": files, "sweep": yaml_configs.QPU_ONLY_SWEEP}
+    rerun_path = yaml_configs.write_config(rerun_folder, rerun_card)
+    second_dir = tmp_path / "second"
+    _run_one_shot(rerun_path, seed=0, out_dir=second_dir)
+    first_result = (first_dir / "result.json").read_text()
+    second_result = (second_dir / "result.json").read_text()
+
+    assert second_result == first_result
+
+
+@pytest.mark.parametrize(
+    "function",
+    ["decsim.producers:memory_circuit", "decsim.producers.memory_circuit"],
+)
+def test_a_points_record_names_the_maker_in_either_of_its_forms(
+    tmp_path, function
+):
+    """pkgutil.resolve_name reads both forms, so the run records both."""
+    workload = yaml_configs.memory_workload(15)
+    workload["function"] = function
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    out_dir = tmp_path / "out"
+
+    _run_one_shot(config_path, out_dir=out_dir)
+
+    resolved_dir = out_dir / "points"
+    resolved_path = _one_file(resolved_dir, "*/machine.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    assert resolved["maker"]["function"] == function
+
+
+def test_a_points_record_names_the_maker_its_row_answers(tmp_path, monkeypatch):
+    """The row says what made its workload; the runner names no row.
+
+    The producer row under a second name answers the same maker, so the
+    record holds it whatever the row is called.
+    """
+    monkeypatch.setitem(
+        workload_settings.WORKLOADS,
+        "made_elsewhere",
+        workload_settings.ProducerWorkload,
+    )
+    workload = yaml_configs.memory_workload(15)
+    workload["kind"] = "made_elsewhere"
+    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
+    out_dir = tmp_path / "out"
+
+    _run_one_shot(config_path, out_dir=out_dir)
+
+    resolved_dir = out_dir / "points"
+    resolved_path = _one_file(resolved_dir, "*/machine.json")
+    resolved_text = resolved_path.read_text()
+    resolved = json.loads(resolved_text)
+    maker = resolved["maker"]
+    assert maker["function"] == "decsim.producers:memory_circuit"
+    assert maker["arguments"]["rounds_per_shot"] == 15
+
+
+def test_a_sweep_block_that_says_shots_is_refused(tmp_path, capsys):
+    """A block's shots are its collection's max_shots, and nothing else."""
+    card = {"sweep": [{"axes": NOISY_AXES, "shots": 2}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert "sweep block 1 is" in printed.err
+    assert "a collection of its own, where max_shots is" in printed.err
+
+
+def test_a_point_two_blocks_collect_two_ways_is_refused(tmp_path, capsys):
+    first = {"axes": NOISY_AXES, "collection": {"max_shots": 2}}
+    second = {"axes": NOISY_AXES, "collection": {"max_shots": 3}}
+    card = {"sweep": [first, second]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    lines = printed.err.splitlines()
+    assert "is in two sweep blocks that collect it two ways" in lines[-1]
+    assert "max_shots 2" in lines[-1]
+    assert "max_shots 3" in lines[-1]
+
+
+def test_a_point_holds_its_own_value_at_a_path_another_block_sets(tmp_path):
+    """Each point has a value at every swept path, so no cell is missing.
+
+    The first block leaves the window and the frame as the file writes
+    them, and the second block leaves the distance; a mapping is one
+    cell of compact json, as sinter writes json_metadata
+    (sinter/_data/_csv_out.py:35-37).
+    """
+    frame = {"clock": "fridge", "write_cycles": 2}
+    card = {
+        "qpu": {"kind": "stim_device", "distance": 3},
+        "workload": yaml_configs.memory_workload(15),
+        "sweep": [
+            {"axes": {"qpu.distance": [5]}, "collection": {"max_shots": 1}},
+            {
+                "axes": {"windows.commit_rounds": [2], "pauli_frame": [frame]},
+                "collection": {"max_shots": 1},
+            },
+        ],
+    }
+    card["workload"]["arguments"]["physical_error_probability"] = 0.001
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    sweep_path = out_dir / "sweep.csv"
+    first, second = _csv_rows(sweep_path)
+    assert first["qpu.distance"] == "5"
+    assert first["windows.commit_rounds"] == "null"
+    assert first["pauli_frame"] == '{"clock":"fridge","write_cycles":1}'
+    assert second["qpu.distance"] == "3"
+    assert second["windows.commit_rounds"] == "2"
+    assert second["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
+
+
+def test_a_swept_reference_is_written_as_the_value_it_resolved_to(tmp_path):
+    """A table is built from the value a point ran, not the text it wrote."""
+    card = {
+        "qpu": {"kind": "stim_device", "distance": 7},
+        "workload": yaml_configs.memory_workload(15),
+        "sweep": [
+            {
+                "axes": {
+                    "qpu.distance": ["${windows.commit_rounds}"],
+                    "windows.commit_rounds": [3, 5],
+                },
+                "collection": {"max_shots": 1},
+            }
+        ],
+    }
+    card["workload"]["arguments"]["physical_error_probability"] = 0.001
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    sweep_path = out_dir / "sweep.csv"
+    rows = _csv_rows(sweep_path)
+    distances = [row["qpu.distance"] for row in rows]
+    assert distances == ["3", "5"]
+
+
+def test_a_child_axis_under_a_swept_mapping_shows_in_the_mappings_cell(
+    tmp_path,
+):
+    """The mapping is placed first, then its child: the point ran both."""
+    frame = {"clock": "fridge", "write_cycles": 1}
+    card = {
+        "qpu": {"kind": "stim_device", "distance": 3},
+        "workload": yaml_configs.memory_workload(15),
+        "sweep": [
+            {
+                "axes": {
+                    "pauli_frame": [frame],
+                    "pauli_frame.write_cycles": [2],
+                },
+                "collection": {"max_shots": 1},
+            }
+        ],
+    }
+    card["workload"]["arguments"]["physical_error_probability"] = 0.001
+    config_path = yaml_configs.write_config(tmp_path, card)
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    sweep_path = out_dir / "sweep.csv"
+    (row,) = _csv_rows(sweep_path)
+    assert row["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
+    assert row["pauli_frame.write_cycles"] == "2"
+
+
+def test_every_point_records_its_own_makers_arguments(tmp_path):
+    """Each point's maker was called with its own arguments and version."""
+    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    records = run_folder.point_records(out_dir)
+    arguments = [record["maker"]["arguments"] for record in records.values()]
+    made_at = {
+        (made["physical_error_probability"], made["distance"])
+        for made in arguments
+    }
+    assert made_at == {(0.001, 3), (0.001, 5), (0.003, 3), (0.003, 5)}
+
+
+def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
+    tmp_path, capsys
+):
+    unknown_axis = {
+        "sweep": [
+            {
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.0],
+                },
+                "algorithm": ["pymatching"],
+                "collection": {"max_shots": 1},
+            }
+        ]
+    }
+    config_path = yaml_configs.write_config(tmp_path, unknown_axis)
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["show", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert "sweep block 1 is " in printed.err
+    assert "a block is axes" in printed.err
+
+
+def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
+    tmp_path, capsys
+):
+    scalar_axis = {
+        "sweep": [
+            {
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": 3,
+                    "qpu.round_period_microseconds": [1.0],
+                },
+                "collection": {"max_shots": 1},
+            }
+        ]
+    }
+    config_path = yaml_configs.write_config(tmp_path, scalar_axis)
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["show", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    sentence = "sweep block 1 axis qpu.distance must be a list of at least"
+    assert sentence in printed.err
+
+
+def _run_one_shot(config_path, seed=0, out_dir=None):
+    """`decsim run <file> --seed S`: the first point's one narrated shot."""
+    run_path = pathlib.Path(config_path)
+    study = experiment.load_one_point(run_path)
+    return collect_command.run_one_shot(study, run_path, seed, out_dir)
+
+
+def _one_file(folder: pathlib.Path, pattern: str) -> pathlib.Path:
+    found = folder.glob(pattern)
+    matches = sorted(found)
+    assert len(matches) == 1
+    return matches[0]
+
+
+def test_run_refuses_a_yaml_that_is_not_there(tmp_path, capsys):
+    missing = tmp_path / "not_a_config.yaml"
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["run", str(missing)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err.count("\n") == 1
+    assert printed.err.startswith(f"decsim: {missing} is not a file")
+    assert "reference.yaml" in printed.err
+    assert "examples/two_tiers.yaml" in printed.err
+    assert "bases/" not in printed.err
+
+
+@pytest.mark.parametrize("shots", [0, -1, 1.5, "many", True])
+def test_show_refuses_a_shot_cap_that_is_not_a_whole_number_of_one_or_more(
+    tmp_path, capsys, shots
+):
+    bad_count = {
+        "sweep": [
+            {
+                "axes": {
+                    "workload.arguments.physical_error_probability": [0.001],
+                    "qpu.distance": [3],
+                    "qpu.round_period_microseconds": [1.0],
+                },
+                "collection": {"max_shots": shots},
+            }
+        ]
+    }
+    config_path = yaml_configs.write_config(tmp_path, bad_count)
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["show", str(config_path)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    refusal_text = "sweep block 1 collection max_shots must be a whole number"
+    assert refusal_text in printed.err
+
+
+def test_a_blocks_collection_key_wins_over_the_tops():
+    """A block's key replaces the top's, as a file's replaces its base's.
+
+    sinter's CollectionOptions.combine takes the smaller of two instead
+    (sinter/_data/_collection_options.py:68-99), which would let the
+    top's value cut a block that asks for more.
+    """
+    top = {"piece_rounds": 100, "max_shots": 10}
+    block = {"piece_rounds": 7}
+
+    settings = collection.CollectionSettings.from_yaml(top, block, "block 0")
+
+    assert settings.piece_rounds == 7
+    assert settings.max_shots == 10
+
+
+def test_the_tops_collection_key_stands_where_the_block_sets_none():
+    top = {"piece_rounds": 100, "max_shots": 10}
+
+    settings = collection.CollectionSettings.from_yaml(top, {}, "block 0")
+
+    assert settings.piece_rounds == 100
+
+
+def test_an_unknown_collection_key_is_refused_by_name():
+    top = {"piece_shots": 5, "max_shots": 10}
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml(top, None, "b")
+
+    message = str(refused.value)
+    assert "['piece_shots']" in message
+    assert "piece_rounds" in message
+
+
+def test_a_collection_section_that_is_no_mapping_is_refused():
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml([1], None, "block 0")
+
+    message = str(refused.value)
+    assert "is [1]; it is a mapping of max_failures, max_shots" in message
+
+
+def test_a_collection_refusal_names_its_sweep_block():
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml(None, None, "block 3")
+
+    message = str(refused.value)
+    assert message.startswith("block 3 collection has no cap")

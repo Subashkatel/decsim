@@ -35,8 +35,8 @@ python -m pip install -e ".[run]" -c constraints.txt
 
 The `run` extra brings Stim (which simulates the quantum circuit and
 produces the syndrome), PyMatching (the default decoder), ldpc (the
-BP-OSD and belief matching decoders), numpy, scipy and matplotlib.
-Without it decsim imports but cannot run a shot.
+BP-OSD and belief matching decoders), numpy and scipy. Without it
+decsim imports but cannot run a shot.
 
 ## Step 2. Read the run file
 
@@ -126,30 +126,28 @@ stops it. `--only` picks one point by its name:
 decsim run examples/priced_cards_example.py --only d3 --out results/d3
 ```
 
-It first prints what it is about to run, then the summary of the
-point:
+It first prints the folder it writes, then one line per point as the
+point finishes:
 
 ```
+run dir: results/d3
+
 {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 20 shots done (cap)
-workload.arguments.physical_error_probability: 0.001
-qpu.distance: 3
-qpu.round_period_microseconds: 1.0
-algorithm: 1 us
-load (service per window / window inter-arrival): 0.36
-logical failures: 0 of 20 scored shots
-logical error rate among scored shots: below 0.168 at 95% (cap)
-unscored shots: 0 of 20 (0)
-throughput: 0.997 rounds per us
-queue wait, mean: 0.000 us
-service time per window, mean: 1.064 us
-ready to frame commit: median 1.076 us, p99 1.076 us
-
-data movement: observation.data_movement was off, so this run counted no copies, references or moves
-
-every column: results/d3/sweep.csv
 ```
 
-Two new words:
+The numbers are in the folder's `sweep.csv`, one row per point. These
+are the columns this step reads:
+
+```bash
+cut -d, -f5,35,73,97,130,131 results/d3/sweep.csv
+```
+
+```
+algorithm,load,queue_wait_mean_us,service_mean_us,buffer0_ready_to_frame_median_us,buffer0_ready_to_frame_p99_us
+1.0,0.35585185185185186,0.0,1.064,1.076,1.076
+```
+
+Two new words for these columns:
 
 - A **window** is a slice of rounds that one decode covers. A decoder
   does not wait for the whole run before deciding: it takes the rounds a
@@ -157,22 +155,22 @@ Two new words:
   about, and slides on.
 - A **frame commit** is the moment the correction for a window is
   written into the **Pauli frame**, the running record of every
-  correction decided so far. `ready to frame commit` is the time from a
-  window having all its rounds to its correction being recorded: the
-  reaction time this machine achieves.
+  correction decided so far. `buffer0_ready_to_frame_median_us` is the
+  median time from a window having all its rounds to its correction
+  being recorded: the reaction time this machine achieves.
 
-`algorithm: 1 us` is the card. `service time per window` adds the
+`algorithm` is the card, 1.0 microseconds. `service_mean_us` adds the
 decoder unit's own cycles to it: one cycle a round to fetch the six
 rounds of a window and ten to release the result, at 4 nanoseconds a
 cycle, 0.064 microseconds in all. `load` is that service time divided
 by the time between windows arriving, about three microseconds. Above 1
 the decoder cannot keep up and work queues; at 0.36 nothing waits, so
-the queue wait is zero and every window's reaction time is the same.
-`p99` is the 99th percentile: ninety-nine windows in a hundred
-finished within it.
+`queue_wait_mean_us` is zero and every window's reaction time is the
+same. A `_p99_us` column is the 99th percentile: ninety-nine windows in
+a hundred finished within it.
 
-The `data movement` line says the run did not count copies, references
-and moves, because the `data_movement` field of the machine's
+The run counted no copies, references or moves, so the folder has no
+`shot_data_movement.csv`: the `data_movement` field of the machine's
 `ObservationSettings` is off by default.
 
 ## Step 5. Open the results folder
@@ -182,7 +180,6 @@ ls results/d3
 ```
 
 ```
-links.csv
 pieces
 points
 priced_cards_example.py
@@ -199,7 +196,8 @@ the pieces it has not saved. The csv files are folded from the pieces.
 `priced_cards_example.py` is a copy of the run file, and `run.json`
 holds the git commit and the command line. A checkout with changes git
 has not committed also gets `code_state.patch`, those changes as a
-patch. Without `--out`, `decsim run` writes a new folder,
+patch, and `run.json` records the patch's sha256. Without `--out`,
+`decsim run` writes a new folder,
 `results/<date>_<name>/`.
 
 ```bash

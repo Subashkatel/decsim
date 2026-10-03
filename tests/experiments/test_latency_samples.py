@@ -12,60 +12,37 @@ import collections
 import csv
 
 import decsim.experiments.collect_command as collect_command
-import decsim.experiments.experiment as experiment
 import decsim.experiments.report as report
-import tests.experiments.yaml_configs as yaml_configs
+import tests.experiments.run_files as run_files
+
+# PyMatching's measured wall clock on every window, two shots a point
+WALL_CLOCK = {
+    "machine_arguments": {"weak_decoder": "pymatching"},
+    "collection": {"max_shots": 2},
+}
 
 
-def wall_clock_config(tmp_path, distances):
-    return yaml_configs.write_config(
-        tmp_path,
-        {
-            "weak_decoder": {
-                **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
-                "kind": "pymatching",
-            },
-            "sweep": [
-                {
-                    "axes": {
-                        "workload.arguments.physical_error_probability": [
-                            0.001
-                        ],
-                        "qpu.distance": distances,
-                        "qpu.round_period_microseconds": [1.0],
-                    },
-                    "collection": {"max_shots": 2},
-                }
-            ],
-        },
-    )
+def wall_clock_axes(distances: tuple) -> dict:
+    return {
+        run_files.DISTANCE_PATH: distances,
+        run_files.ROUND_PERIOD_PATH: (1.0,),
+        run_files.ERROR_RATE_PATH: (0.001,),
+    }
 
 
-def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
-    config_path = wall_clock_config(tmp_path, [3])
-    config = experiment.load_experiment(config_path)
-    measurement = yaml_configs.measure_point_shot(
-        config,
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        seed=0,
+def test_every_decoded_window_contributes_one_latency_sample():
+    measurement = run_files.measured_shot(
+        axes=wall_clock_axes((3,)), **WALL_CLOCK
     )
     samples = measurement.samples["algorithm"]
     assert len(samples) == measurement.decoded_windows
     assert all(sample > 0 for sample in samples)
 
 
-def test_a_latency_sample_names_the_tier_that_decoded_its_window(tmp_path):
+def test_a_latency_sample_names_the_tier_that_decoded_its_window():
     """A weak-only run's windows are all the weak tier's."""
-    config_path = wall_clock_config(tmp_path, [3])
-    config = experiment.load_experiment(config_path)
-    measurement = yaml_configs.measure_point_shot(
-        config,
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        seed=0,
+    measurement = run_files.measured_shot(
+        axes=wall_clock_axes((3,)), **WALL_CLOCK
     )
     rows = report.latency_sample_rows([measurement])
     tiers = [row["tier"] for row in rows]
@@ -82,8 +59,10 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
     times the round period: 3 us at d 3 and 5 us at d 5.
     """
     monkeypatch.chdir(tmp_path)
-    config_path = wall_clock_config(tmp_path, [3, 5])
-    run_dir, rows = collect_command.run_experiment(config_path)
+    run_path = run_files.write_run_file(
+        tmp_path, axes=wall_clock_axes((3, 5)), **WALL_CLOCK
+    )
+    run_dir, rows = collect_command.run_experiment(run_path)
     samples_path = run_dir / "latency_samples.csv"
     with open(samples_path, newline="") as handle:
         reader = csv.DictReader(handle)
@@ -110,23 +89,7 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
 def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):
     """The fixed-latency card is flat by construction: no raw samples."""
     monkeypatch.chdir(tmp_path)
-    card_path = yaml_configs.write_config(
-        tmp_path,
-        {
-            "sweep": [
-                {
-                    "axes": {
-                        "workload.arguments.physical_error_probability": [
-                            0.001
-                        ],
-                        "qpu.distance": [3, 5],
-                        "qpu.round_period_microseconds": [1.0],
-                    },
-                    "collection": {"max_shots": 1},
-                }
-            ]
-        },
-    )
+    card_path = run_files.write_run_file(tmp_path, axes=wall_clock_axes((3, 5)))
     card_run_dir, rows = collect_command.run_experiment(card_path)
     assert not (card_run_dir / "latency_samples.csv").exists()
 

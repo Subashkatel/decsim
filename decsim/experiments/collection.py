@@ -181,11 +181,11 @@ class PointRule:
 
     @classmethod
     def from_record(cls, record: Mapping) -> "PointRule":
-        """The rule a point's resolved/ record says its prefix is read by.
+        """The rule a point's machine.json says its prefix is read by.
 
         The record's experiment facts are what collect_command wrote when
         it recorded the point, so a fold reads a point by the collection
-        it was run under, whatever the yaml says now.
+        it was run under, whatever its run file says now.
         """
         facts = record["experiment"]
         settings = CollectionSettings(**facts["collection"])

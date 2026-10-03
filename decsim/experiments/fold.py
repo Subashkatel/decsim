@@ -38,8 +38,7 @@ when its first row is due: before that, only its first place is known,
 read with the file open for one row. The pieces of an experiment hold
 disjoint seed ranges, so one piece's file is open at a time, and a
 capped point's hundred thousand pieces stay under the open-file limit.
-The merge assumes each input is sorted, so a stream that goes backwards
-is refused where it is read rather than folded into a wrong order.
+The merge takes each input sorted, as the run wrote it.
 
 Nothing here knows a column of decsim's: which field is a mean and which
 a count is report.py's to say, and a row is either the text a csv file
@@ -51,8 +50,6 @@ import csv
 import heapq
 import math
 import pathlib
-
-import decsim.experiments.refusal as refusal
 
 
 def typed_value(text: str):
@@ -368,28 +365,7 @@ def _push_the_next_row(heap: list, index: int, stream) -> None:
 
 
 def _keyed_rows(path: pathlib.Path, key):
-    """One file's rows with their places, refusing a file out of order.
-
-    A merge assumes its inputs are sorted, so a file whose rows go
-    backwards would fold into a wrong order rather than fail. The check
-    is here, on the place the merge is about to compare, and costs one
-    comparison a row.
-    """
-    previous = None
+    """One file's rows with their places, in the order the run wrote them."""
     for row in row_stream(path):
         place = key(row)
-        if previous is not None:
-            _refuse_a_row_out_of_order(path, place, previous)
-        previous = place
         yield (place, row)
-
-
-def _refuse_a_row_out_of_order(path: pathlib.Path, place, previous) -> None:
-    """A run folder holds its rows in the order the run wrote them."""
-    if place >= previous:
-        return
-    raise refusal.RefusalError(
-        f"{path} holds a row at {place} after a row at {previous}; a fold "
-        "merges the pieces' rows, and a piece holds its rows in the order "
-        "the sweep ran them, its task position and then its seed"
-    )

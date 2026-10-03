@@ -122,9 +122,6 @@ These are not from the papers. The pages use them everywhere.
 - **piece**: a run of consecutive seeds of one point, run by one
   process and saved whole as one folder of the results folder, sized by
   the stop rule's `piece_rounds` (`decsim/experiments/pieces.py`).
-- **batch**: one written plan of pieces, `batches/<k>/plan.csv`, and
-  the Slurm arrays that run it; `decsim run --slurm` plans the next
-  batch from what the pieces say (`decsim/experiments/plan_command.py`).
 - **scored shot**, **unscored shot**: a shot is scored when every
   decode it committed, provisional or final, got a correction from its
   decoder's backend, and unscored when a backend produced none; sinter

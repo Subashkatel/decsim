@@ -7,6 +7,8 @@ holds detection events, so round 1's residence there carries 4 bits and
 not the link's 8.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.collect as collect
@@ -18,8 +20,8 @@ import decsim.observe.settings as observe_settings
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
+import tests.experiments.test_measure as measure_tests
 import tests.observe.gate_point as gate_point
-import tests.observe.test_trace_writer as trace_writer_tests
 
 
 @pytest.fixture(scope="module")
@@ -176,10 +178,14 @@ def test_a_withdrawn_request_reads_as_withdrawn_when_it_left(tmp_path):
     """double_window takes back 1:3:weak:6 1.132 us after it queued."""
     path = tmp_path / "withdrawn.trace.json"
     double_window = strong_window_shapes.DoubleWindow.Settings()
-    settings = trace_writer_tests.switching_settings(
-        path, weak_microseconds=5.0, strong_window=double_window
+    settings = measure_tests.switching_settings(
+        20.0, weak_microseconds=5.0, strong_window=double_window
     )
-    task = collect.Task(settings, {})
+    observation = dataclasses.replace(settings.observation, trace=str(path))
+    traced_settings = dataclasses.replace(settings, observation=observation)
+    task = measure_tests.point_task(
+        traced_settings, measure_tests.SWITCHING_ERROR_PROBABILITY
+    )
     shot = collect.run_shot(task, 0)
     shot.machine.observation.trace_writer.write(str(path))
     traced = trace_file.load(path)
@@ -238,57 +244,15 @@ def test_the_counts_read_as_one_sentence(traced):
     assert lines[0] == "copies 4, references 1 job and 1 hold, moves 3"
 
 
-def test_the_page_carries_every_row_of_the_table(traced):
-    followed = trace_follow.follow(traced, "round", "1:1")
-
-    written = trace_follow.page(followed)
-
-    cells = [f"<td>{hop.what}</td>" for hop in followed.hops]
-    assert all(cell in written for cell in cells)
-    assert written.count("<tr>") == len(followed.hops) + 1
-
-
-def test_the_page_needs_no_second_file(traced):
-    """One self-contained page: no script, no stylesheet, no image."""
-    followed = trace_follow.follow(traced, "window", "1:0")
-
-    written = trace_follow.page(followed)
-
-    assert "<script" not in written
-    assert "src=" not in written
-    assert "http" not in written
-
-
-def test_the_page_draws_one_lane_per_component(traced):
-    followed = trace_follow.follow(traced, "window", "1:0")
-
-    written = trace_follow.page(followed)
-
-    lanes = {hop.where for hop in followed.hops}
-    assert written.count("<div class='lane'>") == len(lanes)
-    assert "Decoder unit default#0" in written
-
-
-def test_the_command_prints_the_table_and_writes_the_page(trace_path, tmp_path):
+def test_the_command_prints_the_table(trace_path, capsys):
     import decsim.experiments.command as command
 
-    page_path = tmp_path / "one.html"
+    command.main(["trace", "follow", str(trace_path), "--round", "1:1"])
 
-    command.main(
-        [
-            "trace",
-            "follow",
-            str(trace_path),
-            "--round",
-            "1:1",
-            "--html",
-            str(page_path),
-        ]
-    )
-
-    written = page_path.read_text()
-    assert "<table>" in written
-    assert "d3 seed0" in written
+    printed = capsys.readouterr().out
+    assert printed.startswith("round 1:1 of ")
+    assert "d3 seed0" in printed
+    assert "copies 4, references 1 job and 1 hold, moves 3" in printed
 
 
 def test_a_command_line_naming_neither_a_round_nor_a_window_is_refused():

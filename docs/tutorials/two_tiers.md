@@ -113,45 +113,23 @@ the strong decoder, and nothing else in this run.
 decsim run examples/two_tiers.py --out results/two_tiers
 ```
 
-The command prints what it is about to run, then one line per point as
-it finishes, then the summary. This is the summary:
+The command prints its folder, then one line per point as it finishes.
+The numbers are in `sweep.csv`; these are the columns this step reads:
 
-```
-workload.arguments.physical_error_probability: 0.008
-qpu.distance: 3
-qpu.round_period_microseconds: 1.0
-algorithm: 0 us
-load (service per window / window inter-arrival): 19.90
-logical failures: 15 of 50 scored shots
-logical error rate among scored shots: 0.3, 95% 0.179 to 0.446 (cap)
-unscored shots: 0 of 50 (0)
-throughput: 0.101 rounds per us
-queue wait, mean: 136.378 us
-service time per window, mean: 31.834 us
-ready to frame commit: median 210.056 us, p99 558.328 us
-
-workload.arguments.physical_error_probability: 0.008
-qpu.distance: 5
-qpu.round_period_microseconds: 1.0
-algorithm: 0 us
-load (service per window / window inter-arrival): 23.87
-logical failures: 16 of 50 scored shots
-logical error rate among scored shots: 0.32, 95% 0.195 to 0.467 (cap)
-unscored shots: 0 of 50 (0)
-throughput: 0.071 rounds per us
-queue wait, mean: 289.609 us
-service time per window, mean: 64.718 us
-ready to frame commit: median 439.072 us, p99 986.144 us
-
-data movement: observation.data_movement was off, so this run counted no copies, references or moves
-
-every column: results/two_tiers/sweep.csv
+```bash
+cut -d, -f3,8,9,35,73,97,130,131 results/two_tiers/sweep.csv
 ```
 
-`algorithm: 0 us` is the card; the decode time is on the unit's fetch
-stage, as Step 1 said.
+```
+qpu.distance,logical_failures,scored_shots,load,queue_wait_mean_us,service_mean_us,buffer0_ready_to_frame_median_us,buffer0_ready_to_frame_p99_us
+3,15,50,19.89587733333333,136.37816,31.8336,210.056,558.328
+5,16,50,23.867641600000002,289.608928,64.718,439.072,986.144
+```
 
-Read `service time per window, mean` against the weak tier's own cost.
+Every value is the same on any host: the decoders are priced by cards,
+and the decode time is on the unit's fetch stage, as Step 1 said.
+
+Read `service_mean_us` against the weak tier's own cost.
 A window here is six rounds, so its two weak decodes cost 2.4
 microseconds. The average window costs 31.8 microseconds at distance 3,
 because some windows were decoded a third time, on a strong decoder
@@ -163,9 +141,9 @@ switching is for.
 windows arriving. Above 1 the decoders cannot keep up, the undecoded
 backlog grows, and the queue wait and the tail of the reaction time grow
 with it. This configuration is far over its head, at a load near 20,
-which is why the mean queue wait is over a hundred microseconds and the
-p99 of `ready to frame commit` is between two and three times its
-median.
+which is why the mean queue wait is over a hundred microseconds and
+`buffer0_ready_to_frame_p99_us` is between two and three times the
+median beside it.
 
 ## Step 3. Trace one shot
 

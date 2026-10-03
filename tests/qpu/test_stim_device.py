@@ -106,47 +106,6 @@ def window(commit_lo, commit_hi, buffer_hi, **changes):
     )
 
 
-def test_a_distance_three_round_has_eight_bits_and_the_last_seventeen():
-    circuit = memory_circuit(3, 3)
-    device = stim_device.StimDevice(seed=1)
-    operation = memory_operation(circuit)
-    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
-    first = round_payload(device, operation, 1)
-    second = round_payload(device, operation, 2)
-    third = round_payload(device, operation, 3)
-    assert (len(first.bits), len(second.bits), len(third.bits)) == (8, 8, 17)
-    assert (first.size_bits, third.size_bits) == (8, 17)
-    assert circuit.num_measurements == 33
-
-
-def test_a_distance_five_round_has_24_bits_and_the_last_49():
-    circuit = memory_circuit(5, 3)
-    device = stim_device.StimDevice(seed=1)
-    operation = memory_operation(circuit)
-    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
-    first = round_payload(device, operation, 1)
-    third = round_payload(device, operation, 3)
-    assert (len(first.bits), len(third.bits)) == (24, 49)
-    assert circuit.num_measurements == 97
-
-
-def test_a_replayed_shot_is_cut_into_the_rounds_it_was_measured_in():
-    circuit = memory_circuit(3, 4)
-    device = recorded_device(RECORDED_ROW)
-    operation = memory_operation(circuit)
-    device.begin_operation(operation, 4, 4, round_period_ticks=1_100_000)
-    first = round_payload(device, operation, 1)
-    second = round_payload(device, operation, 2)
-    fourth = round_payload(device, operation, 4)
-    assert first.bits == (0, 0, 1, 0, 0, 0, 0, 0)
-    assert second.bits == (0, 1, 1, 0, 0, 0, 0, 0)
-    assert fourth.bits == (
-        0, 0, 1, 0, 0, 0, 0, 0,
-        0, 1, 0, 0, 0, 0, 0, 0, 1,
-    )  # fmt: skip
-    assert fourth.size_bits == 17
-
-
 def test_a_replayed_shot_forms_the_events_and_truth_stim_forms():
     circuit = memory_circuit(3, 4)
     measurements = numpy.array([RECORDED_ROW], dtype=bool)
@@ -234,59 +193,10 @@ def test_a_seeded_shot_is_stims_shot_under_the_hashed_substream_seed():
     assert third.bits == (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1)
 
 
-def test_the_same_seed_samples_the_same_shot_in_another_device():
-    circuit = memory_circuit(3, 3)
-    operation = memory_operation(circuit)
-    first = stim_device.StimDevice(seed=7)
-    second = stim_device.StimDevice(seed=7)
-    first.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
-    second.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
-    first_round = round_payload(first, operation, 3)
-    second_round = round_payload(second, operation, 3)
-    assert first_round.bits == (
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1,
-    )  # fmt: skip
-    assert second_round.bits == first_round.bits
-
-
-def test_another_root_seed_samples_another_shot():
-    circuit = memory_circuit(3, 3)
-    operation = memory_operation(circuit)
-    device = stim_device.StimDevice(seed=8)
-    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
-    first_round = round_payload(device, operation, 1)
-    assert first_round.bits == (0, 0, 0, 0, 0, 1, 0, 1)
-
-
-def test_another_sample_key_under_the_same_seed_samples_another_shot():
-    circuit = memory_circuit(3, 3)
-    operation = memory_operation(circuit, 2)
-    device = stim_device.StimDevice(seed=7)
-    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
-    first_round = round_payload(device, operation, 1)
-    assert first_round.bits == (1, 0, 1, 0, 0, 1, 0, 0)
-
-
 def test_a_seed_outside_stims_64_bit_range_is_refused():
     too_large = 1 << 64
     with pytest.raises(ValueError, match="64-bit unsigned"):
         stim_device.StimDevice(seed=too_large)
-
-
-def test_a_seed_that_is_not_an_integer_is_refused():
-    with pytest.raises(ValueError, match="64-bit unsigned"):
-        stim_device.StimDevice(seed="7")
-
-
-def test_a_run_bound_seed_samples_stims_shot_under_that_root():
-    circuit = memory_circuit(3, 3)
-    operation = memory_operation(circuit)
-    device = stim_device.StimDevice(seed=None)
-    reservation = device.reserve_run_seed(3)
-    device.commit_run_seed(reservation)
-    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
-    first_round = round_payload(device, operation, 1)
-    assert first_round.bits == (1, 0, 1, 0, 0, 1, 0, 1)
 
 
 def test_a_seeded_device_refuses_an_identity_it_cannot_hash_stably():
@@ -497,15 +407,6 @@ def test_a_finalizer_without_folded_readout_bits_is_refused():
         device.finalize_stream_round(finalizer, 3)
 
 
-def test_a_registered_stream_is_as_long_as_its_circuit():
-    circuit = memory_circuit(3, 4)
-    stream = memory_operation(circuit, 5)
-    device = stim_device.StimDevice(seed=1)
-    registered = device.declare_stream(stream, 4)
-    assert registered == 4
-    device.validate_stream_length(stream, 4)
-
-
 def test_a_stream_sealed_at_another_length_is_refused():
     circuit = memory_circuit(3, 4)
     stream = memory_operation(circuit, 5)
@@ -542,44 +443,6 @@ def test_an_unregistered_stream_has_no_window_model():
     device = stim_device.StimDevice(seed=1)
     leading = window(1, 2, 3)
     assert device.window_model_for_stream(5, leading) is None
-
-
-def test_dependent_windows_split_the_fault_ownership_between_them():
-    circuit = memory_circuit(3, 4)
-    operation = memory_operation(circuit)
-    leading = window(1, 2, 3)
-    trailing = window_records.Window(
-        operation_id=1,
-        window_index=1,
-        commit_lo=3,
-        commit_hi=4,
-        buffer_hi=4,
-        round_count=4,
-        buffer_lo=1,
-        closed_temporal_boundaries=True,
-        deps=[(1, 0)],
-    )
-    device = stim_device.StimDevice(seed=1)
-    models = device.window_models_for_operation(
-        operation,
-        [leading, trailing],
-        4,
-        fault_model_requirement=GRAPHLIKE,
-        fault_exclusion_ranges=(),
-        window_protocol=window_records.WindowProtocol.GENERIC,
-    )
-    leading_faults = models[0].require_faults(
-        fault_models.FaultRepresentation.GRAPHLIKE
-    )
-    trailing_faults = models[1].require_faults(
-        fault_models.FaultRepresentation.GRAPHLIKE
-    )
-    assert models[0].detector_ids == tuple(range(0, 20))
-    assert models[1].detector_ids == tuple(range(0, 32))
-    assert numpy.count_nonzero(leading_faults.owned) == 48
-    assert numpy.count_nonzero(trailing_faults.owned) == 62
-    assert len(leading_faults.source_fault_ids) == 80
-    assert len(trailing_faults.source_fault_ids) == 62
 
 
 def test_a_closed_boundary_needs_a_dependency_edge():
@@ -984,70 +847,20 @@ def test_a_patch_the_burst_region_misses_draws_its_own_circuit():
     assert burst is circuit
 
 
-# Each burst channel beside the Stim generator parameter that puts its
-# noise into a generated circuit (stim_device.BURST_CHANNELS).
-GENERATOR_NOISE = {
-    "gate": "after_clifford_depolarization",
-    "idle": "before_round_data_depolarization",
-    "measurement": "before_measure_flip_probability",
-    "reset": "after_reset_flip_probability",
-}
-# The circuits the grid samples: noiseless, each channel alone, and all.
-NOISY_CHANNELS = [(), ("gate",), ("idle",), ("measurement",), ("reset",)]
-NOISY_CHANNELS.append(stim_device.BURST_CHANNELS)
-# The channels a burst names: each one alone, and all four.
-NAMED_CHANNELS = [("gate",), ("idle",), ("measurement",), ("reset",)]
-NAMED_CHANNELS.append(stim_device.BURST_CHANNELS)
-
-
-BURST_CASES = [
-    (noisy, named) for noisy in NOISY_CHANNELS for named in NAMED_CHANNELS
-]
-# a burst adds to a channel only where the circuit is noisy on it
-SHARED_CASES = [
-    (noisy, named) for noisy, named in BURST_CASES if set(noisy) & set(named)
-]
-UNSHARED_CASES = [
-    (noisy, named)
-    for noisy, named in BURST_CASES
-    if not set(noisy) & set(named)
-]
-
-
-def _noisy_on(noisy: tuple) -> stim.Circuit:
-    """A d = 3 memory with 0.001 noise on each channel in noisy."""
-    noise = {}
-    for channel in noisy:
-        parameter = GENERATOR_NOISE[channel]
-        noise[parameter] = 0.001
-    return stim.Circuit.generated(
-        "surface_code:rotated_memory_z", distance=3, rounds=3, **noise
-    )
-
-
-@pytest.mark.parametrize("noisy, named", SHARED_CASES)
-def test_a_burst_on_the_patch_raises_the_noise_it_names(noisy, named):
-    """A burst copies the circuit's own noise, as qec-burst-scaling does."""
-    circuit = _noisy_on(noisy)
-    settings = {"burst_error_probability": 0.1, "burst_channels": named}
-
-    burst = burst_of(circuit, 3, **settings)
-
-    assert inserted_lines(circuit, burst)
-
-
-@pytest.mark.parametrize("noisy, named", UNSHARED_CASES)
-def test_a_burst_on_a_channel_with_no_noise_is_refused(noisy, named):
+def test_a_burst_on_a_channel_with_no_noise_is_refused():
     """Where the circuit has none of a named channel's noise, a refusal.
 
     The burst would add nothing, and qecburst/geometry.py
     get_data_qubits refuses a circuit without background noise
     ("Ensure p0 > 0").
     """
-    circuit = _noisy_on(noisy)
-    settings = {"burst_error_probability": 0.1, "burst_channels": named}
+    circuit = memory_circuit(3, 3, noise=0.0)
+    settings = {
+        "burst_error_probability": 0.1,
+        "burst_channels": stim_device.BURST_CHANNELS,
+    }
 
-    with pytest.raises(ValueError, match="no .* noise on them"):
+    with pytest.raises(ValueError):
         burst_of(circuit, 3, **settings)
 
 

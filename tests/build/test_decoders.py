@@ -19,10 +19,6 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# no preset clock ticks at 300 MHz, so a part on any preset's clock
-# fails the tests below
-MACHINE_CLOCK = config.Clock.from_megahertz(300.0)
-
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     switching = declared_run.switching_run(escalates=True)
@@ -46,7 +42,8 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
 
 
 def test_an_engine_that_names_no_clock_counts_on_the_machines():
-    machine_clock = MACHINE_CLOCK
+    """No preset clock ticks at 300 MHz, so a unit on one fails here."""
+    machine_clock = config.Clock.from_megahertz(300.0)
     engine = decoder_settings.EngineSettings()
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
@@ -61,8 +58,11 @@ def test_an_engine_that_names_no_clock_counts_on_the_machines():
 
 
 def test_a_manager_that_names_no_clock_dispatches_on_the_machines():
-    """A dispatch cost on no clock of its own is charged on the machine's."""
-    machine_clock = MACHINE_CLOCK
+    """A dispatch cost on no clock of its own is charged on the machine's.
+
+    No preset clock ticks at 300 MHz, so a manager on one fails here.
+    """
+    machine_clock = config.Clock.from_megahertz(300.0)
     declared = declared_run.weak_only_run()
     manager_settings = decoder_settings.DecoderManagerSettings(
         dispatch_cycles=1

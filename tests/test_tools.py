@@ -19,9 +19,6 @@ import sys
 
 import pytest
 
-import decsim.experiments.experiment as experiment
-import tests.experiments.yaml_configs as yaml_configs
-
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
@@ -486,24 +483,26 @@ def _decsim(tmp_path, arguments: list, environment):
     )
 
 
-def _two_point_config(tmp_path) -> tuple:
-    """A yaml sweeping two distances, and its point names in order."""
-    card = {
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": [3, 5],
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "collection": {"max_shots": 4},
-            }
-        ]
-    }
-    config_path = yaml_configs.write_config(tmp_path, card)
-    study = experiment.load(config_path)
-    names = [point.name for point in study.points]
-    return config_path, names
+# The weak base at two distances, four shots each.
+TWO_POINT_RUN_FILE = """
+import decsim
+import decsim.settings as machine_settings
+
+points = []
+for distance in (3, 5):
+    machine = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
+    point = decsim.Point(f"d{distance}", machine, {"qpu.distance": distance})
+    points.append(point)
+collection = decsim.CollectionSettings(max_shots=4)
+experiment = decsim.Experiment("two_points", points, collection)
+"""
+
+
+def _two_point_run_file(tmp_path) -> tuple:
+    """A run file of two distances, and its point names in order."""
+    run_file = tmp_path / "two_points.py"
+    run_file.write_text(TWO_POINT_RUN_FILE)
+    return run_file, ["d3", "d5"]
 
 
 def _sbatch_lines(printed: str) -> list:
@@ -523,7 +522,7 @@ def _value_after(words: list, flag: str) -> str:
 
 
 def _slurm_arguments(config_path, results_dir, *extra) -> list:
-    """`decsim run <yaml> --slurm`, into results_dir."""
+    """`decsim run <run file> --slurm`, into results_dir."""
     return [
         "run",
         str(config_path),
@@ -543,7 +542,7 @@ def test_a_slurm_dry_run_checks_plans_and_prints_its_jobs(tmp_path):
     next step waits on that array with afterany. A dry run submits
     nothing and makes no task folder.
     """
-    config_path, names = _two_point_config(tmp_path)
+    config_path, names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     environment = _slurm_environment(tmp_path, "clean")
     arguments = _slurm_arguments(
@@ -588,7 +587,7 @@ def test_a_batch_submits_one_array_per_shape_of_job(tmp_path):
     local run measured and the task of the point nothing measured go in
     two arrays.
     """
-    config_path, names = _two_point_config(tmp_path)
+    config_path, names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     environment = _slurm_environment(tmp_path, "clean")
     measured = ["run", str(config_path), "--only", names[0], "--shots", "1"]
@@ -611,7 +610,7 @@ def test_a_batch_submits_one_array_per_shape_of_job(tmp_path):
 
 def test_a_launch_submits_the_arrays_then_the_next_step_behind_them(tmp_path):
     """The next step's dependency names the job ids sbatch answered."""
-    config_path, _names = _two_point_config(tmp_path)
+    config_path, _names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     environment = _slurm_environment(tmp_path, "clean")
     arguments = _slurm_arguments(config_path, results_dir, "--tasks", "2")
@@ -644,7 +643,7 @@ def test_a_tree_git_does_not_vouch_for_is_refused_where_it_starts(
     it can name. Launching refuses it, so no array is queued, and so
     does every task, since the tree may change after submission.
     """
-    config_path, _names = _two_point_config(tmp_path)
+    config_path, _names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     environment = _slurm_environment(tmp_path, status)
     arguments = {
@@ -673,7 +672,7 @@ def test_a_batch_past_the_submit_limit_is_refused_before_any_array(
     be half submitted; it is refused before the first array, dry run or
     not, with a sentence that says to run with fewer tasks.
     """
-    config_path, _names = _two_point_config(tmp_path)
+    config_path, _names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     over_the_limit = {"SUBMIT_LIMIT": "3", "STUB_QUEUED_JOBS": "2"}
     environment = _slurm_environment(tmp_path, "clean", over_the_limit)
@@ -695,7 +694,7 @@ def test_a_submit_limit_that_is_no_positive_whole_number_is_refused(
     tmp_path, limit
 ):
     """A limit the launcher cannot compare would let any batch through."""
-    config_path, _names = _two_point_config(tmp_path)
+    config_path, _names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     malformed = {"SUBMIT_LIMIT": limit}
     environment = _slurm_environment(tmp_path, "clean", malformed)
@@ -714,7 +713,7 @@ def test_a_squeue_that_fails_refuses_the_submission(tmp_path):
     Counted as empty, a batch could pass the limit and be half
     submitted; only a node with no squeue at all counts none.
     """
-    config_path, _names = _two_point_config(tmp_path)
+    config_path, _names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     failing = {"STUB_SQUEUE_FAILS": "1"}
     environment = _slurm_environment(tmp_path, "clean", failing)
@@ -734,7 +733,7 @@ def test_a_failed_one_shot_check_stops_the_launch_before_any_plan(tmp_path):
     The check runs before the first batch is planned, so a broken import,
     build or config costs one shot and no array.
     """
-    config_path, names = _two_point_config(tmp_path)
+    config_path, names = _two_point_run_file(tmp_path)
     results_dir = tmp_path / "results"
     environment = _slurm_environment(tmp_path, "clean", check_exit_code=1)
     arguments = _slurm_arguments(config_path, results_dir, "--tasks", "1")

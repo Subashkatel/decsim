@@ -6,10 +6,11 @@ small machine, and three things of its shot are compared with
 shot_digests.json: the result's json, every seed the run derived with
 its path, and the engine's final tick with the number of events it
 scheduled. The shapes cover the decode slots (weak, strong, switching,
-none), both strong windows, the three threshold sources, the cluster
-gap, bounded links and buffers, the data path read in place, and
-Experiment 1's two machines, each at d = 3 from the shipped base
-functions and run files.
+none), both strong windows, the three threshold sources, both cluster
+gaps, the four window schemes, bounded links and buffers, the ported
+store, the credit and reliable protocols, the chip side's priced
+stages, the data path read in place, and Experiment 1's two machines,
+each at d = 3 from the shipped base functions and run files.
 
 The decoders' and confidence walks' host clocks are a counter stepping
 20 microseconds a reading, as the fingerprint harness steps them, so a
@@ -36,11 +37,22 @@ import decsim.collect as collect
 import decsim.confidence.cluster as cluster
 import decsim.confidence.extra_cluster as extra_cluster
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.settings as decoder_settings
+import decsim.detector_error_model.settings as detection_event_settings
 import decsim.engine as engine_module
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.links.credit_channel as credit_channel
+import decsim.links.framings as framings
 import decsim.links.link_profiles as link_profiles
+import decsim.links.reliable_channel as reliable_channel
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
+import decsim.windows.boundary_payloads as boundary_payloads
+import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.schemes.naive_online as naive_online
+import decsim.windows.schemes.parallel as parallel
+import decsim.windows.schemes.sandwich as sandwich
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -143,6 +155,108 @@ def experiment_one_weak_alone() -> machine_settings.MachineSettings:
     return run_file.weak_alone(DISTANCE, 0.003)
 
 
+def extra_cluster_gap_switching() -> machine_settings.MachineSettings:
+    machine = cluster_gap_switching()
+    confidence = extra_cluster.ExtraClusterGap.Settings()
+    switching = dataclasses.replace(machine.switching, confidence=confidence)
+    return dataclasses.replace(machine, switching=switching)
+
+
+def parallel_windows() -> machine_settings.MachineSettings:
+    scheme = parallel.ParallelWindowScheme.Settings(
+        commit_rounds=2, buffer_rounds=2
+    )
+    sparse = boundary_payloads.SparseSeamList.Settings()
+    return _weak_alone_on_windows(scheme, sparse, None)
+
+
+def sandwich_windows() -> machine_settings.MachineSettings:
+    scheme = sandwich.TanSandwichScheme.Settings(
+        commit_rounds=2, buffer_rounds=3
+    )
+    return _weak_alone_on_windows(scheme, None, None)
+
+
+def naive_online_windows() -> machine_settings.MachineSettings:
+    scheme = naive_online.NaiveOnlineScheme.Settings()
+    sparse = boundary_payloads.SparseSeamList.Settings()
+    held = boundary_policies.Held.Settings()
+    return _weak_alone_on_windows(scheme, sparse, held)
+
+
+def ported_buffer() -> machine_settings.MachineSettings:
+    base = weak_alone()
+    store = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        read_write_ports=1, cycles_per_access=2, access_latency_cycles=1
+    )
+    return dataclasses.replace(base, weak_syndrome_buffer=store)
+
+
+def protocol_links() -> machine_settings.MachineSettings:
+    # a reliable RoCE hop that drops bits and retransmits, then a credit
+    # hop in flits, so both protocols queue and the drops draw seeds
+    base = weak_alone()
+    roce = framings.RoceV2.Settings(path_mtu_bytes=256)
+    reliable = reliable_channel.ReliableChannel.Settings(
+        framing=roce,
+        receive_buffer_frames=8,
+        credit_latency_cycles=1,
+        window_packets=4,
+        ack_every_packets=2,
+        retransmit_timeout_cycles=400,
+        retry_count=7,
+        bit_error_rate=0.0005,
+        clock=machine_settings.FRIDGE_CLOCK,
+    )
+    flits = framings.Flits.Settings(flit_bits=8)
+    credit = credit_channel.CreditChannel.Settings(
+        framing=flits,
+        receive_buffer_frames=2,
+        credit_latency_cycles=1,
+        clock=machine_settings.FRIDGE_CLOCK,
+    )
+    to_store = _protocol_path(base.links, "controller_to_weak_buffer", reliable)
+    to_unit = _protocol_path(base.links, "weak_buffer_to_weak_decoder", credit)
+    links = dataclasses.replace(
+        base.links,
+        controller_to_weak_buffer=to_store,
+        weak_buffer_to_weak_decoder=to_unit,
+    )
+    return dataclasses.replace(base, links=links)
+
+
+def chip_side_costs() -> machine_settings.MachineSettings:
+    # the chip-side prices the bases leave free: two units with a bounded
+    # memory read in words, held until their result is read, every stage
+    # priced per job and per round, events formed at the decoder, and a
+    # priced dispatch
+    base = weak_alone()
+    engine = decoder_settings.EngineSettings(
+        fetch_cycles_per_round=3,
+        fetch_cycles_per_job=2,
+        release_cycles_per_job=5,
+        release_cycles_per_round=7,
+    )
+    memory = decoder_settings.UnitMemorySettings(bits=4096, word_bits=8)
+    weak_decoder = dataclasses.replace(
+        base.weak_decoder,
+        unit_count=2,
+        engine=engine,
+        unit_memory=memory,
+        result_blocks_unit=True,
+    )
+    events = detection_event_settings.DetectionEventSettings(
+        formed_at=("weak_decoder",), latency_cycles=2, cycles_per_round=1
+    )
+    manager = dataclasses.replace(base.decoder_manager, dispatch_cycles=1)
+    return dataclasses.replace(
+        base,
+        weak_decoder=weak_decoder,
+        detection_events=events,
+        decoder_manager=manager,
+    )
+
+
 def no_decoder() -> machine_settings.MachineSettings:
     base = weak_alone()
     workload = dataclasses.replace(base.workload, decode_operations=())
@@ -161,6 +275,13 @@ SHAPES = {
     "data_path_in_place": data_path_in_place,
     "experiment_one_switching": experiment_one_switching,
     "experiment_one_weak_alone": experiment_one_weak_alone,
+    "extra_cluster_gap_switching": extra_cluster_gap_switching,
+    "parallel_windows": parallel_windows,
+    "sandwich_windows": sandwich_windows,
+    "naive_online_windows": naive_online_windows,
+    "ported_buffer": ported_buffer,
+    "protocol_links": protocol_links,
+    "chip_side_costs": chip_side_costs,
     "no_decoder": no_decoder,
 }
 
@@ -237,6 +358,34 @@ def _redo_window_switching_on(threshold) -> machine_settings.MachineSettings:
     machine = redo_window_switching()
     switching = dataclasses.replace(machine.switching, threshold=threshold)
     return dataclasses.replace(machine, switching=switching)
+
+
+def _weak_alone_on_windows(
+    scheme, boundary_payload, boundary_policy
+) -> machine_settings.MachineSettings:
+    """The weak base on another scheme; None keeps the base's choice."""
+    base = weak_alone()
+    windows = dataclasses.replace(base.windows, scheme=scheme)
+    if boundary_payload is not None:
+        windows = dataclasses.replace(
+            windows, boundary_payload=boundary_payload
+        )
+    if boundary_policy is not None:
+        windows = dataclasses.replace(windows, boundary_policy=boundary_policy)
+    return dataclasses.replace(base, windows=windows)
+
+
+def _protocol_path(links, path_name: str, protocol):
+    """One path of the card, one fridge cycle at 8 bits, on a protocol."""
+    return link_profiles.path_card(
+        links,
+        path_name,
+        clock=machine_settings.FRIDGE_CLOCK,
+        latency_cycles=1,
+        bits_per_cycle=8.0,
+        source="the regression lock's protocol hop",
+        protocol=protocol,
+    )
 
 
 def _recording_derive(derive, seed_rows: list):

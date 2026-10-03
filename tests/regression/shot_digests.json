@@ -65,6 +65,48 @@
     "final_tick": 102340000,
     "event_count": 972
   },
+  "extra_cluster_gap_switching": {
+    "result_sha256": "a94c651025113fa863cec62b82918541a793d355d01f5cfb35fa3a459eeea9b2",
+    "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
+    "final_tick": 726732000,
+    "event_count": 273
+  },
+  "parallel_windows": {
+    "result_sha256": "053b4abc2e91bb868e8eb1e12b515a912022f7fac40a258940de90a94136500c",
+    "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
+    "final_tick": 30208000,
+    "event_count": 199
+  },
+  "sandwich_windows": {
+    "result_sha256": "c82b41fe390bd92313dfc2b2a366815a51a1971a5d7f02c88d69677521ef3a96",
+    "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
+    "final_tick": 30196000,
+    "event_count": 311
+  },
+  "naive_online_windows": {
+    "result_sha256": "18802e26deb2e10aaac7e3bef7d95c920e6c763aa6af4cdacdb1908f55ddcead",
+    "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
+    "final_tick": 30208000,
+    "event_count": 157
+  },
+  "ported_buffer": {
+    "result_sha256": "1c5c2e8d5eb322a676b610d792c5271e72002ec717f8f4d8b1a69ddc4348c730",
+    "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
+    "final_tick": 30192000,
+    "event_count": 252
+  },
+  "protocol_links": {
+    "result_sha256": "dde83cafc8c9e0a3fd0080197f8ceab1842af534429c5a2fde164207467fedf5",
+    "seeds_sha256": "53fc7962e1aba58c876afdd3ee92720221381ed2348757ee7cdd70a6bd0aa07f",
+    "final_tick": 70404000,
+    "event_count": 490
+  },
+  "chip_side_costs": {
+    "result_sha256": "1a388520b25c41e5421dc6471aee3dca5c480d26f61d1caf6f8bb53626090c9c",
+    "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
+    "final_tick": 30368000,
+    "event_count": 231
+  },
   "no_decoder": {
     "result_sha256": "f64d61c5877eca85f254f28c5e830d2e1334fc674c122cae8e1b821da8993b33",
     "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",

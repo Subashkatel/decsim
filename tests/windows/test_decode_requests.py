@@ -8,6 +8,7 @@ request is priced for the rounds it reads, which the declared run shows
 on its lookahead tail (Skoric et al. 2209.08552, Tan et al. 2209.09219).
 """
 
+import dataclasses
 import types
 
 import pytest
@@ -20,6 +21,7 @@ import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
 import decsim.links.window_transfers as window_transfers
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -722,3 +724,27 @@ def test_a_charged_window_decision_with_no_clock_still_stops():
 
     with pytest.raises(AttributeError):
         declared_run.weak_only_run(windows=windows)
+
+
+def test_the_decision_and_the_verdict_run_on_the_machines_clock():
+    """No preset clock ticks at 300 MHz, so a part on one fails here."""
+    machine_clock = config.Clock.from_megahertz(300.0)
+    declared = declared_run.switching_run(escalates=True)
+    windows = dataclasses.replace(declared.settings.windows, decision_cycles=2)
+    switching = dataclasses.replace(
+        declared.settings.switching, threshold_cycles=3
+    )
+    settings = dataclasses.replace(
+        declared.settings,
+        clock=machine_clock,
+        windows=windows,
+        switching=switching,
+    )
+
+    machine = machine_module.Machine.build(settings)
+
+    requester = machine.windows.requester
+    assert settings.windows.clock is None
+    assert settings.switching.clock is None
+    assert requester.clock == machine_clock
+    assert requester.verdict.clock == machine_clock

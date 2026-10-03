@@ -102,6 +102,16 @@ def test_the_frame_keeps_its_own_copy_of_the_observables_it_was_given():
     assert frame.frame_for_stream("stream") == (1, 0, 1)
 
 
+def test_a_snapshot_does_not_change_when_the_frame_does():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0))
+    before = frame.snapshot()
+    commit(frame, ("stream", 1), (1, 1))
+    after = frame.snapshot()
+    assert before.commit_count == 1
+    assert after.commit_count == 2
+
+
 def test_a_second_correction_for_a_window_is_refused():
     engine, frame = frame_with_commit_ticks(0)
     commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)

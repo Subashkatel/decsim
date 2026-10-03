@@ -12,8 +12,10 @@ import dataclasses
 
 import decsim.build.decoders as decoder_build
 import decsim.config as config
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
+import decsim.records.seeds as seed_records
 import tests.declared_run as declared_run
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -77,3 +79,58 @@ def test_a_manager_that_names_no_clock_dispatches_on_the_machines():
 
     dispatch_cost = machine.decoders.decoder_manager.service.dispatch_cost
     assert dispatch_cost.clock == machine_clock
+
+
+class _SeedRecordingScheduler(schedulers.FifoScheduler):
+    """A FIFO that keeps every seed the run hands it."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The record that builds this FIFO."""
+
+        def build(self) -> "_SeedRecordingScheduler":
+            return _SeedRecordingScheduler()
+
+    def __init__(self):
+        self.reserved_seeds = []
+
+    def reserve_run_seed(self, seed):
+        self.reserved_seeds.append(seed)
+        return seed_records.RunSeedReservation("derived", seed, None)
+
+    def commit_run_seed(self, reservation):
+        del reservation
+
+    def cancel_run_seed(self, reservation):
+        del reservation
+
+
+def test_each_managers_scheduler_is_seeded_on_its_own_path():
+    """Every shipped scheduler is the unseeded FIFO; this one takes seeds."""
+    weak, strong = declared_run.switching_decoders(False)
+    engine = declared_run.DECLARED_ENGINE
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=engine
+    )
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=strong, engine=engine
+    )
+    scheduler_settings = _SeedRecordingScheduler.Settings()
+    manager_settings = decoder_settings.DecoderManagerSettings(
+        scheduler=scheduler_settings
+    )
+    switching = declared_run.switching_run(escalates=True)
+    settings = dataclasses.replace(
+        switching.settings,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        decoder_manager=manager_settings,
+    )
+
+    machine = machine_module.Machine.build(settings, 7)
+
+    chip_scheduler = machine.decoders.decoder_manager.queue.scheduler
+    host_scheduler = machine.decoders.strong_decoder_manager.queue.scheduler
+    assert len(chip_scheduler.reserved_seeds) == 1
+    assert len(host_scheduler.reserved_seeds) == 1
+    assert chip_scheduler.reserved_seeds != host_scheduler.reserved_seeds

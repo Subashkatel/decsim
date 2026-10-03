@@ -373,15 +373,15 @@ def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
     )
 
 
-def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
+def test_a_transfer_with_no_payload_size_still_stops_a_bounded_channel():
+    """A bounded wire serializes bits, so an unsized transfer cannot cross."""
     engine = decsim.engine.Engine()
     bounded = bounded_path("bounded", 1000.0, 0)
     fabric = fabric_with(engine, controller_to_weak_buffer=bounded)
     attribution = round_attribution(1)
-    with pytest.raises(
-        RuntimeError, match="a bounded wire needs a size to serialize"
-    ):
+    with pytest.raises(TypeError):
         fabric.send(PATH.CONTROLLER_TO_WEAK_BUFFER, None, 0, attribution, print)
+        engine.run()
 
 
 def test_an_actual_payload_on_a_path_without_a_source_is_refused():

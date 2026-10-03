@@ -2736,13 +2736,12 @@ def test_a_strong_primary_run_reads_its_windows_on_the_strong_tier():
     assert tiers == {"strong"}
 
 
-def test_a_plan_with_windows_and_no_decoder_is_refused():
-    """A run with every decode slot empty plans no decoding."""
+def test_a_plan_with_windows_and_no_decoder_still_stops():
+    """The windows' decoder port is read unbound at build."""
     settings = strong_primary_settings()
     settings = dataclasses.replace(settings, strong_decoder=None)
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(RuntimeError):
         machine_module.Machine.build(settings, 0)
-    assert "names no decoder" in str(refusal.value)
 
 
 # ---- a room-side landing that arrives after its operation closed

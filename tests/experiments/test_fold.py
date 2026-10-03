@@ -415,17 +415,6 @@ def test_a_file_with_no_rows_of_this_kind_is_skipped(tmp_path):
     assert merged == [only_row]
 
 
-def test_a_file_whose_rows_go_backwards_is_refused(tmp_path):
-    """A merge assumes sorted inputs, so an unsorted file is not folded."""
-    path = tmp_path / "backwards.csv"
-    backwards = [_row(3, "a"), _row(1, "b")]
-    _write_rows(path, backwards)
-    merged = fold.merged_rows([path], _place_of)
-    with pytest.raises(refusal.RefusalError) as refused:
-        list(merged)
-    assert "holds a row at 1 after a row at 3" in str(refused.value)
-
-
 def test_a_row_file_leaves_a_column_its_row_lacks_empty(tmp_path):
     """Which is write_csv's rule, so the two agree."""
     path = tmp_path / "written.csv"

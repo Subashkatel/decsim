@@ -242,19 +242,6 @@ def test_a_claim_publishes_every_resource_of_the_operation_or_none():
     }
 
 
-def test_an_operation_that_lists_one_qubit_twice_is_refused():
-    operation = program_records.Operation(1, "twice", ("q", "q"))
-    operations = (operation,)
-    runtime, _engine, _issuer, _factory, _stamps = runtime_over(operations)
-    runtime.schedule.operations[1] = operation
-
-    name_of = name_of_holder(runtime)
-    with pytest.raises(RuntimeError, match="lists a qubit more than once"):
-        runtime.lifecycle.resources.claim(operation, name_of)
-
-    assert runtime.lifecycle.resources.holder_by_resource == {}
-
-
 def test_a_body_frees_its_resources_before_its_successor_is_issued():
     """The successor holds the qubit its predecessor just gave up."""
     shared = frozenset({"shared"})

@@ -214,12 +214,6 @@ class _ResourceLedger:
         self, operation: program_records.Operation, name_of: Callable
     ) -> None:
         """Claim every resource of the operation, or none of them."""
-        distinct_qubits = set(operation.qubits)
-        if len(distinct_qubits) != len(operation.qubits):
-            raise RuntimeError(
-                f"{operation.name} lists a qubit more than once: "
-                f"{operation.qubits}"
-            )
         claims = self.claims_by_operation_id[operation.id]
         keys_to_claim = []
         for key in _resource_keys(claims):

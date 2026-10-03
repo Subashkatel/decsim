@@ -578,7 +578,7 @@ def _write_result(
 def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
     """The run file beside the results, or a yaml's whole chain in config/.
 
-    A Python run file is copied under its own name, so a plot script
+    A Python run file is copied under its own name, so an array task
     loads the copy that made the rows. A yaml goes into config/ with
     every base of its extends chain, each at its place relative to the
     others, so every `extends` still resolves. Each copy is written once

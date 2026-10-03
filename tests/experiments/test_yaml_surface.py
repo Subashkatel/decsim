@@ -1151,3 +1151,126 @@ def test_two_config_files_of_one_name_are_both_copied(tmp_path):
     base_copy = run_dir / "config" / base_path.name
     assert child_copy.read_text() == child_path.read_text()
     assert base_copy.read_text() == base_path.read_text()
+
+
+def test_a_yaml_point_keeps_the_id_its_task_has(tmp_path):
+    overrides = yaml_configs.online_threshold()
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    (task,) = config.tasks()
+
+    study = config.experiment()
+
+    (point,) = study.points
+    point_task = experiment.task_of(point)
+    point_id = task.strong_id()
+    assert point_task.strong_id() == point_id
+    assert point.name == point_id[:12]
+
+
+def test_a_yaml_point_two_blocks_name_is_one_point(tmp_path):
+    block = yaml_configs.MINIMAL_CONFIG["sweep"][0]
+    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block, block]})
+    config = experiment.load_experiment(config_path)
+
+    study = config.experiment()
+
+    assert len(study.points) == 1
+
+
+def test_one_point_reads_no_point_past_the_one_it_chooses(
+    tmp_path, monkeypatch
+):
+    """A point's read runs its maker, so a narrated shot reads no other.
+
+    Without a name only the first point is read; with one, the points up
+    to the named one, since a yaml point is named by its id.
+    """
+    axes = {
+        "qpu.distance": [3, 5, 7],
+        "workload.arguments.physical_error_probability": [0.001],
+        "qpu.round_period_microseconds": [1.0],
+    }
+    card = {"sweep": [{"axes": axes, "collection": {"max_shots": 2}}]}
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    study = config.experiment()
+    second_name = study.points[1].name
+    read_distances = []
+    point_task = experiment.ExperimentConfig.point_task
+
+    def counted_point_task(self, values):
+        distance = values["qpu.distance"]
+        read_distances.append(distance)
+        return point_task(self, values)
+
+    monkeypatch.setattr(
+        experiment.ExperimentConfig, "point_task", counted_point_task
+    )
+
+    config.one_point()
+    first_reads = list(read_distances)
+    read_distances.clear()
+    config.one_point(second_name)
+
+    assert first_reads == [3]
+    assert read_distances == [3, 5]
+
+
+def _record_options_of(tmp_path, overrides: dict):
+    """The record options and settings the yaml's first point reads to."""
+    config_path = yaml_configs.write_config(tmp_path, overrides)
+    config = experiment.load_experiment(config_path)
+    task = config.first_point_task()
+    return task.record_options, task.settings
+
+
+def test_the_record_options_are_read_beside_what_they_record(tmp_path):
+    """They are written under observation and burst_detector, run-owned.
+
+    The machine never reads them, so they are on the task beside the
+    settings and no part of the point's id.
+    """
+    overrides = yaml_configs.fixed_threshold_switching()
+    overrides["observation"] = {"confidence_shot_count": "all"}
+    overrides["burst_detector"] = {
+        "kind": "masked_regional_cusum",
+        "catch_deadline_rounds": 0,
+    }
+    written, settings = _record_options_of(tmp_path, overrides)
+    unset, _settings = _record_options_of(tmp_path, {})
+
+    assert written == collect.RecordOptions(None, 0)
+    assert unset == collect.RecordOptions(100, 300)
+    a_billion = 10**9
+    assert written.samples_confidence_of(a_billion)
+    assert unset.samples_confidence_of(99)
+    assert not unset.samples_confidence_of(100)
+    assert not hasattr(settings.observation, "confidence_shot_count")
+    assert not hasattr(
+        settings.switching.burst_detector, "catch_deadline_rounds"
+    )
+
+
+@pytest.mark.parametrize("written", [-1, True, "some", 2.5])
+def test_a_confidence_shot_count_that_is_no_count_is_refused(tmp_path, written):
+    """A count of shots from seed 0, or the word all; nothing else."""
+    overrides = {"observation": {"confidence_shot_count": written}}
+
+    with pytest.raises(ValueError, match="confidence_shot_count must be"):
+        _record_options_of(tmp_path, overrides)
+
+
+def test_a_catch_deadline_is_a_whole_number_of_rounds(tmp_path):
+    detector = {"kind": "masked_regional_cusum", "catch_deadline_rounds": -1}
+
+    with pytest.raises(ValueError, match="catch_deadline_rounds must be"):
+        _record_options_of(tmp_path, {"burst_detector": detector})
+
+
+def test_no_detector_takes_no_catch_deadline(tmp_path):
+    """With no detector there is no flag to time, so the key is refused."""
+    detector = {"kind": "none", "catch_deadline_rounds": 300}
+
+    with pytest.raises(ValueError, match="burst_detector does not know"):
+        _record_options_of(tmp_path, {"burst_detector": detector})

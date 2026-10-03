@@ -102,7 +102,7 @@ def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):
         == config_module.microseconds_to_ticks(1.0)
     )
     store_capacity = card.controller_to_weak_buffer.channel.capacity
-    store_rate = store_capacity.exact_aggregate_bits_per_microsecond()
+    store_rate = store_capacity.input_bits_per_microsecond
     assert store_rate == 100_000
     assert card.qpu_to_controller.excludes_receiver_processing is True
 
@@ -231,7 +231,7 @@ def test_a_positive_lane_rate_is_read_at_its_clock(
     card = dict(GOOD_CARD, bits_per_cycle=bits_per_cycle)
     fabric = _load_readout_card(card)
     capacity = fabric.qpu_to_controller.channel.capacity
-    rate = capacity.exact_aggregate_bits_per_microsecond()
+    rate = capacity.input_bits_per_microsecond
     assert rate == bits_per_microsecond
 
 
@@ -259,7 +259,7 @@ def test_a_cards_lanes_multiply_its_lane_rate():
     card = dict(GOOD_CARD, channels=8)
     fabric = _load_readout_card(card)
     capacity = fabric.qpu_to_controller.channel.capacity
-    assert capacity.exact_aggregate_bits_per_microsecond() == 8 * 250
+    assert capacity.input_bits_per_microsecond == 8 * 250
 
 
 @pytest.mark.parametrize("header_bits", [True, -8, 448.5, "448"])

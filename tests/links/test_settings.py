@@ -11,6 +11,7 @@ import math
 
 import pytest
 
+import decsim.collect as collect
 import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
 
@@ -65,8 +66,21 @@ def card(**paths):
 
 def test_an_aggregate_rate_is_read_as_the_decimal_on_the_card():
     decimal_rate = capacity(0.20846)
-    exact = decimal_rate.exact_aggregate_bits_per_microsecond()
+    exact = decimal_rate.input_bits_per_microsecond
     assert exact == fractions.Fraction("0.20846")
+
+
+def test_a_rate_written_as_a_float_or_as_its_fraction_has_one_point_id():
+    """The rate is one exact type, so equal rates write equal json."""
+    half = fractions.Fraction(1, 2)
+    float_rate = capacity(0.5)
+    fraction_rate = capacity(half)
+
+    float_value = collect.json_value(float_rate, keep_labels=False)
+    fraction_value = collect.json_value(fraction_rate, keep_labels=False)
+
+    assert type(float_rate.input_bits_per_microsecond) is fractions.Fraction
+    assert float_value == fraction_value
 
 
 def test_a_zero_capacity_is_refused():

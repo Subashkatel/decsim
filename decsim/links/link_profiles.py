@@ -980,7 +980,7 @@ def _roce_v2_strong_paths(
     reads the coprocessor's own memory, crosses no cable and stays
     unbounded.
     """
-    rate = cable_rate.exact_aggregate_bits_per_microsecond()
+    rate = cable_rate.input_bits_per_microsecond
     echo_fraction = echo_payload_bits / rate
     echo_on_the_cable = float(echo_fraction)
     half_microseconds = round_trip_microseconds / 2

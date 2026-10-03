@@ -76,7 +76,7 @@ def capacities_of(profile):
     for path in transfer_records.LinkPath:
         path_settings = profile.path_settings(path)
         capacity = path_settings.channel.capacity
-        rate = capacity.exact_aggregate_bits_per_microsecond()
+        rate = capacity.input_bits_per_microsecond
         capacities[path.value] = rate
     return capacities
 
@@ -112,7 +112,7 @@ def test_a_reference_hop_delivers_its_latency_after_its_bits_serialize():
     channel.send(framed, 0, 0, delivered.append)
     engine.run()
     transfer = delivered[0]
-    rate = weak_store.capacity.exact_aggregate_bits_per_microsecond()
+    rate = weak_store.capacity.input_bits_per_microsecond
     exact_ticks = 120 * config.TICKS_PER_MICROSECOND / rate
     serialization_ticks = math.ceil(exact_ticks)
     latency_ticks = weak_store.propagation_latency_ticks
@@ -658,9 +658,9 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
     escalation = profile.weak_decoder_to_strong_decoder.channel.capacity
     reply = profile.strong_decoder_to_frame.channel.capacity
     poll = profile.strong_buffer_to_strong_decoder.channel.capacity
-    write_rate = write.exact_aggregate_bits_per_microsecond()
-    escalation_rate = escalation.exact_aggregate_bits_per_microsecond()
-    reply_rate = reply.exact_aggregate_bits_per_microsecond()
+    write_rate = write.input_bits_per_microsecond
+    escalation_rate = escalation.input_bits_per_microsecond
+    reply_rate = reply.input_bits_per_microsecond
 
     assert (write_rate, escalation_rate, reply_rate) == (100000,) * 3
     assert poll is None
@@ -721,7 +721,7 @@ def test_an_instruction_hop_moves_its_word_in_one_cycle(path):
     path_settings = profile.path_settings(path)
     word_bits = path_settings.default_payload.input_bits
     capacity = path_settings.channel.capacity
-    rate = capacity.exact_aggregate_bits_per_microsecond()
+    rate = capacity.input_bits_per_microsecond
     word_ticks = word_bits * config.TICKS_PER_MICROSECOND / rate
     assert word_ticks == 4000
 
@@ -816,7 +816,7 @@ def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps(path):
     profile = link_profiles.nvqlink_measured_profile()
     path_settings = profile.path_settings(path)
     capacity = path_settings.channel.capacity
-    rate = capacity.exact_aggregate_bits_per_microsecond()
+    rate = capacity.input_bits_per_microsecond
     assert rate == 100000
 
 
@@ -902,8 +902,8 @@ def test_the_risc_q_weak_loop_is_liu_et_als_fiber_network():
     uplink = card.controller_to_weak_buffer.channel
     downlink = card.weak_decoder_to_frame.channel
     frame_read = card.weak_buffer_to_weak_decoder.channel
-    uplink_rate = uplink.capacity.exact_aggregate_bits_per_microsecond()
-    downlink_rate = downlink.capacity.exact_aggregate_bits_per_microsecond()
+    uplink_rate = uplink.capacity.input_bits_per_microsecond
+    downlink_rate = downlink.capacity.input_bits_per_microsecond
 
     assert uplink.propagation_latency_ticks == 40 * 4_000
     assert downlink.propagation_latency_ticks == 41 * 4_000

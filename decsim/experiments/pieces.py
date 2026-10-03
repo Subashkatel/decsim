@@ -111,20 +111,21 @@ def refuse_pieces_of_another_tree(run_dir: pathlib.Path, folders: list) -> None:
     A folder's rows pool its pieces under its one run.json, so a piece
     another tree saved would be skipped as done, folded, and reported
     as this tree's. A collect asks before it records a point or runs a
-    shot, and the fold asks again of the pieces it folds.
+    shot, and the fold asks again of the pieces it folds. run.json's
+    tree is read first, so a fold of a folder with no piece yet still
+    stops on a run.json an older tree wrote.
     """
-    if not folders:
-        return
     run_path = run_dir / run_folder.RUN_FILE
     run_record = run_folder.read_json(run_path)
     folder_tree = run_record["git"]
+    folder_text = run_folder.tree_text(folder_tree)
     for folder in folders:
         piece = read_piece(folder)
         if run_folder.is_one_tree(folder_tree, piece):
             continue
         raise refusal.RefusalError(
             f"{folder} ran {run_folder.tree_text(piece)}, and {run_path} "
-            f"names {run_folder.tree_text(folder_tree)}; a folder holds "
+            f"names {folder_text}; a folder holds "
             "one tree's results, so collect into a new folder, or move "
             "that tree's pieces out of this one"
         )

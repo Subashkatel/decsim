@@ -348,10 +348,15 @@ def fold_the_folder(
 
 
 def _refuse_another_tree(run_dir: pathlib.Path) -> None:
-    """This tree, and every piece the folder saved, are run.json's tree."""
+    """This tree, and every piece the folder saved, are run.json's tree.
+
+    A new folder has neither run.json nor a piece, so its pieces are
+    not asked about.
+    """
     run_folder.refuse_another_tree(run_dir)
     saved = pieces.every_folder(run_dir)
-    pieces.refuse_pieces_of_another_tree(run_dir, saved)
+    if saved:
+        pieces.refuse_pieces_of_another_tree(run_dir, saved)
 
 
 def recorded_points(

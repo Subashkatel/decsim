@@ -1578,6 +1578,31 @@ def test_a_record_with_no_patch_hash_stops_a_run_before_a_shot(
     assert _piece_names(out_dir) == ["0-0", "1-1"]
 
 
+def test_a_fold_of_a_folder_whose_run_json_has_no_patch_hash_stops(
+    tmp_path,
+):
+    """With no piece to compare, an older run.json still stops a fold.
+
+    The pieces are gone, as before a first piece is saved, and run.json
+    loses its patch_sha256, as one an older tree wrote has none. The
+    fold stops on the missing key and publishes nothing.
+    """
+    out_dir = tmp_path / "out"
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    shutil.rmtree(out_dir / pieces.PIECES_FOLDER)
+    run_path = out_dir / run_folder.RUN_FILE
+    record = json.loads(run_path.read_text())
+    del record["git"]["patch_sha256"]
+    run_path.write_text(json.dumps(record))
+    before = _run_folder_bytes(out_dir)
+
+    with pytest.raises(KeyError):
+        command.main(["run", "--fold", "--out", str(out_dir)])
+
+    assert _run_folder_bytes(out_dir) == before
+
+
 def _as_pieces_run_at_commit(piece_paths, commit: str) -> None:
     """The pieces as a process at another commit would have saved them."""
     for piece_path in piece_paths:

@@ -40,10 +40,12 @@ import dataclasses
 
 import decsim
 import decsim.confidence.complementary as complementary
+import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.links.link_profiles as link_profiles
+import decsim.links.settings as link_settings
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 
@@ -59,50 +61,26 @@ STRONG_COMMUNICATION_MICROSECONDS = 10 * ROUND_PERIOD_MICROSECONDS
 # the keep threshold of 2510.25222 Sec. IV
 THRESHOLD_DECIBELS = 20.0
 COLLECTION = decsim.CollectionSettings(max_shots=100)
-# Every block's swept cells as data_movement.yaml wrote them, which a
-# point's metadata holds so that its id is the yaml point's.
-EVERY_BLOCK_CELLS = {
-    "links.controller_to_weak_buffer": {
-        "latency_cycles": 250,
-        "clock": "fridge",
-        "bits_per_cycle": None,
-    },
-    "workload.arguments.physical_error_probability": PHYSICAL_ERROR_PROBABILITY,
-    "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
+# The word a results column shows for whether a pool copies its input,
+# and its boundary fold.
+INPUT_WORDS = {
+    copies: word for word, copies in decoder_settings.DECODER_INPUTS.items()
 }
-ONE_ROOM_CYCLE_CARD = {
-    "latency_cycles": 1,
-    "clock": "room",
-    "bits_per_cycle": None,
+BOUNDARY_FOLD_WORDS = {
+    copies: word
+    for word, copies in decoder_settings.DECODER_BOUNDARY_FOLDS.items()
 }
-SWITCHING_CELLS = {
-    "weak_decoder.engine.fetch_cycles_per_round": 50,
-    "escalation": {
-        "kind": "switching",
-        "gap_threshold_db": THRESHOLD_DECIBELS,
-        "strong_window": "redo_window",
-    },
-    "strong_decoder": {
-        "kind": 0.0,
-        "units": 1,
-        "input": "copy",
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "room",
-            "fetch_cycles_per_round": 2500,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 0,
-            "release_cycles_per_round": 0,
-        },
-    },
-    "links.controller_to_strong_buffer": ONE_ROOM_CYCLE_CARD,
-    "links.weak_decoder_to_strong_decoder": {
-        "latency_cycles": 2500,
-        "clock": "room",
-        "bits_per_cycle": None,
-    },
-    "links.strong_buffer_to_strong_decoder": ONE_ROOM_CYCLE_CARD,
-    "links.strong_decoder_to_frame": ONE_ROOM_CYCLE_CARD,
+# Blocks 1 to 3 run no strong tier. The weak base they extend escalates
+# nothing, names three strong-side hops null, which keeps the reference
+# card, and writes no fourth hop and no strong decoder; the results show
+# those cells as written.
+NO_STRONG_SIDE_CELLS = {
+    "escalation": {"kind": "weak_baseline"},
+    "strong_decoder": "",
+    "links.controller_to_strong_buffer": None,
+    "links.weak_decoder_to_strong_decoder": None,
+    "links.strong_buffer_to_strong_decoder": None,
+    "links.strong_decoder_to_frame": "",
 }
 
 
@@ -186,38 +164,60 @@ def switching(distance: int) -> machine_settings.MachineSettings:
     )
 
 
-# Each block: its name, its machine, and the cells it sweeps.
+# Each block: its name and its machine.
 BLOCKS = (
-    ("every_hop_copies", every_hop_copies, {}),
-    (
-        "weak_input_in_place",
-        weak_input_in_place,
-        {"weak_decoder.input": "in_place"},
-    ),
-    (
-        "boundary_folded_in_place",
-        boundary_folded_in_place,
-        {"weak_decoder.boundary_fold": "in_place"},
-    ),
-    ("switching", switching, SWITCHING_CELLS),
+    ("every_hop_copies", every_hop_copies),
+    ("weak_input_in_place", weak_input_in_place),
+    ("boundary_folded_in_place", boundary_folded_in_place),
+    ("switching", switching),
 )
 
 
 def data_movement_points() -> list:
     """Every block at every distance, blocks in order."""
     points = []
-    for block_name, machine_at, cells in BLOCKS:
+    for block_name, machine_at in BLOCKS:
         for distance in DISTANCES:
             machine = machine_at(distance)
-            metadata = {
-                **EVERY_BLOCK_CELLS,
-                **cells,
-                "qpu.distance": distance,
-            }
+            metadata = reported_cells(machine, distance)
             point_name = f"{block_name}_d{distance}"
             point = decsim.Point(point_name, machine, metadata)
             points.append(point)
     return points
+
+
+def reported_cells(
+    machine: machine_settings.MachineSettings, distance: int
+) -> dict:
+    """Every cell the study's results show for a point, in column order.
+
+    Each column is a setting some block changes, so every point reports
+    its value there, read off the machine it runs.
+    """
+    weak_decoder = machine.weak_decoder
+    weak_link = _link_cell(
+        machine.links.controller_to_weak_buffer,
+        "fridge",
+        machine_settings.FRIDGE_CLOCK,
+    )
+    input_word = INPUT_WORDS[weak_decoder.copies_input]
+    fold_word = BOUNDARY_FOLD_WORDS[weak_decoder.copies_boundary_fold]
+    weak_fetch_cycles = weak_decoder.engine.fetch_cycles_per_round
+    strong_side = NO_STRONG_SIDE_CELLS
+    if machine.switching is not None:
+        strong_side = _strong_side_cells(machine)
+    return {
+        "links.controller_to_weak_buffer": weak_link,
+        "workload.arguments.physical_error_probability": (
+            PHYSICAL_ERROR_PROBABILITY
+        ),
+        "qpu.distance": distance,
+        "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
+        "weak_decoder.input": input_word,
+        "weak_decoder.boundary_fold": fold_word,
+        "weak_decoder.engine.fetch_cycles_per_round": weak_fetch_cycles,
+        **strong_side,
+    }
 
 
 def _complementary_gap_switching() -> escalation_settings.SwitchingSettings:
@@ -233,6 +233,67 @@ def _complementary_gap_switching() -> escalation_settings.SwitchingSettings:
     return escalation_settings.SwitchingSettings(
         confidence=complementary_gap, threshold=threshold
     )
+
+
+def _strong_side_cells(machine: machine_settings.MachineSettings) -> dict:
+    """Block 4's escalation, strong pool and strong-side hops, on the host."""
+    links = machine.links
+    room = machine_settings.ROOM_CLOCK
+    escalation = {
+        "kind": "switching",
+        "gap_threshold_db": THRESHOLD_DECIBELS,
+        "strong_window": "redo_window",
+    }
+    strong_decoder = _pool_cell(machine.strong_decoder, "room")
+    write = _link_cell(links.controller_to_strong_buffer, "room", room)
+    escalated = _link_cell(links.weak_decoder_to_strong_decoder, "room", room)
+    read = _link_cell(links.strong_buffer_to_strong_decoder, "room", room)
+    result = _link_cell(links.strong_decoder_to_frame, "room", room)
+    return {
+        "escalation": escalation,
+        "strong_decoder": strong_decoder,
+        "links.controller_to_strong_buffer": write,
+        "links.weak_decoder_to_strong_decoder": escalated,
+        "links.strong_buffer_to_strong_decoder": read,
+        "links.strong_decoder_to_frame": result,
+    }
+
+
+def _link_cell(
+    path: link_settings.PathSettings, clock_name: str, clock: config.Clock
+) -> dict:
+    """A path's card in the cycles of its clock, on an unbounded wire."""
+    latency_ticks = path.channel.propagation_latency_ticks
+    latency_cycles = latency_ticks // clock.period_ticks
+    return {
+        "latency_cycles": latency_cycles,
+        "clock": clock_name,
+        "bits_per_cycle": None,
+    }
+
+
+def _pool_cell(
+    pool: decoder_settings.DecoderPoolSettings, clock_name: str
+) -> dict:
+    """A priced matching pool: its card, units, input, memory and engine."""
+    engine = pool.engine
+    unit_memory = {"bits": pool.unit_memory.bits}
+    input_word = INPUT_WORDS[pool.copies_input]
+    engine_cell = {
+        "clock": clock_name,
+        "fetch_cycles_per_round": engine.fetch_cycles_per_round,
+        "fetch_cycles_per_job": engine.fetch_cycles_per_job,
+        "release_cycles_per_job": engine.release_cycles_per_job,
+        "release_cycles_per_round": engine.release_cycles_per_round,
+    }
+    # a priced matching card's kind is its latency in microseconds
+    return {
+        "kind": pool.algorithm.preset_latency_microseconds,
+        "units": pool.unit_count,
+        "input": input_word,
+        "unit_memory": unit_memory,
+        "engine": engine_cell,
+    }
 
 
 points = data_movement_points()

@@ -33,6 +33,24 @@ def _minimal_settings(tmp_path):
     return task.settings
 
 
+def _online_point_at_distance_5(tmp_path, workload) -> experiment.Point:
+    """A Python switching point on the online threshold, running workload."""
+    machine = _minimal_settings(tmp_path)
+    confidence = complementary.ComplementaryGap.Settings()
+    card = threshold_sources.OnlineThreshold.Settings(threshold_decibels=15.0)
+    switching = escalation_settings.SwitchingSettings(confidence, card)
+    qpu = dataclasses.replace(machine.qpu, distance=5)
+    running = workload_settings.WorkloadSettings.running(workload)
+    machine = dataclasses.replace(
+        machine,
+        qpu=qpu,
+        workload=running,
+        strong_decoder=machine.weak_decoder,
+        switching=switching,
+    )
+    return experiment.Point("online", machine)
+
+
 def test_a_grid_runs_the_last_axis_fastest_in_the_order_given():
     points = experiment.grid(d=(3, 5), p=(0.1, 0.2))
 
@@ -147,23 +165,10 @@ def test_a_python_point_states_its_distance_and_error_probability_once(
     The distance is the qpu's and the error probability the one the
     workload was made at, so the online card restates neither.
     """
-    machine = _minimal_settings(tmp_path)
-    confidence = complementary.ComplementaryGap.Settings()
-    card = threshold_sources.OnlineThreshold.Settings(threshold_decibels=15.0)
-    switching = escalation_settings.SwitchingSettings(confidence, card)
     workload = producers.memory_circuit(
         "surface_code:rotated_memory_x", 6, 5, 0.002
     )
-    qpu = dataclasses.replace(machine.qpu, distance=5)
-    running = workload_settings.WorkloadSettings.running(workload)
-    machine = dataclasses.replace(
-        machine,
-        qpu=qpu,
-        workload=running,
-        strong_decoder=machine.weak_decoder,
-        switching=switching,
-    )
-    point = experiment.Point("online", machine)
+    point = _online_point_at_distance_5(tmp_path, workload)
 
     task = experiment.task_of(point)
 
@@ -172,6 +177,20 @@ def test_a_python_point_states_its_distance_and_error_probability_once(
     expected = random.Random("online-threshold d=5 p=0.002")
     generator = calibrator.random_generator
     assert generator.getstate() == expected.getstate()
+
+
+def test_a_python_workload_that_states_no_probability_is_refused_by_name(
+    tmp_path,
+):
+    """No yaml names the probability for a record built in Python."""
+    made = producers.memory_circuit(
+        "surface_code:rotated_memory_x", 6, 5, 0.002
+    )
+    workload = dataclasses.replace(made, physical_error_probability=None)
+    point = _online_point_at_distance_5(tmp_path, workload)
+
+    with pytest.raises(ValueError, match="physical_error_probability=None"):
+        experiment.task_of(point)
 
 
 def test_a_yaml_point_two_blocks_name_is_one_point(tmp_path):

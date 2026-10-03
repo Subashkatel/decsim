@@ -174,17 +174,23 @@ class ProducerWorkload:
     def workload(
         settings: "ProducerWorkload.Settings",
     ) -> workload_records.Workload:
-        """The maker's workload at one sweep point."""
+        """The maker's workload at one sweep point.
+
+        A workload that states no physical error probability takes the
+        one its arguments name, the probability the maker was called at,
+        so a maker that leaves the field unset still gives the point the
+        fact a threshold reads (settings.MachineSettings.point_facts).
+        """
         maker = _maker(settings.function)
         made = maker(**settings.arguments)
-        if isinstance(made, workload_records.Workload):
-            return made
-        made_type = type(made)
-        raise ValueError(
-            f"workload.function {settings.function} returned a "
-            f"{made_type.__name__}; a maker returns a "
-            "decsim.records.workload.Workload"
-        )
+        if not isinstance(made, workload_records.Workload):
+            made_type = type(made)
+            raise ValueError(
+                f"workload.function {settings.function} returned a "
+                f"{made_type.__name__}; a maker returns a "
+                "decsim.records.workload.Workload"
+            )
+        return _stating_the_called_probability(made, settings.arguments)
 
     @staticmethod
     def maker(settings: "ProducerWorkload.Settings") -> dict:
@@ -290,6 +296,16 @@ def _lowered_fields(workload: workload_records.Workload) -> dict:
         "physical_circuits": program.physical_circuits,
         "workload_record": workload,
     }
+
+
+def _stating_the_called_probability(
+    workload: workload_records.Workload, arguments: Mapping
+) -> workload_records.Workload:
+    """The workload, its error probability the arguments' when it has none."""
+    if workload.physical_error_probability is not None:
+        return workload
+    probability = arguments.get("physical_error_probability")
+    return dataclasses.replace(workload, physical_error_probability=probability)
 
 
 def _maker(function: str) -> Any:

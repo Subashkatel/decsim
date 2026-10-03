@@ -11,6 +11,7 @@ tables, and pin the sentence every refusal reads as.
 import dataclasses
 import json
 import pathlib
+import random
 import textwrap
 
 import pytest
@@ -25,6 +26,8 @@ import decsim.records.circuits as circuit_records
 import tests.experiments.yaml_configs as yaml_configs
 
 OUTSIDE_MAKER = '''
+import stim
+
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
 
@@ -45,6 +48,25 @@ def rounds_from_keywords(distance, physical_error_probability, **options):
     """A maker that reads its round count out of its keyword arguments."""
     operation = program_records.Operation(1, "a", (1,), patches=(1,))
     rounds = options.get("rounds", distance)
+    return workload_records.Workload((operation,), {1: rounds})
+
+
+def memory_stating_no_probability(
+    code_task, rounds, distance, physical_error_probability
+):
+    """Stim's memory at the probability; the workload states none."""
+    circuit = stim.Circuit.generated(
+        code_task,
+        rounds=rounds,
+        distance=distance,
+        after_clifford_depolarization=physical_error_probability,
+        before_round_data_depolarization=physical_error_probability,
+        before_measure_flip_probability=physical_error_probability,
+        after_reset_flip_probability=physical_error_probability,
+    )
+    operation = program_records.Operation(
+        1, "memory", (0,), patches=(0,), circuit=circuit
+    )
     return workload_records.Workload((operation,), {1: rounds})
 '''
 
@@ -206,6 +228,43 @@ def test_a_maker_written_outside_decsim_runs_from_a_yaml(monkeypatch, tmp_path):
     assert result.terminal_status == "complete"
     assert len(machine.plan.all_operations) == 2
     assert rounds == ((1, 4), (2, 7))
+
+
+def test_a_maker_that_states_no_probability_runs_an_online_point(
+    monkeypatch, tmp_path
+):
+    """The probability the yaml calls the maker at is the point's.
+
+    A maker that leaves Workload.physical_error_probability unset still
+    seeds the online calibrator from its arguments' probability, as a
+    run did before the workload held one, and its shot completes.
+    """
+    _outside_package(tmp_path, monkeypatch)
+    arguments = {
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds": 12,
+        "distance": "${qpu.distance}",
+    }
+    workload = _producer(
+        "outside_makers.makers:memory_stating_no_probability", arguments
+    )
+    card = yaml_configs.online_threshold()
+    card["workload"] = workload
+    config_path = yaml_configs.write_config(tmp_path, card)
+    config = experiment.load_experiment(config_path)
+    task = config.point_task(AT_DISTANCE_3_AND_P)
+    calibrator = task.online_threshold
+    generator = calibrator.random_generator
+    seeded_state = generator.getstate()
+
+    machine = machine_module.Machine.build(
+        task.settings, 0, online_threshold=calibrator
+    )
+    result = machine.run()
+
+    expected = random.Random("online-threshold d=3 p=0.001")
+    assert seeded_state == expected.getstate()
+    assert result.terminal_status == "complete"
 
 
 @pytest.mark.parametrize("arguments, rounds", [({}, 3), ({"rounds": 9}, 9)])

@@ -655,23 +655,9 @@ def _run_points(run_dir: pathlib.Path, point_id: str) -> list:
 def _point_collection(
     run_dir: pathlib.Path, resolved: _ResolvedPoint
 ) -> PointCollection:
-    """A recorded point's collection state, its pieces sized by its rounds.
-
-    A point whose shots send no detector
-    data has no rounds to size a piece by or to score, and is refused
-    here, before any shot runs, as sinter's Task refuses a task it cannot
-    count when it is built (sinter/_data/_task.py:127-149).
-    """
+    """A recorded point's collection state, its pieces sized by its rounds."""
     point_id = resolved.record["id"]
     rounds_per_shot = resolved.record["rounds_per_shot"]
-    if rounds_per_shot == 0:
-        metadata = collect.metadata_text(resolved.task.metadata)
-        raise refusal.RefusalError(
-            f"the point {metadata} runs no operation that sends detector "
-            "data, so its shots have no rounds to size a piece by or to "
-            "score; decsim run needs a workload whose operations emit "
-            "detector data (decsim run times the others)"
-        )
     settings = resolved.settings
     piece_shots = settings.piece_shots(rounds_per_shot)
     point_folders = pieces.folders_of(run_dir, [point_id])

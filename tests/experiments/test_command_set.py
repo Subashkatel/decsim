@@ -776,48 +776,6 @@ def test_a_collect_makes_each_points_workload_once(tmp_path, monkeypatch):
     assert growing_maker.CALLS == [3]
 
 
-WAITING_MAKER = """
-import decsim.records.program as program
-import decsim.records.workload as workload
-
-
-def wait(**_arguments):
-    operation = program.Operation(
-        1, "wait", (0,), patches=(0,), emits_detector_data=False
-    )
-    return workload.Workload((operation,), {1: 3})
-"""
-
-
-def test_a_collect_of_a_workload_with_no_detector_rounds_is_refused(
-    tmp_path, monkeypatch, capsys
-):
-    """A shot that sends no detector data has no rounds to size or score.
-
-    Its rounds per shot are zero, so collect refuses the point before it
-    sizes a piece, as its scoring would refuse the first shot.
-    """
-    maker_path = tmp_path / "waiting_maker.py"
-    maker_path.write_text(WAITING_MAKER)
-    monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.delitem(sys.modules, "waiting_maker", raising=False)
-    workload = {"kind": "producer", "function": "waiting_maker:wait"}
-    card = {
-        "workload": workload,
-        "qpu": {"kind": "timing_only"},
-        "sweep": yaml_configs.QPU_ONLY_SWEEP,
-    }
-    config_path = yaml_configs.write_config(tmp_path, card)
-    run_dir = tmp_path / "run"
-
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["run", str(config_path), "--out", str(run_dir)])
-    printed = capsys.readouterr()
-
-    assert stopped.value.code == 1
-    assert "sends detector data" in printed.err
-
-
 def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
     """The files row reads inputs/ back, and the shot is the same shot."""
     config_path = yaml_configs.write_config(tmp_path, {})

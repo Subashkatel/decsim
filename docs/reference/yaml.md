@@ -159,8 +159,10 @@ decsim show configs/reference.yaml
 prints the resolved sections, one line per component, and the sweep
 blocks, without running anything. Then, under `values:`, it prints
 every value the machine is built with, one per line, gem5's
-`config.ini` in one list (`src/python/m5/simulate.py:122-127`). Three
-of `decsim show configs/examples/my_first_sweep.yaml`'s:
+`config.ini` in one list (`src/python/m5/simulate.py:122-127`), and
+each record's class on a line ending in `.class`, as `config.ini`
+names each object's type (`src/python/m5/SimObject.py:1144-1145`).
+Three of `decsim show configs/examples/my_first_sweep.yaml`'s:
 
 ```
 qpu.distance = [3, 5, 7]  [sweep, configs/examples/my_first_sweep.yaml:16-21]

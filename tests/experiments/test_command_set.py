@@ -464,6 +464,18 @@ def test_show_prints_every_value_after_the_sections(capsys):
     assert lines[values_at + 1 :] == value_lines
 
 
+def test_show_names_the_class_of_a_row_that_takes_no_setting():
+    """The held boundary row has no field, so its class is its one line."""
+    config_path = CONFIGS_DIR / "examples" / "two_tiers.yaml"
+    config = experiment.load_experiment(config_path)
+    point = config.first_point_task()
+
+    lines = experiment.value_lines(config, point.settings)
+
+    held = "decsim.windows.boundary_policies.Held.Settings"
+    assert f'windows.boundary_policy.class = "{held}"' in lines
+
+
 def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
     config_path = gate_point.CONFIG_PATH
     lines = _run_one_shot(config_path, seed=0, out_dir=tmp_path)

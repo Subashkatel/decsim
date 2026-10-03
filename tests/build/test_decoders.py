@@ -3,14 +3,25 @@
 The chip's manager has the pool of the tier that decodes the plan's
 windows and a switching run gives the host's manager a pool of the
 strong tier. The regression lock (tests/regression) runs every other
-wiring of this module; no lock shot bounds the strong tier's memory.
+wiring of this module. No lock shot bounds the strong tier's memory,
+and none can tell the machine's clock from the fridge's or the room's,
+since both tick at 250 MHz.
 """
 
 import dataclasses
 
+import decsim.build.decoders as decoder_build
+import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import tests.declared_run as declared_run
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
+
+# no preset clock ticks at 300 MHz, so a part on any preset's clock
+# fails the tests below
+MACHINE_CLOCK = config.Clock.from_megahertz(300.0)
 
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
@@ -32,3 +43,37 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     strong_unit = machine.decoders.strong_decoder_manager.pool.units[0]
     assert weak_unit.memory.capacity_bits == 12
     assert strong_unit.memory.capacity_bits == 30
+
+
+def test_an_engine_that_names_no_clock_counts_on_the_machines():
+    machine_clock = MACHINE_CLOCK
+    engine = decoder_settings.EngineSettings()
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
+
+    unit = decoder_build.build_decoder_unit(
+        weak, "weak", machine_clock, None, None
+    )
+
+    assert unit.timing.clock == machine_clock
+
+
+def test_a_manager_that_names_no_clock_dispatches_on_the_machines():
+    """A dispatch cost on no clock of its own is charged on the machine's."""
+    machine_clock = MACHINE_CLOCK
+    declared = declared_run.weak_only_run()
+    manager_settings = decoder_settings.DecoderManagerSettings(
+        dispatch_cycles=1
+    )
+    settings = dataclasses.replace(
+        declared.settings,
+        clock=machine_clock,
+        decoder_manager=manager_settings,
+    )
+
+    machine = declared_run.run_machine(settings)
+
+    dispatch_cost = machine.decoders.decoder_manager.service.dispatch_cost
+    assert dispatch_cost.clock == machine_clock

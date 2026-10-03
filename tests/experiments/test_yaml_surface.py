@@ -23,6 +23,7 @@ import decsim.config as config_module
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
+import decsim.experiments.collection as collection
 import decsim.experiments.command as command
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -2142,3 +2143,54 @@ def test_show_refuses_a_shot_cap_that_is_not_a_whole_number_of_one_or_more(
     assert stopped.value.code == 1
     refusal_text = "sweep block 1 collection max_shots must be a whole number"
     assert refusal_text in printed.err
+
+
+def test_a_blocks_collection_key_wins_over_the_tops():
+    """A block's key replaces the top's, as a file's replaces its base's.
+
+    sinter's CollectionOptions.combine takes the smaller of two instead
+    (sinter/_data/_collection_options.py:68-99), which would let the
+    top's value cut a block that asks for more.
+    """
+    top = {"piece_rounds": 100, "max_shots": 10}
+    block = {"piece_rounds": 7}
+
+    settings = collection.CollectionSettings.from_yaml(top, block, "block 0")
+
+    assert settings.piece_rounds == 7
+    assert settings.max_shots == 10
+
+
+def test_the_tops_collection_key_stands_where_the_block_sets_none():
+    top = {"piece_rounds": 100, "max_shots": 10}
+
+    settings = collection.CollectionSettings.from_yaml(top, {}, "block 0")
+
+    assert settings.piece_rounds == 100
+
+
+def test_an_unknown_collection_key_is_refused_by_name():
+    top = {"piece_shots": 5, "max_shots": 10}
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml(top, None, "b")
+
+    message = str(refused.value)
+    assert "['piece_shots']" in message
+    assert "piece_rounds" in message
+
+
+def test_a_collection_section_that_is_no_mapping_is_refused():
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml([1], None, "block 0")
+
+    message = str(refused.value)
+    assert "is [1]; it is a mapping of max_failures, max_shots" in message
+
+
+def test_a_collection_refusal_names_its_sweep_block():
+    with pytest.raises(refusal.RefusalError) as refused:
+        collection.CollectionSettings.from_yaml(None, None, "block 3")
+
+    message = str(refused.value)
+    assert message.startswith("block 3 collection has no cap")

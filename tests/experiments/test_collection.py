@@ -1,10 +1,4 @@
-"""The collection, built in Python or read from yaml (collection.py).
-
-A block's key replaces the top's, as a file's key replaces its base's
-under `extends`. sinter's CollectionOptions.combine takes the smaller of
-two instead (sinter/_data/_collection_options.py:68-99), which would let
-the top's value cut a block that asks for more.
-"""
+"""The collection: how a point's shots are cut and stopped (collection.py)."""
 
 import math
 import random
@@ -14,51 +8,29 @@ import sinter._collection._collection_manager as sinter_manager
 
 import decsim.experiments.collection as collection
 import decsim.experiments.failure_statistics as failure_statistics
-import decsim.experiments.refusal as refusal
 
-CAPPED = {"max_shots": 10}
 StopKind = failure_statistics.StopKind
 
 
-def test_a_capped_section_gives_the_default_piece_rounds():
-    settings = collection.CollectionSettings.from_yaml(CAPPED, None, "b")
+def test_a_capped_collection_gives_the_default_piece_rounds():
+    settings = collection.CollectionSettings(max_shots=10)
 
     assert settings.piece_rounds == collection.DEFAULT_PIECE_ROUNDS
     assert settings.min_shots == 0
     assert settings.max_failures is None
 
 
-def test_a_blocks_key_wins_over_the_tops():
-    top = {"piece_rounds": 100, "max_shots": 10}
-    block = {"piece_rounds": 7}
-
-    settings = collection.CollectionSettings.from_yaml(top, block, "block 0")
-
-    assert settings.piece_rounds == 7
-    assert settings.max_shots == 10
-
-
-def test_the_tops_key_stands_where_the_block_sets_none():
-    top = {"piece_rounds": 100, "max_shots": 10}
-
-    settings = collection.CollectionSettings.from_yaml(top, {}, "block 0")
-
-    assert settings.piece_rounds == 100
-
-
-def test_a_point_with_no_cap_is_refused():
-    with pytest.raises(refusal.RefusalError) as refused:
-        collection.CollectionSettings.from_yaml(None, None, "block 3")
+def test_a_collection_with_no_cap_is_refused():
+    with pytest.raises(ValueError) as refused:
+        collection.CollectionSettings(max_failures=100)
 
     message = str(refused.value)
-    assert message.startswith("block 3 collection has no cap")
+    assert message.startswith("collection has no cap")
     assert "max_shots or max_core_seconds" in message
 
 
 def test_a_time_cap_alone_is_a_cap():
-    top = {"max_core_seconds": 60}
-
-    settings = collection.CollectionSettings.from_yaml(top, None, "block 0")
+    settings = collection.CollectionSettings(max_core_seconds=60)
 
     assert settings.max_core_seconds == 60
 
@@ -79,66 +51,35 @@ def test_a_shot_longer_than_a_piece_is_a_piece_of_one_shot():
     assert shots == 1
 
 
-def test_an_unknown_key_is_refused_by_name():
-    top = {"piece_shots": 5, "max_shots": 10}
-
-    with pytest.raises(refusal.RefusalError) as refused:
-        collection.CollectionSettings.from_yaml(top, None, "b")
-
-    message = str(refused.value)
-    assert "['piece_shots']" in message
-    assert "piece_rounds" in message
-
-
-def test_a_section_that_is_no_mapping_is_refused():
-    with pytest.raises(refusal.RefusalError) as refused:
-        collection.CollectionSettings.from_yaml([1], None, "block 0")
-
-    message = str(refused.value)
-    assert "is [1]; it is a mapping of max_failures, max_shots" in message
-
-
 @pytest.mark.parametrize("key", ["piece_rounds", "max_shots", "max_failures"])
 @pytest.mark.parametrize("value", [0, -3, 2.5, True, "20000"])
 def test_a_count_that_is_no_count_is_refused(key, value):
-    block = {"max_shots": 10, key: value}
+    keys = {"max_shots": 10, key: value}
 
-    with pytest.raises(refusal.RefusalError) as refused:
-        collection.CollectionSettings.from_yaml(None, block, "block 2")
+    with pytest.raises(ValueError) as refused:
+        collection.CollectionSettings(**keys)
 
     message = str(refused.value)
-    assert message.startswith(f"block 2 collection {key} must be")
+    assert message.startswith(f"collection {key} must be")
 
 
 @pytest.mark.parametrize("value", [0, -1.5, True, "60", math.inf])
 def test_a_time_cap_that_is_no_finite_positive_number_is_refused(value):
     """An infinite time cap never stops a point that has no other cap."""
-    block = {"max_core_seconds": value}
-
-    with pytest.raises(refusal.RefusalError) as refused:
-        collection.CollectionSettings.from_yaml(None, block, "block 2")
+    with pytest.raises(ValueError) as refused:
+        collection.CollectionSettings(max_core_seconds=value)
 
     message = str(refused.value)
-    assert message.startswith("block 2 collection max_core_seconds must be")
+    assert message.startswith("collection max_core_seconds must be")
 
 
 @pytest.mark.parametrize("value", [-1, 1.5, False, None])
 def test_a_minimum_that_is_no_count_is_refused(value):
-    block = {"max_shots": 10, "min_shots": value}
-
-    with pytest.raises(refusal.RefusalError) as refused:
-        collection.CollectionSettings.from_yaml(None, block, "block 2")
-
-    message = str(refused.value)
-    assert message.startswith("block 2 collection min_shots must be")
-
-
-def test_a_collection_built_in_python_with_no_cap_is_refused():
     with pytest.raises(ValueError) as refused:
-        collection.CollectionSettings(max_failures=100)
+        collection.CollectionSettings(max_shots=10, min_shots=value)
 
     message = str(refused.value)
-    assert message.startswith("collection has no cap")
+    assert message.startswith("collection min_shots must be")
 
 
 def test_a_collection_built_in_python_names_the_count_it_refuses():
@@ -364,7 +305,7 @@ def test_a_prefix_whose_outputs_ran_apart_has_no_one_shape():
 
 
 def _settings(**keys) -> collection.CollectionSettings:
-    return collection.CollectionSettings.from_yaml(keys, None, "block 1")
+    return collection.CollectionSettings(**keys)
 
 
 def _counts(shots, scored_shots, failures, core_seconds=0.0):

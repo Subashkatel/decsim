@@ -444,12 +444,6 @@ def point_records(run_dir: pathlib.Path) -> dict:
     return records
 
 
-def inputs_dir_of(run_dir: pathlib.Path, record: Mapping) -> pathlib.Path:
-    """Where a recorded point's workload files are."""
-    point_dir = run_dir / POINTS_FOLDER / record["name"]
-    return point_dir / INPUTS_FOLDER
-
-
 def record_seeds(run_dir: pathlib.Path, seeds_by_point: dict) -> None:
     """Each point's machine.json given the seed ranges its pieces hold.
 

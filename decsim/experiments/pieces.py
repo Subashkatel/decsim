@@ -11,13 +11,8 @@ the counts its save file already holds
 (sinter/_collection/_collection.py:387-397). A staging folder a killed
 writer left is no piece and is passed over; no writer can tell from
 another host whether its owner is still writing, so none removes it.
-
-A batch's plan, batches/<k>/plan.csv, is a list of pieces, each with
-the task it was dealt to; `decsim run --slurm` writes it and each task
-of the batch's arrays runs its share of it.
 """
 
-import csv
 import hashlib
 import json
 import os
@@ -31,18 +26,11 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.ports as ports
-import decsim.records.round_plans as round_plans
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
 # an adaptive point's calibrator as its piece left it (design 6.5)
 STATE_FILE = "state.pickle"
-
-# A batch's folder, batches/<k>/, and its plan: a row per piece, its
-# task first.
-BATCHES_FOLDER = "batches"
-PLAN_FILE = "plan.csv"
-PLAN_COLUMNS = ("task", "point_id", "first_seed", "count")
 
 
 def piece_dir(
@@ -145,31 +133,6 @@ def contiguous_ranges(saved: dict, first_seed: int) -> list:
     return ranges
 
 
-def uncovered_ranges(saved: dict, first_seed: int, count: int) -> list:
-    """The parts of seeds [first_seed, first_seed + count) no saved piece holds.
-
-    saved maps each saved piece's first seed to its count, as
-    saved_counts gives it, whatever collection cut it. Returns (first
-    seed, count) ranges in seed order; none when every seed is saved.
-    """
-    end_seed = first_seed + count
-    ranges = []
-    next_seed = first_seed
-    saved_items = saved.items()
-    for saved_first, saved_count in sorted(saved_items):
-        saved_end = saved_first + saved_count
-        if saved_end <= next_seed or saved_first >= end_seed:
-            continue
-        if saved_first > next_seed:
-            gap_count = saved_first - next_seed
-            ranges.append((next_seed, gap_count))
-        next_seed = max(next_seed, saved_end)
-    if next_seed < end_seed:
-        tail_count = end_seed - next_seed
-        ranges.append((next_seed, tail_count))
-    return ranges
-
-
 def seed_ranges_of(folders: list) -> dict:
     """Each point's seed ranges, [first, count], from its pieces' names."""
     ranges = {}
@@ -209,57 +172,6 @@ def read_state(folder: pathlib.Path) -> ports.ThresholdSource:
             "folder and collect it again"
         )
     return pickle.loads(state_bytes)
-
-
-def planned_pieces(experiment_dir: pathlib.Path) -> dict:
-    """Every batch's planned pieces, by point id, as (first seed, count).
-
-    Each seed range once, in seed order, however many batches planned it.
-    """
-    planned = {}
-    for batch_folder in batch_dirs(experiment_dir):
-        plan_path = batch_folder / PLAN_FILE
-        for _task, piece in read_plan(plan_path):
-            point_pieces = planned.setdefault(piece.point_id, set())
-            point_pieces.add((piece.first_seed, piece.count))
-    return {
-        point_id: sorted(point_pieces)
-        for point_id, point_pieces in planned.items()
-    }
-
-
-def read_plan(plan_path: pathlib.Path) -> list:
-    """A plan.csv's pieces as (task, PlannedPiece), in the file's order."""
-    with open(plan_path, newline="") as handle:
-        reader = csv.DictReader(handle)
-        rows = list(reader)
-    planned = []
-    for row in rows:
-        piece = round_plans.PlannedPiece(
-            row["point_id"],
-            int(row["first_seed"]),
-            int(row["count"]),
-        )
-        task = int(row["task"])
-        planned.append((task, piece))
-    return planned
-
-
-def batch_dir(experiment_dir: pathlib.Path, batch_number: int) -> pathlib.Path:
-    """Batch k's folder, batches/<k>/."""
-    return experiment_dir / BATCHES_FOLDER / str(batch_number)
-
-
-def batch_dirs(experiment_dir: pathlib.Path) -> list:
-    """The experiment's batch folders that hold a plan, in batch order."""
-    found = experiment_dir.glob(f"{BATCHES_FOLDER}/*/{PLAN_FILE}")
-    folders = [path.parent for path in found]
-    return sorted(folders, key=batch_number_of)
-
-
-def batch_number_of(batch_folder: pathlib.Path) -> int:
-    """The batch number k of a batches/<k> folder."""
-    return int(batch_folder.name)
 
 
 def _staging_dir(folder: pathlib.Path) -> pathlib.Path:

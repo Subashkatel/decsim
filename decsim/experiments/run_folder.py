@@ -200,9 +200,9 @@ def piece_identity() -> dict:
 
     Beside the commit, a rerun needs the interpreter and the processor
     that set the seconds a shot; the array job and task name the Slurm
-    task that ran it, which the batch's plan.csv maps back to its
-    pieces. The package versions come from the process that ran the
-    shots, with its measurements (collect.imported_module_versions).
+    task that ran it, one point's. The package versions come from the
+    process that ran the shots, with its measurements
+    (collect.imported_module_versions).
     """
     commit, is_dirty = _tree_reading()
     python_version = platform.python_version()
@@ -281,12 +281,13 @@ def write_run_record(
         write_json(staging, record)
 
 
-def recorded_run_file(run_dir: pathlib.Path) -> pathlib.Path:
-    """The run file run.json names, which a planned task loads again."""
-    run_path = run_dir / RUN_FILE
-    recorded = read_json(run_path)
-    run_files = recorded["run_files"]
-    return pathlib.Path(run_files[0])
+def copied_run_file(
+    run_file: pathlib.Path, run_dir: pathlib.Path
+) -> pathlib.Path:
+    """Where the folder keeps its copy of the run file, which a task loads."""
+    copies = _run_file_copies(run_file, run_dir)
+    _source, target = copies[0]
+    return target
 
 
 def recorded_point_ids(run_dir: pathlib.Path, first_ids: list) -> list:

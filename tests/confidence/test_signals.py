@@ -12,6 +12,8 @@ solves and never for the row's class.
 import pytest
 
 import decsim.confidence.signals as confidence_signals
+import decsim.decoders.union_find.cycle_count as cycle_count_module
+import decsim.decoders.union_find.decoder as union_find
 
 
 def test_the_shipped_rows_are_reachable_by_the_name_the_yaml_writes():
@@ -22,6 +24,22 @@ def test_the_shipped_rows_are_reachable_by_the_name_the_yaml_writes():
         "complementary_gap",
         "extra_cluster_gap",
     ]
+
+
+@pytest.mark.parametrize("name", sorted(confidence_signals.CONFIDENCE_SIGNALS))
+def test_every_row_built_from_its_record_keeps_the_records_walk_card(name):
+    """The lock prices only the cluster gap on a card, so this guards the rest.
+
+    The default card is None; 0.5 microseconds must reach the row whole.
+    """
+    row = confidence_signals.CONFIDENCE_SIGNALS[name]
+    host_time = cycle_count_module.HostMeasuredTime()
+    weak = union_find.UnionFindDecoder.Settings(timing=host_time)
+    record = row.Settings(walk_microseconds=0.5)
+
+    built = record.build(weak, 2.0)
+
+    assert built.walk_microseconds == 0.5
 
 
 @pytest.mark.parametrize("name", sorted(confidence_signals.CONFIDENCE_SIGNALS))

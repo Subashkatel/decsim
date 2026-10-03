@@ -14,12 +14,14 @@ import pathlib
 import textwrap
 
 import pytest
+import stim
 
 import decsim.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.producers as producers
+import decsim.records.circuits as circuit_records
 import tests.experiments.yaml_configs as yaml_configs
 
 OUTSIDE_MAKER = '''
@@ -67,6 +69,73 @@ MERGE_OPERATIONS = {
         {"id": 4, "name": "measure", "patches": [0], "kind": "MEASURE"},
     ],
 }
+# One operation that runs the files row's finite circuit.
+ONE_OPERATION_ON_A_CIRCUIT = {
+    "schema": "decsim.ops/1",
+    "operations": [{"id": 1, "patches": [0]}],
+}
+
+
+# One live fragment for every round: a single measurement.
+ONE_MEASUREMENT = stim.Circuit("M 0")
+LIVE_FRAGMENTS = circuit_records.RepeatedStimCircuit(
+    ONE_MEASUREMENT, ONE_MEASUREMENT, ONE_MEASUREMENT, ONE_MEASUREMENT
+)
+# Every maker decsim ships, with the arguments of a small point.
+SHIPPED_MAKERS = [
+    (
+        producers.memory_circuit,
+        ("surface_code:rotated_memory_z", 6, 3, 0.001),
+    ),
+    (
+        producers.memory_patches,
+        ("surface_code:rotated_memory_z", 4, 2, 3, 0.001),
+    ),
+    (producers.deltakit_memory, (3, 3, 0.001)),
+    (producers.deltakit_live_memory, (3, 0.001, 1.0, 2)),
+    (producers.live_memory, (LIVE_FRAGMENTS, 2)),
+]
+
+
+@pytest.mark.parametrize("maker, arguments", SHIPPED_MAKERS)
+def test_a_made_workload_hashes_and_writes_to_json(maker, arguments):
+    """One record builds every shot of a point, so it is a value.
+
+    Two records of one workload hash alike, and the record writes to
+    json, as a point's id and its machine.json read it.
+    """
+    workload = maker(*arguments)
+    settings = workload_settings.WorkloadSettings.running(workload)
+    again = workload_settings.WorkloadSettings.running(workload)
+
+    value = collect.json_value(settings)
+    text = json.dumps(value)
+
+    assert hash(settings) == hash(again)
+    assert json.loads(text) == value
+
+
+def test_a_workload_a_yaml_makes_hashes_and_writes_to_json(tmp_path):
+    """The files row and its finite circuit, made at the point."""
+    _write_json(tmp_path, "ops.json", ONE_OPERATION_ON_A_CIRCUIT)
+    circuit_path = tmp_path / "history.stim"
+    circuit_path.write_text("M 0\nDETECTOR rec[-1]\n")
+    _write_json(tmp_path, "rounds.json", {"0": 1})
+    workload = {
+        "kind": "files",
+        "operations": "ops.json",
+        "circuit": "history.stim",
+        "measurement_rounds": "rounds.json",
+    }
+    config_path = _files_config(tmp_path, workload, "stim_device")
+    settings = _point(config_path, AT_DISTANCE_3)
+    again = _point(config_path, AT_DISTANCE_3)
+
+    value = collect.json_value(settings.workload)
+    text = json.dumps(value)
+
+    assert hash(settings.workload) == hash(again.workload)
+    assert json.loads(text) == value
 
 
 def test_making_a_workload_keeps_every_field_the_section_set():

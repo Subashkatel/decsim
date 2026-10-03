@@ -7,7 +7,7 @@ resolved once per run, so a planning collaborator reads a frozen record
 rather than the live operation with its Stim circuit.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional
 
@@ -118,7 +118,7 @@ class OpKind(Enum):
     GENERIC = auto()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Operation:
     """One logical operation in the circuit."""
 
@@ -126,9 +126,10 @@ class Operation:
     name: str  # human-readable label used in traces
     qubits: tuple  # logical qubit ids the op acts on
     clifford: bool = True  # non-Clifford implies a magic state by default
-    circuit: Optional[Any] = (
-        None  # stim circuit for real-syndrome (data-path) runs
-    )
+    # Stim circuit for real-syndrome (data-path) runs. A Stim circuit has
+    # no hash, and equal operations hold equal circuits, so the hash
+    # leaves it out and still agrees with equality.
+    circuit: Optional[Any] = field(default=None, hash=False)
     consumes_magic_state: Optional[bool] = (
         None  # override; None = infer from clifford
     )

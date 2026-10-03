@@ -84,9 +84,10 @@ def write_workload(
     circuit with measurement_rounds, or fragments.
     """
     folder.mkdir(parents=True, exist_ok=True)
+    round_counts = dict(workload.round_counts)
     entries = []
     for operation in workload.operations:
-        entry = _operation_entry(operation, workload.round_counts, folder)
+        entry = _operation_entry(operation, round_counts, folder)
         entries.append(entry)
     document = {"schema": OPERATIONS_SCHEMA, "operations": entries}
     operations_path = folder / "operations.json"
@@ -228,7 +229,7 @@ def _write_finite_circuit(
     circuit_path = folder / "circuit.stim"
     physical.circuit.to_file(str(circuit_path))
     schedule = {}
-    for index, round_index in physical.measurement_rounds.items():
+    for index, round_index in physical.measurement_rounds:
         schedule[str(index)] = round_index
     schedule_path = folder / "measurement_rounds.json"
     _write_json(schedule_path, schedule)

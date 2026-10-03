@@ -34,8 +34,7 @@ class WorkloadProgram:
 
 def lowered(workload: workload_records.Workload) -> WorkloadProgram:
     """The workload's operations wired, its stream and rounds derived."""
-    operations = _copied(workload.operations)
-    _wire_circuit(operations)
+    operations = _wired(workload.operations)
     stream_id = _one_stream_id(operations)
     physical = workload.physical
     round_counts = dict(workload.round_counts)
@@ -44,8 +43,8 @@ def lowered(workload: workload_records.Workload) -> WorkloadProgram:
     return _stream_program(operations, round_counts, physical, stream_id)
 
 
-def _wire_circuit(operations: list[program_records.Operation]) -> None:
-    """Fill operation patches and predecessors in schedule order.
+def _wired(operations: tuple) -> list:
+    """The operations with their patches and predecessors, in schedule order.
 
     An operation keeps the predecessors it declares and gains the last
     earlier user of each of its patches. A decoder boundary joins two
@@ -53,23 +52,34 @@ def _wire_circuit(operations: list[program_records.Operation]) -> None:
     carries one.
     """
     _check_unique_qubits(operations)
-    predecessors = _patch_order_predecessors(operations)
-    emitters = _emitters(operations)
+    placed = _placed(operations)
+    predecessors = _patch_order_predecessors(placed)
+    emitters = _emitters(placed)
     decoded_ids = {operation.id for operation in emitters}
-    for operation in operations:
+    wired = []
+    for operation in placed:
         ordered = sorted(predecessors[operation.id])
-        operation.predecessors = tuple(ordered)
-        boundary_predecessors = _boundary_predecessors(operation, decoded_ids)
-        operation.decoder_boundary_predecessors = boundary_predecessors
+        ordered_predecessors = tuple(ordered)
+        boundary_predecessors = _boundary_predecessors(
+            operation.id, ordered_predecessors, decoded_ids
+        )
+        wired_operation = dataclasses.replace(
+            operation,
+            predecessors=ordered_predecessors,
+            decoder_boundary_predecessors=boundary_predecessors,
+        )
+        wired.append(wired_operation)
+    return wired
 
 
-def _copied(operations) -> list:
-    """Copies of the maker's operations, so the wiring leaves its own."""
-    copies = []
+def _placed(operations: tuple) -> list:
+    """Each operation on its patches: its own, or its qubits."""
+    placed = []
     for operation in operations:
-        copy = dataclasses.replace(operation)
-        copies.append(copy)
-    return copies
+        patches = _operation_patches(operation)
+        placed_operation = dataclasses.replace(operation, patches=patches)
+        placed.append(placed_operation)
+    return placed
 
 
 def _one_stream_id(operations: list) -> Optional[object]:
@@ -95,7 +105,8 @@ def _standalone_program(
     physical_circuits = ()
     if physical is not None:
         runner = _the_one_runner(operations)
-        runner.circuit = physical.circuit
+        runner_ids = {runner.id}
+        operations = _carrying(operations, runner_ids, physical.circuit)
         physical_circuits = ((runner.id, physical),)
         circuit_round_count = _owner_round_count(physical)
         round_counts.setdefault(runner.id, circuit_round_count)
@@ -118,10 +129,10 @@ def _stream_program(
     for the circuit's rounds or stays open for live fragments, and the
     segments sample the owner's shot, so they carry its circuit too.
     """
-    segments = _segments(operations, stream_id)
     circuit = _finite_circuit(physical)
-    for segment in segments:
-        segment.circuit = circuit
+    segment_ids = _segment_ids(operations, stream_id)
+    operations = _carrying(operations, segment_ids, circuit)
+    segments = _segments(operations, stream_id)
     owner = _owner(stream_id, segments, circuit)
     round_counts[stream_id] = _owner_round_count(physical)
     regions = _protected_regions(operations, segments, owner)
@@ -174,6 +185,23 @@ def _segments(operations: list, stream_id) -> list:
     return segments
 
 
+def _segment_ids(operations: list, stream_id) -> set:
+    segments = _segments(operations, stream_id)
+    return {segment.id for segment in segments}
+
+
+def _carrying(operations: list, operation_ids: set, circuit) -> list:
+    """The operations, each one named carrying the circuit."""
+    carried = []
+    for operation in operations:
+        if operation.id not in operation_ids:
+            carried.append(operation)
+            continue
+        carrier = dataclasses.replace(operation, circuit=circuit)
+        carried.append(carrier)
+    return carried
+
+
 def _finite_circuit(physical):
     """The finite circuit the owner and its segments sample, or None."""
     if isinstance(physical, workload_records.FiniteCircuit):
@@ -203,7 +231,8 @@ def _owner_round_count(physical) -> int:
     (qpu/streaming_stim_device.py), so the owner declares no length.
     """
     if isinstance(physical, workload_records.FiniteCircuit):
-        rounds = physical.measurement_rounds.values()
+        schedule = dict(physical.measurement_rounds)
+        rounds = schedule.values()
         return max(rounds)
     return 0
 
@@ -246,18 +275,18 @@ def _rounds_policy(round_counts: dict) -> Optional[ports.RoundsPolicy]:
 
 
 def _boundary_predecessors(
-    operation: program_records.Operation, decoded_ids: set
+    operation_id, predecessors: tuple, decoded_ids: set
 ) -> tuple:
-    if operation.id not in decoded_ids:
+    if operation_id not in decoded_ids:
         return ()
     boundary_predecessors = []
-    for predecessor_id in operation.predecessors:
+    for predecessor_id in predecessors:
         if predecessor_id in decoded_ids:
             boundary_predecessors.append(predecessor_id)
     return tuple(boundary_predecessors)
 
 
-def _check_unique_qubits(operations: list[program_records.Operation]) -> None:
+def _check_unique_qubits(operations: tuple) -> None:
     """Refuse an operation that lists the same qubit twice."""
     for operation in operations:
         distinct = set(operation.qubits)
@@ -284,7 +313,6 @@ def _patch_order_predecessors(
     for operation in operations:
         predecessors[operation.id] = set(operation.predecessors)
     for operation in operations:
-        operation.patches = _operation_patches(operation)
         earlier_users = _claim_patches(operation, last_operation_on_patch)
         predecessors[operation.id].update(earlier_users)
     return predecessors

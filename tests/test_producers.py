@@ -41,7 +41,7 @@ def test_the_memory_circuit_is_stims_generated_circuit():
     operation = workload.operations[0]
 
     assert operation.circuit == generated
-    assert workload.round_counts == {1: 6}
+    assert workload.round_counts == ((1, 6),)
 
 
 def test_memory_patches_sit_side_by_side_two_d_plus_two_apart():
@@ -64,7 +64,7 @@ def test_memory_patches_sit_side_by_side_two_d_plus_two_apart():
     first_detectors = first_circuit.get_detector_coordinates()
     second_detectors = second_circuit.get_detector_coordinates()
 
-    assert workload.round_counts == {1: 4, 2: 4}
+    assert workload.round_counts == ((1, 4), (2, 4))
     assert first[10] == [3.0, 3.0]
     assert second[10] == [11.0, 3.0]
     assert first_detectors[30] == [4.0, 4.0, 4.0]

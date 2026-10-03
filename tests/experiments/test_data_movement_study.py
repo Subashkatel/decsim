@@ -32,10 +32,10 @@ STUDY_BLOCKS = (CONTROL, INPUT_IN_PLACE, FOLD_IN_PLACE, SWITCHING)
 # 10 tau_gen a round at tau_gen = 1 us (2510.25222 lines 1109-1114). The
 # switching block's complementary gap solves each weak window twice.
 _CLOCK_250_MEGAHERTZ = config.Clock(period_ticks=4_000)
-WEAK_ONE_SOLVE = decoder_settings.toshio_decoder_pool(
+WEAK_ONE_SOLVE = decoder_settings.linear_decoder_pool(
     0.4, _CLOCK_250_MEGAHERTZ, solves_per_window=1
 )
-WEAK_TWO_SOLVES = decoder_settings.toshio_decoder_pool(
+WEAK_TWO_SOLVES = decoder_settings.linear_decoder_pool(
     0.4, _CLOCK_250_MEGAHERTZ, solves_per_window=2
 )
 WEAK_TOSHIO_BY_BLOCK = {
@@ -44,7 +44,7 @@ WEAK_TOSHIO_BY_BLOCK = {
     FOLD_IN_PLACE: WEAK_ONE_SOLVE,
     SWITCHING: WEAK_TWO_SOLVES,
 }
-STRONG_TOSHIO = decoder_settings.toshio_decoder_pool(
+STRONG_TOSHIO = decoder_settings.linear_decoder_pool(
     10.0, _CLOCK_250_MEGAHERTZ, solves_per_window=1
 )
 

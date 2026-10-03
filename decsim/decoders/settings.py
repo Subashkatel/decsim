@@ -547,7 +547,7 @@ def _latency_settings(kind, section_name: str):
         ) from None
 
 
-def toshio_decoder_pool(
+def linear_decoder_pool(
     decode_microseconds_per_round: float,
     clock: config.Clock,
     *,
@@ -572,7 +572,7 @@ def toshio_decoder_pool(
     cycles, remainder_ticks = divmod(decode_ticks, solve_share_ticks)
     if remainder_ticks:
         raise ValueError(
-            f"Toshio's per-round decode time of "
+            f"a per-round decode time of "
             f"{decode_microseconds_per_round} us over {solves_per_window} "
             f"solves is not a whole number of cycles of a "
             f"{clock.period_ticks}-tick clock"

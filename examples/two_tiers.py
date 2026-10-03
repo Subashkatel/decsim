@@ -52,12 +52,12 @@ threshold = threshold_sources.FixedThreshold.Settings(
 switching = escalation_settings.SwitchingSettings(
     confidence=complementary_gap, threshold=threshold
 )
-weak_decoder = decoder_settings.toshio_decoder_pool(
+weak_decoder = decoder_settings.linear_decoder_pool(
     WEAK_DECODE_MICROSECONDS_PER_ROUND,
     machine_settings.FRIDGE_CLOCK,
     solves_per_window=2,
 )
-strong_decoder = decoder_settings.toshio_decoder_pool(
+strong_decoder = decoder_settings.linear_decoder_pool(
     STRONG_DECODE_MICROSECONDS_PER_ROUND,
     machine_settings.ROOM_CLOCK,
     solves_per_window=1,

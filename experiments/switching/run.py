@@ -70,7 +70,7 @@ def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
     weak_decoder = dataclasses.replace(
         base.weak_decoder, algorithm=union_find_decoder
     )
-    strong_decoder = decoder_settings.toshio_decoder_pool(
+    strong_decoder = decoder_settings.linear_decoder_pool(
         STRONG_DECODE_MICROSECONDS_PER_ROUND,
         machine_settings.ROOM_CLOCK,
         solves_per_window=1,

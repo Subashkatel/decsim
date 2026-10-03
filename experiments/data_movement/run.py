@@ -97,7 +97,7 @@ def every_hop_copies(distance: int) -> machine_settings.MachineSettings:
     links = link_profiles.with_path_latency(
         base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
     )
-    weak_decoder = decoder_settings.toshio_decoder_pool(
+    weak_decoder = decoder_settings.linear_decoder_pool(
         WEAK_DECODE_MICROSECONDS_PER_ROUND,
         machine_settings.FRIDGE_CLOCK,
         solves_per_window=1,
@@ -134,12 +134,12 @@ def switching(distance: int) -> machine_settings.MachineSettings:
     The complementary gap decodes each weak window twice.
     """
     machine = every_hop_copies(distance)
-    weak_decoder = decoder_settings.toshio_decoder_pool(
+    weak_decoder = decoder_settings.linear_decoder_pool(
         WEAK_DECODE_MICROSECONDS_PER_ROUND,
         machine_settings.FRIDGE_CLOCK,
         solves_per_window=2,
     )
-    strong_decoder = decoder_settings.toshio_decoder_pool(
+    strong_decoder = decoder_settings.linear_decoder_pool(
         STRONG_DECODE_MICROSECONDS_PER_ROUND,
         machine_settings.ROOM_CLOCK,
         solves_per_window=1,

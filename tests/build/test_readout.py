@@ -103,6 +103,18 @@ def test_a_placement_that_names_no_clock_forms_on_the_machines():
     assert placement.clock == machine_clock
 
 
+def test_a_controller_that_names_no_clock_runs_on_the_machines():
+    """No preset clock ticks at 300 MHz, so a controller on one fails here."""
+    machine_clock = config.Clock.from_megahertz(300.0)
+    declared = declared_run.declared_controller()
+    controller = dataclasses.replace(declared, clock=None)
+    settings = _machine_settings(clock=machine_clock, controller=controller)
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    assert machine.readout.controller.settings.clock == machine_clock
+
+
 # A ported strong store: the default byte FIFO, and AFS's 32-bit word at
 # four cycles an access (ported_syndrome_buffer.py).
 PORTED_CLOCK = config.Clock(1000)

@@ -136,7 +136,8 @@ def weak_alone(
         distance, physical_error_probability, ROUNDS_PER_SHOT
     )
     # both machines lay out the same last window, the lookahead tail
-    windows = dataclasses.replace(window_plan(), terminal_policy="lookahead")
+    sliding_windows = window_plan()
+    windows = dataclasses.replace(sliding_windows, terminal_policy="lookahead")
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True, backlog_trace=True
     )
@@ -145,15 +146,18 @@ def weak_alone(
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=machine_settings.FRIDGE_CLOCK
     )
+    readout_controller = controller()
+    event_forming = detection_events()
+    union_find_pool = weak_decoder()
     return decsim.MachineSettings(
         clock=machine_settings.FRIDGE_CLOCK,
         qpu=qpu,
-        controller=controller(),
-        detection_events=detection_events(),
+        controller=readout_controller,
+        detection_events=event_forming,
         links=links,
         weak_syndrome_buffer=weak_syndrome_buffer,
         windows=windows,
-        weak_decoder=weak_decoder(),
+        weak_decoder=union_find_pool,
         decoder_manager=decoder_manager,
         pauli_frame=pauli_frame,
         workload=workload,
@@ -299,22 +303,29 @@ def experiment_one_links() -> link_settings.FabricSettings:
     # the uplink's latency leaves out the root's own 20 ns of work
     # (lines 897-899); the other hops' numbers hold their receiver's
     uplink = _fridge_path(links, "controller_to_weak_buffer", 40, 38.79)
-    frame_read = _fridge_path(links, "weak_buffer_to_weak_decoder", 1, None)
-    downlink = _fridge_path(links, "weak_decoder_to_frame", 41, 38.79)
-    poll = _fridge_path(links, "strong_buffer_to_strong_decoder", 0, None)
+    frame_read_wire = _fridge_path(
+        links, "weak_buffer_to_weak_decoder", 1, None
+    )
+    downlink_wire = _fridge_path(links, "weak_decoder_to_frame", 41, 38.79)
+    poll_wire = _fridge_path(links, "strong_buffer_to_strong_decoder", 0, None)
+    frame_read = _with_receiver(frame_read_wire)
+    downlink = _with_receiver(downlink_wire)
+    poll = _with_receiver(poll_wire)
     return dataclasses.replace(
         links,
         controller_to_weak_buffer=uplink,
-        weak_buffer_to_weak_decoder=_with_receiver(frame_read),
-        weak_decoder_to_frame=_with_receiver(downlink),
-        strong_buffer_to_strong_decoder=_with_receiver(poll),
+        weak_buffer_to_weak_decoder=frame_read,
+        weak_decoder_to_frame=downlink,
+        strong_buffer_to_strong_decoder=poll,
         profile_name="roce_v2_cpu with the risc_q weak loop",
     )
 
 
 def _fridge_path(links, path_name, latency_cycles, bits_per_lane_cycle):
     """One path in cycles of the chip clock, four lanes when it has a rate."""
-    lane_count = 1 if bits_per_lane_cycle is None else 4
+    lane_count = 4
+    if bits_per_lane_cycle is None:
+        lane_count = 1
     return link_profiles.path_card(
         links,
         path_name,

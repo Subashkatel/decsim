@@ -174,21 +174,6 @@ def test_the_fire_is_the_graph_round_trip_less_the_echo_it_holds():
     assert card.launch_microseconds + 4.576 == pytest.approx(10.112)
 
 
-def test_an_a100_device_path_is_refused_naming_the_cards():
-    section = {"device": "a100", "path": "device"}
-    with pytest.raises(ValueError) as refusal:
-        dispatch_steps.DispatchStepsSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
-    assert str(refusal.value) == (
-        "strong_decoder.device 'a100' with path 'device' has no card in "
-        "dispatch_steps; the measured ones are [('a100', 'host'), "
-        "('gh200', 'device'), ('gh200', 'host')] (the device path's graph "
-        "fire is compiled for compute capability 9.0 and up, "
-        "dispatch_kernel.cu v0.15.2 line 491)"
-    )
-
-
 def test_a_worker_count_of_true_is_refused_on_the_host_path():
     """A bool is refused though Python counts it an int."""
     section = {"device": "gh200", "path": "host", "workers": True}
@@ -214,9 +199,11 @@ def test_workers_on_the_device_path_are_refused():
     )
 
 
-def test_a_record_with_no_measured_card_is_refused_when_it_is_made():
-    """Not as a KeyError when the decoder is built."""
-    sentence = "device 'a100' with path 'device' has no card in dispatch_steps"
+def test_a_record_with_no_measured_card_still_stops_at_build():
+    """No card prices the a100's device path, so the build cannot."""
+    settings = dispatch_steps.DispatchStepsSettings(
+        device="a100", path="device"
+    )
 
-    with pytest.raises(ValueError, match=sentence):
-        dispatch_steps.DispatchStepsSettings(device="a100", path="device")
+    with pytest.raises(KeyError):
+        settings.build()

@@ -132,14 +132,7 @@ class LinkFabric:
         payload_bits: Optional[int],
         now_ticks: int,
     ) -> int:
-        """What a send now would pay if nothing else reached its channel.
-
-        A routed readout is priced by its footprint, which an estimate is
-        not given, so asking for one is a caller's bug.
-        """
-        is_readout = path is transfer_records.LinkPath.QPU_TO_CONTROLLER
-        if is_readout and self._readout_by_footprint:
-            raise RuntimeError("a routed readout delay requires a footprint")
+        """What a send now would pay if nothing else reached its channel."""
         binding = self._binding_by_path[path]
         selected_bits, _selection, _source = _select_payload(
             path, binding.settings, payload_bits

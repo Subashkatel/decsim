@@ -45,6 +45,7 @@ def test_a_finite_workload_reads_back_what_was_written(tmp_path):
         "readout",
         (0,),
         patches=(0,),
+        predecessors=(1,),
         emits_detector_data=False,
         scheduled_start_round=2,
     )

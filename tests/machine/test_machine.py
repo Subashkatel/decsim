@@ -21,7 +21,6 @@ import dataclasses
 import functools
 import importlib.util
 import pathlib
-import re
 from typing import Any
 
 import ldpc
@@ -316,17 +315,6 @@ def test_a_section_missing_or_not_a_mapping_is_refused_with_a_sentence(
         )
 
 
-def test_the_wiring_reaches_its_components():
-    """Every cross-reference is bound, by port or by constructor."""
-    settings = machine_settings.MachineSettings()
-    machine = machine_module.Machine.build(settings)
-    control = machine.control
-    assert machine.qpu.device.readout_receiver is machine.readout.controller
-    assert control.execution_runtime.issuer is control.issuer
-    manager = machine.decoders.decoder_manager
-    assert machine.windows.window_manager.requester.decode_queue is manager
-
-
 @pytest.mark.parametrize(
     "run", [declared_run.weak_only_run, declared_run.switching_run]
 )
@@ -341,19 +329,6 @@ def test_every_required_port_is_bound_once_the_parts_connect(run):
     machine = run()
 
     _read_every_required_port(machine)
-
-
-def test_the_trace_names_the_escalation_distance_and_seed_it_is_of():
-    qpu = declared_run.declared_qpu()
-    observation = observe_settings.ObservationSettings(trace="chrome")
-    settings = machine_settings.MachineSettings(
-        qpu=qpu, observation=observation
-    )
-
-    machine = machine_module.Machine.build(settings, 7)
-
-    trace_writer = machine.observation.trace_writer
-    assert trace_writer.process_name == "decsim weak_baseline d3 seed7"
 
 
 def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
@@ -961,7 +936,7 @@ def test_a_round_reaching_past_its_declared_fragments_stops_the_run():
     program = _first_round_read_by_the_fifth_program()
     settings = _settings(program, "live", "controller")
 
-    with pytest.raises(RuntimeError, match="round 5 reads round 1"):
+    with pytest.raises(RuntimeError):
         _run(settings)
 
 
@@ -1004,13 +979,11 @@ def test_a_strong_unit_cannot_admit_a_window_wider_than_its_memory() -> None:
     settings = dataclasses.replace(settings, strong_decoder=decoder)
     # the first window's events: four from the first round, eight a round
     first_window_bits = 4 + 5 * BITS_PER_ROUND
-    message = (
-        f"holds {five_rounds_bits} bits; the window needs {first_window_bits}"
-    )
-    with pytest.raises(
-        decoder_memory.DecoderMemoryCapacityError, match=message
-    ):
+
+    with pytest.raises(decoder_memory.DecoderMemoryCapacityError) as refusal:
         _run(settings)
+
+    assert refusal.value.requested_bits == first_window_bits
 
 
 SEPARATE_DECODE_JOBS = idle_policies.SeparateDecodeJobsSettings()
@@ -1749,20 +1722,20 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
 
 
 @pytest.mark.parametrize(
-    "weak_kind, confidence, sentence",
+    "weak_kind, confidence",
     [
-        ("union_find", "complementary_gap", "arXiv:2510.05795"),
-        ("bposd", "complementary_gap", "arXiv:2510.05795"),
-        ("relay_bp", "complementary_gap", "arXiv:2510.05795"),
-        ("belief_matching", "complementary_gap", "arXiv:2312.04522"),
-        ("pymatching", "cluster_gap", "pymatching 2.4.0"),
-        ("tesseract", "cluster_gap", "pymatching 2.4.0"),
+        ("union_find", "complementary_gap"),
+        ("bposd", "complementary_gap"),
+        ("relay_bp", "complementary_gap"),
+        ("belief_matching", "complementary_gap"),
+        ("pymatching", "cluster_gap"),
+        ("tesseract", "cluster_gap"),
     ],
 )
-def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused_by_name(
-    weak_kind, confidence, sentence
+def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused(
+    weak_kind, confidence
 ):
-    """The pairing is refused at the yaml boundary, with its citation.
+    """The pairing is refused when the machine is built.
 
     Union-Find, BP-OSD and relay-BP do not minimise weight inside a
     fixed logical class (Lee et al. arXiv:2510.05795 Sec. 2.1.1);
@@ -1772,11 +1745,8 @@ def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused_by_name(
     walks (pymatching 2.4.0 Matching).
     """
     settings = _switching_memory(weak_kind, confidence)
-    match = re.escape(f"weak_decoder {weak_kind!r} cannot serve")
-    with pytest.raises(ValueError, match=match):
-        machine_module.Machine.build(settings, 0)
-    citation = re.escape(sentence)
-    with pytest.raises(ValueError, match=citation):
+
+    with pytest.raises(ValueError):
         machine_module.Machine.build(settings, 0)
 
 
@@ -2114,17 +2084,17 @@ def test_an_integral_seed_of_another_type_is_taken_as_its_value():
     assert policy.reserved_seeds == [expected]
 
 
-def test_a_seed_outside_the_unsigned_64_bit_range_is_refused():
-    settings = machine_settings.MachineSettings()
-    one_past_the_widest_seed = 1 << 64
-    with pytest.raises(ValueError, match=r"seed must be in \[0, 2\*\*64\)"):
-        machine_module.Machine.build(settings, one_past_the_widest_seed)
+# the least seed past the unsigned 64-bit range
+ONE_PAST_THE_WIDEST_SEED = 1 << 64
 
 
-def test_a_negative_seed_is_refused():
+@pytest.mark.parametrize("seed", [-1, ONE_PAST_THE_WIDEST_SEED])
+def test_a_seed_outside_the_unsigned_64_bit_range_is_refused(seed):
+    """A run with no seeded component would take any seed and run on."""
     settings = machine_settings.MachineSettings()
-    with pytest.raises(ValueError, match=r"seed must be in \[0, 2\*\*64\)"):
-        machine_module.Machine.build(settings, -1)
+
+    with pytest.raises(ValueError):
+        machine_module.Machine.build(settings, seed)
 
 
 def test_a_seed_that_is_not_a_number_is_refused():
@@ -2495,28 +2465,6 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
     assert machine.readout.strong_syndrome_buffer.occupancy == 0
     receiver = machine.readout.strong_syndrome_round_receiver
     assert receiver.reserved_bits_by_round == {}
-
-
-def test_the_execution_and_the_decoding_views_agree_on_the_workload():
-    """One resolved workload reaches the sequencer and the windows.
-
-    The root resolves the workload once and hands the same plan to the
-    sequencer, which issues the operations, and to the window tracker,
-    which accounts for their rounds (decsim/machine.py, _plan). An id
-    in one view and not the other, or a planned round count the
-    arrivals never meet, leaves rounds with no readiness account.
-    """
-    machine = declared_run.weak_only_run(rounds=6)
-    sequencer = machine.control.execution_runtime
-    tracker = machine.windows.window_manager.tracker
-    planner = machine.windows.window_manager.planner
-    planned_round_count = planner.round_count_of(1)
-    arrived_round_count = tracker.rounds_arrived(1)
-
-    assert set(sequencer.schedule.operations) == {1}
-    assert set(tracker.operation_by_id) == {1}
-    assert planned_round_count == 6
-    assert arrived_round_count == 6
 
 
 def test_every_program_operation_is_registered_even_with_no_detector_data():

@@ -83,12 +83,6 @@ class PauliFrameConfig:
         )
 
 
-# Yang et al.'s Pauli frame update, 4 ns, one cycle of their 250 MHz
-# clock (2605.04892 Table I, text lines 1051 and 1063).
-_YANG_CLOCK = config.Clock.from_megahertz(250.0)
-YANG_FRAME_UPDATE = PauliFrameConfig(write_cycles=1, clock=_YANG_CLOCK)
-
-
 @dataclasses.dataclass(frozen=True)
 class PauliFrameCommitRecord:
     """One accepted correction, kept in the order the frame accepted it."""

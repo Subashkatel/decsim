@@ -134,6 +134,11 @@ def weak_alone(
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True, backlog_trace=True
     )
+    # the frame update takes 4 ns, one cycle of the chip clock
+    # (2605.04892 Table I, lines 1051 and 1063)
+    pauli_frame = pauli_frame_module.PauliFrameConfig(
+        write_cycles=1, clock=machine_settings.FRIDGE_CLOCK
+    )
     return decsim.MachineSettings(
         clock=machine_settings.FRIDGE_CLOCK,
         qpu=qpu,
@@ -144,7 +149,7 @@ def weak_alone(
         windows=windows,
         weak_decoder=machine_settings.HELIOS_POOL,
         decoder_manager=decoder_manager,
-        pauli_frame=pauli_frame_module.YANG_FRAME_UPDATE,
+        pauli_frame=pauli_frame,
         workload=workload,
         observation=observation,
     )

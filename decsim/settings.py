@@ -511,7 +511,7 @@ def _baseline(
     """What both bases share, every value written out, around one decoder.
 
     Both stores are unbounded and free, and the frame writes in one
-    fridge cycle (YANG_FRAME_UPDATE).
+    fridge cycle, 4 ns (2605.04892 Table I, lines 1051 and 1063).
     """
     controller = _baseline_controller()
     idle_policy = idle_policies.SeparateDecodeJobsSettings()
@@ -523,6 +523,9 @@ def _baseline(
     decoder_manager = _baseline_decoder_manager()
     magic_state_factory = magic_state_factories.InfiniteFactory.Settings()
     observation = _baseline_observation()
+    pauli_frame = pauli_frame_module.PauliFrameConfig(
+        write_cycles=1, clock=FRIDGE_CLOCK
+    )
     return MachineSettings(
         # the controller and every part that names no clock of its own
         # count their cycles on the machine's clock
@@ -539,7 +542,7 @@ def _baseline(
         strong_decoder=strong_decoder,
         decoder_manager=decoder_manager,
         switching=None,
-        pauli_frame=pauli_frame_module.YANG_FRAME_UPDATE,
+        pauli_frame=pauli_frame,
         workload=workload,
         magic_state_factory=magic_state_factory,
         observation=observation,

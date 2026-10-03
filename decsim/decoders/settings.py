@@ -184,7 +184,7 @@ class EngineSettings:
             config.check_cycles(f"engine.{key}", cycles)
 
 
-_CLOCK_250_MEGAHERTZ = config.Clock(period_ticks=4_000)
+_CLOCK_250_MEGAHERTZ = config.Clock.from_megahertz(250.0)
 # The shipped baselines' engine: one round a cycle in and ten cycles to
 # write the correction out. No source states either count.
 ESTIMATED_ENGINE = EngineSettings(

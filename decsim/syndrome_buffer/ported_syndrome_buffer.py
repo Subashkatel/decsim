@@ -261,7 +261,7 @@ SKY130_BYTE_FIFO = PortedSyndromeBufferSettings(
 # 530-531), an occupancy of the port, on AFS's own 4 GHz clock (lines
 # 1101-1102), so a read holds its port 1 ns. AFS states no port count,
 # so the ports are the byte FIFO's, an estimate.
-_AFS_CLOCK = config.Clock(period_ticks=250)
+_AFS_CLOCK = config.Clock.from_megahertz(4000.0)
 AFS_WORD_MEMORY = PortedSyndromeBufferSettings(
     clock=_AFS_CLOCK,  # 4 GHz, line 1102
     read_ports=1,  # estimate

@@ -157,7 +157,7 @@ def _check_seats(formed_at: tuple) -> None:
 # Table I line 1063). Yang form the syndromes in the CFM, the FPGA that
 # also decodes them (lines 199-200); decsim forms them at the
 # controller, the record's default seat, by its own choice.
-_YANG_CLOCK = config.Clock(period_ticks=4_000)
+_YANG_CLOCK = config.Clock.from_megahertz(250.0)
 YANG_PREPROCESSING = DetectionEventSettings(
     clock=_YANG_CLOCK,
     latency_cycles=5,  # lines 1274-1275

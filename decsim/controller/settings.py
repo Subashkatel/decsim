@@ -133,7 +133,7 @@ class ControllerSettings:
 
 # decsim's one controller clock, 250 MHz: Yang et al.'s loop (2605.04892
 # line 1063) and Caune et al.'s sequencer (2410.05202 lines 1021-1022).
-_CLOCK_250_MEGAHERTZ = config.Clock(period_ticks=4_000)
+_CLOCK_250_MEGAHERTZ = config.Clock.from_megahertz(250.0)
 # QubiC's issue pipeline from the decision to the pulse trigger
 # (2404.15260 lines 173-191), counted with gem5's MinorCPU stage delays
 # where the paper gives none. The count is QubiC's; decsim runs it on its
@@ -148,7 +148,7 @@ QUBIC_ISSUE = ControllerSettings(
 # QICK's tProcessor: 16 clocks for the conditional and the jump and 20
 # for the next pulse (2110.00557 lines 896-900), on its 384 MHz clock
 # (line 624).
-_QICK_CLOCK = config.Clock(period_ticks=2_604)
+_QICK_CLOCK = config.Clock.from_megahertz(384.0)
 QICK_ISSUE = ControllerSettings(
     clock=_QICK_CLOCK,
     readout_to_bits_cycles=0,

@@ -32,7 +32,6 @@ import dataclasses
 import decsim
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
-import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
@@ -91,14 +90,7 @@ def redo_window_switching(distance: int) -> machine_settings.MachineSettings:
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
-    belief_matching_decoder = belief_matching.BeliefMatchingDecoder.Settings()
-    # the baselines' engine card, counted on the host's clock
-    strong_engine = dataclasses.replace(
-        decoder_settings.ESTIMATED_ENGINE, clock=machine_settings.ROOM_CLOCK
-    )
-    strong_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=belief_matching_decoder, engine=strong_engine
-    )
+    strong_decoder = machine_settings.HOST_BELIEF_MATCHING_POOL
     complementary_gap = complementary.ComplementaryGap.Settings()
     return _switching(base, complementary_gap, weak_decoder, strong_decoder)
 

@@ -335,6 +335,28 @@ _STRONG_SIDE_PATH_CLOCKS = {
 }
 # A base's shot is ten rounds per unit of distance.
 _BASELINE_ROUNDS_PER_DISTANCE = 10
+_BELIEF_MATCHING = belief_matching.BeliefMatchingDecoder.Settings(
+    max_iterations=30, belief_propagation_method="product_sum"
+)
+# the baselines' engine card, counted on the host's clock
+_HOST_ESTIMATED_ENGINE = dataclasses.replace(
+    decoder_settings.ESTIMATED_ENGINE, clock=ROOM_CLOCK
+)
+_UNBOUNDED_UNIT_MEMORY = decoder_settings.UnitMemorySettings(
+    bits=None, word_bits=None
+)
+# Belief matching on one host unit with an unbounded memory, charged its
+# measured wall clock: the strong base's tier, and a strong tier a run
+# on the weak base escalates to.
+HOST_BELIEF_MATCHING_POOL = decoder_settings.DecoderPoolSettings(
+    algorithm=_BELIEF_MATCHING,
+    unit_count=1,
+    engine=_HOST_ESTIMATED_ENGINE,
+    unit_memory=_UNBOUNDED_UNIT_MEMORY,
+    copies_input=True,
+    copies_boundary_fold=True,
+    result_blocks_unit=False,
+)
 
 
 def weak_decoder_baseline(
@@ -386,29 +408,12 @@ def strong_decoder_baseline(
     links = _one_cycle_paths(
         reference, _STRONG_BASELINE_PATH_CLOCKS, "the strong base's hops"
     )
-    belief_matching_decoder = belief_matching.BeliefMatchingDecoder.Settings(
-        max_iterations=30, belief_propagation_method="product_sum"
-    )
-    # the baselines' engine card, counted on the host's clock
-    engine = dataclasses.replace(
-        decoder_settings.ESTIMATED_ENGINE, clock=ROOM_CLOCK
-    )
-    unit_memory = decoder_settings.UnitMemorySettings(bits=None, word_bits=None)
-    strong_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=belief_matching_decoder,
-        unit_count=1,
-        engine=engine,
-        unit_memory=unit_memory,
-        copies_input=True,
-        copies_boundary_fold=True,
-        result_blocks_unit=False,
-    )
     qpu = _stim_qpu(distance, round_period_microseconds)
     rounds_per_shot = _BASELINE_ROUNDS_PER_DISTANCE * distance
     workload = memory_workload(
         distance, physical_error_probability, rounds_per_shot
     )
-    return _baseline(qpu, workload, links, None, strong_decoder)
+    return _baseline(qpu, workload, links, None, HOST_BELIEF_MATCHING_POOL)
 
 
 def one_cycle_strong_side(

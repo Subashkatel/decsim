@@ -19,6 +19,14 @@ import decsim.records.circuits as circuit_records
 TEMPLATE_ROUND_COUNT = 4
 TEMPLATE_REPEAT_COUNT = TEMPLATE_ROUND_COUNT - 2
 
+# Each of these acts on every target alone, so target order carries no
+# meaning, but stim draws their noise in target order. Explorer's CSSStage
+# keeps resets in a frozenset of gates hashed by class identity, so their
+# order changes between processes.
+ORDER_FREE_INSTRUCTIONS = frozenset(
+    {"R", "RX", "RY", "X_ERROR", "Y_ERROR", "Z_ERROR", "DEPOLARIZE1"}
+)
+
 if TYPE_CHECKING:
     import deltakit_circuit as circuit_api
     import deltakit_circuit.gates as gates
@@ -407,7 +415,31 @@ def _export_compiled_memory(
     noisy = device.compile_and_add_noise_to_circuit(compiled)
     exported = noisy.as_stim_circuit(qubit_mapping=qubit_mapping)
     circuit_text = str(exported)
-    return stim.Circuit(circuit_text)
+    circuit = stim.Circuit(circuit_text)
+    return _sorted_order_free_targets(circuit)
+
+
+def _sorted_order_free_targets(circuit: stim.Circuit) -> stim.Circuit:
+    """One seed draws the same samples in every process."""
+    sorted_circuit = stim.Circuit()
+    for instruction in circuit:
+        if isinstance(instruction, stim.CircuitRepeatBlock):
+            body = instruction.body_copy()
+            sorted_body = _sorted_order_free_targets(body)
+            repeat_count = instruction.repeat_count
+            block = stim.CircuitRepeatBlock(repeat_count, sorted_body)
+            sorted_circuit.append(block)
+            continue
+        targets = instruction.targets_copy()
+        if instruction.name in ORDER_FREE_INSTRUCTIONS:
+            targets.sort(key=_qubit_index)
+        arguments = instruction.gate_args_copy()
+        sorted_circuit.append(instruction.name, targets, arguments)
+    return sorted_circuit
+
+
+def _qubit_index(target: stim.GateTarget) -> int:
+    return target.value
 
 
 def _memory_fragments(

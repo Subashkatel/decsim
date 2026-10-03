@@ -500,7 +500,7 @@ class _OutsideShape:
     """A strong window shape written outside decsim that absorbs nothing."""
 
     absorbs_weak_windows = False
-    default_boundary_policy = "outside_boundaries"
+    boundary_policy = _OutsideBoundaryPolicy.Settings()
     window_absorbed = trace_source.SILENT
 
     @dataclasses.dataclass(frozen=True)
@@ -509,7 +509,7 @@ class _OutsideShape:
 
         name = "outside_shape"
         absorbs_weak_windows = False
-        default_boundary_policy = "outside_boundaries"
+        boundary_policy = _OutsideBoundaryPolicy.Settings()
         restart_reread_buffer_regions = 1
 
         def build(self, engine) -> "_OutsideShape":
@@ -536,15 +536,8 @@ def _outside_shape_switching():
     )
 
 
-def test_an_outside_strong_window_row_names_the_escalations_default(
-    monkeypatch,
-):
+def test_an_outside_strong_window_row_names_the_escalations_default():
     """A row that may escalate leaves the default to its strong window."""
-    monkeypatch.setitem(
-        window_settings.BOUNDARY_POLICIES,
-        "outside_boundaries",
-        _OutsideBoundaryPolicy,
-    )
     switching = _outside_shape_switching()
 
     plan = _plan(switching=switching)

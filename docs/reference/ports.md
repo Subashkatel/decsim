@@ -570,6 +570,22 @@ When a committed window ships its boundary to the windows after it.
 | --- | --- |
 | `on_commit` | Whether to ship the boundary now. |
 
+### `BoundaryPolicySettings`
+
+A boundary policy row's settings record, which builds the policy.
+
+| Method | What it does |
+| --- | --- |
+| `build` | A fresh policy. |
+
+### `StrongWindowBoundaries`
+
+The boundary row a strong window's settings record gives the windows.
+
+| Member | Type |
+| --- | --- |
+| `boundary_policy` | `BoundaryPolicySettings` |
+
 ### `EscalationPolicy`
 
 Whether and when a window is decoded again by the strong tier.

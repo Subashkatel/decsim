@@ -36,16 +36,15 @@ what tools/check_uses_graph.py prints and check.sh enforces:
 
     0  compiled_libraries, config, plots, records, tables, trace_source
     1  engine, ports, seeding
-    2  controller, detector_error_model, escalation, links, pauli_frame,
+    2  controller, detector_error_model, links, pauli_frame,
        syndrome_buffer, windows
-    3  burst_detectors, decoders, qpu
+    3  burst_detectors, decoders, escalation, qpu
     4  confidence, frontends, observe, sinter_adapters
-    5  producers, settings
-    6  build
-    7  machine (this file)
-    8  collect
-    9  experiments
-    10 __main__, results
+    5  build, producers, settings
+    6  machine (this file)
+    7  collect
+    8  experiments
+    9  __main__, results
 
 Level 3 and below decode a window on a store with no window manager,
 which is what the decoders' own tests run.

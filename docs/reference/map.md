@@ -71,7 +71,7 @@ docstring.
 
 - `decsim/seeding.py`: Deterministic seeds for every stochastic component of one run.
 
-## Level 2: controller, detector_error_model, escalation, links, pauli_frame, syndrome_buffer, windows
+## Level 2: controller, detector_error_model, links, pauli_frame, syndrome_buffer, windows
 
 ### controller
 
@@ -104,17 +104,6 @@ docstring.
 - `decsim/detector_error_model/window_placement.py`: Places the faults of one window: its rows, its columns, what it owns.
 - `decsim/detector_error_model/window_protocol_policy.py`: What a window plan must look like to be decoded under a named protocol.
 - `decsim/detector_error_model/window_slicer.py`: Slices one circuit's fault catalog into window models, window by window.
-
-### escalation
-
-- `decsim/escalation/__init__.py`: The escalation: a window decoded again by the strong tier.
-- `decsim/escalation/pending_strong_windows.py`: The strong windows held until the conditions their row declared fire.
-- `decsim/escalation/policies.py`: The switching policy: weak first, escalate on low confidence.
-- `decsim/escalation/settings.py`: The switching settings: when a window is decoded again, and on what.
-- `decsim/escalation/strong_redecode.py`: The strong re-decode: the window side of the strong tier.
-- `decsim/escalation/strong_regions.py`: Where a strong window sits: its rounds, its faults, its neighbours.
-- `decsim/escalation/strong_window_shapes.py`: The strong window's shape: which rounds the strong tier re-decodes, and when.
-- `decsim/escalation/threshold_sources.py`: The threshold sources: where the switching policy's threshold comes from.
 
 ### links
 
@@ -169,7 +158,7 @@ docstring.
 - `decsim/windows/window_manager.py`: The windows facade: the window life cycle of every operation.
 - `decsim/windows/window_planner.py`: The window planner: which windows exist, planned or grown.
 
-## Level 3: burst_detectors, decoders, qpu
+## Level 3: burst_detectors, decoders, escalation, qpu
 
 ### burst_detectors
 
@@ -235,6 +224,17 @@ docstring.
 - `decsim/decoders/union_find/decoder.py`: The Union-Find adapter: decsim's own weighted growth and peeling.
 - `decsim/decoders/union_find/window_decoder.py`: Prior-weighted graphlike Union-Find: the graph and one decode on it.
 - `decsim/decoders/verify_windows.py`: The referee: every window re-decoded by Tesseract and compared.
+
+### escalation
+
+- `decsim/escalation/__init__.py`: The escalation: a window decoded again by the strong tier.
+- `decsim/escalation/pending_strong_windows.py`: The strong windows held until the conditions their row declared fire.
+- `decsim/escalation/policies.py`: The switching policy: weak first, escalate on low confidence.
+- `decsim/escalation/settings.py`: The switching settings: when a window is decoded again, and on what.
+- `decsim/escalation/strong_redecode.py`: The strong re-decode: the window side of the strong tier.
+- `decsim/escalation/strong_regions.py`: Where a strong window sits: its rounds, its faults, its neighbours.
+- `decsim/escalation/strong_window_shapes.py`: The strong window's shape: which rounds the strong tier re-decodes, and when.
+- `decsim/escalation/threshold_sources.py`: The threshold sources: where the switching policy's threshold comes from.
 
 ### qpu
 

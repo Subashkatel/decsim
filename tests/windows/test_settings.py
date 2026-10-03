@@ -128,6 +128,42 @@ def test_the_switching_preset_takes_lookahead_and_the_strong_windows_row(
     assert windows.scheme == plain_windows.scheme
 
 
+class _OutsideHeld:
+    """A boundary row written outside decsim, in no table."""
+
+    ships_provisional_boundaries = False
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The outside row's record."""
+
+        def build(self) -> "_OutsideHeld":
+            return _OutsideHeld()
+
+    def on_commit(self, window, *, final: bool) -> bool:
+        """Ship when final."""
+        del window
+        return final
+
+
+@dataclasses.dataclass(frozen=True)
+class _OutsideStrongWindow:
+    """A strong window record from outside, giving its own boundary row."""
+
+    boundary_policy = _OutsideHeld.Settings()
+
+
+def test_the_switching_preset_takes_the_record_its_strong_window_gives():
+    """The record arrives whole: no table is read and no word is named."""
+    plain_windows = window_settings.WindowSettings()
+    strong_window = _OutsideStrongWindow()
+
+    windows = window_settings.switching_windows(plain_windows, strong_window)
+
+    assert windows.boundary_policy is strong_window.boundary_policy
+    assert windows.terminal_policy == "lookahead"
+
+
 def _double_window_switching():
     """A switching slot whose strong window is the double window."""
     confidence = complementary.ComplementaryGap.Settings()

@@ -57,6 +57,7 @@ import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
+import decsim.windows.boundary_policies as boundary_policies
 
 
 @dataclasses.dataclass(frozen=True)
@@ -125,21 +126,18 @@ class StrongWindowShape(Protocol):
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
-    yaml flag. default_boundary_policy is the row of
-    BOUNDARY_POLICIES a
-    run gets when windows.boundaries is null and the escalation may
-    escalate: an absorbing region needs the weak chain to keep
-    committing, so it names eager, and a region that absorbs nothing
-    names held, since its escalation would revise a boundary already
-    shipped. window_absorbed(key, owner_key) is the shape's one trace
-    source: the double window fires it for every weak window a strong
-    one covers, and a shape that absorbs nothing exposes the silent
-    source, so the machine connects the ledger and the trace without
-    asking which shape it built.
+    yaml flag. boundary_policy is the boundary row's record a switching
+    run's windows take (ports.StrongWindowBoundaries): eager for an
+    absorbing region, held for one that absorbs nothing.
+    window_absorbed(key, owner_key) is the shape's one trace source: the
+    double window fires it for every weak window a strong one covers,
+    and a shape that absorbs nothing exposes the silent source, so the
+    machine connects the ledger and the trace without asking which shape
+    it built.
     """
 
     absorbs_weak_windows: bool
-    default_boundary_policy: str
+    boundary_policy: ports.BoundaryPolicySettings
     window_absorbed: Any
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
@@ -207,7 +205,7 @@ class RedoWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = False
-    default_boundary_policy = "held"
+    boundary_policy = boundary_policies.Held.Settings()
     window_absorbed = trace_source.SILENT
 
     @dataclasses.dataclass(frozen=True)
@@ -226,9 +224,9 @@ class RedoWindow(StrongWindowPorts):
             return RedoWindow.absorbs_weak_windows
 
         @property
-        def default_boundary_policy(self) -> str:
+        def boundary_policy(self) -> ports.BoundaryPolicySettings:
             """The row's own declaration."""
-            return RedoWindow.default_boundary_policy
+            return RedoWindow.boundary_policy
 
         def build(self, engine: engine_module.Engine) -> "RedoWindow":
             """A fresh redo window on the run's engine."""
@@ -326,7 +324,7 @@ class DoubleWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = True
-    default_boundary_policy = "eager"
+    boundary_policy = boundary_policies.Eager.Settings()
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -356,9 +354,9 @@ class DoubleWindow(StrongWindowPorts):
             return DoubleWindow.absorbs_weak_windows
 
         @property
-        def default_boundary_policy(self) -> str:
+        def boundary_policy(self) -> ports.BoundaryPolicySettings:
             """The row's own declaration."""
-            return DoubleWindow.default_boundary_policy
+            return DoubleWindow.boundary_policy
 
         def build(self, engine: engine_module.Engine) -> "DoubleWindow":
             """A fresh double window on the run's engine."""

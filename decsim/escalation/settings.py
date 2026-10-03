@@ -103,14 +103,13 @@ class ThresholdSettings(Protocol):
 class StrongWindowSettings(Protocol):
     """A strong window row's settings record (STRONG_WINDOW_SHAPES, above).
 
-    absorbs_weak_windows and default_boundary_policy are its row's
-    declarations; restart_reread_buffer_regions is the double window's
-    re-read width.
+    absorbs_weak_windows and boundary_policy are its row's declarations;
+    restart_reread_buffer_regions is the double window's re-read width.
     """
 
     name: str
     absorbs_weak_windows: bool
-    default_boundary_policy: str
+    boundary_policy: ports.BoundaryPolicySettings
     restart_reread_buffer_regions: int
 
     def build(

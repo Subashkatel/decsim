@@ -66,28 +66,11 @@ class SchemeSettings(Protocol):
         """A fresh scheme of these sizes."""
 
 
-class BoundaryPolicySettings(Protocol):
-    """A boundary row's settings record (BOUNDARY_POLICIES, above)."""
-
-    def build(self) -> ports.BoundaryPolicy:
-        """A fresh policy."""
-
-
 class BoundaryPayloadSettings(Protocol):
     """A payload row's settings record (BOUNDARY_PAYLOADS, above)."""
 
     def build(self) -> ports.BoundaryPayload:
         """A fresh payload."""
-
-
-class StrongWindowBoundaries(Protocol):
-    """What a switching run's strong window declares to the windows.
-
-    default_boundary_policy is the BOUNDARY_POLICIES row it needs
-    (escalation/strong_window_shapes.py).
-    """
-
-    default_boundary_policy: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -115,7 +98,9 @@ class WindowSettings:
     decision_cycles: int = 0
     scheme: SchemeSettings = sliding_scheme.SlidingWindowScheme.Settings()
     terminal_policy: str = "flush"
-    boundary_policy: BoundaryPolicySettings = boundary_policies.Eager.Settings()
+    boundary_policy: ports.BoundaryPolicySettings = (
+        boundary_policies.Eager.Settings()
+    )
     boundary_payload: BoundaryPayloadSettings = (
         boundary_payloads.DenseSeamMask.Settings()
     )
@@ -164,17 +149,15 @@ class WindowSettings:
 
 
 def switching_windows(
-    windows: WindowSettings, strong_window: StrongWindowBoundaries
+    windows: WindowSettings, strong_window: ports.StrongWindowBoundaries
 ) -> WindowSettings:
     """The windows with the tail and boundary row a switching run takes.
 
     A strong recovery reads past the last window's commit, so the tail is
-    lookahead. The boundary row is the one the strong window declares;
-    its row says why (escalation/strong_window_shapes.py).
+    lookahead. The boundary row is the record the strong window gives
+    (ports.StrongWindowBoundaries).
     """
-    boundaries = strong_window.default_boundary_policy
-    row = tables.row(BOUNDARY_POLICIES, "windows.boundaries", boundaries)
-    boundary_policy = row.Settings()
+    boundary_policy = strong_window.boundary_policy
     return dataclasses.replace(
         windows, terminal_policy="lookahead", boundary_policy=boundary_policy
     )

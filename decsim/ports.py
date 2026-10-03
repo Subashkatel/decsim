@@ -1913,6 +1913,30 @@ class BoundaryPolicy(Protocol):
         """Whether to ship the boundary now."""
 
 
+class BoundaryPolicySettings(Protocol):
+    """A boundary policy row's settings record, which builds the policy.
+
+    The windows record holds one; a switching run's strong window record
+    gives the one its windows take (StrongWindowBoundaries).
+    """
+
+    def build(self) -> BoundaryPolicy:
+        """A fresh policy."""
+
+
+class StrongWindowBoundaries(Protocol):
+    """The boundary row a strong window's settings record gives the windows.
+
+    A switching run's windows take it (windows/settings.py
+    switching_windows). A strong window that absorbs the weak windows it
+    covers gives eager, since the weak chain must keep committing; one
+    that absorbs nothing gives held, since its escalation would revise a
+    boundary already shipped.
+    """
+
+    boundary_policy: BoundaryPolicySettings
+
+
 @runtime_checkable
 class EscalationPolicy(Protocol):
     """Whether and when a window is decoded again by the strong tier.

@@ -19,8 +19,7 @@ a decoder with a number instead of measuring one.
 
 Python 3.10 or newer, and the `run` extra: the root imports Stim, the
 yaml layer reads PyYAML, the decoder table imports ldpc, and a run on
-real syndrome data needs PyMatching, numpy, scipy and matplotlib as
-well.
+real syndrome data needs PyMatching, numpy and scipy as well.
 
 ```bash
 python -m pip install -e ".[run]" -c constraints.txt

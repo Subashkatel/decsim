@@ -47,8 +47,7 @@ read back.
   a viewer for the whole shot, or one path printed by `decsim trace
   follow`.
 - [How to compare two runs](compare_two_runs.md): add shards, read two
-  rows side by side, or plot both folders, and what to check before
-  believing a difference.
+  rows side by side, and what to check before believing a difference.
 - [How to run a timing study whose numbers do not depend on your computer](run_a_timing_only_study.md):
   price the decoders with cards so the ticks are a function of the
   configuration and the seed.

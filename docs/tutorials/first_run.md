@@ -36,8 +36,7 @@ python -m pip install -e ".[run]" -c constraints.txt
 The `run` extra brings Stim (which simulates the quantum circuit and
 produces the syndrome), PyMatching (the default decoder), ldpc (the
 BP-OSD and belief matching decoders), PyYAML (which reads the config),
-numpy, scipy and matplotlib. Without it decsim imports but cannot run a
-shot.
+numpy and scipy. Without it decsim imports but cannot run a shot.
 
 ## Step 2. Run one shot
 

@@ -17,9 +17,9 @@ decsim = "decsim.experiments.command:main"
 stim = ["stim"]
 pymatching = ["pymatching"]
 # The yaml layer reads PyYAML, the decoder table imports ldpc for its
-# BP-OSD and belief matching rows, and decsim.plots and the experiments'
-# offline scripts read sinter.
-run = ["stim", "pymatching", "numpy", "scipy", "matplotlib", "pyyaml", "ldpc", "sinter"]
+# BP-OSD and belief matching rows, and the experiments' offline scripts
+# read sinter.
+run = ["stim", "pymatching", "numpy", "scipy", "pyyaml", "ldpc", "sinter"]
 deltakit = [
     "stim",
     "deltakit-explorer==0.9.2",

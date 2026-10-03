@@ -1089,4 +1089,4 @@ def test_a_burst_key_outside_its_domain_is_refused_naming_it(
     key, value, sentence
 ):
     with pytest.raises(ValueError, match=sentence):
-        stim_device.BurstStimDevice.Settings.from_yaml({key: value})
+        stim_device.BurstStimDevice.Settings(**{key: value})

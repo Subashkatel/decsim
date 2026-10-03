@@ -111,23 +111,25 @@ and fails when they are not there yet; on Slurm, submit that point with
 `--dependency=afterok:<job>` on the job that runs the other. `combine`
 writes each results file from the rows of the points that name it.
 
-## Plot and keep the results
+## Keep the results
 
-```bash
-PYTHONPATH=. python experiments/decoder_baseline/plot.py results/<date>_decoder_baseline
+The folder's `stats.csv` holds each point's sinter counts: `shots`,
+`errors`, `discards`, its `decoder` and its labels in `json_metadata`.
+Every baseline shot is a 100-round memory (`run.py`, `ROUNDS`), which
+`stats.csv` does not carry. The logical error rate per round, the one
+the Tesseract paper reports (Beni et al. 2503.10988, eq. 8), and its
+band, each end converted the same way, are:
+
+```python
+rate = sinter.shot_error_rate_to_piece_error_rate(
+    errors / (shots - discards), pieces=100
+)
+band = sinter.fit_binomial(
+    num_shots=shots - discards, num_hits=errors, max_likelihood_factor=1e3
+)
 ```
 
-This draws the folder's `plots/` from its `stats.csv`: the logical
-error rate per round against the physical error rate, a figure per
-decoder and one comparing the decoders for each basis. Its decoders,
-bases, distances and rates are the ones `stats.csv` holds, each row's
-decoder and labels, so a folder of any date, the 2026-09-27 baseline
-included, is drawn by today's script; the folder's `run.py` is kept as
-the record of the run and never run. Every baseline shot is a 100-round
-memory, which `stats.csv` does not carry, so the script states it. The
-script is a few lines because `decsim/plots.py` holds the figure kinds
-(an error rate and plain values) and their one axis style; another experiment's
-plot.py draws with the same calls. The repository tracks a results
-folder's `stats.csv`, `run.json`, script copy and `plots/`, so every
-experiment's results live beside the code that made them; `points/` and
-`logs/` stay with the run (`.gitignore`).
+The repository tracks a results
+folder's `stats.csv`, `run.json` and script copy, so every experiment's
+results live beside the code that made them; `points/` and `logs/` stay
+with the run (`.gitignore`).

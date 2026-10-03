@@ -33,7 +33,6 @@ for distance in DISTANCES:
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
-        name=NAME,
     )
     # the baseline charges its decoder a number; this sweep decodes for real
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()

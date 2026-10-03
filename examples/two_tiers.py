@@ -68,14 +68,13 @@ for distance in DISTANCES:
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         TAU_GEN_MICROSECONDS,
-        name=NAME,
     )
     # T_weak_comm on the hop into the weak store, the strong side's hops
     # one host cycle each, and T_strong_comm on the escalation's hop
     weak_side = link_profiles.with_path_latency(
         base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
     )
-    strong_side = machine_settings.one_cycle_strong_side(weak_side, NAME)
+    strong_side = machine_settings.one_cycle_strong_side(weak_side)
     links = link_profiles.with_path_latency(
         strong_side,
         "weak_decoder_to_strong_decoder",

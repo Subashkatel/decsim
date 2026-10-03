@@ -61,9 +61,8 @@ def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
 
     The union-find decode is charged the host's wall clock.
     """
-    name = "cluster_gap_switching"
     base = machine_settings.weak_decoder_baseline(
-        distance, PHYSICAL_ERROR_PROBABILITY, TAU_GEN_MICROSECONDS, name=name
+        distance, PHYSICAL_ERROR_PROBABILITY, TAU_GEN_MICROSECONDS
     )
     union_find_decoder = union_find.UnionFindDecoder.Settings()
     weak_decoder = dataclasses.replace(
@@ -75,7 +74,7 @@ def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
         solves_per_window=1,
     )
     cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=12.0)
-    machine = _switching(base, cluster_gap, weak_decoder, strong_decoder, name)
+    machine = _switching(base, cluster_gap, weak_decoder, strong_decoder)
     links = link_profiles.with_path_latency(
         machine.links,
         "weak_decoder_to_strong_decoder",
@@ -86,9 +85,8 @@ def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
 
 def redo_window_switching(distance: int) -> machine_settings.MachineSettings:
     """PyMatching's complementary gap decides; belief matching redoes."""
-    name = "redo_window_switching"
     base = machine_settings.weak_decoder_baseline(
-        distance, PHYSICAL_ERROR_PROBABILITY, TAU_GEN_MICROSECONDS, name=name
+        distance, PHYSICAL_ERROR_PROBABILITY, TAU_GEN_MICROSECONDS
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
@@ -101,9 +99,7 @@ def redo_window_switching(distance: int) -> machine_settings.MachineSettings:
         algorithm=belief_matching_decoder, engine=strong_engine
     )
     complementary_gap = complementary.ComplementaryGap.Settings()
-    return _switching(
-        base, complementary_gap, weak_decoder, strong_decoder, name
-    )
+    return _switching(base, complementary_gap, weak_decoder, strong_decoder)
 
 
 def switching_points() -> list:
@@ -137,14 +133,13 @@ def _switching(
     confidence: escalation_settings.ConfidenceSettings,
     weak_decoder: decoder_settings.DecoderPoolSettings,
     strong_decoder: decoder_settings.DecoderPoolSettings,
-    name: str,
 ) -> machine_settings.MachineSettings:
     """The base switching on confidence to a strong decoder on the host.
 
     A weak result is kept at 20 dB or more; any other window is redone
     on the redo window, the strong decode starting after the weak
     verdict, which is free. The strong side's hops are one room cycle
-    each. name labels the card, as the yaml reader labels it.
+    each.
     """
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=THRESHOLD_DECIBELS
@@ -152,7 +147,7 @@ def _switching(
     switching_slot = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
-    links = machine_settings.one_cycle_strong_side(base.links, name)
+    links = machine_settings.one_cycle_strong_side(base.links)
     windows = window_settings.switching_windows(
         base.windows, switching_slot.strong_window
     )

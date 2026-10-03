@@ -34,7 +34,6 @@ for distance in DISTANCES:
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
-        name=NAME,
     )
     card = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=DECODE_MICROSECONDS

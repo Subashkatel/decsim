@@ -84,7 +84,7 @@ def switching(
     Fig. 12), and its strong decode starts only after the weak verdict
     (lines 632-640).
     """
-    machine = weak_alone(distance, physical_error_probability, NAME)
+    machine = weak_alone(distance, physical_error_probability)
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=measured_table.A100_RELAY_BP_5,
         engine=decoder_settings.MEASURED_TIME_ENGINE,
@@ -114,15 +114,14 @@ def switching(
 
 
 def weak_alone(
-    distance: int, physical_error_probability: float, name: str
+    distance: int, physical_error_probability: float
 ) -> machine_settings.MachineSettings:
     """The machine with no escalation: union-find keeps every window.
 
     Helios's union-find (HELIOS_TIMED) runs on a RISC-Q root's engine
     and folds the boundary into its own copy (2301.08419 lines 632-640).
     Readout, packing, event forming and the frame are the presets'
-    sourced values. name labels the link card, as the yaml reader
-    labels it.
+    sourced values.
     """
     stim_source = stim_device.StimDevice.Settings()
     qpu = qpu_settings.QpuSettings(
@@ -130,7 +129,7 @@ def weak_alone(
         round_period_microseconds=ROUND_PERIOD_MICROSECONDS,
         distance=distance,
     )
-    links = experiment_one_links(name)
+    links = experiment_one_links()
     # the store's costs are paid once in the windows' decision
     weak_syndrome_buffer = syndrome_buffer_module.SyndromeBufferSettings(
         clock=machine_settings.FRIDGE_CLOCK
@@ -175,7 +174,7 @@ def weak_alone(
     )
 
 
-def experiment_one_links(name: str) -> link_settings.FabricSettings:
+def experiment_one_links() -> link_settings.FabricSettings:
     """Backline's CPU round trip on the strong side, RISC-Q's on the weak.
 
     The four strong-side paths keep the roce_v2_cpu card: half the
@@ -186,7 +185,7 @@ def experiment_one_links(name: str) -> link_settings.FabricSettings:
     """
     roce = link_profiles.roce_v2_measured_profile("cpu")
     links = link_profiles.with_risc_q_weak_loop(roce)
-    return _as_the_yaml_carded(links, name)
+    return _as_the_yaml_carded(links)
 
 
 def switching_baseline_points() -> list:
@@ -214,7 +213,7 @@ def switching_baseline_points() -> list:
             SWITCHING_COLLECTION,
         )
         switching_points.append(switching_point)
-        weak_alone_machine = weak_alone(distance, probability, "weak_alone")
+        weak_alone_machine = weak_alone(distance, probability)
         weak_alone_point = decsim.Point(
             f"weak_alone_{cell_name}",
             weak_alone_machine,
@@ -226,7 +225,7 @@ def switching_baseline_points() -> list:
 
 
 def _as_the_yaml_carded(
-    links: link_settings.FabricSettings, name: str
+    links: link_settings.FabricSettings,
 ) -> link_settings.FabricSettings:
     """The card as the yaml reader built it from the same numbers.
 
@@ -234,36 +233,34 @@ def _as_the_yaml_carded(
     alone, where the presets mark a measured number as covering the
     receiver's processing too (all but the RISC-Q uplink); the mark is
     read only when the controller prices its readout, which it does not
-    here, so no result moves. The labels name the yaml file, and each
-    rate is the yaml's exact Fraction.
+    here, so no result moves. Each rate is the yaml's exact Fraction.
     """
-    source = f"configs/{name}.yaml links"
     paths = {}
     for path_name in CARDED_PATHS:
         path = getattr(links, path_name)
-        channel = _as_a_carded_channel(path.channel, source)
+        channel = _with_an_exact_rate(path.channel)
         paths[path_name] = dataclasses.replace(
             path, channel=channel, excludes_receiver_processing=True
         )
-    profile_name = f"{name}.yaml"
-    return dataclasses.replace(links, **paths, profile_name=profile_name)
+    return dataclasses.replace(links, **paths)
 
 
-def _as_a_carded_channel(
-    channel: link_settings.ChannelSettings, source: str
+def _with_an_exact_rate(
+    channel: link_settings.ChannelSettings,
 ) -> link_settings.ChannelSettings:
-    """The channel labelled source, its rate an exact Fraction.
+    """The channel with its rate an exact Fraction.
 
     A yaml card's rate is a Fraction (link_profiles.path_card), which
     equals the preset's whole number but writes another point id.
     """
     capacity = channel.capacity
-    if capacity is not None:
-        rate = fractions.Fraction(capacity.input_bits_per_microsecond)
-        capacity = link_settings.CapacitySettings(rate, source)
-    return dataclasses.replace(
-        channel, capacity=capacity, configuration_source=source
+    if capacity is None:
+        return channel
+    rate = fractions.Fraction(capacity.input_bits_per_microsecond)
+    exact_capacity = dataclasses.replace(
+        capacity, input_bits_per_microsecond=rate
     )
+    return dataclasses.replace(channel, capacity=exact_capacity)
 
 
 def _metadata(distance: int, physical_error_probability: float) -> dict:

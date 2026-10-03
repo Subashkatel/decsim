@@ -114,7 +114,6 @@ def every_hop_copies(distance: int) -> machine_settings.MachineSettings:
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         TAU_GEN_MICROSECONDS,
-        name=NAME,
     )
     links = link_profiles.with_path_latency(
         base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
@@ -166,7 +165,7 @@ def switching(distance: int) -> machine_settings.MachineSettings:
         machine_settings.ROOM_CLOCK,
         solves_per_window=1,
     )
-    strong_side = machine_settings.one_cycle_strong_side(machine.links, NAME)
+    strong_side = machine_settings.one_cycle_strong_side(machine.links)
     links = link_profiles.with_path_latency(
         strong_side,
         "weak_decoder_to_strong_decoder",

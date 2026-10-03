@@ -338,20 +338,17 @@ def weak_decoder_baseline(
     distance: int,
     physical_error_probability: float,
     round_period_microseconds: float,
-    *,
-    name: str = "weak_decoder_baseline",
 ) -> MachineSettings:
     """configs/bases/weak_decoder_baseline.yaml: the weak decoder alone.
 
     Real PyMatching answers every window on one chip unit, charged
     LILLIPUT's 28 ns, and each hop it prices is one fridge cycle on an
-    unbounded wire. name labels the link card and the paths it prices,
-    as the yaml reader labels them with its file's name
-    (link_profiles.from_yaml), so a run that extends this base names
-    itself.
+    unbounded wire.
     """
     reference = link_profiles.logical_reference_profile()
-    links = _one_cycle_paths(reference, _WEAK_BASELINE_PATH_CLOCKS, name)
+    links = _one_cycle_paths(
+        reference, _WEAK_BASELINE_PATH_CLOCKS, "the weak base's hops"
+    )
     unit_memory = decoder_settings.UnitMemorySettings(bits=None, word_bits=None)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=minimum_weight_perfect_matching.LILLIPUT_TIMED,
@@ -371,18 +368,18 @@ def strong_decoder_baseline(
     distance: int,
     physical_error_probability: float,
     round_period_microseconds: float,
-    *,
-    name: str = "strong_decoder_baseline",
 ) -> MachineSettings:
     """configs/bases/strong_decoder_baseline.yaml: the strong decoder alone.
 
     Belief matching answers every window on one host unit, charged its
     measured wall clock. Each hop it prices is one cycle on an unbounded
     wire, of the fridge clock on the chip and the room clock on the
-    host. name labels the card, as weak_decoder_baseline's does.
+    host.
     """
     reference = link_profiles.logical_reference_profile()
-    links = _one_cycle_paths(reference, _STRONG_BASELINE_PATH_CLOCKS, name)
+    links = _one_cycle_paths(
+        reference, _STRONG_BASELINE_PATH_CLOCKS, "the strong base's hops"
+    )
     belief_matching_decoder = belief_matching.BeliefMatchingDecoder.Settings(
         max_iterations=30, belief_propagation_method="product_sum"
     )
@@ -406,15 +403,16 @@ def strong_decoder_baseline(
 
 
 def one_cycle_strong_side(
-    links: link_settings.FabricSettings, name: str
+    links: link_settings.FabricSettings,
 ) -> link_settings.FabricSettings:
     """The card with the strong side's four hops one room cycle each.
 
     A run that switches on the weak base reaches the strong decoder over
     these hops, each an unbounded wire; every other path keeps its card.
-    name labels the card, as weak_decoder_baseline's does.
     """
-    return _one_cycle_paths(links, _STRONG_SIDE_PATH_CLOCKS, name)
+    return _one_cycle_paths(
+        links, _STRONG_SIDE_PATH_CLOCKS, "the strong side's hops"
+    )
 
 
 def memory_workload(
@@ -575,15 +573,14 @@ def _baseline_observation() -> observe_settings.ObservationSettings:
 
 
 def _one_cycle_paths(
-    links: link_settings.FabricSettings, path_clocks: Mapping, name: str
+    links: link_settings.FabricSettings, path_clocks: Mapping, hops: str
 ) -> link_settings.FabricSettings:
     """The card with each named path one cycle of its clock, the rest kept.
 
     Each named path is an unbounded wire of one lane, with no setup,
-    header or protocol, labelled as the yaml reader labels the cards a
-    file writes, and the card takes the file's name.
+    header or protocol; hops names the set in the card's name.
     """
-    source = f"configs/{name}.yaml links"
+    source = f"{hops}: one cycle of the hop's clock, an idealized wire"
     cards = {}
     for path_name, clock in path_clocks.items():
         cards[path_name] = link_profiles.path_card(
@@ -598,7 +595,7 @@ def _one_cycle_paths(
             header_bits_per_transfer=0,
             protocol=None,
         )
-    profile_name = f"{name}.yaml"
+    profile_name = f"{links.profile_name} with {hops} at one cycle"
     return dataclasses.replace(links, **cards, profile_name=profile_name)
 
 

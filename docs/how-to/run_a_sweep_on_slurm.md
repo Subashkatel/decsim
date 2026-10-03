@@ -164,8 +164,8 @@ Status can run while a batch runs. Each row reads the pieces once, so
 a piece saved meanwhile is in all of a row or none of it.
 
 The run folder's `sweep.csv` holds one row per point, its values and
-its counts, and `decsim.results.load` reads it beside every setting
-([How to compare two runs](compare_two_runs.md)).
+its counts, and each point's `points/<name>/machine.json` holds every
+setting it ran with ([How to compare two runs](compare_two_runs.md)).
 
 ## Read next
 

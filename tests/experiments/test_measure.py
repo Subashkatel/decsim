@@ -66,7 +66,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
@@ -2266,7 +2265,7 @@ def test_no_runner_module_names_a_row_of_the_decoder_table():
 
     The referent is the decoder table itself (decoders/settings.py
     DECODERS). The runner is every module below the experiments package,
-    with collect.py and results.py. None imports a row's package, or a
+    with collect.py. None imports a row's package, or a
     package only the rows import (a decoder backend), under any alias,
     and no string constant in it is a row's key (NOTE section 9 item
     10), so what it measures holds for every row.
@@ -2309,13 +2308,12 @@ def test_the_row_check_reads_imports_and_keys_and_not_prose(source, expected):
 
 
 def _runner_paths() -> list:
-    """Every module below the experiments package, collect.py, results.py."""
+    """Every module below the experiments package, and collect.py."""
     measure_file = pathlib.Path(measure.__file__)
     experiments_dir = measure_file.parent
     experiment_files = experiments_dir.rglob("*.py")
     collect_file = pathlib.Path(collect.__file__)
-    results_file = pathlib.Path(results.__file__)
-    return sorted([*experiment_files, collect_file, results_file])
+    return sorted([*experiment_files, collect_file])
 
 
 def _rows_named_in(paths: list) -> list:

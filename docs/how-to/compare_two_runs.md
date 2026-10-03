@@ -73,37 +73,11 @@ a join on the seed:
 
 ## Read the folders from Python
 
-`decsim.results` reads run folders into one table, a row per point with
-a column per result, one per swept path, and one per setting
-(`settings.` and the setting's dotted path). The figure is yours to draw, in whatever form the
-question needs, and `decsim.plots` saves it:
-
-```python
-import matplotlib.pyplot as plt
-
-import decsim.plots as plots
-import decsim.results as results
-
-folders = ["results/first", "results/second"]
-rows = results.load(*folders)
-distance = "qpu.distance"
-figure, ax = plt.subplots()
-for folder in folders:
-    kept = [row for row in rows if row["run_dir"] == folder]
-    kept.sort(key=lambda row: row[distance])
-    distances = [row[distance] for row in kept]
-    rates = [row["logical_error_rate_estimate"] for row in kept]
-    lows = [row["logical_error_rate_low"] for row in kept]
-    highs = [row["logical_error_rate_high"] for row in kept]
-    below = [rate - low for rate, low in zip(rates, lows)]
-    above = [high - rate for rate, high in zip(rates, highs)]
-    ax.errorbar(distances, rates, yerr=[below, above], fmt="o-", label=folder)
-ax.set_yscale("log")
-ax.legend()
-plots.save(figure, "ler.png")
-```
-
-`plots.save` writes `ler.png` and closes the figure.
+Each folder's `sweep.csv` is one row per point, its `point_id`, one
+column per swept path, its counts, and each estimate with its exact
+limits; the settings a point ran with are its
+`points/<name>/machine.json`. Read them with any csv and json reader
+and draw the figure the question needs.
 
 ## If a burst made things worse: harder windows or an overloaded strong side
 

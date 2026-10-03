@@ -206,33 +206,11 @@ interval, or quote the point as an upper bound.
 ## Step 4. Draw it
 
 decsim writes the numbers and leaves the figure to you, since only you
-know what it should show. `decsim.results.load` reads a results folder
-into one row per point, its `sweep.csv` columns, one of them per swept path,
-beside every setting it ran with (`settings.` and the setting's path):
-
-```python
-import matplotlib.pyplot as plt
-
-import decsim.plots as plots
-import decsim.results as results
-
-rows = results.load("results/first_sweep")
-error_rate = "workload.arguments.physical_error_probability"
-kept = [row for row in rows if row[error_rate] == 0.003]
-distances = [row["qpu.distance"] for row in kept]
-estimate = "logical_error_rate_estimate"
-rates = [row[estimate] for row in kept]
-below = [row[estimate] - row["logical_error_rate_low"] for row in kept]
-above = [row["logical_error_rate_high"] - row[estimate] for row in kept]
-figure, ax = plt.subplots()
-ax.errorbar(distances, rates, yerr=[below, above], fmt="o-")
-ax.set_xlabel("code distance")
-ax.set_ylabel("logical error rate")
-plots.save(figure, "ler.png")
-```
-
-The error bars are the limit columns you just read. `plots.save`
-writes `ler.png` and closes the figure.
+know what it should show. `sweep.csv` holds one row per point: its
+`point_id`, one column per swept path, its counts, and the estimate
+with its limits, `logical_error_rate_estimate`, `logical_error_rate_low`
+and `logical_error_rate_high`. Read it with any csv reader and draw the
+error bars from the limit columns you just read.
 
 ## Step 5. Stop it and pick it up again
 

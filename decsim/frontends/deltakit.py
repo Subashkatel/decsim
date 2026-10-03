@@ -203,6 +203,16 @@ def _memory_noise(
     )
 
 
+def _check_finite(duration: float, name: str) -> None:
+    """Refuse an infinite time: it runs, but the run's json cannot hold it.
+
+    The Explorer builds the T1 to infinity limit from it, but json.dumps
+    writes it as Infinity, which RFC 8259 JSON readers refuse.
+    """
+    if not math.isfinite(duration):
+        raise ValueError(f"{name} must be finite")
+
+
 def _physical_noise(
     probability: float,
     relaxation_microseconds: Optional[float],
@@ -220,6 +230,8 @@ def _physical_noise(
     """
     import deltakit_explorer.qpu as qpu
 
+    _check_finite(relaxation_microseconds, "relaxation_time_microseconds")
+    _check_finite(dephasing_microseconds, "dephasing_time_microseconds")
     relaxation_seconds = relaxation_microseconds * 1e-6
     dephasing_seconds = dephasing_microseconds * 1e-6
     return qpu.PhysicalNoise(

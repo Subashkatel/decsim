@@ -230,11 +230,25 @@ def test_physical_idle_noise_uses_the_declared_cadence() -> None:
             "relaxation_time_microseconds": 20,
             "dephasing_time_microseconds": 40,
         },
+        {
+            "noise_model": "physical",
+            "relaxation_time_microseconds": float("inf"),
+            "dephasing_time_microseconds": 30,
+        },
     ],
-    ids=["unknown model", "sd6 given times", "explorer's t2 bound"],
+    ids=[
+        "unknown model",
+        "sd6 given times",
+        "explorer's t2 bound",
+        "infinite t1",
+    ],
 )
 def test_invalid_repeated_memory_noise_is_refused(arguments: dict) -> None:
-    """The first two are decsim's refusals; the Explorer bounds T2 by T1."""
+    """The Explorer bounds T2 by T1; the other three are decsim's refusals.
+
+    An infinite T1 builds the right limit but would be saved as
+    Infinity, which a strict JSON reader refuses.
+    """
     selected = {
         "code_family": "rotated_surface",
         "distance": 3,

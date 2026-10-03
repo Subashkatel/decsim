@@ -779,8 +779,8 @@ def _write_online_threshold_record(
     Every audit and target move, plus every 100th window, and a summary
     line on stderr. The gap unit inside the calibrator is nats; the csv
     converts to the paper's decibels. The file is named by the point's
-    id, as its resolved/ record is, and its rows carry the point's id,
-    swept values and algorithm, as every other csv's rows do.
+    id, and its rows carry the point's id, swept values and algorithm,
+    as every other csv's rows do.
     """
     _say_the_threshold(calibrator)
     summary = calibrator.summary()

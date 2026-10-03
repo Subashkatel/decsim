@@ -14,7 +14,6 @@ is the delay between a request and its delivery.
 import dataclasses
 
 import pytest
-import yaml
 
 import decsim.engine
 import decsim.observe.log_writers as log_writers
@@ -255,32 +254,6 @@ def test_a_failed_attempt_is_discarded_and_retried():
     )
 
 
-def test_a_yaml_success_probability_in_e_notation_is_a_number():
-    """YAML 1.1 loads 5e-1 as text; the card holds the number it writes.
-
-    The card is test_a_failed_attempt_is_discarded_and_retried's, so the
-    state arrives at the same tick.
-    """
-    section = yaml.safe_load(
-        "unit_count: 1\n"
-        "attempt_ticks: 100\n"
-        "correction_round_count: 0\n"
-        "correction_decode_count: 0\n"
-        "success_probability: 5e-1\n"
-        "seed: 2\n"
-    )
-    row = magic_state_factories.DistillationFactory
-    settings = row.Settings.from_yaml(section)
-    engine = decsim.engine.Engine()
-    factory = settings.build(engine, 0)
-    factory.start()
-    delivered = []
-    factory.request(1, lambda: delivered.append(engine.now))
-    engine.run()
-    assert settings.success_probability == 0.5
-    assert delivered == [300]
-
-
 def eight_requests(factory, note):
     factory.request(1, note)
     factory.request(2, note)
@@ -510,28 +483,6 @@ def test_a_failed_preparation_is_counted_and_retried():
     assert delivered == [430]
     assert factory.counters_by_level[0].failure_count == 11
     assert factory.counters_by_level[0].produced_count == 15
-
-
-def test_a_chains_yaml_probabilities_in_e_notation_are_numbers():
-    """The card of test_a_failed_preparation_is_counted_and_retried."""
-    section = yaml.safe_load(
-        "levels:\n"
-        "  - {unit_count: 1, distance: 3, success_probability: 1e0}\n"
-        "preparation_unit_count: 15\n"
-        "preparation_logical_cycles: 1\n"
-        "preparation_distance: 1\n"
-        "preparation_success_probability: 5e-1\n"
-        "seed: 1\n"
-    )
-    row = magic_state_factories.MultiLevelDistillationFactory
-    settings = row.Settings.from_yaml(section)
-    engine = decsim.engine.Engine()
-    factory = settings.build(engine, 10)
-    factory.start()
-    delivered = []
-    factory.request(1, lambda: delivered.append(engine.now))
-    engine.run()
-    assert delivered == [430]
 
 
 def test_a_preparation_success_probability_above_one_is_refused():

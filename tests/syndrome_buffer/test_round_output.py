@@ -26,7 +26,6 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
@@ -136,16 +135,9 @@ def _ported_store(engine) -> syndrome_buffer_module.SyndromeBuffer:
 
     A word is two bits, one round of this file's fragments.
     """
-    clocks = config.ClockSettings.from_yaml({"storage": 10})
-    section = {
-        "kind": "ported_syndrome_buffer",
-        "clock": "storage",
-        "word_bits": 2,
-    }
-    settings = syndrome_buffer_settings.from_yaml(
-        section,
-        "weak_syndrome_buffer",
-        clocks,
+    storage = config.Clock.from_megahertz(10.0)
+    settings = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=storage, word_bits=2
     )
     return ported_syndrome_buffer.PortedSyndromeBuffer(settings, engine)
 
@@ -399,12 +391,9 @@ def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
 @pytest.mark.parametrize("copies_input", [True, False])
 def test_read_cycles_delay_the_decode_from_dispatch_on(copies_input):
     """Readiness, queueing and dispatch stand; the decode and frame move."""
-    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
-    section = {"clock": "storage", "read_cycles": 3}
-    settings = syndrome_buffer_settings.from_yaml(
-        section,
-        "weak_syndrome_buffer",
-        clocks,
+    storage = config.Clock.from_megahertz(1.0)
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=storage, read_cycles=3
     )
     free = declared_run.weak_only_run(copies_input=copies_input)
     charged = declared_run.weak_only_run(

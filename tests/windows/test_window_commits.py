@@ -350,8 +350,7 @@ def test_a_charged_verdict_needs_its_clock():
 
 @pytest.mark.parametrize("escalates", [False, True])
 def test_threshold_cycles_delay_kept_and_escalated_frame_points(escalates):
-    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
-    clock = clocks.clock("decisions")
+    clock = config.Clock.from_megahertz(1.0)
     free = declared_run.switching_run(rounds=3, escalates=escalates)
     charged = declared_run.switching_run(
         rounds=3,
@@ -368,8 +367,7 @@ def test_threshold_cycles_delay_kept_and_escalated_frame_points(escalates):
 
 
 def test_switch_cycles_delay_the_strong_request_and_frame_points():
-    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
-    clock = clocks.clock("decisions")
+    clock = config.Clock.from_megahertz(1.0)
     free_requests = declared_run.EndedRequests()
     charged_requests = declared_run.EndedRequests()
     free = declared_run.switching_run(

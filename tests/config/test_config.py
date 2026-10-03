@@ -1,4 +1,4 @@
-"""The tick, the microsecond stamp, and the clock domains a yaml prices on.
+"""The tick, the microsecond stamp, and the clock a part prices on.
 
 One microsecond is a million ticks and every duration in the machine is
 an integer count of them, so a duration stated in microseconds is
@@ -8,10 +8,9 @@ reference's built-in functions), so a duration exactly between two
 ticks lands on the even one and a sweep of many such durations does not
 drift upwards.
 
-The clock section follows XQsim's shape: domain labels with frequencies
-over one tick core. Both shipped domains start at LILLIPUT's 250 MHz
-(2108.06569 Table 4), so a period is 4000 ticks. A domain hands out a
-Clock, whose two methods are gem5's clockEdge and ticksToCycles
+A clock is a frequency over one tick core, as in XQsim. At LILLIPUT's
+250 MHz (2108.06569 Table 4) a period is 4000 ticks. A Clock's two
+methods are gem5's clockEdge and ticksToCycles
 (gem5 src/sim/clocked_object.hh lines 174-186 and
 224-227): a cost of n cycles is charged from the edge at or after the
 current tick, and a span of ticks is rounded up to whole cycles.
@@ -75,25 +74,10 @@ def test_a_positive_duration_that_rounds_to_no_ticks_is_refused():
         config.check_duration("round_period", a_quarter_tick)
 
 
-def test_a_named_domains_clock_has_that_frequencys_period_in_ticks():
-    clocks = config.ClockSettings.from_yaml({"fridge": 250.0, "room": 500})
-    assert clocks.megahertz("fridge") == 250.0
-    fridge = clocks.clock("fridge")
-    room = clocks.clock("room")
-    assert fridge.period_ticks == 4000
-    assert room.period_ticks == 2000
-
-
 def test_a_clock_from_megahertz_rounds_its_period_to_whole_ticks():
     """A third of a microsecond is 333333.33 ticks, rounded to 333333."""
     assert config.Clock.from_megahertz(250.0) == config.Clock(4000)
     assert config.Clock.from_megahertz(3) == config.Clock(333_333)
-
-
-def test_a_clock_from_megahertz_is_the_clock_its_domain_hands_out():
-    clocks = config.ClockSettings.from_yaml({"helios": 100.0})
-
-    assert clocks.clock("helios") == config.Clock.from_megahertz(100.0)
 
 
 @pytest.mark.parametrize("megahertz", [0, -250.0, float("nan"), True, "250"])
@@ -148,28 +132,6 @@ def test_a_span_of_ticks_is_rounded_up_to_whole_cycles():
     assert clock.cycles_for(1) == 1
     assert clock.cycles_for(4000) == 1
     assert clock.cycles_for(4001) == 2
-
-
-@pytest.mark.parametrize(
-    "megahertz",
-    [0, -250.0, float("inf"), float("nan"), True, "250", "x", None],
-    ids=[
-        "zero",
-        "negative",
-        "infinity",
-        "nan",
-        "true",
-        "quoted_number",
-        "word",
-        "null",
-    ],
-)
-def test_a_clock_that_is_not_a_positive_frequency_is_refused(megahertz):
-    with pytest.raises(
-        ValueError,
-        match="clock fridge must be a positive frequency in megahertz, got",
-    ):
-        config.ClockSettings.from_yaml({"fridge": megahertz})
 
 
 @pytest.mark.parametrize(

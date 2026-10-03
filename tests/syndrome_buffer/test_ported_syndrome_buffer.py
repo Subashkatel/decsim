@@ -22,7 +22,6 @@ import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import tests.declared_run as declared_run
 
 PERIOD_TICKS = 10
@@ -272,32 +271,11 @@ def test_afs_word_memory_reads_32_bits_in_one_nanosecond():
     assert store.book_read(window) == config.microseconds_to_ticks(0.001)
 
 
-def _section_settings(section):
-    clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
-    return syndrome_buffer_settings.from_yaml(
-        section, "weak_syndrome_buffer", clocks
-    )
-
-
-@pytest.mark.parametrize("key", ["write_cycles", "read_cycles"])
-def test_a_flat_access_cost_under_the_ported_row_is_refused_by_name(key):
-    section = {"kind": "ported_syndrome_buffer", key: 1}
-
-    with pytest.raises(
-        ValueError, match=rf"weak_syndrome_buffer does not know \['{key}'\]"
-    ):
-        _section_settings(section)
-
-
 def test_a_ported_store_with_no_port_that_reads_is_refused():
-    section = {
-        "kind": "ported_syndrome_buffer",
-        "read_ports": 0,
-        "read_write_ports": 0,
-    }
-
     with pytest.raises(ValueError, match="needs a port that reads"):
-        _section_settings(section)
+        ported_syndrome_buffer.PortedSyndromeBufferSettings(
+            read_ports=0, read_write_ports=0
+        )
 
 
 @pytest.mark.parametrize(
@@ -313,18 +291,17 @@ def test_a_ported_store_with_no_port_that_reads_is_refused():
 def test_a_ported_key_out_of_its_domain_is_refused_by_name(
     key, value, sentence
 ):
-    section = {"kind": "ported_syndrome_buffer", key: value}
+    fields = {key: value}
 
     with pytest.raises(ValueError, match=sentence):
-        _section_settings(section)
+        ported_syndrome_buffer.PortedSyndromeBufferSettings(**fields)
 
 
 def test_a_declared_weak_run_on_a_ported_store_delays_the_decode_only():
     """The byte port's reads and writes cost cycles the flat row does not."""
-    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
-    section = {"kind": "ported_syndrome_buffer", "clock": "storage"}
-    settings = syndrome_buffer_settings.from_yaml(
-        section, "weak_syndrome_buffer", clocks
+    storage = config.Clock.from_megahertz(1.0)
+    settings = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=storage
     )
     free = declared_run.weak_only_run()
     ported = declared_run.weak_only_run(weak_syndrome_buffer=settings)

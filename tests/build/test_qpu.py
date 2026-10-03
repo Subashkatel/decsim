@@ -10,7 +10,6 @@ import pytest
 import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.qpu.magic_state_factories as magic_state_factories
-import decsim.qpu.settings as qpu_settings
 import decsim.settings as machine_settings
 
 _INFINITE = magic_state_factories.InfiniteFactory
@@ -70,15 +69,6 @@ def test_every_factory_builds_and_takes_the_decode_queue_it_is_handed(
     result = machine.run()
 
     assert result.terminal_status == "complete"
-
-
-def test_a_factory_kind_that_names_no_record_is_refused():
-    section = {"kind": "teleported"}
-
-    with pytest.raises(ValueError) as refusal:
-        qpu_settings.factory_from_yaml(section)
-
-    assert "magic_state_factory.kind" in str(refusal.value)
 
 
 def test_the_level_chain_is_built_on_the_runs_round():

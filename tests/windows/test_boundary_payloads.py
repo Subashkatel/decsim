@@ -26,6 +26,12 @@ import decsim.windows.window_interactions as window_interactions
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
 
+# the payload rows the tree ships
+PAYLOAD_ROWS = (
+    boundary_payloads.DenseSeamMask,
+    boundary_payloads.SparseSeamList,
+)
+
 
 def boundary_transfers(link_traffic: dict) -> list:
     """Every decoder_to_decoder transfer of a run's traffic report."""
@@ -129,18 +135,17 @@ def test_a_run_with_one_window_sends_no_boundary():
     assert boundary_transfers(report) == []
 
 
-@pytest.mark.parametrize("name", sorted(window_settings.BOUNDARY_PAYLOADS))
-def test_every_row_of_the_table_answers_a_width_for_a_seam(name):
-    """The table's contract, as ports.BoundaryPayload states it.
+@pytest.mark.parametrize("row_class", PAYLOAD_ROWS)
+def test_every_row_of_the_table_answers_a_width_for_a_seam(row_class):
+    """The rows' contract, as ports.BoundaryPayload states it.
 
     A row's whole job is to turn one BoundarySeam into the bits the wire
     carries, so every row satisfies the port and answers a count for a
-    d=3 bulk layer. The shipped table says nothing about a direction: a
+    d=3 bulk layer. No shipped row says anything about a direction: a
     hand-off is written the same way whichever face it lands on, since
     both are the destination's own layer (Tan 2209.09219 lines 936-946).
     """
     seam = window_records.BoundarySeam(detector_count=8, flip_count=2)
-    row_class = window_settings.BOUNDARY_PAYLOADS[name]
     row = row_class()
     bits = row.bits(seam)
     assert isinstance(row, ports.BoundaryPayload)

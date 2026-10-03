@@ -1,9 +1,8 @@
-"""The run plan: the rows the yaml names and the defaults it is given.
+"""The run plan: the rows the settings name and the defaults they get.
 
-Two window keys carry a null yaml default whose meaning the yaml reader
-derives from whether the switching slot is filled and from its strong
-window row's declared facts, never from a kind string. Both are pinned
-here through build_plan, on settings read as a yaml would leave them.
+A switching run's windows take the lookahead tail and the boundary row
+its strong window declares (window_settings.switching_windows), never
+a kind string. Both are pinned here through build_plan.
 """
 
 import dataclasses
@@ -15,7 +14,6 @@ import stim
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.complementary as complementary
-import decsim.config as config
 import decsim.controller.policies as policies
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
@@ -46,21 +44,15 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 NO_BULK_STRONG = decoder_settings.DecoderManagerSettings()
 # the detection events section a run gets when the test names none
 CONTROLLER_FORMS = event_settings.DetectionEventSettings()
-# the windows section a yaml writes when it names the scheme alone
-WINDOWS_SECTION = {
-    "kind": "sliding",
-    "commit_rounds": None,
-    "buffer_rounds": None,
-}
-NO_CLOCKS = config.ClockSettings({})
 
 
-def _windows(switching=None, **keys):
-    """The windows a yaml section with these keys reads as, beside switching."""
-    section = {**WINDOWS_SECTION, **keys}
-    return window_settings.WindowSettings.from_yaml(
-        section, NO_CLOCKS, switching
-    )
+def _windows(switching=None):
+    """The default windows, with the tail and boundaries switching takes."""
+    windows = window_settings.WindowSettings()
+    if switching is None:
+        return windows
+    strong_window = switching.strong_window
+    return window_settings.switching_windows(windows, strong_window)
 
 
 def _plan(
@@ -356,14 +348,6 @@ def test_a_run_that_may_escalate_gets_the_lookahead_tail():
     assert plan.scheme.has_trailing_tail_context is True
 
 
-def test_a_terminal_policy_written_in_the_section_wins_over_the_default():
-    windows = _windows(terminal_policy="lookahead")
-
-    plan = _plan(windows=windows)
-
-    assert plan.scheme.terminal_policy == "lookahead"
-
-
 def test_a_run_that_never_escalates_ships_boundaries_eagerly():
     plan = _plan()
 
@@ -377,21 +361,6 @@ def test_a_serial_escalation_holds_its_boundaries():
     plan = _plan(switching=switching)
 
     assert isinstance(plan.boundary_policy, boundary_policies.Held)
-
-
-def test_a_boundaries_row_written_in_the_section_wins_over_the_default():
-    windows = _windows(boundaries="held")
-
-    plan = _plan(windows=windows)
-
-    assert isinstance(plan.boundary_policy, boundary_policies.Held)
-
-
-def test_a_windows_kind_that_names_no_row_is_refused():
-    with pytest.raises(ValueError) as refusal:
-        _windows(kind="diagonal")
-
-    assert "windows.kind" in str(refusal.value)
 
 
 class _SettingsRecordingScheme(sliding_scheme.SlidingWindowScheme):

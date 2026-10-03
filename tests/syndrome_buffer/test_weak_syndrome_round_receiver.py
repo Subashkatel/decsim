@@ -28,7 +28,6 @@ import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 from decsim.syndrome_buffer import (
@@ -324,12 +323,9 @@ def test_the_incoming_port_fills_the_declared_port():
 
 
 def test_write_cycles_move_every_reaction_point_by_the_store_periods():
-    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
-    section = {"clock": "storage", "write_cycles": 3}
-    settings = syndrome_buffer_settings.from_yaml(
-        section,
-        "weak_syndrome_buffer",
-        clocks,
+    storage = config.Clock.from_megahertz(1.0)
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=storage, write_cycles=3
     )
     free = declared_run.weak_only_run()
     charged = declared_run.weak_only_run(weak_syndrome_buffer=settings)

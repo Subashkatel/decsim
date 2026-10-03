@@ -44,8 +44,6 @@ class SeatedFormation:
     A seat not in the list hands a round on as it came and costs
     nothing. The source's recipes are read per operation
     (ports.DetectionEventFormer); each seat forms from its own packets.
-    The burst detector, when the run has one, counts the rounds one
-    seat forms, the first seat on the path the primary tier reads.
 
     Trace source: state_held(seat, operation_id, bits) each time a seat
     takes a raw round, bits being the raw packets the seat then holds
@@ -58,8 +56,6 @@ class SeatedFormation:
         self,
         source: Optional[ports.DetectionEventFormer],
         settings: detection_event_settings.DetectionEventSettings,
-        observed_seat: Optional[str] = None,
-        burst_detector: Optional[ports.BurstDetector] = None,
     ) -> None:
         _check_charged_cost_has_a_clock(settings)
         self.settings = settings
@@ -69,10 +65,7 @@ class SeatedFormation:
         self.trace = _TraceSources()
         self.history_by_seat = {}
         for seat in settings.formed_at:
-            observer = None
-            if seat == observed_seat:
-                observer = burst_detector
-            history = _SeatHistory(seat, source, observer)
+            history = _SeatHistory(seat, source)
             history.state_held = self.trace.state_held
             self.history_by_seat[seat] = history
 
@@ -214,12 +207,10 @@ class _SeatHistory:
         self,
         seat: str,
         source: Optional[ports.DetectionEventFormer],
-        observer: Optional[ports.BurstDetector],
     ) -> None:
         self.seat = seat
         # the source's recipes, read per operation
         self.recipes = source
-        self.observer = observer
         # where the seat reports the raw bits it holds; bound by the
         # placement, silent for a history on its own
         self.state_held = trace_source.SILENT
@@ -403,8 +394,6 @@ class _SeatHistory:
         events = former.form_round(round_index)
         values = tuple(value for _, value in events)
         self.memory.events_by_round[key] = values
-        if self.observer is not None:
-            self.observer.observe_round(operation_id, round_index, values)
         return values
 
     def _report_state(

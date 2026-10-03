@@ -268,13 +268,6 @@ class ShotMeasurement:
     # where this shot's Chrome trace was written, None when the shot was
     # not one of observation.trace_shots; the residence table reads it
     trace_path: Optional[str]
-    # the burst detector's first flagged round at or after the burst's
-    # onset, from round 1 on a shot with no burst, 0 when it flagged none;
-    # and whether that flag came within burst_detector.catch_deadline_rounds
-    # of the onset. None, and no column, without a detector; the second
-    # is None on a shot with no burst
-    burst_first_flag_round: Optional[int]
-    burst_caught_in_time: Optional[bool]
     # WINDOW_STATUS_COLUMNS -> the committed windows whose decode carried
     # that status; shots.csv holds one column per entry
     window_statuses: dict
@@ -853,8 +846,6 @@ def _measurement(
     totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
-    deadline = record_options.catch_deadline_rounds
-    first_flag_round, is_caught = _burst_catch(settings, observation, deadline)
     window_statuses = _window_statuses(observation)
     unscored_reason = _unscored_reason(observation)
     is_scored = unscored_reason == ""
@@ -901,8 +892,6 @@ def _measurement(
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,
         trace_path=trace_path,
-        burst_first_flag_round=first_flag_round,
-        burst_caught_in_time=is_caught,
         window_statuses=window_statuses,
         is_scored=is_scored,
         unscored_reason=unscored_reason,
@@ -928,35 +917,6 @@ def _shot_confidence(
     signal = settings.switching.confidence.name
     sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
-
-
-def _burst_catch(
-    settings: machine_settings.MachineSettings,
-    observation: observation_module.Observation,
-    deadline: int,
-) -> tuple:
-    """The first flag at or after the burst's onset, and whether in time.
-
-    A detector's delay is its first alarm at or after the onset less the
-    onset, and it catches the burst within k rounds when that delay is
-    at most k, as detection delay is scored for change-point detectors
-    (Xie et al. 2104.04186 lines 161-171). The delay counts the rounds
-    the detector read, not the tick its flag was published, which its
-    pipeline puts later and the switching waits for. A shot with no
-    burst counts from round 1, so any flag on it is a false alarm.
-    (None, None) without a detector.
-    """
-    flags = observation.burst_flags
-    if flags is None:
-        return None, None
-    onset_round = _burst_onset_round(settings.qpu.source)
-    if onset_round is None:
-        first_flag_round = flags.first_flag_from(1)
-        return first_flag_round, None
-    first_flag_round = flags.first_flag_from(onset_round)
-    delay = first_flag_round - onset_round
-    is_caught = first_flag_round > 0 and delay <= deadline
-    return first_flag_round, is_caught
 
 
 def _window_statuses(observation: observation_module.Observation) -> dict:
@@ -1095,19 +1055,6 @@ def _one_length(owner_rounds) -> int:
         return 0
     (length,) = lengths
     return length
-
-
-def _burst_onset_round(source_settings) -> Optional[int]:
-    """The burst's first round; None when the shot draws no burst.
-
-    Read by the fields' names rather than the record's class, so any
-    source record that carries a burst probability and onset, as
-    burst_stim's does, is measured alike; a probability of 0 is no burst.
-    """
-    probability = getattr(source_settings, "burst_error_probability", 0)
-    if probability == 0:
-        return None
-    return source_settings.burst_onset_round
 
 
 @dataclasses.dataclass(frozen=True)

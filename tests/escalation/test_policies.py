@@ -254,41 +254,6 @@ def test_switching_keeps_at_the_threshold_and_escalates_below_it():
     assert unsure is decoding_records.Verdict.ESCALATE
 
 
-class _DetectorFlaggingFromRoundFive:
-    """A burst detector whose one flag covers round 5 onward."""
-
-    def observe_round(self, operation_id, round_index, events) -> None:
-        del operation_id, round_index, events
-
-    def is_burst_window(self, window) -> bool:
-        return window.buffer_hi >= 5
-
-    def with_burst_priors(self, window, model):
-        del window
-        return model
-
-
-def test_a_window_a_burst_flag_meets_escalates_however_confident():
-    """Burst mode: the flag decides, the threshold is not asked."""
-    switching = _switching()
-    switching.burst_detector = _DetectorFlaggingFromRoundFive()
-    flagged_job = dataclasses.replace(JOB, window=WINDOW)
-    confident = _result(50.0)
-    verdict = switching.verdict_for_weak_result(flagged_job, confident)
-    assert verdict is decoding_records.Verdict.ESCALATE
-
-
-def test_a_window_no_flag_meets_gets_the_thresholds_verdict():
-    """Normal mode is the machine without a detector."""
-    switching = _switching()
-    switching.burst_detector = _DetectorFlaggingFromRoundFive()
-    early_window = dataclasses.replace(WINDOW, commit_hi=2, buffer_hi=4)
-    early_job = dataclasses.replace(JOB, window=early_window)
-    confident = _result(50.0)
-    verdict = switching.verdict_for_weak_result(early_job, confident)
-    assert verdict is decoding_records.Verdict.KEEP
-
-
 def test_switching_decodes_both_tiers_at_once_when_asked():
     parallel = _switching(run_both_at_once=True)
     assert parallel.tiers_for_ready_window(WINDOW) == BOTH_TIERS

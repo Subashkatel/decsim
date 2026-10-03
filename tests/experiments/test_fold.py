@@ -681,31 +681,6 @@ def test_pieces_of_one_point_that_hold_different_columns_are_refused(
     assert not out_dir.exists()
 
 
-def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
-    """A quiet point and a burst point of one grid fold into one run folder.
-
-    A burst shot measures whether it was caught in time and a quiet shot
-    has no burst to catch, so their pieces hold different columns. The
-    folded file takes every column any point holds, first seen first, as
-    write_csv does for a run's own rows, and a point's cell for a column
-    it did not measure is empty.
-    """
-    experiment_dir = _burst_and_quiet_pieces(tmp_path)
-
-    run_dir = experiment_dir
-    shots_path = run_dir / "shots.csv"
-    sweep_path = run_dir / "sweep.csv"
-    shots = _rows_of(shots_path)
-    sweep = _rows_of(sweep_path)
-
-    quiet_shots = _rows_with_qpu_kind(shots, sweep, "stim_device")
-    burst_shots = _rows_with_qpu_kind(shots, sweep, "burst_stim")
-    assert [row["burst_caught_in_time"] for row in quiet_shots] == [""]
-    assert [row["burst_caught_in_time"] for row in burst_shots] != [""]
-    quiet_points = _rows_with_qpu_kind(sweep, sweep, "stim_device")
-    assert [row["caught_in_time_share"] for row in quiet_points] == [""]
-
-
 def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
     """The fold orders the pieces itself, so their order is no input.
 
@@ -772,58 +747,6 @@ def _seeds_of_the_one_point(run_dir) -> list:
     record_text = record_path.read_text()
     record = json.loads(record_text)
     return record["seeds"]
-
-
-# a burst at round 5 of a shot's thirty, so a burst shot measures its catch
-BURST_QPU = {
-    "kind": "burst_stim",
-    "burst_onset_round": 5,
-    "burst_decay_rounds": 600.0,
-    "burst_radius": 3.1,
-    "burst_error_probability": 0.01,
-}
-
-
-def _burst_and_quiet_pieces(tmp_path):
-    """One shot each of a quiet and a burst point, collected in pieces."""
-    overrides = yaml_configs.online_threshold()
-    overrides["escalation"] = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "redo_window",
-    }
-    overrides["burst_detector"] = {"kind": "event_count"}
-    # the event count's windows need 22 rounds of a shot
-    overrides["workload"] = yaml_configs.memory_workload(30)
-    overrides["sweep"] = [
-        {
-            "axes": {
-                "qpu": [{"kind": "stim_device"}, BURST_QPU],
-                "workload.arguments.physical_error_probability": [0.001],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": 1},
-        }
-    ]
-    config_path = yaml_configs.write_config(tmp_path, overrides)
-    experiment_dir = tmp_path / "experiment"
-    command.main(["run", str(config_path), "--out", str(experiment_dir)])
-    return experiment_dir
-
-
-def _rows_with_qpu_kind(rows, sweep, kind) -> list:
-    """The rows of the points whose QPU is that kind, sweep.csv naming it."""
-    point_ids = set()
-    for point in sweep:
-        qpu = json.loads(point["qpu"])
-        if qpu["kind"] == kind:
-            point_ids.add(point["point_id"])
-    selected = []
-    for row in rows:
-        if row["point_id"] in point_ids:
-            selected.append(row)
-    return selected
 
 
 def test_a_switching_run_writes_both_confidence_files(tmp_path):

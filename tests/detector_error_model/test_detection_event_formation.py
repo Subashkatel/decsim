@@ -41,17 +41,6 @@ class CircuitSource:
         return self.table
 
 
-class CountingDetector:
-    """A burst detector that records every round it is shown."""
-
-    def __init__(self):
-        self.observed = []
-
-    def observe_round(self, operation_id, round_index, events):
-        """One round's events."""
-        self.observed.append((operation_id, round_index, tuple(events)))
-
-
 FORMER_CLOCK = config.Clock(4000)
 
 
@@ -272,20 +261,16 @@ def test_the_width_a_seat_answers_is_the_width_it_forms_the_round_to(
     assert round_records.fragment_wire_bits(formed) == width
 
 
-def test_asking_a_width_forms_nothing_and_holds_nothing():
-    detector = CountingDetector()
+def test_asking_a_width_holds_nothing():
     settings = event_settings.DetectionEventSettings(
         formed_at=("weak_syndrome_buffer",)
     )
     source = CircuitSource()
-    placement = formation.SeatedFormation(
-        source, settings, "weak_syndrome_buffer", detector
-    )
+    placement = formation.SeatedFormation(source, settings)
     second_round = rounds(2)
 
     placement.width_at("weak_syndrome_buffer", second_round)
 
-    assert detector.observed == []
     needed_rounds = placement.rounds_needed_before(
         "weak_syndrome_buffer", 1, 2, 2
     )
@@ -301,26 +286,6 @@ def test_fake_bits_formed_are_the_first_of_the_random_bits():
     (formed,) = placement.form_at("controller", raw)
 
     assert formed.bits == random_bits[:12]
-
-
-def test_a_round_the_seat_formed_before_is_answered_from_what_it_holds():
-    """Two windows of one tier read one round; it is formed once."""
-    detector = CountingDetector()
-    settings = event_settings.DetectionEventSettings(
-        formed_at=("weak_decoder",)
-    )
-    source = CircuitSource()
-    placement = formation.SeatedFormation(
-        source, settings, "weak_decoder", detector
-    )
-    first_job = rounds(1, 2)
-    second_job = rounds(2, 3)
-
-    placement.form_at("weak_decoder", first_job)
-    placement.form_at("weak_decoder", second_job)
-
-    observed_rounds = [round_index for _, round_index, _ in detector.observed]
-    assert observed_rounds == [1, 2, 3]
 
 
 def test_each_seat_forms_from_the_packets_it_was_given():

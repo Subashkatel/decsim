@@ -380,10 +380,6 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings.decoder_manager.bulk_strong,
         switching,
     )
-    round_period = settings.qpu.round_period_microseconds
-    burst_detector = escalation_build.build_burst_detector(
-        settings.switching, round_period, settings.clock, engine, plan
-    )
     window_tier = settings.window_tier
     window_decoder = settings.decoder_settings_for(window_tier.value)
     escalates = settings.switching is not None
@@ -393,7 +389,6 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         plan.device,
         window_tier,
         escalates,
-        burst_detector,
     )
     signal = switching.confidence_signal
     pool = decoders_part.build_decoder_pool(
@@ -439,7 +434,6 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings.clock,
         engine,
         plan,
-        burst_detector,
         links,
         built_models,
     )

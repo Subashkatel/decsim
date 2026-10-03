@@ -99,8 +99,7 @@ labels. A run of every point in one process writes it at the end.
 ## Points that run a function
 
 A point can be a Python function instead of a sinter task, for an
-experiment that is not a decode, such as
-`experiments/burst_detection/run.py`. Its script calls
+experiment that is not a decode. Its script calls
 `function(labels, seed, folder)`, the seed a hash of the labels so a
 point draws the same shots in any grid, and writes the rows it returns,
 a list of dicts, after the labels' columns into `points/<id>.csv`. The

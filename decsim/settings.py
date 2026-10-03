@@ -13,7 +13,6 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Optional, Union
 
-import decsim.burst_detectors.settings as burst_detector_settings
 import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.policies as idle_policies
@@ -65,7 +64,6 @@ SECTIONS = (
     "strong_decoder",
     "decoder_manager",
     "escalation",
-    "burst_detector",
     "pauli_frame",
     "workload",
     "magic_state_factory",
@@ -290,17 +288,6 @@ class MachineSettings:
             weak_decoder = None
         if "strong_decoder" not in kept_sections:
             strong_decoder = None
-        burst_detector_section = sections.get("burst_detector", {})
-        burst_detector = burst_detector_settings.detector_from_yaml(
-            burst_detector_section, clocks
-        )
-        burst_detector_settings.refuse_a_detector_without_switching(
-            burst_detector_section, switching
-        )
-        if switching is not None:
-            switching = dataclasses.replace(
-                switching, burst_detector=burst_detector
-            )
         pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
             sections["pauli_frame"], clocks
         )

@@ -150,8 +150,6 @@ pauli_frame:
 
 idle_policy:
   kind: separate_decode_jobs       # inert for one memory patch
-burst_detector:
-  kind: none
 
 observation:
   check_windows_with: none

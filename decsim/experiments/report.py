@@ -144,13 +144,6 @@ SHOT_TRUE_COUNTS = (
     "logical_failure",
     "is_scored",
 )
-# the burst detector's shot columns, counted true per point when a run
-# with a detector wrote them: a first flag round is true when the
-# detector flagged a round, since rounds count from 1 and 0 is none
-BURST_SHARES = {
-    "burst_first_flag_round": "flagged_share",
-    "burst_caught_in_time": "caught_in_time_share",
-}
 # the files a fold reads row by row and writes back out, one header
 # each: every column any piece holds, the pieces of one point alike
 FOLDED_FILES = (
@@ -294,7 +287,6 @@ def summarize_point(
     row["sim_wall_seconds_per_shot"] = totals.mean("sim_wall_seconds")
     _add_pool_columns(row, totals)
     _add_load_columns(row, totals)
-    _add_burst_columns(row, totals)
     for name in _points_held(totals.means):
         multiset = _multiset_over_tiers(counts, point, name)
         _add_latency_point_columns(row, totals, name, multiset)
@@ -845,9 +837,9 @@ def _folded_columns(paths: list, swept: dict) -> list:
 
     That is write_csv's header: point_id, the swept paths, then each
     file's columns. Two points of one grid can measure different
-    columns, a quiet shot having no burst to catch, and a point's cell
-    for a column it did not measure is empty, as a swept path a point's
-    sections do not hold is (run_folder.swept_values).
+    columns, and a point's cell for a column it did not measure is
+    empty, as a swept path a point's sections do not hold is
+    (run_folder.swept_values).
     """
     columns = {"point_id": None}
     for values in swept.values():
@@ -1014,8 +1006,7 @@ def _add_load_columns(row: dict, totals) -> None:
     """The difficulty and overload columns the point's shots hold.
 
     The escalated share rides with them: the windows the strong tier
-    committed over the windows decoded, the escalation rate a burst
-    raises when it makes the weak decoder unsure.
+    committed over the windows decoded.
     """
     for name in LOAD_MEANS:
         if name in totals.means:
@@ -1028,18 +1019,6 @@ def _add_load_columns(row: dict, totals) -> None:
     windows = totals.sums["decoded_windows"]
     escalated = totals.sums["escalated_windows"]
     row["escalated_fraction"] = escalated / windows
-
-
-def _add_burst_columns(row: dict, totals) -> None:
-    """The share of the point's shots flagged, and caught in time.
-
-    On shots with no burst the flagged share is the share holding a
-    false alarm; over one shot's time it is the false-alarm rate.
-    """
-    for column, share in BURST_SHARES.items():
-        if column in totals.true_counts:
-            flagged = totals.true_counts[column]
-            row[share] = flagged / totals.rows
 
 
 def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
@@ -1096,7 +1075,6 @@ def _shot_totals(row: dict) -> fold.RowTotals:
     means = _held_by(row, SHOT_MEANS)
     maxes = _held_by(row, SHOT_MAXES)
     sums = _held_by(row, SHOT_SUMS)
-    burst_counts = _held_by(row, tuple(BURST_SHARES))
     for name in _points_held(row):
         means.append(f"{name}_mean_us")
         maxes.append(f"{name}_max_us")
@@ -1104,7 +1082,7 @@ def _shot_totals(row: dict) -> fold.RowTotals:
         means=means,
         maxes=maxes,
         sums=sums,
-        true_counts=(*SHOT_TRUE_COUNTS, *burst_counts),
+        true_counts=SHOT_TRUE_COUNTS,
     )
 
 

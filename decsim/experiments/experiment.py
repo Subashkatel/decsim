@@ -701,17 +701,14 @@ def _point_task_of(
 def _split_record_options(resolved: dict) -> tuple:
     """The sections the machine reads, and the run's record options.
 
-    confidence_shot_count is written under observation and
-    catch_deadline_rounds under a burst detector, beside what they
-    record, but the machine reads neither (collect.RecordOptions), so
-    they are taken out of a copy before it reads the sections.
+    confidence_shot_count is written under observation, beside what it
+    records, but the machine does not read it (collect.RecordOptions),
+    so it is taken out of a copy before the machine reads the sections.
     """
     machine_sections = copy.deepcopy(resolved)
     observation = _section_of(machine_sections, "observation")
-    burst_detector = _section_of(machine_sections, "burst_detector")
     shot_count = _confidence_shot_count(observation)
-    deadline = _catch_deadline_rounds(burst_detector)
-    record_options = collect.RecordOptions(shot_count, deadline)
+    record_options = collect.RecordOptions(shot_count)
     return machine_sections, record_options
 
 
@@ -739,27 +736,6 @@ def _confidence_shot_count(observation: dict) -> Optional[int]:
         "observation.confidence_shot_count must be a non-negative whole "
         f"number of shots or {collect.EVERY_SHOT}, got {shot_count!r}"
     )
-
-
-def _catch_deadline_rounds(burst_detector: dict) -> int:
-    """The rounds a detector's flag may come after a burst's onset.
-
-    A section that builds no detector keeps the key, which its reader
-    refuses, since there is no flag to time.
-    """
-    default = DEFAULT_RECORD_OPTIONS.catch_deadline_rounds
-    if burst_detector.get("kind", "none") == "none":
-        return default
-    deadline = config_module.whole_count(
-        burst_detector,
-        "burst_detector",
-        "catch_deadline_rounds",
-        default,
-        "rounds",
-        0,
-    )
-    burst_detector.pop("catch_deadline_rounds", None)
-    return deadline
 
 
 def _place(sections: dict, path: str, value) -> None:
@@ -862,9 +838,8 @@ def _section_lines(settings: machine_settings.MachineSettings) -> list:
     """One line per section, its kind named where the section has one.
 
     The qpu section's kind is its source record's name, the windows
-    section's its scheme's name, the escalation section's the word for
-    the filled decode slots, and the burst detector's the name of the
-    switching slot's detector.
+    section's its scheme's name, and the escalation section's the word
+    for the filled decode slots.
     """
     lines = []
     for field in dataclasses.fields(settings):
@@ -877,8 +852,6 @@ def _section_lines(settings: machine_settings.MachineSettings) -> list:
             continue
         if field.name == "switching":
             lines.append(f"escalation: kind {settings.escalation_kind}")
-            detector_name = _burst_detector_name(settings.switching)
-            lines.append(f"burst_detector: kind {detector_name}")
             continue
         section = getattr(settings, field.name)
         kind = getattr(section, "kind", None)
@@ -886,13 +859,6 @@ def _section_lines(settings: machine_settings.MachineSettings) -> list:
             continue
         lines.append(f"{field.name}: kind {kind}")
     return lines
-
-
-def _burst_detector_name(switching) -> str:
-    """The switching slot's detector's name; none for a run with none."""
-    if switching is None or switching.burst_detector is None:
-        return "none"
-    return switching.burst_detector.name
 
 
 def _links_line(links) -> str:

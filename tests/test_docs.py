@@ -57,7 +57,7 @@ TESTS = CHECKOUT / "tests"
 TOOLS = CHECKOUT / "tools"
 SLURM = CHECKOUT / "slurm"
 EM_DASH = "—"
-TABLE_COUNT = 19
+TABLE_COUNT = 18
 
 PATH_PREFIXES = ("decsim/", "tests/", "tools/", "docs/", "configs/", "slurm/")
 ROOT_FILES = ("README.md", "STYLE.md", "pyproject.toml")

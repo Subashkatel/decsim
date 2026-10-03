@@ -15,7 +15,6 @@ gem5 cache with no prefetcher holds a NULL one
 import dataclasses
 from typing import TYPE_CHECKING, Any, Optional
 
-import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -108,9 +107,8 @@ class Switching:
         the host's manager. The committer, the verdict and the window
         manager hand the re-decode its windows, and the join reads the
         signal. The verdict asks the policy to keep or escalate, the
-        requester which tiers decode a ready window, both managers teach
-        it a strong result, and a burst detector, when the run has one,
-        overrides its threshold.
+        requester which tiers decode a ready window, and both managers
+        teach it a strong result.
         """
         self._wire_the_strong_side(plan, windows)
         strong_redecode = self.strong_redecode
@@ -125,8 +123,6 @@ class Switching:
         windows.requester.escalation_policy = self.policy
         decoders.decoder_manager.escalation_policy = self.policy
         decoders.strong_decoder_manager.escalation_policy = self.policy
-        if windows.burst_detector is not None:
-            self.policy.burst_detector = windows.burst_detector
 
     def check_settled(self) -> None:
         """No strong escalation is pending."""
@@ -146,7 +142,6 @@ class Switching:
         regions.planner = windows.planner
         regions.tracker = windows.tracker
         regions.retention = windows.retention
-        regions.burst_detector = windows.burst_detector
         shape = self.shape
         shape.regions = regions
         shape.planner = windows.planner
@@ -175,31 +170,6 @@ def build_switching(
     return Switching.build(settings, weak_decoder, engine, online_threshold)
 
 
-def build_burst_detector(
-    settings: Optional[escalation_settings.SwitchingSettings],
-    round_period_microseconds: float,
-    machine_clock: Optional[config.Clock],
-    engine: engine_module.Engine,
-    plan: "plan_build.Plan",
-) -> Optional[ports.BurstDetector]:
-    """The detector the switching slot names; None when it names none.
-
-    It scores detection events, so every operation it scores brings the
-    circuit they are formed from, and it is calibrated from that
-    circuit, its round count and the round period. The row reads
-    machine_clock when its own record names none.
-    """
-    if settings is None:
-        return None
-    record = settings.burst_detector
-    if record is None:
-        return None
-    circuits = _counted_circuits(plan)
-    return record.build(
-        engine, circuits, round_period_microseconds, machine_clock
-    )
-
-
 def _threshold_source(
     settings: escalation_settings.SwitchingSettings,
     online_threshold: Optional[ports.ThresholdSource],
@@ -213,32 +183,3 @@ def _threshold_source(
     if online_threshold is not None:
         return online_threshold
     return settings.threshold.build()
-
-
-def _counted_circuits(plan) -> dict:
-    """Each counted operation's circuit and round count, by operation id."""
-    round_count_by_operation = {}
-    for resolved in plan.run_plan.resolved_operations:
-        operation_id = resolved.operation_id
-        round_count_by_operation[operation_id] = resolved.round_count
-    circuits = {}
-    for operation in plan.planned_operations:
-        _refuse_an_uncounted_operation(operation)
-        round_count = round_count_by_operation[operation.id]
-        circuits[operation.id] = (operation.circuit, round_count)
-    return circuits
-
-
-def _refuse_an_uncounted_operation(operation) -> None:
-    """The detector counts one standalone operation's events per circuit."""
-    if operation.circuit is None:
-        raise ValueError(
-            f"operation {operation.id} has no circuit, so no detection "
-            "events are formed for the burst detector to count"
-        )
-    if operation.stream_id is not None:
-        raise ValueError(
-            f"operation {operation.id} is a segment of stream "
-            f"{operation.stream_id!r}; the burst detector counts "
-            "standalone operations, one circuit each"
-        )

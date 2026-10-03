@@ -17,7 +17,6 @@ import decsim.build.readout as readout_part
 import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.experiments.experiment as experiment
 import decsim.links.settings as link_settings
@@ -38,18 +37,6 @@ DATA_MOVEMENT_SWITCHING_BLOCK = 3
 
 class _DeviceWithNoFormationTable:
     """A timing-only or synthetic source: it forms nothing."""
-
-
-class _CountingDetector:
-    """A burst detector that records the rounds it is shown."""
-
-    def __init__(self):
-        self.observed = []
-
-    def observe_round(self, operation_id, round_index, events):
-        """One round's events."""
-        del operation_id, events
-        self.observed.append(round_index)
 
 
 def _settings_forming_at(formed_at=("controller",)):
@@ -152,34 +139,6 @@ def test_a_placement_that_names_no_clock_forms_on_the_machines():
     )
 
     assert placement.clock == machine_clock
-
-
-def test_the_burst_detector_counts_at_the_primary_tiers_seat():
-    """The escalated region's seat forms too, but is not counted twice."""
-    seats = ("weak_decoder", "strong_decoder")
-    settings = _settings_forming_at(seats)
-    source = _OneRoundSource()
-    detector = _CountingDetector()
-    placement = readout_part.build_detection_events(
-        settings.detection_events, None, source, *SWITCHING, detector
-    )
-    raw = (_OneRoundSource.fragment(),)
-
-    placement.form_at("strong_decoder", raw)
-    placement.form_at("weak_decoder", raw)
-
-    assert detector.observed == [1]
-
-
-def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
-    settings = _settings_forming_at()
-    device = _DeviceWithNoFormationTable()
-    detector = _CountingDetector()
-
-    with pytest.raises(ValueError, match="burst_detector counts detection"):
-        readout_part.build_detection_events(
-            settings.detection_events, None, device, *WEAK_BASELINE, detector
-        )
 
 
 def test_the_weak_store_is_the_one_its_settings_build():
@@ -527,38 +486,3 @@ def _strong_only(settings):
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     return dataclasses.replace(settings, weak_decoder=None, strong_decoder=tier)
-
-
-class _OneRoundSource:
-    """Recipes of a one-round operation: its one event is its first outcome."""
-
-    def formation_table(self, operation_id):
-        """The one table."""
-        del operation_id
-        recipe = detector_formation.DetectorRecipe(
-            detector_index=0,
-            round_index=1,
-            kind=detector_formation.LayerKind.PREPARATION,
-            records=((1, 0),),
-            reference_parity=0,
-            coordinates=(),
-        )
-        return detector_formation.FormationTable(
-            round_count=1,
-            packet_width_by_round={1: 1},
-            readout_slot_start=None,
-            detectors=(recipe,),
-            observables=(),
-        )
-
-    @staticmethod
-    def fragment():
-        """The operation's one round, its outcome set."""
-        return round_records.RetainedSyndromeFragment(
-            operation_id=1,
-            patch_ids=(0,),
-            round_index=1,
-            bits=(1,),
-            size_bits=1,
-            fragment_index=0,
-        )

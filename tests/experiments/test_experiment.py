@@ -300,30 +300,23 @@ def _record_options_of(tmp_path, overrides: dict):
 
 
 def test_the_record_options_are_read_beside_what_they_record(tmp_path):
-    """They are written under observation and burst_detector, run-owned.
+    """They are written under observation, run-owned.
 
     The machine never reads them, so they are on the task beside the
     settings and no part of the point's id.
     """
     overrides = yaml_configs.fixed_threshold_switching()
     overrides["observation"] = {"confidence_shot_count": "all"}
-    overrides["burst_detector"] = {
-        "kind": "masked_regional_cusum",
-        "catch_deadline_rounds": 0,
-    }
     written, settings = _record_options_of(tmp_path, overrides)
     unset, _settings = _record_options_of(tmp_path, {})
 
-    assert written == collect.RecordOptions(None, 0)
-    assert unset == collect.RecordOptions(100, 300)
+    assert written == collect.RecordOptions(None)
+    assert unset == collect.RecordOptions(100)
     a_billion = 10**9
     assert written.samples_confidence_of(a_billion)
     assert unset.samples_confidence_of(99)
     assert not unset.samples_confidence_of(100)
     assert not hasattr(settings.observation, "confidence_shot_count")
-    assert not hasattr(
-        settings.switching.burst_detector, "catch_deadline_rounds"
-    )
 
 
 @pytest.mark.parametrize("written", [-1, True, "some", 2.5])
@@ -333,18 +326,3 @@ def test_a_confidence_shot_count_that_is_no_count_is_refused(tmp_path, written):
 
     with pytest.raises(ValueError, match="confidence_shot_count must be"):
         _record_options_of(tmp_path, overrides)
-
-
-def test_a_catch_deadline_is_a_whole_number_of_rounds(tmp_path):
-    detector = {"kind": "masked_regional_cusum", "catch_deadline_rounds": -1}
-
-    with pytest.raises(ValueError, match="catch_deadline_rounds must be"):
-        _record_options_of(tmp_path, {"burst_detector": detector})
-
-
-def test_no_detector_takes_no_catch_deadline(tmp_path):
-    """With no detector there is no flag to time, so the key is refused."""
-    detector = {"kind": "none", "catch_deadline_rounds": 300}
-
-    with pytest.raises(ValueError, match="burst_detector does not know"):
-        _record_options_of(tmp_path, {"burst_detector": detector})

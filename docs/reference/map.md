@@ -158,23 +158,7 @@ docstring.
 - `decsim/windows/window_manager.py`: The windows facade: the window life cycle of every operation.
 - `decsim/windows/window_planner.py`: The window planner: which windows exist, planned or grown.
 
-## Level 3: burst_detectors, decoders, escalation, qpu
-
-### burst_detectors
-
-- `decsim/burst_detectors/__init__.py`: The burst detectors: detection events scored against their usual rates.
-- `decsim/burst_detectors/burst_region.py`: The positions and rounds a flag covers, and the priors they get.
-- `decsim/burst_detectors/burst_windows.py`: The two questions the machine asks a burst detector about a window.
-- `decsim/burst_detectors/event_count/__init__.py`: The event_count row: patch and position event counts against their tails.
-- `decsim/burst_detectors/event_count/detector.py`: The event_count row: the simple count baseline.
-- `decsim/burst_detectors/event_count/tail_law.py`: The tail of one count of detection events under the usual rates.
-- `decsim/burst_detectors/flag_log.py`: One operation's verdicts, when each was published, and their episodes.
-- `decsim/burst_detectors/layout.py`: Where one operation's checks sit, their usual rates, and their faults.
-- `decsim/burst_detectors/masked_regional_cusum/__init__.py`: The masked_regional_cusum row: a masked CUSUM bank over regions.
-- `decsim/burst_detectors/masked_regional_cusum/chart_bank.py`: The chart bank: one Page CUSUM per region and design, and the mask.
-- `decsim/burst_detectors/masked_regional_cusum/detector.py`: The masked_regional_cusum row: a CUSUM bank over regions of the checks.
-- `decsim/burst_detectors/masked_regional_cusum/thresholds.py`: The chart bank's thresholds, read off quiet shots' block maxima.
-- `decsim/burst_detectors/settings.py`: The burst_detector section: the row that watches for bursts, and its keys.
+## Level 3: decoders, escalation, qpu
 
 ### decoders
 
@@ -274,7 +258,6 @@ docstring.
 ### observe
 
 - `decsim/observe/__init__.py`: Observation: every listener of a run, and the files a run leaves behind.
-- `decsim/observe/burst_flags.py`: The rounds the burst detector fired on, for a shot's catch columns.
 - `decsim/observe/command_events.py`: When each command arrived at the QPU and when it started.
 - `decsim/observe/controller_counters.py`: The controller's counters: how many idle rounds it emitted.
 - `decsim/observe/data_movement.py`: How often a run copied bits, referenced them and moved them.

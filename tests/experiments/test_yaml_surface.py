@@ -25,7 +25,6 @@ import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
-import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import tests.experiments.yaml_configs as yaml_configs
 
@@ -744,42 +743,6 @@ def test_a_source_rows_own_key_reaches_the_built_source(monkeypatch, tmp_path):
     own_settings = _SplitBits.Settings(one_payload_per_patch=True)
     assert machine.qpu.syndrome_source.settings == own_settings
     assert machine.qpu.syndrome_source.one_payload_per_patch is True
-
-
-def test_the_burst_rows_keys_reach_the_source_that_runs(tmp_path):
-    qpu = {
-        "kind": "burst_stim",
-        "burst_onset_round": 5,
-        "burst_decay_rounds": 4.0,
-        "burst_radius": 2.0,
-        "burst_center": [3.0, 3.0],
-        "burst_error_probability": 0.1,
-        "burst_channels": ["idle", "measurement"],
-    }
-    config_path = yaml_configs.write_config(tmp_path, {"qpu": qpu})
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-
-    machine = machine_module.Machine.build(settings, 0)
-    result = machine.run()
-
-    burst = stim_device.BurstStimDevice.Settings(
-        burst_onset_round=5,
-        burst_decay_rounds=4.0,
-        burst_radius=2.0,
-        burst_center=(3.0, 3.0),
-        burst_error_probability=0.1,
-        burst_channels=("idle", "measurement"),
-    )
-    assert machine.qpu.syndrome_source.burst == burst
-    assert len(result.operation_results) == 1
 
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):

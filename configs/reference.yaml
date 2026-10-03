@@ -16,8 +16,8 @@
 
 qpu:
   kind: stim_device                # stim_device | timing_only | syndrome_bits
-                                   # | recorded_stim | streaming_stim
-                                   # | burst_stim: what the QPU reads out
+                                   # | recorded_stim | streaming_stim:
+                                   # what the QPU reads out
                                    # each round. stim_device samples the
                                    # workload's circuit (real detector data);
                                    # timing_only states each round's size, the
@@ -43,44 +43,6 @@ qpu:
                                    # from a source record of your own
                                    # (QpuSettings(source=...)); a yaml
                                    # naming it stops at its build.
-                                   # burst_stim is stim_device drawing each
-                                   # shot from the circuit plus one error
-                                   # burst the decoders are not told of
-                                   # (their models stay the circuit's own,
-                                   # as qec-burst-scaling's qecburst/
-                                   # circuit.py does). A source row with keys
-                                   # of its own reads them here (its
-                                   # Settings); burst_stim's, with their
-                                   # defaults (a probability of 0 is no
-                                   # burst, and the shot is stim_device's):
-  # burst_onset_round: 1           # the first one-based round with extra noise
-  # burst_rise_rounds: 1           # rounds to climb to the peak, linearly:
-                                   # (i + 1) / rise of it in the onset's
-                                   # i-th round; 1 is a step, 3 Willow's
-                                   # large bursts (2408.13687 data)
-  # burst_decay_rounds: null       # from the peak, the extra probability
-                                   # r rounds on is burst_error_probability
-                                   # x exp(-r / burst_decay_rounds), McEwen's
-                                   # exponential recovery (2104.05219: about
-                                   # 25 ms on Sycamore; 400-700 us on Willow,
-                                   # 2408.13687); null holds it to the end
-  # burst_radius: null             # Stim qubit-coordinate units around
-                                   # burst_center; null is every qubit
-  # burst_center: null             # [x, y]; null is the middle of the
-                                   # qubits' coordinates
-  # burst_error_probability: 0.0   # the extra probability at the peak, 0 to 0.75
-  # burst_channels: [gate, idle, measurement, reset]
-                                   # the noise it raises, named for where
-                                   # Stim's generator puts each parameter
-                                   # (src/stim/gen/circuit_gen_params.cc):
-                                   # after a unitary, after the round's first
-                                   # TICK, before a measurement, after a
-                                   # reset. [idle] is qec-burst-scaling's
-                                   # one DEPOLARIZE1 per round on data qubits.
-                                   # A burst raises the circuit's own noise,
-                                   # so one whose region covers the patch
-                                   # and finds none of its channels there
-                                   # (a sweep point at p = 0) is refused
   distance: 3                      # the code distance d, which the code card
                                    # prices and a maker reads through
                                    # ${qpu.distance}; one LER curve per d
@@ -305,155 +267,6 @@ escalation:
 #                                  # rounds it reads. Refused beside any other
 #                                  # strong_window, which restarts nothing
 
-burst_detector:
-  kind: none                       # none | event_count |
-                                   # masked_regional_cusum. none builds no
-                                   # detector. The other rows read each
-                                   # round's bulk detection events where
-                                   # they are formed and flag a burst; a
-                                   # flagged window escalates under
-                                   # escalation.kind switching, the only kind
-                                   # they are accepted with. Their keys
-                                   # (refused under none, so documented as
-                                   # comments):
-# burst_detector:
-#   catch_deadline_rounds: 300     # either row: a detector that fires on
-#                                  # a round at most this many rounds after
-#                                  # a burst_stim burst's onset catches it
-#                                  # in time, the shots.csv column
-#                                  # burst_caught_in_time and the sweep.csv
-#                                  # caught_in_time_share. The round is the
-#                                  # one the detector read, its detection
-#                                  # delay (Xie et al. 2104.04186); its
-#                                  # flag is published pipeline_cycles or
-#                                  # cycles_per_round later, which the
-#                                  # switching waits for and this does not.
-#                                  # The run reads it and the machine does
-#                                  # not, so it is no part of a point's id.
-#                                  # 300 is half the 600-round decay of
-#                                  # Willow's large bursts (2408.13687), so
-#                                  # a burst counts as caught while it is
-#                                  # still strong
-#
-# burst_detector:
-#   kind: event_count              # the simple count baseline: the patch's
-#                                  # detection events over a window, the
-#                                  # Hamming weight of Tan 2406.18897
-#                                  # lines 956-966 widened to W rounds, and
-#                                  # each position's events over a window,
-#                                  # Q3DE's active node counter (2501.00331
-#                                  # lines 713-727)
-#   patch_window_rounds: 4         # W: fires when the patch's events over
-#                                  # the last W rounds pass their threshold
-#                                  # (Tan 2406.18897 lines 956-966 at W = 1)
-#   detector_window_rounds: 20     # c_win: fires when one stabiliser
-#                                  # position's events over the last c_win
-#                                  # rounds pass its own threshold (Q3DE
-#                                  # 2501.00331 lines 713-727)
-#   false_alarms_per_round: 1.0e-6 # the detector's false-alarm budget per
-#                                  # round per patch, half for each count,
-#                                  # the per-position half split evenly
-#                                  # over the positions; a threshold is the
-#                                  # smallest count whose tail under the
-#                                  # usual rates is at most its share,
-#                                  # calibrated from the operation's own
-#                                  # circuit: its faults' exact law, the
-#                                  # tail estimated by draws, so a
-#                                  # noiseless circuit fires on one event;
-#                                  # a fault prior of one half or more is
-#                                  # refused, its parity rate infinite
-#   rate_tracking_rounds: 10000    # time constant of each position's usual
-#                                  # rate, an exponential average frozen
-#                                  # while a flag fires (DGR 2311.16214
-#                                  # lines 216-218)
-#   clock: fridge                  # a clocks domain; needed when
-#                                  # cycles_per_round is above 0
-#   cycles_per_round: 0            # what counting one round costs; a
-#                                  # round's verdict is published that many
-#                                  # cycles after it is formed, rounds in
-#                                  # order. 0 leaves it unpriced (Q3DE gives
-#                                  # no count, lines 1428-1434)
-#   raise_strong_priors: false     # true gives a flagged strong window's
-#                                  # model the burst priors: the faults at
-#                                  # the anomalous positions in the flagged
-#                                  # rounds get their priors scaled to
-#                                  # explain the measured rate, the graph
-#                                  # unchanged (IonQ 2608.25027 lines
-#                                  # 334-340)
-#
-# burst_detector:
-#   kind: masked_regional_cusum    # a bank of Page CUSUMs, one per region
-#                                  # and design, on each round's events
-#                                  # (Page 1954; Lucas's count step
-#                                  # c log rho - (rho - 1) mu, Ward
-#                                  # 2208.01494 lines 274-296); it fires
-#                                  # when any chart reaches its group's
-#                                  # threshold (multichart CUSUM, Zhang
-#                                  # 1410.8765 lines 338-350) and stops
-#                                  # when every group is below it. A
-#                                  # flag's onset is the round after the
-#                                  # leading chart was last zero. The
-#                                  # papers fix the method, not the
-#                                  # numbers below: those are the values
-#                                  # the method was tuned at
-#   mask_window_rounds: 64         # the window of each check's repeat
-#                                  # count (fired this round and the one
-#                                  # before) and each pair's joint count
-#   mask_count: 8                  # either count reaching this flags the
-#                                  # check as a defect, which leaves the
-#                                  # counts for mask_hold_rounds (Q3DE
-#                                  # removes detected positions, 2501.00331
-#                                  # lines 729-733). null never masks: the
-#                                  # plain regional CUSUM
-#   mask_hold_rounds: 100          # how long a flag masks its check
-#   region_radii: [0.0, 1.5, 2.3, 3.2]  # disc radii around each check, in
-#                                  # grid units (a Stim distance over
-#                                  # sqrt(2)); the whole patch is always a
-#                                  # region too, Kulldorff's circular zones
-#                                  # (Commun. Stat. 26(6) 1997). [] leaves
-#                                  # the whole patch the only region: the
-#                                  # whole-patch CUSUM
-#   fault_rate_multipliers: [2.0, 4.0, 20.0]  # the designs k: a check of
-#                                  # usual rate q0 fires with
-#                                  # (1 - (1 - 2 q0)^k) / 2 under design k;
-#                                  # each above 1
-#   rate_tracking_rounds: 5000     # time constant of each region's usual
-#                                  # count, an exponential average of its
-#                                  # unmasked events
-#   unmasked_share_floor: 0.2      # a region's usual count is held while
-#                                  # at most this share of its usual rate
-#                                  # is unmasked
-#   false_alarms_per_second: 0.03  # the bank's false-alarm budget. A
-#                                  # shot's share is this rate times the
-#                                  # shot's length, the operation's rounds
-#                                  # times the sweep point's
-#                                  # round_period_microseconds: at 1.0 us
-#                                  # and 15 rounds, 0.03/s is 4.5e-7 of
-#                                  # shots. Thresholds are
-#                                  # set so that share of quiet shots
-#                                  # alarms, each group's level read off
-#                                  # its maxima (the empirical tail, else
-#                                  # an exponential fit to the top 20);
-#                                  # a share of 1 or
-#                                  # more is refused
-#   calibration_shot_count: 20000  # quiet Stim shots of the operation's own
-#                                  # circuit the thresholds are read from,
-#                                  # a fixed seed, once per run in memory
-#   clock: fridge                  # a clocks domain; with none the bank's
-#                                  # verdict is published as its round is
-#                                  # formed, and the two keys below are
-#                                  # refused
-#   datapath_count: 1              # the timing card: a round costs
-#   pipeline_cycles: 30            # ceil(regions x designs /
-#                                  # datapath_count) + pipeline_cycles
-#                                  # cycles (97 regions
-#                                  # x 3 designs at d = 5 is 321 at the
-#                                  # defaults). regions x designs is the
-#                                  # algorithm's count; datapath_count and
-#                                  # pipeline_cycles are hardware figures,
-#                                  # fitted by hand until a design is built
-#   raise_strong_priors: false     # as event_count's
-
 workload:
   kind: producer                   # producer | files (WORKLOADS,
                                    # frontends/settings.py): what makes the
@@ -473,8 +286,7 @@ workload:
                                    # sharing the decoder units (Elastic
                                    # 2406.17995 lines 121-123), side by side
                                    # along x, 2d + 2 Stim coordinate units
-                                   # apart, so a qpu burst region covers the
-                                   # patches it reaches; deltakit_memory,
+                                   # apart; deltakit_memory,
                                    # Deltakit's finite memory for
                                    # stim_device; deltakit_live_memory, a
                                    # live memory for streaming_stim decoded

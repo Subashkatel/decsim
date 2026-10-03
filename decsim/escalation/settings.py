@@ -123,25 +123,6 @@ class StrongWindowSettings(Protocol):
         """A fresh shape on the run's engine."""
 
 
-class BurstDetectorSettings(Protocol):
-    """A burst detector row's settings record (burst_detectors/settings.py).
-
-    circuits maps each counted operation's id to its circuit and round
-    count; machine_clock prices a row whose record names no clock.
-    """
-
-    name: str
-
-    def build(
-        self,
-        engine: engine_module.Engine,
-        circuits: Mapping,
-        round_period_microseconds: float,
-        machine_clock: Optional[config.Clock],
-    ) -> ports.BurstDetector:
-        """A fresh detector calibrated on the circuits it counts."""
-
-
 @dataclasses.dataclass(frozen=True)
 class SwitchingSettings:
     """The machine's switching slot: weak first, escalate on low confidence.
@@ -194,8 +175,6 @@ class SwitchingSettings:
     strong_window: StrongWindowSettings = (
         strong_window_shapes.RedoWindow.Settings()
     )
-    # None watches for no burst
-    burst_detector: Optional[BurstDetectorSettings] = None
 
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)

@@ -38,7 +38,7 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     1  engine, ports, seeding
     2  controller, detector_error_model, links, pauli_frame,
        syndrome_buffer, windows
-    3  burst_detectors, decoders, escalation, qpu
+    3  decoders, escalation, qpu
     4  confidence, frontends, observe, sinter_adapters
     5  build, producers, settings
     6  machine (this file)
@@ -153,10 +153,6 @@ class Machine:
             settings.decoder_manager.bulk_strong,
             switching,
         )
-        round_period = settings.qpu.round_period_microseconds
-        burst_detector = escalation_build.build_burst_detector(
-            settings.switching, round_period, settings.clock, engine, plan
-        )
         window_tier = settings.window_tier
         window_decoder = settings.decoder_settings_for(window_tier.value)
         escalates = settings.switching is not None
@@ -166,7 +162,6 @@ class Machine:
             plan.device,
             window_tier,
             escalates,
-            burst_detector,
         )
         confidence_signal = None
         if switching is not None:
@@ -213,7 +208,6 @@ class Machine:
             settings.clock,
             engine,
             plan,
-            burst_detector,
             links,
             built_models,
         )

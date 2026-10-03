@@ -266,7 +266,6 @@ def build_detection_events(
     device,
     window_tier: window_records.DecoderTier,
     escalates: bool,
-    burst_detector: Optional[ports.BurstDetector] = None,
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
 
@@ -274,13 +273,11 @@ def build_detection_events(
     one seat of detection_events.formed_at: a path with none would
     decode raw outcomes, and a path with two would form events of
     events, a wrong answer either way. A source that does not answer
-    the DetectionEventFormer port forms nothing. A burst detector
-    counts the rounds the first seat on the primary tier's path forms.
-    window_tier is the tier that decodes the plan's windows, and
-    escalates says a switching run sends regions on to the strong tier.
-    A placement that names no clock forms on machine_clock. The decoder
-    units are compiled from this placement, so the machine builds it
-    before the parts.
+    the DetectionEventFormer port forms nothing. window_tier is the tier
+    that decodes the plan's windows, and escalates says a switching run
+    sends regions on to the strong tier. A placement that names no clock
+    forms on machine_clock. The decoder units are compiled from this
+    placement, so the machine builds it before the parts.
     """
     formed_at = detection_event_settings.formed_at
     paths = _paths_of_the_run(window_tier, escalates)
@@ -289,16 +286,10 @@ def build_detection_events(
     source = None
     if isinstance(device, ports.DetectionEventFormer):
         source = device
-    observed_seat = None
-    if burst_detector is not None:
-        _check_forms_events(source)
-        observed_seat = _first_seat_on(paths[0], formed_at)
     clocked_settings = config.with_machine_clock(
         detection_event_settings, machine_clock
     )
-    return formation.SeatedFormation(
-        source, clocked_settings, observed_seat, burst_detector
-    )
+    return formation.SeatedFormation(source, clocked_settings)
 
 
 def _weak_store(
@@ -432,17 +423,6 @@ def _check_readout_cost_is_priced(
             )
 
 
-def _check_forms_events(source) -> None:
-    """A burst detector counts detection events, so the source forms some."""
-    if source is not None:
-        return
-    raise ValueError(
-        "burst_detector counts detection events, and this qpu.kind "
-        "forms none; name a source that forms them, or write "
-        "burst_detector: {kind: none}"
-    )
-
-
 def _paths_of_the_run(
     window_tier: window_records.DecoderTier, escalates: bool
 ) -> tuple:
@@ -469,11 +449,3 @@ def _check_one_seat_on(path: tuple, formed_at: tuple) -> None:
         "crosses exactly one seat, since a path with none decodes raw "
         "outcomes and a path with two forms events of events"
     )
-
-
-def _first_seat_on(path: tuple, formed_at: tuple) -> str:
-    """The seat of formed_at the path crosses; the path crosses one."""
-    for seat in path:
-        if seat in formed_at:
-            return seat
-    raise AssertionError("every path crosses one seat")

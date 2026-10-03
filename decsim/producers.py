@@ -67,9 +67,7 @@ def memory_patches(
     The copies sit side by side along x in one Stim coordinate frame,
     patch p shifted by p (2 d + 2) with a SHIFT_COORDS ahead of its
     circuit, so a surface-code patch, 2 d units wide, starts one lattice
-    step past its neighbour and a burst region in that frame covers the
-    patches it reaches (McEwen 2104.05219: a burst starts at one spot and
-    spreads over the chip). Each copy draws its own shot.
+    step past its neighbour. Each copy draws its own shot.
     """
     if patch_count < 1:
         raise ValueError(

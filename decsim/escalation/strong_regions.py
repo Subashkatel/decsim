@@ -58,9 +58,6 @@ class StrongRegions:
     # the one call this package makes on the window interaction; the rest
     # of that class is the windows package's own seam
     interaction = ports.Port(ports.RegionProposer)
-    # the burst detector, which may raise a flagged strong window's
-    # priors; unbound when burst_detector.kind is none
-    burst_detector = ports.Port(ports.BurstDetector, optional=True)
 
     def redo_region(self, key: tuple) -> RedoRegion:
         """The escalated window's commit rounds, its past face pinned.
@@ -146,10 +143,9 @@ class StrongRegions:
         exclusions = _left_fault_exclusions(window.commit_lo)
         operation = self.tracker.operation(key[0])
         prior_faults = self._faults_the_pins_carry(pinned_source_keys)
-        model = self.planner.strong_window_model(
+        return self.planner.strong_window_model(
             operation, window, round_count, exclusions, prior_faults
         )
-        return self._with_burst_priors(window, model)
 
     def _faults_the_pins_carry(self, pinned_source_keys: tuple):
         """What the windows behind the pinned faces have committed.
@@ -164,16 +160,6 @@ class StrongRegions:
             if owned is not None:
                 owned_sets.append(owned)
         return _union_of_owned_faults(owned_sets)
-
-    def _with_burst_priors(self, window: window_records.Window, model):
-        """The strong model, with the burst priors when a flag meets it.
-
-        Only the strong decoder's model changes; the restart window the
-        weak chain resumes on keeps the calibrated priors.
-        """
-        if self.burst_detector is None:
-            return model
-        return self.burst_detector.with_burst_priors(window, model)
 
     def double_window_region(
         self, key: tuple, *, near_source_key: Optional[tuple]
@@ -362,14 +348,13 @@ class StrongRegions:
         prior_faults = self._double_window_prior_faults(
             key, near_source_key, restart_model
         )
-        planned_model = self.planner.strong_window_model(
+        strong_model = self.planner.strong_window_model(
             operation,
             strong_window,
             round_count,
             strong_exclusions,
             prior_faults,
         )
-        strong_model = self._with_burst_priors(strong_window, planned_model)
         return DoubleWindowRegion(
             plan=plan,
             absorbed_window_keys=absorbed,

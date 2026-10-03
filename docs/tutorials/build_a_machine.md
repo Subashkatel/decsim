@@ -58,7 +58,7 @@ does.
 
 Some things are read from the settings before any part exists, because
 more than one part is built for them: the escalation policy, the plan
-(the windows, the circuit and the round clock), the burst detector, the
+(the windows, the circuit and the round clock), the
 detection event formation, the decoder units, and the store slots: which
 syndrome buffers a decoder reads, and whether it reads them in place.
 
@@ -68,9 +68,6 @@ escalation_policy = escalation_build.build_escalation_policy(
     settings.escalation, settings.weak_decoder
 )
 plan = plan_build.build_plan(settings, escalation_policy)
-burst_detector = escalation_build.build_burst_detector(
-    settings, engine, plan, escalation_policy
-)
 window_tier = escalation_policy.primary_tier
 escalates = escalation_policy.requires_strong_context
 detection_events = readout_part.build_detection_events(
@@ -79,7 +76,6 @@ detection_events = readout_part.build_detection_events(
     plan.device,
     window_tier,
     escalates,
-    burst_detector,
 )
 pool = decoders_part.build_decoder_pool(
     settings, plan, escalation_policy, detection_events
@@ -125,7 +121,7 @@ readout = readout_part.Readout.build(
     links,
 )
 windows = windows_part.Windows.build(
-    settings, engine, plan, escalation_policy, burst_detector, links
+    settings, engine, plan, escalation_policy, links
 )
 decoders = decoders_part.Decoders.build(
     settings.decoder_manager, engine, pool, escalation_policy

@@ -63,7 +63,6 @@ component is one class and one table row. These guides are the recipe and its va
 
 - [How to add a row to a table](how-to/add_a_table_row.md)
 - [How to add a decoder backend](how-to/add_a_decoder_backend.md)
-- [How to add a burst detector](how-to/add_a_burst_detector.md)
 - [How to plug a component in without a table row](how-to/plug_in_without_a_table_row.md)
 - [How to add a component to a part](how-to/add_a_component_to_a_part.md)
 - [How to add a yaml key](how-to/add_a_yaml_key.md)

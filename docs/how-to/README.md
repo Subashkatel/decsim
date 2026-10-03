@@ -18,8 +18,6 @@ are that recipe and its variants.
   worked examples in the tests.
 - [How to add a decoder backend](add_a_decoder_backend.md): the decoder
   case, with the fault model contract and the check against PyMatching.
-- [How to add a burst detector](add_a_burst_detector.md): one folder and
-  one table line, with the shared layout, flag log and window answers.
 - [How to plug a component in without a table row](plug_in_without_a_table_row.md):
   hand the machine your own object while the class is still changing.
 - [How to add a component to a part](add_a_component_to_a_part.md): a

@@ -20,7 +20,6 @@ from typing import Any, Optional
 
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
-import decsim.observe.burst_flags as burst_flags_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -103,7 +102,6 @@ def observe(
     )
     decoder_utilization = _decoder_utilization(engine, decoder_managers)
     frame_corrections = _frame_corrections(control.pauli_frame)
-    burst_flags = _connect_burst_flags(windows.burst_detector)
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
@@ -123,7 +121,6 @@ def observe(
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
         round_events=round_events,
-        burst_flags=burst_flags,
         confidence=confidence,
     )
 
@@ -528,17 +525,6 @@ def _frame_corrections(
         corrections.correction_committed
     )
     return corrections
-
-
-def _connect_burst_flags(
-    burst_detector,
-) -> Optional[burst_flags_module.BurstFlags]:
-    """The rounds the detector fired on; a run without one has none."""
-    if burst_detector is None:
-        return None
-    flags = burst_flags_module.BurstFlags()
-    burst_detector.trace.round_flagged.connect(flags.round_flagged)
-    return flags
 
 
 def _decoder_utilization(

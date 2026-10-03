@@ -1630,13 +1630,12 @@ def test_link_totals_sum_every_binding_of_one_semantic_path(
 def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
     tmp_path,
 ):
-    """Two patches, a burst on the second: the first right, the shot wrong.
+    """Two patches: the first right, the second wrong, the shot wrong.
 
-    The burst region, radius 4 about patch 1's centre (11, 3) on the
-    patches' shared plane, misses patch 0 entirely; at seed 1 patch 1's
-    observable comes out wrong.
+    At p = 0.02 and seed 23 patch 1's observable comes out wrong and
+    patch 0's right.
     """
-    shot = _two_patch_burst_shot(tmp_path, seed=1)
+    shot = _two_patch_shot(tmp_path, seed=23)
     measurement = measure.measure_shot(shot)
     first, second = shot.result.operation_results
 
@@ -1648,12 +1647,12 @@ def test_a_shot_fails_when_any_of_its_patches_reads_a_wrong_observable(
 def test_a_shot_records_each_operations_prediction(tmp_path):
     """The two patches' observables, each its own, not one failure flag.
 
-    At seed 4 both truths are 0 and the loop predicts 1 on patch 1,
-    under the burst, and 0 on patch 0, so operation 2's cell is 1 and
-    operation 1's is 0. A csv reader that types a number would read the
-    bits 01 as 1; the json cell reads back as the text it was written.
+    At seed 23 both truths are 0 and the loop predicts 1 on patch 1 and
+    0 on patch 0, so operation 2's cell is 1 and operation 1's is 0. A
+    csv reader that types a number would read the bits 01 as 1; the
+    json cell reads back as the text it was written.
     """
-    shot = _two_patch_burst_shot(tmp_path, seed=4)
+    shot = _two_patch_shot(tmp_path, seed=23)
 
     measurement = measure.measure_shot(shot)
 
@@ -1661,8 +1660,8 @@ def test_a_shot_records_each_operations_prediction(tmp_path):
     assert fold.typed_value(measurement.predictions) == measurement.predictions
 
 
-def _two_patch_burst_shot(tmp_path, *, seed: int) -> collect.Shot:
-    """One seed of two memory patches under a burst on the second."""
+def _two_patch_shot(tmp_path, *, seed: int) -> collect.Shot:
+    """One seed of two memory patches at p = 0.02."""
     raw = dict(MINIMAL_CONFIG)
     raw["workload"] = {
         "kind": "producer",
@@ -1674,19 +1673,13 @@ def _two_patch_burst_shot(tmp_path, *, seed: int) -> collect.Shot:
             "distance": "${qpu.distance}",
         },
     }
-    raw["qpu"] = {
-        "kind": "burst_stim",
-        "burst_radius": 4.0,
-        "burst_center": [11.0, 3.0],
-        "burst_error_probability": 0.3,
-    }
     config_path = tmp_path / "two_patches.yaml"
     config_text = yaml.safe_dump(raw)
     config_path.write_text(config_text)
     config = experiment.load_experiment(config_path)
     task = config.point_task(
         {
-            "workload.arguments.physical_error_probability": 0.001,
+            "workload.arguments.physical_error_probability": 0.02,
             "qpu.distance": 3,
             "qpu.round_period_microseconds": 1.0,
         },
@@ -1928,101 +1921,6 @@ def test_a_live_stream_is_scored_through_its_owner_over_its_run_rounds():
     assert measured.executed_rounds == stim_rounds
     assert stim_rounds > 3 + 1
     assert measured.logical_failure is False
-
-
-# A whole-patch burst from round 12 on the 30-round switching shot; the
-# masked regional CUSUM, at its per-second budget over a 30 us shot,
-# first fires on round 21 at seed 0, nine rounds after the onset
-BURST_ONSET_ROUND = 12
-FIRST_FLAG_ROUND = 21
-
-
-def burst_detector_shot(
-    tmp_path, burst_error_probability: float, catch_deadline_rounds=300
-):
-    """One switching shot with the masked regional CUSUM watching it."""
-    qpu = {
-        "kind": "burst_stim",
-        "burst_onset_round": BURST_ONSET_ROUND,
-        "burst_error_probability": burst_error_probability,
-    }
-    return detector_shot(tmp_path, qpu, catch_deadline_rounds)
-
-
-def detector_shot(tmp_path, qpu: dict, catch_deadline_rounds=300):
-    """That shot on any qpu section."""
-    detector = {
-        "kind": "masked_regional_cusum",
-        "catch_deadline_rounds": catch_deadline_rounds,
-    }
-    sections = {"qpu": qpu, "burst_detector": detector}
-    shot = switching_run(tmp_path, 0.0, sections=sections)
-    return measure.measure_shot(shot)
-
-
-def test_a_burst_shot_records_its_first_flag_and_a_catch_in_time(tmp_path):
-    """Delay 9 is inside a 9-round deadline and outside an 8-round one.
-
-    A catch within k is a detection delay of at most k, so the deadline
-    is inclusive.
-    """
-    in_time = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
-    late = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
-
-    assert in_time.burst_first_flag_round == FIRST_FLAG_ROUND
-    assert in_time.burst_caught_in_time is True
-    assert late.burst_first_flag_round == FIRST_FLAG_ROUND
-    assert late.burst_caught_in_time is False
-
-
-@pytest.mark.parametrize(
-    "qpu",
-    [
-        {"kind": "burst_stim", "burst_error_probability": 0.0},
-        {"kind": "stim_device"},
-    ],
-)
-def test_a_shot_with_no_burst_records_no_flag_and_no_catch(tmp_path, qpu):
-    """A burst of probability 0 draws the operation's own circuit."""
-    quiet = detector_shot(tmp_path, qpu)
-
-    assert quiet.burst_first_flag_round == 0
-    assert quiet.burst_caught_in_time is None
-
-
-def test_the_point_holds_the_shares_flagged_and_caught_in_time(tmp_path):
-    """Two shots, one caught in time, folded as one point's shots.
-
-    The two deadlines are two settings, so two points; the late shot
-    takes the caught shot's point id and the next seed to be summed with
-    it, since a fold refuses two shots of one seed.
-    """
-    caught = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=9)
-    late_alone = burst_detector_shot(tmp_path, 0.05, catch_deadline_rounds=8)
-    next_seed = caught.seed + 1
-    late = dataclasses.replace(
-        late_alone, point_id=caught.point_id, seed=next_seed
-    )
-    quiet = burst_detector_shot(tmp_path, 0.0)
-
-    burst_rows, _burst_dir = yaml_configs.folded_run(tmp_path, [caught, late])
-    quiet_rows, _quiet_dir = yaml_configs.folded_run(tmp_path, [quiet])
-
-    assert burst_rows[0]["flagged_share"] == 1.0
-    assert burst_rows[0]["caught_in_time_share"] == 0.5
-    assert quiet_rows[0]["flagged_share"] == 0.0
-    assert "caught_in_time_share" not in quiet_rows[0]
-
-
-def test_a_run_without_a_detector_writes_no_burst_column(tmp_path):
-    measurement = switching_shot(tmp_path, 1000000.0)
-    record = report.record_of([measurement])
-    rows, _run_dir = yaml_configs.folded_run(tmp_path, [measurement])
-
-    assert "burst_first_flag_round" not in record.shots[0]
-    assert "burst_caught_in_time" not in record.shots[0]
-    assert "flagged_share" not in rows[0]
-    assert "caught_in_time_share" not in rows[0]
 
 
 def recorded_relay_statuses(monkeypatch) -> list:

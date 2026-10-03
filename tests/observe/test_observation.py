@@ -32,8 +32,6 @@ ASKED_FOR_BY_A_STUDY = (
     "data_movement",
     "decode_records",
     "decode_backlog",
-    # built when burst_detector.kind names a detector
-    "burst_flags",
     # built when a confidence signal decides the escalation
     "confidence",
 )

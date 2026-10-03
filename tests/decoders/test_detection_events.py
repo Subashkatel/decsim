@@ -45,19 +45,7 @@ class CircuitSource:
         return TABLE
 
 
-class CountingDetector:
-    """A burst detector that records every round it is shown."""
-
-    def __init__(self):
-        self.observed = []
-
-    def observe_round(self, operation_id, round_index, events):
-        """One round's events."""
-        del operation_id, events
-        self.observed.append(round_index)
-
-
-def placement(source=None, detector=None):
+def placement(source=None):
     """Both tiers' decoders seated, at Yang's latency and one round a clock."""
     if source is None:
         source = CircuitSource()
@@ -67,7 +55,7 @@ def placement(source=None, detector=None):
         latency_cycles=5,
         cycles_per_round=1,
     )
-    return formation.SeatedFormation(source, settings, "weak_decoder", detector)
+    return formation.SeatedFormation(source, settings)
 
 
 def fragment(round_index, bits=(0,) * 8):
@@ -95,8 +83,8 @@ def job(round_indices):
     )
 
 
-def weak_tier(detector=None, source=None):
-    seated = placement(source, detector)
+def weak_tier():
+    seated = placement()
     return detection_events.TierFormation(seated, "weak_decoder")
 
 
@@ -123,16 +111,14 @@ def test_a_formed_round_carries_its_events_at_the_size_it_landed():
     assert [carried.size_bits for carried in formed] == [8, 8]
 
 
-def test_a_round_two_windows_read_is_formed_once():
-    detector = CountingDetector()
-    tier = weak_tier(detector)
+def test_a_round_two_windows_read_is_formed_the_same_for_both():
+    tier = weak_tier()
     first = job([1, 2, 3])
     second = job([2, 3, 4])
 
     formed_first = tier.form(first.payloads)
     formed_second = tier.form(second.payloads)
 
-    assert detector.observed == [1, 2, 3, 4]
     assert formed_first[1].bits == formed_second[0].bits
 
 
@@ -257,8 +243,7 @@ def test_a_job_that_carries_no_rounds_forms_and_pays_nothing():
 
 
 def test_a_joint_round_forms_once_after_all_fragments_arrive() -> None:
-    detector = CountingDetector()
-    tier = weak_tier(detector)
+    tier = weak_tier()
     first = fragment(1, bits=(0, 0, 0))
     second = dataclasses.replace(first, patch_ids=("other",), fragment_index=1)
     last = fragment(1, bits=(0, 0))
@@ -266,7 +251,6 @@ def test_a_joint_round_forms_once_after_all_fragments_arrive() -> None:
 
     (formed,) = tier.form([last, first, second])
 
-    assert detector.observed == [1]
     assert formed.patch_ids == (0, "other")
     assert len(formed.bits) == 4
     # eight raw bits landed in the unit's memory: the size it holds

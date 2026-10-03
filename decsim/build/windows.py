@@ -46,9 +46,6 @@ class Windows:
     parts.
     """
 
-    # the detector is built before the parts, since the decoder units
-    # are compiled for it
-    burst_detector: Optional[ports.BurstDetector]
     models: window_planner_module.WindowModels
     planner: window_planner_module.WindowPlanner
     tracker: round_tracker_module.RoundTracker
@@ -77,7 +74,6 @@ class Windows:
         machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         plan: plan_build.Plan,
-        burst_detector: Optional[ports.BurstDetector],
         links: ports.Link,
         built_models: built_window_models.BuiltWindowModels,
     ) -> "Windows":
@@ -122,7 +118,6 @@ class Windows:
             engine, feedback_boundary_mode=feedback_boundary_mode
         )
         windows = cls(
-            burst_detector=burst_detector,
             models=models,
             planner=planner,
             tracker=tracker,

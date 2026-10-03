@@ -60,17 +60,12 @@ class RecordOptions:
     confidence_shot_count is how many shots of the point, from seed 0,
     write their windows' confidence gaps to window_confidence.csv when a
     confidence signal decides the escalation; None writes every scored
-    shot's. catch_deadline_rounds is how many rounds after a burst's
-    onset a detector's flag may come and still catch it in time, which
-    the shot columns read; 300 is half the 600-round decay of the
-    comparison folder's burst, so a caught burst still has most of its
-    raised rounds ahead. The machine reads neither, so they are no part
-    of a point's id, as sinter keeps its output options out of a task's
-    strong id (sinter/_data/_task.py:167-204).
+    shot's. The machine does not read it, so it is no part of a point's
+    id, as sinter keeps its output options out of a task's strong id
+    (sinter/_data/_task.py:167-204).
     """
 
     confidence_shot_count: Optional[int] = 100
-    catch_deadline_rounds: int = 300
 
     def __post_init__(self) -> None:
         shot_count = self.confidence_shot_count
@@ -78,12 +73,6 @@ class RecordOptions:
             raise ValueError(
                 "confidence_shot_count must be a non-negative whole number "
                 f"of shots or None for every shot, got {shot_count!r}"
-            )
-        deadline = self.catch_deadline_rounds
-        if not config.is_whole_count(deadline, 0):
-            raise ValueError(
-                "catch_deadline_rounds must be a non-negative whole number "
-                f"of rounds, got {deadline!r}"
             )
 
     def samples_confidence_of(self, seed: int) -> bool:

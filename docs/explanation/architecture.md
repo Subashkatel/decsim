@@ -56,7 +56,7 @@ that file as a page.
 | Links | `decsim/machine.py` `build_links` | the link fabric | nothing: every part sends on it |
 
 `Machine.build` compiles what every part is built for (the escalation
-policy, the plan, the burst detector, the detection event formation and
+policy, the plan, the detection event formation and
 the decoder pool), then builds the parts one line each and hands them to
 `Machine.assemble`. A script that replaces one part does the same steps
 and builds its own part in that part's line.
@@ -131,7 +131,6 @@ An arrow nobody makes fails the suite.
 | Decoder manager | `decoders/` | decode jobs | one result per request, once its input landed and its unit computed |
 | Decoder unit | `decoders/` | one input per slot | the correction its backend found, priced at the unit's clock |
 | Escalation | `escalation/` | a weak result and its confidence | the verdict: keep it, or re-decode the region on the strong tier |
-| Burst detector | `burst_detectors/` | each round's detection events, as they are formed | a flag, which sends the windows it meets to the strong tier |
 | Boundary courier | `windows/` | a committed correction | the neighbouring window, with that correction folded into its input |
 | Pauli frame | `pauli_frame/` | one correction per window | the folded frame per stream, and the release of whatever waited |
 | Conditional release | `controller/` | an operation whose result is final | the decision, which the frame's end sends and the controller relays as the instruction to the QPU |
@@ -155,9 +154,7 @@ The ones a study is most likely to change:
   (`WINDOWING_SCHEMES`);
 - the **link fabric**, which prices the hops (`LINK_FABRICS`);
 - the **confidence signal** and the **threshold source**, which decide
-  when a window is escalated (`CONFIDENCE_SIGNALS`, `THRESHOLD_SOURCES`);
-- the **burst detector**, which sends the windows a burst of errors
-  covers to the strong tier (`BURST_DETECTORS`).
+  when a window is escalated (`CONFIDENCE_SIGNALS`, `THRESHOLD_SOURCES`).
 
 Every one of them is one class filling one port and one row in a table.
 [How to add a row to a table](../how-to/add_a_table_row.md) is the recipe.

@@ -147,7 +147,6 @@ config: configs/examples/two_tiers.yaml <- configs/bases/weak_decoder_baseline.y
 qpu: kind stim_device
 windows: kind sliding
 escalation: kind switching
-burst_detector: kind none
 workload: kind producer
 links: card two_tiers.yaml
 sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distance [3, 5], qpu.round_period_microseconds [1.0]; max_shots 50, min_shots 0, piece_rounds 20000

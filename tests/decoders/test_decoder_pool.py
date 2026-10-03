@@ -3,8 +3,7 @@
 A job that may not start yet is staged where the least work is left,
 and a free unit a staged job waits on is not an empty one: the two
 forced-class solves of one window are two ordinary jobs, so the unit
-count alone decides whether they overlap (configs/reference.yaml,
-escalation.confidence).
+count alone decides whether they overlap.
 
 The law: with known deterministic work, dispatching each job to the
 server with the least work left starts it at the tick a central FIFO

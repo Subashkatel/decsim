@@ -89,20 +89,12 @@ def switching(
         algorithm=measured_table.A100_RELAY_BP_5,
         engine=decoder_settings.MEASURED_TIME_ENGINE,
     )
-    cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=1.0)
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=THRESHOLD_DECIBELS
     )
-    double_window = strong_window_shapes.DoubleWindow.Settings(
-        restart_reread_buffer_regions=1
-    )
-    switching_slot = escalation_settings.SwitchingSettings(
-        confidence=cluster_gap,
-        threshold=threshold,
-        clock=machine_settings.FRIDGE_CLOCK,
-        threshold_cycles=1,  # estimate, one compare
-        switch_cycles=1,  # estimate, one state change
-        strong_window=double_window,
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    switching_slot = escalation_settings.one_cycle_verdict(
+        cluster.ONE_MICROSECOND_WALK, threshold, double_window
     )
     windows = window_settings.switching_windows(machine.windows, double_window)
     return dataclasses.replace(
@@ -147,13 +139,9 @@ def weak_alone(
     workload = machine_settings.memory_workload(
         distance, physical_error_probability, ROUNDS_PER_SHOT
     )
-    # sliding windows of the code distance, each decision 20 ns
-    # (2603.16203 lines 897-899); both machines lay out the same last
-    # window, the lookahead tail
-    windows = window_settings.WindowSettings(
-        clock=machine_settings.FRIDGE_CLOCK,
-        decision_cycles=5,
-        terminal_policy="lookahead",
+    # both machines lay out the same last window, the lookahead tail
+    windows = dataclasses.replace(
+        window_settings.RISC_Q_WINDOWS, terminal_policy="lookahead"
     )
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True, backlog_trace=True

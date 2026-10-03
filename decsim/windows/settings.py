@@ -49,6 +49,8 @@ WINDOWS_KEYS = (
 )
 # The keys the section must name; the rest have a default.
 _REQUIRED_WINDOWS_KEYS = ("kind", "commit_rounds", "buffer_rounds")
+# The chip's controller clock, 250 MHz (2605.04892 line 1063).
+_CLOCK_250_MEGAHERTZ = config.Clock.from_megahertz(250.0)
 
 
 class SchemeSettings(Protocol):
@@ -217,3 +219,12 @@ def _check_terminal_policy(terminal_policy) -> None:
     raise ValueError(
         f"windows.terminal_policy is one of {listed}, got {terminal_policy!r}"
     )
+
+
+# Sliding windows of the code distance, each decode request issued by a
+# RISC-Q root on the chip's clock (Liu et al. 2603.16203). It follows
+# the checks WindowSettings runs when it is made.
+RISC_Q_WINDOWS = WindowSettings(
+    clock=_CLOCK_250_MEGAHERTZ,
+    decision_cycles=5,  # 20 ns, 2603.16203 lines 897-899
+)

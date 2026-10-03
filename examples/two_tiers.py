@@ -34,11 +34,12 @@ import decsim.windows.settings as window_settings
 NAME = "two_tiers"
 DISTANCES = (3, 5)
 PHYSICAL_ERROR_PROBABILITY = 0.008
-TAU_GEN_MICROSECONDS = 1.0
-WEAK_DECODE_MICROSECONDS_PER_ROUND = 0.4 * TAU_GEN_MICROSECONDS
-STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * TAU_GEN_MICROSECONDS
-WEAK_COMMUNICATION_MICROSECONDS = TAU_GEN_MICROSECONDS
-STRONG_COMMUNICATION_MICROSECONDS = 10 * TAU_GEN_MICROSECONDS
+# the round period, the paper's tau_gen
+ROUND_PERIOD_MICROSECONDS = 1.0
+WEAK_DECODE_MICROSECONDS_PER_ROUND = 0.4 * ROUND_PERIOD_MICROSECONDS
+STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * ROUND_PERIOD_MICROSECONDS
+WEAK_COMMUNICATION_MICROSECONDS = ROUND_PERIOD_MICROSECONDS
+STRONG_COMMUNICATION_MICROSECONDS = 10 * ROUND_PERIOD_MICROSECONDS
 THRESHOLD_DECIBELS = 20.0
 COLLECTION = decsim.CollectionSettings(max_shots=50)
 
@@ -67,7 +68,7 @@ for distance in DISTANCES:
     base = machine_settings.weak_decoder_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
-        TAU_GEN_MICROSECONDS,
+        ROUND_PERIOD_MICROSECONDS,
     )
     # T_weak_comm on the hop into the weak store, the strong side's hops
     # one host cycle each, and T_strong_comm on the escalation's hop
@@ -98,7 +99,7 @@ for distance in DISTANCES:
             PHYSICAL_ERROR_PROBABILITY
         ),
         "qpu.distance": distance,
-        "qpu.round_period_microseconds": TAU_GEN_MICROSECONDS,
+        "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
     }
     point = decsim.Point(f"d{distance}", machine, metadata)
     points.append(point)

@@ -50,11 +50,12 @@ import decsim.windows.settings as window_settings
 NAME = "data_movement"
 DISTANCES = (3, 5, 7)
 PHYSICAL_ERROR_PROBABILITY = 0.003
-TAU_GEN_MICROSECONDS = 1.0
-WEAK_DECODE_MICROSECONDS_PER_ROUND = 0.4 * TAU_GEN_MICROSECONDS
-STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * TAU_GEN_MICROSECONDS
-WEAK_COMMUNICATION_MICROSECONDS = TAU_GEN_MICROSECONDS
-STRONG_COMMUNICATION_MICROSECONDS = 10 * TAU_GEN_MICROSECONDS
+# the round period, the paper's tau_gen
+ROUND_PERIOD_MICROSECONDS = 1.0
+WEAK_DECODE_MICROSECONDS_PER_ROUND = 0.4 * ROUND_PERIOD_MICROSECONDS
+STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * ROUND_PERIOD_MICROSECONDS
+WEAK_COMMUNICATION_MICROSECONDS = ROUND_PERIOD_MICROSECONDS
+STRONG_COMMUNICATION_MICROSECONDS = 10 * ROUND_PERIOD_MICROSECONDS
 # the keep threshold of 2510.25222 Sec. IV
 THRESHOLD_DECIBELS = 20.0
 COLLECTION = decsim.CollectionSettings(max_shots=100)
@@ -67,7 +68,7 @@ EVERY_BLOCK_CELLS = {
         "bits_per_cycle": None,
     },
     "workload.arguments.physical_error_probability": PHYSICAL_ERROR_PROBABILITY,
-    "qpu.round_period_microseconds": TAU_GEN_MICROSECONDS,
+    "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
 }
 ONE_ROOM_CYCLE_CARD = {
     "latency_cycles": 1,
@@ -113,7 +114,7 @@ def every_hop_copies(distance: int) -> machine_settings.MachineSettings:
     base = machine_settings.weak_decoder_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
-        TAU_GEN_MICROSECONDS,
+        ROUND_PERIOD_MICROSECONDS,
     )
     links = link_profiles.with_path_latency(
         base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS

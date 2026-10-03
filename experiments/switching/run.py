@@ -47,9 +47,10 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 NAME = "switching"
 DISTANCES = (3, 5)
 PHYSICAL_ERROR_PROBABILITY = 0.008
-TAU_GEN_MICROSECONDS = 1.0
-STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * TAU_GEN_MICROSECONDS
-STRONG_COMMUNICATION_MICROSECONDS = 10 * TAU_GEN_MICROSECONDS
+# the round period, the paper's tau_gen
+ROUND_PERIOD_MICROSECONDS = 1.0
+STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * ROUND_PERIOD_MICROSECONDS
+STRONG_COMMUNICATION_MICROSECONDS = 10 * ROUND_PERIOD_MICROSECONDS
 # the keep threshold of 2510.25222 Sec. IV
 THRESHOLD_DECIBELS = 20.0
 CLUSTER_GAP_COLLECTION = decsim.CollectionSettings(max_shots=50)
@@ -62,7 +63,7 @@ def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
     The union-find decode is charged the host's wall clock.
     """
     base = machine_settings.weak_decoder_baseline(
-        distance, PHYSICAL_ERROR_PROBABILITY, TAU_GEN_MICROSECONDS
+        distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
     union_find_decoder = union_find.UnionFindDecoder.Settings()
     weak_decoder = dataclasses.replace(
@@ -86,7 +87,7 @@ def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
 def redo_window_switching(distance: int) -> machine_settings.MachineSettings:
     """PyMatching's complementary gap decides; belief matching redoes."""
     base = machine_settings.weak_decoder_baseline(
-        distance, PHYSICAL_ERROR_PROBABILITY, TAU_GEN_MICROSECONDS
+        distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
@@ -168,7 +169,7 @@ def _metadata(distance: int) -> dict:
             PHYSICAL_ERROR_PROBABILITY
         ),
         "qpu.distance": distance,
-        "qpu.round_period_microseconds": TAU_GEN_MICROSECONDS,
+        "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
     }
 
 

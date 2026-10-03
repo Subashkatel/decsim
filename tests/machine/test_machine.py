@@ -1131,12 +1131,14 @@ def test_longer_joint_feedback_protects_both_blocks_without_resampling() -> (
     _assert_joint_acquisitions(second)
 
 
+# At RUN_SEED no logical flips in either basis; seed 3 flips a Z logical.
 @pytest.mark.parametrize(
-    "basis, has_logical_flips", [("X", False), ("Z", True)]
+    "basis, seed, has_logical_flips",
+    [("X", RUN_SEED, False), ("Z", 3, True)],
 )
 @pytest.mark.parametrize("placement", ["controller", "decoder"])
 def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
-    basis: str, has_logical_flips: bool, placement: str
+    basis: str, seed: int, has_logical_flips: bool, placement: str
 ) -> None:
     pytest.importorskip("deltakit_explorer")
     program = _bb_memory(basis)
@@ -1146,7 +1148,7 @@ def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
     workload = _bb_logical_qubits(workload)
     settings = dataclasses.replace(settings, workload=workload)
 
-    run = _run(settings)
+    run = _run(settings, seed)
 
     _assert_actual_truth(run)
     _assert_direct_strong_path(run)

@@ -18,8 +18,12 @@ import types
 
 import pytest
 
+import decsim.collect as collect
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.records.decoding as decoding_records
+import decsim.settings as machine_settings
+import decsim.windows.schemes.sliding as sliding_scheme
+import tests.escalation.test_strong_window_shapes as shape_tests
 
 SOURCE = object()  # opaque: the sources compare gaps, never sources
 
@@ -481,3 +485,233 @@ def test_an_online_source_with_no_error_probability_is_refused():
 
     with pytest.raises(ValueError, match=sentence):
         settings.for_point(facts)
+
+
+# a table of two points, its three methods' thresholds in decibels; the
+# distance-7 point has an empty Wilson entry, too little evidence
+CALIBRATION_TABLE = (
+    "distance,physical_error_probability,gth_brute_force,gth_eq4,"
+    "gth_eq4_wilson\n"
+    "3,0.008,2.5,18.0,19.5\n"
+    "7,0.008,,20.0,\n"
+)
+GATE_FACTS = {"distance": 3, "physical_error_probability": 0.008}
+# two rates a Stim circuit prints alike, so their circuits are one and
+# only the calibrator's seed text tells the points apart
+PRINTED_ALIKE = (0.001, 0.0010000000000000002)
+
+
+def _gate_on(threshold) -> machine_settings.MachineSettings:
+    """The gate's switching card, d 3 and p 0.008, on this threshold."""
+    settings = shape_tests.gate_switching()
+    switching = dataclasses.replace(settings.switching, threshold=threshold)
+    return dataclasses.replace(settings, switching=switching)
+
+
+def _online_gate(physical_error_probability=0.008):
+    """The gate on an online threshold that audits often, so it learns."""
+    online = threshold_sources.OnlineThreshold.Settings(
+        15.0,
+        audit_rate=0.3,
+        target_escalation_rate=0.2,
+        max_escalation_rate=0.5,
+    )
+    settings = _gate_on(online)
+    workload = machine_settings.memory_workload(
+        3, physical_error_probability, 30
+    )
+    return dataclasses.replace(settings, workload=workload)
+
+
+@pytest.mark.parametrize(
+    "cell, sentence",
+    [("-5.0", "must be finite and not negative"), ("abc", "number of dec")],
+)
+def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
+    tmp_path, cell, sentence
+):
+    table_path = _write_table(tmp_path, f"distance,gth_eq4_wilson\n3,{cell}\n")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+
+    with pytest.raises(ValueError, match=sentence):
+        table.at_point(_facts(distance=3))
+
+
+def test_an_empty_entry_refuses_its_point(tmp_path):
+    """No threshold was certified there, so none is guessed."""
+    table_path = _write_table(tmp_path, CALIBRATION_TABLE)
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=7, physical_error_probability=0.008)
+
+    with pytest.raises(ValueError, match="entry is empty"):
+        table.at_point(facts)
+
+
+def test_a_table_with_no_key_column_is_refused(tmp_path):
+    """Headers that name no point fact would match every point to row one."""
+    table_path = _write_table(tmp_path, "d,p,gth_eq4_wilson\n3,0.008,19.5\n")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+
+    with pytest.raises(ValueError, match="has no key column"):
+        table.at_point(_facts(**GATE_FACTS))
+
+
+def test_the_column_named_is_the_method_the_point_reads(tmp_path):
+    table_path = _write_table(tmp_path, CALIBRATION_TABLE)
+    wilson = threshold_sources.TableThreshold.Settings(table_path)
+    brute = threshold_sources.TableThreshold.Settings(
+        table_path, column="gth_brute_force"
+    )
+    facts = _facts(**GATE_FACTS)
+
+    assert wilson.at_point(facts).threshold_decibels == 19.5
+    assert brute.at_point(facts).threshold_decibels == 2.5
+
+
+def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
+    """The round period is a point fact, read off the qpu's settings."""
+    table_path = _write_table(
+        tmp_path,
+        "distance,physical_error_probability,round_period_microseconds,"
+        "gth_eq4_wilson\n"
+        "3,0.008,0.5,12.0\n"
+        "3,0.008,1.0,13.0\n",
+    )
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    whole = _gate_on(table)
+    half_qpu = dataclasses.replace(whole.qpu, round_period_microseconds=0.5)
+    half = dataclasses.replace(whole, qpu=half_qpu)
+
+    half_threshold = half.at_point().switching.threshold
+    whole_threshold = whole.at_point().switching.threshold
+
+    assert half_threshold.threshold_decibels == 12.0
+    assert whole_threshold.threshold_decibels == 13.0
+
+
+def test_a_window_only_sweep_finds_its_table_row_by_its_geometry(tmp_path):
+    """A threshold is calibrated for one window geometry.
+
+    The commit and buffer rounds are point facts a table keys on, so a
+    sweep over the window alone finds each point's row.
+    """
+    table_path = _write_table(
+        tmp_path,
+        "distance,physical_error_probability,commit_rounds,buffer_rounds,"
+        "gth_eq4_wilson\n"
+        "3,0.008,2,2,12.0\n"
+        "3,0.008,3,2,13.0\n",
+    )
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    gate = _gate_on(table)
+
+    two = _threshold_at_commit_rounds(gate, 2)
+    three = _threshold_at_commit_rounds(gate, 3)
+
+    assert two.threshold_decibels == 12.0
+    assert three.threshold_decibels == 13.0
+
+
+def _threshold_at_commit_rounds(gate, commit_rounds: int):
+    """The threshold the gate's point reads with these commit rounds."""
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
+        commit_rounds=commit_rounds, buffer_rounds=2
+    )
+    windows = dataclasses.replace(gate.windows, scheme=scheme)
+    point = dataclasses.replace(gate, windows=windows)
+    return point.at_point().switching.threshold
+
+
+def test_a_table_read_from_two_folders_names_its_points_alike(tmp_path):
+    """The folder a table sits in is no part of what its points run."""
+    first_id = _point_id_with_its_table_in(tmp_path / "first")
+    other_id = _point_id_with_its_table_in(tmp_path / "elsewhere")
+
+    assert first_id == other_id
+
+
+def _point_id_with_its_table_in(folder: pathlib.Path) -> str:
+    """The id of the gate's point on the calibration table in this folder."""
+    folder.mkdir()
+    table_path = _write_table(folder, CALIBRATION_TABLE)
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    task = collect.Task(_gate_on(table), {})
+    return task.strong_id()
+
+
+def test_a_target_that_leaves_no_room_for_the_audits_is_refused():
+    """The audits reach the strong tier beside the target.
+
+    Toshio 2510.25222 lines 1333-1340 count every strong decode in the
+    backlog, so a target of 0.30 under a 0.30 cap with audit_rate 0.01
+    would put the strong duty past the cap.
+    """
+    with pytest.raises(ValueError, match="max_escalation_rate - audit_rate"):
+        threshold_sources.OnlineThreshold.Settings(
+            20.0,
+            target_escalation_rate=0.30,
+            audit_rate=0.01,
+            max_escalation_rate=0.30,
+        )
+
+
+def test_a_fixed_threshold_point_builds_no_calibrator():
+    fixed = threshold_sources.FixedThreshold.Settings(20.0)
+
+    task = collect.Task(_gate_on(fixed), {})
+
+    assert task.online_threshold is None
+
+
+def test_one_calibrator_learns_across_every_shot_of_its_point():
+    """The point's task builds it once and every shot's machine takes it."""
+    task = collect.Task(_online_gate(), {})
+    calibrator = task.online_threshold
+
+    collect.run_shot(task, 0)
+    first_shot_windows = calibrator.summary()["windows"]
+    collect.run_shot(task, 1)
+    two_shot_windows = calibrator.summary()["windows"]
+
+    assert first_shot_windows > 0
+    assert two_shot_windows == 2 * first_shot_windows
+
+
+def test_an_online_point_reproduces_its_decisions():
+    """The calibrator's random stream is seeded by the point's facts.
+
+    Rerunning the point reruns the same audits, so the same windows
+    escalate and every operation ends with the same observables. The
+    decoders are charged their measured wall clock, so the times are
+    not compared.
+    """
+    first_run = _two_shots_of_a_fresh_online_point()
+    second_run = _two_shots_of_a_fresh_online_point()
+
+    assert first_run == second_run
+
+
+def _two_shots_of_a_fresh_online_point() -> tuple:
+    """Each shot's observables, and what the point's calibrator did."""
+    task = collect.Task(_online_gate(), {})
+    first_shot = collect.run_shot(task, 0)
+    second_shot = collect.run_shot(task, 1)
+    calibrator = task.online_threshold
+    return (
+        first_shot.result.operation_results,
+        second_shot.result.operation_results,
+        calibrator.trajectory,
+        calibrator.summary(),
+    )
+
+
+def test_two_online_points_whose_rates_print_alike_have_two_ids():
+    """The seed text picks the windows the calibrator audits."""
+    plain_rate, nudged_rate = PRINTED_ALIKE
+    plain = collect.Task(_online_gate(plain_rate), {})
+    nudged = collect.Task(_online_gate(nudged_rate), {})
+    (plain_operation,) = plain.settings.workload.operations
+    (nudged_operation,) = nudged.settings.workload.operations
+
+    assert str(plain_operation.circuit) == str(nudged_operation.circuit)
+    assert plain.strong_id() != nudged.strong_id()

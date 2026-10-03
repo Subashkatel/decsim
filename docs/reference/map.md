@@ -347,9 +347,8 @@ docstring.
 - `decsim/experiments/collect_command.py`: `decsim run`: every point of one experiment, each until it stops.
 - `decsim/experiments/collection.py`: The collection: how a point's shots are cut and stopped.
 - `decsim/experiments/command.py`: `decsim <verb>`: the command set, dispatched on the first word.
-- `decsim/experiments/diff_command.py`: `decsim diff`: how two run folders differ.
 - `decsim/experiments/experiment.py`: An experiment: named points, each a machine to collect shots of.
-- `decsim/experiments/failure_statistics.py`: Estimates, exact intervals and paired tests of logical failure rates.
+- `decsim/experiments/failure_statistics.py`: Estimates and exact intervals of logical failure rates.
 - `decsim/experiments/fold.py`: Many run folders' additive rows folded into one, none of them held.
 - `decsim/experiments/measure.py`: One collected shot -> one shot's numbers.
 - `decsim/experiments/pieces.py`: A piece: seeds [first, first + count) of one sweep point, kept as one folder.

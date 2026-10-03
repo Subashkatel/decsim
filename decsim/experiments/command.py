@@ -14,7 +14,6 @@ loads Stim. The console script and `python -m decsim` both land here.
         [--memory-mb M] [--out DIR] [--dry-run]
     decsim status <results folder>
     decsim show <yaml>
-    decsim diff <run_dir> <run_dir>
     decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
     decsim trace follow <file> --round k:n | --window k:n [--html PATH]
 
@@ -339,13 +338,6 @@ def _show(argv: list) -> None:
     print(text)
 
 
-def _diff(argv: list) -> None:
-    """How two run folders differ: settings, inputs, then results."""
-    import decsim.experiments.diff_command as diff_command
-
-    diff_command.main(argv)
-
-
 def _plot(argv: list) -> None:
     """One figure of decsim's own records, drawn from a run folder."""
     import argparse
@@ -401,7 +393,6 @@ _RUN_BY_VERB = {
     "run": _run,
     "status": _status,
     "show": _show,
-    "diff": _diff,
     "plot": _plot,
     "trace": _trace,
 }

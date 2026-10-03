@@ -399,8 +399,38 @@ def write_shot(
     asks for them. examples/deltakit_example.py and
     examples/live_memory_example.py write their shot through it too.
     """
-    _write_the_log_and_trace(machine, settings, run_dir, label)
+    observation = settings.observation
+    if observation.writes_log:
+        write_log(machine.observation, run_dir, label)
+    if observation.writes_trace:
+        trace_path = trace_path_of(observation, run_dir, label)
+        machine.observation.trace_writer.write(str(trace_path))
     _write_result(result, run_dir)
+
+
+def write_log(observation, run_dir: pathlib.Path, label: str) -> None:
+    """log/<label>.log: the engine narrator's full line record of a shot.
+
+    The same lines log: print shows live.
+    """
+    log_dir = run_dir / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    text = "\n".join(observation.log.lines)
+    log_path = log_dir / f"{label}.log"
+    contents = text + "\n"
+    log_path.write_text(contents)
+
+
+def trace_path_of(
+    observation, run_dir: pathlib.Path, label: str
+) -> pathlib.Path:
+    """Where a shot's trace goes: the named path, or trace/ in the folder."""
+    named = observation.trace_path
+    if named is not None:
+        return pathlib.Path(named)
+    trace_dir = run_dir / "trace"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    return trace_dir / f"{label}.trace.json"
 
 
 def point_records(run_dir: pathlib.Path) -> dict:
@@ -549,37 +579,6 @@ def _write_result(
     value = collect.json_value(result, record_classes=False)
     result_path = run_dir / "result.json"
     write_json(result_path, value)
-
-
-def _write_the_log_and_trace(
-    machine: machine_module.Machine,
-    settings: machine_settings.MachineSettings,
-    run_dir: pathlib.Path,
-    label: str,
-) -> None:
-    """The shot's log and trace, each where its knob says."""
-    observation = settings.observation
-    if observation.writes_log:
-        log_dir = run_dir / "log"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        text = "\n".join(machine.observation.log.lines)
-        log_path = log_dir / f"{label}.log"
-        contents = text + "\n"
-        log_path.write_text(contents)
-    if not observation.writes_trace:
-        return
-    trace_path = _trace_path(observation, run_dir, label)
-    machine.observation.trace_writer.write(str(trace_path))
-
-
-def _trace_path(observation, run_dir: pathlib.Path, label: str) -> pathlib.Path:
-    """Where this shot's trace goes: the named path, or trace/ in the folder."""
-    named = observation.trace_path
-    if named is not None:
-        return pathlib.Path(named)
-    trace_dir = run_dir / "trace"
-    trace_dir.mkdir(parents=True, exist_ok=True)
-    return trace_dir / f"{label}.trace.json"
 
 
 def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:

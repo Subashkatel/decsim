@@ -27,6 +27,7 @@ import types
 
 import pytest
 
+import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
@@ -849,22 +850,22 @@ def test_pieces_of_one_point_that_ran_different_commits_are_refused(
     """A resumed collect from another tree would pool two simulators.
 
     The second piece is saved as a process at another commit saves it;
-    the fold names both trees' pieces and writes nothing.
+    the fold names it and the tree run.json names, and writes nothing.
     """
     experiment_dir = _pieces_of_one_point(tmp_path, 2, 1)
     folders = _piece_folders(experiment_dir)
     later = folders[1]
     other_commit = "b" * 40
     _as_a_piece_run_at_commit(later, other_commit)
-    out_dir = tmp_path / "folded"
+    sweep_path = experiment_dir / "sweep.csv"
+    sweep_bytes = sweep_path.read_bytes()
 
     with pytest.raises(refusal.RefusalError) as refused:
-        _folded(experiment_dir, folders, out_dir)
+        collect_command.fold_the_run(experiment_dir)
 
     said = str(refused.value)
-    assert "ran different code" in said
-    assert f"{later} (commit {other_commit}" in said
-    assert not out_dir.exists()
+    assert f"{later} ran commit {other_commit}" in said
+    assert sweep_path.read_bytes() == sweep_bytes
 
 
 def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():

@@ -97,6 +97,39 @@ def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
     return folders
 
 
+def every_folder(experiment_dir: pathlib.Path) -> list:
+    """Every whole piece the folder holds, of whichever point."""
+    pieces_dir = experiment_dir / PIECES_FOLDER
+    point_dirs = sorted(pieces_dir.glob("*"))
+    point_ids = [point_dir.name for point_dir in point_dirs]
+    return folders_of(experiment_dir, point_ids)
+
+
+def refuse_pieces_of_another_tree(run_dir: pathlib.Path, folders: list) -> None:
+    """Every piece ran the tree the folder's run.json names.
+
+    A folder's rows pool its pieces under its one run.json, so a piece
+    another tree saved would be skipped as done, folded, and reported
+    as this tree's. A collect asks before it records a point or runs a
+    shot, and the fold asks again of the pieces it folds.
+    """
+    if not folders:
+        return
+    run_path = run_dir / run_folder.RUN_FILE
+    run_record = run_folder.read_json(run_path)
+    folder_tree = run_record["git"]
+    for folder in folders:
+        piece = read_piece(folder)
+        if run_folder.is_one_tree(folder_tree, piece):
+            continue
+        raise refusal.RefusalError(
+            f"{folder} ran {run_folder.tree_text(piece)}, and {run_path} "
+            f"names {run_folder.tree_text(folder_tree)}; a folder holds "
+            "one tree's results, so collect into a new folder, or move "
+            "that tree's pieces out of this one"
+        )
+
+
 def point_folders(folders: list, point_id: str) -> list:
     """The pieces of one point among folders, in their order."""
     return [folder for folder in folders if folder.parent.name == point_id]

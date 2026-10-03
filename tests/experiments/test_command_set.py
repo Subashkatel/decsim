@@ -1490,7 +1490,70 @@ def test_two_dirty_trees_of_one_commit_are_two_trees(
     assert first_git["commit"] == second_git["commit"]
     assert first_git["patch_sha256"] != second_git["patch_sha256"]
     assert f"patch {first_patch_sha256}" in run_refusal
-    assert "ran different code" in fold_refusal
+    assert f"{first_piece} ran commit" in fold_refusal
+
+
+def test_a_run_onto_pieces_another_tree_saved_is_refused_before_a_shot(
+    tmp_path, capsys
+):
+    """A capped point whose saved pieces all ran another tree.
+
+    They reach its cap, so a run again would skip them as done and fold
+    them under this folder's run.json as this tree's. The run is refused
+    before it writes anything, and the folder is as the first run left
+    it.
+    """
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
+    out_dir = tmp_path / "out"
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    other_commit = "b" * 40
+    piece_paths = out_dir.glob("pieces/*/*/piece.json")
+    _as_pieces_run_at_commit(piece_paths, other_commit)
+    run_path = out_dir / run_folder.RUN_FILE
+    record_bytes = run_path.read_bytes()
+    before = _run_folder_bytes(out_dir)
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    assert f"ran commit {other_commit}" in printed.err
+    assert run_path.read_bytes() == record_bytes
+    assert _run_folder_bytes(out_dir) == before
+
+
+def test_a_fold_of_two_points_saved_by_two_trees_is_refused(tmp_path, capsys):
+    """Every piece of a folder ran the tree its run.json names.
+
+    One point's pieces all ran another tree, which agrees with itself
+    point by point, and the fold still refuses, publishing nothing.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    out_dir = tmp_path / "out"
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    first_point_dir = min(out_dir.glob("pieces/*"))
+    other_commit = "b" * 40
+    piece_paths = first_point_dir.glob("*/piece.json")
+    _as_pieces_run_at_commit(piece_paths, other_commit)
+    before = _run_folder_bytes(out_dir)
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        command.main(["run", "--fold", "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    assert f"{first_point_dir}" in printed.err
+    assert f"ran commit {other_commit}" in printed.err
+    assert _run_folder_bytes(out_dir) == before
+
+
+def _as_pieces_run_at_commit(piece_paths, commit: str) -> None:
+    """The pieces as a process at another commit would have saved them."""
+    for piece_path in piece_paths:
+        piece = json.loads(piece_path.read_text())
+        piece["commit"] = commit
+        piece_path.write_text(json.dumps(piece))
 
 
 def _as_a_tree_with_the_patch(monkeypatch, patch_text: str) -> None:

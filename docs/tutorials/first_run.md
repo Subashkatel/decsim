@@ -3,8 +3,8 @@
 # Your first run
 
 This lesson takes about ten minutes. By the end you will have run one
-shot of the reference configuration, opened the folder it wrote, read a
-figure and followed one round of syndrome data through the machine.
+shot of the reference configuration, opened the folder it wrote, read
+its rows and followed one round of syndrome data through the machine.
 
 You do not need to know anything about decsim, and the words you need
 are defined as they appear. You do need a terminal and a Python 3.10 or
@@ -152,7 +152,6 @@ run.json
 shot_links.csv
 shots.csv
 sweep.csv
-timeline.png
 trace
 window_samples.csv
 ```
@@ -182,7 +181,7 @@ ran with and the function that made its workload, `inputs/` the
 workload the point ran, and the csv files the facts.
 [The run folder](../reference/run_folder.md) has one row per file.
 
-## Step 5. Read one row and one figure
+## Step 5. Read one row
 
 `sweep.csv` has one row per sweep point and more than a hundred
 columns. The distance and the first counts:
@@ -213,25 +212,13 @@ values in braces on the point's progress line. Every other
 csv file of the folder names its rows the same way, so a table of any
 of them groups by a setting with no parsing.
 
-`decsim run` also drew a figure. Draw a second one:
-
-```bash
-decsim plot results/reference --figure stage_breakdown
-```
-
-```
-results/reference/stage_breakdown.png
-```
-
-`stage_breakdown.png` shows where a window's time went, stage by stage:
-the buffer filling, the queue, the link into the decoder unit, the
-fetch, the algorithm, the release, the boundary handed to the next
-window, the link out and the frame commit, one bar per sweep point.
-These two figures read decsim's own records, a trace and the stage
-columns in pipeline order. A figure of the sweep's numbers against a
-setting is yours to draw from the csv files, since only you know
-which setting belongs on the axis and what the figure should look
-like.
+Where a window's time went is in `shots.csv`, one column per stage in
+pipeline order, each the shot's mean over its windows: the buffer
+filling (`buffer_fill_mean_us`), the queue, the link into the decoder
+unit, the fetch, the algorithm, the release, the boundary handed to the
+next window, the link out and the frame commit. A figure is yours to
+draw from the csv files, since only you know which setting belongs on
+the axis and what the figure should look like.
 
 ## Step 6. Follow one round
 

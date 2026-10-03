@@ -1539,8 +1539,7 @@ observation:                       # what a run records beyond its results
                                    # shot, holding every hop of every round and window
                                    # of that shot: 69 kB for this file's d3, 15-round
                                    # point, growing with the rounds and windows a shot
-                                   # has. `decsim run` draws timeline.png from it,
-                                   # and `decsim trace follow` reads one round's or
+                                   # has. `decsim trace follow` reads one round's or
                                    # window's path out of it: how long a round or
                                    # window sat in each store and unit memory, and
                                    # how long a move waited on each link path

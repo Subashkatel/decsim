@@ -6,7 +6,7 @@ saves each piece's additive facts in the results folder the moment it
 ends (pieces). A point stops by its collection's rule on the contiguous
 prefix of its seeds (collection), and no piece past the stop is
 started. Then the pieces are folded into the results folder, one row
-per point, beside the figures (report, run_folder, plots). A piece already
+per point (report, run_folder). A piece already
 saved is counted and not run again, so a killed collect resumes where
 it stopped; rerunning the same experiment reproduces the same rows
 (only the wall-clock column varies), and so does running it with a
@@ -28,7 +28,6 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.pieces as pieces
-import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
@@ -307,8 +306,7 @@ def fold_the_folder(
     fold is built whole in a staging folder and moved in only then, in
     place of the last fold, so a fold that is refused (two pieces of a
     point with different columns) leaves the last one as it was. Then
-    each record names the seeds its pieces hold, and the figure is
-    drawn.
+    each record names the seeds its pieces hold.
     """
     with tempfile.TemporaryDirectory(dir=run_dir, prefix=".") as staged:
         staging = pathlib.Path(staged)
@@ -316,7 +314,6 @@ def fold_the_folder(
         run_folder.publish_the_fold(staging, run_dir)
     seeds_by_point = pieces.seed_ranges_of(folders)
     run_folder.record_seeds(run_dir, seeds_by_point)
-    plots.plots(run_dir)
     return rows
 
 

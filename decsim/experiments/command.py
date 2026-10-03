@@ -2,8 +2,8 @@
 
 sinter's shape (sinter/_command/_main.py:1-40): one command, one
 subcommand per word, and each verb's module imported only when that verb
-runs, so `decsim show` never loads matplotlib and `decsim plot` never
-loads Stim. The console script and `python -m decsim` both land here.
+runs, so `decsim show` and `decsim trace` never load Stim. The console
+script and `python -m decsim` both land here.
 
     decsim run <run file> [--out DIR] [--processes N] [--only NAME]
         [--shots N]
@@ -14,7 +14,6 @@ loads Stim. The console script and `python -m decsim` both land here.
         [--memory-mb M] [--out DIR] [--dry-run]
     decsim status <results folder>
     decsim show <yaml>
-    decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
     decsim trace follow <file> --round k:n | --window k:n
 
 What the experiments layer refuses reaches the user as one sentence and
@@ -331,29 +330,6 @@ def _show(argv: list) -> None:
     print(text)
 
 
-def _plot(argv: list) -> None:
-    """One figure of decsim's own records, drawn from a run folder."""
-    import argparse
-
-    import decsim.experiments.plots as plots
-
-    parser = argparse.ArgumentParser(prog="decsim plot")
-    parser.add_argument(
-        "run_dir", help="the folder to read, or a trace file to draw"
-    )
-    parser.add_argument(
-        "--figure", default="timeline", help="which figure to draw"
-    )
-    parser.add_argument(
-        "--out",
-        default=None,
-        help="where the figure goes; beside its source if unset",
-    )
-    parsed = parser.parse_args(argv)
-    out_path = plots.figure(parsed.figure, parsed.run_dir, parsed.out)
-    print(out_path)
-
-
 def _trace(argv: list) -> None:
     """One round's or one window's path through one shot's trace file."""
     import decsim.experiments.trace_follow as trace_follow
@@ -386,6 +362,5 @@ _RUN_BY_VERB = {
     "run": _run,
     "status": _status,
     "show": _show,
-    "plot": _plot,
     "trace": _trace,
 }

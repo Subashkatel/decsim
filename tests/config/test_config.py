@@ -40,6 +40,13 @@ def test_a_negative_duration_is_refused_by_name():
         config.check_duration("round_period", -1)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_a_duration_that_is_not_finite_still_stops(value):
+    """round() refuses NaN and infinity, so neither becomes a tick count."""
+    with pytest.raises((ValueError, OverflowError)):
+        config.check_duration("round_period", value)
+
+
 def test_a_positive_duration_that_rounds_to_no_ticks_is_refused():
     a_quarter_tick = decimal.Decimal("0.00000025")
     with pytest.raises(

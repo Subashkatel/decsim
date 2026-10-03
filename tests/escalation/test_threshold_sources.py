@@ -342,6 +342,24 @@ def test_an_online_step_that_is_not_a_number_is_refused():
         online(20.0, step_decibels=float("nan"))
 
 
+@pytest.mark.parametrize(
+    "field, value, sentence",
+    [
+        ("step_decibels", 0.0, "step_decibels must be positive"),
+        ("audit_rate", 0.0, "audit_rate must be in"),
+        ("kept_bad_budget", 1.5, "kept_bad_budget must be in"),
+        ("adjust_factor", 1.0, "adjust_factor must exceed 1"),
+    ],
+)
+def test_an_online_knob_outside_its_range_is_refused(field, value, sentence):
+    """A step of 0 never moves the threshold, a negative one moves it back."""
+    online = threshold_sources.OnlineThreshold.Settings
+    knob = {field: value}
+
+    with pytest.raises(ValueError, match=sentence):
+        online(20.0, **knob)
+
+
 def _write_table(tmp_path, text: str) -> pathlib.Path:
     table_path = tmp_path / "calibration.csv"
     table_path.write_text(text)

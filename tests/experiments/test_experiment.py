@@ -8,6 +8,7 @@ today, which names its pieces.
 """
 
 import dataclasses
+import os
 import random
 
 import pytest
@@ -21,6 +22,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
 import decsim.frontends.settings as workload_settings
 import decsim.producers as producers
+import tests.experiments.run_files as run_files
 import tests.experiments.yaml_configs as yaml_configs
 
 CAPPED = collection.CollectionSettings(max_shots=4)
@@ -222,6 +224,25 @@ def test_a_run_file_is_loaded_by_its_experiment(tmp_path):
 
     assert study.name == "study"
     assert [point.name for point in study.points] == ["d3"]
+
+
+def test_a_run_file_rewritten_within_its_second_runs_its_new_text(tmp_path):
+    """No cached module stands in for the run file's text.
+
+    Python trusts a cached module whose source keeps its size and its
+    whole-second mtime (PEP 552), so a cap raised in place, at the same
+    length and within the second, would otherwise run the old cap.
+    """
+    run_path = run_files.write_run_file(tmp_path, collection={"max_shots": 2})
+    os.utime(run_path, (1_000_000_000, 1_000_000_000))
+    experiment.load(run_path)
+    run_files.write_run_file(tmp_path, collection={"max_shots": 4})
+    os.utime(run_path, (1_000_000_000, 1_000_000_000))
+
+    study = experiment.load(run_path)
+
+    first_point = study.points[0]
+    assert study.collection_of(first_point).max_shots == 4
 
 
 def test_a_run_file_that_defines_no_experiment_is_refused(tmp_path):

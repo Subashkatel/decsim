@@ -20,13 +20,13 @@ file (same folder) and overrides the top-level keys this file names.
 import contextlib
 import copy
 import dataclasses
-import importlib.util
 import itertools
 import json
 import os
 import pathlib
 import re
 import sys
+import types
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Optional, Union
 
@@ -583,14 +583,22 @@ def _refuse_a_repeated_name(points: Sequence) -> None:
 
 
 def _executed_run_file(path: pathlib.Path):
-    """The run file run as a module, a refusal in it one sentence."""
+    """The run file run as a module, a refusal in it one sentence.
+
+    The source is compiled as it stands now, never from __pycache__: a
+    cached module is trusted when the source's size and whole-second
+    mtime match (PEP 552), so a run file rewritten within one second at
+    the same length would otherwise run its old text.
+    """
     stem = path.stem
     module_name = f"decsim_run_file_{stem}"
-    specification = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(specification)
+    source = path.read_text()
+    code = compile(source, str(path), "exec")
+    module = types.ModuleType(module_name)
+    module.__file__ = str(path)
     sys.modules[module_name] = module
     with _refused_in(path):
-        specification.loader.exec_module(module)
+        exec(code, module.__dict__)
     return module
 
 

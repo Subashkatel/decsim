@@ -38,6 +38,7 @@ import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
+import decsim.collect as collect
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.config as config
@@ -123,6 +124,8 @@ ENGINE_CLOCK = config.Clock(10_000)
 ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # The run helpers' default root seed: one call is one repeatable shot.
 RUN_SEED = 17
+# the clock each part names for itself, unlike either machine clock
+PART_CLOCK = config.Clock(8000)
 
 
 class RecordingReceiver:
@@ -274,6 +277,87 @@ def test_the_wiring_reaches_its_components():
     assert control.execution_runtime.issuer is control.issuer
     manager = machine.decoders.decoder_manager
     assert machine.windows.window_manager.requester.decode_queue is manager
+
+
+def test_a_part_on_its_own_clock_keeps_it_whatever_the_machines():
+    """Every clocked part of the gate names PART_CLOCK and a cost on it.
+
+    The machine's clock prices only a part that names none, as a gem5
+    ClockedObject takes its parent's domain only by default
+    (src/sim/ClockedObject.py:50), so the shot is the same on a machine
+    clock twice as fast as on the parts' own.
+    """
+    faster_clock = config.Clock(4000)
+    on_a_faster_machine = _shot_on_own_clocks(faster_clock)
+    on_the_parts_clock = _shot_on_own_clocks(PART_CLOCK)
+
+    assert on_a_faster_machine == on_the_parts_clock
+
+
+def _shot_on_own_clocks(machine_clock):
+    """The gate's shot 0 with every clocked part on PART_CLOCK, as json."""
+    settings = _gate_on_own_clocks(machine_clock)
+    task = collect.Task(settings, {})
+    shot = collect.run_shot(task, 0)
+    return collect.json_value(shot.result)
+
+
+def _gate_on_own_clocks(machine_clock):
+    """Each clocked part a cost on PART_CLOCK; both tiers a preset time."""
+    gate = shape_tests.gate_switching()
+    controller = dataclasses.replace(
+        gate.controller,
+        clock=PART_CLOCK,
+        readout_to_bits_cycles=1,
+        packing_cycles_per_round=1,
+    )
+    events = dataclasses.replace(
+        gate.detection_events,
+        clock=PART_CLOCK,
+        latency_cycles=1,
+        cycles_per_round=1,
+    )
+    store = dataclasses.replace(
+        gate.weak_syndrome_buffer,
+        clock=PART_CLOCK,
+        write_cycles=1,
+        read_cycles=1,
+    )
+    # long enough that the decision outlasts the wait for a free unit
+    windows = dataclasses.replace(
+        gate.windows, clock=PART_CLOCK, decision_cycles=50
+    )
+    manager = dataclasses.replace(
+        gate.decoder_manager, clock=PART_CLOCK, dispatch_cycles=1
+    )
+    switching = dataclasses.replace(
+        gate.switching, clock=PART_CLOCK, threshold_cycles=1, switch_cycles=1
+    )
+    frame = dataclasses.replace(gate.pauli_frame, clock=PART_CLOCK)
+    weak = _pool_on_own_clock(gate.weak_decoder, 1.0)
+    strong = _pool_on_own_clock(gate.strong_decoder, 10.0)
+    return dataclasses.replace(
+        gate,
+        clock=machine_clock,
+        controller=controller,
+        detection_events=events,
+        weak_syndrome_buffer=store,
+        windows=windows,
+        decoder_manager=manager,
+        switching=switching,
+        pauli_frame=frame,
+        weak_decoder=weak,
+        strong_decoder=strong,
+    )
+
+
+def _pool_on_own_clock(pool, microseconds: float):
+    """The pool's engine on PART_CLOCK, its decode a preset time."""
+    engine = dataclasses.replace(pool.engine, clock=PART_CLOCK)
+    algorithm = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=microseconds
+    )
+    return dataclasses.replace(pool, algorithm=algorithm, engine=engine)
 
 
 @pytest.mark.parametrize(

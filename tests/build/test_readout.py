@@ -111,6 +111,19 @@ def test_a_path_that_crosses_no_seat_or_two_is_refused(run_facts, formed_at):
         )
 
 
+def test_a_placement_that_names_no_clock_forms_on_the_machines():
+    """No preset clock ticks at 300 MHz, so a former on one fails here."""
+    detection_events = event_settings.DetectionEventSettings(latency_cycles=5)
+    machine_clock = config.Clock.from_megahertz(300.0)
+    device = _DeviceWithNoFormationTable()
+
+    placement = readout_part.build_detection_events(
+        detection_events, machine_clock, device, *WEAK_BASELINE
+    )
+
+    assert placement.clock == machine_clock
+
+
 def test_the_burst_detector_counts_at_the_primary_tiers_seat():
     """The escalated region's seat forms too, but is not counted twice."""
     seats = ("weak_decoder", "strong_decoder")

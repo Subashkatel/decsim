@@ -543,7 +543,10 @@ def _online_gate(physical_error_probability=0.008):
 
 @pytest.mark.parametrize(
     "cell, sentence",
-    [("-5.0", "must be finite and not negative"), ("abc", "number of dec")],
+    [
+        ("-5.0", "must be finite and not negative"),
+        ("abc", "could not convert string to float"),
+    ],
 )
 def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
     tmp_path, cell, sentence

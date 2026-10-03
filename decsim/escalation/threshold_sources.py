@@ -854,10 +854,5 @@ def _certified_decibels(
             "entry is empty (not enough evidence at calibration time)"
         )
     entry = f"threshold_table {table_path} entry {column} at {point}"
-    try:
-        gap_threshold_db = float(cell)
-    except ValueError:
-        raise ValueError(
-            f"{entry} must be a number of decibels (got {cell!r})"
-        ) from None
+    gap_threshold_db = float(cell)
     return checked_decibels(gap_threshold_db, entry)

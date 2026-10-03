@@ -7,6 +7,7 @@ records.workload.Workload. A maker written outside decsim has the same
 shape; these are the ones that ship.
 """
 
+import dataclasses
 from typing import Optional, Union
 
 import stim
@@ -43,7 +44,9 @@ def memory_circuit(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     return workload_records.Workload(
-        operations=(operation,), round_counts={1: rounds}
+        operations=(operation,),
+        round_counts={1: rounds},
+        physical_error_probability=physical_error_probability,
     )
 
 
@@ -93,7 +96,9 @@ def memory_patches(
         operations.append(operation)
         round_counts[operation_id] = rounds
     return workload_records.Workload(
-        operations=tuple(operations), round_counts=round_counts
+        operations=tuple(operations),
+        round_counts=round_counts,
+        physical_error_probability=physical_error_probability,
     )
 
 
@@ -120,7 +125,9 @@ def deltakit_memory(
         1, "memory", (patch,), patches=(patch,)
     )
     physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
-    return workload_records.Workload((operation,), {1: rounds}, physical)
+    return workload_records.Workload(
+        (operation,), {1: rounds}, physical, physical_error_probability
+    )
 
 
 def deltakit_live_memory(
@@ -149,7 +156,10 @@ def deltakit_live_memory(
         relaxation_time_microseconds=relaxation_time_microseconds,
         dephasing_time_microseconds=dephasing_time_microseconds,
     )
-    return live_memory(program, decode_after_rounds, patch)
+    workload = live_memory(program, decode_after_rounds, patch)
+    return dataclasses.replace(
+        workload, physical_error_probability=physical_error_probability
+    )
 
 
 def live_memory(

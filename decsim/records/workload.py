@@ -50,7 +50,10 @@ class Workload:
     counts of round_policies.GateRounds, and a mapping given is held as
     its pairs, in its order. physical is a finite circuit, the four live
     fragments of a repeated memory, or None when every operation carries
-    its own circuit or the run is timing only.
+    its own circuit or the run is timing only. physical_error_probability
+    is the noise the maker made the circuits at, as its caller wrote it,
+    None when it states none: a point's fact a threshold reads
+    (settings.MachineSettings.point_facts).
     """
 
     operations: tuple
@@ -58,6 +61,7 @@ class Workload:
     physical: Optional[
         Union[FiniteCircuit, circuit_records.RepeatedStimCircuit]
     ] = None
+    physical_error_probability: Optional[float] = None
 
     def __post_init__(self) -> None:
         pairs = _held_pairs(self.round_counts)

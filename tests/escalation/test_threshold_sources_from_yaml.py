@@ -195,8 +195,9 @@ def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
     table_path.write_text(f"{header}\n3,{NEAR_THRESHOLD_P},{cell}\n")
     card = {"threshold_source": "table", "threshold_table": table_path.name}
     config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
     with pytest.raises(ValueError, match=sentence):
-        load_experiment(config_path)
+        config.first_point_task()
 
 
 def test_a_table_with_no_key_column_is_refused(tmp_path):
@@ -213,8 +214,8 @@ def test_a_table_with_no_key_column_is_refused(tmp_path):
 def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
     """The distance and the error rate are written once and not swept.
 
-    The table's key columns read them from each point's resolved
-    sections, so a sweep over the round period alone finds its row.
+    The table's key columns read them from each point's settings, so a
+    sweep over the round period alone finds its row.
     """
     table_path = tmp_path / "period_table.csv"
     table_path.write_text(
@@ -418,7 +419,8 @@ def test_an_online_target_written_in_exponent_form_loads(tmp_path):
 def test_the_online_seed_reads_its_distance_and_error_rate_by_path(tmp_path):
     """The seed text is the one the frozen gate's online point ran with.
 
-    Its two numbers are read from the point's resolved sections.
+    Its two numbers are read from the point's settings: the qpu's
+    distance and the error probability the workload was made at.
     """
     card = {"threshold_source": "online", "gap_threshold_db": 20.0}
     config_path = source_config(tmp_path, card)
@@ -642,8 +644,9 @@ class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
     class Settings(threshold_sources.OnlineThreshold.Settings):
         """The online row's record, building this row for a point."""
 
-        def for_point(self) -> "_OutsideLearningThreshold":
+        def for_point(self, facts) -> "_OutsideLearningThreshold":
             """One instance of this row for the point."""
+            del facts
             return _OutsideLearningThreshold(self.threshold_nats)
 
 

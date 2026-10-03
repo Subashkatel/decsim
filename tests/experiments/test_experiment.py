@@ -13,9 +13,14 @@ import random
 import pytest
 
 import decsim.collect as collect
+import decsim.confidence.complementary as complementary
+import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collection as collection
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
+import decsim.frontends.settings as workload_settings
+import decsim.producers as producers
 import tests.experiments.yaml_configs as yaml_configs
 
 CAPPED = collection.CollectionSettings(max_shots=4)
@@ -122,12 +127,49 @@ def test_a_python_points_task_builds_its_online_calibrator(tmp_path):
     overrides = yaml_configs.online_threshold()
     config_path = yaml_configs.write_config(tmp_path, overrides)
     config = experiment.load_experiment(config_path)
-    machine = config.first_point_task().settings
-    point = experiment.Point("online", machine)
+    yaml_task = config.first_point_task()
+    point = experiment.Point("online", yaml_task.settings)
 
-    calibrator = experiment.task_of(point).online_threshold
+    task = experiment.task_of(point)
+
+    calibrator = task.online_threshold
 
     expected = random.Random("online-threshold d=3 p=0.001")
+    generator = calibrator.random_generator
+    assert generator.getstate() == expected.getstate()
+
+
+def test_a_python_point_states_its_distance_and_error_probability_once(
+    tmp_path,
+):
+    """The threshold record names no fact; the seed reads the point's.
+
+    The distance is the qpu's and the error probability the one the
+    workload was made at, so the online card restates neither.
+    """
+    machine = _minimal_settings(tmp_path)
+    confidence = complementary.ComplementaryGap.Settings()
+    card = threshold_sources.OnlineThreshold.Settings(threshold_decibels=15.0)
+    switching = escalation_settings.SwitchingSettings(confidence, card)
+    workload = producers.memory_circuit(
+        "surface_code:rotated_memory_x", 6, 5, 0.002
+    )
+    qpu = dataclasses.replace(machine.qpu, distance=5)
+    running = workload_settings.WorkloadSettings.running(workload)
+    machine = dataclasses.replace(
+        machine,
+        qpu=qpu,
+        workload=running,
+        strong_decoder=machine.weak_decoder,
+        switching=switching,
+    )
+    point = experiment.Point("online", machine)
+
+    task = experiment.task_of(point)
+
+    calibrator = task.online_threshold
+
+    expected = random.Random("online-threshold d=5 p=0.002")
     generator = calibrator.random_generator
     assert generator.getstate() == expected.getstate()
 

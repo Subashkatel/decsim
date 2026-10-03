@@ -527,7 +527,6 @@ def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
             clocks,
             None,
             confidence_signals.confidence_settings,
-            {},
         )
     finally:
         del table["port_only"]

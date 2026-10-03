@@ -166,6 +166,43 @@ class MachineSettings:
             return "strong_only"
         return "weak_baseline"
 
+    def point_facts(self) -> dict:
+        """The point's facts a threshold reads, None where none is stated.
+
+        The names are threshold_sources.POINT_FACTS: the qpu's distance
+        and round period, the physical error probability the workload
+        was made at, and the window sizes, None being the distance. A
+        threshold reads them here, off the point, so a run states each
+        once.
+        """
+        workload_record = self.workload.workload_record
+        probability = None
+        if workload_record is not None:
+            probability = workload_record.physical_error_probability
+        scheme = self.windows.scheme
+        return {
+            "distance": self.qpu.distance,
+            "physical_error_probability": probability,
+            "round_period_microseconds": self.qpu.round_period_microseconds,
+            "commit_rounds": scheme.commit_rounds,
+            "buffer_rounds": scheme.buffer_rounds,
+        }
+
+    def at_point(self) -> "MachineSettings":
+        """The settings with the threshold their point's facts give.
+
+        A calibration table's row is read here, once per point by the
+        point's task (collect.Task); any other threshold is the same at
+        every point.
+        """
+        switching = self.switching
+        if switching is None:
+            return self
+        facts = self.point_facts()
+        threshold = switching.threshold.at_point(facts)
+        resolved = dataclasses.replace(switching, threshold=threshold)
+        return dataclasses.replace(self, switching=resolved)
+
     @classmethod
     def from_mapping(
         cls, sections: Mapping, *, name: str, section_folders: Mapping
@@ -217,13 +254,11 @@ class MachineSettings:
             decoder_manager_section, clocks
         )
         escalation_folder = section_folders.get("escalation")
-        facts = _point_facts(sections)
         switching = escalation_settings.SwitchingSettings.from_yaml(
             escalation_section,
             clocks,
             escalation_folder,
             confidence_signals.confidence_settings,
-            facts,
         )
         windows = window_settings.WindowSettings.from_yaml(
             sections["windows"], clocks, switching
@@ -282,28 +317,6 @@ class MachineSettings:
             magic_state_factory=magic_state_factory,
             observation=observation,
         )
-
-
-def _point_facts(sections: Mapping) -> dict:
-    """The facts a threshold row reads at the point, None where left out.
-
-    The names are threshold_sources.POINT_FACTS. The physical error
-    probability is the one the workload's maker takes; an arguments
-    value that is no mapping is the workload's to refuse.
-    """
-    qpu = sections["qpu"]
-    windows = sections["windows"]
-    arguments = sections["workload"].get("arguments")
-    probability = None
-    if isinstance(arguments, Mapping):
-        probability = arguments.get("physical_error_probability")
-    return {
-        "distance": qpu.get("distance"),
-        "physical_error_probability": probability,
-        "round_period_microseconds": qpu.get("round_period_microseconds"),
-        "commit_rounds": windows.get("commit_rounds"),
-        "buffer_rounds": windows.get("buffer_rounds"),
-    }
 
 
 def _checked(

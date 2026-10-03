@@ -686,9 +686,8 @@ def _point_task_of(
 ) -> collect.Task:
     """A point's task: its workload made.
 
-    The task builds the online calibrator, whose seed reads the point's
-    facts off its threshold record, which the yaml reader filled from
-    the point's sections.
+    The task reads the point's threshold and builds its online
+    calibrator from the point's facts, the made workload's among them.
     """
     workload = settings.workload.made()
     point_settings = dataclasses.replace(settings, workload=workload)

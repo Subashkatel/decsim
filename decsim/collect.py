@@ -97,7 +97,10 @@ class RecordOptions:
 class Task:
     """One machine settings record, a sweep point, to run seeds of.
 
-    metadata is the json the caller wants to see beside every row (the
+    settings are the point's, its threshold read at the point
+    (MachineSettings.at_point: a calibration table's row), so the strong
+    id covers the number a table gives the point. metadata is the json
+    the caller wants to see beside every row (the
     sweep point). online_threshold is the point's calibrator when its
     switching threshold learns across shots: point state, built here
     once from the threshold record (for_point) and handed to every
@@ -114,8 +117,10 @@ class Task:
 
     def __post_init__(self):
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
+        settings = self.settings.at_point()
+        object.__setattr__(self, "settings", settings)
         if self.online_threshold is None:
-            calibrator = _point_calibrator(self.settings.switching)
+            calibrator = _point_calibrator(settings)
             object.__setattr__(self, "online_threshold", calibrator)
 
     def strong_id(self) -> str:
@@ -291,11 +296,15 @@ def json_value(
     return _json_in(value, form)
 
 
-def _point_calibrator(switching) -> Optional[ports.ThresholdSource]:
+def _point_calibrator(
+    settings: machine_settings.MachineSettings,
+) -> Optional[ports.ThresholdSource]:
     """The calibrator a point's shots share, when its threshold learns one."""
+    switching = settings.switching
     if switching is None:
         return None
-    return switching.threshold.for_point()
+    facts = settings.point_facts()
+    return switching.threshold.for_point(facts)
 
 
 @dataclasses.dataclass(frozen=True)

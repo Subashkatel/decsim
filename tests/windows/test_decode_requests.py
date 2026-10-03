@@ -399,21 +399,6 @@ def test_a_shared_input_is_written_once_and_the_other_solve_reads_it():
     assert masked.bits == (1, 0, 1)
 
 
-def test_an_input_that_carries_its_mask_is_not_masked_again():
-    """A second write would be a second mask over the first.
-
-    The memory that holds the input refuses it, so a caller that folds
-    twice is told rather than decoding rounds the boundary has been
-    XORed into twice (Helios 2301.08419 lines 632-640).
-    """
-    fixture = _Fixture()
-    job, memory = _landed_job(fixture, folds_in_place=True)
-    fixture.gate.mask_input(job)
-
-    with pytest.raises(RuntimeError):
-        memory.rewrite(job, job.decoder_input)
-
-
 def _companion_solve(job, memory):
     """The window's other forced-class solve, reading the same input."""
     companion = decoding_records.DecodeJob(

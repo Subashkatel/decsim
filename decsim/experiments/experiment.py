@@ -28,7 +28,7 @@ import pathlib
 import re
 import sys
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 import yaml
 
@@ -38,6 +38,7 @@ import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
 import decsim.machine as machine_module
+import decsim.ports as ports
 import decsim.settings as machine_settings
 
 _THIS_FILE = pathlib.Path(__file__)
@@ -100,7 +101,7 @@ class Point:
     sections: Optional[Mapping] = dataclasses.field(
         default=None, compare=False, repr=False
     )
-    online_threshold: Optional[Any] = dataclasses.field(
+    online_threshold: Optional[ports.ThresholdSource] = dataclasses.field(
         default=None, compare=False, repr=False
     )
     record_options: collect.RecordOptions = DEFAULT_RECORD_OPTIONS
@@ -713,7 +714,7 @@ def _point_task_of(
 
 def _online_threshold_of(
     switching: Optional[escalation_settings.SwitchingSettings],
-) -> Optional[Any]:
+) -> Optional[ports.ThresholdSource]:
     """The source the point's shots share, when its threshold row has one."""
     if switching is None:
         return None

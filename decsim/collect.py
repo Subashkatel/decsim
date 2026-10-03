@@ -40,6 +40,7 @@ import stim
 
 import decsim.config as config
 import decsim.machine as machine_module
+import decsim.ports as ports
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
@@ -106,7 +107,7 @@ class Task:
 
     settings: machine_settings.MachineSettings
     metadata: Mapping[str, Any]
-    online_threshold: Optional[Any] = None
+    online_threshold: Optional[ports.ThresholdSource] = None
     record_options: RecordOptions = RecordOptions()
 
     def __post_init__(self):

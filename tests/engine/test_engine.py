@@ -83,6 +83,13 @@ def test_the_engine_runs_the_same_ticks_with_no_listener_at_all():
     assert bare.now == heard.now
 
 
+def test_a_negative_delay_is_refused():
+    """An action due in the past would run out of order, so it stops."""
+    engine = engine_module.Engine()
+    with pytest.raises(ValueError):
+        engine.schedule(-1, lambda: None)
+
+
 def test_an_action_that_raises_stops_the_run_and_leaves_the_rest_queued():
     """An action's exception reaches the caller unchanged.
 

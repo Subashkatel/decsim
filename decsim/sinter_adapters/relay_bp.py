@@ -19,7 +19,6 @@ sinter scores every shot.
 """
 
 import dataclasses
-from collections.abc import Mapping
 
 import numpy
 import sinter
@@ -30,34 +29,25 @@ import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_builders
-import decsim.tables as tables
-
-# the name a refused settings key is reported under
-SETTINGS_NAME = "relay_bp_adapter"
 
 
 class RelayBeliefPropagationDecoder(sinter.Decoder):
     """The factory sinter pickles to each worker, for one point's circuit.
 
-    settings holds the relay_bp row's own yaml keys, read and checked by
-    the row's Settings (decoders/relay_belief_propagation/decoder.py).
-    seed is the seed the row's gamma table is drawn from, so every
-    worker of a point decodes with one table and a rerun repeats it.
+    settings is the relay_bp row's own Settings record
+    (decoders/relay_belief_propagation/decoder.py). seed is the seed the
+    row's gamma table is drawn from, so every worker of a point decodes
+    with one table and a rerun repeats it.
     """
 
     def __init__(
-        self, circuit: stim.Circuit, settings: Mapping, seed: int
+        self,
+        circuit: stim.Circuit,
+        settings: relay_decoder.RelayBeliefPropagationDecoder.Settings,
+        seed: int,
     ) -> None:
         self.circuit = circuit
-        # the row reads no clock (its Settings.from_yaml deletes it)
-        self.settings = tables.row_settings(
-            relay_decoder.RelayBeliefPropagationDecoder,
-            SETTINGS_NAME,
-            settings,
-            (),
-            None,
-            SETTINGS_NAME,
-        )
+        self.settings = settings
         self.seed = seed
 
     def compile_decoder_for_dem(

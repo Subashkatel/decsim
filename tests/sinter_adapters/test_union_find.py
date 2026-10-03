@@ -10,26 +10,26 @@ _collection_worker_state.py:28), so the two agree shot for shot only if
 the adapter builds the row's graph.
 """
 
+import dataclasses
 import math
 
 import numpy
 import pytest
 import sinter
 import stim
-import yaml
 
 import decsim.collect as collect
-import decsim.experiments.experiment as experiment
+import decsim.decoders.union_find.cycle_count as cycle_count
+import decsim.decoders.union_find.decoder as union_find
+import decsim.frontends.settings as workload_settings
+import decsim.producers as producers
+import decsim.settings as machine_settings
 import decsim.sinter_adapters.union_find as union_find_adapter
 import decsim.windows.built_window_models as built_window_models
-import tests.experiments.yaml_configs as yaml_configs
+import decsim.windows.schemes.naive_online as naive_online
 
-BASELINE = (
-    yaml_configs.CONFIGS_DIR
-    / "experiments"
-    / "decoder_baseline"
-    / "decoder_baseline.yaml"
-)
+# the round period of the machine point the adapters answer against
+ROUND_PERIOD_MICROSECONDS = 1.1
 CODE_TASKS = ["surface_code:rotated_memory_x", "surface_code:rotated_memory_z"]
 # At this rate a shot holds enough defects that the graph's weights
 # decide many answers: the adapter on a coarser weight_step (2.0) answers
@@ -37,27 +37,18 @@ CODE_TASKS = ["surface_code:rotated_memory_x", "surface_code:rotated_memory_z"]
 SHOT_COUNT = 150
 ROUNDS = 5
 ERROR_RATE = 0.02
-# the baseline's union_find row (decoder_baseline.yaml)
-UNION_FIND_ROW = {
-    "kind": "union_find",
-    "units": 1,
-    "unit_memory": {"bits": None},
-    "engine": {
-        "clock": "fridge",
-        "fetch_cycles_per_round": 1,
-        "fetch_cycles_per_job": 0,
-        "release_cycles_per_job": 10,
-        "release_cycles_per_round": 0,
-    },
-}
+# the baseline's union_find row, charged the host's time
+UNION_FIND = union_find.UnionFindDecoder.Settings(
+    timing=cycle_count.HostMeasuredTime()
+)
 
 
 @pytest.mark.parametrize("distance", [3, 5])
 @pytest.mark.parametrize("code_task", CODE_TASKS)
 def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
-    tmp_path, distance, code_task
+    distance, code_task
 ):
-    task = union_find_task(tmp_path, distance, code_task)
+    task = baseline_task(distance, code_task, ERROR_RATE, UNION_FIND)
     seeds = range(SHOT_COUNT)
     events, machine_answers = machine_shots(task, seeds)
     (operation,) = task.settings.workload.operations
@@ -146,35 +137,26 @@ def test_sinter_collects_through_the_adapter():
     assert stats.errors < 200
 
 
-def union_find_task(tmp_path, distance: int, code_task: str):
-    """The one machine point of a union_find row, short shots."""
-    raw = {
-        "extends": str(BASELINE),
-        "workload": {
-            "kind": "producer",
-            "function": "decsim.producers:memory_circuit",
-            "arguments": {
-                "code_task": code_task,
-                "rounds_per_shot": ROUNDS,
-                "distance": "${qpu.distance}",
-                "physical_error_probability": ERROR_RATE,
-            },
-        },
-        "sweep": [
-            {
-                "axes": {
-                    "qpu.distance": [distance],
-                    "weak_decoder": [UNION_FIND_ROW],
-                },
-            }
-        ],
-        "collection": {"max_shots": 1},
-    }
-    config_path = tmp_path / "union_find.yaml"
-    text = yaml.safe_dump(raw, sort_keys=False)
-    config_path.write_text(text)
-    config = experiment.load_experiment(config_path)
-    return config.first_point_task()
+def baseline_task(distance: int, code_task: str, error_rate, algorithm):
+    """The decoder baseline's machine point on one weak row, short shots.
+
+    The weak base whose naive_online scheme decodes the operation as one
+    window, on one memory shot of the code task.
+    """
+    base = machine_settings.weak_decoder_baseline(
+        distance, error_rate, ROUND_PERIOD_MICROSECONDS
+    )
+    circuit_workload = producers.memory_circuit(
+        code_task, ROUNDS, distance, error_rate
+    )
+    workload = workload_settings.WorkloadSettings.running(circuit_workload)
+    scheme = naive_online.NaiveOnlineScheme.Settings()
+    windows = dataclasses.replace(base.windows, scheme=scheme)
+    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=algorithm)
+    settings = dataclasses.replace(
+        base, workload=workload, windows=windows, weak_decoder=weak_decoder
+    )
+    return collect.Task(settings, {})
 
 
 def machine_shots(task, seeds) -> tuple:

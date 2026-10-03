@@ -29,6 +29,7 @@ import sinter
 import stim
 import tesseract_decoder
 
+import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.experiments.run_folder as run_folder
 import decsim.sinter_adapters.relay_bp as relay_bp_adapter
 import decsim.sinter_adapters.union_find as union_find_adapter
@@ -49,18 +50,18 @@ TESSERACT_PROFILES = tesseract_decoder.make_tesseract_sinter_decoders_dict()
 
 # XYZ-Relay-BP-5 with the surface code values of Mueller et al.
 # 2506.01779 (lines 307, 332, 343), the variant the paper finds
-# comparable to matching on the surface code (lines 356-358), in the
-# machine's relay_bp row's own keys.
+# comparable to matching on the surface code (lines 356-358), as the
+# machine's relay_bp row's own record.
 RELAY_BP = "xyz-relay-bp-5"
-RELAY_BP_SETTINGS = {
-    "gamma0": 0.35,
-    "gamma_interval": [-0.254, 0.985],
-    "pre_iterations": 80,
-    "relay_set_count": 600,
-    "iterations_per_set": 60,
-    "converged_solution_count": 5,
-    "bases": "together",
-}
+RELAY_BP_SETTINGS = relay_decoder.RelayBeliefPropagationDecoder.Settings(
+    gamma0=0.35,
+    gamma_interval=(-0.254, 0.985),
+    pre_iterations=80,
+    relay_set_count=600,
+    iterations_per_set=60,
+    converged_solution_count=5,
+    bases="together",
+)
 # the seed each point's gamma table is drawn from, so a rerun repeats it
 RELAY_BP_SEED = 20260927
 # a point's decoders in the order of their ids

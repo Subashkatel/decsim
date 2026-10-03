@@ -207,8 +207,11 @@ class TableThreshold(FixedThreshold):
             sets g_th by brute force over P_L(g_th), lines 855-863, or as
             the smallest g_th with P_L,th(g_th) <= epsilon P_L,strong,
             Eq. (4) at line 890). The first row that holds the point
-            wins.
+            wins. A record whose row is read is the point's already, so
+            reading it again is itself and reads no file.
             """
+            if self.threshold_decibels is not None:
+                return self
             columns, rows = _table_rows(self.table, self.column)
             point = _point_of(columns, facts, self.table)
             row = _first_row_holding(rows, point, self.table)
@@ -229,9 +232,9 @@ class TableThreshold(FixedThreshold):
             if self.threshold_decibels is None:
                 raise ValueError(
                     f"threshold_table {self.table} gives a point its "
-                    "threshold once the point's row is read: a point's "
-                    "task reads it (collect.Task), and for one machine "
-                    "settings.at_point() does"
+                    "threshold once the point's row is read: "
+                    "Machine.build and a point's task read it "
+                    "(settings.at_point())"
                 )
             return TableThreshold(self.threshold_nats)
 

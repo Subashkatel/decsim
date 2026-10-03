@@ -194,8 +194,9 @@ class MachineSettings:
         """The settings with the threshold their point's facts give.
 
         A calibration table's row is read here, once per point by the
-        point's task (collect.Task); any other threshold is the same at
-        every point.
+        point's task (collect.Task), or by Machine.build for a record no
+        task read; settings read at their point are their own reading,
+        and any other threshold is the same at every point.
         """
         switching = self.switching
         if switching is None:

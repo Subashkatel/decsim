@@ -132,8 +132,11 @@ class Machine:
         without one builds its own models. online_threshold is the
         point's calibrator when its switching threshold learns across
         shots (collect.Task builds it); like the models it is point
-        state, never a setting.
+        state, never a setting. The settings are read at their point
+        first (MachineSettings.at_point), so a record whose table row no
+        task has read builds a shot as one whose row is read.
         """
+        settings = settings.at_point()
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
         engine = engine_module.Engine()

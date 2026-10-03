@@ -1781,6 +1781,26 @@ def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused_by_name(
         machine_module.Machine.build(settings, 0)
 
 
+def test_a_machine_built_from_its_record_reads_the_tables_row(tmp_path):
+    """Machine.build(settings, seed) builds a shot from the record alone.
+
+    A table threshold no point's task has read is read at the build,
+    from the record's own point facts: here its distance, 3.
+    """
+    table_path = tmp_path / "calibration.csv"
+    table_path.write_text("distance,gth_eq4_wilson\n3,12.0\n5,18.0\n")
+    memory = _switching_memory("pymatching", "complementary_gap")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    switching = dataclasses.replace(memory.switching, threshold=table)
+    settings = dataclasses.replace(memory, switching=switching)
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    threshold = machine.switching.policy.threshold
+    twelve_decibels = threshold_sources.decibels_to_nats(12.0)
+    assert threshold.threshold_nats == twelve_decibels
+
+
 def test_a_weak_tier_that_serves_the_confidence_is_accepted():
     """Each signal's own row builds; the refusal is about the pairing."""
     settings = _switching_memory("union_find", "cluster_gap")

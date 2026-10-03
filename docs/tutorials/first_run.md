@@ -107,8 +107,8 @@ every point of the yaml's sweep until its collection stops it:
 decsim run configs/reference.yaml --out results/reference
 ```
 
-It first prints what the yaml resolved to, one line per component, then
-one line per point as it finishes:
+It first prints the folder it writes, then one line per point as it
+finishes:
 
 ```
 {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 2 shots done (cap)

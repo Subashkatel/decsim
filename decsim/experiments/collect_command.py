@@ -242,7 +242,7 @@ def collect_experiment(
     report.refuse_pieces_of_another_tree(saved_pieces)
     run_folder.accept_raised_stop_rules(run_dir, run_file, every_id)
     started_utc = run_folder.start_run(run_dir, run_file, every_id)
-    _echo_description(chosen, run_file, run_dir)
+    print(f"run dir: {run_dir}\n", file=sys.stderr)
     measure_shot = _shot_measure(points, run_dir)
     _collect_until_stopped(points, run_dir, measure_shot, processes)
     folded_ids = run_folder.recorded_point_ids(run_dir, every_id)
@@ -918,18 +918,6 @@ def _save_the_piece(
     }
     state = unit.task.online_threshold
     pieces.write(run_dir, point_id, unit.first_seed, rows, piece_facts, state)
-
-
-def _echo_description(
-    study: experiment.Experiment,
-    run_file: pathlib.Path,
-    run_dir: pathlib.Path,
-) -> None:
-    """The resolved experiment, before the first shot, on stderr."""
-    description = experiment.description(study, run_file)
-    description.append(f"run dir: {run_dir}\n")
-    description_text = "\n".join(description)
-    print(description_text, file=sys.stderr)
 
 
 def _say_the_threshold(calibrator) -> None:

@@ -186,8 +186,7 @@ the strong decoder, and nothing else in this run.
 decsim run configs/examples/two_tiers.yaml --out results/two_tiers
 ```
 
-The command prints the same resolved config, then one line per point as
-it finishes. The numbers are in `sweep.csv`; these are the columns this
+The command prints its folder, then one line per point as it finishes. The numbers are in `sweep.csv`; these are the columns this
 step reads:
 
 ```bash

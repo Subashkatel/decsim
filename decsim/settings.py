@@ -100,7 +100,7 @@ class MachineSettings:
     decoder, strong_decoder alone on the strong one, and both with
     switching decode weak first and escalate a window to the strong
     decoder; none of the three is a run that plans no decoding. Two
-    decoders without switching, or switching without both, is refused.
+    decoders without switching is refused.
     """
 
     clock: Optional[config.Clock] = None

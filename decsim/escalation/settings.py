@@ -32,8 +32,6 @@ ESCALATION_KINDS = {
 # The section keys every kind reads: the price of the verdict, which only
 # a switching run charges.
 _TIMING_KEYS = ("kind", "clock", "threshold_cycles", "switch_cycles")
-# The chip's controller clock, 250 MHz (2605.04892 line 1063).
-_CLOCK_250_MEGAHERTZ = config.Clock.from_megahertz(250.0)
 # escalation.strong_window names one of these rows: the shape of the
 # window the strong tier re-decodes. The yaml's name becomes the row's
 # Settings record, which the switching part builds on the run's engine.
@@ -216,25 +214,6 @@ class SwitchingSettings:
             switch_cycles,
             confidence_settings,
         )
-
-
-def one_cycle_verdict(
-    confidence: ConfidenceSettings,
-    threshold: ThresholdSettings,
-    strong_window: StrongWindowSettings,
-) -> SwitchingSettings:
-    """A switching slot whose verdict is one compare and one state change.
-
-    The verdict runs on the chip's clock, each step one cycle.
-    """
-    return SwitchingSettings(
-        confidence=confidence,
-        threshold=threshold,
-        clock=_CLOCK_250_MEGAHERTZ,
-        threshold_cycles=1,  # estimate, one compare
-        switch_cycles=1,  # estimate, one state change
-        strong_window=strong_window,
-    )
 
 
 def escalation_kind(section: Mapping) -> str:

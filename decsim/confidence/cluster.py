@@ -164,11 +164,6 @@ class ClusterGap:
         return gap, ticks
 
 
-# The cluster gap with its walk priced at 1.0 us on the weak unit: a
-# chosen value, an estimate (Kishi 2602.03336 lines 17-19).
-ONE_MICROSECOND_WALK = ClusterGap.Settings(walk_microseconds=1.0)
-
-
 def require_one_logical_row(graph) -> None:
     """The gap is defined for exactly one logical-observable row."""
     row_count = graph.logical_observable_count

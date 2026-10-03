@@ -80,8 +80,17 @@ def switching(
         threshold_decibels=THRESHOLD_DECIBELS
     )
     double_window = strong_window_shapes.DoubleWindow.Settings()
-    switching_slot = escalation_settings.one_cycle_verdict(
-        cluster.ONE_MICROSECOND_WALK, threshold, double_window
+    # the cluster gap's walk priced at 1.0 us on the weak unit, a chosen
+    # value (2602.03336 lines 17-19); the verdict is one compare and one
+    # state change, a cycle each of the chip clock, estimates
+    confidence = cluster.ClusterGap.Settings(walk_microseconds=1.0)
+    switching_slot = escalation_settings.SwitchingSettings(
+        confidence=confidence,
+        threshold=threshold,
+        clock=machine_settings.FRIDGE_CLOCK,
+        threshold_cycles=1,
+        switch_cycles=1,
+        strong_window=double_window,
     )
     windows = window_settings.switching_windows(machine.windows, double_window)
     return dataclasses.replace(

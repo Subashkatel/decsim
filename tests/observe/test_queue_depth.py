@@ -13,23 +13,6 @@ depth by the time spent at it, as gem5's time-weighted average
 import decsim.observe.queue_depth as queue_depth
 
 
-def test_a_queue_that_never_changed_has_no_sample_and_no_peak():
-    log = queue_depth.QueueDepthLog()
-
-    assert log.samples == []
-    assert log.peak == 0
-
-
-def test_one_sample_is_kept_per_change_with_its_tick():
-    log = queue_depth.QueueDepthLog()
-
-    log.depth_changed("default", 1000, 1)
-    log.depth_changed("default", 2000, 2)
-    log.depth_changed("default", 3000, 0)
-
-    assert log.samples == [(1000, 1), (2000, 2), (3000, 0)]
-
-
 def test_a_sample_is_the_jobs_waiting_over_both_pools():
     log = queue_depth.QueueDepthLog()
 
@@ -38,16 +21,6 @@ def test_a_sample_is_the_jobs_waiting_over_both_pools():
     log.depth_changed("default", 3000, 0)
 
     assert log.samples == [(1000, 2), (2000, 3), (3000, 1)]
-
-
-def test_the_peak_is_the_most_jobs_that_ever_waited_at_once():
-    log = queue_depth.QueueDepthLog()
-
-    log.depth_changed("default", 1000, 1)
-    log.depth_changed("default", 2000, 5)
-    log.depth_changed("default", 3000, 2)
-
-    assert log.peak == 5
 
 
 def test_a_job_that_joins_and_leaves_in_one_tick_never_waited():

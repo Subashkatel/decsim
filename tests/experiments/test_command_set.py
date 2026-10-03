@@ -953,6 +953,27 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     assert point.tracker.counts.failures == 1
 
 
+def test_a_new_piece_ends_where_the_next_saved_piece_starts(tmp_path):
+    """A piece handed out before a saved one stops at that one's first seed.
+
+    Seeds 0 and 2 are saved in pieces of one shot and a piece is three
+    shots, so seed 1's piece is one shot, and a piece of three would run
+    seed 2 again; the piece after seed 2 is whole.
+    """
+    task = run_files.first_task()
+    point_id = task.strong_id()
+    _write_a_saved_piece(tmp_path, point_id, 0, [False])
+    _write_a_saved_piece(tmp_path, point_id, 2, [False])
+    settings = collection_module.CollectionSettings(max_shots=6)
+    point_folders = pieces.folders_of(tmp_path, [point_id])
+    saved = pieces.saved_counts(point_folders)
+    point = collect_command.PointCollection(task, settings, 3, 15, saved)
+
+    units = point.next_units(tmp_path, 2)
+
+    assert units == [collect.Unit(task, 1, 1), collect.Unit(task, 3, 3)]
+
+
 def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     tmp_path, capsys
 ):
@@ -1365,6 +1386,33 @@ def test_a_record_class_names_settings_and_not_results(tmp_path):
     result_text = (out_dir / "result.json").read_text()
     assert record["settings"]["class"] == "decsim.settings.MachineSettings"
     assert '"class"' not in result_text
+
+
+def test_a_run_into_a_folder_of_another_commit_is_refused(tmp_path, capsys):
+    """A folder's rows pool every run into it, so they ran one tree.
+
+    run.json is rewritten as a run at another commit leaves it, and the
+    next run into the folder is refused before it writes anything,
+    naming the commit the folder holds.
+    """
+    run_file = run_files.write_run_file(tmp_path)
+    out_dir = tmp_path / "out"
+    command.main(["run", str(run_file), "--out", str(out_dir)])
+    record = _manifest_of(out_dir)
+    other_commit = "b" * 40
+    record["git"]["commit"] = other_commit
+    run_path = out_dir / run_folder.RUN_FILE
+    record_text = json.dumps(record)
+    run_path.write_text(record_text)
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["run", str(run_file), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert f"holds a run of commit {other_commit}" in printed.err
+    assert run_path.read_text() == record_text
 
 
 def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
@@ -1845,6 +1893,46 @@ def test_a_refused_fold_leaves_the_last_run_folder_as_it_was(tmp_path):
         command.main(["run", "--fold", "--out", str(out_dir)])
 
     assert _run_folder_bytes(out_dir) == before
+
+
+def test_a_fold_that_fails_part_way_leaves_the_last_run_folder_as_it_was(
+    tmp_path,
+):
+    """A fold that raises after writing some files publishes none of them.
+
+    Every piece is made to name a latency point this tree does not
+    measure, as a tree that called service something else would write
+    it, so the fold's sort of the window samples raises after sweep.csv
+    and shots.csv are written. Those went into the staging folder, so
+    every file of the run folder is what the first fold wrote.
+    """
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
+    out_dir = tmp_path / "out"
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    before = _run_folder_bytes(out_dir)
+    for piece_folder in out_dir.glob("pieces/*/*"):
+        _with_a_renamed_point(piece_folder, "service", "park")
+
+    with pytest.raises(ValueError):
+        command.main(["run", "--fold", "--out", str(out_dir)])
+
+    assert _run_folder_bytes(out_dir) == before
+
+
+def _with_a_renamed_point(piece_folder, name: str, renamed: str) -> None:
+    """The piece as a tree that called that latency point renamed writes it."""
+    shots_path = piece_folder / "shots.csv"
+    shot_rows = _csv_rows(shots_path)
+    for row in shot_rows:
+        row[f"{renamed}_mean_us"] = row.pop(f"{name}_mean_us")
+        row[f"{renamed}_max_us"] = row.pop(f"{name}_max_us")
+    _write_csv_rows(shots_path, shot_rows)
+    samples_path = piece_folder / "window_samples.csv"
+    samples = _csv_rows(samples_path)
+    for row in samples:
+        if row["name"] == name:
+            row["name"] = renamed
+    _write_csv_rows(samples_path, samples)
 
 
 def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:

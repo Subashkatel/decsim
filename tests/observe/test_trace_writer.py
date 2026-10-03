@@ -14,7 +14,9 @@ import json
 
 import pytest
 
+import decsim.collect as collect
 import decsim.decoders.decoders as decoders
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.qpu.settings as qpu_settings
@@ -28,33 +30,24 @@ POINT_LOG_SHA256 = gate_point.POINT_LOG_SHA256
 
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
 _METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
-# the switching run's one-microsecond weak card
-ONE_MICROSECOND_WEAK = {
-    "kind": 1.0,
-    "unit_memory": {"bits": None},
-    "engine": {
-        "clock": "fridge",
-        "fetch_cycles_per_round": 1,
-        "fetch_cycles_per_job": 0,
-        "release_cycles_per_job": 10,
-        "release_cycles_per_round": 0,
-    },
-}
-# the withdrawal run of test_measure: a five-microsecond weak card under
-# double_window, which takes back a queued request when it re-slices
-RE_SLICED_WINDOWS = {
-    "escalation": {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "double_window",
-    },
-    "weak_decoder": {
-        "kind": 5.0,
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": measure_tests.ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
-    },
-}
+
+
+def _traced_switching_run(trace_path, weak_unit_count=1, **arguments):
+    """test_measure's 20 dB switching shot, traced to trace_path."""
+    settings = measure_tests.switching_settings(20.0, **arguments)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, unit_count=weak_unit_count
+    )
+    observation = dataclasses.replace(
+        settings.observation, trace=str(trace_path)
+    )
+    traced = dataclasses.replace(
+        settings, weak_decoder=weak_decoder, observation=observation
+    )
+    task = measure_tests.point_task(
+        traced, measure_tests.SWITCHING_ERROR_PROBABILITY
+    )
+    return collect.run_shot(task, 0)
 
 
 def _settings(trace_path=None, data_movement=False):
@@ -292,15 +285,11 @@ def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
     decode's stages and no two of its stages overlap.
     """
     trace_path = tmp_path / "pair.trace.json"
-    observation = {"trace": str(trace_path)}
-    weak_decoder = {**ONE_MICROSECOND_WEAK, "units": 2}
-    sections = {"weak_decoder": weak_decoder, "observation": observation}
-    shot = measure_tests.switching_run(
-        tmp_path,
-        20.0,
+    shot = _traced_switching_run(
+        trace_path,
+        weak_unit_count=2,
         run_both_at_once=True,
         strong_units=2,
-        sections=sections,
     )
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
@@ -325,9 +314,10 @@ def test_a_withdrawn_request_leaves_the_queue_when_it_is_withdrawn(tmp_path):
     the end of the run.
     """
     trace_path = tmp_path / "withdrawn.trace.json"
-    observation = {"trace": str(trace_path)}
-    sections = {**RE_SLICED_WINDOWS, "observation": observation}
-    shot = measure_tests.switching_run(tmp_path, 20.0, sections=sections)
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    shot = _traced_switching_run(
+        trace_path, weak_microseconds=5.0, strong_window=double_window
+    )
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
     queued = _rows_with(complete_rows, "cat", "window,queue")

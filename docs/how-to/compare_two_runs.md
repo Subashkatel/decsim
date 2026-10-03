@@ -150,9 +150,9 @@ counts those windows in `referee_window_disagreements`.
   rate. Compare `logical_error_rate_low` and `logical_error_rate_high`,
   not just `logical_error_rate_estimate`; if the two intervals overlap,
   the runs have not been shown to differ that way. When the two runs
-  decoded the same shots, read the paired line too. A point with no interval, no
-  scored shot or a cap with no failure, has no comparison to make, and
-  `diff` says so.
+  decoded the same shots, count the shots only one of them failed, as
+  above. A point with no interval, no scored shot or a cap with no
+  failure, has no comparison to make.
 - **The run record.** `run.json` in each folder carries the git
   commit, whether the checkout was dirty, the sha256 of its uncommitted
   changes, the library versions and the command line. Two runs on

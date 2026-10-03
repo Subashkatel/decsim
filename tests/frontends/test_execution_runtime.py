@@ -128,6 +128,14 @@ def name_of_holder(runtime):
     return name_of
 
 
+def test_a_program_with_no_operations_is_complete_at_once():
+    runtime, _engine, _issuer, _factory, _stamps = runtime_over(())
+    program = program_records.ExecutionProgram(())
+    runtime.load_program(program)
+    runtime.start()
+    assert runtime.workload_complete is True
+
+
 def test_a_successor_waits_for_every_dependency_edge_it_declares():
     """An operation named twice as a predecessor is waited for twice."""
     root = operation_named(1)

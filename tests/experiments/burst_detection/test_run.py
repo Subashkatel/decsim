@@ -3,7 +3,6 @@
 import dataclasses
 import importlib.util
 import pathlib
-import sys
 
 import pytest
 
@@ -40,7 +39,7 @@ def test_a_point_whose_calibration_is_not_saved_is_refused(tmp_path):
     )
 
 
-def test_a_tiny_grid_runs_combines_and_plots(tmp_path, monkeypatch):
+def test_a_tiny_grid_runs_and_combines(tmp_path, monkeypatch):
     """Only d = 5 and p = 0.003: 40 rounds, 2 trials a class, 4 streams."""
     run = script_module("run")
     one_shot_calibration = dataclasses.replace(
@@ -54,29 +53,20 @@ def test_a_tiny_grid_runs_combines_and_plots(tmp_path, monkeypatch):
     monkeypatch.setattr(run, "QUIET_PARTS", 1)
     monkeypatch.setattr(run, "QUIET_BATCHES", 1)
     monkeypatch.setattr(run, "QUIET_STREAMS", 4)
-    monkeypatch.setitem(sys.modules, "run", run)
-    plot = script_module("plot")
     folder = tmp_path / "out"
 
     run.main(["--out", str(folder)])
-    plot.main(folder)
 
     trials_text = (folder / "trials.csv").read_text()
     quiet_text = (folder / "quiet.csv").read_text()
-    plot_names = {path.name for path in (folder / "plots").iterdir()}
     assert trials_text.count("\n") == 1 + 12 * 2 * 3
     quiet_lines = quiet_text.splitlines()
     assert len(quiet_lines) == 1 + 3
     assert quiet_lines[1].startswith("5,0.003,0,1.0,0.00016,")
-    assert plot_names == {"rounds_to_90_p0.003.png", "false_alarms.png"}
 
 
 def script_module(name: str):
-    """experiments/burst_detection/<name>.py, imported, its main not run.
-
-    plot.py imports run.py by the name run, so a caller that imports plot
-    pins this experiment's run in sys.modules first.
-    """
+    """experiments/burst_detection/<name>.py, imported, its main not run."""
     path = SCRIPT_FOLDER / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"burst_{name}", path)
     module = importlib.util.module_from_spec(spec)

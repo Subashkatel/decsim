@@ -256,9 +256,7 @@ def test_the_first_relay_leg_must_run_at_least_once():
 def test_a_gamma_interval_that_is_not_low_below_high_is_refused(interval):
     # relay-bp panics on an empty interval, [0.1, 0.1] among them
     with pytest.raises(ValueError) as caught:
-        relay.RelayBeliefPropagationDecoder.Settings(
-            **{"gamma_interval": interval}
-        )
+        relay.RelayBeliefPropagationDecoder.Settings(gamma_interval=interval)
     assert str(caught.value) == (
         "gamma_interval must be [low, high], two finite real "
         f"numbers with low below high (got {interval!r})"

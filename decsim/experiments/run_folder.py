@@ -486,21 +486,6 @@ def swept_values(run_dir: pathlib.Path, point_ids: list) -> dict:
     return values
 
 
-def resolved_values(record: dict, names: tuple) -> dict:
-    """The named parts of a point's record, each value at its dotted path.
-
-    resolved_values(record, ("settings",)) gives
-    settings.qpu.distance and every other setting as one mapping.
-    """
-    values = {}
-    for name in names:
-        part = record.get(name)
-        for path, value in experiment.value_leaves(part, (name,)):
-            dotted = ".".join(path)
-            values[dotted] = value
-    return values
-
-
 def seed_ranges(ranges: list) -> list:
     """Seed ranges as [first, how many], in order, touching ones joined."""
     joined = []

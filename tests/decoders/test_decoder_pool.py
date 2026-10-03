@@ -20,6 +20,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
@@ -271,7 +272,13 @@ def test_a_released_unit_is_offered_after_the_ones_freed_before_it():
     assert unit is second
 
 
-def test_a_pool_with_no_unit_is_refused():
-    settings = _settings(0)
-    with pytest.raises(ValueError, match="needs at least 1 unit"):
-        decoder_pool.DecoderPool(None, settings)
+def test_a_tier_with_no_unit_is_refused():
+    """A pool of no units would hold every job forever.
+
+    The tier's record is where the count enters; the build makes every
+    pool from it, or one unit when the run has no decoder.
+    """
+    algorithm = decoders.PresetLatencyDecoder.Settings(1.0)
+
+    with pytest.raises(ValueError):
+        decoder_settings.DecoderPoolSettings(algorithm=algorithm, unit_count=0)

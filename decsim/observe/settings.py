@@ -98,8 +98,9 @@ class ObservationSettings:
         log = _off_word(log_word)
         trace_word = section.get("trace", "off")
         trace = _off_word(trace_word)
-        shot_list = section.get("trace_shots", (0,))
-        trace_shots = _shot_tuple(shot_list)
+        trace_shots = section.get("trace_shots", (0,))
+        if isinstance(trace_shots, list):
+            trace_shots = tuple(trace_shots)
         log_component_io = section.get("log_component_io", False)
         record_switching_windows = section.get(
             "record_switching_windows", False
@@ -164,13 +165,6 @@ def _off_word(value):
     if value is False:
         return "off"
     return value
-
-
-def _shot_tuple(shots):
-    """A yaml list of shots as the record's tuple; any other as written."""
-    if isinstance(shots, list):
-        return tuple(shots)
-    return shots
 
 
 def _check_log(log) -> None:

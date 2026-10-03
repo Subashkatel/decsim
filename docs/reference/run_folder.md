@@ -8,8 +8,8 @@ experiment it ran, and a second one that day gets `_2`
 (`decsim/experiments/run_folder.py`, `new_run_dir`), unless `--out`
 names one. A launcher fixes the folder once and hands it to every task.
 `results/` is output, not code, and git does not track it, which is
-gem5's `m5out/`. `tools/deltakit_example.py` and
-`tools/live_memory_example.py` write the same records into their
+gem5's `m5out/`. `examples/deltakit_example.py` and
+`examples/live_memory_example.py` write the same records into their
 `--output` folder.
 
 A results folder holds one experiment: its pieces, one record per
@@ -59,7 +59,7 @@ one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, and a patch creating each untracked file git does not ignore, written only when there is either |
 | `points/<name>/machine.json` | `decsim/experiments/run_folder.py`, `record_point` | one per point, in a folder named by the point's name: its content `id`, its `name`, its metadata, the seeds this folder ran of it (ranges of first and how many, joined from its pieces), `sections`, the yaml the point resolved to with its axes placed and its references resolved (null for a point a Python caller built), `maker`, what the workload's row says made it for this point (the `producer` row answers its `function`, the point's own `arguments` and its package's `version`; the `files` row and a Python-built workload answer null), every setting, each record under its `class` (module and qualified name) beside its fields, as gem5's `config.json` writes each object's type, so two records with the same fields are two points, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
 | `points/<name>/inputs/` | `decsim/experiments/run_folder.py`, `record_point` | the workload the point ran, as the `files` workload row reads it (`operations.json`, and `circuit.stim` with `measurement_rounds.json` or `fragments/`), and `hashes.json`, each file's sha256 |
-| `result.json` | `decsim/experiments/run_folder.py`, `write_shot` | `decsim run --seed` and the two tools only: every field of the shot's result |
+| `result.json` | `decsim/experiments/run_folder.py`, `write_shot` | `decsim run --seed` and the two Deltakit examples only: every field of the shot's result |
 | `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file |
 | `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_folder.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
 | `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |

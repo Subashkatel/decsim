@@ -1,11 +1,12 @@
-"""The makers decsim ships, against Stim's generator and the example tools.
+"""The makers decsim ships, against Stim's generator and the examples.
 
 memory_circuit is stim.Circuit.generated with one probability on all
 four of its noise channels (Stim src/stim/gen/circuit_gen_params.cc);
 memory_patches places copies of it with SHIFT_COORDS (Stim
 doc/file_format_stim_circuit.md, SHIFT_COORDS). The Deltakit makers run
-from a yaml what tools/deltakit_example.py and tools/live_memory_example.py
-build by hand in Python, and the runs are compared field by field.
+from a yaml what examples/deltakit_example.py and
+examples/live_memory_example.py build by hand in Python, and the runs are
+compared field by field.
 """
 
 import dataclasses
@@ -17,9 +18,9 @@ import decsim.experiments.experiment as experiment
 import decsim.frontends.deltakit as deltakit
 import decsim.machine as machine_module
 import decsim.producers as producers
+import examples.deltakit_example as deltakit_example
+import examples.live_memory_example as live_memory_example
 import tests.experiments.yaml_configs as yaml_configs
-import tools.deltakit_example as deltakit_example
-import tools.live_memory_example as live_memory_example
 
 
 def test_the_memory_circuit_is_stims_generated_circuit():

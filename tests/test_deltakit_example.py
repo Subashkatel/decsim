@@ -1,8 +1,9 @@
 """Supplied Explorer circuits obey the existing machine and cycle contracts.
 
 Referents: qpu/cycle_clock.py, qpu/stim_device.py, detector_formation.py,
-and tools/deltakit_example.py. Whole-shot PyMatching is an integration oracle,
-not an independent decoding algorithm. All tests execute functional decoding.
+and examples/deltakit_example.py. Whole-shot PyMatching is an integration
+oracle, not an independent decoding algorithm. All tests execute functional
+decoding.
 """
 
 import dataclasses
@@ -25,8 +26,8 @@ import decsim.machine as machines
 import decsim.producers as producers
 import decsim.qpu.stim_device as sources
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import examples.deltakit_example as example
 import tests.declared_run as declared_run
-import tools.deltakit_example as example
 
 pytestmark = pytest.mark.usefixtures("explorer")
 
@@ -251,7 +252,7 @@ def test_command_replay_preserves_repetition_geometry_and_horizon(
 ) -> None:
     original = tmp_path / "original"
     replay = tmp_path / "replay"
-    command = [sys.executable, "tools/deltakit_example.py"]
+    command = [sys.executable, "examples/deltakit_example.py"]
     generate = command + [
         "--family",
         "repetition",
@@ -285,7 +286,7 @@ def test_the_whole_shot_repetition_example_refuses_a_prefix_feedback_wait(
 ) -> None:
     command = [
         sys.executable,
-        "tools/deltakit_example.py",
+        "examples/deltakit_example.py",
         "--family",
         "repetition",
         "--mode",

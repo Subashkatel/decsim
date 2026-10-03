@@ -7,9 +7,9 @@ decsim machine runs them through readout, stores, windows, decoding and
 feedback. From a yaml, the makers `decsim.producers:deltakit_memory`
 and `decsim.producers:deltakit_live_memory` run the finite and the live
 memory ([plug in a workload maker](plug_in_a_workload_maker.md)). The
-finite example `tools/deltakit_example.py` adds the repetition family
+finite example `examples/deltakit_example.py` adds the repetition family
 and the protection mode on one finite history;
-`tools/live_memory_example.py` keeps memory live until decoded feedback
+`examples/live_memory_example.py` keeps memory live until decoded feedback
 permits final readout and saves the executed history.
 
 ## Install in a separate environment
@@ -30,7 +30,7 @@ Python >=3.10,<3.15, the same floor as decsim.
 ## Run a memory experiment
 
 ```bash
-PYTHONPATH=. .venv-deltakit/bin/python tools/deltakit_example.py \
+PYTHONPATH=. .venv-deltakit/bin/python examples/deltakit_example.py \
   --mode memory --family rotated_surface --distance 3 --rounds 24 \
   --basis Z --probability 0.001 --seed 7 \
   --output results/deltakit-memory
@@ -73,12 +73,12 @@ join the last packet. Preserve this map with the circuit.
 ## Keep memory live until feedback releases it
 
 ```bash
-PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
+PYTHONPATH=. .venv-deltakit/bin/python examples/live_memory_example.py \
   --distance 3 --basis Z --physical-error-probability 0.001 \
   --round-period-microseconds 1.25 --feedback-microseconds 4 \
   --output results/live-memory
 
-PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
+PYTHONPATH=. .venv-deltakit/bin/python examples/live_memory_example.py \
   --input results/live-memory/inputs/*/fragments --feedback-microseconds 8 \
   --output results/live-memory-slower
 ```
@@ -103,7 +103,7 @@ only exports the physical fragments.
 For duration-aware noise, generate a separate physical input:
 
 ```bash
-PYTHONPATH=. .venv-deltakit/bin/python tools/live_memory_example.py \
+PYTHONPATH=. .venv-deltakit/bin/python examples/live_memory_example.py \
   --noise-model physical --physical-error-probability 0.001 \
   --relaxation-time-microseconds 50 --dephasing-time-microseconds 40 \
   --round-period-microseconds 1.25 --output results/live-physical
@@ -217,13 +217,13 @@ these checks do not establish calibrated neutral-atom transport or loss physics.
 ## Compare feedback waits on one finite history
 
 ```bash
-PYTHONPATH=. .venv-deltakit/bin/python tools/deltakit_example.py \
+PYTHONPATH=. .venv-deltakit/bin/python examples/deltakit_example.py \
   --mode protection --rounds 24 --prefix-rounds 3 \
   --period-microseconds 1.1 --feedback-microseconds 4 \
   --decoder-microseconds 0.1 --seed 7 \
   --output results/deltakit-protection
 
-PYTHONPATH=. .venv-deltakit/bin/python tools/deltakit_example.py \
+PYTHONPATH=. .venv-deltakit/bin/python examples/deltakit_example.py \
   --input results/deltakit-protection --mode protection --prefix-rounds 3 \
   --period-microseconds 1.1 --feedback-microseconds 8 \
   --decoder-microseconds 0.1 --seed 7 \

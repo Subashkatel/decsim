@@ -3,7 +3,7 @@
 The wiring fills each operation's predecessors from program order on
 its patches, so two operations that share a patch always carry a
 dependency edge between them. The live stream's owner, its protected
-region and its rounds are derived as tools/live_memory_example.py
+region and its rounds are derived as examples/live_memory_example.py
 writes them by hand; the region follows the papers' rule that a
 waiting patch keeps measuring (Terhal 1302.3428 lines 2697-2698,
 Holmes 2004.04794 line 451).
@@ -125,7 +125,7 @@ def test_an_operation_that_lists_one_qubit_twice_is_refused():
 
 
 def test_a_live_stream_gets_its_owner_region_and_rounds_derived():
-    """What tools/live_memory_example.py protection_workload writes."""
+    """What examples/live_memory_example.py protection_workload writes."""
     workload = _live_workload()
     program = circuit_frontend.lowered(workload)
     owner = program.dynamic_streams[0]

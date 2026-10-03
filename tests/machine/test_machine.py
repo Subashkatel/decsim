@@ -86,12 +86,12 @@ import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.schemes.naive_online as naive_online
 import decsim.windows.settings as window_settings
+import examples.deltakit_example as finite_example
+import examples.live_memory_example as live_example
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
 import tests.machine.decoder_arrangements as decoder_arrangements
 import tests.qpu.memory_programs as memory_programs
-import tools.deltakit_example as finite_example
-import tools.live_memory_example as live_example
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )

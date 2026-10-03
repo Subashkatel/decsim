@@ -52,7 +52,7 @@ def checked_detector_round_map(
     """The map it was given, covering every detector inside 1..round_count.
 
     A supplied circuit may declare the map (StimDevice's detector_rounds,
-    as tools/deltakit_example.py does), so this is the boundary check for
+    as examples/deltakit_example.py does), so this is the boundary check for
     it; detector_formation holds a declared map to the same law through
     this function.
     """

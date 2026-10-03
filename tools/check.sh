@@ -21,7 +21,7 @@ if [ -n "${DECSIM_PYDEPS:-}" ]; then
 fi
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
-  targets=(decsim tests tools)
+  targets=(decsim tests tools examples)
 fi
 status=0
 "$python" -m ruff format --check "${targets[@]}" || status=1

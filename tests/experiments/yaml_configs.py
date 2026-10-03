@@ -277,7 +277,7 @@ def fixed_threshold_switching() -> dict:
 def example_tool_config(
     tmp_path, qpu_kind: str, workload: dict, feedback_microseconds=4.0
 ) -> pathlib.Path:
-    """The machine tools/deltakit_example.py and live_memory_example.py build.
+    """The machine examples/deltakit_example.py and live_memory_example.py make.
 
     Their Python settings as a yaml: the logical reference links with the
     feedback path's latency on the fridge clock, a 0.1 us weak decoder on

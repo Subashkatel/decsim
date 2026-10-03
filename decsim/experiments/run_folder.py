@@ -396,8 +396,8 @@ def write_shot(
     """One narrated shot's files in its folder, the log and trace named label.
 
     result.json always, and the log and the trace when the observation
-    asks for them. tools/deltakit_example.py and
-    tools/live_memory_example.py write their shot through it too.
+    asks for them. examples/deltakit_example.py and
+    examples/live_memory_example.py write their shot through it too.
     """
     _write_the_log_and_trace(machine, settings, run_dir, label)
     _write_result(result, run_dir)

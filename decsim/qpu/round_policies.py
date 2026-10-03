@@ -64,7 +64,7 @@ class PerOperationRounds:
     rounds_by_operation pairs each operation id with its count, as a
     tuple so the record is plain data: tuple(counts.items()) turns a
     dict into it. A Python workload fills this with its own counts
-    (protection_workload in tools/deltakit_example.py does); a zero
+    (protection_workload in examples/deltakit_example.py does); a zero
     count is allowed, because an operation may finalize a stream round
     without occupying the QPU.
     """

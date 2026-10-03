@@ -149,7 +149,7 @@ or with fragments on disk, the four operations written out:
 }
 ```
 
-Both run what `tools/live_memory_example.py` builds by hand in Python
+Both run what `examples/live_memory_example.py` builds by hand in Python
 (`tests/test_live_memory_example.py` and `tests/test_producers.py`
 compare them field by field). The stream's owner, its protected region
 and its rounds are derived, as the next section says.

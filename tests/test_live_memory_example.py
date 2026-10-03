@@ -20,9 +20,9 @@ import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
 import decsim.producers as producers
 import decsim.records.circuits as circuit_records
+import examples.live_memory_example as example
 import tests.experiments.yaml_configs as yaml_configs
 import tests.qpu.memory_programs as memory_programs
-import tools.live_memory_example as example
 
 # The tool's protection workload as a decsim.ops/1 file: decode after
 # three rounds, wait for the answer, resume one round, read out. The
@@ -178,7 +178,7 @@ def test_replay_refuses_a_round_period_the_fragments_do_not_declare(
     output = tmp_path / "refused"
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--input",
         str(inputs),
         "--output",
@@ -201,7 +201,7 @@ def test_a_replay_refuses_a_flag_that_would_relabel_its_circuit(
     output = tmp_path / "relabelled"
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--input",
         str(inputs),
         "--output",
@@ -263,7 +263,7 @@ def test_replay_does_not_select_the_optional_producer(
     output = tmp_path / "ordinary"
     script = (
         "import sys\n"
-        "import tools.live_memory_example as example\n"
+        "import examples.live_memory_example as example\n"
         "example.main()\n"
         "loaded = [name for name in sys.modules "
         "if name.startswith('deltakit_')]\n"
@@ -436,7 +436,7 @@ def _run_example(
 ) -> None:
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--input",
         str(inputs),
         "--output",
@@ -472,7 +472,7 @@ def _executed_circuit(folder: pathlib.Path) -> stim.Circuit:
 def _producer_command(output: pathlib.Path, noise_model: str) -> list[str]:
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--output",
         str(output),
         "--round-period-microseconds",

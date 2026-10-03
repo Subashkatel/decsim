@@ -19,8 +19,9 @@ import decsim.records.workload as workload_records
 
 # The stream a live memory's segments extend: an identity local to the
 # workload, which also names the stream's substream seed
-# (seeding.substream_seed), so it is the one tools/live_memory_example.py
-# uses and a run reproduces that tool's draws.
+# (seeding.substream_seed), so it is the one
+# examples/live_memory_example.py uses and a run reproduces that example's
+# draws.
 LIVE_STREAM_ID = 100
 
 
@@ -109,7 +110,7 @@ def deltakit_memory(
 
     The Explorer's css_code_memory_circuit with SD6 noise at the sweep's
     probability, exported with its measurement-to-round map
-    (frontends/deltakit.py memory_circuit), as tools/deltakit_example.py
+    (frontends/deltakit.py memory_circuit), as examples/deltakit_example.py
     builds it by hand. The optional deltakit extra is imported only when
     this maker runs.
     """

@@ -69,10 +69,10 @@ import decsim.records.windows as window_records
 import decsim.results as results
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
+import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
 import tests.qpu.memory_programs as memory_programs
-import tools.live_memory_example as live_memory_example
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )

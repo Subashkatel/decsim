@@ -21,8 +21,10 @@ import decsim.decoders.detection_events as detection_events
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import tests.declared_run as declared_run
 
 
 class _CopyRecorder:
@@ -130,15 +132,20 @@ def test_a_fold_in_place_is_written_by_the_memory_that_holds_the_input():
     assert job.decoder_input is masked
 
 
-def test_a_fold_in_place_with_no_unit_memory_is_refused():
-    """A tier that reads its input in place has nothing to write into."""
-    engine = engine_module.Engine()
-    staging = _staging(engine)
-    job = _job_with_rounds()
-    landed = decoder_memory.materialize_decoder_input(job)
+def test_an_in_place_fold_on_a_tier_that_reads_in_place_still_stops():
+    """The weak tier folds in place; the strong tier keeps no copy to fold."""
+    reading_in_place = declared_run.switching_run(
+        rounds=9, escalates=True, strong_copies_input=False
+    )
+    settings = reading_in_place.settings
+    weak = dataclasses.replace(
+        settings.weak_decoder, copies_boundary_fold=False
+    )
+    folding_in_place = dataclasses.replace(settings, weak_decoder=weak)
+    machine = machine_module.Machine.build(folding_in_place, 0)
 
-    with pytest.raises(RuntimeError, match="in_place needs the unit's own"):
-        staging.fold_in_place(job, landed)
+    with pytest.raises(AttributeError):
+        machine.run()
 
 
 def test_a_companion_that_joins_after_the_fold_reads_the_written_rounds():

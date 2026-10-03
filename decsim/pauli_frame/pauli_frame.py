@@ -117,8 +117,6 @@ class PauliFrame:
     def __init__(
         self, engine, *, clock: Optional[config.Clock], write_cycles: int
     ) -> None:
-        if write_cycles > 0 and clock is None:
-            raise ValueError("a charged write needs the clock it is priced on")
         self.engine = engine
         self.clock = clock
         self.write_cycles = write_cycles

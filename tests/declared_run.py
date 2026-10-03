@@ -679,14 +679,6 @@ def log_tick(log_lines, needle):
     raise AssertionError(f"no log line contains {needle!r}")
 
 
-def log_index(log_lines, needle):
-    """The position of the first log line containing the needle."""
-    for index, line in enumerate(log_lines):
-        if needle in line:
-            return index
-    raise AssertionError(f"no log line contains {needle!r}")
-
-
 def log_lines_containing(machine, needle):
     """Every log line of the run that contains the needle."""
     found = []

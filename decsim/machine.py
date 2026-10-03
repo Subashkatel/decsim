@@ -172,7 +172,6 @@ class Machine:
             window_tier,
             escalates,
             settings.clock,
-            plan,
             detection_events,
             confidence_signal,
         )

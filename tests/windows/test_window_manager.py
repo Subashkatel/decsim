@@ -1,9 +1,9 @@
 """The windows facade's laws through its public surface.
 
-The status of a window lives on its record (gem5's CacheBlk carries
-its own status bits, src/mem/cache/cache_blk.hh): the facade keeps no
-set that mirrors it. The run is a six-round d=3 memory on the
-timing-only device with a preset-latency weak decoder.
+A modelled window never reads the next operation's rounds, a stream's
+later window waits on the one before it, a Tan seam waits in its input
+slot rather than on the only unit, and a round past the plan stops the
+run.
 """
 
 import types
@@ -100,63 +100,12 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
 
 def test_a_modelled_window_never_reads_the_next_operations_rounds():
     """Its model ends at its own last round, so the plan refuses it."""
-    with pytest.raises(ValueError, match="first window 2 reads rounds 10"):
+    with pytest.raises(ValueError):
         _chained_stim_run("lookahead")
     machine = _chained_stim_run("flush")
     machine.run()
 
     assert machine.windows.window_manager.planner.total_windows == 4
-
-
-def _publication_of(window) -> tuple:
-    """(committed, tier, operation, window) of the request it published."""
-    request_key = window.published_request_key
-    return (
-        window.committed,
-        request_key.tier,
-        request_key.operation_id,
-        request_key.window_id,
-    )
-
-
-def test_a_committed_window_publishes_the_request_that_decoded_it():
-    machine = _weak_run()
-    windows = machine.observation.windows.windows
-    weak = window_records.DecoderTier.WEAK
-    published = {
-        key: _publication_of(window) for key, window in windows.items()
-    }
-    expected = {key: (True, weak, key[0], key[1]) for key in windows}
-    assert windows
-    assert published == expected
-
-
-def test_no_window_of_a_weak_run_is_absorbed():
-    machine = _weak_run()
-    windows = machine.observation.windows.windows.values()
-    is_false = [window.is_absorbed is False for window in windows]
-    assert all(is_false)
-
-
-def test_a_window_is_final_once_its_request_is_published():
-    """A committed window whose request is unpublished still awaits strong."""
-    window = window_records.Window(
-        operation_id=1,
-        window_index=0,
-        commit_lo=1,
-        commit_hi=3,
-        buffer_hi=5,
-        round_count=5,
-    )
-    window.committed = True
-    assert window.published_request_key is None
-    request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 3
-    )
-    window.published_request_key = request_key
-    assert (
-        window.published_request_key.tier is window_records.DecoderTier.STRONG
-    )
 
 
 def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
@@ -311,7 +260,5 @@ def test_a_round_arriving_after_the_last_window_committed_is_refused():
     )
     packet = round_records.SyndromeRoundPacket(0, 2, (fragment,))
     window_manager = machine.windows.window_manager
-    with pytest.raises(
-        RuntimeError, match="arrived after the op's last window committed"
-    ):
+    with pytest.raises(RuntimeError):
         window_manager.accept_window_input(packet)

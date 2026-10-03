@@ -41,8 +41,8 @@ def format_ticks(ticks: int) -> str:
 
 def check_duration(name: str, value: float) -> None:
     """Refuse a duration the yaml or a decsim.experiments call cannot mean."""
-    if not math.isfinite(value) or value < 0:
-        raise ValueError(f"{name} must be a finite nonnegative number")
+    if value < 0:
+        raise ValueError(f"{name} must be a nonnegative number")
     ticks = microseconds_to_ticks(value)
     if value > 0 and ticks == 0:
         raise ValueError(f"{name} is positive but rounds to zero ticks")

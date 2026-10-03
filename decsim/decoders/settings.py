@@ -248,6 +248,7 @@ class DecoderPoolSettings:
     result_blocks_unit: bool = False
 
     def __post_init__(self) -> None:
+        _check_unit_count(self.unit_count)
         _check_flag("copies_input", self.copies_input)
         _check_flag("copies_boundary_fold", self.copies_boundary_fold)
         _check_flag("result_blocks_unit", self.result_blocks_unit)
@@ -493,6 +494,16 @@ def _check_flag(name: str, value) -> None:
         return
     raise ValueError(
         f"a decoder pool's {name} {value!r} is not a flag; give True or False"
+    )
+
+
+def _check_unit_count(unit_count) -> None:
+    """A pool's engine count is a whole number, at least one."""
+    if config.is_whole_count(unit_count):
+        return
+    raise ValueError(
+        "a decoder pool's unit_count (<tier>_decoder.units) must be a whole "
+        f"number of engines, at least one (got {unit_count!r})"
     )
 
 

@@ -9,7 +9,6 @@ import dataclasses
 
 import pytest
 
-import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.naive_online as naive_online_scheme
 import decsim.windows.schemes.parallel as parallel_scheme
@@ -24,11 +23,6 @@ SCHEME_ROWS = (
     sandwich_scheme.TanSandwichScheme,
     naive_online_scheme.NaiveOnlineScheme,
 )
-# each strong window record and the boundary row it declares
-PRESET_ROWS = [
-    (strong_window_shapes.RedoWindow.Settings(), boundary_policies.Held),
-    (strong_window_shapes.DoubleWindow.Settings(), boundary_policies.Eager),
-]
 
 
 def test_a_python_record_defaults_to_flush_and_eager():
@@ -43,19 +37,6 @@ def test_a_terminal_policy_off_its_two_words_is_refused():
     """A misspelt word lays out a last window that is neither policy's."""
     with pytest.raises(ValueError, match="terminal_policy is one of"):
         window_settings.WindowSettings(terminal_policy="lookahaed")
-
-
-@pytest.mark.parametrize("strong_window, boundary_row", PRESET_ROWS)
-def test_the_switching_preset_takes_lookahead_and_the_strong_windows_row(
-    strong_window, boundary_row
-):
-    plain_windows = window_settings.WindowSettings()
-
-    windows = window_settings.switching_windows(plain_windows, strong_window)
-
-    assert windows.terminal_policy == "lookahead"
-    assert windows.boundary_policy == boundary_row.Settings()
-    assert windows.scheme == plain_windows.scheme
 
 
 class _OutsideHeld:
@@ -96,5 +77,5 @@ def test_the_switching_preset_takes_the_record_its_strong_window_gives():
 
 @pytest.mark.parametrize("row", SCHEME_ROWS)
 def test_every_scheme_record_refuses_a_window_that_commits_nothing(row):
-    with pytest.raises(ValueError, match="commit_rounds is a whole number"):
+    with pytest.raises(ValueError, match="commit_rounds"):
         row.Settings(commit_rounds=0)

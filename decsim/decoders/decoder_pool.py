@@ -112,11 +112,6 @@ class DecoderPool:
         manager: "decoder_manager_module.DecoderManager",
         settings: PoolSettings,
     ) -> None:
-        if settings.unit_count < 1:
-            raise ValueError(
-                f"pool {settings.name!r} needs at least 1 unit "
-                f"(got {settings.unit_count})"
-            )
         self.manager = manager
         self.name = settings.name
         self.blocks_unit = settings.blocks_unit

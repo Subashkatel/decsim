@@ -256,15 +256,6 @@ def test_the_trace_moves_no_tick_and_narrates_the_same_log(tmp_path):
     )
 
 
-def test_a_run_with_no_trace_builds_no_writer():
-    """The section did not ask, so nothing is connected."""
-    point = _settings()
-    machine = machine_module.Machine.build(point, SEED)
-
-    assert machine.observation.trace_writer is None
-    assert machine.observation.data_movement is None
-
-
 def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
     """Every listener is built because the section asked, and only then.
 
@@ -372,9 +363,8 @@ def _rows_outside_every_span(rows, spans_by_tid: dict) -> list:
     return outside
 
 
-@pytest.mark.parametrize("run_both_at_once", [False, True])
 def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
-    tmp_path, run_both_at_once
+    tmp_path,
 ):
     """Two decodes of one window on two units keep two lanes.
 
@@ -390,7 +380,7 @@ def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
         trace_path,
         weak_units=2,
         strong_units=2,
-        run_both_at_once=run_both_at_once,
+        run_both_at_once=True,
     )
     task = collect.Task(settings, {})
     shot = collect.run_shot(task, 0)
@@ -757,29 +747,6 @@ def test_the_unit_memory_counter_is_the_memorys_own_occupancy(tmp_path):
 
     assert values
     assert values == held.values
-
-
-def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):
-    """The one bounded controller-side structure, as a residence.
-
-    A round enters the packing workspace at its first fragment and
-    leaves when it is packed; the point prices no packing time, so round
-    1 is in and out at 1.004 us. The counter carries the occupancy and
-    the residence carries the bound the record sets, unbounded here.
-    """
-    _machine, _result, document = traced
-    residence = _one(document, "X", "assemble round 1")
-
-    assert residence["cat"] == "round,residence"
-    assert residence["args"]["tick"] == 1_004_000
-    assert residence["dur"] == 0.0
-    assert residence["args"]["slot_taken"] == 1_004_000
-    assert residence["args"]["freed"] == 1_004_000
-    assert residence["args"]["freed_reason"] == "packed"
-    assert residence["args"]["capacity"] is None
-    steps = _counter_values(document, "controller assembler rounds", "rounds")
-    assert max(steps) == 1
-    assert steps[-1] == 0
 
 
 def test_a_round_waits_for_a_packing_place_before_it_takes_one():

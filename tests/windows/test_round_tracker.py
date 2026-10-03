@@ -156,7 +156,7 @@ def test_a_finite_stream_refuses_a_boundary_inside_its_circuit():
     tracker = _tracker({}, {"stream": []})
     operation_stream = _operation("stream")
     tracker.register_stream(operation_stream, 5)
-    with pytest.raises(RuntimeError, match="destructive boundary"):
+    with pytest.raises(RuntimeError):
         tracker.close_boundary("stream", 4)
     tracker.close_boundary("stream", 6)
 

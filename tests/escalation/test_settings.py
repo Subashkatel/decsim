@@ -1,5 +1,6 @@
 """The switching slot's record: its threshold, its costs, its slots."""
 
+import dataclasses
 import math
 
 import pytest
@@ -8,7 +9,9 @@ import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.machine as machine_module
 import decsim.settings as machine_settings
+import tests.escalation.test_strong_window_shapes as shape_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -34,7 +37,7 @@ def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
 
 
 def test_a_switching_record_refuses_a_cost_by_its_own_field():
-    with pytest.raises(ValueError, match="^threshold_cycles must not be"):
+    with pytest.raises(ValueError, match="threshold_cycles"):
         _switching(threshold_cycles=-1)
 
 
@@ -49,3 +52,14 @@ def test_two_decoders_without_switching_are_refused():
 
     with pytest.raises(ValueError, match="both set and switching is not"):
         machine_settings.MachineSettings(weak_decoder=pool, strong_decoder=pool)
+
+
+@pytest.mark.parametrize("empty_slot", ["weak_decoder", "strong_decoder"])
+def test_switching_with_an_empty_decoder_slot_still_stops(empty_slot):
+    """No weak tier stops the build; no strong tier, the first escalation."""
+    settings = shape_tests.gate_switching()
+    one_decoder = dataclasses.replace(settings, **{empty_slot: None})
+
+    with pytest.raises(AttributeError):
+        machine = machine_module.Machine.build(one_decoder, 0)
+        machine.run()

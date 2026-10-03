@@ -100,7 +100,7 @@ def test_memory_patches_runs_one_memory_per_patch_at_once():
 
 def test_no_patches_is_refused():
     """With no patch the run would finish having run nothing."""
-    with pytest.raises(ValueError, match="patch_count is at least 1"):
+    with pytest.raises(ValueError, match="patch_count"):
         producers.memory_patches(
             "surface_code:rotated_memory_z",
             4,

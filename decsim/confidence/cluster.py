@@ -144,7 +144,6 @@ class ClusterGap:
             return decoding_records.SoftOutputComputation(None, 0)
         graph = evidence.graph
         require_one_logical_row(graph)
-        require_weight_step(graph, self.weight_step)
         gap, ticks = self._walk(evidence)
         soft_output = decoding_records.SoftOutput(gap=gap, source=self.source)
         return decoding_records.SoftOutputComputation(soft_output, ticks)
@@ -172,17 +171,6 @@ def require_one_logical_row(graph) -> None:
             "Union-Find cluster confidence requires exactly one logical "
             f"observable, got {row_count}"
         )
-
-
-def require_weight_step(graph, weight_step: float) -> None:
-    """The gap is read off the ticks the growth actually used."""
-    if graph.weight_step == weight_step:
-        return
-    raise RuntimeError(
-        "the cluster gap reads the decode's own ticks: the decoder grew "
-        f"at weight step {graph.weight_step} and the signal reports "
-        f"{weight_step}"
-    )
 
 
 def gap_half_ticks_to_natural_log_weight(

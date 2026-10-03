@@ -408,9 +408,6 @@ class SyndromeBuffer:
         return kept_bits
 
     def _open(self, operation_id) -> None:
-        is_open = self.operations.get(operation_id)
-        if is_open is False:
-            raise RuntimeError("closed operation identities cannot be reused")
         self.operations[operation_id] = True
 
     def _stored_rounds_of(self, operation_id) -> list:

@@ -92,7 +92,6 @@ pool = decoders_part.build_decoder_pool(
     window_tier,
     escalates,
     settings.clock,
-    plan,
     detection_events,
     switching.confidence_signal,
 )

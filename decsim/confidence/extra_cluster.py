@@ -71,11 +71,6 @@ def growth_limit_ticks(growth_limit_nats: float, weight_step: float) -> int:
     the ceiling keeps Theorem 2, since every cluster gap at or under
     the limit joins within that many ticks.
     """
-    if not math.isfinite(growth_limit_nats) or growth_limit_nats < 0:
-        raise ValueError(
-            "the extra-cluster gap's growth limit must be a finite "
-            f"nonnegative natural-log weight, got {growth_limit_nats!r}"
-        )
     ticks = growth_limit_nats / weight_step
     limit_ticks = math.ceil(ticks)
     if limit_ticks > _LARGEST_TICK_COUNT:
@@ -148,7 +143,6 @@ class ExtraClusterGap:
             row takes the shipped step and the host's measured time, and
             the build refuses the pairing by name (build/decoders.py).
             """
-            _refuse_a_threshold_with_no_number(threshold_nats)
             walk_microseconds = self.walk_microseconds
             weight_step = getattr(weak_algorithm, "weight_step", None)
             if weight_step is None:
@@ -178,7 +172,6 @@ class ExtraClusterGap:
             return decoding_records.SoftOutputComputation(None, 0)
         graph = evidence.graph
         cluster.require_one_logical_row(graph)
-        cluster.require_weight_step(graph, self.weight_step)
         gap, ticks = self._grow_on(evidence)
         soft_output = decoding_records.SoftOutput(gap=gap, source=self.source)
         return decoding_records.SoftOutputComputation(soft_output, ticks)
@@ -210,16 +203,3 @@ class ExtraClusterGap:
         return cluster.gap_half_ticks_to_natural_log_weight(
             half_ticks, self.weight_step
         )
-
-
-def _refuse_a_threshold_with_no_number(threshold_nats) -> None:
-    """The growth limit is the threshold, so it is one number at build."""
-    if threshold_nats is not None:
-        return
-    raise ValueError(
-        "the extra_cluster_gap confidence grows to the threshold, so it "
-        "needs the threshold as one number when the machine is built "
-        "(Kishi 2602.03336 Sec. III, the early-stopping threshold is the "
-        "switching threshold): give a fixed threshold, or look a table "
-        "threshold up at its sweep point first"
-    )

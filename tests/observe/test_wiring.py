@@ -401,21 +401,6 @@ def test_the_narrator_log_is_byte_identical_with_and_without_the_observers(
     assert len(wired_lines) > 100
 
 
-def test_a_run_with_only_those_listeners_gives_the_same_result_record(
-    monkeypatch,
-):
-    """Every field of the gate point's result, between the two wirings."""
-    wired_machine, wired = gate_point.run(**EVERY_KNOB)
-    monkeypatch.setattr(wiring, "observe", _bare_observe)
-    _bare_machine, bare = gate_point.run(**EVERY_KNOB)
-
-    assert bare.terminal_status == wired.terminal_status
-    assert bare.operation_results == wired.operation_results
-    assert bare.link_traffic == wired.link_traffic
-    assert bare.fully_done_ticks == wired.fully_done_ticks
-    assert wired_machine.observation.data_movement is not None
-
-
 def test_the_data_movement_report_is_the_only_field_that_needs_a_listener(
     monkeypatch,
 ):

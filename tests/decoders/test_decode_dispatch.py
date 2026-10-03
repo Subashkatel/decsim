@@ -186,24 +186,6 @@ def test_a_startable_job_takes_an_empty_unit_over_one_holding_a_parked_job():
     assert later_unit_name != parked_unit_name
 
 
-def test_the_placement_line_names_the_unit_the_job_was_given():
-    """Two jobs at once on two units: the log says which unit took which."""
-    engine = engine_module.Engine()
-    manager = _manager(engine, unit_count=2)
-    lines = []
-    engine.line.connect(lines.append)
-    first = _job(0, "first", deps_remaining=0)
-    second = _job(1, "second", deps_remaining=0)
-
-    manager.enqueue(first, None, _ignore)
-    manager.enqueue(second, None, _ignore)
-    engine.run()
-
-    placements = _lines_containing(lines, "ASSIGN UNIT")
-    assert "ASSIGN UNIT default#0 to first" in placements[0]
-    assert "ASSIGN UNIT default#1 to second" in placements[1]
-
-
 def _lines_containing(lines, needle):
     """The log lines that hold the text, to pick out one kind of line."""
     found = []

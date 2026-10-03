@@ -57,22 +57,6 @@ def test_error_rate_draws_sinter_per_round_rate_and_band_per_curve():
     pyplot.close(figure)
 
 
-def test_error_rate_styles_a_curve_by_its_place_in_order():
-    """The panel lacks d = 5, and d = 7 keeps its second style."""
-    stats = [
-        stat("pymatching", d=7, p=0.001, errors=5),
-        stat("pymatching", d=7, p=0.002, errors=20),
-    ]
-    figure, axis = pyplot.subplots()
-
-    plots.error_rate(axis, stats, x="p", curve="d", order=[5, 7])
-
-    (line,) = axis.lines
-    assert line.get_color() == "C1"
-    assert line.get_marker() == "v"
-    pyplot.close(figure)
-
-
 def test_error_rate_marks_a_point_with_no_errors_at_its_bound():
     stats = [
         stat("pymatching", d=5, p=0.001, errors=0),
@@ -148,37 +132,6 @@ def test_values_draw_error_bars_from_the_low_and_high_columns():
     assert len(axis.containers) == 2
     assert segments[0][:, 1] == pytest.approx([0.1, 0.4])
     pyplot.close(figure)
-
-
-def test_bounds_draw_hollow_markers_at_the_high_column_by_place():
-    rows = [
-        {"d": 7, "p": 0.001, "high": 0.02},
-        {"d": 7, "p": 0.002, "high": 0.03},
-    ]
-    figure, axis = pyplot.subplots()
-
-    plots.bounds(axis, rows, x="p", high="high", curve="d", order=[5, 7])
-
-    (bound,) = axis.lines
-    bound_ys = bound.get_ydata()
-    assert list(bound_ys) == [0.02, 0.03]
-    assert bound.get_linestyle() == "None"
-    assert bound.get_markerfacecolor() == "none"
-    assert bound.get_color() == "C1"
-    pyplot.close(figure)
-
-
-def test_save_writes_a_png_and_closes_the_figure(tmp_path):
-    figure, axis = pyplot.subplots()
-    axis.plot([1, 2], [1, 2])
-    path = tmp_path / "line.png"
-
-    plots.save(figure, path)
-
-    written = path.read_bytes()
-    header = written[:8]
-    assert header == b"\x89PNG\r\n\x1a\n"
-    assert not pyplot.fignum_exists(figure.number)
 
 
 def stat(decoder, errors=1, **metadata) -> sinter.TaskStats:

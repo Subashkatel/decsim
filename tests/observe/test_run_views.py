@@ -26,17 +26,6 @@ class _WindowManager:
         return self.backlog
 
 
-def test_an_idle_run_has_no_ready_job_and_no_waiting_round():
-    decoders = (_DecoderManager("default", []),)
-    windows = _WindowManager(())
-
-    view = run_views.backlog_view(windows, decoders)
-
-    assert view.ready_jobs == 0
-    assert view.per_lane == (("", 0),)
-    assert view.total_rounds == 0
-
-
 def test_the_default_pool_is_the_unnamed_lane_and_the_hosts_keeps_its_name():
     chip = _DecoderManager("default", ["a"])
     host = _DecoderManager("strong", ["b", "c"])

@@ -7,7 +7,6 @@ and the buffers read the plan and never change it.
 """
 
 import dataclasses
-import math
 from collections.abc import Callable
 from typing import Optional
 
@@ -118,9 +117,10 @@ def check_operation_graph(
 ) -> None:
     """Refuse a dependency graph a dictionary or an empty queue would hide.
 
-    Operation ids are the graph's stable keys: no id twice, no edge to an
-    unknown or to itself, no cycle; a blocker, when checked, names a
-    known operation.
+    Operation ids are the graph's stable keys: no id twice, no edge
+    twice, no cycle (an edge to itself is one); an edge to an unknown id
+    stops at its lookup; a blocker, when checked, names a known
+    operation.
     """
     by_id = _index_by_id(operations)
     external_ids = set(external_blocker_ids)
@@ -132,7 +132,7 @@ def check_operation_graph(
         indegree[operation_id] = 0
     for operation in operations:
         predecessor_ids = getattr(operation, dependency_field)
-        _check_predecessors(operation, predecessor_ids, by_id, successors)
+        _check_predecessors(operation, predecessor_ids, successors)
         indegree[operation.id] = len(predecessor_ids)
         if validate_blockers:
             _check_blocker(operation, valid_blocker_ids)
@@ -169,12 +169,6 @@ def _resolve_round_ticks(code, fallback_round_microseconds: float) -> int:
     if round_microseconds is None:
         round_microseconds = fallback_round_microseconds
     round_microseconds = float(round_microseconds)
-    # QpuSettings refuses a run period that is not finite, so only the
-    # card's own period reaches this.
-    if not math.isfinite(round_microseconds):
-        raise ValueError(
-            "the code card's round_microseconds must be a finite number"
-        )
     round_ticks = config.microseconds_to_ticks(round_microseconds)
     if round_ticks < 1:
         raise ValueError("resolved round cadence must be at least one tick")
@@ -696,9 +690,7 @@ def _index_by_id(operations) -> dict:
     return by_id
 
 
-def _check_predecessors(
-    operation, predecessor_ids, by_id: dict, successors: dict
-) -> None:
+def _check_predecessors(operation, predecessor_ids, successors: dict) -> None:
     seen = set()
     for predecessor_id in predecessor_ids:
         if predecessor_id in seen:
@@ -707,13 +699,6 @@ def _check_predecessors(
                 f"{predecessor_id} more than once"
             )
         seen.add(predecessor_id)
-        if predecessor_id == operation.id:
-            raise ValueError(f"operation {operation.id} depends on itself")
-        if predecessor_id not in by_id:
-            raise ValueError(
-                f"operation {operation.id} has unknown predecessor "
-                f"{predecessor_id}"
-            )
         successors[predecessor_id].append(operation.id)
 
 

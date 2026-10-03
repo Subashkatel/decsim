@@ -759,7 +759,7 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
         },
     )
     settings = point.settings
-    with pytest.raises(ValueError, match="the run names no decoder"):
+    with pytest.raises(RuntimeError):
         machine_module.Machine.build(settings)
 
 

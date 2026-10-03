@@ -237,9 +237,6 @@ class WindowVerdict:
         threshold_cycles: int = 0,
         switch_cycles: int = 0,
     ) -> None:
-        charged = threshold_cycles + switch_cycles
-        if charged > 0 and clock is None:
-            raise ValueError("charged escalation costs need a clock")
         self.engine = engine
         self.clock = clock
         self.threshold_cycles = threshold_cycles

@@ -1,8 +1,7 @@
 """The program records of decsim/records/program.py.
 
-A planning view is the operation frozen without its executable circuit,
-so a planning collaborator cannot reach the Stim circuit or the live
-tuples the front end still holds.
+An operation's magic-state need, its planning view's feedback mode,
+and a segment's rounds folded into its stream.
 """
 
 import decsim.records.program as program_records

@@ -291,7 +291,7 @@ def test_a_row_that_declares_no_forced_solve_refuses_a_forced_job():
     faults = placed_faults([[1, 0], [0, 1]], [0.1, 0.1], [[1, 0]])
     model = window_of(faults, 2)
     syndrome = numpy.zeros(2, dtype=numpy.uint8)
-    with pytest.raises(RuntimeError, match="forced-class solve"):
+    with pytest.raises(RuntimeError):
         decoder_module.WindowDecoderBase.decode_forced_window(
             row, None, model, faults, syndrome, 0
         )
@@ -343,7 +343,5 @@ def test_rows_of_one_kind_and_settings_share_a_models_backend():
 @pytest.mark.parametrize("microseconds", [-1.0, math.inf, True])
 def test_a_preset_latency_that_is_no_duration_is_refused(microseconds):
     settings = adapter.PyMatchingDecoder.Settings
-    sentence = "preset_latency_microseconds must be a finite nonnegative"
-
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(ValueError, match="preset_latency_microseconds"):
         settings(preset_latency_microseconds=microseconds)

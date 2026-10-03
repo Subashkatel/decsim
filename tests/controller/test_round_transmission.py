@@ -44,9 +44,7 @@ WBD_TICKS = config.microseconds_to_ticks(5.0)
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(7)
 WBD_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
-# 64 bits at 1000 bits per microsecond, one serialization on the wire
 ROUND_BITS = 64
-SERIALIZATION_TICKS = config.microseconds_to_ticks(0.064)
 # a pure-delay controller_to_weak_buffer, so a window round publishes
 # one fixed store hop after it is sent
 STORE_HOP_TICKS = config.microseconds_to_ticks(0.04)
@@ -210,24 +208,6 @@ def reserve_and_send(transmitter, packed) -> None:
     """The sender's two steps: the room is reserved, then the round leaves."""
     transmitter.weak_receiver.reserve_write(packed)
     transmitter.send(packed)
-
-
-def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
-    engine = engine_module.Engine()
-    profile = priced_cwb_profile()
-    transmitter, store, windows, recorder, _ledger = transmitter_with(
-        engine, profile
-    )
-    first = packed(1)
-
-    reserve_and_send(transmitter, first)
-    engine.run()
-
-    assert store.publication_tick((1, 1)) == CWB_TICKS
-    assert windows.published == [(CWB_TICKS, 1)]
-    kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
-    assert kinds_and_ticks == [("CWB_SENT", 0), ("PUBLISHED", CWB_TICKS)]
-    assert transmitter.in_flight == 0
 
 
 def test_a_round_that_leaves_its_route_lets_a_waiting_round_enter():

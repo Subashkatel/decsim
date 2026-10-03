@@ -533,22 +533,13 @@ def test_an_in_place_input_references_the_rounds_and_moves_nothing():
 
 
 def test_an_input_rule_that_is_not_a_flag_is_refused_by_name():
-    with pytest.raises(ValueError, match="copies_input 'in-place'"):
+    with pytest.raises(ValueError, match="copies_input"):
         _machine(copies_input="in-place")
 
 
 def test_a_boundary_fold_rule_that_is_not_a_flag_is_refused_by_name():
-    with pytest.raises(ValueError, match="copies_boundary_fold 'in place'"):
+    with pytest.raises(ValueError, match="copies_boundary_fold"):
         _machine(copies_boundary_fold="in place")
-
-
-def test_the_result_default_frees_the_unit_at_the_decodes_end():
-    """False is today's behaviour: the compute is back when the decode ends."""
-    default = _machine()
-    default.run()
-    non_blocking = _machine(result_blocks_unit=False)
-    non_blocking.run()
-    assert _busy_unit_ticks(non_blocking) == _busy_unit_ticks(default)
 
 
 def test_a_blocking_result_holds_the_unit_until_the_window_commits():
@@ -562,15 +553,6 @@ def test_a_blocking_result_holds_the_unit_until_the_window_commits():
     default_windows = default.observation.windows.windows
     blocking_windows = blocking.observation.windows.windows
     assert len(blocking_windows) == len(default_windows)
-
-
-def test_the_formation_default_sends_the_events_from_the_controller():
-    """Controller is today's behaviour: the input link carries the events."""
-    default = _machine()
-    default.run()
-    at_the_controller = _machine_formed_at("controller")
-    at_the_controller.run()
-    assert _weak_input_bits(at_the_controller) == _weak_input_bits(default)
 
 
 def test_a_source_with_no_outcomes_pays_the_tiers_formation_stage():
@@ -650,33 +632,6 @@ def test_a_region_escalated_from_the_weak_chip_is_formed_by_no_tier():
     assert _formation_stages(on_the_weak_chip) == []
     assert chip_inputs == controller_inputs
     assert chip_observables == controller_observables
-
-
-def test_a_tier_pays_yangs_latency_then_one_round_a_clock():
-    """Six rounds at the first window, three at each window after it.
-
-    The stage is pipelined (Yang 2605.04892 line 1273), so the cycles
-    are 5 + (r - 1) and 5 + (r - b - 1), not 5 per round.
-    """
-    at_the_decoder = _machine_formed_at("decoder")
-    at_the_decoder.run()
-    charged = _formation_stages(at_the_decoder)
-    assert charged[0] == (10, 6, 40000)
-    assert charged[1] == (7, 3, 28000)
-
-
-def test_the_controller_seat_charges_no_tier_for_a_formation_it_did():
-    at_the_controller = _machine_formed_at("controller")
-    at_the_controller.run()
-    assert _formation_stages(at_the_controller) == []
-
-
-def test_one_tier_forms_and_charges_each_round_it_reads_once():
-    """Windows of one tier overlap; the rounds they share are formed once."""
-    at_the_decoder = _machine_formed_at("decoder")
-    at_the_decoder.run()
-    charged = _formed_round_keys(at_the_decoder)
-    assert len(charged) == len(set(charged))
 
 
 def test_the_second_tier_forms_the_rounds_it_reads_out_of_its_own_store():

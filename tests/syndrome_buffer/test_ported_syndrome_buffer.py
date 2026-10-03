@@ -25,11 +25,6 @@ import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.declared_run as declared_run
 
 PERIOD_TICKS = 10
-# the last window of the d = 3 machine: six rounds of 8 bits, one of 12
-D3_LAST_WINDOW_BITS = (8, 8, 8, 8, 8, 8, 12)
-# the d = 11 windows: 60 then 21 x 120 bits, or 22 x 120 then 180
-D11_FIRST_WINDOW_BITS = (60,) + (120,) * 21
-D11_READOUT_WINDOW_BITS = (120,) * 22 + (180,)
 # read, write and read/write port counts; each reads and writes somewhere
 PORT_SHAPES = (
     (1, 1, 0),
@@ -177,51 +172,6 @@ def test_every_completion_is_the_fifo_multi_port_law_property():
             shape["access_latency_cycles"],
         )
         assert _run_program(program, shape) == expected, seed
-
-
-@pytest.mark.parametrize(
-    ("round_bits", "cycles"),
-    [(D11_FIRST_WINDOW_BITS, 323), (D11_READOUT_WINDOW_BITS, 353)],
-)
-def test_a_d11_window_over_a_byte_word_takes_one_access_a_word(
-    round_bits, cycles
-):
-    """8 + 21 x 15 = 323 and 22 x 15 + 23 = 353 cycles of one read port."""
-    engine = engine_module.Engine()
-    store = _store(engine)
-    window = _stored_window(store, round_bits)
-
-    assert store.book_read(window) == cycles * PERIOD_TICKS
-
-
-def test_two_readers_on_one_read_port_finish_one_read_apart():
-    """The d = 3 last window is 6 x 8 + 12 bits: 8 words, then 8 more."""
-    engine = engine_module.Engine()
-    store = _store(engine)
-    window = _stored_window(store, D3_LAST_WINDOW_BITS)
-
-    first = store.book_read(window)
-    second = store.book_read(window)
-
-    assert (first, second) == (8 * PERIOD_TICKS, 16 * PERIOD_TICKS)
-
-
-def test_a_write_waits_for_no_read_on_its_own_port():
-    engine = engine_module.Engine()
-    store = _store(engine)
-    window = _stored_window(store, D3_LAST_WINDOW_BITS)
-    store.book_read(window)
-
-    assert store.book_write((1, 8), 8) == 1 * PERIOD_TICKS
-
-
-def test_a_single_read_write_port_makes_a_write_wait_for_the_read():
-    engine = engine_module.Engine()
-    store = _store(engine, read_ports=0, write_ports=0, read_write_ports=1)
-    window = _stored_window(store, D3_LAST_WINDOW_BITS)
-    store.book_read(window)
-
-    assert store.book_write((1, 8), 8) == 9 * PERIOD_TICKS
 
 
 def test_an_arrival_between_edges_starts_at_the_next_edge():

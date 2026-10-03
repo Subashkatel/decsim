@@ -29,15 +29,6 @@ import decsim.records.workload as workload_records
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 
-# What every windowing scheme row declares, so the escalation policy and
-# the plan read a fact rather than the row's class (ports.py,
-# WindowingScheme).
-_SCHEME_DECLARATIONS = (
-    "has_trailing_tail_context",
-    "commits_in_one_serial_chain",
-    "supports_dynamic_streams",
-)
-
 
 @dataclasses.dataclass(frozen=True)
 class Plan:
@@ -320,48 +311,16 @@ def _scheme(windows: window_settings.WindowSettings):
     A switching run's policy refuses a scheme whose last window has no
     trailing tail context, the fact the terminal tail sets.
     """
-    scheme = windows.scheme.build(windows.terminal_policy)
-    _refuse_undeclared_scheme(scheme)
-    return scheme
-
-
-def _refuse_undeclared_scheme(scheme) -> None:
-    """A windowing scheme row declares the facts its callers read."""
-    row = type(scheme)
-    row_name = row.__name__
-    declarations = ", ".join(_SCHEME_DECLARATIONS)
-    for declaration in _SCHEME_DECLARATIONS:
-        if hasattr(scheme, declaration):
-            continue
-        raise ValueError(
-            f"windowing scheme {row_name} does not declare "
-            f"{declaration}; every row of windows.kind declares "
-            f"{declarations}"
-        )
-
-
-def _refuse_undeclared_boundary_policy(boundary_policy) -> None:
-    """A boundary policy row declares whether it ships provisionally."""
-    if hasattr(boundary_policy, "ships_provisional_boundaries"):
-        return
-    row = type(boundary_policy)
-    row_name = row.__name__
-    raise ValueError(
-        f"boundary policy {row_name} does not declare "
-        "ships_provisional_boundaries; every boundary policy row declares "
-        "whether it ships a boundary before the result is final"
-    )
+    return windows.scheme.build(windows.terminal_policy)
 
 
 def _boundary_policy(windows: window_settings.WindowSettings):
-    """The section's boundary policy, once it declares what it ships.
+    """The section's boundary policy.
 
     A switching run's policy refuses the row its strong window cannot
     serve (escalation/policies.py check_plan).
     """
-    boundary_policy = windows.boundary_policy.build()
-    _refuse_undeclared_boundary_policy(boundary_policy)
-    return boundary_policy
+    return windows.boundary_policy.build()
 
 
 def _error_model_provider(

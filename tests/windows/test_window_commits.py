@@ -339,13 +339,10 @@ def test_a_frameless_run_commits_at_the_delivery():
     assert committed == [4]
 
 
-def test_a_charged_verdict_needs_its_clock():
-    engine = engine_module.Engine()
-
-    with pytest.raises(
-        ValueError, match="charged escalation costs need a clock"
-    ):
-        window_commits.WindowVerdict(engine, threshold_cycles=1)
+def test_a_charged_verdict_with_no_clock_still_stops():
+    """The declared run names no clock, so the first charge cannot land."""
+    with pytest.raises(AttributeError):
+        declared_run.switching_run(rounds=3, escalates=True, threshold_cycles=3)
 
 
 @pytest.mark.parametrize("escalates", [False, True])

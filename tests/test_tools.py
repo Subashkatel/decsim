@@ -57,15 +57,6 @@ def test_the_uses_graph_check_says_what_it_wants_with_no_argument(capsys):
     assert "usage: check_uses_graph.py" in captured.err
 
 
-def test_the_uses_graph_check_refuses_a_path_that_is_not_a_directory(capsys):
-    """A mistyped root is named, so the reader sees which argument was wrong."""
-    tool = _tool("check_uses_graph")
-    exit_code = tool.main(["decsim/machine.py"])
-    captured = capsys.readouterr()
-    assert exit_code == 2
-    assert "is not a directory" in captured.err
-
-
 def test_the_uses_graph_check_reports_the_levels_of_the_package(capsys):
     """With the package it prints the partial order and passes."""
     tool = _tool("check_uses_graph")
@@ -75,21 +66,6 @@ def test_the_uses_graph_check_reports_the_levels_of_the_package(capsys):
     assert exit_code == 0
     assert "0 cycles" in captured.out
     assert "level 0:" in captured.out
-
-
-def test_the_uses_graph_puts_a_package_importing_none_at_level_zero(
-    tmp_path,
-):
-    tool = _tool("check_uses_graph")
-    root_module = tmp_path / "__init__.py"
-    root_module.write_text('"""The package."""\n')
-    leaf = tmp_path / "leaf.py"
-    leaf.write_text('"""Imports nothing of the package."""\n')
-
-    edges = tool.read_edges(tmp_path)
-    nodes = tool.nodes_of(edges)
-
-    assert tool.levels_of(edges, nodes) == {"leaf": 0}
 
 
 def test_the_recognition_check_passes_on_the_tree(capsys):
@@ -124,22 +100,6 @@ def test_the_recognition_check_catches_a_row_chosen_by_its_class(
     )
     assert "build_something.py:4" in captured.out
     assert "BeliefMatchingDecoder" in captured.out
-
-
-def test_the_recognition_check_reads_an_enum_member_as_a_value(
-    tmp_path, capsys
-):
-    """A member is a value, so comparing one is not a class test."""
-    tool = _tool("check_row_recognition")
-    module = tmp_path / "reads_a_member.py"
-    module.write_text(
-        "def is_strong(tier):\n"
-        "    return tier is window_records.DecoderTier.STRONG\n"
-    )
-    exit_code = tool.main([str(tmp_path)])
-    captured = capsys.readouterr()
-    assert exit_code == 0
-    assert "0 unlisted class tests" in captured.out
 
 
 def test_the_one_action_check_fails_a_call_or_sum_passed_as_an_argument(

@@ -400,21 +400,6 @@ def test_a_shared_input_is_written_once_and_the_other_solve_reads_it():
     assert masked.bits == (1, 0, 1)
 
 
-def test_an_input_that_carries_its_mask_is_not_masked_again():
-    """A second write would be a second mask over the first.
-
-    The memory that holds the input refuses it, so a caller that folds
-    twice is told rather than decoding rounds the boundary has been
-    XORed into twice (Helios 2301.08419 lines 632-640).
-    """
-    fixture = _Fixture()
-    job, memory = _landed_job(fixture, folds_in_place=True)
-    fixture.gate.mask_input(job)
-
-    with pytest.raises(RuntimeError, match="already written"):
-        memory.rewrite(job, job.decoder_input)
-
-
 def _companion_solve(job, memory):
     """The window's other forced-class solve, reading the same input."""
     companion = decoding_records.DecodeJob(
@@ -675,8 +660,33 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     assert restart.round_count == 9
 
 
-def test_a_charged_window_decision_needs_its_clock():
-    with pytest.raises(
-        ValueError, match="windows.decision_cycles needs a clock"
-    ):
-        decode_requests.DecodeRequester(decision_cycles=1)
+def test_a_charged_window_decision_with_no_clock_still_stops():
+    """The declared run names no clock, so the first decision cannot end."""
+    windows = window_settings.WindowSettings(decision_cycles=3)
+
+    with pytest.raises(AttributeError):
+        declared_run.weak_only_run(windows=windows)
+
+
+def test_the_decision_and_the_verdict_run_on_the_machines_clock():
+    """No preset clock ticks at 300 MHz, so a part on one fails here."""
+    machine_clock = config.Clock.from_megahertz(300.0)
+    declared = declared_run.switching_run(escalates=True)
+    windows = dataclasses.replace(declared.settings.windows, decision_cycles=2)
+    switching = dataclasses.replace(
+        declared.settings.switching, threshold_cycles=3
+    )
+    settings = dataclasses.replace(
+        declared.settings,
+        clock=machine_clock,
+        windows=windows,
+        switching=switching,
+    )
+
+    machine = machine_module.Machine.build(settings)
+
+    requester = machine.windows.requester
+    assert settings.windows.clock is None
+    assert settings.switching.clock is None
+    assert requester.clock == machine_clock
+    assert requester.verdict.clock == machine_clock

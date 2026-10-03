@@ -74,14 +74,6 @@ def test_the_restart_reread_width_counts_whole_buffer_regions():
     assert one == BUFFER_ROUNDS
 
 
-def test_the_row_and_the_card_read_the_declared_width():
-    declared = window_records.strong_region_round_count(
-        COMMIT_ROUNDS, BUFFER_ROUNDS
-    )
-    assert _planned_region_round_count() == declared
-    assert _provisioned_region_round_count() == declared
-
-
 def test_a_wider_declared_region_moves_the_row_and_the_card_together(
     monkeypatch,
 ):

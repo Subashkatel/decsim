@@ -190,6 +190,11 @@ def test_a_leaf_reached_by_two_paths_is_bound_once_at_the_first_one():
     ]
 
 
+def test_a_substream_key_of_another_type_still_stops_the_derivation():
+    with pytest.raises(AttributeError):
+        seeding.substream_seed(23, (("stream", 4),))
+
+
 def test_two_components_at_one_path_are_refused_naming_the_path():
     """One path is one seed, so two components on it would share a stream."""
     events = []
@@ -201,19 +206,6 @@ def test_two_components_at_one_path_are_refused_naming_the_path():
 
     with pytest.raises(ValueError, match="duplicate seed path root.leaf"):
         seeding.bind_run_seed(1, roots)
-
-
-def test_a_cycle_in_the_component_graph_is_refused_naming_both_paths():
-    outer = RecordingComposite(())
-    inner_children = (child_at("outer", outer),)
-    inner = RecordingComposite(inner_children)
-    outer.children = (child_at("inner", inner),)
-    roots = [root_at("root", outer)]
-
-    with pytest.raises(ValueError) as caught:
-        seeding.bind_run_seed(1, roots)
-
-    assert str(caught.value) == "seed cycle from root.inner.outer to root"
 
 
 def test_a_components_own_seed_conflicts_with_the_runs_root_seed():

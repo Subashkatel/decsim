@@ -356,7 +356,6 @@ docstring.
 - `decsim/experiments/plots.py`: The figures that read decsim's own records, not a sweep's numbers.
 - `decsim/experiments/refusal.py`: The one refusal decsim.experiments raises when it will not do what was asked.
 - `decsim/experiments/report.py`: Shot measurements -> a run folder's additive facts -> the summaries.
-- `decsim/experiments/residence.py`: How long the data sat, and how long a move waited, per sweep point.
 - `decsim/experiments/run_folder.py`: The results folder: one experiment's records, pieces and rows.
 - `decsim/experiments/status_command.py`: `decsim status`: a results folder's pieces folded, and where each point is.
 - `decsim/experiments/trace_file.py`: One shot's Chrome trace, read back from disk and indexed.

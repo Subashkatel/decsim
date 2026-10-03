@@ -20,7 +20,7 @@ refused:
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`) without the swept columns, the `residence.csv` rows of its traced shots when it traced any, an online point's calibrator as the piece left it in `state.pickle`, which the point's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one point, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`) without the swept columns, an online point's calibrator as the piece left it in `state.pickle`, which the point's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `point_id`, `first_seed` and `count`, its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a point whose pieces differ in it, a piece without it included), its `scored_shots`, `failures`, `unscored_shots` and `core_seconds` (its shots' own wall time), its window status counts (the summary's `*_windows` status columns and `provisional_no_correction_windows`), its `rounds` (the rounds its shots ran, their `executed_rounds` added up), the `state_sha256` of an online point's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended, which a later batch's memory request is sized by), a planned piece's `batch` and `task`, and the `commit`, `dirty`, `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a fold refuses a point whose pieces ran different commits, or one commit clean and dirty, since its estimate would pool two simulators under one `run.json`, and a run refuses such a point, its own tree counted, before it writes `run.json` or runs a shot) |
 | `points/<name>/machine.json`, `points/<name>/inputs/` | `decsim/experiments/run_folder.py`, `write_point_record` | each point's record and workload, below, written before any shot and only once every point of the experiment has built and been accepted, so a refused one changes no record. A name the folder holds for a point of another id is refused. The record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the point's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which a status folds it by whatever its run file says later |
 | `batches/<k>/plan.csv` | `decsim/experiments/plan_command.py`, `plan_batch` | batch `k`'s pieces, a row each: its `task`, `point_id`, `first_seed` and `count`. A planned piece whose seeds no saved piece holds is planned again, with its own seeds, in the next batch, each seed once however many batches planned it, and a task runs only the seeds of its pieces no saved piece holds. An online point's pieces go to one task in seed order, since each starts from the calibrator the one before it saved |
@@ -51,7 +51,6 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on. A point's mean per shot on a path or a memory class is a counter's sum over those rows divided by the point's distinct seeds; `references` and `referenced_rounds` repeat on every row of a shot, so they count once per seed |
-| `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `run.json` | `decsim/experiments/run_folder.py`, `write_run_record` | one object: what ran, where, and with which library versions |
 | `<run file>.py`, `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of the run file: a Python run file under its own name beside the results, or every yaml file in the config chain in `config/`, each at its place relative to the others, so every `extends` still resolves. The copy is written once: a later run into the folder must bring the same text, or a run file whose points have the ids `run.json` recorded, which differs only in how far they run (a pilot's caps raised) and replaces the copy; any other run file is refused |
 | `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, and a patch creating each untracked file git does not ignore, written only when there is either |
@@ -382,20 +381,6 @@ Then `buffer0_ready_to_frame_<tier>_median_us` and
 window at the point: the formed-to-commit time of the kept windows
 (`weak`) and of the escalated ones (`strong`), each over that tier's own
 sample counts. A tier with no window has no column.
-
-### `residence.csv`
-
-One row per traced shot per structure, then one per link path.
-`shot_data_movement.csv` is described in the table at the top of this
-page and is not tabulated here.
-
-| Column | What it is |
-| --- | --- |
-| `point_id`, the swept paths, `algorithm`, `seed` | the traced shot |
-| `counting` | what the row counts: `residence` for stays in a structure, `link_path` for a path's moves |
-| `name` | the structure (a store, a decoder unit, the controller, the frame) or the link path |
-| `samples` | how many stays or moves the shot had there |
-| `mean_us`, `longest_us` | the mean and the longest: a stay's length, or a move's wait on the wire |
 
 ### `run.json`
 

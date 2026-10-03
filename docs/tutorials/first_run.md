@@ -148,7 +148,6 @@ config
 latency_samples.csv
 pieces
 points
-residence.csv
 run.json
 shot_links.csv
 shots.csv

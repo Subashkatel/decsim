@@ -6,8 +6,7 @@ saves each piece's additive facts in the results folder the moment it
 ends (pieces). A point stops by its collection's rule on the contiguous
 prefix of its seeds (collection), and no piece past the stop is
 started. Then the pieces are folded into the results folder, one row
-per point, beside the figures and the residence and wait table of the
-traced shots (report, run_folder, plots, residence). A piece already
+per point, beside the figures (report, run_folder, plots). A piece already
 saved is counted and not run again, so a killed collect resumes where
 it stopped; rerunning the same experiment reproduces the same rows
 (only the wall-clock column varies), and so does running it with a
@@ -32,7 +31,6 @@ import decsim.experiments.pieces as pieces
 import decsim.experiments.plots as plots
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
-import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
 import decsim.machine as machine_module
 import decsim.records.results as result_records
@@ -419,8 +417,6 @@ def _fold_into_the_staging(
         rules[point_id] = collection_module.PointRule.from_record(record)
         _write_the_recorded_trajectory(run_dir, folders, record, staging, swept)
     rows = report.fold_pieces(run_dir, folders, point_ids, staging, rules)
-    residence_rows = residence.rows_in(folders)
-    residence.write_residence(residence_rows, staging, swept)
     return rows
 
 

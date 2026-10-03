@@ -29,7 +29,6 @@ from typing import Optional
 
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
-import decsim.experiments.residence as residence
 import decsim.experiments.run_folder as run_folder
 import decsim.ports as ports
 import decsim.records.round_plans as round_plans
@@ -78,7 +77,6 @@ def write(
     staging.mkdir(parents=True)
     record = report.record_of(measurements)
     report.write_record(record, staging, None)
-    _write_residence(staging, measurements)
     counts = _counts_of(record.shots)
     identity = run_folder.piece_identity()
     confidence_shot_count = report.confidence_shot_count_of(measurements)
@@ -290,15 +288,6 @@ def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
         if not folder.is_dir():
             raise
         shutil.rmtree(staging)
-
-
-def _write_residence(staging: pathlib.Path, measurements: list) -> None:
-    """The residence rows of the piece's traced shots, when it traced any."""
-    residence_rows = residence.rows_of(measurements)
-    if not residence_rows:
-        return
-    residence_path = staging / residence.PIECE_FILE
-    report.write_csv(residence_rows, residence_path)
 
 
 def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:

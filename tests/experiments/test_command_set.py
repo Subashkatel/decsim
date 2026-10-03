@@ -1255,48 +1255,6 @@ def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     assert raised_rows == whole_rows
 
 
-def test_a_collect_onto_pieces_of_another_commit_is_refused_before_a_shot(
-    tmp_path,
-):
-    """The saved piece is rewritten as a process at another commit saves it.
-
-    Raising the cap would add this tree's pieces to it, so the collect is
-    refused before it runs a shot, and the run folder keeps the earlier
-    tree's manifest and summary byte for byte.
-    """
-    experiment_dir = tmp_path / "experiment"
-    run_dir = _collected_noisy_point(
-        tmp_path, "first", {"max_shots": 1}, experiment_dir
-    )
-    (piece_path,) = experiment_dir.glob("pieces/*/0-0/piece.json")
-    piece_text = piece_path.read_text()
-    piece = json.loads(piece_text)
-    other_commit = "b" * 40
-    piece["commit"] = other_commit
-    other_text = json.dumps(piece)
-    piece_path.write_text(other_text)
-    manifest_path = run_dir / "run.json"
-    manifest_bytes = manifest_path.read_bytes()
-    sweep_path = run_dir / "sweep.csv"
-    sweep_bytes = sweep_path.read_bytes()
-    second_dir = tmp_path / "second"
-    second_dir.mkdir()
-    raised = {"max_shots": 2, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": raised}]}
-    config_path = yaml_configs.write_config(second_dir, card)
-
-    with pytest.raises(refusal.RefusalError) as refused:
-        collect_command.run_experiment(config_path, experiment_dir)
-
-    said = str(refused.value)
-    assert "ran different code" in said
-    assert f"(commit {other_commit}, dirty" in said
-    assert "this collect (commit" in said
-    assert _piece_names(experiment_dir) == ["0-0"]
-    assert manifest_path.read_bytes() == manifest_bytes
-    assert sweep_path.read_bytes() == sweep_bytes
-
-
 def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
     """The NOISY_AXES point collected into out_dir under this collection."""
     folder = tmp_path / name

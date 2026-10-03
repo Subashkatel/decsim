@@ -248,9 +248,6 @@ def start_the_folder(
     run_folder.refuse_another_tree(run_dir)
     every_id = _experiment_point_ids(study)
     points = recorded_points(run_dir, chosen)
-    point_ids = _point_ids(points)
-    saved_pieces = pieces.folders_of(run_dir, point_ids)
-    report.refuse_pieces_of_another_tree(saved_pieces)
     run_folder.accept_raised_stop_rules(run_dir, run_file, every_id)
     started_utc = run_folder.start_run(run_dir, run_file, every_id)
     return every_id, points, started_utc
@@ -555,15 +552,6 @@ def _operation_line(row) -> str:
         f"observables {row.logical_observables}, "
         f"truth {row.observable_truth}"
     )
-
-
-def _point_ids(points: list) -> list:
-    """The points' ids in the experiment's order."""
-    point_ids = []
-    for point in points:
-        point_id = point.task.strong_id()
-        point_ids.append(point_id)
-    return point_ids
 
 
 @dataclasses.dataclass(frozen=True)

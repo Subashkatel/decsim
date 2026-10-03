@@ -206,9 +206,10 @@ def test_a_table_with_no_key_column_is_refused(tmp_path):
     table_path.write_text(f"d,p,gth_eq4_wilson\n3,{NEAR_THRESHOLD_P},19.5\n")
     card = {"threshold_source": "table", "threshold_table": table_path.name}
     config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
 
     with pytest.raises(ValueError, match="has no key column"):
-        load_experiment(config_path)
+        config.first_point_task()
 
 
 def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
@@ -321,8 +322,9 @@ def test_table_source_key_guards(tmp_path):
         "threshold_table": "missing.csv",
     }
     missing_table_path = source_config(tmp_path, missing_table_card)
+    missing_table_config = load_experiment(missing_table_path)
     with pytest.raises(ValueError, match="does not exist"):
-        load_experiment(missing_table_path)
+        missing_table_config.first_point_task()
 
 
 def test_online_card_guards(tmp_path):

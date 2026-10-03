@@ -9,6 +9,7 @@ its outer loop raises the target on one bad audit and relaxes it on a
 rule-of-three clean quota.
 """
 
+import dataclasses
 import math
 import pathlib
 import random
@@ -386,8 +387,11 @@ def test_a_yaml_path_header_is_refused_naming_its_fact_header(tmp_path):
         "3,0.001,20\n",
     )
 
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=3, physical_error_probability=0.002)
+
     with pytest.raises(ValueError) as refusal:
-        threshold_sources.TableThreshold.Settings(table_path)
+        table.at_point(facts)
 
     sentence = str(refusal.value)
     assert "workload.arguments.physical_error_probability" in sentence
@@ -427,6 +431,25 @@ def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
 
     with pytest.raises(ValueError, match=sentence):
         table.at_point(facts)
+
+
+def test_a_read_table_record_needs_its_file_no_more(tmp_path):
+    """The point's row, read once, is the record's own threshold.
+
+    A copy of the read record and the source it builds read no file, so
+    the table may be gone by then.
+    """
+    table_path = _write_table(tmp_path, "distance,gth_eq4_wilson\n5,12.0\n")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=5)
+    read = table.at_point(facts)
+    table_path.unlink()
+
+    copied = dataclasses.replace(read)
+    source = copied.build()
+
+    twelve_decibels = threshold_sources.decibels_to_nats(12.0)
+    assert source.threshold_nats == twelve_decibels
 
 
 def test_a_table_threshold_no_point_has_read_builds_no_source(tmp_path):

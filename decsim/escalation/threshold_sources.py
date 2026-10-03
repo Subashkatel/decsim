@@ -177,8 +177,9 @@ class TableThreshold(FixedThreshold):
         table gives a point names the point and the file it sits in
         does not. threshold_decibels is that number, None until the
         point's row is read (at_point), which the point's task does
-        before it names the point (collect.Task). The file's columns
-        are checked here, where it enters.
+        before it names the point (collect.Task). The file is read
+        there, once, where it enters: its columns and the point's row
+        are checked, and the read record needs the file no more.
         """
 
         table: pathlib.Path = dataclasses.field(compare=False)
@@ -186,9 +187,9 @@ class TableThreshold(FixedThreshold):
         threshold_decibels: Optional[float] = None
 
         def __post_init__(self) -> None:
-            _check_a_read_threshold(self.threshold_decibels)
-            _refuse_a_missing_table(self.table)
-            _table_rows(self.table, self.column)
+            if self.threshold_decibels is None:
+                return
+            checked_decibels(self.threshold_decibels, "threshold_decibels")
 
         @property
         def threshold_nats(self) -> Optional[float]:
@@ -212,6 +213,7 @@ class TableThreshold(FixedThreshold):
             """
             if self.threshold_decibels is not None:
                 return self
+            _refuse_a_missing_table(self.table)
             columns, rows = _table_rows(self.table, self.column)
             point = _point_of(columns, facts, self.table)
             row = _first_row_holding(rows, point, self.table)
@@ -718,13 +720,6 @@ def _refuse_a_seed_with_no_fact(distance, physical_error_probability) -> None:
         f"distance={distance!r}, "
         f"physical_error_probability={physical_error_probability!r}"
     )
-
-
-def _check_a_read_threshold(threshold_decibels: Optional[float]) -> None:
-    """A table's threshold is unread, None, or a checked number."""
-    if threshold_decibels is None:
-        return
-    checked_decibels(threshold_decibels, "threshold_decibels")
 
 
 def _refuse_a_missing_table(table_path: pathlib.Path) -> None:

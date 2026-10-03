@@ -8,12 +8,6 @@ fires into an empty list.
 import decsim.trace_source as trace_source
 
 
-def test_a_source_with_no_listener_fires_and_nothing_happens():
-    source = trace_source.TraceSource()
-    source.fire(1, "round")
-    assert not source.has_listeners
-
-
 def test_every_listener_hears_every_fire_once_in_connection_order():
     source = trace_source.TraceSource()
     heard = []

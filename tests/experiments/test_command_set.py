@@ -9,6 +9,7 @@ command line is never the only record of a number.
 import csv
 import dataclasses
 import datetime
+import functools
 import hashlib
 import importlib.metadata
 import json
@@ -747,12 +748,14 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
 TWO_SHOT_PIECE_ROUNDS = 30
 
 
-def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
+def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path, monkeypatch):
     """The referent is one collect run to the raised cap from the start.
 
     A cap of 3 in pieces of two ends on a piece of one shot, 2-2. The
     cap raised to 4 runs seed 3 alone beside it, so no seed is run
-    twice, and the fold is the uncut run's.
+    twice, and the fold is the uncut run's. The seeds the second
+    collect runs are noted as it runs them, since a saved piece's
+    folder is never written twice and so cannot show a seed run again.
     """
     whole_dir = tmp_path / "whole"
     raised_dir = tmp_path / "raised"
@@ -760,6 +763,11 @@ def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
         tmp_path, "whole_config", {"max_shots": 4}, whole_dir
     )
     _collected_noisy_point(tmp_path, "first", {"max_shots": 3}, raised_dir)
+    ran_seeds = []
+    noting = functools.partial(
+        _run_the_unit_and_note, ran_seeds, collect.run_unit
+    )
+    monkeypatch.setattr(collect, "run_unit", noting)
 
     raised_run_dir = _collected_noisy_point(
         tmp_path, "second", {"max_shots": 4}, raised_dir
@@ -767,6 +775,7 @@ def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
 
     whole_rows = _rows_of_every_file(whole_run_dir)
     raised_rows = _rows_of_every_file(raised_run_dir)
+    assert ran_seeds == [3]
     assert _piece_names(raised_dir) == ["0-1", "2-2", "3-3"]
     assert raised_rows == whole_rows
 

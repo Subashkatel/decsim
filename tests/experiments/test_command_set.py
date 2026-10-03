@@ -8,6 +8,7 @@ command line is never the only record of a number.
 
 import csv
 import dataclasses
+import datetime
 import hashlib
 import importlib.metadata
 import json
@@ -1706,6 +1707,42 @@ def test_run_refuses_a_run_file_that_is_not_there(tmp_path, capsys):
     assert printed.err.count("\n") == 1
     assert printed.err.startswith(f"decsim: {missing} is not a file")
     assert "the shipped experiments are" in printed.err
+
+
+def test_a_run_with_no_folder_writes_a_new_dated_one(tmp_path, monkeypatch):
+    """results/<date>_<experiment>/, and a second run that day gets _2."""
+    run_file = run_files.write_run_file(tmp_path, **run_files.REFERENCE)
+    monkeypatch.chdir(tmp_path)
+
+    first_dir, _rows = collect_command.run_experiment(run_file)
+    second_dir, _rows = collect_command.run_experiment(run_file)
+
+    today = datetime.date.today()
+    expected = pathlib.Path("results") / f"{today.isoformat()}_reference"
+    assert first_dir == expected
+    assert second_dir == expected.with_name(f"{expected.name}_2")
+    assert (first_dir / "sweep.csv").is_file()
+
+
+def test_a_build_refusal_of_a_narrated_shot_is_one_line_naming_the_run_file(
+    tmp_path, capsys, monkeypatch
+):
+    run_file = run_files.write_run_file(tmp_path, **run_files.REFERENCE)
+
+    def refused(*arguments, **keywords):
+        del arguments, keywords
+        raise ValueError("the machine cannot be built")
+
+    monkeypatch.setattr(machine_module.Machine, "build", refused)
+    out_dir = tmp_path / "out"
+    with pytest.raises(SystemExit) as stopped:
+        command.main(
+            ["run", str(run_file), "--seed", "0", "--out", str(out_dir)]
+        )
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert printed.err == f"decsim: {run_file}: the machine cannot be built\n"
 
 
 @pytest.mark.parametrize("shots", [0, -1, 1.5, "many", True])

@@ -787,6 +787,22 @@ def test_a_path_cards_rate_is_the_exact_fraction_of_its_decimal():
     assert python_card.excludes_receiver_processing is True
 
 
+def test_a_path_card_with_no_rate_is_an_unbounded_wire():
+    reference = link_profiles.logical_reference_profile()
+    fridge = config.Clock.from_megahertz(250.0)
+
+    python_card = link_profiles.path_card(
+        reference,
+        "qpu_to_controller",
+        clock=fridge,
+        latency_cycles=1,
+        bits_per_cycle=None,
+        source="an unbounded wire",
+    )
+
+    assert python_card.channel.capacity is None
+
+
 def test_a_path_latency_in_microseconds_moves_that_path_alone():
     reference = link_profiles.logical_reference_profile()
 

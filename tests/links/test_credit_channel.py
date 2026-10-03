@@ -91,6 +91,15 @@ def test_a_frame_waits_for_the_credit_of_the_frame_c_places_before_it():
     assert transfer.serializer_end_ticks == 1100
 
 
+def test_a_credit_latency_below_zero_is_refused():
+    """A credit back before its frame lands lets more than C frames fly."""
+    clock = config.Clock(50)
+    hundred_bit_flits = flits(100)
+
+    with pytest.raises(ValueError, match="credit_latency_cycles"):
+        credit_channel.CreditChannel.Settings(hundred_bit_flits, 1, -1, clock)
+
+
 def test_a_credit_protocol_on_an_unbounded_wire_stops_at_its_first_frame():
     """A frame has no wire time without a rate, so the first send stops."""
     engine = decsim.engine.Engine()

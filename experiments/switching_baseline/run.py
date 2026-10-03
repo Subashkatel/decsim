@@ -29,9 +29,12 @@ import dataclasses
 
 import decsim
 import decsim.confidence.cluster as cluster
+import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.union_find.cycle_count as cycle_count
+import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -113,9 +116,8 @@ def weak_alone(
 ) -> machine_settings.MachineSettings:
     """The machine with no escalation: union-find keeps every window.
 
-    Helios's union-find runs on a RISC-Q root's engine (HELIOS_POOL).
-    Readout, packing, event forming and the frame are the presets'
-    sourced values.
+    Readout, packing, event forming, the frame and the union-find unit
+    are sourced values, each written below with its source.
     """
     stim_source = stim_device.StimDevice.Settings()
     qpu = qpu_settings.QpuSettings(
@@ -154,11 +156,52 @@ def weak_alone(
         links=links,
         weak_syndrome_buffer=weak_syndrome_buffer,
         windows=windows,
-        weak_decoder=machine_settings.HELIOS_POOL,
+        weak_decoder=weak_decoder(),
         decoder_manager=decoder_manager,
         pauli_frame=pauli_frame,
         workload=workload,
         observation=observation,
+    )
+
+
+def weak_decoder() -> decoder_settings.DecoderPoolSettings:
+    """One union-find unit on a cycle law traced from an FPGA design.
+
+    The law's delay is 3 cycles (MAXIMUM_DELAY,
+    Helios_single_FPGA_core.v:76 at github.com/yale-paragon/
+    Helios_scalable_QEC 2dda998, the design behind 2301.08419v2); an
+    element per vertex costs no cycle per edge (2301.08419 lines
+    764-767), and the graph sits in registers, so there is no setup
+    (lines 912-913). The clock is the design's 100 MHz synthesis target
+    (2406.08491 line 1230). The step that turns a log-odds weight into
+    growth ticks is an estimate, as the design's weights are integers
+    from 2 to wmax (2406.08491 lines 1616-1620). The engine reads a
+    header byte, then a round a cycle (control_node_single_FPGA.v:137
+    and 170-182), and the correction leaves in one 25 ns message
+    (2603.16203 line 902), rounded up to 3 cycles. The boundary folds
+    into the unit's own copy of the rounds (2301.08419 lines 632-640).
+    """
+    clock = config.Clock.from_megahertz(100.0)
+    timing = cycle_count.CycleCount(
+        clock=clock,
+        delay_cycles=3,
+        cycles_per_edge=0.0,
+        setup_cycles=0,
+        setup_cycles_per_vertex=0,
+        setup_cycles_per_edge=0,
+    )
+    algorithm = union_find.UnionFindDecoder.Settings(
+        weight_step=0.5, timing=timing
+    )
+    engine = decoder_settings.EngineSettings(
+        clock=clock,
+        fetch_cycles_per_round=1,
+        fetch_cycles_per_job=1,
+        release_cycles_per_job=3,
+        release_cycles_per_round=0,
+    )
+    return decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=engine, copies_boundary_fold=False
     )
 
 

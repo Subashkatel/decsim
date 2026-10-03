@@ -18,7 +18,6 @@ import decsim.decoders.dispatch_steps.decoder as dispatch_steps
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.tesseract.decoder as tesseract
-import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
 import decsim.tables as tables
@@ -193,18 +192,6 @@ ESTIMATED_ENGINE = EngineSettings(
     fetch_cycles_per_job=0,
     release_cycles_per_job=10,  # estimate
     release_cycles_per_round=0,
-)
-# Helios inside RISC-Q's root node: Helios's controller takes a header
-# byte and then a loading cycle a round (control_node_single_FPGA.v at
-# 2dda998), the aggregator having assembled the whole frame (Liu et al.
-# 2603.16203 lines 668-670), and the root's error distributor sends the
-# correction on in one message.
-RISC_Q_HELIOS_ENGINE = EngineSettings(
-    clock=cycle_count.HELIOS.clock,
-    fetch_cycles_per_round=1,  # control_node_single_FPGA.v:170-182
-    fetch_cycles_per_job=1,  # header byte, control_node_single_FPGA.v:137
-    release_cycles_per_job=3,  # 25 ns, 2603.16203 line 902, rounded up
-    release_cycles_per_round=0,  # one message a job, 2603.16203 line 902
 )
 # A decoder priced by a measured time that already holds the syndrome's
 # copies to and from the device (measured_table/measurements.py) pays no

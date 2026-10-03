@@ -143,15 +143,6 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         )
 
 
-# decsim's union-find decode priced by Helios's cycle count. Helios's
-# edge weights are integers from 2 to wmax (2406.08491 lines 1616-1620);
-# the step that turns a log-odds weight into growth ticks is an estimate.
-HELIOS_TIMED = UnionFindDecoder.Settings(
-    weight_step=0.5,  # estimate
-    timing=cycle_count_module.HELIOS,
-)
-
-
 def _timing_of(
     block: Optional[Mapping], clocks: config.ClockSettings, section_name: str
 ) -> cycle_count_module.Timing:

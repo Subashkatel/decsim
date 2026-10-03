@@ -20,7 +20,6 @@ import decsim.controller.settings as controller_settings
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
-import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
@@ -387,13 +386,6 @@ HOST_BELIEF_MATCHING_POOL = decoder_settings.DecoderPoolSettings(
     copies_input=True,
     copies_boundary_fold=True,
     result_blocks_unit=False,
-)
-# Helios's union-find on one RISC-Q root unit, the window's boundary
-# folded into the unit's own copy of the rounds.
-HELIOS_POOL = decoder_settings.DecoderPoolSettings(
-    algorithm=union_find.HELIOS_TIMED,
-    engine=decoder_settings.RISC_Q_HELIOS_ENGINE,
-    copies_boundary_fold=False,  # Helios 2301.08419 lines 632-640
 )
 
 

@@ -312,17 +312,3 @@ def _check_cycles_per_edge(value) -> None:
         raise ValueError(
             "cycle_count.cycles_per_edge must be a finite nonnegative number"
         )
-
-
-# Helios's union-find core, github.com/yale-paragon/Helios_scalable_QEC
-# at 2dda998, the design behind 2301.08419v2, on its 100 MHz synthesis
-# target (2406.08491 line 1230).
-_HELIOS_CLOCK = config.Clock.from_megahertz(100.0)
-HELIOS = CycleCount(
-    clock=_HELIOS_CLOCK,
-    delay_cycles=3,  # MAXIMUM_DELAY, Helios_single_FPGA_core.v:76
-    cycles_per_edge=0.0,  # an element per vertex, 2301.08419 lines 764-767
-    setup_cycles=0,  # its graph is registers, 2301.08419 lines 912-913
-    setup_cycles_per_vertex=0,
-    setup_cycles_per_edge=0,
-)

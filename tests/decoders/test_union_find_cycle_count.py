@@ -35,6 +35,18 @@ WEIGHT_STEP = 0.1
 # every edge of the twelve-detector graph is this long in half ticks,
 # and both ends of the one between two defects grow
 HAND_GRAPH_TICKS = 22
+# The law traced from Helios's core on its 100 MHz target: a delay of 3
+# cycles (MAXIMUM_DELAY, Helios_single_FPGA_core.v:76), an element per
+# vertex (2301.08419 lines 764-767) and its graph in registers (lines
+# 912-913), so no cycle per edge and no setup.
+TRACED_CYCLE_COUNT = cycle_count_module.CycleCount(
+    clock=CLOCK,
+    delay_cycles=3,
+    cycles_per_edge=0.0,
+    setup_cycles=0,
+    setup_cycles_per_vertex=0,
+    setup_cycles_per_edge=0,
+)
 
 GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 # detector 0 carries the defect; faults 0 and 1 reach the quiet
@@ -121,7 +133,7 @@ def test_an_empty_syndrome_costs_the_quiet_machines_eleven_cycles():
 
     assert evidence.growth_steps == ()
     assert evidence.forest_depth == 0
-    assert cycle_count_module.HELIOS.cycles(evidence) == 11
+    assert TRACED_CYCLE_COUNT.cycles(evidence) == 11
 
 
 def test_two_adjacent_defects_cost_sixteen_cycles():
@@ -141,7 +153,7 @@ def test_two_adjacent_defects_cost_sixteen_cycles():
     )
     assert evidence.growth_steps == (step,)
     assert evidence.forest_depth == 1
-    assert cycle_count_module.HELIOS.cycles(evidence) == 16
+    assert TRACED_CYCLE_COUNT.cycles(evidence) == 16
 
 
 def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
@@ -160,7 +172,7 @@ def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
     lengths = {edge.length_half_ticks for edge in graph.edges}
     assert lengths == {2}
     assert evidence.forest_depth == 1
-    assert cycle_count_module.HELIOS.cycles(evidence) == 19
+    assert TRACED_CYCLE_COUNT.cycles(evidence) == 19
 
 
 def test_a_steps_changes_are_its_fusion_kind_over_its_deepest_flood():
@@ -185,9 +197,9 @@ def test_a_steps_changes_are_its_fusion_kind_over_its_deepest_flood():
     roots_evidence = evidence_with([roots])
     parity_evidence = evidence_with([parity])
 
-    assert cycle_count_module.HELIOS.cycles(quiet_evidence) == floor
-    assert cycle_count_module.HELIOS.cycles(roots_evidence) == floor + 4
-    assert cycle_count_module.HELIOS.cycles(parity_evidence) == floor + 9
+    assert TRACED_CYCLE_COUNT.cycles(quiet_evidence) == floor
+    assert TRACED_CYCLE_COUNT.cycles(roots_evidence) == floor + 4
+    assert TRACED_CYCLE_COUNT.cycles(parity_evidence) == floor + 9
 
 
 def test_a_unit_that_walks_its_edges_pays_its_port_instead_of_its_changes():
@@ -229,7 +241,7 @@ def test_a_decode_with_no_steps_pays_its_setup_and_one_quiet_iteration():
     )
     setup = 1 + 2 * 5 + 3 * 4
     assert laid_out.cycles(evidence) == 1 + 2 + 2 + setup
-    assert cycle_count_module.HELIOS.cycles(None) == 0
+    assert TRACED_CYCLE_COUNT.cycles(None) == 0
 
 
 def test_the_count_ends_on_the_edge_of_its_own_clock():
@@ -243,11 +255,11 @@ def test_the_count_ends_on_the_edge_of_its_own_clock():
     )
     evidence = evidence_with([one_step], forest_depth=1)
     no_step = evidence_with([])
-    helios = cycle_count_module.HELIOS
-    assert helios.decode_ticks(evidence, 0, 0) == 16 * CYCLE_TICKS
-    assert helios.decode_ticks(evidence, 0, 1) == 17 * CYCLE_TICKS - 1
-    assert helios.decode_ticks(no_step, 0, 1) == 12 * CYCLE_TICKS - 1
-    assert helios.decode_ticks(None, 0, 7) == 0
+    traced = TRACED_CYCLE_COUNT
+    assert traced.decode_ticks(evidence, 0, 0) == 16 * CYCLE_TICKS
+    assert traced.decode_ticks(evidence, 0, 1) == 17 * CYCLE_TICKS - 1
+    assert traced.decode_ticks(no_step, 0, 1) == 12 * CYCLE_TICKS - 1
+    assert traced.decode_ticks(None, 0, 7) == 0
 
 
 def test_a_counted_unit_is_held_for_the_counted_cycles():
@@ -259,9 +271,7 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
     cannot say so in advance, as a measured unit cannot.
     """
     engine = engine_module.Engine()
-    settings = union_find.UnionFindDecoder.Settings(
-        timing=cycle_count_module.HELIOS
-    )
+    settings = union_find.UnionFindDecoder.Settings(timing=TRACED_CYCLE_COUNT)
     decoder = union_find.UnionFindDecoder(settings=settings)
     timing = staged_decoder.UnitTiming((), (), CLOCK)
     unit = staged_decoder.StagedDecoder(decoder, timing)

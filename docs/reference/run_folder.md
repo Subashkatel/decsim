@@ -386,7 +386,7 @@ One object. Its keys, from `write_run_record` in
 | --- | --- |
 | `run_files` | the run file, or the yaml chain in the order it was read; empty for a run no file describes |
 | `points` | the experiment's point ids in its order, a point two yaml blocks name listed once: the order a fold writes its rows in |
-| `git` | the `commit`, whether the checkout was `dirty`, and `patch_sha256`, the sha256 of its `code_state.patch` (null when it has none), read once when the process started |
+| `git` | the `commit`, whether the checkout was `dirty`, and `patch_sha256`, the sha256 of its `code_state.patch` (null when it has none), read once when the process started; a run or a fold stops on a `run.json` or `piece.json` without `patch_sha256`, which an older tree wrote |
 | `container` | the container image, when one was in use |
 | `versions` | the Python version, and `packages`: every installed package and its version |
 | `compiled_libraries` | every compiled library a loader the run imported names, keyed by its absolute path, each its sha256, since a library is built and not tracked and the commit does not name it; a loader may take its file from outside the package (the environment variable the Union-Find row reads, `LIBRARY_VARIABLE` in `decsim/decoders/union_find/compiled_decoder.py`), and a named file not built is left out |

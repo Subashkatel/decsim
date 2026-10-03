@@ -181,31 +181,24 @@ def refuse_another_tree(run_dir: pathlib.Path) -> None:
 
 
 def is_one_tree(one: dict, other: dict) -> bool:
-    """One commit, and no dirty flag or patch hash read apart.
+    """One commit, one dirty flag and one patch hash, each read as is.
 
-    Each is a run.json git block or a piece.json. A flag or hash nobody
-    could read (None) says nothing either way, so only two read values
-    that differ are refused. A record written before the patch hash was
-    recorded has none, which reads as None.
+    Each is a run.json git block or a piece.json. A value nobody could
+    read is None and matches only None, and a record written before the
+    patch hash was recorded has no key, so reading it raises KeyError
+    before any shot runs.
     """
-    if one["commit"] != other["commit"]:
-        return False
-    for key in ("dirty", "patch_sha256"):
-        one_value = one.get(key)
-        other_value = other.get(key)
-        if None in (one_value, other_value):
-            continue
-        if one_value != other_value:
-            return False
-    return True
+    return _tree_of(one) == _tree_of(other)
+
+
+def _tree_of(record: dict) -> tuple:
+    return (record["commit"], record["dirty"], record["patch_sha256"])
 
 
 def tree_text(record: dict) -> str:
     """A run.json git block's or a piece.json's tree, for a refusal."""
-    return (
-        f"commit {record['commit']} dirty {record['dirty']} "
-        f"patch {record.get('patch_sha256')}"
-    )
+    commit, is_dirty, patch_sha256 = _tree_of(record)
+    return f"commit {commit} dirty {is_dirty} patch {patch_sha256}"
 
 
 def _refuse_an_unread_commit() -> None:

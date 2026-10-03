@@ -1548,6 +1548,36 @@ def test_a_fold_of_two_points_saved_by_two_trees_is_refused(tmp_path, capsys):
     assert _run_folder_bytes(out_dir) == before
 
 
+@pytest.mark.parametrize("record", ["run.json", "piece.json"])
+def test_a_record_with_no_patch_hash_stops_a_run_before_a_shot(
+    tmp_path, record
+):
+    """A record from before the patch hash cannot name its tree.
+
+    Two shots are saved and the record loses its patch_sha256, as a
+    record an older tree wrote has none; the run again under a raised
+    cap stops on the missing key and runs no shot.
+    """
+    out_dir = tmp_path / "out"
+    first_config = _capped_noisy_config(tmp_path, 2, 15)
+    command.main(["run", str(first_config), "--out", str(out_dir)])
+    records = {
+        "run.json": [out_dir / run_folder.RUN_FILE],
+        "piece.json": list(out_dir.glob("pieces/*/*/piece.json")),
+    }
+    for record_path in records[record]:
+        written = json.loads(record_path.read_text())
+        identity = written.get("git", written)
+        del identity["patch_sha256"]
+        record_path.write_text(json.dumps(written))
+    raised_config = _capped_noisy_config(tmp_path, 3, 15)
+
+    with pytest.raises(KeyError):
+        command.main(["run", str(raised_config), "--out", str(out_dir)])
+
+    assert _piece_names(out_dir) == ["0-0", "1-1"]
+
+
 def _as_pieces_run_at_commit(piece_paths, commit: str) -> None:
     """The pieces as a process at another commit would have saved them."""
     for piece_path in piece_paths:

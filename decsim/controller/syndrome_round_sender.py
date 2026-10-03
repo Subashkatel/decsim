@@ -156,8 +156,8 @@ class SyndromeRoundSender:
     # syndrome buffer
     link = ports.Port(ports.Link)
     # The weak syndrome buffer's own end: its room, and the landing that takes
-    # the slot
-    weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver)
+    # the slot; absent on a run with no weak syndrome buffer
+    weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver, optional=True)
     # The weak syndrome buffer itself, which the window side either reads its
     # windows from or does not; absent on a strong-primary run
     weak_store = ports.Port(ports.SyndromeBuffer, optional=True)
@@ -217,11 +217,17 @@ class SyndromeRoundSender:
             )
 
     def _write(self, packed: round_records.PackedRound) -> bool:
-        """Write the round if its store has room; False when it has none."""
+        """Write the round if its store has room; False when it has none.
+
+        A run with no decoder has no store, since a store exists only
+        when a decoder reads it, so its round is sent nowhere.
+        """
         if self.publishes_from_strong_store:
             if not self.strong_receiver.has_room(packed):
                 return self.held_rounds.refuse(packed, self._write)
             self._write_strong(packed)
+            return True
+        if self.weak_receiver is None:
             return True
         if not self.weak_receiver.has_room(packed):
             return self.held_rounds.refuse(packed, self._write)

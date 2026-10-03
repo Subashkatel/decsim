@@ -23,6 +23,7 @@ import decsim.experiments.experiment as experiment
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
@@ -345,6 +346,27 @@ def test_a_run_with_no_decoder_builds_no_syndrome_buffer():
     assert readout.strong_syndrome_buffer is None
     assert readout.primary_output is None
     assert result.terminal_status == "complete"
+
+
+def test_a_run_with_no_decoder_sends_its_rounds_to_no_store():
+    """The controller reads every round out and sends none on to a store.
+
+    A store exists only when a decoder reads it, so a round that reaches
+    the sender of a run with no decoder has nowhere to go.
+    """
+    operation = declared_run.memory_operation()
+    workload = declared_run.declared_workload([operation], 4)
+    workload = dataclasses.replace(workload, decode_operations=())
+    settings = machine_settings.MachineSettings(workload=workload)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    traffic = machine.observation.traffic.snapshot()
+    paths = [record.path for record in traffic.transfers]
+
+    assert result.terminal_status == "complete"
+    assert transfer_records.LinkPath.QPU_TO_CONTROLLER in paths
+    assert transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER not in paths
+    assert transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER not in paths
 
 
 def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():

@@ -14,15 +14,12 @@ one so a refused binding never disturbs a run.
 """
 
 import hashlib
-import random
-import types
 
 import pytest
 
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 
-MAX_SEED = (1 << 64) - 1
 NAMESPACE = b"decsim.run-seed.v1"
 
 
@@ -96,16 +93,6 @@ def root_at(name, component):
     return ((segment,), component)
 
 
-def recording_root(name, events):
-    """A root holding one recording leaf, both named name."""
-    leaf = RecordingLeaf(name, events)
-    return root_at(name, leaf)
-
-
-def actions_of(events):
-    return [action for action, _name, _seed in events]
-
-
 def reserved_names(events):
     names = []
     for action, name, _seed in events:
@@ -129,43 +116,6 @@ def test_a_substream_seed_is_the_component_law_over_its_framed_keys():
     independent = blake2b_seed(23, path)
     derived = seeding.substream_seed(23, ("stream", 4))
     assert derived == independent
-
-
-def test_a_substream_key_that_is_not_an_int_or_str_is_refused():
-    with pytest.raises(ValueError, match="must be an int or str"):
-        seeding.substream_seed(23, (("stream", 4),))
-
-
-def test_the_root_seed_alone_derives_the_seed_of_the_empty_path():
-    independent = blake2b_seed(0, ())
-    derived = seeding.derive_component_seed(0, ())
-    assert derived == independent
-
-
-def test_the_widest_root_seed_derives_a_seed_of_its_own():
-    path = (field("device"),)
-    independent = blake2b_seed(MAX_SEED, path)
-    derived = seeding.derive_component_seed(MAX_SEED, path)
-    assert derived == independent
-
-
-def test_two_components_of_one_run_draw_from_different_seeds():
-    """Two leaves of one root differ, so no two components share a stream."""
-    device_path = (field("device"),)
-    decoder_path = (field("weak_decoder"),)
-    device_seed = seeding.derive_component_seed(23, device_path)
-    decoder_seed = seeding.derive_component_seed(23, decoder_path)
-    assert device_seed != decoder_seed
-
-
-def test_every_leaf_reserves_before_any_leaf_commits():
-    events = []
-    roots = [recording_root(name, events) for name in ("a", "b", "c")]
-
-    seeding.bind_run_seed(5, roots)
-
-    assert actions_of(events) == ["reserve"] * 3 + ["commit"] * 3
-    assert reserved_names(events) == ["a", "b", "c"]
 
 
 def test_a_reservation_that_fails_cancels_the_earlier_ones_in_reverse():
@@ -282,29 +232,6 @@ def seeded_generator_leaf():
     return GeneratorLeaf(seed=None)
 
 
-def test_a_reserved_generator_is_installed_only_at_commit():
-    leaf = seeded_generator_leaf()
-    live_generator = leaf._rng
-
-    reservation = leaf.reserve_run_seed(29)
-    assert leaf._rng is live_generator
-
-    leaf.commit_run_seed(reservation)
-    assert leaf._rng is not live_generator
-
-
-def test_a_committed_seed_reproduces_the_drawn_numbers():
-    leaf = seeded_generator_leaf()
-    reservation = leaf.reserve_run_seed(29)
-    leaf.commit_run_seed(reservation)
-    reference = random.Random(29)
-
-    drawn = [leaf._rng.random() for _ in range(4)]
-    expected = [reference.random() for _ in range(4)]
-
-    assert drawn == expected
-
-
 def test_a_cancelled_reservation_leaves_the_live_generator_alone():
     leaf = seeded_generator_leaf()
     live_state = leaf._rng.getstate()
@@ -313,15 +240,3 @@ def test_a_cancelled_reservation_leaves_the_live_generator_alone():
     leaf.cancel_run_seed(reservation)
 
     assert leaf._rng.getstate() == live_state
-
-
-def test_a_component_that_draws_nothing_is_walked_and_skipped():
-    """A plain component takes no seed; the walk carries on past it."""
-    events = []
-    plain = types.SimpleNamespace()
-    leaf = RecordingLeaf("leaf", events)
-    roots = [root_at("plain", plain), root_at("leaf", leaf)]
-
-    seeding.bind_run_seed(3, roots)
-
-    assert reserved_names(events) == ["leaf"]

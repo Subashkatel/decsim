@@ -6,9 +6,12 @@ refused with a sentence, the swept distance reaches the rounds policy,
 and a run writes its run.json and its per-shot records.
 """
 
+import csv
 import dataclasses
 import json
+import pathlib
 import re
+import shutil
 
 import pytest
 import yaml
@@ -19,6 +22,7 @@ import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.experiment as experiment
+import decsim.experiments.fold as fold
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
@@ -27,7 +31,13 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.settings as machine_settings
 import tests.experiments.yaml_configs as yaml_configs
+
+CONFIGS = yaml_configs.CONFIGS_DIR
+REFERENCE_YAML = CONFIGS / "reference.yaml"
+# the data-movement grid's fourth block, the one with the strong tier
+DATA_MOVEMENT_SWITCHING_BLOCK = 3
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
@@ -1274,3 +1284,168 @@ def test_no_detector_takes_no_catch_deadline(tmp_path):
 
     with pytest.raises(ValueError, match="burst_detector does not know"):
         _record_options_of(tmp_path, {"burst_detector": detector})
+
+
+def test_a_swept_section_keeps_its_column_beside_every_measured_one(
+    tmp_path,
+):
+    """A whole yaml section is an axis, and no measured column shares it.
+
+    A row takes its swept values first and its measured values after
+    (report._with_swept_values), so a measured column named as a section
+    would overwrite the swept value in its cell. The swept windows cell
+    is the section's compact json (run_folder.swept_values), and no csv
+    column the run wrote is named as another yaml section.
+    """
+    windows = yaml_configs.MINIMAL_CONFIG["windows"]
+    block = dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])
+    block["axes"] = dict(block["axes"], windows=[windows])
+    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
+    out_dir = tmp_path / "out"
+    run_dir, _ = collect_command.run_experiment(config_path, out_dir)
+    shots_path = run_dir / "shots.csv"
+    shot, *_ = _csv_rows(shots_path)
+    columns = _columns_of_every_csv(run_dir)
+    sections_written = columns & set(machine_settings.SECTIONS)
+
+    assert json.loads(shot["windows"]) == windows
+    assert int(shot["decoded_windows"]) > 0
+    assert sections_written == {"windows"}
+
+
+def test_a_task_named_by_two_blocks_runs_once(tmp_path):
+    raw = _reference_yaml()
+    raw["sweep"] = [raw["sweep"][0], dict(raw["sweep"][0])]
+    raw["collection"]["max_shots"] = 2
+    twice_path = tmp_path / "twice.yaml"
+    twice = _written_yaml(raw, twice_path)
+    config = experiment.load_experiment(twice)
+    tasks = config.tasks()
+    out_dir = tmp_path / "out"
+
+    run_dir, _ = collect_command.run_experiment(twice, out_dir)
+
+    shots_path = run_dir / "shots.csv"
+    shots = _csv_rows(shots_path)
+    seeds = [shot["seed"] for shot in shots]
+    assert len(tasks) == 2
+    assert seeds == ["0", "1"]
+
+
+def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
+    """A yaml link rate is an exact Fraction and enters the id as its text.
+
+    sinter's strong id is the sha256 of every value's json text
+    (sinter/_data/_task.py strong_id_value), so two values give two ids.
+    """
+    narrow, wide = _bandwidth_tasks(tmp_path, (8, 64))
+
+    unique = collect.unique_tasks([narrow, wide])
+    narrow_shot = collect.run_shot(narrow, 0)
+    wide_shot = collect.run_shot(wide, 0)
+
+    assert narrow.strong_id() != wide.strong_id()
+    assert len(unique) == 2
+    assert _readout_rate(narrow_shot) == "2000"
+    assert _readout_rate(wide_shot) == "16000"
+    assert collect.json_value(narrow.settings) != collect.json_value(
+        wide.settings
+    )
+
+
+def test_one_yaml_saved_under_two_names_names_its_points_alike(tmp_path):
+    """A point is named by what it runs, not by the file that says it.
+
+    sinter keeps a task's circuit_path out of its strong id and hashes
+    the circuit's text (sinter/_data/_task.py:157, 167-204). The
+    reference yaml saved as t2.yaml and as t6.yaml runs the same points,
+    so its points' ids are equal, though the links card's labels name
+    the two files.
+    """
+    first_path = tmp_path / "t2.yaml"
+    second_path = tmp_path / "t6.yaml"
+    shutil.copyfile(REFERENCE_YAML, first_path)
+    shutil.copyfile(REFERENCE_YAML, second_path)
+
+    first_ids = _point_ids_of(first_path)
+    second_ids = _point_ids_of(second_path)
+
+    assert first_ids
+    assert first_ids == second_ids
+
+
+def _reference_yaml() -> dict:
+    text = REFERENCE_YAML.read_text()
+    return yaml.safe_load(text)
+
+
+def _written_yaml(raw: dict, path: pathlib.Path) -> pathlib.Path:
+    text = yaml.safe_dump(raw)
+    path.write_text(text)
+    return path
+
+
+def _columns_of_every_csv(run_dir) -> set:
+    """Every column name any csv file under the folder holds."""
+    columns = set()
+    for path in run_dir.rglob("*.csv"):
+        header = fold.header_of(path)
+        columns.update(header)
+    return columns
+
+
+def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
+    """The data-movement grid's switching task, its readout hop at each width.
+
+    The weak base the grid extends holds the hop, and that one file is
+    edited in place between loads, so the tasks differ in the hop's rate
+    and in nothing else, the path included.
+    """
+    configs = tmp_path / "configs"
+    shutil.copytree(CONFIGS, configs)
+    path = configs / "bases" / "weak_decoder_baseline.yaml"
+    grid = configs / "experiments" / "data_movement" / "data_movement.yaml"
+    text = path.read_text()
+    unpriced = "clock: fridge, bits_per_cycle: null}"
+    readout_hop = f"qpu_to_controller:  {{latency_cycles: 1, {unpriced}"
+    assert readout_hop in text
+    tasks = []
+    for bits_per_cycle in widths:
+        priced = f"clock: fridge, bits_per_cycle: {bits_per_cycle}}}"
+        priced_hop = readout_hop.replace(unpriced, priced)
+        priced_text = text.replace(readout_hop, priced_hop)
+        path.write_text(priced_text)
+        config = experiment.load_experiment(grid)
+        task = _switching_task(config)
+        tasks.append(task)
+    return tasks
+
+
+def _switching_task(config: experiment.ExperimentConfig):
+    """The grid's switching block, its first point at p = 0.001."""
+    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
+    points = switching_block.points()
+    values = dict(points[0])
+    values[yaml_configs.ERROR_RATE_PATH] = 0.001
+    return config.point_task(values)
+
+
+def _readout_rate(shot) -> str:
+    """The readout hop's rate, the one setting two bandwidth tasks differ in."""
+    capacity = shot.task.settings.links.qpu_to_controller.channel.capacity
+    return str(capacity.input_bits_per_microsecond)
+
+
+def _point_ids_of(config_path: pathlib.Path) -> list:
+    config = experiment.load_experiment(config_path)
+    point_ids = []
+    for task, _collection in config.point_tasks():
+        point_id = task.strong_id()
+        point_ids.append(point_id)
+    return point_ids
+
+
+def _csv_rows(path: pathlib.Path) -> list:
+    with open(path, newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader)

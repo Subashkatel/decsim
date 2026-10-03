@@ -87,6 +87,31 @@ ALGORITHMS = {
         timing=cycle_count.HostMeasuredTime()
     ),
 }
+# reference_machine's hops: (path, latency cycles, bits a cycle a lane,
+# lanes), each on the fridge clock
+REFERENCE_HOPS = (
+    ("qpu_to_controller", 1, None, 1),
+    ("controller_to_weak_buffer", 1, 1.0, 8),
+    ("weak_buffer_to_weak_decoder", 1, None, 1),
+    ("decoder_to_decoder", 1, None, 1),
+    ("weak_decoder_to_frame", 1, None, 1),
+    ("frame_to_controller", 0, 32, 1),
+    ("controller_to_qpu", 22, 128, 1),
+)
+REFERENCE_SOURCE = "configs/reference.yaml's hops, in fridge cycles"
+# the control processor's issue pipeline, configs/reference.yaml's count
+REFERENCE_ISSUE_CYCLES = 8
+# configs/reference.yaml's sweep: one point, its axes in written order
+REFERENCE = {
+    "axes": {
+        ERROR_RATE_PATH: (0.001,),
+        DISTANCE_PATH: (3,),
+        ROUND_PERIOD_PATH: (1.0,),
+    },
+    "machine": "reference",
+    "collection": {"max_shots": 2},
+    "name": "reference",
+}
 # Same-region gap below 20 dB redoes the window on the strong tier.
 FIXED_THRESHOLD_DECIBELS = 20.0
 # Where an online threshold starts before it learns.
@@ -191,7 +216,53 @@ def switching_machine(
     )
 
 
-MACHINES = {"minimal": minimal_machine, "switching": switching_machine}
+def reference_machine(
+    cells: Optional[Mapping] = None,
+) -> machine_settings.MachineSettings:
+    """configs/reference.yaml's machine, the minimal one on priced hops.
+
+    PyMatching decodes for real; every hop is priced in fridge cycles
+    (REFERENCE_HOPS); the controller issues in eight cycles; and the
+    weak store, the windows and the decoder manager count on the fridge
+    clock. Its first shot writes a Chrome trace.
+    """
+    base = minimal_machine(cells, weak_decoder="pymatching")
+    fridge = machine_settings.FRIDGE_CLOCK
+    cards = {}
+    for path_name, latency_cycles, bits_per_cycle, lane_count in REFERENCE_HOPS:
+        cards[path_name] = link_profiles.path_card(
+            base.links,
+            path_name,
+            clock=fridge,
+            latency_cycles=latency_cycles,
+            bits_per_cycle=bits_per_cycle,
+            source=REFERENCE_SOURCE,
+            lane_count=lane_count,
+        )
+    links = dataclasses.replace(base.links, **cards)
+    controller = dataclasses.replace(
+        base.controller, decision_to_pulse_cycles=REFERENCE_ISSUE_CYCLES
+    )
+    weak_store = dataclasses.replace(base.weak_syndrome_buffer, clock=fridge)
+    windows = dataclasses.replace(base.windows, clock=fridge)
+    manager = dataclasses.replace(base.decoder_manager, clock=fridge)
+    observation = dataclasses.replace(base.observation, trace="chrome")
+    return dataclasses.replace(
+        base,
+        links=links,
+        controller=controller,
+        weak_syndrome_buffer=weak_store,
+        windows=windows,
+        decoder_manager=manager,
+        observation=observation,
+    )
+
+
+MACHINES = {
+    "minimal": minimal_machine,
+    "switching": switching_machine,
+    "reference": reference_machine,
+}
 
 
 def decoder_pool(algorithm, clock) -> decoder_settings.DecoderPoolSettings:
@@ -224,7 +295,7 @@ def sweep(
 ) -> experiment.Experiment:
     """One point per combination of the axes, each collected alike.
 
-    The axes run in their paths' alphabetical order, the last fastest.
+    The axes run in the order given, the last fastest.
     machine names a MACHINES builder and machine_arguments its keywords;
     observation replaces fields of every point's observation, and
     record_options are collect.RecordOptions fields. A point is named by
@@ -236,9 +307,8 @@ def sweep(
     settings = collection_module.CollectionSettings(**collection)
     options = collect.RecordOptions(**(record_options or {}))
     build = MACHINES[machine]
-    ordered = {path: axes[path] for path in sorted(axes)}
     points = []
-    for cells in experiment.grid(**ordered):
+    for cells in experiment.grid(**axes):
         settings_at_point = build(cells, **machine_arguments)
         if observation is not None:
             watched = dataclasses.replace(

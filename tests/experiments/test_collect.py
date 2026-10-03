@@ -1,7 +1,8 @@
 """The experiments layer's referents: sinter's collect, and a recorded sweep.
 
 Referent one is a sweep of reference.yaml recorded before decsim.collect
-existed, its sweep.csv and its per-link means kept in data/, each mean
+existed, rerun on its machine (run_files.REFERENCE), its sweep.csv
+and its per-link means kept in data/, each mean
 the one shot_links.csv gives a link over the point's shots. Ten of its
 numbers
 were amended when the controller-to-store hop stopped being priced at
@@ -34,7 +35,8 @@ out of the comparison, and the columns kept are exactly the ones two
 recorded runs agreed on. Its two columns of the per-shot whole-circuit
 PyMatching reference went when that reference did. Referent two
 is sinter (sinter/_collection/_collection.py collect, sinter/_data/_task.py
-strong_id): a task named twice runs once, and a decoder off the table is
+strong_id): two tasks that run differently have two ids, a decoder
+off the table is
 refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder"),
 and a shot its decoder could not answer is a discard, counted apart and
 never an error (sinter/_decoding/_decoding.py:123-125). Referent three
@@ -50,20 +52,16 @@ import functools
 import json
 import pathlib
 import re
-import shutil
 import statistics
 import time
 
 import numpy
 import pytest
 import stim
-import yaml
 
 import decsim.collect as collect
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
 import decsim.experiments.collect_command as run
-import decsim.experiments.experiment as experiment
-import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
 import decsim.experiments.run_folder as run_folder
@@ -76,14 +74,10 @@ import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
-import tests.experiments.yaml_configs as yaml_configs
+import tests.experiments.run_files as run_files
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
-CONFIGS = THIS_FILE.parents[2] / "configs"
-REFERENCE_YAML = CONFIGS / "reference.yaml"
-# the data-movement grid's fourth block, the one with the strong tier
-DATA_MOVEMENT_SWITCHING_BLOCK = 3
 # The sweep.csv columns that carry the decoder's measured wall clock, and
 # the release stage that starts from it and waits for a clock edge.
 WALL_CLOCK_POINTS = (
@@ -118,21 +112,14 @@ WALL_CLOCK_COLUMNS = (
 DIRECT_REFERENCE = DATA / "direct_reference.csv"
 
 FULL_HISTORY_PAIR = {
-    "weak_decoder": {
-        **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
-        "kind": "pymatching",
+    "axes": {
+        run_files.DISTANCE_PATH: (3,),
+        run_files.ROUND_PERIOD_PATH: (1.0,),
+        run_files.COMMIT_ROUNDS_PATH: (None, 16),
+        run_files.ERROR_RATE_PATH: (0.015,),
     },
-    "sweep": [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.015],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-                "windows.commit_rounds": [None, 16],
-            },
-            "collection": {"max_shots": 240},
-        }
-    ],
+    "machine_arguments": {"weak_decoder": "pymatching"},
+    "collection": {"max_shots": 240},
 }
 
 # how long the first unit waits for its release before it gives up
@@ -148,13 +135,16 @@ LINK_COUNTERS = (
     "propagation_us",
 )
 
-# the observation keys that record a run without changing a shot's row
-RECORDING_ONLY_OBSERVATION = {
-    "trace": "chrome",
-    "trace_shots": [0, 1],
-    "log": "print",
-    "log_component_io": True,
-    "confidence_shot_count": 7,
+# the observation fields and record options that record a run without
+# changing a shot's row
+RECORDING_ONLY = {
+    "observation": {
+        "trace": "chrome",
+        "trace_shots": (0, 1),
+        "log": "print",
+        "log_component_io": True,
+    },
+    "record_options": {"confidence_shot_count": 7},
 }
 
 # Each number beside the json value it enters the strong id as.
@@ -171,11 +161,11 @@ EXACT_NUMBERS = [
 ]
 
 
-def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
-    config = experiment.load_experiment(REFERENCE_YAML)
-    tasks = config.tasks()
-    measurements = yaml_configs.run_sweep(tasks, 2)
-    _rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
+def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):
+    study = run_files.sweep(**run_files.REFERENCE)
+    tasks = run_files.tasks_of(study)
+    measurements = run_files.run_sweep(tasks, 2)
+    _rows, run_dir = run_files.folded_run(tmp_path, measurements)
     folded_sweep_path = run_dir / "sweep.csv"
     shot_links_path = run_dir / "shot_links.csv"
     sweep_now = _csv_rows(folded_sweep_path)
@@ -206,10 +196,10 @@ def test_a_full_history_point_reproduces_the_retired_direct_columns(
     failures can be two different answers, which is why the pair is
     compared by predictions.
     """
-    config_path = yaml_configs.write_config(tmp_path, FULL_HISTORY_PAIR)
+    run_file = run_files.write_run_file(tmp_path, **FULL_HISTORY_PAIR)
     out_dir = tmp_path / "out"
 
-    run_dir, _rows = run.run_experiment(config_path, out_dir)
+    run_dir, _rows = run.run_experiment(run_file, out_dir)
 
     shots_path = run_dir / "shots.csv"
     shots = _csv_rows(shots_path)
@@ -229,69 +219,10 @@ def test_a_full_history_point_reproduces_the_retired_direct_columns(
     assert sum(mismatches) == 2
 
 
-def test_a_swept_section_keeps_its_column_beside_every_measured_one(
-    tmp_path,
-):
-    """A whole yaml section is an axis, and no measured column shares it.
-
-    A row takes its swept values first and its measured values after
-    (report._with_swept_values), so a measured column named as a section
-    would overwrite the swept value in its cell. The swept windows cell
-    is the section's compact json (run_folder.swept_values), and no csv
-    column the run wrote is named as another yaml section.
-    """
-    windows = yaml_configs.MINIMAL_CONFIG["windows"]
-    block = dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])
-    block["axes"] = dict(block["axes"], windows=[windows])
-    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
-    out_dir = tmp_path / "out"
-    run_dir, _ = run.run_experiment(config_path, out_dir)
-    shots_path = run_dir / "shots.csv"
-    shot, *_ = _csv_rows(shots_path)
-    columns = _columns_of_every_csv(run_dir)
-    sections_written = columns & set(machine_settings.SECTIONS)
-
-    assert json.loads(shot["windows"]) == windows
-    assert int(shot["decoded_windows"]) > 0
-    assert sections_written == {"windows"}
-
-
-def test_a_task_named_by_two_blocks_runs_once(tmp_path):
-    raw = _reference_yaml()
-    raw["sweep"] = [raw["sweep"][0], dict(raw["sweep"][0])]
-    raw["collection"]["max_shots"] = 2
-    twice_path = tmp_path / "twice.yaml"
-    twice = _written_yaml(raw, twice_path)
-    config = experiment.load_experiment(twice)
-    tasks = config.tasks()
-    out_dir = tmp_path / "out"
-
-    run_dir, _ = run.run_experiment(twice, out_dir)
-
-    shots_path = run_dir / "shots.csv"
-    shots = _csv_rows(shots_path)
-    seeds = [shot["seed"] for shot in shots]
-    assert len(tasks) == 2
-    assert seeds == ["0", "1"]
-
-
-def test_every_shot_of_a_point_decides_on_the_tasks_calibrator(tmp_path):
-    """threshold_source online: one calibrator per point, on the task."""
-    raw = _reference_yaml()
-    raw["escalation"] = {
-        "kind": "switching",
-        "gap_threshold_db": 15.0,
-        "threshold_source": "online",
-    }
-    online_path = tmp_path / "online.yaml"
-    online = _written_yaml(raw, online_path)
-    config = experiment.load_experiment(online)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
+def test_every_shot_of_a_point_decides_on_the_tasks_calibrator():
+    """An online threshold: one calibrator per point, on the task."""
+    task = run_files.first_task(
+        machine="switching", machine_arguments={"online": {}}
     )
     first = collect.run_shot(task, 0)
     second = collect.run_shot(task, 1)
@@ -303,14 +234,7 @@ def test_every_shot_of_a_point_decides_on_the_tasks_calibrator(tmp_path):
 
 def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     """The task's own referent: sinter compiles once per task."""
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    task = _reference_task()
 
     whole_task = collect.Unit(task, 0, 4)
     shared_outcome = collect.run_unit(whole_task, _decoded)
@@ -321,14 +245,7 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
 
 
 def test_the_first_shot_builds_the_models_and_the_rest_read_them():
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    task = _reference_task()
     built = built_window_models.BuiltWindowModels()
 
     _run_every_shot(task, 3, built)
@@ -338,14 +255,7 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
 
 
 def test_a_machine_built_alone_builds_its_own_models():
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    task = _reference_task()
     settings = task.settings
 
     first = machine_module.Machine.build(settings, 0)
@@ -362,29 +272,10 @@ def test_two_points_under_one_cache_do_not_share_models():
     Two distances also differ in their window spans, so the noisier
     point at one distance is what pins the circuit text itself.
     """
-    config = experiment.load_experiment(REFERENCE_YAML)
     built = built_window_models.BuiltWindowModels()
-    at_three = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    at_five = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 5,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    noisier_at_three = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    at_three = _reference_task()
+    at_five = _reference_task(distance=5)
+    noisier_at_three = _reference_task(probability=0.003)
 
     collect.run_shot(at_three, 0, built_models=built)
     collect.run_shot(at_five, 0, built_models=built)
@@ -402,14 +293,7 @@ def test_a_unit_that_ended_is_handed_on_while_one_before_it_runs(tmp_path):
     short ones would wait behind it unsaved, and a job killed at its
     time limit would lose them.
     """
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    task = _reference_task()
     units = [
         collect.Unit(task, 0, 1),
         collect.Unit(task, 1, 1),
@@ -430,9 +314,7 @@ def test_two_tasks_that_run_different_circuits_are_two_tasks():
     three_rounds = _memory_task(3)
     five_rounds = _memory_task(5)
 
-    unique = collect.unique_tasks([three_rounds, five_rounds])
-
-    assert len(unique) == 2
+    assert three_rounds.strong_id() != five_rounds.strong_id()
 
 
 def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
@@ -448,9 +330,7 @@ def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
     memory_task = collect.Task(memory_settings, {"point": 1})
     merge_task = collect.Task(merge_settings, {"point": 1})
 
-    unique = collect.unique_tasks([memory_task, merge_task])
-
-    assert len(unique) == 2
+    assert memory_task.strong_id() != merge_task.strong_id()
 
 
 def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
@@ -468,9 +348,7 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     three_task = collect.Task(three_settings, {"point": 1})
     five_task = collect.Task(five_settings, {"point": 1})
 
-    unique = collect.unique_tasks([three_task, five_task])
-
-    assert len(unique) == 2
+    assert three_task.strong_id() != five_task.strong_id()
 
 
 def test_two_records_with_the_same_fields_are_two_tasks():
@@ -498,9 +376,8 @@ def test_two_records_with_the_same_fields_are_two_tasks():
         task = collect.Task(settings, {"point": 1})
         tasks.append(task)
 
-    unique = collect.unique_tasks(tasks)
-
-    assert len(unique) == 2
+    every_round_task, no_round_task = tasks
+    assert every_round_task.strong_id() != no_round_task.strong_id()
 
 
 def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
@@ -508,9 +385,7 @@ def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
     three_rounds = _slotted_rounds_task(3)
     six_rounds = _slotted_rounds_task(6)
 
-    unique = collect.unique_tasks([three_rounds, six_rounds])
-
-    assert len(unique) == 2
+    assert three_rounds.strong_id() != six_rounds.strong_id()
 
 
 def test_two_python_built_sources_that_hold_different_values_are_two_tasks():
@@ -518,9 +393,7 @@ def test_two_python_built_sources_that_hold_different_values_are_two_tasks():
     first = _device_task(1)
     second = _device_task(2)
 
-    unique = collect.unique_tasks([first, second])
-
-    assert len(unique) == 2
+    assert first.strong_id() != second.strong_id()
 
 
 def test_two_recorded_sources_that_replay_different_shots_are_two_tasks():
@@ -528,18 +401,14 @@ def test_two_recorded_sources_that_replay_different_shots_are_two_tasks():
     first = _recorded_device_task(0)
     second = _recorded_device_task(1)
 
-    unique = collect.unique_tasks([first, second])
-
-    assert len(unique) == 2
+    assert first.strong_id() != second.strong_id()
 
 
 def test_two_python_built_sources_that_hold_the_same_values_are_one_task():
     first = _device_task(1)
     same = _device_task(1)
 
-    unique = collect.unique_tasks([first, same])
-
-    assert len(unique) == 1
+    assert first.strong_id() == same.strong_id()
 
 
 def test_a_class_enters_the_id_by_its_name_whatever_it_holds():
@@ -561,54 +430,9 @@ def test_a_class_enters_the_id_by_its_name_whatever_it_holds():
     assert after == before
 
 
-def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
-    """A yaml link rate is an exact Fraction and enters the id as its text.
-
-    sinter's strong id is the sha256 of every value's json text
-    (sinter/_data/_task.py strong_id_value), so two values give two ids.
-    """
-    narrow, wide = _bandwidth_tasks(tmp_path, (8, 64))
-
-    unique = collect.unique_tasks([narrow, wide])
-    narrow_shot = collect.run_shot(narrow, 0)
-    wide_shot = collect.run_shot(wide, 0)
-
-    assert narrow.strong_id() != wide.strong_id()
-    assert len(unique) == 2
-    assert _readout_rate(narrow_shot) == "2000"
-    assert _readout_rate(wide_shot) == "16000"
-    assert collect.json_value(narrow.settings) != collect.json_value(
-        wide.settings
-    )
-
-
-def test_one_yaml_saved_under_two_names_names_its_points_alike(tmp_path):
-    """A point is named by what it runs, not by the file that says it.
-
-    sinter keeps a task's circuit_path out of its strong id and hashes
-    the circuit's text (sinter/_data/_task.py:157, 167-204). The
-    reference yaml saved as t2.yaml and as t6.yaml runs the same points,
-    so its points' ids are equal, though the links card's labels name
-    the two files.
-    """
-    first_path = tmp_path / "t2.yaml"
-    second_path = tmp_path / "t6.yaml"
-    shutil.copyfile(REFERENCE_YAML, first_path)
-    shutil.copyfile(REFERENCE_YAML, second_path)
-
-    first_ids = _point_ids_of(first_path)
-    second_ids = _point_ids_of(second_path)
-
-    assert first_ids
-    assert first_ids == second_ids
-
-
 def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     """machine.json is where a label is read, so it keeps them all."""
-    config_path = tmp_path / "t6.yaml"
-    shutil.copyfile(REFERENCE_YAML, config_path)
-    config = experiment.load_experiment(config_path)
-    task = config.first_point_task()
+    task = _reference_task()
 
     run_folder.record_point(tmp_path, "point", task)
 
@@ -617,16 +441,15 @@ def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     record = json.loads(record_text)
     links = record["settings"]["links"]
     channel = links["qpu_to_controller"]["channel"]
-    assert links["profile_name"] == "t6.yaml"
-    assert channel["configuration_source"] == "configs/t6.yaml links"
+    assert links["profile_name"] == "logical_reference"
+    assert channel["configuration_source"] == run_files.REFERENCE_SOURCE
 
 
 def test_settings_that_differ_only_in_labels_are_one_point():
     """A label changes no id; a latency, which changes the run, does."""
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.first_point_task()
+    task = _reference_task()
     links = task.settings.links
-    relabelled = dataclasses.replace(links, profile_name="other.yaml")
+    relabelled = dataclasses.replace(links, profile_name="other")
     channel = links.qpu_to_controller.channel
     slower_ticks = channel.propagation_latency_ticks + 1
     slower_channel = dataclasses.replace(
@@ -654,16 +477,8 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
     rows but for the wall clock, and its resolved record says what it
     recorded.
     """
-    plain_path = yaml_configs.write_config(tmp_path, {})
-    plain_config = experiment.load_experiment(plain_path)
-    plain = plain_config.first_point_task()
-    recorded_folder = tmp_path / "recorded"
-    recorded_folder.mkdir()
-    recorded_path = yaml_configs.write_config(
-        recorded_folder, {"observation": RECORDING_ONLY_OBSERVATION}
-    )
-    recorded_config = experiment.load_experiment(recorded_path)
-    recorded = recorded_config.first_point_task()
+    plain = run_files.first_task()
+    recorded = run_files.first_task(**RECORDING_ONLY)
 
     plain_rows = _shot_rows_without_wall_clock(plain)
     recorded_rows = _shot_rows_without_wall_clock(recorded)
@@ -693,8 +508,7 @@ def test_a_metadata_key_that_is_not_text_is_refused_at_any_depth(
     metadata, sentence_start
 ):
     """A Python caller's metadata, where a yaml reader cannot refuse it."""
-    config = experiment.load_experiment(REFERENCE_YAML)
-    first_point = config.first_point_task()
+    first_point = run_files.first_task()
     sentence = (
         f"{sentence_start} which is not text; a point's id is the json of "
         "its metadata, whose keys are text, so 1 and '1' would name one point"
@@ -740,19 +554,13 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     monkeypatch.setattr(
         relay_window, "_load_relay_decoder_type", _crashing_relay_type
     )
-    weak_decoder = dict(
-        yaml_configs.MINIMAL_CONFIG["weak_decoder"], kind="relay_bp"
-    )
-    sweep = [
-        dict(
-            yaml_configs.MINIMAL_CONFIG["sweep"][0], collection={"max_shots": 2}
-        )
-    ]
-    config_path = yaml_configs.write_config(
-        tmp_path, {"weak_decoder": weak_decoder, "sweep": sweep}
+    run_file = run_files.write_run_file(
+        tmp_path,
+        machine_arguments={"weak_decoder": "relay_bp"},
+        collection={"max_shots": 2},
     )
     out_dir = tmp_path / "out"
-    run_dir, rows = run.run_experiment(config_path, out_dir)
+    run_dir, rows = run.run_experiment(run_file, out_dir)
     shots_path = run_dir / "shots.csv"
     first, second = _csv_rows(shots_path)
 
@@ -782,21 +590,22 @@ def _is_wall_clock_column(column: str) -> bool:
     return False
 
 
+def _reference_task(
+    distance: int = 3, probability: float = 0.001
+) -> collect.Task:
+    """The reference machine's task at one distance and error probability."""
+    axes = {
+        run_files.ERROR_RATE_PATH: (probability,),
+        run_files.DISTANCE_PATH: (distance,),
+        run_files.ROUND_PERIOD_PATH: (1.0,),
+    }
+    return run_files.first_task(axes=axes, machine="reference")
+
+
 def _csv_rows(path: pathlib.Path) -> list:
     with open(path, newline="") as handle:
         reader = csv.DictReader(handle)
         return list(reader)
-
-
-def _reference_yaml() -> dict:
-    text = REFERENCE_YAML.read_text()
-    return yaml.safe_load(text)
-
-
-def _written_yaml(raw: dict, path: pathlib.Path) -> pathlib.Path:
-    text = yaml.safe_dump(raw)
-    path.write_text(text)
-    return path
 
 
 def _stable_columns(row: dict) -> dict:
@@ -843,15 +652,6 @@ def _without_point_id(rows: list) -> list:
     return kept
 
 
-def _columns_of_every_csv(run_dir) -> set:
-    """Every column name any csv file under the folder holds."""
-    columns = set()
-    for path in run_dir.rglob("*.csv"):
-        header = fold.header_of(path)
-        columns.update(header)
-    return columns
-
-
 def _decoded(shot: collect.Shot) -> tuple:
     """What one shot drew, and what the loop and the whole circuit decoded.
 
@@ -863,8 +663,8 @@ def _decoded(shot: collect.Shot) -> tuple:
         shot.seed,
         measurement.decoded_windows,
         _drawn(shot),
-        yaml_configs.loop_predictions(shot),
-        yaml_configs.whole_circuit_predictions(shot),
+        run_files.loop_predictions(shot),
+        run_files.whole_circuit_predictions(shot),
     )
 
 
@@ -960,48 +760,6 @@ def _recorded_device_task(flip: int) -> collect.Task:
     return collect.Task(settings, {"point": 1})
 
 
-def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
-    """The data-movement grid's switching task, its readout hop at each width.
-
-    The weak base the grid extends holds the hop, and that one file is
-    edited in place between loads, so the tasks differ in the hop's rate
-    and in nothing else, the path included.
-    """
-    configs = tmp_path / "configs"
-    shutil.copytree(CONFIGS, configs)
-    path = configs / "bases" / "weak_decoder_baseline.yaml"
-    grid = configs / "experiments" / "data_movement" / "data_movement.yaml"
-    text = path.read_text()
-    unpriced = "clock: fridge, bits_per_cycle: null}"
-    readout_hop = f"qpu_to_controller:  {{latency_cycles: 1, {unpriced}"
-    assert readout_hop in text
-    tasks = []
-    for bits_per_cycle in widths:
-        priced = f"clock: fridge, bits_per_cycle: {bits_per_cycle}}}"
-        priced_hop = readout_hop.replace(unpriced, priced)
-        priced_text = text.replace(readout_hop, priced_hop)
-        path.write_text(priced_text)
-        config = experiment.load_experiment(grid)
-        task = _switching_task(config)
-        tasks.append(task)
-    return tasks
-
-
-def _switching_task(config: experiment.ExperimentConfig):
-    """The grid's switching block, its first point at p = 0.001."""
-    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
-    points = switching_block.points()
-    values = dict(points[0])
-    values[yaml_configs.ERROR_RATE_PATH] = 0.001
-    return config.point_task(values)
-
-
-def _readout_rate(shot) -> str:
-    """The readout hop's rate, the one setting two bandwidth tasks differ in."""
-    capacity = shot.task.settings.links.qpu_to_controller.channel.capacity
-    return str(capacity.input_bits_per_microsecond)
-
-
 def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
     """One point's shots.csv rows by seed, the point named by its window."""
     by_seed = {}
@@ -1033,7 +791,7 @@ def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:
 
 def _shot_rows_without_wall_clock(task: collect.Task) -> list:
     """Two shots' rows, the host's time to simulate each left out."""
-    measurements = yaml_configs.run_sweep([task], 2)
+    measurements = run_files.run_sweep([task], 2)
     record = sweep_report.record_of(measurements)
     rows = []
     for row in record.shots:
@@ -1041,15 +799,6 @@ def _shot_rows_without_wall_clock(task: collect.Task) -> list:
         del stable["sim_wall_seconds"]
         rows.append(stable)
     return rows
-
-
-def _point_ids_of(config_path: pathlib.Path) -> list:
-    config = experiment.load_experiment(config_path)
-    point_ids = []
-    for task, _collection in config.point_tasks():
-        point_id = task.strong_id()
-        point_ids.append(point_id)
-    return point_ids
 
 
 def _task_with_links(task: collect.Task, links) -> collect.Task:

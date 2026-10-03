@@ -63,13 +63,8 @@ THRESHOLD_DECIBELS = 20.0
 COLLECTION = decsim.CollectionSettings(max_shots=100)
 # The word a results column shows for whether a pool copies its input,
 # and its boundary fold.
-INPUT_WORDS = {
-    copies: word for word, copies in decoder_settings.DECODER_INPUTS.items()
-}
-BOUNDARY_FOLD_WORDS = {
-    copies: word
-    for word, copies in decoder_settings.DECODER_BOUNDARY_FOLDS.items()
-}
+INPUT_WORDS = {True: "copy", False: "in_place"}
+BOUNDARY_FOLD_WORDS = {True: "copy", False: "in_place"}
 # Blocks 1 to 3 run no strong tier. The weak base they extend escalates
 # nothing, names three strong-side hops null, which keeps the reference
 # card, and writes no fourth hop and no strong decoder; the results show

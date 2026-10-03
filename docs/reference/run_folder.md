@@ -203,8 +203,7 @@ On a serial path those ten add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 
-The park is two points because it has two causes
-([D15](../explanation/decisions.md#d15-the-park-before-a-decode-is-two-points-by-what-it-waited-for)).
+The park is two points because it has two causes.
 A run whose windows wait on the seam reports the park in `dep_block` and
 zero in `compute_wait`; two decodes of one window sharing a unit, which
 is what a complementary gap's forced-class pair is, report it in the
@@ -433,6 +432,4 @@ leave every folder naming code that no part of the run read.
 
 ## Read next
 
-- [How to compare two runs](../how-to/compare_two_runs.md): read two folders side by side.
-- [The commands](cli.md): the commands that write and read these files.
 - [Your first sweep](../tutorials/first_sweep.md): a sweep, its pieces and its error bars.

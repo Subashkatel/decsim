@@ -2,14 +2,16 @@
 
 # How to add a component to a part
 
-You have a new kind of component, one that no table lists, and you want
-it in the machine: a new stage on the readout path, say, or a new step
-between the frame and the controller. It goes in the part that holds
-that stage of the loop, and the part builds it and wires it.
+You have a new kind of component and you want it in the machine: a new
+stage on the readout path, say, or a new step between the frame and the
+controller. It goes in the part that holds that stage of the loop, and
+the part builds it and wires it.
 
-If what you have is another row of a component decsim already has, such
-as a decoder or a syndrome buffer, you want
-[How to add a row to a table](add_a_table_row.md) instead.
+If what you have is another kind of a component decsim already has,
+such as a decoder, you want
+[How to add a decoder backend](add_a_decoder_backend.md) instead: a
+class that fills the component's port, with a settings record a machine
+names.
 
 The worked example on this page is `DecisionDispatch`
 (`decsim/pauli_frame/decision_dispatch.py`), which sends a released
@@ -120,5 +122,5 @@ what the new component does, in the test folder of its package.
 
 - [Build a machine step by step](../tutorials/build_a_machine.md): the
   parts, built and assembled by hand.
-- [Architecture](../explanation/architecture.md): what each part holds.
-- [The ports](../reference/ports.md): every port a component can fill.
+- [The parts](../reference/parts.md): every settings record a machine is
+  built from.

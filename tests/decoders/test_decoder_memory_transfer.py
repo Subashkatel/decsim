@@ -5,8 +5,7 @@ rounds it deposits at a landing, and the masked input a window's gate
 hands it once the window's boundary is known. Both writes land in
 storage this side owns, so this side makes them and books its own copy:
 a copy is booked where it lands, by the name of the structure it landed
-in (docs/explanation/data_path.md), and the destination takes what it is
-handed before it acts (OMNeT++
+in, and the destination takes what it is handed before it acts (OMNeT++
 src/sim/csimplemodule.cc:782-783). One input has
 one writer, which is the memory's own rule (Helios 2301.08419 lines
 632-640, decoder_memory.py rewrite).

@@ -1,7 +1,7 @@
 """How often a run copied bits, referenced them and moved them.
 
-The counters of the data path's hops (docs/explanation/data_path.md),
-so a study reads the data path without the trace file. gem5's
+The counters of the data path's hops, so a study reads the data path
+without the trace file. gem5's
 vocabulary: a copy duplicates bits into a structure the receiver owns
 (mem/cache/cache_blk.hh 97-104), a reference is a handle to bits that
 stay where they are (mem/packet.hh 1163-1171), a move crosses a link

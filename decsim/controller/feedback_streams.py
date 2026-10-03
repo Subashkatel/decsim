@@ -232,9 +232,8 @@ class FeedbackStreams:
         A segment that declares no offset follows every round of its
         stream, the idle rounds its patches read out while it waited to
         start among them: a live source executes each round once, in
-        order, on one retained state (Stim's TableauSimulator.do;
-        docs/explanation/decisions.md D24), and the QPU starts the
-        segment only after its boundary's idle rounds
+        order, on one retained state (Stim's TableauSimulator.do), and
+        the QPU starts the segment only after its boundary's idle rounds
         (qpu/cycle_clock.py _cross_boundary). The segment issued before
         it has run, so its patches may continue the stream after it. A
         feedback source on a protected stream reads the stream from the

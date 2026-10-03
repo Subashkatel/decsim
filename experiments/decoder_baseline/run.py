@@ -15,7 +15,7 @@ running at once never write one file and a resubmitted task goes on
 where it stopped; stats.csv is sinter's combine, read_stats_from_csv_files
 under its CSV_HEADER (sinter/_command/_main_combine.py). The folder keeps
 run.json, the code state and a copy of this script, as every decsim
-results folder does (docs/how-to/run_an_experiment.md).
+results folder does (docs/reference/run_folder.md).
 """
 
 import argparse

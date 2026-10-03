@@ -95,11 +95,10 @@ class WindowInputGate:
         applies the accumulated syndrome mods to every window past the
         first, whatever they hold (sliding_window.cpp:287-293, the
         `w > 0` branch), and a fold skipped on an all-zero mask would
-        make the work the seam costs follow the noise, which is the cost
-        D9 (docs/explanation/decisions.md:156-164) prices independent of
-        it so that a sweep can read it. The mask is this side's: what a
-        boundary is and how it lands on a round layer are the window
-        interaction's. Where the masked input is written is the decoder
+        make the work the seam costs follow the noise, a cost priced
+        independent of the noise so that a sweep can read it. The mask
+        is this side's: what a boundary is and how it lands on a round
+        layer are the window interaction's. Where the masked input is written is the decoder
         side's, which is handed it here: with the copy fold the unit's
         stored rounds stay raw (cudaq-x keeps raw rounds and applies
         syndrome_mods at window assembly) and the job reads a masked

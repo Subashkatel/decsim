@@ -1188,7 +1188,7 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
     """The values the design fixed first, then what was measured.
 
     Wickham's tidy order (Tidy Data, J. Stat. Softw. 59(10), 2014,
-    section 2.3): one column per yaml path the sweep sets, right after
+    section 2.3): one column per path the sweep sets, right after
     the point id, in every file a point's rows are in.
     """
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
@@ -1839,10 +1839,10 @@ def test_a_sweep_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
     assert _estimate_of(row) == _estimate_by_the_statistics(row)
 
 
-def test_a_fold_keeps_a_point_its_yaml_no_longer_sweeps(tmp_path):
-    """A fold folds what was recorded, not what the yamls make now.
+def test_a_fold_keeps_a_point_its_run_file_no_longer_sweeps(tmp_path):
+    """A fold folds what was recorded, not what the run file makes now.
 
-    Four points are collected; the yaml then drops one error rate. The
+    Four points are collected; the run file then drops one error rate. The
     two points it no longer makes keep their pieces, and a fold still
     counts them, every saved shot once.
     """

@@ -681,6 +681,52 @@ def test_pieces_of_one_point_that_hold_different_columns_are_refused(
     assert not out_dir.exists()
 
 
+# A switching point that records each tier's waits and services, and the
+# weak tier alone, which has none to record, as Experiment 1 mixes them.
+MIXED_RUN_FILE = """
+import dataclasses
+
+import decsim
+import decsim.observe.settings as observe_settings
+import decsim.settings as machine_settings
+import tests.escalation.test_strong_window_shapes as shape_tests
+
+switching = shape_tests.gate_switching()
+recording = observe_settings.ObservationSettings(record_switching_windows=True)
+switching = dataclasses.replace(switching, observation=recording)
+weak_alone = machine_settings.weak_decoder_baseline(3, 0.008, 1.0)
+points = [
+    decsim.Point("switching", switching, {}),
+    decsim.Point("weak_alone", weak_alone, {}),
+]
+collection = decsim.CollectionSettings(max_shots=1)
+experiment = decsim.Experiment("mixed", points, collection)
+"""
+
+
+def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
+    """A switching point and a weak-alone point fold into one run folder.
+
+    The switching point measures its weak decodes' service and its
+    strong decodes' waits, and the weak-alone point has no tiers to
+    measure, so their pieces hold different columns. The folded file
+    takes every column any point holds, first seen first, as write_csv
+    does for a run's own rows, and a point's cell for a column it did
+    not measure is empty.
+    """
+    run_file = tmp_path / "mixed.py"
+    run_file.write_text(MIXED_RUN_FILE)
+    run_dir = tmp_path / "run"
+    command.main(["run", str(run_file), "--out", str(run_dir)])
+
+    shots = _rows_of(run_dir / "shots.csv")
+    run_record = json.loads((run_dir / "run.json").read_text())
+    switching_id, weak_alone_id = run_record["points"]
+    services = {row["point_id"]: row["weak_service_mean_us"] for row in shots}
+    assert services[switching_id] != ""
+    assert services[weak_alone_id] == ""
+
+
 def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
     """The fold orders the pieces itself, so their order is no input.
 

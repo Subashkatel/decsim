@@ -528,7 +528,8 @@ def _holds_in_a_row(contents: str, listing: str) -> bool:
     file_lines = contents.splitlines()
     listed_lines = listing.splitlines()
     count = len(listed_lines)
-    for start in range(len(file_lines) - count + 1):
+    start_count = len(file_lines) - count + 1
+    for start in range(start_count):
         if file_lines[start : start + count] == listed_lines:
             return True
     return False

@@ -38,9 +38,8 @@ SHOT_COUNT = 150
 ROUNDS = 5
 ERROR_RATE = 0.02
 # the baseline's union_find row, charged the host's time
-UNION_FIND = union_find.UnionFindDecoder.Settings(
-    timing=cycle_count.HostMeasuredTime()
-)
+HOST_TIME = cycle_count.HostMeasuredTime()
+UNION_FIND = union_find.UnionFindDecoder.Settings(timing=HOST_TIME)
 
 
 @pytest.mark.parametrize("distance", [3, 5])

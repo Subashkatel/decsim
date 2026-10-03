@@ -532,9 +532,10 @@ def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
 ):
     table_path = _write_table(tmp_path, f"distance,gth_eq4_wilson\n3,{cell}\n")
     table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=3)
 
     with pytest.raises(ValueError, match=sentence):
-        table.at_point(_facts(distance=3))
+        table.at_point(facts)
 
 
 def test_an_empty_entry_refuses_its_point(tmp_path):
@@ -551,9 +552,10 @@ def test_a_table_with_no_key_column_is_refused(tmp_path):
     """Headers that name no point fact would match every point to row one."""
     table_path = _write_table(tmp_path, "d,p,gth_eq4_wilson\n3,0.008,19.5\n")
     table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(**GATE_FACTS)
 
     with pytest.raises(ValueError, match="has no key column"):
-        table.at_point(_facts(**GATE_FACTS))
+        table.at_point(facts)
 
 
 def test_the_column_named_is_the_method_the_point_reads(tmp_path):
@@ -564,8 +566,11 @@ def test_the_column_named_is_the_method_the_point_reads(tmp_path):
     )
     facts = _facts(**GATE_FACTS)
 
-    assert wilson.at_point(facts).threshold_decibels == 19.5
-    assert brute.at_point(facts).threshold_decibels == 2.5
+    wilson_threshold = wilson.at_point(facts)
+    brute_threshold = brute.at_point(facts)
+
+    assert wilson_threshold.threshold_decibels == 19.5
+    assert brute_threshold.threshold_decibels == 2.5
 
 
 def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
@@ -582,8 +587,10 @@ def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
     half_qpu = dataclasses.replace(whole.qpu, round_period_microseconds=0.5)
     half = dataclasses.replace(whole, qpu=half_qpu)
 
-    half_threshold = half.at_point().switching.threshold
-    whole_threshold = whole.at_point().switching.threshold
+    half_point = half.at_point()
+    whole_point = whole.at_point()
+    half_threshold = half_point.switching.threshold
+    whole_threshold = whole_point.switching.threshold
 
     assert half_threshold.threshold_decibels == 12.0
     assert whole_threshold.threshold_decibels == 13.0
@@ -619,13 +626,17 @@ def _threshold_at_commit_rounds(gate, commit_rounds: int):
     )
     windows = dataclasses.replace(gate.windows, scheme=scheme)
     point = dataclasses.replace(gate, windows=windows)
-    return point.at_point().switching.threshold
+    placed = point.at_point()
+    return placed.switching.threshold
 
 
 def test_a_table_read_from_two_folders_names_its_points_alike(tmp_path):
     """The folder a table sits in is no part of what its points run."""
-    first_id = _point_id_with_its_table_in(tmp_path / "first")
-    other_id = _point_id_with_its_table_in(tmp_path / "elsewhere")
+    first_folder = tmp_path / "first"
+    other_folder = tmp_path / "elsewhere"
+
+    first_id = _point_id_with_its_table_in(first_folder)
+    other_id = _point_id_with_its_table_in(other_folder)
 
     assert first_id == other_id
 
@@ -635,7 +646,8 @@ def _point_id_with_its_table_in(folder: pathlib.Path) -> str:
     folder.mkdir()
     table_path = _write_table(folder, CALIBRATION_TABLE)
     table = threshold_sources.TableThreshold.Settings(table_path)
-    task = collect.Task(_gate_on(table), {})
+    gate = _gate_on(table)
+    task = collect.Task(gate, {})
     return task.strong_id()
 
 
@@ -657,24 +669,27 @@ def test_a_target_that_leaves_no_room_for_the_audits_is_refused():
 
 def test_a_fixed_threshold_point_builds_no_calibrator():
     fixed = threshold_sources.FixedThreshold.Settings(20.0)
+    gate = _gate_on(fixed)
 
-    task = collect.Task(_gate_on(fixed), {})
+    task = collect.Task(gate, {})
 
     assert task.online_threshold is None
 
 
 def test_one_calibrator_learns_across_every_shot_of_its_point():
     """The point's task builds it once and every shot's machine takes it."""
-    task = collect.Task(_online_gate(), {})
+    gate = _online_gate()
+    task = collect.Task(gate, {})
     calibrator = task.online_threshold
 
     collect.run_shot(task, 0)
-    first_shot_windows = calibrator.summary()["windows"]
+    after_one_shot = calibrator.summary()
     collect.run_shot(task, 1)
-    two_shot_windows = calibrator.summary()["windows"]
+    after_two_shots = calibrator.summary()
 
+    first_shot_windows = after_one_shot["windows"]
     assert first_shot_windows > 0
-    assert two_shot_windows == 2 * first_shot_windows
+    assert after_two_shots["windows"] == 2 * first_shot_windows
 
 
 def test_an_online_point_reproduces_its_decisions():
@@ -693,7 +708,8 @@ def test_an_online_point_reproduces_its_decisions():
 
 def _two_shots_of_a_fresh_online_point() -> tuple:
     """Each shot's observables, and what the point's calibrator did."""
-    task = collect.Task(_online_gate(), {})
+    gate = _online_gate()
+    task = collect.Task(gate, {})
     first_shot = collect.run_shot(task, 0)
     second_shot = collect.run_shot(task, 1)
     calibrator = task.online_threshold
@@ -708,8 +724,11 @@ def _two_shots_of_a_fresh_online_point() -> tuple:
 def test_two_online_points_whose_rates_print_alike_have_two_ids():
     """The seed text picks the windows the calibrator audits."""
     plain_rate, nudged_rate = PRINTED_ALIKE
-    plain = collect.Task(_online_gate(plain_rate), {})
-    nudged = collect.Task(_online_gate(nudged_rate), {})
+    plain_gate = _online_gate(plain_rate)
+    nudged_gate = _online_gate(nudged_rate)
+
+    plain = collect.Task(plain_gate, {})
+    nudged = collect.Task(nudged_gate, {})
     (plain_operation,) = plain.settings.workload.operations
     (nudged_operation,) = nudged.settings.workload.operations
 

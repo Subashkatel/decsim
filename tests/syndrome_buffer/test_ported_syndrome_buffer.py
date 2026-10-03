@@ -262,8 +262,9 @@ def test_the_default_shape_is_the_sky130_byte_fifo_one_port_each_way():
 def test_afs_word_memory_reads_32_bits_in_one_nanosecond():
     """Four cycles a 32-bit read at 4 GHz, 2001.06598 lines 531 and 1102."""
     engine = engine_module.Engine()
+    four_gigahertz = config.Clock.from_megahertz(4000.0)
     afs = ported_syndrome_buffer.PortedSyndromeBufferSettings(
-        clock=config.Clock.from_megahertz(4000.0),
+        clock=four_gigahertz,
         word_bits=32,
         cycles_per_access=4,
     )

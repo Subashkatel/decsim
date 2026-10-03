@@ -57,6 +57,8 @@ SHORT_BEAM = tesseract.TesseractDecoder.Settings(
 )
 # the least seed build_det_orders cannot take as a uint64
 ONE_PAST_UINT64 = 2**64
+# the least beam TesseractConfig cannot take as a C++ int
+ONE_PAST_INT32 = 2**31
 
 
 def _seeded_row():
@@ -351,7 +353,7 @@ def test_a_beam_the_backend_cannot_build_leaves_the_shot_unscored():
     exception as its reason, as a search that raises does.
     """
     pytest.importorskip("tesseract_decoder")
-    settings = tesseract.TesseractDecoder.Settings(detector_beam=2**31)
+    settings = tesseract.TesseractDecoder.Settings(detector_beam=ONE_PAST_INT32)
     row = tesseract.TesseractDecoder(settings=settings)
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
     model = windows.whole_circuit_window(

@@ -719,8 +719,11 @@ def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
     run_dir = tmp_path / "run"
     command.main(["run", str(run_file), "--out", str(run_dir)])
 
-    shots = _rows_of(run_dir / "shots.csv")
-    run_record = json.loads((run_dir / "run.json").read_text())
+    shots_path = run_dir / "shots.csv"
+    run_path = run_dir / "run.json"
+    shots = _rows_of(shots_path)
+    run_text = run_path.read_text()
+    run_record = json.loads(run_text)
     switching_id, weak_alone_id = run_record["points"]
     services = {row["point_id"]: row["weak_service_mean_us"] for row in shots}
     assert services[switching_id] != ""

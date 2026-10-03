@@ -78,13 +78,15 @@ def switching_settings(
     engine = decoder_settings.EngineSettings(
         clock=FRIDGE_CLOCK, release_cycles_per_job=10
     )
+    weak_algorithm = _preset_matching(weak_microseconds)
+    strong_algorithm = _preset_matching(10.0)
     weak_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=_preset_matching(weak_microseconds),
+        algorithm=weak_algorithm,
         unit_count=weak_units,
         engine=engine,
     )
     strong_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=_preset_matching(10.0),
+        algorithm=strong_algorithm,
         unit_count=strong_units,
         engine=engine,
     )
@@ -95,8 +97,9 @@ def switching_settings(
     plain_windows = window_settings.WindowSettings()
     windows = window_settings.switching_windows(plain_windows, strong_window)
     threshold = threshold_sources.FixedThreshold.Settings(20.0)
+    confidence = complementary.ComplementaryGap.Settings()
     switching = escalation_settings.SwitchingSettings(
-        confidence=complementary.ComplementaryGap.Settings(),
+        confidence=confidence,
         threshold=threshold,
         run_both_at_once=run_both_at_once,
         strong_window=strong_window,
@@ -106,10 +109,11 @@ def switching_settings(
     )
     observation = observe_settings.ObservationSettings(trace=str(trace_path))
     workload = machine_settings.memory_workload(3, 0.008, 30)
+    links = _switching_links()
     return machine_settings.MachineSettings(
         clock=FRIDGE_CLOCK,
         qpu=qpu,
-        links=_switching_links(),
+        links=links,
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
@@ -388,7 +392,8 @@ def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
         strong_units=2,
         run_both_at_once=run_both_at_once,
     )
-    shot = collect.run_shot(collect.Task(settings, {}), 0)
+    task = collect.Task(settings, {})
+    shot = collect.run_shot(task, 0)
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
     stages = _rows_with(complete_rows, "cat", "stage")
@@ -416,7 +421,8 @@ def test_a_withdrawn_request_leaves_the_queue_when_it_is_withdrawn(tmp_path):
     settings = switching_settings(
         trace_path, weak_microseconds=5.0, strong_window=double_window
     )
-    shot = collect.run_shot(collect.Task(settings, {}), 0)
+    task = collect.Task(settings, {})
+    shot = collect.run_shot(task, 0)
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
     queued = _rows_with(complete_rows, "cat", "window,queue")

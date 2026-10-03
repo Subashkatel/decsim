@@ -26,6 +26,8 @@ REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
 DISPATCHER = dispatch_steps.DISPATCHER
 WORKER = dispatch_steps.WORKER
 ECHO = dispatch_steps.ECHO
+ROCE_V2_GPU_CARD = link_profiles.RoceV2GpuFabric.base_card()
+NVQLINK_GPU_CARD = link_profiles.NvqlinkGpuFabric.base_card()
 
 
 def _bind_seed(component) -> None:
@@ -143,8 +145,8 @@ def _wire_ticks(channel, bits: int) -> int:
 @pytest.mark.parametrize(
     "profile, echo_bits, echo_microseconds",
     [
-        (link_profiles.RoceV2GpuFabric.base_card(), 128, 4.5),
-        (link_profiles.NvqlinkGpuFabric.base_card(), 256, 3.839),
+        (ROCE_V2_GPU_CARD, 128, 4.5),
+        (NVQLINK_GPU_CARD, 256, 3.839),
     ],
 )
 def test_an_echo_on_a_published_card_costs_its_measured_round_trip(

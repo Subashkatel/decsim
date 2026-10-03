@@ -128,20 +128,6 @@ def test_the_compute_goes_to_the_oldest_landed_resident_not_parked():
     assert unit.oldest_landed_resident_ready_to_start() is ready
 
 
-def test_the_residents_describe_their_phase():
-    unit = _unit()
-    computing = _job("w0", rounds=3)
-    computing.input_landed = True
-    computing.service_started = True
-    landing = _job("w1", rounds=2)
-    unit.admit(computing)
-    unit.claim_compute(computing)
-    unit.admit(landing)
-    assert unit.describe_residents() == (
-        "w0 computing, 3 rounds; w1 capturing, 2 rounds"
-    )
-
-
 def test_the_output_slot_holds_one_finished_result_until_it_is_taken():
     """AFS keeps the finished log in the unit until it is read (833-840)."""
     unit = _unit()

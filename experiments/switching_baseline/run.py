@@ -26,7 +26,6 @@ decsim run experiments/switching_baseline/run.py
 """
 
 import dataclasses
-import fractions
 
 import decsim
 import decsim.confidence.cluster as cluster
@@ -61,17 +60,6 @@ SWITCHING_COLLECTION = decsim.CollectionSettings(
 )
 WEAK_ALONE_COLLECTION = decsim.CollectionSettings(
     max_failures=100, max_shots=5_000_000, min_shots=0, piece_rounds=200_000
-)
-# The paths the yaml carded over the roce_v2_cpu row, whose rates it
-# keeps as exact fractions.
-CARDED_PATHS = (
-    "qpu_to_controller",
-    "controller_to_weak_buffer",
-    "weak_buffer_to_weak_decoder",
-    "decoder_to_decoder",
-    "weak_decoder_to_frame",
-    "frame_to_controller",
-    "controller_to_qpu",
 )
 
 
@@ -176,8 +164,7 @@ def experiment_one_links() -> link_settings.FabricSettings:
     decision and the pulse keep the reference card.
     """
     roce = link_profiles.roce_v2_measured_profile("cpu")
-    links = link_profiles.with_risc_q_weak_loop(roce)
-    return _with_exact_rates(links)
+    return link_profiles.with_risc_q_weak_loop(roce)
 
 
 def switching_baseline_points() -> list:
@@ -214,36 +201,6 @@ def switching_baseline_points() -> list:
         )
         weak_alone_points.append(weak_alone_point)
     return switching_points + weak_alone_points
-
-
-def _with_exact_rates(
-    links: link_settings.FabricSettings,
-) -> link_settings.FabricSettings:
-    """The card with each carded path's rate the yaml's exact Fraction."""
-    paths = {}
-    for path_name in CARDED_PATHS:
-        path = getattr(links, path_name)
-        channel = _with_an_exact_rate(path.channel)
-        paths[path_name] = dataclasses.replace(path, channel=channel)
-    return dataclasses.replace(links, **paths)
-
-
-def _with_an_exact_rate(
-    channel: link_settings.ChannelSettings,
-) -> link_settings.ChannelSettings:
-    """The channel with its rate an exact Fraction.
-
-    A yaml card's rate is a Fraction (link_profiles.path_card), which
-    equals the preset's whole number but writes another point id.
-    """
-    capacity = channel.capacity
-    if capacity is None:
-        return channel
-    rate = fractions.Fraction(capacity.input_bits_per_microsecond)
-    exact_capacity = dataclasses.replace(
-        capacity, input_bits_per_microsecond=rate
-    )
-    return dataclasses.replace(channel, capacity=exact_capacity)
 
 
 def _metadata(distance: int, physical_error_probability: float) -> dict:

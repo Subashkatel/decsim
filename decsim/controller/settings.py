@@ -131,16 +131,12 @@ class ControllerSettings:
         )
 
 
-# decsim's one controller clock, 250 MHz: Yang et al.'s loop (2605.04892
-# line 1063) and Caune et al.'s sequencer (2410.05202 lines 1021-1022).
-_CLOCK_250_MEGAHERTZ = config.Clock.from_megahertz(250.0)
 # QubiC's issue pipeline from the decision to the pulse trigger
 # (2404.15260 lines 173-191), counted with gem5's MinorCPU stage delays
-# where the paper gives none. The count is QubiC's; decsim runs it on its
-# 250 MHz controller clock, while QubiC's cores run at 500 MHz (lines
-# 716-717). Readout and packing sit inside the round.
+# where the paper gives none. The count is QubiC's; decsim runs it on the
+# machine's clock, while QubiC's cores run at 500 MHz (lines 716-717).
+# Readout and packing sit inside the round.
 QUBIC_ISSUE = ControllerSettings(
-    clock=_CLOCK_250_MEGAHERTZ,  # estimate, QubiC runs 500 MHz
     readout_to_bits_cycles=0,
     packing_cycles_per_round=0,
     decision_to_pulse_cycles=8,  # estimate traced from the paper
@@ -157,11 +153,10 @@ QICK_ISSUE = ControllerSettings(
 )
 # A RISC-Q leaf (Liu et al. 2603.16203) issuing on QubiC's pipeline: the
 # syndrome aggregator packs a round in 29 ns (lines 894-895), rounded up
-# to 250 MHz cycles; RISC-Q gives no issue count. decsim runs the leaf on
-# its 250 MHz controller clock, while RISC-Q's leaves run at 500 MHz
-# (line 143).
+# to cycles of the machine's 250 MHz clock; RISC-Q gives no issue count.
+# decsim runs the leaf on the machine's clock, while RISC-Q's leaves run
+# at 500 MHz (line 143).
 RISC_Q_LEAF = ControllerSettings(
-    clock=_CLOCK_250_MEGAHERTZ,  # estimate, RISC-Q leaves run 500 MHz
     readout_to_bits_cycles=0,  # in the readout hop, 2605.04892 lines 1053-1055
     packing_cycles_per_round=8,  # 29 ns, 2603.16203 lines 894-895
     decision_to_pulse_cycles=QUBIC_ISSUE.decision_to_pulse_cycles,

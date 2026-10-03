@@ -127,14 +127,10 @@ def weak_alone(
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True, backlog_trace=True
     )
-    # the leaf runs on the machine's clock, which names it once
-    controller = dataclasses.replace(
-        controller_settings.RISC_Q_LEAF, clock=None
-    )
     return decsim.MachineSettings(
         clock=machine_settings.FRIDGE_CLOCK,
         qpu=qpu,
-        controller=controller,
+        controller=controller_settings.RISC_Q_LEAF,
         detection_events=detection_event_settings.YANG_PREPROCESSING,
         links=links,
         weak_syndrome_buffer=weak_syndrome_buffer,

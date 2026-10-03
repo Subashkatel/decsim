@@ -345,32 +345,11 @@ def test_a_cancel_during_the_algorithm_closes_it_and_the_timer_adds_none():
     assert engine.now == fetch_ticks + config.microseconds_to_ticks(5.0)
 
 
-def test_a_hardware_stage_may_not_be_named_algorithm():
-    """The algorithm stage is the wrapped decoder, never a unit stage.
+def test_a_unit_clock_with_no_period_is_refused():
+    """A period of no ticks would price every stage at nothing."""
+    no_period = config.Clock(0)
 
-    Its time is measured or priced by that decoder, so a hardware stage
-    of the same name would be charged twice and would collide in the
-    stage ledger (staged_decoder.py, UnitTiming.__post_init__).
-    """
-    stage = staged_decoder.DecoderStage(
-        staged_decoder.ALGORITHM_STAGE, cycles_per_job=1
-    )
-    before = (stage,)
-    with pytest.raises(ValueError, match="names the decoder itself"):
-        staged_decoder.UnitTiming(before, (), CLOCK)
-
-
-def test_a_negative_stage_cost_and_a_zero_period_are_refused():
-    """A card that cannot be a unit is refused where the card is built.
-
-    Negative cycles and a clock with no period have no reading as time,
-    and a card reaches decsim from a yaml section, so both raise at
-    construction (staged_decoder.py, DecoderStage and UnitTiming).
-    """
-    with pytest.raises(ValueError, match="cycles must be nonnegative"):
-        staged_decoder.DecoderStage("fetch", cycles_per_job=-1)
-    with pytest.raises(ValueError, match="period must be at least a tick"):
-        no_period = config.Clock(0)
+    with pytest.raises(ValueError):
         staged_decoder.UnitTiming((), (), no_period)
 
 

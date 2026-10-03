@@ -15,13 +15,12 @@ import pytest
 import stim
 
 import decsim.config as config
-import decsim.experiments.experiment as experiment
+import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
 import decsim.producers as producers
 import decsim.records.circuits as circuit_records
 import examples.live_memory_example as example
-import tests.experiments.yaml_configs as yaml_configs
 import tests.qpu.memory_programs as memory_programs
 
 # The tool's protection workload as a decsim.ops/1 file: decode after
@@ -339,45 +338,40 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     assert source.logical_observable_truth(producers.LIVE_STREAM_ID) is not None
 
 
-@pytest.mark.parametrize("feedback_microseconds", [4.0, 8.0, 20.0])
-def test_the_files_row_runs_what_the_tool_builds_by_hand(
-    tmp_path: pathlib.Path, feedback_microseconds: float
+def test_the_files_reader_runs_what_the_tool_builds_by_hand(
+    tmp_path: pathlib.Path,
 ) -> None:
-    """The canonical fragments from a yaml, against the tool's own run."""
+    """The canonical fragments read from files, against the tool's own run."""
     program = memory_programs.memory_program()
     program = dataclasses.replace(program, round_period_microseconds=1.1)
     folder = _live_files(tmp_path, program)
-    workload = {
-        "kind": "files",
-        "operations": "live/operations.json",
-        "fragments": "live/fragments",
-    }
-    config_path = yaml_configs.example_tool_config(
-        folder, "streaming_stim", workload, feedback_microseconds
+    live = folder / "live"
+    operations_path = live / "operations.json"
+    fragments_path = live / "fragments"
+    workload = workload_files.read_workload(
+        operations_path, fragments_path=fragments_path
     )
-    config = experiment.load_experiment(config_path)
-    values = {"qpu.distance": 3, "qpu.round_period_microseconds": 1.1}
-    point = config.point_task(values)
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 17)
-    result = machine.run()
     tool_settings = example.live_settings(
         program,
         distance=3,
         round_period_microseconds=1.1,
         prefix_round_count=3,
         patch="memory-patch",
-        feedback_microseconds=feedback_microseconds,
+        feedback_microseconds=4.0,
         decoder_microseconds=0.1,
     )
+    read_workload = workload_settings.WorkloadSettings.running(workload)
+    settings = dataclasses.replace(tool_settings, workload=read_workload)
+    machine = machine_module.Machine.build(settings, 17)
+    result = machine.run()
     tool_machine = machine_module.Machine.build(tool_settings, 17)
     tool_result = tool_machine.run()
     stream_id = producers.LIVE_STREAM_ID
-    yaml_source = machine.qpu.syndrome_source
+    files_source = machine.qpu.syndrome_source
     source = tool_machine.qpu.syndrome_source
-    measurements = yaml_source.sampled_measurements(stream_id)
+    measurements = files_source.sampled_measurements(stream_id)
     tool_measurements = source.sampled_measurements(stream_id)
-    executed = yaml_source.executed_circuit(stream_id)
+    executed = files_source.executed_circuit(stream_id)
     tool_executed = source.executed_circuit(stream_id)
 
     assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)

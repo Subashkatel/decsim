@@ -19,6 +19,10 @@ import decsim.frontends.deltakit as deltakit
 
 EXPLORER_SPECIFICATION = importlib.util.find_spec("deltakit_explorer")
 HAS_EXPLORER = EXPLORER_SPECIFICATION is not None
+# Resets and single-qubit noise act on each target alone.
+ORDER_FREE_INSTRUCTIONS = frozenset(
+    {"R", "RX", "RY", "X_ERROR", "Y_ERROR", "Z_ERROR", "DEPOLARIZE1"}
+)
 
 
 @pytest.fixture
@@ -115,6 +119,27 @@ def test_noiseless_memory_has_no_detection_events_or_observable_flips(
     assert not numpy.any(observables)
     declared_rounds = mapping.values()
     assert max(declared_rounds) == 4
+
+
+@pytest.mark.usefixtures("explorer")
+def test_one_seed_draws_the_same_samples_in_every_process() -> None:
+    script = (
+        "import decsim.frontends.deltakit as deltakit\n"
+        "circuit, _ = deltakit.memory_circuit("
+        "'rotated_surface', 3, 3, 'Z', 0.05)\n"
+        "sampler = circuit.compile_detector_sampler(seed=7)\n"
+        "print(sampler.sample(200).tobytes().hex())\n"
+    )
+    samples = set()
+    for _ in range(3):
+        finished = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        samples.add(finished.stdout)
+    assert len(samples) == 1
 
 
 @pytest.mark.usefixtures("explorer")
@@ -459,7 +484,10 @@ def _reference_qubit_identifier(qubit) -> str:
 
 
 def _physical_operations(circuit: stim.Circuit) -> stim.Circuit:
-    """Ignore timing annotations and XOR target order, preserving all noise."""
+    """Ignore timing annotations and orders that carry no meaning.
+
+    XOR targets and order-free targets are sorted; all noise is kept.
+    """
     result = stim.Circuit()
     flattened = circuit.flattened()
     for instruction in flattened:
@@ -467,13 +495,15 @@ def _physical_operations(circuit: stim.Circuit) -> stim.Circuit:
             continue
         targets = instruction.targets_copy()
         if instruction.name in ("DETECTOR", "OBSERVABLE_INCLUDE"):
-            targets.sort(key=_record_index)
+            targets.sort(key=_target_value)
+        if instruction.name in ORDER_FREE_INSTRUCTIONS:
+            targets.sort(key=_target_value)
         arguments = instruction.gate_args_copy()
         result.append(instruction.name, targets, arguments)
     return result
 
 
-def _record_index(target: stim.GateTarget) -> int:
+def _target_value(target: stim.GateTarget) -> int:
     return target.value
 
 

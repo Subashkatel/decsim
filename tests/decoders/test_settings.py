@@ -3,6 +3,7 @@
 import pytest
 
 import decsim.config as config
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
@@ -451,6 +452,19 @@ def test_a_memory_row_that_is_not_a_row_is_refused_at_load_by_name(key):
         decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+def test_the_manager_holds_its_scheduler_as_a_record_that_builds_it():
+    """A settings record holds data: the rule's record, not its class."""
+    settings = decoder_settings.DecoderManagerSettings()
+    record = settings.scheduler
+
+    first = record.build()
+    second = record.build()
+
+    assert record.__dataclass_params__.frozen
+    assert type(first) is schedulers.FifoScheduler
+    assert first is not second
 
 
 def test_a_manager_clock_the_clocks_do_not_have_is_refused_at_no_cost():

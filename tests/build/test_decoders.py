@@ -319,6 +319,13 @@ def test_each_side_has_its_own_manager_pool_and_one_ledger():
 class _SeedRecordingScheduler(schedulers.FifoScheduler):
     """A FIFO that keeps the seed the run hands it."""
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The record that builds this FIFO."""
+
+        def build(self) -> "_SeedRecordingScheduler":
+            return _SeedRecordingScheduler()
+
     def __init__(self):
         self.reserved_seeds = []
 
@@ -342,8 +349,9 @@ def test_each_managers_scheduler_is_seeded_on_its_own_path():
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=strong, engine=engine
     )
+    scheduler_settings = _SeedRecordingScheduler.Settings()
     manager_settings = decoder_settings.DecoderManagerSettings(
-        scheduler=_SeedRecordingScheduler
+        scheduler=scheduler_settings
     )
     switching = declared_run.switching_run(escalates=True)
     settings = dataclasses.replace(

@@ -1,9 +1,12 @@
 """The ready-queue discipline of a decoder pool: which waiting job is next.
 
-A scheduler is a class with pop(queue), named by the decoder manager's
-scheduler setting. It stays a research knob: Triage (2605.04459) makes
-the M-for-N scheduler the thing to vary.
+A scheduler is a class with pop(queue), built by its frozen Settings
+record, which the decoder manager's scheduler setting holds. It stays a
+research knob: Triage (2605.04459) makes the M-for-N scheduler the
+thing to vary.
 """
+
+import dataclasses
 
 import decsim.records.decoding as decoding_records
 
@@ -15,6 +18,14 @@ class FifoScheduler:
     units. FIFO is the minimal pool-locally work-conserving baseline: it
     makes no unsupported deadline, cost, or microarchitecture claim.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """FIFO has no knob; the record names the rule and builds it."""
+
+        def build(self) -> "FifoScheduler":
+            """A fresh scheduler: each manager orders its own queue."""
+            return FifoScheduler()
 
     def pop(
         self, queue: list[decoding_records.DecodeJob]

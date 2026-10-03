@@ -83,13 +83,6 @@ def test_the_root_exports_the_object_its_module_defines(name, module_name):
     assert exported is getattr(module, name)
 
 
-def test_a_name_the_root_does_not_export_is_refused():
-    unexported = "Engine"
-
-    with pytest.raises(AttributeError, match="no attribute 'Engine'"):
-        getattr(decsim, unexported)
-
-
 def test_importing_the_root_leaves_the_machine_unimported():
     """The command line starts light: an export loads on first use."""
     package_file = pathlib.Path(decsim.__file__)

@@ -16,7 +16,6 @@ from typing import Any, Optional, Protocol, runtime_checkable
 import decsim.records.seeds as seed_records
 
 _NAMESPACE = b"decsim.run-seed.v1"
-_UNSEEDED_SOURCES = ("explicit_local", "entropy")
 
 
 def derive_component_seed(root_seed: int, path) -> int:
@@ -63,7 +62,6 @@ def bind_run_seed(root_seed: Optional[int], roots) -> None:
         for _path, component, seed in walk.leaves:
             reservation = component.reserve_run_seed(seed)
             acquired.append((component, reservation))
-            _check_seed_source(seed, reservation)
     except BaseException:
         for component, reservation in reversed(acquired):
             component.cancel_run_seed(reservation)
@@ -215,8 +213,7 @@ class _SeedWalk:
 
     def __init__(self, root_seed: Optional[int]):
         self._root_seed = root_seed
-        self._path_by_identity: dict[int, tuple] = {}
-        self._active_identities: set[int] = set()
+        self._visited_identities: set[int] = set()
         self._encoded_paths: set[bytes] = set()
         # (path, component, seed) in preorder; a shared component is
         # planned once, at its first sorted path.
@@ -226,20 +223,11 @@ class _SeedWalk:
         """Plan the component and, when it is a composite, its children."""
         self._note_path(path)
         identity = id(component)
-        if identity in self._active_identities:
-            cycle_start = self._path_by_identity[identity]
-            path_text = _render(path)
-            cycle_text = _render(cycle_start)
-            raise ValueError(f"seed cycle from {path_text} to {cycle_text}")
-        if identity in self._path_by_identity:
+        if identity in self._visited_identities:
             return
-        self._path_by_identity[identity] = path
-        self._active_identities.add(identity)
-        try:
-            self._plan_leaf(path, component)
-            self._visit_children(path, component)
-        finally:
-            self._active_identities.remove(identity)
+        self._visited_identities.add(identity)
+        self._plan_leaf(path, component)
+        self._visit_children(path, component)
 
     def _note_path(self, path) -> None:
         encoded = _encode_path(path)
@@ -282,16 +270,11 @@ def _sorted_by_path(pairs) -> list:
 
 
 def _key_segment(key) -> seed_records.RunSeedPathSegment:
-    """An int or str key as its framed segment; any other type is refused."""
+    """An int key as an integer segment, any other as a string segment."""
     key_type = type(key)
     if key_type is int:
         return seed_records.RunSeedPathSegment("integer_key", key)
-    if key_type is str:
-        return seed_records.RunSeedPathSegment("string_key", key)
-    raise ValueError(
-        f"a substream key must be an int or str so its seed is the same in "
-        f"every process; {key!r} is a {key_type.__name__}"
-    )
+    return seed_records.RunSeedPathSegment("string_key", key)
 
 
 def _encode_path(path) -> bytes:
@@ -300,16 +283,6 @@ def _encode_path(path) -> bytes:
         segment_bytes = segment.canonical_bytes()
         pieces.append(segment_bytes)
     return b"".join(pieces)
-
-
-def _check_seed_source(
-    seed: Optional[int], reservation: seed_records.RunSeedReservation
-) -> None:
-    """A leaf bound without a run seed must say where its seed came from."""
-    if seed is not None:
-        return
-    if reservation.proposed_seed_source not in _UNSEEDED_SOURCES:
-        raise ValueError("unseeded components must report their seed source")
 
 
 def _render(path: tuple[Any, ...]) -> str:

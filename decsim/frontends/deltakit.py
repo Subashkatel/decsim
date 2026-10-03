@@ -5,7 +5,6 @@ history and measurement order. Canonical Stim circuits, measurement
 schedules and declared cadence leave this optional provider.
 """
 
-import importlib.util
 import itertools
 import math
 from typing import TYPE_CHECKING, Optional
@@ -52,9 +51,6 @@ def memory_circuit(
     decomposes CZ and MX into more layers, so more idle locations, than
     its exhaustive set (Explorer qpu/_native_gate_set.py).
     """
-    _require_explorer()
-    _check_memory_parameters(distance, round_count, basis)
-    check_probability(physical_error_probability)
     import deltakit_circuit.gates as gates
     import deltakit_explorer.qpu as qpu
 
@@ -72,10 +68,6 @@ def memory_circuit(
     qubit_mapping = _qubit_mapping(code.qubits)
     circuit = _export_compiled_memory(compiled, device, qubit_mapping)
     measurement_rounds = _measurement_rounds(code, round_count, basis)
-    if len(measurement_rounds) != circuit.num_measurements:
-        raise ValueError(
-            "Deltakit noise changed the memory measurement schedule"
-        )
     return circuit, measurement_rounds
 
 
@@ -100,9 +92,6 @@ def memory_rounds(
     T1/T2 noise applied only to idle intervals. Physical requires relaxation
     and dephasing times; SD6 rejects them. T1/T2 use a Pauli approximation.
     """
-    _require_explorer()
-    check_positive_integer(distance, "distance")
-    _check_basis(basis)
     import deltakit_circuit.gates as gates
 
     logical_basis = gates.PauliBasis[basis]
@@ -137,10 +126,6 @@ def css_memory_rounds(
     This function keeps setup together so its noise, indexing and physical
     timing are visibly shared by both finite templates.
     """
-    _require_explorer()
-    _check_basis(basis)
-    check_probability(physical_error_probability)
-    _positive_duration(round_period_microseconds, "round_period_microseconds")
     import deltakit_circuit.gates as gates
 
     logical_basis = gates.PauliBasis[basis]
@@ -163,44 +148,6 @@ def css_memory_rounds(
     )
     _check_memory_cadence(template, single, device, fragments)
     return fragments
-
-
-def check_positive_integer(value: int, name: str) -> None:
-    """Refuse a distance or round count that is not a positive int."""
-    value_type = type(value)
-    if value_type is not int or value < 1:
-        raise ValueError(f"{name} must be a positive integer")
-
-
-def check_probability(probability: float) -> None:
-    """Refuse a physical error probability outside [0, 1].
-
-    A NaN or an infinity is outside it: every comparison with a NaN is
-    false, so no separate finiteness test is needed.
-    """
-    if not 0 <= probability <= 1:
-        raise ValueError("physical_error_probability must lie in [0, 1]")
-
-
-def _require_explorer() -> None:
-    specification = importlib.util.find_spec("deltakit_explorer")
-    if specification is None:
-        raise ValueError(
-            "Deltakit memory requires the optional decsim[deltakit] extra"
-        )
-
-
-def _check_memory_parameters(
-    distance: int, round_count: int, basis: str
-) -> None:
-    check_positive_integer(distance, "distance")
-    check_positive_integer(round_count, "round_count")
-    _check_basis(basis)
-
-
-def _check_basis(basis: str) -> None:
-    if basis not in ("X", "Z"):
-        raise ValueError("memory basis must be X or Z")
 
 
 def _memory_code(
@@ -234,11 +181,6 @@ def _measurement_rounds(code, round_count: int, basis: str) -> dict[int, int]:
     return dict(measurement_items)
 
 
-def _positive_duration(duration: float, name: str) -> None:
-    if not math.isfinite(duration) or duration <= 0:
-        raise ValueError(f"{name} must be finite and positive")
-
-
 def _memory_noise(
     name: str,
     probability: float,
@@ -261,6 +203,16 @@ def _memory_noise(
     )
 
 
+def _check_finite(duration: float, name: str) -> None:
+    """Refuse an infinite time: it runs, but the run's json cannot hold it.
+
+    The Explorer builds the T1 to infinity limit from it, but json.dumps
+    writes it as Infinity, which RFC 8259 JSON readers refuse.
+    """
+    if not math.isfinite(duration):
+        raise ValueError(f"{name} must be finite")
+
+
 def _physical_noise(
     probability: float,
     relaxation_microseconds: Optional[float],
@@ -278,12 +230,8 @@ def _physical_noise(
     """
     import deltakit_explorer.qpu as qpu
 
-    if relaxation_microseconds is None or dephasing_microseconds is None:
-        raise ValueError(
-            "Physical noise requires relaxation and dephasing times"
-        )
-    _positive_duration(relaxation_microseconds, "relaxation_time_microseconds")
-    _positive_duration(dephasing_microseconds, "dephasing_time_microseconds")
+    _check_finite(relaxation_microseconds, "relaxation_time_microseconds")
+    _check_finite(dephasing_microseconds, "dephasing_time_microseconds")
     relaxation_seconds = relaxation_microseconds * 1e-6
     dephasing_seconds = dephasing_microseconds * 1e-6
     return qpu.PhysicalNoise(

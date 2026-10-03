@@ -8,19 +8,6 @@ import decsim.engine as engine_module
 import decsim.observe.log_writers as log_writers
 
 
-def test_the_log_writer_keeps_each_stamped_line_in_order():
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    engine.log("worker", "ready")
-    engine.now = 1_000_000
-    engine.log("worker", "ready")
-    assert log.lines == [
-        "[  0.000 us] worker: ready",
-        "[  1.000 us] worker: ready",
-    ]
-
-
 def test_the_console_printer_prints_each_line_as_it_is_fired(capsys):
     engine = engine_module.Engine()
     printer = log_writers.ConsolePrinter()

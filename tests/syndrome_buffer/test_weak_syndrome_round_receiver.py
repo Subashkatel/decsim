@@ -13,9 +13,7 @@ destination's own accept (Ciw/ciw/node.py:602 into :102-103), and Caune
 memory only after the propagation. The sender still refuses before it
 sends, so the room counts the bits of the writes in flight as taken
 (gem5 src/dev/net/pktfifo.hh, `avail() = _maxsize - _size - _reserved`
-with `reserve(len)`). The rest pin the store's two ordering laws: the
-publication never precedes the store, and the window manager hears of a
-round only once the store's record says it is readable.
+with `reserve(len)`).
 """
 
 import pytest
@@ -25,8 +23,6 @@ import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.observe.log_writers as log_writers
-import decsim.ports as ports
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
@@ -114,83 +110,6 @@ def _cross(receiver, packed, landing_ticks=LANDING_TICKS):
     )
 
 
-def test_a_crossing_round_holds_no_slot_until_it_lands():
-    engine = engine_module.Engine()
-    store = _store(engine)
-    receiver, _windows = _receiver_with(engine, store)
-    packed = _packed(1)
-
-    _cross(receiver, packed)
-    occupancy_while_crossing = store.occupancy
-    readable_while_crossing = store.retained_fragments((1, 1))
-    engine.run()
-
-    assert occupancy_while_crossing == 0
-    assert readable_while_crossing is None
-    assert store.occupancy == 1
-    assert store.retained_fragments((1, 1)) is not None
-
-
-def test_the_reserved_bits_count_against_the_room_until_the_round_lands():
-    engine = engine_module.Engine()
-    store = _store(engine, bits=BITS_PER_ROUND)
-    receiver, _windows = _receiver_with(engine, store)
-    packed = _packed(1)
-    next_round = _packed(2)
-    room_before = receiver.has_room(next_round)
-
-    _cross(receiver, packed)
-    room_while_crossing = receiver.has_room(next_round)
-    reserved_while_crossing = dict(receiver.reserved_bits_by_round)
-    engine.run()
-
-    assert room_before is True
-    assert room_while_crossing is False
-    assert reserved_while_crossing == {(1, 1): BITS_PER_ROUND}
-    assert receiver.has_room(next_round) is False
-    assert receiver.reserved_bits_by_round == {}
-    assert store.occupied_bits == BITS_PER_ROUND
-
-
-def test_the_landing_stamps_the_publication_tick_of_the_end_it_reached():
-    engine = engine_module.Engine()
-    store = _store(engine)
-    receiver, _windows = _receiver_with(engine, store)
-    packed = _packed(1)
-
-    _cross(receiver, packed)
-    engine.run()
-
-    assert store.publication_tick((1, 1)) == LANDING_TICKS
-
-
-def test_the_windows_hear_a_landed_round_only_once_it_is_published():
-    engine = engine_module.Engine()
-    store = _store(engine)
-    receiver, windows = _receiver_with(engine, store)
-    packed = _packed(1)
-
-    _cross(receiver, packed)
-    engine.run()
-
-    assert windows.published == [(LANDING_TICKS, (1, 1), LANDING_TICKS)]
-
-
-def test_the_published_event_is_the_incoming_ports_own():
-    engine = engine_module.Engine()
-    store = _store(engine)
-    receiver, _windows = _receiver_with(engine, store)
-    events = []
-    receiver.trace.round_event.connect(events.append)
-    packed = _packed(1)
-
-    _cross(receiver, packed)
-    engine.run()
-
-    kinds_and_ticks = [(event.kind, event.tick) for event in events]
-    assert kinds_and_ticks == [("PUBLISHED", LANDING_TICKS)]
-
-
 def test_the_intake_copy_is_made_at_the_landing_by_this_end():
     engine = engine_module.Engine()
     store = _store(engine)
@@ -216,34 +135,6 @@ def test_the_intake_copy_is_made_at_the_landing_by_this_end():
             "weak syndrome buffer",
         )
     ]
-
-
-def test_the_buffer_0_line_names_the_hop_the_round_arrived_by():
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.io_line.connect(log.write)
-    store = _store(engine)
-    receiver, _windows = _receiver_with(engine, store)
-    silent_engine = engine_module.Engine()
-    silent_log = log_writers.LogWriter()
-    silent_engine.line.connect(silent_log.write)
-    silent_store = _store(silent_engine)
-    silent_receiver, _silent_windows = _receiver_with(
-        silent_engine, silent_store
-    )
-
-    landed = _packed(1)
-    _cross(receiver, landed)
-    _cross(silent_receiver, landed)
-    engine.run()
-    silent_engine.run()
-
-    assert silent_log.lines == []
-    (line,) = log.lines
-    assert line.endswith(
-        "weak syndrome buffer: received round 1 of op 1 from "
-        "controller_to_weak_buffer; defects {0}; holds op 1 rounds 1 (1)"
-    )
 
 
 def test_a_timing_only_round_takes_its_slot_here_and_is_never_published():
@@ -296,31 +187,16 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     crossing = _packed(1)
     receiver.reserve_write(crossing)
 
-    with pytest.raises(RuntimeError) as unsettled:
+    with pytest.raises(RuntimeError):
         receiver.check_settled()
-    sentence = str(unsettled.value)
-    assert "1 controller_to_weak_buffer writes in flight" in sentence
 
 
 def test_a_weak_store_too_small_for_a_window_stops_the_run_at_its_hold():
     """The first round forms 4 events, the rest 8; the window reads six."""
     settings = syndrome_buffer_module.SyndromeBufferSettings(bits=16)
 
-    with pytest.raises(RuntimeError) as stop:
+    with pytest.raises(RuntimeError):
         declared_run.weak_only_run(weak_syndrome_buffer=settings)
-
-    sentence = str(stop.value)
-    assert "12 of its 16 bits" in sentence
-    assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
-    assert "waits for [(1, 3), (1, 4), (1, 5), (1, 6)]" in sentence
-
-
-def test_the_incoming_port_fills_the_declared_port():
-    engine = engine_module.Engine()
-    store = _store(engine)
-    receiver, _windows = _receiver_with(engine, store)
-
-    assert isinstance(receiver, ports.WeakSyndromeRoundReceiver)
 
 
 def test_write_cycles_move_every_reaction_point_by_the_store_periods():

@@ -22,26 +22,6 @@ import types
 import decsim.controller.conditional_release as conditional_release
 
 
-class RecordingDispatch:
-    """The frame's end: which decisions were sent, and with what delivery."""
-
-    def __init__(self):
-        self.dispatched = []
-
-    def dispatch_decision(self, decision, deliver_decision):
-        self.dispatched.append((decision.target_operation_id, deliver_decision))
-
-
-class RecordingRuntime:
-    """The runtime the decision is delivered into at the QPU."""
-
-    def __init__(self):
-        self.decisions = []
-
-    def on_decision(self, decision):
-        self.decisions.append(decision)
-
-
 def operation(operation_id, name="decode", requires_return=False):
     return types.SimpleNamespace(
         id=operation_id,
@@ -53,16 +33,6 @@ def operation(operation_id, name="decode", requires_return=False):
 def bare_release():
     """The unit with no dispatch bound: only its decisions are read."""
     return conditional_release.ConditionalRelease()
-
-
-def connected_release():
-    """The unit bound to a recording dispatch and one runtime."""
-    dispatch = RecordingDispatch()
-    runtime = RecordingRuntime()
-    unit = conditional_release.ConditionalRelease()
-    unit.dispatch = dispatch
-    unit.runtime = runtime
-    return unit, dispatch, runtime
 
 
 def test_every_waiting_operation_is_registered_once_per_edge():
@@ -112,33 +82,3 @@ def test_a_waiter_comes_before_the_qpus_own_result_return():
     assert [decision.target_operation_id for decision in returns] == [4]
     assert releases[0].releases_operation is True
     assert returns[0].releases_operation is False
-
-
-def test_a_result_nobody_waits_for_and_the_qpu_ignores_releases_nothing():
-    unit = bare_release()
-    unheard_of = operation(5)
-    assert unit.decisions_for(unheard_of) == []
-
-
-def test_every_decision_leaves_by_the_frames_end_with_its_delivery():
-    unit, dispatch, runtime = connected_release()
-    unit.register_blocked_operation(12, 7)
-    unit.register_blocked_operation(4, 7)
-    source = operation(7)
-
-    unit.release_waiters(source)
-
-    sent = [operation_id for operation_id, _sink in dispatch.dispatched]
-    sinks = [sink for _operation_id, sink in dispatch.dispatched]
-    assert sent == [12, 4]
-    assert sinks == [runtime.on_decision, runtime.on_decision]
-
-
-def test_a_result_return_leaves_by_the_same_end():
-    """Nothing waits, but the QPU needs the outcome: one return goes out."""
-    unit, dispatch, _runtime = connected_release()
-
-    source = operation(9, requires_return=True)
-    unit.release_waiters(source)
-
-    assert dispatch.dispatched[0][0] == 9

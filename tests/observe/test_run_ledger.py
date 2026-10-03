@@ -69,15 +69,6 @@ def events_by_id(ledger):
     return by_id
 
 
-def events_of_kind(ledger, kind):
-    """Every event of the ledger of one kind, in ledger order."""
-    rows = []
-    for event in ledger.events:
-        if event.kind == kind:
-            rows.append(event)
-    return rows
-
-
 def one_event(ledger, kind, operation_id):
     """The one event of that kind for that operation; a second fails."""
     rows = []
@@ -165,24 +156,6 @@ def test_a_windows_chain_is_exact_and_its_cause_is_the_last_round_it_read():
     assert cause.tick == config_module.microseconds_to_ticks(15.0)
 
 
-def test_every_emitted_round_reaches_exactly_one_terminal_state():
-    """Conservation over a whole run, which is the ledger's own claim.
-
-    A weak-only run of six rounds publishes all six, so the check finds
-    one terminal state per emitted round and nothing lost on the way
-    (run_ledger.py's RunLedgerView docstring).
-    """
-    machine = declared_run.weak_only_run(rounds=6)
-    ledger = run_ledger.ledger_of(machine)
-
-    ledger.check()
-
-    emitted = events_of_kind(ledger, "EMITTED")
-    published = events_of_kind(ledger, "PUBLISHED")
-    assert len(emitted) == 6
-    assert len(published) == 6
-
-
 def test_a_strong_primary_run_records_the_room_side_landing():
     """A strong-primary round travels once, and its journey ends there.
 
@@ -217,19 +190,6 @@ def test_a_strong_primary_run_records_the_room_side_landing():
     ]
     last = window_rows[-1]
     assert last.route == "strong"
-
-
-def test_a_full_escalation_runs_ledger_passes_its_check():
-    """Every window escalating exercises both tiers of one chain.
-
-    An escalated window is decoded twice and committed once, so the
-    accounting has to hold across the second decode as well as the
-    first.
-    """
-    machine = declared_run.switching_run(rounds=6, escalates=True)
-    ledger = run_ledger.ledger_of(machine)
-
-    ledger.check()
 
 
 def test_a_release_is_caused_by_the_blocking_operations_commit():

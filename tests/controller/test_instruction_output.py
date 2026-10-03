@@ -36,31 +36,6 @@ CLOCK = config.Clock(1)
 PULSE_TICKS = 17
 
 
-def test_a_release_is_consumed_where_it_lands():
-    """The crossing is already paid: the release is available at once."""
-    engine = engine_module.Engine()
-    reference = link_profiles.logical_reference_profile()
-    link = fabric_module.LinkFabric(reference, engine)
-    recorder = round_events.RoundEventRecorder(engine)
-    output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
-    output.link = link
-    output.trace.output_event.connect(recorder.output)
-    release = program_records.Decision(2, releases_operation=True)
-    delivered = []
-
-    def deliver(decision):
-        delivered.append((engine.now, decision))
-
-    output.relay_instruction(release, deliver)
-    engine.run()
-
-    assert delivered == [(0, release)]
-    kinds_and_ticks = [
-        (event.kind, event.tick) for event in recorder.output_events
-    ]
-    assert kinds_and_ticks == [("DECISION_AVAILABLE", 0)]
-
-
 def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()

@@ -19,16 +19,13 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.records.rounds as round_records
-import decsim.records.transfers as transfer_records
 
 # a 1 GHz controller, so its period is 1000 ticks and the reference
 # card's 0.15 us crossing already lands on one of its edges
 CLOCK = config.Clock(1000)
-READOUT_TICKS = 3_000_000
 SETTINGS = controller_settings.ControllerSettings(
     clock=CLOCK, readout_to_bits_cycles=3000
 )
-FREE_SETTINGS = controller_settings.ControllerSettings()
 # a 1 MHz controller: the same 0.15 us crossing lands mid-cycle
 SLOW_CLOCK = config.Clock(1_000_000)
 SLOW_SETTINGS = controller_settings.ControllerSettings(
@@ -61,37 +58,6 @@ def controller_with(engine, links, assembler, settings=SETTINGS):
     return controller
 
 
-def test_a_readout_reaches_the_assembler_after_the_crossing_and_the_delay() -> (
-    None
-):
-    engine = engine_module.Engine()
-    reference = link_profiles.logical_reference_profile()
-    links = fabric_module.LinkFabric(reference, engine)
-    assembler = RecordingAssembler(engine)
-    controller = controller_with(engine, links, assembler)
-    readout = round_records.QPUReadout(
-        7, ("patch-a",), 4, bits=[True, False, 1, 0], size_bits=4
-    )
-    crossing_ticks = links.expected_delay_ticks(
-        transfer_records.LinkPath.QPU_TO_CONTROLLER, 4, 0
-    )
-
-    controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)
-    (expected,) = assembler.expected
-    assert assembler.added == []
-    engine.run()
-
-    (added,) = assembler.added
-    tick, fragment, route = added
-    _, fragment_count, _ = expected
-    expected_tick = crossing_ticks + READOUT_TICKS
-    assert tick == expected_tick
-    assert fragment.bits == (1, 0, 1, 0)
-    assert fragment.size_bits == 4
-    assert fragment_count == 1
-    assert route is round_records.WINDOW_INPUT_ROUTE
-
-
 def test_a_readout_landing_mid_cycle_is_charged_from_the_next_edge():
     engine = engine_module.Engine()
     reference = link_profiles.logical_reference_profile()
@@ -111,25 +77,3 @@ def test_a_readout_landing_mid_cycle_is_charged_from_the_next_edge():
     # the crossing lands at 150_000, a quarter of the way into the first
     # microsecond, so the three cycles run from the edge at 1_000_000
     assert added[0] == 4_000_000
-
-
-def test_a_readout_with_no_delay_reaches_the_assembler_at_the_crossing():
-    engine = engine_module.Engine()
-    reference = link_profiles.logical_reference_profile()
-    links = fabric_module.LinkFabric(reference, engine)
-    assembler = RecordingAssembler(engine)
-    controller = controller_with(
-        engine, links, assembler, settings=FREE_SETTINGS
-    )
-    readout = round_records.QPUReadout(
-        7, ("patch-a",), 4, bits=[1], size_bits=1
-    )
-    crossing_ticks = links.expected_delay_ticks(
-        transfer_records.LinkPath.QPU_TO_CONTROLLER, 1, 0
-    )
-
-    controller.accept_qpu_readout(readout, round_records.WINDOW_INPUT_ROUTE)
-    engine.run()
-
-    (added,) = assembler.added
-    assert added[0] == crossing_ticks

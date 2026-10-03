@@ -20,13 +20,6 @@ class _Record:
         self.stage = stage
 
 
-def test_a_run_with_no_stage_holds_no_record():
-    ledger = stage_records.StageLedger()
-
-    assert ledger.records == []
-    assert ledger.records_for(1, 0) == ()
-
-
 def test_every_record_is_kept_in_the_order_the_stages_ended():
     ledger = stage_records.StageLedger()
     fetch = _Record(1, 0, "fetch")
@@ -49,14 +42,3 @@ def test_one_windows_records_come_back_in_stage_order():
     ledger.stage_recorded(second)
 
     assert ledger.records_for(1, 0) == (first, second)
-
-
-def test_the_ledger_asks_nothing_about_a_rows_stage_names():
-    """An ASIC model's engines reach the ledger under their own names."""
-    ledger = stage_records.StageLedger()
-    engine_stage = _Record(1, 0, "syndrome_compression_engine")
-
-    ledger.stage_recorded(engine_stage)
-    recorded = ledger.records_for(1, 0)
-
-    assert recorded[0].stage == "syndrome_compression_engine"

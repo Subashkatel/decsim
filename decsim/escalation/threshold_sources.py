@@ -9,8 +9,12 @@ kept windows to learn whether the target is safe; it is one instance
 per sweep point, shared by every shot, and built for it from the
 point's facts (OnlineThreshold.Settings.for_point). The third source,
 TableThreshold, looks a point's facts up in an offline calibration csv
-(TableThreshold.Settings.from_table), so at run time it decides as
-FixedThreshold does. Every row fills the ThresholdSource port
+(TableThreshold.Settings.at_point), so at run time it decides as
+FixedThreshold does. A record states no fact of the point: it reads
+them off the point's settings (settings.MachineSettings.point_facts),
+as a gem5 parameter set to Parent.x reads x off the object above it
+when the system is instantiated (src/python/m5/proxy.py:116-148,
+simulate.py:87-89). Every row fills the ThresholdSource port
 (decsim/ports.py) and is built from its own Settings record, which the
 switching settings hold. A record takes its threshold in the paper's
 decibels and hands it out in natural-log weight (nats), the unit the
@@ -117,8 +121,14 @@ class FixedThreshold:
             """The threshold as the weight a gap is compared in."""
             return decibels_to_nats(self.threshold_decibels)
 
-        def for_point(self) -> None:
+        def at_point(self, facts: Mapping) -> "FixedThreshold.Settings":
+            """A constant is the same at every point."""
+            del facts
+            return self
+
+        def for_point(self, facts: Mapping) -> None:
             """A constant builds nothing shared across a point's shots."""
+            del facts
 
         def build(self) -> "FixedThreshold":
             """A fresh source at this threshold."""
@@ -151,7 +161,7 @@ class TableThreshold(FixedThreshold):
     threshold in decibels, set as Toshio et al. 2510.25222 Sec. III B
     sets it (by brute force, or as Eq. (4)'s smallest g_th, line 890);
     the point is looked up and converted before the machine is built
-    (Settings.from_table), so at run time this row decides on a constant
+    (Settings.at_point), so at run time this row decides on a constant
     exactly as FixedThreshold does. What it declares that the fixed row
     does not is where its number came from, which is what the settings
     need to know to demand the csv.
@@ -160,30 +170,36 @@ class TableThreshold(FixedThreshold):
     reads_a_calibration_table = True
 
     @dataclasses.dataclass(frozen=True)
-    class Settings(FixedThreshold.Settings):
-        """The point's threshold, and the csv column it was read from.
+    class Settings:
+        """The csv and its column, and the threshold they give the point.
 
         table is a label, no part of a point's id, since the number the
         table gives a point names the point and the file it sits in
-        does not.
+        does not. threshold_decibels is that number, None until the
+        point's row is read (at_point), which the point's task does
+        before it names the point (collect.Task). The file is read
+        there, once, where it enters: its columns and the point's row
+        are checked, and the read record needs the file no more.
         """
 
         table: pathlib.Path = dataclasses.field(compare=False)
-        column: str
+        column: str = "gth_eq4_wilson"
+        threshold_decibels: Optional[float] = None
 
-        @classmethod
-        def from_table(
-            cls,
-            table: pathlib.Path,
-            column: str = "gth_eq4_wilson",
-            *,
-            distance: Optional[int] = None,
-            physical_error_probability: Optional[float] = None,
-            round_period_microseconds: Optional[float] = None,
-            commit_rounds: Optional[int] = None,
-            buffer_rounds: Optional[int] = None,
-        ) -> "TableThreshold.Settings":
-            """The threshold of the point these facts name, in its column.
+        def __post_init__(self) -> None:
+            if self.threshold_decibels is None:
+                return
+            checked_decibels(self.threshold_decibels, "threshold_decibels")
+
+        @property
+        def threshold_nats(self) -> Optional[float]:
+            """The threshold as the weight a gap is compared in; None unread."""
+            if self.threshold_decibels is None:
+                return None
+            return decibels_to_nats(self.threshold_decibels)
+
+        def at_point(self, facts: Mapping) -> "TableThreshold.Settings":
+            """The record holding the threshold of the point these facts name.
 
             The table's key columns are headed by the POINT_FACTS they
             match, and the point is refused when the table does not
@@ -192,33 +208,36 @@ class TableThreshold(FixedThreshold):
             sets g_th by brute force over P_L(g_th), lines 855-863, or as
             the smallest g_th with P_L,th(g_th) <= epsilon P_L,strong,
             Eq. (4) at line 890). The first row that holds the point
-            wins.
+            wins. A record whose row is read is the point's already, so
+            reading it again is itself and reads no file.
             """
-            table_path = pathlib.Path(table)
-            if not table_path.exists():
-                raise ValueError(f"threshold_table {table_path} does not exist")
-            facts = {
-                "distance": distance,
-                "physical_error_probability": physical_error_probability,
-                "round_period_microseconds": round_period_microseconds,
-                "commit_rounds": commit_rounds,
-                "buffer_rounds": buffer_rounds,
-            }
-            columns, rows = _table_rows(table_path, column)
-            point = _point_of(columns, facts, table_path)
-            row = _first_row_holding(rows, point, table_path)
-            cell = row[column]
+            if self.threshold_decibels is not None:
+                return self
+            _refuse_a_missing_table(self.table)
+            columns, rows = _table_rows(self.table, self.column)
+            point = _point_of(columns, facts, self.table)
+            row = _first_row_holding(rows, point, self.table)
+            cell = row[self.column]
             threshold_decibels = _certified_decibels(
-                cell, table_path, column, point
+                cell, self.table, self.column, point
             )
-            return cls(
-                threshold_decibels=threshold_decibels,
-                table=table_path,
-                column=column,
+            return dataclasses.replace(
+                self, threshold_decibels=threshold_decibels
             )
 
+        def for_point(self, facts: Mapping) -> None:
+            """A table's constant builds nothing shared across the shots."""
+            del facts
+
         def build(self) -> "TableThreshold":
-            """A fresh source at the point's threshold."""
+            """A fresh source at the point's threshold, once it is read."""
+            if self.threshold_decibels is None:
+                raise ValueError(
+                    f"threshold_table {self.table} gives a point its "
+                    "threshold once the point's row is read: "
+                    "Machine.build and a point's task read it "
+                    "(settings.at_point())"
+                )
             return TableThreshold(self.threshold_nats)
 
 
@@ -446,9 +465,8 @@ class OnlineThreshold:
         audit_rate], because the audits reach the strong tier beside the
         target and max_escalation_rate bounds the strong duty they make
         together (OnlineThresholdController). Defaults are the validated
-        drift-replay configuration. distance and
-        physical_error_probability are the point's facts the audits'
-        random stream is seeded from, so they name the point too.
+        drift-replay configuration. The audits' random stream is seeded
+        from the point's facts, which for_point reads off the point.
         """
 
         threshold_decibels: float
@@ -459,8 +477,6 @@ class OnlineThreshold:
         adjust_factor: float = 2.0
         min_escalation_rate: float = 1e-5
         max_escalation_rate: float = 0.30
-        distance: Optional[int] = None
-        physical_error_probability: Optional[float] = None
 
         def __post_init__(self) -> None:
             checked_decibels(self.threshold_decibels, "threshold_decibels")
@@ -470,17 +486,11 @@ class OnlineThreshold:
 
         @classmethod
         def from_yaml(
-            cls,
-            section: Mapping,
-            threshold_decibels: float,
-            distance: Optional[int],
-            physical_error_probability: Optional[float],
+            cls, section: Mapping, threshold_decibels: float
         ) -> "OnlineThreshold.Settings":
             """The `online` card, every key optional, from its start.
 
-            The card's step_db is the record's step_decibels; distance
-            and physical_error_probability are the point's, as its yaml
-            writes them.
+            The card's step_db is the record's step_decibels.
             """
             if not isinstance(section, Mapping):
                 raise ValueError(
@@ -496,12 +506,7 @@ class OnlineThreshold:
                     section, "escalation.online", key, default
                 )
             knobs["step_decibels"] = knobs.pop("step_db")
-            values = {
-                "threshold_decibels": threshold_decibels,
-                **knobs,
-                "distance": distance,
-                "physical_error_probability": physical_error_probability,
-            }
+            values = {"threshold_decibels": threshold_decibels, **knobs}
             return tables.section_record("escalation.online", cls, values)
 
         @property
@@ -513,18 +518,23 @@ class OnlineThreshold:
             """The step in natural-log weight units."""
             return decibels_to_nats(self.step_decibels)
 
-        def for_point(self) -> "OnlineThreshold":
+        def at_point(self, facts: Mapping) -> "OnlineThreshold.Settings":
+            """The card is the same at every point; its source is not."""
+            del facts
+            return self
+
+        def for_point(self, facts: Mapping) -> "OnlineThreshold":
             """The one instance a sweep point's shots share, point-seeded.
 
             Both loops are assembled here, where they are read: the rate
             tracker starting at the threshold in nats, the audit lane,
             and the target adjustment. The random stream is seeded from
-            the point's distance and physical error probability alone,
-            as they are written, so a rerun of the point draws the same
-            audits.
+            the point's distance and physical error probability alone
+            (facts, settings.MachineSettings.point_facts), as they are
+            written, so a rerun of the point draws the same audits.
             """
-            distance = self.distance
-            physical_error_probability = self.physical_error_probability
+            distance = facts["distance"]
+            physical_error_probability = facts["physical_error_probability"]
             _refuse_a_seed_with_no_fact(distance, physical_error_probability)
             step_nats = self.step_nats()
             tracker = EscalationRateTracker(
@@ -550,8 +560,8 @@ class OnlineThreshold:
             raise ValueError(
                 "an online threshold learns across a sweep point's shots, "
                 "so it is built once per point by for_point and shared: "
-                "give it to the point as its online_threshold, or set it "
-                "as the switching slot's online_threshold for one machine"
+                "a point's task builds it, and Machine.build takes it as "
+                "online_threshold for one machine"
             )
 
     def __init__(
@@ -651,13 +661,8 @@ _ONLINE_DEFAULTS = {
 
 
 def _check_online_numbers(online) -> None:
-    """Every knob of the online card is a finite number.
-
-    The point's facts are not knobs: for_point refuses a missing one.
-    """
+    """Every knob of the online card is a finite number."""
     for field in dataclasses.fields(online):
-        if field.name in POINT_FACTS:
-            continue
         value = getattr(online, field.name)
         is_finite = config.is_number(value) and math.isfinite(value)
         if not is_finite:
@@ -715,6 +720,13 @@ def _refuse_a_seed_with_no_fact(distance, physical_error_probability) -> None:
         f"distance={distance!r}, "
         f"physical_error_probability={physical_error_probability!r}"
     )
+
+
+def _refuse_a_missing_table(table_path: pathlib.Path) -> None:
+    table = pathlib.Path(table_path)
+    if table.exists():
+        return
+    raise ValueError(f"threshold_table {table_path} does not exist")
 
 
 def _table_rows(table_path: pathlib.Path, column: str) -> tuple:

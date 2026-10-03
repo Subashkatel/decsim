@@ -19,7 +19,7 @@ import dataclasses
 import fractions
 import math
 from collections.abc import Mapping
-from typing import Optional, Protocol, Union
+from typing import Optional, Protocol
 
 import decsim.config as config
 import decsim.engine
@@ -35,13 +35,15 @@ class CapacitySettings:
     A link of several parallel bit lanes is one wire with aggregate
     bandwidth (a PCIe x4 link stripes one transfer over four lanes), so
     a yaml card folds its `channels` count into this rate before the
-    setting is built. The rate is kept as written, a decimal from a
-    Python card or an exact Fraction from the yaml and the bandwidth
-    card, and the serialization arithmetic reads it exactly
-    (exact_aggregate_bits_per_microsecond).
+    setting is built. The rate is held as one exact Fraction of the
+    number as written (a float 0.20846 is the Fraction 10423/50000), so
+    a rate written as an int, a float or a Fraction is one value with
+    one point id. ns-3's DataRate does the serialization arithmetic in
+    integers the same way, so a whole-tick duration is never inflated by
+    a binary float's hidden expansion.
     """
 
-    input_bits_per_microsecond: Union[float, fractions.Fraction]
+    input_bits_per_microsecond: fractions.Fraction
     # where the rate was written, a label: no part of a point's id
     source: str = dataclasses.field(compare=False)
 
@@ -51,16 +53,9 @@ class CapacitySettings:
         )
         if self.input_bits_per_microsecond <= 0:
             raise ValueError("input_bits_per_microsecond must be positive")
-
-    def exact_aggregate_bits_per_microsecond(self) -> fractions.Fraction:
-        """The whole channel's rate as an exact Fraction of the card's text.
-
-        ns-3's DataRate does the same arithmetic in integers, so a
-        whole-tick duration is never inflated by a binary float's hidden
-        expansion.
-        """
         rate_text = str(self.input_bits_per_microsecond)
-        return fractions.Fraction(rate_text)
+        exact_rate = fractions.Fraction(rate_text)
+        object.__setattr__(self, "input_bits_per_microsecond", exact_rate)
 
 
 @dataclasses.dataclass(frozen=True)

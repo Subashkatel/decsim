@@ -359,7 +359,7 @@ def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
     assert (
         "links.qpu_to_controller.channel.propagation_latency_ticks = 28000"
     ) in lines
-    assert "controller.clock.period_ticks = 4000" in lines
+    assert "controller.clock = null" in lines
     assert (
         "weak_decoder.unit_memory.bits = null  "
         f"[preset reference.yaml, {reference_path}:{bits_line}]"
@@ -465,6 +465,18 @@ def test_show_prints_every_value_after_the_sections(capsys):
     lines = printed.out.splitlines()
     values_at = lines.index("values:")
     assert lines[values_at + 1 :] == value_lines
+
+
+def test_show_names_the_class_of_a_row_that_takes_no_setting():
+    """The held boundary row has no field, so its class is its one line."""
+    config_path = CONFIGS_DIR / "examples" / "two_tiers.yaml"
+    config = experiment.load_experiment(config_path)
+    point = config.first_point_task()
+
+    lines = experiment.value_lines(config, point.settings)
+
+    held = "decsim.windows.boundary_policies.Held.Settings"
+    assert f'windows.boundary_policy.class = "{held}"' in lines
 
 
 def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):

@@ -21,14 +21,13 @@ import shutil
 import pytest
 import yaml
 
-import decsim.build.escalation as escalation_build
-import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.collection as collection_module
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
+import decsim.machine as machine_module
 import tests.experiments.yaml_configs as yaml_configs
 from decsim.experiments.experiment import load_experiment
 from tests.escalation.test_switching_mode import (
@@ -196,8 +195,9 @@ def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
     table_path.write_text(f"{header}\n3,{NEAR_THRESHOLD_P},{cell}\n")
     card = {"threshold_source": "table", "threshold_table": table_path.name}
     config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
     with pytest.raises(ValueError, match=sentence):
-        load_experiment(config_path)
+        config.first_point_task()
 
 
 def test_a_table_with_no_key_column_is_refused(tmp_path):
@@ -206,16 +206,17 @@ def test_a_table_with_no_key_column_is_refused(tmp_path):
     table_path.write_text(f"d,p,gth_eq4_wilson\n3,{NEAR_THRESHOLD_P},19.5\n")
     card = {"threshold_source": "table", "threshold_table": table_path.name}
     config_path = source_config(tmp_path, card)
+    config = load_experiment(config_path)
 
     with pytest.raises(ValueError, match="has no key column"):
-        load_experiment(config_path)
+        config.first_point_task()
 
 
 def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
     """The distance and the error rate are written once and not swept.
 
-    The table's key columns read them from each point's resolved
-    sections, so a sweep over the round period alone finds its row.
+    The table's key columns read them from each point's settings, so a
+    sweep over the round period alone finds its row.
     """
     table_path = tmp_path / "period_table.csv"
     table_path.write_text(
@@ -321,8 +322,9 @@ def test_table_source_key_guards(tmp_path):
         "threshold_table": "missing.csv",
     }
     missing_table_path = source_config(tmp_path, missing_table_card)
+    missing_table_config = load_experiment(missing_table_path)
     with pytest.raises(ValueError, match="does not exist"):
-        load_experiment(missing_table_path)
+        missing_table_config.first_point_task()
 
 
 def test_online_card_guards(tmp_path):
@@ -419,7 +421,8 @@ def test_an_online_target_written_in_exponent_form_loads(tmp_path):
 def test_the_online_seed_reads_its_distance_and_error_rate_by_path(tmp_path):
     """The seed text is the one the frozen gate's online point ran with.
 
-    Its two numbers are read from the point's resolved sections.
+    Its two numbers are read from the point's settings: the qpu's
+    distance and the error probability the workload was made at.
     """
     card = {"threshold_source": "online", "gap_threshold_db": 20.0}
     config_path = source_config(tmp_path, card)
@@ -462,12 +465,7 @@ def _online_task_at(tmp_path, folder_name: str, probability: float):
 
 def _one_online_point(task) -> experiment.Experiment:
     """The task as the one point of an experiment, under a fixed name."""
-    point = experiment.Point(
-        "online",
-        task.settings,
-        task.metadata,
-        online_threshold=task.online_threshold,
-    )
+    point = experiment.Point("online", task.settings, task.metadata)
     collection = collection_module.CollectionSettings(max_shots=1)
     return experiment.Experiment("online", [point], collection)
 
@@ -648,8 +646,9 @@ class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
     class Settings(threshold_sources.OnlineThreshold.Settings):
         """The online row's record, building this row for a point."""
 
-        def for_point(self) -> "_OutsideLearningThreshold":
+        def for_point(self, facts) -> "_OutsideLearningThreshold":
             """One instance of this row for the point."""
+            del facts
             return _OutsideLearningThreshold(self.threshold_nats)
 
 
@@ -711,10 +710,9 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     """The row builds its own per-point source, and that is what runs.
 
     A row that declares built_per_sweep_point has its card read and
-    builds the source itself; the instance the experiments layer puts on
-    the point's task is the row's own, and it reaches the policy the
-    root builds for the shot (build/escalation.py _threshold_source,
-    which reads the same declaration).
+    builds the source itself; the instance the point's task builds is
+    the row's own, and Machine.build hands it to the policy it builds
+    for the shot (build/escalation.py _threshold_source).
     """
     monkeypatch.setitem(
         escalation_settings.THRESHOLD_SOURCES,
@@ -737,9 +735,7 @@ def test_an_outside_row_built_per_point_is_the_installed_source(
     assert type(installed) is _OutsideLearningThreshold
     expected_nats = task.settings.switching.threshold.threshold_nats
     assert installed.threshold_nats == expected_nats
-    shot_settings = task.shot_settings()
-    engine = engine_module.Engine()
-    switching = escalation_build.Switching.build(
-        shot_settings.switching, shot_settings.weak_decoder, engine
+    machine = machine_module.Machine.build(
+        task.settings, 0, online_threshold=installed
     )
-    assert switching.policy.threshold is installed
+    assert machine.switching.policy.threshold is installed

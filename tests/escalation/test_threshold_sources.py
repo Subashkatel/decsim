@@ -9,6 +9,7 @@ its outer loop raises the target on one bad audit and relaxes it on a
 rule-of-three clean quota.
 """
 
+import dataclasses
 import math
 import pathlib
 import random
@@ -343,6 +344,13 @@ def _write_table(tmp_path, text: str) -> pathlib.Path:
     return table_path
 
 
+def _facts(**given) -> dict:
+    """A point's facts by name, None where the point gives none."""
+    facts = dict.fromkeys(threshold_sources.POINT_FACTS)
+    facts.update(given)
+    return facts
+
+
 def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
     tmp_path,
 ):
@@ -354,10 +362,12 @@ def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
         "5,0.0030000000001,12.0\n",
     )
 
-    threshold = threshold_sources.TableThreshold.Settings.from_table(
-        table_path, distance=5, physical_error_probability=0.003
-    )
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=5, physical_error_probability=0.003)
 
+    threshold = table.at_point(facts)
+
+    assert table.threshold_decibels is None
     assert threshold.threshold_decibels == 19.5
     assert threshold.table == table_path
     assert threshold.column == "gth_eq4_wilson"
@@ -377,10 +387,11 @@ def test_a_yaml_path_header_is_refused_naming_its_fact_header(tmp_path):
         "3,0.001,20\n",
     )
 
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=3, physical_error_probability=0.002)
+
     with pytest.raises(ValueError) as refusal:
-        threshold_sources.TableThreshold.Settings.from_table(
-            table_path, distance=3, physical_error_probability=0.001
-        )
+        table.at_point(facts)
 
     sentence = str(refusal.value)
     assert "workload.arguments.physical_error_probability" in sentence
@@ -401,11 +412,11 @@ def test_an_integer_key_matches_its_row_exactly(tmp_path):
         "[{'distance': '1000000000'}]"
     )
     pattern = re.escape(sentence)
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=1000000001)
 
     with pytest.raises(ValueError, match=pattern):
-        threshold_sources.TableThreshold.Settings.from_table(
-            table_path, distance=1000000001
-        )
+        table.at_point(facts)
 
 
 def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
@@ -415,20 +426,47 @@ def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
         tmp_path, "round_period_microseconds,gth_eq4_wilson\n1.0,12.0\n"
     )
     sentence = "keys its rows on round_period_microseconds, and the point"
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=5, physical_error_probability=0.003)
 
     with pytest.raises(ValueError, match=sentence):
-        threshold_sources.TableThreshold.Settings.from_table(
-            table_path, distance=5, physical_error_probability=0.003
-        )
+        table.at_point(facts)
+
+
+def test_a_read_table_record_needs_its_file_no_more(tmp_path):
+    """The point's row, read once, is the record's own threshold.
+
+    A copy of the read record and the source it builds read no file, so
+    the table may be gone by then.
+    """
+    table_path = _write_table(tmp_path, "distance,gth_eq4_wilson\n5,12.0\n")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=5)
+    read = table.at_point(facts)
+    table_path.unlink()
+
+    copied = dataclasses.replace(read)
+    source = copied.build()
+
+    twelve_decibels = threshold_sources.decibels_to_nats(12.0)
+    assert source.threshold_nats == twelve_decibels
+
+
+def test_a_table_threshold_no_point_has_read_builds_no_source(tmp_path):
+    """Its number is the point's row, which a point's task reads."""
+    table_path = _write_table(tmp_path, "distance,gth_eq4_wilson\n5,12.0\n")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+
+    with pytest.raises(ValueError, match="once the point's row is read"):
+        table.build()
 
 
 def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
     """The seed text is the one the experiments layer's yaml points use."""
-    settings = threshold_sources.OnlineThreshold.Settings(
-        20.0, distance=5, physical_error_probability=0.003
-    )
+    settings = threshold_sources.OnlineThreshold.Settings(20.0)
+    facts = _facts(distance=5, physical_error_probability=0.003)
 
-    source = settings.for_point()
+    source = settings.for_point(facts)
 
     expected = random.Random("online-threshold d=5 p=0.003")
     twenty_decibels = threshold_sources.decibels_to_nats(20.0)
@@ -437,8 +475,9 @@ def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
 
 
 def test_an_online_source_with_no_error_probability_is_refused():
-    settings = threshold_sources.OnlineThreshold.Settings(20.0, distance=5)
+    settings = threshold_sources.OnlineThreshold.Settings(20.0)
     sentence = "physical_error_probability=None"
+    facts = _facts(distance=5)
 
     with pytest.raises(ValueError, match=sentence):
-        settings.for_point()
+        settings.for_point(facts)

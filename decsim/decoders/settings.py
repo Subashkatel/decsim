@@ -9,7 +9,7 @@ when a window is decoded again by the strong tier.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional
+from typing import Optional, Protocol
 
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -327,6 +327,13 @@ class DecoderPoolSettings:
         )
 
 
+class SchedulerSettings(Protocol):
+    """A ready-queue rule's settings record (schedulers.py), which builds it."""
+
+    def build(self) -> schedulers.Scheduler:
+        """A fresh rule, one per manager."""
+
+
 @dataclasses.dataclass(frozen=True)
 class DecoderManagerSettings:
     """The yaml's `decoder_manager` section, and the manager's Python knobs.
@@ -339,15 +346,15 @@ class DecoderManagerSettings:
     charged before the job's input is asked for; Caune et al. 2410.05202
     lines 519-526 and 636-641 measure 250 to 370 control cycles per
     decode on the control system's own clock. It is zero by default, so a
-    run that does not model that work is unchanged. The rest are Python
-    objects. scheduler is the class of the rule that orders a ready queue
-    (FifoScheduler by default); each manager builds its own, since the
+    run that does not model that work is unchanged. scheduler, Python
+    only, is the settings record of the rule that orders a ready queue
+    (FifoScheduler's by default); each manager builds its own, since the
     chip's and the host's queues are separate hardware (LATTE 2509.03954
     lines 20-25 and 718-722), as gem5 gives every object its own copy of
     a SimObject parameter (src/python/m5/SimObject.py:775-782).
     """
 
-    scheduler: type = schedulers.FifoScheduler
+    scheduler: SchedulerSettings = schedulers.FifoScheduler.Settings()
     bulk_strong: bool = False
     dispatch_cycles: int = 0
     clock: Optional[config.Clock] = None

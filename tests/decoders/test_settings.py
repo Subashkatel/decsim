@@ -1,10 +1,14 @@
 """The decoder settings at the yaml boundary."""
 
+import typing
+
 import pytest
 
 import decsim.config as config
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -306,10 +310,10 @@ def test_the_cycle_count_block_is_read_and_absent_is_none():
         without, clocks, "weak_decoder"
     )
 
-    cycle_count = settings.algorithm.cycle_count
+    cycle_count = settings.algorithm.timing
     assert cycle_count.setup_cycles == 11
     assert cycle_count.clock == clocks.clock("helios")
-    assert plain.algorithm.cycle_count is None
+    assert plain.algorithm.timing == cycle_count_module.HostMeasuredTime()
 
 
 @pytest.mark.parametrize("key", ["kind", "units", "unit_memory", "engine"])
@@ -450,6 +454,28 @@ def test_a_memory_row_that_is_not_a_row_is_refused_at_load_by_name(key):
         decoder_settings.DecoderPoolSettings.from_yaml(
             section, clocks, "weak_decoder"
         )
+
+
+def test_the_manager_holds_its_scheduler_as_a_record_that_builds_it():
+    """A settings record holds data: the rule's record, not its class."""
+    settings = decoder_settings.DecoderManagerSettings()
+    record = settings.scheduler
+
+    first = record.build()
+    second = record.build()
+
+    assert record.__dataclass_params__.frozen
+    assert type(first) is schedulers.FifoScheduler
+    assert first is not second
+
+
+def test_the_scheduler_record_names_the_rule_it_builds():
+    """Every public signature is annotated: build returns a Scheduler."""
+    build = decoder_settings.SchedulerSettings.build
+
+    hints = typing.get_type_hints(build)
+
+    assert hints["return"] is schedulers.Scheduler
 
 
 def test_a_manager_clock_the_clocks_do_not_have_is_refused_at_no_cost():

@@ -243,10 +243,11 @@ def test_the_count_ends_on_the_edge_of_its_own_clock():
     )
     evidence = evidence_with([one_step], forest_depth=1)
     no_step = evidence_with([])
-    assert cycle_count_module.HELIOS.ticks(evidence, 0) == 16 * CYCLE_TICKS
-    assert cycle_count_module.HELIOS.ticks(evidence, 1) == 17 * CYCLE_TICKS - 1
-    assert cycle_count_module.HELIOS.ticks(no_step, 1) == 12 * CYCLE_TICKS - 1
-    assert cycle_count_module.HELIOS.ticks(None, 7) == 0
+    helios = cycle_count_module.HELIOS
+    assert helios.decode_ticks(evidence, 0, 0) == 16 * CYCLE_TICKS
+    assert helios.decode_ticks(evidence, 0, 1) == 17 * CYCLE_TICKS - 1
+    assert helios.decode_ticks(no_step, 0, 1) == 12 * CYCLE_TICKS - 1
+    assert helios.decode_ticks(None, 0, 7) == 0
 
 
 def test_a_counted_unit_is_held_for_the_counted_cycles():
@@ -259,7 +260,7 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
     """
     engine = engine_module.Engine()
     settings = union_find.UnionFindDecoder.Settings(
-        cycle_count=cycle_count_module.HELIOS
+        timing=cycle_count_module.HELIOS
     )
     decoder = union_find.UnionFindDecoder(settings=settings)
     timing = staged_decoder.UnitTiming((), (), CLOCK)
@@ -283,6 +284,21 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
     assert selected[9] == 1
     assert sum(selected) == 1
     assert unit.occupancy(job) is None
+
+
+def test_a_union_find_row_that_names_no_timing_is_refused_by_name():
+    """The host's time is no hardware's, so a run names it or a count."""
+    with pytest.raises(ValueError, match="^timing must be a cycle count"):
+        union_find.UnionFindDecoder.Settings(weight_step=0.5)
+
+
+def test_the_host_measured_time_holds_the_unit_for_what_the_call_took():
+    """Two microseconds measured on the host are two microseconds held."""
+    host_time = cycle_count_module.HostMeasuredTime()
+    two_microseconds = config.microseconds_to_ticks(2.0)
+
+    assert host_time.decode_ticks(None, 2000, 7) == two_microseconds
+    assert host_time.extra_growth_ticks((), 2000) == two_microseconds
 
 
 def test_a_negative_field_is_refused_by_name():

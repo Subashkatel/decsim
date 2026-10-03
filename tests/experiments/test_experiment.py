@@ -8,13 +8,19 @@ today, which names its pieces.
 """
 
 import dataclasses
+import random
 
 import pytest
 
 import decsim.collect as collect
+import decsim.confidence.complementary as complementary
+import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collection as collection
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
+import decsim.frontends.settings as workload_settings
+import decsim.producers as producers
 import tests.experiments.yaml_configs as yaml_configs
 
 CAPPED = collection.CollectionSettings(max_shots=4)
@@ -25,6 +31,24 @@ def _minimal_settings(tmp_path):
     config = experiment.load_experiment(config_path)
     task = config.first_point_task()
     return task.settings
+
+
+def _online_point_at_distance_5(tmp_path, workload) -> experiment.Point:
+    """A Python switching point on the online threshold, running workload."""
+    machine = _minimal_settings(tmp_path)
+    confidence = complementary.ComplementaryGap.Settings()
+    card = threshold_sources.OnlineThreshold.Settings(threshold_decibels=15.0)
+    switching = escalation_settings.SwitchingSettings(confidence, card)
+    qpu = dataclasses.replace(machine.qpu, distance=5)
+    running = workload_settings.WorkloadSettings.running(workload)
+    machine = dataclasses.replace(
+        machine,
+        qpu=qpu,
+        workload=running,
+        strong_decoder=machine.weak_decoder,
+        switching=switching,
+    )
+    return experiment.Point("online", machine)
 
 
 def test_a_grid_runs_the_last_axis_fastest_in_the_order_given():
@@ -114,25 +138,59 @@ def test_a_yaml_point_keeps_the_id_its_task_has(tmp_path):
     point_id = task.strong_id()
     assert point_task.strong_id() == point_id
     assert point.name == point_id[:12]
-    assert point_task.online_threshold is not None
-    assert point_task.settings.switching.online_threshold is None
-    assert point.machine.switching.online_threshold is None
-    assert point.online_threshold is point_task.online_threshold
 
 
-def test_an_online_source_inside_a_points_machine_is_refused(tmp_path):
-    """The source is the point's run state, so it is given on the point."""
+def test_a_python_points_task_builds_its_online_calibrator(tmp_path):
+    """The calibrator is point state the task builds, seeded as today."""
     overrides = yaml_configs.online_threshold()
     config_path = yaml_configs.write_config(tmp_path, overrides)
     config = experiment.load_experiment(config_path)
-    (task,) = config.tasks()
-    switching = dataclasses.replace(
-        task.settings.switching, online_threshold=task.online_threshold
-    )
-    machine = dataclasses.replace(task.settings, switching=switching)
+    yaml_task = config.first_point_task()
+    point = experiment.Point("online", yaml_task.settings)
 
-    with pytest.raises(ValueError, match="give it as the point's"):
-        experiment.Point("online", machine)
+    task = experiment.task_of(point)
+
+    calibrator = task.online_threshold
+
+    expected = random.Random("online-threshold d=3 p=0.001")
+    generator = calibrator.random_generator
+    assert generator.getstate() == expected.getstate()
+
+
+def test_a_python_point_states_its_distance_and_error_probability_once(
+    tmp_path,
+):
+    """The threshold record names no fact; the seed reads the point's.
+
+    The distance is the qpu's and the error probability the one the
+    workload was made at, so the online card restates neither.
+    """
+    workload = producers.memory_circuit(
+        "surface_code:rotated_memory_x", 6, 5, 0.002
+    )
+    point = _online_point_at_distance_5(tmp_path, workload)
+
+    task = experiment.task_of(point)
+
+    calibrator = task.online_threshold
+
+    expected = random.Random("online-threshold d=5 p=0.002")
+    generator = calibrator.random_generator
+    assert generator.getstate() == expected.getstate()
+
+
+def test_a_python_workload_that_states_no_probability_is_refused_by_name(
+    tmp_path,
+):
+    """No yaml names the probability for a record built in Python."""
+    made = producers.memory_circuit(
+        "surface_code:rotated_memory_x", 6, 5, 0.002
+    )
+    workload = dataclasses.replace(made, physical_error_probability=None)
+    point = _online_point_at_distance_5(tmp_path, workload)
+
+    with pytest.raises(ValueError, match="physical_error_probability=None"):
+        experiment.task_of(point)
 
 
 def test_a_yaml_point_two_blocks_name_is_one_point(tmp_path):

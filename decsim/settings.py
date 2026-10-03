@@ -93,7 +93,9 @@ class MachineSettings:
     differs from a timing-only run of three-qubit surface code patches
     with no decoder at all. links is the fabric card; the reference card
     prices propagation only. clock is the machine's clock, the one every
-    part that names none of its own counts its cycles on.
+    part that names none of its own counts its cycles on; it is stated
+    here alone, and a part on it names none (the controller's clock
+    None).
 
     The decode side is three slots, each None when the run has no such
     part: weak_decoder alone decodes every window once on the weak
@@ -178,6 +180,46 @@ class MachineSettings:
             return "strong_only"
         return "weak_baseline"
 
+    def point_facts(self) -> dict:
+        """The point's facts a threshold reads, None where none is stated.
+
+        The names are threshold_sources.POINT_FACTS: the qpu's distance
+        and round period, the physical error probability the workload
+        was made at, and the window sizes, None being the distance. A
+        threshold reads them here, off the point, so a run states each
+        once.
+        """
+        workload_record = self.workload.workload_record
+        probability = None
+        if workload_record is not None:
+            probability = workload_record.physical_error_probability
+        scheme = self.windows.scheme
+        return {
+            "distance": self.qpu.distance,
+            "physical_error_probability": probability,
+            "round_period_microseconds": self.qpu.round_period_microseconds,
+            "commit_rounds": scheme.commit_rounds,
+            "buffer_rounds": scheme.buffer_rounds,
+        }
+
+    def at_point(self) -> "MachineSettings":
+        """The settings with the threshold their point's facts give.
+
+        A calibration table's row is read here, once per point by the
+        point's task (collect.Task), or by Machine.build for a record no
+        task read; settings read at their point are their own reading,
+        and any other threshold is the same at every point.
+        """
+        switching = self.switching
+        if switching is None:
+            return self
+        facts = self.point_facts()
+        threshold = switching.threshold.at_point(facts)
+        if threshold is switching.threshold:
+            return self
+        resolved = dataclasses.replace(switching, threshold=threshold)
+        return dataclasses.replace(self, switching=resolved)
+
     @classmethod
     def from_mapping(
         cls, sections: Mapping, *, name: str, section_folders: Mapping
@@ -205,9 +247,12 @@ class MachineSettings:
         observation_section = sections.get("observation", {})
         factory_section = sections.get("magic_state_factory", {})
         qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
-        controller = controller_settings.ControllerSettings.from_yaml(
+        written_controller = controller_settings.ControllerSettings.from_yaml(
             sections["controller"], clocks
         )
+        # the yaml's controller clock is the machine's, stated once
+        machine_clock = written_controller.clock
+        controller = dataclasses.replace(written_controller, clock=None)
         idle_policy = controller_settings.idle_policy_from_yaml(
             idle_policy_section
         )
@@ -229,13 +274,11 @@ class MachineSettings:
             decoder_manager_section, clocks
         )
         escalation_folder = section_folders.get("escalation")
-        facts = _point_facts(sections)
         switching = escalation_settings.SwitchingSettings.from_yaml(
             escalation_section,
             clocks,
             escalation_folder,
             confidence_signals.confidence_settings,
-            facts,
         )
         windows = window_settings.WindowSettings.from_yaml(
             sections["windows"], clocks, switching
@@ -276,7 +319,7 @@ class MachineSettings:
         elif strong_decoder is not None:
             strong_decoder = _checked(strong_decoder, window_check)
         return cls(
-            clock=controller.clock,
+            clock=machine_clock,
             qpu=qpu,
             controller=controller,
             idle_policy=idle_policy,
@@ -486,8 +529,8 @@ def _baseline(
     magic_state_factory = magic_state_factories.InfiniteFactory.Settings()
     observation = _baseline_observation()
     return MachineSettings(
-        # the machine clock is the controller's, which every part that
-        # names no clock of its own counts its cycles on
+        # the controller and every part that names no clock of its own
+        # count their cycles on the machine's clock
         clock=FRIDGE_CLOCK,
         qpu=qpu,
         controller=controller,
@@ -511,7 +554,6 @@ def _baseline(
 def _baseline_controller() -> controller_settings.ControllerSettings:
     """A controller whose per-round costs sit inside the round period."""
     return controller_settings.ControllerSettings(
-        clock=FRIDGE_CLOCK,
         readout_to_bits_cycles=0,
         packing_cycles_per_round=0,
         decision_to_pulse_cycles=0,
@@ -555,7 +597,7 @@ def _baseline_windows() -> window_settings.WindowSettings:
 def _baseline_decoder_manager() -> decoder_settings.DecoderManagerSettings:
     """First in, first out, one region a decode, dispatch unpriced."""
     return decoder_settings.DecoderManagerSettings(
-        scheduler=schedulers.FifoScheduler,
+        scheduler=schedulers.FifoScheduler.Settings(),
         bulk_strong=False,
         dispatch_cycles=0,
         clock=None,
@@ -600,28 +642,6 @@ def _one_cycle_paths(
         )
     profile_name = f"{links.profile_name} with {hops} at one cycle"
     return dataclasses.replace(links, **cards, profile_name=profile_name)
-
-
-def _point_facts(sections: Mapping) -> dict:
-    """The facts a threshold row reads at the point, None where left out.
-
-    The names are threshold_sources.POINT_FACTS. The physical error
-    probability is the one the workload's maker takes; an arguments
-    value that is no mapping is the workload's to refuse.
-    """
-    qpu = sections["qpu"]
-    windows = sections["windows"]
-    arguments = sections["workload"].get("arguments")
-    probability = None
-    if isinstance(arguments, Mapping):
-        probability = arguments.get("physical_error_probability")
-    return {
-        "distance": qpu.get("distance"),
-        "physical_error_probability": probability,
-        "round_period_microseconds": qpu.get("round_period_microseconds"),
-        "commit_rounds": windows.get("commit_rounds"),
-        "buffer_rounds": windows.get("buffer_rounds"),
-    }
 
 
 def _checked(

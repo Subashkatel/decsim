@@ -371,7 +371,7 @@ def _decoder_manager(
     pool_settings: decoder_pool_module.PoolSettings,
 ) -> decoder_manager_module.DecoderManager:
     """One manager over its pool, on the run's one manager card."""
-    scheduler = manager_settings.scheduler()
+    scheduler = manager_settings.scheduler.build()
     return decoder_manager_module.DecoderManager(
         engine,
         scheduler=scheduler,

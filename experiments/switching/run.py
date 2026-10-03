@@ -33,6 +33,7 @@ import decsim
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
@@ -59,12 +60,13 @@ REDO_WINDOW_COLLECTION = decsim.CollectionSettings(max_shots=2000)
 def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
     """Union-find's cluster gap decides; Toshio's strong decoder redoes.
 
-    The union-find decode is charged the host's wall clock.
+    The union-find decode is charged the host's measured time.
     """
     base = machine_settings.weak_decoder_baseline(
         distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
-    union_find_decoder = union_find.UnionFindDecoder.Settings()
+    host_time = cycle_count.HostMeasuredTime()
+    union_find_decoder = union_find.UnionFindDecoder.Settings(timing=host_time)
     weak_decoder = dataclasses.replace(
         base.weak_decoder, algorithm=union_find_decoder
     )

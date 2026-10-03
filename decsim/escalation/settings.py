@@ -89,13 +89,16 @@ class ThresholdSettings(Protocol):
     It takes its threshold in decibels and hands it out in nats.
     """
 
-    threshold_decibels: float
+    threshold_decibels: Optional[float]
 
     @property
-    def threshold_nats(self) -> float:
-        """The threshold as the weight a gap is compared in."""
+    def threshold_nats(self) -> Optional[float]:
+        """The threshold as the weight a gap is compared in; None unread."""
 
-    def for_point(self) -> Optional[ports.ThresholdSource]:
+    def at_point(self, facts: Mapping) -> "ThresholdSettings":
+        """The record as the point's facts give it: a table's row read."""
+
+    def for_point(self, facts: Mapping) -> Optional[ports.ThresholdSource]:
         """The source a sweep point's shots share; None for most rows."""
 
     def build(self) -> ports.ThresholdSource:
@@ -177,9 +180,9 @@ class SwitchingSettings:
     jobs of the weak pool, so weak_decoder.units alone decides whether
     they overlap. clock, threshold_cycles and switch_cycles price the
     verdict's threshold and switch logic; clock None is the machine's
-    clock. The experiments layer installs the point's online threshold
-    source, the one instance every shot of the point shares (the
-    threshold record's for_point, collect.Task.shot_settings).
+    clock. An online threshold's calibrator is no setting: it is the
+    point's state, built by the point's task (collect.Task) and handed
+    to Machine.build.
     """
 
     confidence: ConfidenceSettings
@@ -193,9 +196,6 @@ class SwitchingSettings:
     )
     # None watches for no burst
     burst_detector: Optional[BurstDetectorSettings] = None
-    # the sweep point's live online source, shared by every shot of the
-    # point and installed per shot by the experiments layer
-    online_threshold: Optional[ports.ThresholdSource] = None
 
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)
@@ -208,7 +208,6 @@ class SwitchingSettings:
         clocks: config.ClockSettings,
         base_directory: Optional[pathlib.Path],
         confidence_settings: Callable,
-        point_facts: Mapping,
     ) -> Optional["SwitchingSettings"]:
         """The `escalation` section: the switching slot, None if it keeps one.
 
@@ -217,9 +216,7 @@ class SwitchingSettings:
         confidence keys. confidence_settings turns escalation.confidence
         and its walk card into the row's record (confidence/signals.py
         confidence_settings), handed in by the caller, since the
-        confidence package sits above this one. point_facts are the
-        sweep point's facts by name, which a calibration table is read
-        at (threshold_sources.POINT_FACTS).
+        confidence package sits above this one.
         """
         kind = escalation_kind(section)
         clock = None
@@ -239,7 +236,6 @@ class SwitchingSettings:
             threshold_cycles,
             switch_cycles,
             confidence_settings,
-            point_facts,
         )
 
 
@@ -298,7 +294,6 @@ def _switching_settings(
     threshold_cycles: int,
     switch_cycles: int,
     confidence_settings: Callable,
-    point_facts: Mapping,
 ) -> SwitchingSettings:
     """The confidence knobs of an escalating kind, every rule checked once.
 
@@ -313,7 +308,7 @@ def _switching_settings(
         THRESHOLD_SOURCES, "escalation.threshold_source", threshold_source
     )
     threshold = _threshold(
-        section, threshold_source, threshold_row, base_directory, point_facts
+        section, threshold_source, threshold_row, base_directory
     )
     named_confidence = section.get("confidence", "complementary_gap")
     walk_microseconds = _confidence_walk_microseconds(section)
@@ -342,15 +337,14 @@ def _threshold(
     threshold_source: str,
     threshold_row,
     base_directory: Optional[pathlib.Path],
-    point_facts: Mapping,
 ):
     """The Settings record of the threshold row the section names.
 
-    A row that reads a calibration table takes the point's threshold
-    from the csv's column, a relative csv path read from base_directory;
-    a row built once per sweep point takes the online card, its starting
-    threshold and the point's facts its seed reads, and any other row
-    the threshold alone, all in decibels.
+    A row that reads a calibration table names the csv and its column, a
+    relative csv path read from base_directory, and the point's task
+    reads the point's row; a row built once per sweep point takes the
+    online card and its starting threshold, and any other row the
+    threshold alone, all in decibels.
     """
     gap_threshold_db = _gap_threshold_db(
         section, threshold_source, threshold_row
@@ -360,15 +354,9 @@ def _threshold(
         table_path = _table_path(section["threshold_table"], base_directory)
         raw_column = section.get("threshold_column", "gth_eq4_wilson")
         column = str(raw_column)
-        return threshold_row.Settings.from_table(
-            table_path, column, **point_facts
-        )
+        return threshold_row.Settings(table=table_path, column=column)
     if threshold_row.built_per_sweep_point:
-        distance = point_facts["distance"]
-        physical_error_probability = point_facts["physical_error_probability"]
-        return threshold_row.Settings.from_yaml(
-            online, gap_threshold_db, distance, physical_error_probability
-        )
+        return threshold_row.Settings.from_yaml(online, gap_threshold_db)
     return threshold_row.Settings(threshold_decibels=gap_threshold_db)
 
 

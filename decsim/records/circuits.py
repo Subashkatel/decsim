@@ -5,7 +5,7 @@ check readout and destructive data measurement in one physical instruction.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import stim
@@ -26,10 +26,12 @@ class RepeatedStimCircuit:
     the terminal readout included, is then charged one round period.
     """
 
-    first_round: stim.Circuit
-    repeated_round: stim.Circuit
-    final_round: stim.Circuit
-    single_round: stim.Circuit
+    # Stim's circuits have no hash; equal records hold equal circuits, so
+    # the hash leaves them out and still agrees with equality.
+    first_round: stim.Circuit = field(hash=False)
+    repeated_round: stim.Circuit = field(hash=False)
+    final_round: stim.Circuit = field(hash=False)
+    single_round: stim.Circuit = field(hash=False)
     round_period_microseconds: Optional[float] = None
 
     def __post_init__(self) -> None:

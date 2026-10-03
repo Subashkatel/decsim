@@ -207,8 +207,12 @@ def test_a_protected_stream_cannot_use_truth_from_a_later_final_readout() -> (
     None
 ):
     circuit, mapping = deltakit.memory_circuit("rotated_surface", 3, 24, "Z", 0)
-    workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
-    workload.operations[-1].scheduled_start_round = 20
+    protected = example.protection_workload(circuit, mapping, 24, 3, "patch")
+    readout = protected.operations[-1]
+    late_readout = dataclasses.replace(readout, scheduled_start_round=20)
+    earlier = protected.operations[:-1]
+    operations = earlier + (late_readout,)
+    workload = dataclasses.replace(protected, operations=operations)
     settings = _settings(workload, 3, 24)
     machine = machines.Machine.build(settings, 0)
     with pytest.raises(RuntimeError, match="sealed at 20 rounds"):

@@ -17,11 +17,10 @@ The growth is the decoder's own grow and merge loop run on
 (145-149: the soft output "can directly reuse the cluster growth module
 of the decoder"). decsim's graph has one boundary node, so "b1 meets
 b2" is an edge closing a walk of odd logical parity, the reading of
-Meister's quotient that cluster_gap.c also takes. The cost is the
-loop's own cycle count on the unit that decoded (cycle_count.py,
-extra_growth_cycles) when the weak row has one, a card's number when
-the yaml prices it, and the host clock otherwise, as the cluster gap
-(decision D8).
+Meister's quotient that cluster_gap.c also takes. The cost is a
+card's number when the yaml prices it, and otherwise the weak row's
+own timing: its loop's cycle count on the unit that decoded
+(cycle_count.py, extra_growth_cycles), or the host's measured time.
 
 The unit grows whole ticks, so the gap it reports is a whole number of
 weight steps and can exceed the continuous value by up to half a step;
@@ -106,19 +105,19 @@ class ExtraClusterGap:
     def __init__(
         self,
         growth_limit_nats: float,
+        timing: cycle_count_module.Timing,
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP,
         walk_microseconds: Optional[float] = None,
-        cycle_count: Optional[cycle_count_module.CycleCount] = None,
     ) -> None:
         self.weight_step = evidence_records.normalized_weight_step(weight_step)
         self.source = union_find_extra_cluster_gap_source(self.weight_step)
         self.growth_limit_ticks = growth_limit_ticks(
             growth_limit_nats, self.weight_step
         )
-        # what the growth costs on the weak unit: the card's number, the
-        # unit's own cycle count, or the host clock when neither is given
+        # what the growth costs on the weak unit: the card's number when
+        # given, else the weak row's timing
         self.walk_microseconds = walk_microseconds
-        self.cycle_count = cycle_count
+        self.timing = timing
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -146,21 +145,24 @@ class ExtraClusterGap:
             """The row grown to the threshold, on the weak row's unit.
 
             A weak row that keeps no weight step grows no clusters: the
-            row takes the shipped step and the host clock, and the build
-            refuses the pairing by name (build/decoders.py).
+            row takes the shipped step and the host's measured time, and
+            the build refuses the pairing by name (build/decoders.py).
             """
             _refuse_a_threshold_with_no_number(threshold_nats)
             walk_microseconds = self.walk_microseconds
             weight_step = getattr(weak_algorithm, "weight_step", None)
             if weight_step is None:
+                host_time = cycle_count_module.HostMeasuredTime()
                 return ExtraClusterGap(
-                    threshold_nats, walk_microseconds=walk_microseconds
+                    threshold_nats,
+                    host_time,
+                    walk_microseconds=walk_microseconds,
                 )
             return ExtraClusterGap(
                 threshold_nats,
+                weak_algorithm.timing,
                 weight_step=weight_step,
                 walk_microseconds=walk_microseconds,
-                cycle_count=weak_algorithm.cycle_count,
             )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
@@ -182,7 +184,7 @@ class ExtraClusterGap:
         return decoding_records.SoftOutputComputation(soft_output, ticks)
 
     def _grow_on(self, evidence) -> tuple:
-        """The gap and the ticks the growth cost: card, count or measured."""
+        """The gap and the ticks the growth cost: the card, or the timing."""
         started_ns = time.perf_counter_ns()
         outcome = compiled_decoder.extra_growth(
             evidence.graph,
@@ -195,12 +197,9 @@ class ExtraClusterGap:
         if self.walk_microseconds is not None:
             ticks = config.microseconds_to_ticks(self.walk_microseconds)
             return gap, ticks
-        if self.cycle_count is not None:
-            ticks = self.cycle_count.extra_growth_ticks(outcome.growth_steps)
-            return gap, ticks
         elapsed_ns = finished_ns - started_ns
-        elapsed_microseconds = elapsed_ns / 1000.0
-        ticks = config.microseconds_to_ticks(elapsed_microseconds)
+        steps = outcome.growth_steps
+        ticks = self.timing.extra_growth_ticks(steps, elapsed_ns)
         return gap, ticks
 
     def _gap_of(self, outcome: compiled_decoder.ExtraGrowthOutcome) -> float:

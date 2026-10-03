@@ -322,7 +322,7 @@ def serialization_ticks(
     transmission time. Exact Fraction arithmetic keeps the card's rate
     exact, so a whole-tick duration is never inflated by float error.
     """
-    rate = capacity.exact_aggregate_bits_per_microsecond()
+    rate = capacity.input_bits_per_microsecond
     bits = fractions.Fraction(wire_bits)
     bits_times_ticks = bits * config.TICKS_PER_MICROSECOND
     exact_ticks = bits_times_ticks / rate

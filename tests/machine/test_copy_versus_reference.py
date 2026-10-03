@@ -24,6 +24,7 @@ import stim
 
 import decsim.build.decoders as decoder_build
 import decsim.confidence.cluster as cluster
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
@@ -1000,7 +1001,8 @@ def _lookback_switching_machine(formed_at, seed):
     windows = declared_run.windows_on(
         settings.windows, commit_rounds=2, buffer_rounds=2
     )
-    union_find_settings = union_find.UnionFindDecoder.Settings()
+    host_time = cycle_count_module.HostMeasuredTime()
+    union_find_settings = union_find.UnionFindDecoder.Settings(timing=host_time)
     weak_decoder = dataclasses.replace(
         settings.weak_decoder, algorithm=union_find_settings
     )

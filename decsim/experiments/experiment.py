@@ -34,11 +34,9 @@ import yaml
 
 import decsim.collect as collect
 import decsim.config as config_module
-import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
 import decsim.machine as machine_module
-import decsim.ports as ports
 import decsim.settings as machine_settings
 
 _THIS_FILE = pathlib.Path(__file__)
@@ -74,6 +72,10 @@ _RECORDS_WRITTEN_FLAT = (
     ("qpu", "source"),
     ("qpu", "code_card"),
 )
+# The settings paths no yaml key sets: the yaml's controller clock is
+# the machine's, so the controller's own clock is None, which the yaml
+# reader sets (settings.MachineSettings.from_mapping).
+_PATHS_NO_KEY_SETS = (("controller", "clock"),)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,11 +89,9 @@ class Point:
     as it is of a sinter task's strong id. collection overrides the
     experiment's. sections is the yaml a point the yaml translator made
     resolved to, which its swept cells are read from; None for a point
-    built in Python, whose cells are its metadata. online_threshold is
-    the point's online threshold source when its escalation learns one:
-    run state every shot of the point shares and teaches, so it is the
-    point's and never a setting, and no part of the point's id; so are
-    record_options, what the run records of its shots.
+    built in Python, whose cells are its metadata. record_options are
+    what the run records of its shots, no part of the point's id. An
+    online threshold's calibrator is the point's task's (task_of).
     """
 
     name: str
@@ -101,21 +101,10 @@ class Point:
     sections: Optional[Mapping] = dataclasses.field(
         default=None, compare=False, repr=False
     )
-    online_threshold: Optional[ports.ThresholdSource] = dataclasses.field(
-        default=None, compare=False, repr=False
-    )
     record_options: collect.RecordOptions = DEFAULT_RECORD_OPTIONS
 
     def __post_init__(self) -> None:
         _check_folder_name(self.name, "point")
-        switching = self.machine.switching
-        if switching is None or switching.online_threshold is None:
-            return
-        raise ValueError(
-            f"the point {self.name} carries an online threshold source "
-            "in its machine's switching slot; it is the point's run state, "
-            "so give it as the point's online_threshold"
-        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -195,7 +184,8 @@ class Experiment:
         a target stop could rest on, and a time cap would end its learning
         wherever the machine was fast.
         """
-        if point.online_threshold is None:
+        task = task_of(point)
+        if task.online_threshold is None:
             return
         settings = self.collection_of(point)
         has_only_a_shot_cap = settings.max_shots is not None
@@ -309,14 +299,11 @@ def description(study: Experiment, run_file: pathlib.Path) -> list:
 def task_of(point: Point) -> collect.Task:
     """The task a point's shots run: its settings, metadata and state.
 
-    The online threshold source rides on the task beside the settings,
-    which a shot alone receives it on (collect.Task.shot_settings).
+    The task builds the point's online calibrator, when its threshold
+    learns one, which every shot's Machine.build receives.
     """
     return collect.Task(
-        point.machine,
-        point.metadata,
-        point.online_threshold,
-        point.record_options,
+        point.machine, point.metadata, record_options=point.record_options
     )
 
 
@@ -454,12 +441,14 @@ class ExperimentConfig:
         return _resolved(sections, sections, ())
 
     def built_machine(
-        self, settings: machine_settings.MachineSettings, seed: int
+        self, task: collect.Task, seed: int
     ) -> machine_module.Machine:
-        """The machine the settings build, a build refusal one sentence."""
+        """The machine the task builds, a build refusal one sentence."""
         path = self.config_files[0]
         with _refused_in(path):
-            return machine_module.Machine.build(settings, seed)
+            return machine_module.Machine.build(
+                task.settings, seed, online_threshold=task.online_threshold
+            )
 
     def _each_point_task(self) -> Iterator[tuple]:
         """Each point's task and its block's collection, read as asked."""
@@ -523,9 +512,10 @@ def value_lines(
     value (a value an axis sets lists the sweep's values), and in
     brackets its layer and source line when the value is one yaml key's
     (_origin_of). gem5's config.ini lists every parameter of every object
-    the same way (src/python/m5/simulate.py:122-127). A record's class is
-    left out: no yaml key sets it, and a yaml's settings are all records,
-    so every class leaf is one.
+    the same way (src/python/m5/simulate.py:122-127), and names each
+    object's type first (src/python/m5/SimObject.py:1144-1145), so a
+    record's class prints too: a row that takes no setting, such as the
+    held boundary row, still names itself.
     """
     written = _written_keys(config)
     documented = _documented_keys()
@@ -534,8 +524,6 @@ def value_lines(
     leaves = value_leaves(settings_value, ())
     lines = []
     for path, value in leaves:
-        if path[-1] == collect.RECORD_CLASS_KEY:
-            continue
         key = _yaml_key(path)
         value = swept.get(key, value)
         value_text = json.dumps(value)
@@ -634,7 +622,7 @@ def _point_of(
     collection: collection_module.CollectionSettings,
     sections: dict,
 ) -> Point:
-    """A yaml point: its task's settings, metadata and online source."""
+    """A yaml point: its task's settings and metadata."""
     point_id = task.strong_id()
     name = point_id[:YAML_POINT_NAME_LENGTH]
     return Point(
@@ -643,7 +631,6 @@ def _point_of(
         task.metadata,
         collection,
         sections,
-        task.online_threshold,
         task.record_options,
     )
 
@@ -700,25 +687,15 @@ def _shipped_experiment_names() -> list:
 def _point_task_of(
     settings: machine_settings.MachineSettings, values: Mapping
 ) -> collect.Task:
-    """A point's task: its workload made, its online threshold source built.
+    """A point's task: its workload made.
 
-    The online source's seed reads the point's facts off its threshold
-    record, which the yaml reader filled from the point's sections.
+    The task reads the point's threshold and builds its online
+    calibrator from the point's facts, the made workload's among them.
     """
     workload = settings.workload.made()
-    online_threshold = _online_threshold_of(settings.switching)
     point_settings = dataclasses.replace(settings, workload=workload)
     metadata = copy.deepcopy(dict(values))
-    return collect.Task(point_settings, metadata, online_threshold)
-
-
-def _online_threshold_of(
-    switching: Optional[escalation_settings.SwitchingSettings],
-) -> Optional[ports.ThresholdSource]:
-    """The source the point's shots share, when its threshold row has one."""
-    if switching is None:
-        return None
-    return switching.threshold.for_point()
+    return collect.Task(point_settings, metadata)
 
 
 def _split_record_options(resolved: dict) -> tuple:
@@ -1233,7 +1210,12 @@ def _add_new_values(known: list, values: tuple) -> None:
 
 
 def _yaml_key(path: tuple) -> tuple:
-    """A settings path as the yaml writes it: a row's keys sit beside kind."""
+    """A settings path as the yaml writes it: a row's keys sit beside kind.
+
+    A path no yaml key sets is the empty key, which no line writes.
+    """
+    if path in _PATHS_NO_KEY_SETS:
+        return ()
     section_and_record = path[:2]
     if section_and_record not in _RECORDS_WRITTEN_FLAT:
         return path

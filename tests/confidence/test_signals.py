@@ -12,9 +12,11 @@ solves and never for the row's class.
 import pytest
 
 import decsim.confidence.signals as confidence_signals
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 
-UNION_FIND = union_find.UnionFindDecoder.Settings()
+HOST_TIME = cycle_count_module.HostMeasuredTime()
+UNION_FIND = union_find.UnionFindDecoder.Settings(timing=HOST_TIME)
 THRESHOLD_NATS = 2.0
 
 

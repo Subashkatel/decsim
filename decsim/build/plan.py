@@ -6,7 +6,6 @@ the same: configs/deprecated/example/se.py resolves the workload and the
 system before it wires a single port.
 """
 
-import copy
 import dataclasses
 from collections.abc import Mapping
 from typing import Any, Optional, Union
@@ -182,7 +181,14 @@ def build_plan(
     _refuse_bulk_strong_without_a_merge(
         is_bulk_strong, is_switching, qpu.source, device, error_model_provider
     )
-    _install_operation_circuits(device, error_model_provider, all_operations)
+    installed_by_id = _installed_circuits(
+        device, error_model_provider, all_operations
+    )
+    operations = _installed(operations, installed_by_id)
+    decode_operations = _installed(decode_operations, installed_by_id)
+    dynamic_streams = _installed(dynamic_streams, installed_by_id)
+    all_operations = _installed(all_operations, installed_by_id)
+    planned_operations = _installed(planned_operations, installed_by_id)
     idle_policy = idle_policy_settings.build()
     return Plan(
         code=code,
@@ -196,7 +202,7 @@ def build_plan(
         dynamic_streams=dynamic_streams,
         protected_regions=tuple(workload.protected_regions),
         all_operations=all_operations,
-        planned_operations=tuple(planned_operations),
+        planned_operations=planned_operations,
         run_plan=run_plan,
         resource_claims=resource_claims,
         device=device,
@@ -232,10 +238,10 @@ def _window_interaction(settings, reread_regions):
 
 
 def _operations(settings: workload_settings.WorkloadSettings) -> tuple:
-    """The workload's private operation copies and its rounds policy.
+    """The workload's operations, each with its mode, and its rounds policy.
 
-    The run never mutates the caller's operations; an operation without
-    its own feedback boundary mode takes the workload's.
+    An operation without its own feedback boundary mode takes the
+    workload's; one operation named in two roles stays one record.
     """
     rounds_policy = settings.rounds_policy
     if rounds_policy is None:
@@ -252,21 +258,24 @@ def _operations(settings: workload_settings.WorkloadSettings) -> tuple:
 def _copies(
     operations, copies: dict, settings: workload_settings.WorkloadSettings
 ) -> tuple:
-    """Private copies of the operations, one per object identity."""
+    """The operations with their modes, one record per object identity."""
     copied = []
     for operation in operations:
         identity = id(operation)
         if identity not in copies:
-            copies[identity] = _private_copy(operation, settings)
+            copies[identity] = _with_boundary_mode(operation, settings)
         copied.append(copies[identity])
     return tuple(copied)
 
 
-def _private_copy(operation, settings: workload_settings.WorkloadSettings):
-    private = copy.copy(operation)
-    if private.feedback_boundary_mode is None:
-        private.feedback_boundary_mode = settings.feedback_boundary_mode
-    return private
+def _with_boundary_mode(
+    operation: program_records.Operation,
+    settings: workload_settings.WorkloadSettings,
+) -> program_records.Operation:
+    mode = operation.feedback_boundary_mode
+    if mode is None:
+        mode = settings.feedback_boundary_mode
+    return dataclasses.replace(operation, feedback_boundary_mode=mode)
 
 
 def _unique_operations(operations) -> tuple:
@@ -420,7 +429,7 @@ def _physical_formation_table(
     physical: workload_records.FiniteCircuit,
 ) -> detector_formation.FormationTable:
     """The recipes, formed off the declared measurement schedule."""
-    schedule = physical.measurement_rounds
+    schedule = dict(physical.measurement_rounds)
     rounds = schedule.values()
     round_count = max(rounds)
     return detector_formation.build_formation_table(
@@ -499,19 +508,33 @@ def _refuse_bulk_strong_without_a_merge(
     )
 
 
-def _install_operation_circuits(device, model_provider, operations) -> None:
-    """Copy the root-owned circuit once when either consumer requires it."""
+def _installed_circuits(device, model_provider, operations) -> dict:
+    """Each operation by id, its circuit a copy when either consumer reads it.
+
+    A run whose source and model provider read no operation circuit
+    carries none; otherwise each circuit is a copy of the settings' own,
+    so the shot holds no circuit another shot shares.
+    """
     source_scope = _operation_circuit_scope(device, "syndrome source")
     model_scope = _operation_circuit_scope(model_provider, "model provider")
     needs_circuit = "per_operation" in (source_scope, model_scope)
+    installed_by_id = {}
     for operation in operations:
-        if not needs_circuit:
-            operation.circuit = None
-            continue
-        if operation.circuit is None:
-            continue
-        circuit_text = str(operation.circuit)
-        operation.circuit = stim.Circuit(circuit_text)
+        circuit = None
+        if needs_circuit and operation.circuit is not None:
+            circuit_text = str(operation.circuit)
+            circuit = stim.Circuit(circuit_text)
+        installed = dataclasses.replace(operation, circuit=circuit)
+        installed_by_id[operation.id] = installed
+    return installed_by_id
+
+
+def _installed(operations: tuple, installed_by_id: dict) -> tuple:
+    installed = []
+    for operation in operations:
+        installed_operation = installed_by_id[operation.id]
+        installed.append(installed_operation)
+    return tuple(installed)
 
 
 def _operation_circuit_scope(component, role):

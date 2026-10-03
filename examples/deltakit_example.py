@@ -188,7 +188,8 @@ def supplied_settings(
     physical = workload.physical
     if physical.circuit.num_observables != 1:
         raise ValueError("the memory example requires one logical observable")
-    declared_rounds = physical.measurement_rounds.values()
+    schedule = dict(physical.measurement_rounds)
+    declared_rounds = schedule.values()
     if max(declared_rounds) != round_count:
         raise ValueError(
             "the declared horizon must equal the final readout round"

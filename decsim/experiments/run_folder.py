@@ -347,9 +347,8 @@ def point_record(
     build refuses is refused here, before anything is written.
     """
     settings = task.settings
-    shot_settings = task.shot_settings()
     maker = settings.workload.maker()
-    plan = _plan(shot_settings)
+    plan = _plan(task)
     record = {
         "id": task.strong_id(),
         "name": name,
@@ -685,16 +684,19 @@ def _how_it_ran() -> dict:
 
 def rounds_per_shot(task: collect.Task) -> int:
     """A shot's QEC rounds as the point's plan gives them (_rounds_per_shot)."""
-    shot_settings = task.shot_settings()
-    plan = _plan(shot_settings)
+    plan = _plan(task)
     return _rounds_per_shot(plan)
 
 
-def _plan(settings) -> plan_build.Plan:
-    """The plan the build derives from the settings, before it wires."""
+def _plan(task: collect.Task) -> plan_build.Plan:
+    """The plan the build derives from the task, before it wires."""
+    settings = task.settings
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
-        settings.switching, settings.weak_decoder, engine
+        settings.switching,
+        settings.weak_decoder,
+        engine,
+        task.online_threshold,
     )
     return plan_build.build_plan(
         settings.qpu,

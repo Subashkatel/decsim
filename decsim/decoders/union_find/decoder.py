@@ -32,11 +32,10 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     paper's almost-linear bound: the cycle count's flood lays the closed
     edges out again at every growth step.
 
-    The row is priced one of three ways: a latency model, as any window
-    decoder; its own cycle count (cycle_count.py), which reads the
-    growth steps and the peel depth of the decode just run and holds the
-    unit for their cycles on the count's clock; or, with neither, the
-    host clock.
+    The row is priced the way its timing names: its own cycle count
+    (cycle_count.py), which reads the growth steps and the peel depth of
+    the decode just run and holds the unit for their cycles on the
+    count's clock, or the host's measured time.
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -51,25 +50,35 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         weight one tick of an edge length is (Huang, Newman and Brown
         2004.04693): the smaller it is, the longer every edge and the
         more growth iterations a decode spans, which under a cycle count
-        is the engine's own time. cycle_count prices the decode's growth
-        steps in cycles of a named clock (cycle_count.py), in place of
-        the host wall clock.
+        is the engine's own time. timing prices the decode: a cycle count
+        (cycle_count.CycleCount), the growth steps in cycles of a named
+        clock, or cycle_count.HostMeasuredTime(), the host's measured
+        time. A run names one; none is refused, since the host's time is
+        no hardware's and is never assumed.
         """
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
-        cycle_count: Optional[cycle_count_module.CycleCount] = None
+        timing: Optional[cycle_count_module.Timing] = None
         # the word the yaml and the reports name this row by
         name = "union_find"
+        # the yaml's keys, its cycle_count block read into timing
+        yaml_keys = ("weight_step", "cycle_count")
 
         def __post_init__(self) -> None:
             weight_step = evidence_records.normalized_weight_step(
                 self.weight_step, "weight_step"
             )
             object.__setattr__(self, "weight_step", weight_step)
+            if self.timing is None:
+                raise ValueError(
+                    "timing must be a cycle count (cycle_count.CycleCount) "
+                    "or the host's measured time "
+                    "(cycle_count.HostMeasuredTime()); none is given"
+                )
 
         def build(self) -> "UnionFindDecoder":
             """A fresh decoder of these settings."""
-            return UnionFindDecoder(settings=self)
+            return UnionFindDecoder(self)
 
         @classmethod
         def from_yaml(
@@ -80,29 +89,22 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         ) -> "UnionFindDecoder.Settings":
             """Both keys; absent is the default.
 
+            The cycle_count block is the row's timing, and a tier with
+            none is timed by the host's measured time, named here.
             section_name is the tier section the row sits in, which a
             refusal names.
             """
             values = dict(section)
-            block = section.get("cycle_count")
-            if block is not None:
-                values["cycle_count"] = cycle_count_module.CycleCount.from_yaml(
-                    block, clocks, section_name
-                )
+            block = values.pop("cycle_count", None)
+            values["timing"] = _timing_of(block, clocks, section_name)
             return tables.section_record(section_name, cls, values)
 
-    def __init__(
-        self,
-        latency_model: Optional[decoder_module.DecoderBase] = None,
-        settings: Optional["UnionFindDecoder.Settings"] = None,
-    ) -> None:
-        decoder_module.WindowDecoderBase.__init__(self, latency_model)
-        if settings is None:
-            settings = UnionFindDecoder.Settings()
+    def __init__(self, settings: "UnionFindDecoder.Settings") -> None:
+        decoder_module.WindowDecoderBase.__init__(self)
         self.compile_key = (UnionFindDecoder, settings)
         # absolute natural-log units represented by one weight tick
         self.weight_step = settings.weight_step
-        self.cycle_count = settings.cycle_count
+        self.timing = settings.timing
 
     def ticks_after_decode(
         self,
@@ -110,12 +112,9 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         elapsed_nanoseconds: int,
         now: int,
     ) -> int:
-        """The cycle count's ticks to its clock edge, or the host's time."""
-        if self.cycle_count is None:
-            return decoder_module.WindowDecoderBase.ticks_after_decode(
-                self, result, elapsed_nanoseconds, now
-            )
-        return self.cycle_count.ticks(result.cluster_evidence, now)
+        """The ticks the row's timing holds the unit for this decode."""
+        evidence = result.cluster_evidence
+        return self.timing.decode_ticks(evidence, elapsed_nanoseconds, now)
 
     def compile(self, faults, model=None) -> evidence_records.UnionFindGraph:
         """The immutable weighted graph of one placed model."""
@@ -149,8 +148,17 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 # the step that turns a log-odds weight into growth ticks is an estimate.
 HELIOS_TIMED = UnionFindDecoder.Settings(
     weight_step=0.5,  # estimate
-    cycle_count=cycle_count_module.HELIOS,
+    timing=cycle_count_module.HELIOS,
 )
+
+
+def _timing_of(
+    block: Optional[Mapping], clocks: config.ClockSettings, section_name: str
+) -> cycle_count_module.Timing:
+    """The yaml's cycle_count block as a timing; no block is the host's."""
+    if block is None:
+        return cycle_count_module.HostMeasuredTime()
+    return cycle_count_module.CycleCount.from_yaml(block, clocks, section_name)
 
 
 def _status_of(evidence: evidence_records.UnionFindHardEvidence):

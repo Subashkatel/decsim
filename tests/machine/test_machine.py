@@ -48,6 +48,7 @@ import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -243,7 +244,10 @@ def test_a_second_table_row_runs_gate_point_one():
         },
     )
     settings = point.settings
-    union_find_settings = union_find_decoder.UnionFindDecoder.Settings()
+    host_time = cycle_count_module.HostMeasuredTime()
+    union_find_settings = union_find_decoder.UnionFindDecoder.Settings(
+        timing=host_time
+    )
     weak_decoder = dataclasses.replace(
         settings.weak_decoder, algorithm=union_find_settings
     )
@@ -361,7 +365,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     """
     config = experiment.load_experiment("configs/examples/two_tiers.yaml")
     point = config.first_point_task()
-    settings = point.shot_settings()
+    settings = point.settings
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
         settings.switching, settings.weak_decoder, engine
@@ -1603,6 +1607,13 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     assert any("algorithm mem(" in line for line in idle_lines)
 
 
+# the settings a weak row needs beyond its defaults: Union-Find names
+# its timing, here the host's measured time
+WEAK_ROW_ARGUMENTS = {
+    "union_find": {"timing": cycle_count_module.HostMeasuredTime()},
+}
+
+
 def _switching_memory(weak_kind: str, confidence: str):
     """A d=3 memory whose weak tier, the named row, reports the signal."""
     signal_row = confidence_signals.CONFIDENCE_SIGNALS[confidence]
@@ -1614,7 +1625,8 @@ def _switching_memory(weak_kind: str, confidence: str):
         confidence=signal_settings, threshold=threshold
     )
     row = decoder_settings.DECODERS[weak_kind]
-    weak_algorithm = row.Settings()
+    row_arguments = WEAK_ROW_ARGUMENTS.get(weak_kind, {})
+    weak_algorithm = row.Settings(**row_arguments)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak_algorithm,
         engine=ENGINE_CARD,
@@ -1767,6 +1779,35 @@ def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused_by_name(
     citation = re.escape(sentence)
     with pytest.raises(ValueError, match=citation):
         machine_module.Machine.build(settings, 0)
+
+
+def test_a_machine_built_from_its_record_reads_the_tables_row(tmp_path):
+    """Machine.build(settings, seed) builds a shot from the record alone.
+
+    A table threshold no point's task has read is read at the build,
+    from the record's own point facts: here its distance, 3.
+    """
+    table_path = tmp_path / "calibration.csv"
+    table_path.write_text("distance,gth_eq4_wilson\n3,12.0\n5,18.0\n")
+    memory = _switching_memory("pymatching", "complementary_gap")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    switching = dataclasses.replace(memory.switching, threshold=table)
+    settings = dataclasses.replace(memory, switching=switching)
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    threshold = machine.switching.policy.threshold
+    twelve_decibels = threshold_sources.decibels_to_nats(12.0)
+    assert threshold.threshold_nats == twelve_decibels
+
+
+def test_settings_whose_threshold_reads_no_table_are_their_own_reading():
+    """A fixed threshold is the same at every point: nothing is rebuilt."""
+    settings = _switching_memory("pymatching", "complementary_gap")
+
+    read = settings.at_point()
+
+    assert read is settings
 
 
 def test_a_weak_tier_that_serves_the_confidence_is_accepted():
@@ -2876,7 +2917,7 @@ def timed_and_untimed_decodes(folder, arrangement):
     models = built_window_models.BuiltWindowModels()
     decodes = []
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.shot_settings()
+        settings = task.settings
         machine = machine_module.Machine.build(settings, seed, models)
         untimed = machine_module.Machine.build(settings, seed, models)
         reference = untimed.decoders.primary_decoder.decoder
@@ -3000,7 +3041,7 @@ def arrangement_predictions_and_events(folder, arrangement):
     shot_events = []
     sampled = None
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.shot_settings()
+        settings = task.settings
         machine = machine_module.Machine.build(settings, seed, models)
         result = machine.run()
         sampled = machine.observation.sampled_shots.shots_by_operation[1]

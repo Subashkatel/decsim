@@ -154,18 +154,26 @@ sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distan
 log: off
 trace: off
 values:
+class = "decsim.settings.MachineSettings"
+clock.class = "decsim.config.Clock"
 clock.period_ticks = 4000
+qpu.class = "decsim.qpu.settings.QpuSettings"
+qpu.source.class = "decsim.qpu.stim_device.StimDevice.Settings"
+qpu.code_card.class = "decsim.qpu.code_geometry.SurfaceCodeModel.Settings"
 qpu.round_period_microseconds = [1.0]  [sweep, configs/examples/two_tiers.yaml:58-63]
 qpu.distance = [3, 5]  [sweep, configs/examples/two_tiers.yaml:58-63]
-qpu.error_model_provider = null
-controller.clock.period_ticks = 4000
 ```
 
 Below `values:` the list goes on to every value the machine is built
 with, one per line: the layer that set it (your file, a preset it
 extends, the sweep, or the default) and the yaml lines it came from. A
-line with no source is a value decsim works out from others, such as
-`clock.period_ticks`, a 250 MHz cycle in ticks.
+line ending in `.class` names the record a section or a row built, so
+a row that takes no setting, such as `windows.boundary_policy` here,
+still has a line. A line with no source is a value decsim works out
+from others, such as `clock.period_ticks`, a 250 MHz cycle in ticks.
+That is the machine's clock, the domain the yaml's `controller.clock`
+names, so further down `controller.clock = null`: the controller runs
+on the machine's clock.
 
 Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the weak tier and
 keeps every round a strong re-decode might still ask for;

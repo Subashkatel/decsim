@@ -58,8 +58,9 @@ def test_a_packets_attribution_names_every_patch_of_the_round():
 def test_a_windows_attribution_covers_the_rounds_it_reads():
     """The range is the window's reads, both buffers included."""
     window = window_records.Window(4, 2, 3, 5, 6, 6, buffer_lo=1)
-    operation = program_records.Operation(id=4, name="memory", qubits=("q0",))
-    operation.patches = ("patch-a",)
+    operation = program_records.Operation(
+        id=4, name="memory", qubits=("q0",), patches=("patch-a",)
+    )
     request_key = window_records.DecoderRequestKey(
         4, 2, window_records.DecoderTier.WEAK, 1
     )

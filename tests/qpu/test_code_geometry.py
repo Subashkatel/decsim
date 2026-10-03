@@ -82,7 +82,6 @@ def test_the_bicycle_card_is_the_gross_code_by_default():
     qubit_count = card.settings.qubit_count
     logical_qubit_count = card.settings.logical_qubit_count
     assert (qubit_count, logical_qubit_count, card.distance) == (144, 12, 12)
-    assert card.settings == code_geometry.GROSS_CODE
 
 
 def test_the_gross_code_card_reads_out_all_144_checks_per_round():

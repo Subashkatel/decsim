@@ -93,6 +93,15 @@ def test_reading_the_frame_does_not_change_it():
     assert first_read == second_read == (1, 1)
 
 
+def test_the_frame_keeps_its_own_copy_of_the_observables_it_was_given():
+    """A caller may reuse its buffer; the committed correction is fixed."""
+    engine, frame = frame_with_commit_ticks(0)
+    callers_buffer = [1, 0, 1]
+    commit(frame, ("stream", 0), callers_buffer)
+    callers_buffer[0] = 0
+    assert frame.frame_for_stream("stream") == (1, 0, 1)
+
+
 def test_a_second_correction_for_a_window_is_refused():
     engine, frame = frame_with_commit_ticks(0)
     commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)

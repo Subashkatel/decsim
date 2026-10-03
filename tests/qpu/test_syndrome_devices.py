@@ -75,6 +75,16 @@ def test_a_stream_segment_reports_its_stream_and_global_round():
     )
 
 
+def test_fake_bits_grow_with_the_codes_distance():
+    """A d = 5 patch reads 24 stabilizers a round, so 24 bits."""
+    wide_code = code_geometry.SurfaceCodeModel(distance=5)
+    device = syndrome_devices.SyndromeBitDevice(wide_code, seed=1)
+    operation = program_records.Operation(id=1, name="memory", qubits=(0,))
+    payload = first_payload(device, operation, 1)
+    assert len(payload.bits) == 24
+    assert payload.size_bits == 24
+
+
 def test_a_rounds_fake_bits_do_not_depend_on_the_rounds_drawn_before_it():
     """Another operation's rounds, drawn first, leave this round's bits.
 

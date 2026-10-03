@@ -194,8 +194,9 @@ def supplied_settings(
             "the declared horizon must equal the final readout round"
         )
     lowered = workload_settings.WorkloadSettings.running(workload)
+    stim_source = stim_device.StimDevice.Settings()
     qpu = qpu_settings.QpuSettings(
-        source=stim_device.StimDevice.Settings(),
+        source=stim_source,
         distance=distance,
         round_period_microseconds=period_microseconds,
     )

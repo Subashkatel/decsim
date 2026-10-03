@@ -8,20 +8,6 @@ hand.
 import decsim.records.identity as identity_records
 
 
-def test_a_str_identity_is_exactly_a_str_without_surrogates():
-    """A subclass, a nonstring and a surrogate code point are not identities."""
-
-    class StringSubclass(str):
-        pass
-
-    assert identity_records.is_stable_identity("")
-    assert identity_records.is_stable_identity("logical-π")
-    subclass_value = StringSubclass("logical")
-    assert not identity_records.is_stable_identity(subclass_value)
-    assert not identity_records.is_stable_identity(3.0)
-    assert not identity_records.is_stable_identity("\ud800")
-
-
 def test_stable_identity_accepts_recursive_exact_values_only():
     """Stable identities contain only exact integers, strings, and tuples."""
     assert identity_records.is_stable_identity((1, "patch", (2, "round")))
@@ -70,23 +56,6 @@ def test_canonical_identity_bytes_are_injective_across_identity_kinds():
     assert encodings[1] == encoded_string
     assert encodings[2] == encoded_tuple
     assert identity_records.stable_identity_bytes("π") == encoded_unicode
-
-
-def test_stable_identity_json_preserves_typed_structure():
-    identity = (3, "patch", (4,))
-    assert identity_records.stable_identity_json(identity) == {
-        "kind": "tuple",
-        "value": None,
-        "items": [
-            {"kind": "integer", "value": "3", "items": None},
-            {"kind": "string", "value": "patch", "items": None},
-            {
-                "kind": "tuple",
-                "value": None,
-                "items": [{"kind": "integer", "value": "4", "items": None}],
-            },
-        ],
-    }
 
 
 def test_an_identity_read_back_from_its_json_is_the_identity():

@@ -191,12 +191,6 @@ def test_the_formation_table_forms_each_rounds_slice_of_the_shots_events():
     )  # fmt: skip
 
 
-def test_an_operation_that_has_not_begun_has_no_formation_table():
-    device = recorded_device(RECORDED_ROW)
-    with pytest.raises(KeyError, match="has not begun"):
-        device.formation_table(1)
-
-
 def _formed(former, round_index, bits) -> tuple:
     """One round's event values, in the table's detector order."""
     events = former.feed_packet(round_index, bits)

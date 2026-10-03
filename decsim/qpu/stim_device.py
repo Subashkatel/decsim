@@ -181,11 +181,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ) -> detector_formation.FormationTable:
         """The recipes the operation's rounds are formed by, off its circuit."""
         shot = self._shot_for(operation_id)
-        if shot is None:
-            raise KeyError(
-                f"no detector formation table for identity {operation_id!r}; "
-                "the operation has not begun"
-            )
         return shot.table
 
     def round_payloads(

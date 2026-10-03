@@ -280,6 +280,31 @@ def test_command_replay_preserves_repetition_geometry_and_horizon(
     assert refused.returncode != 0
 
 
+def test_the_whole_shot_repetition_example_refuses_a_prefix_feedback_wait(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Protection on repetition memory would otherwise run to completion.
+
+    The script's own check is the only stop: without it the run finishes
+    and writes a result for a mode the family cannot carry.
+    """
+    command = [
+        sys.executable,
+        "examples/deltakit_example.py",
+        "--family",
+        "repetition",
+        "--mode",
+        "protection",
+        "--output",
+        str(tmp_path),
+    ]
+    refused = subprocess.run(
+        command, check=False, capture_output=True, text=True
+    )
+    assert refused.returncode != 0
+    assert "ValueError" in refused.stderr
+
+
 def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
     circuit, mapping = deltakit.memory_circuit(
         "rotated_surface", 3, 24, "Z", 0.001

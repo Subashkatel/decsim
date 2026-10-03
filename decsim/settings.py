@@ -28,6 +28,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
@@ -332,6 +333,8 @@ _STRONG_SIDE_PATH_CLOCKS = {
     "strong_buffer_to_strong_decoder": ROOM_CLOCK,
     "strong_decoder_to_frame": ROOM_CLOCK,
 }
+# A base's shot is ten rounds per unit of distance.
+_BASELINE_ROUNDS_PER_DISTANCE = 10
 
 
 def weak_decoder_baseline(
@@ -360,7 +363,10 @@ def weak_decoder_baseline(
         result_blocks_unit=False,
     )
     qpu = _stim_qpu(distance, round_period_microseconds)
-    workload = memory_workload(distance, physical_error_probability, "10d")
+    rounds_per_shot = _BASELINE_ROUNDS_PER_DISTANCE * distance
+    workload = memory_workload(
+        distance, physical_error_probability, rounds_per_shot
+    )
     return _baseline(qpu, workload, links, weak_decoder, None)
 
 
@@ -398,7 +404,10 @@ def strong_decoder_baseline(
         result_blocks_unit=False,
     )
     qpu = _stim_qpu(distance, round_period_microseconds)
-    workload = memory_workload(distance, physical_error_probability, "10d")
+    rounds_per_shot = _BASELINE_ROUNDS_PER_DISTANCE * distance
+    workload = memory_workload(
+        distance, physical_error_probability, rounds_per_shot
+    )
     return _baseline(qpu, workload, links, None, strong_decoder)
 
 
@@ -416,31 +425,20 @@ def one_cycle_strong_side(
 
 
 def memory_workload(
-    distance: int,
-    physical_error_probability: float,
-    rounds_per_shot: Union[int, str],
+    distance: int, physical_error_probability: float, rounds_per_shot: int
 ) -> workload_settings.WorkloadSettings:
-    """One memory shot of Stim's rotated surface code, made at the point.
+    """One memory shot of Stim's rotated surface code, rounds_per_shot long.
 
     One probability on all four of Stim's noise channels
-    (producers.memory_circuit); rounds_per_shot is a round count or
-    "<n>d", n rounds per unit of distance. The producer row makes it, as
-    the yaml's workload section does, so the point's record names the
-    maker and its arguments (WorkloadSettings.maker).
+    (producers.memory_circuit).
     """
-    arguments = {
-        "code_task": "surface_code:rotated_memory_z",
-        "rounds_per_shot": rounds_per_shot,
-        "distance": distance,
-        "physical_error_probability": physical_error_probability,
-    }
-    maker = workload_settings.ProducerWorkload.Settings(
-        function="decsim.producers:memory_circuit", arguments=arguments
+    workload = producers.memory_circuit(
+        "surface_code:rotated_memory_z",
+        rounds_per_shot,
+        distance,
+        physical_error_probability,
     )
-    workload = workload_settings.WorkloadSettings(
-        kind="producer", row_settings=maker
-    )
-    return workload.made()
+    return workload_settings.WorkloadSettings.running(workload)
 
 
 def _stim_qpu(

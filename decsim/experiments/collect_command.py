@@ -403,42 +403,49 @@ def _fold_into_the_staging(
     point_ids: list,
     staging: pathlib.Path,
 ) -> list:
-    """Every file of the fold written into staging; the rows."""
+    """Every file of the fold written into staging; the rows.
+
+    An online point's calibrator, as its prefix left it, gives its
+    trajectory file and one row of threshold_summary.csv.
+    """
     records = run_folder.point_records(run_dir)
     swept = run_folder.swept_values(run_dir, point_ids)
     rules = {}
+    summary_rows = []
     for point_id in point_ids:
         record = records[point_id]
         rules[point_id] = collection_module.PointRule.from_record(record)
-        _write_the_recorded_trajectory(run_dir, folders, record, staging, swept)
+        calibrator = _recorded_calibrator(run_dir, folders, record)
+        if calibrator is None:
+            continue
+        algorithm = record["experiment"]["algorithm"]
+        point = report.point_columns((point_id, algorithm))
+        _write_online_threshold_record(point, calibrator, staging, swept)
+        summary_row = _threshold_summary_row(point, calibrator)
+        summary_rows.append(summary_row)
+    if summary_rows:
+        summary_path = staging / "threshold_summary.csv"
+        report.write_csv(summary_rows, summary_path, swept)
     rows = report.fold_pieces(run_dir, folders, point_ids, staging, rules)
     return rows
 
 
-def _write_the_recorded_trajectory(
-    run_dir: pathlib.Path,
-    folders: list,
-    record: dict,
-    staging: pathlib.Path,
-    swept: dict,
-) -> None:
-    """An online point's trajectory, from the state its prefix ended on."""
+def _recorded_calibrator(
+    run_dir: pathlib.Path, folders: list, record: dict
+) -> Optional[threshold_sources.OnlineThreshold]:
+    """An online point's calibrator as its prefix ended; None if none."""
     facts = record["experiment"]
     if not facts["adaptive"]:
-        return
+        return None
     point_id = record["id"]
     point_folders = pieces.point_folders(folders, point_id)
     saved = pieces.saved_counts(point_folders)
     prefix = pieces.contiguous_ranges(saved, 0)
     if not prefix:
-        return
+        return None
     first_seed, count = prefix[-1]
     folder = pieces.piece_dir(run_dir, point_id, first_seed, count)
-    calibrator = pieces.read_state(folder)
-    algorithm = facts["algorithm"]
-    _write_online_threshold_record(
-        point_id, algorithm, calibrator, staging, swept
-    )
+    return pieces.read_state(folder)
 
 
 def _shot_measure(points: list, run_dir: pathlib.Path):
@@ -768,8 +775,7 @@ def _final_threshold_db(summary: dict) -> float:
 
 
 def _write_online_threshold_record(
-    point_id: str,
-    algorithm,
+    point: dict,
     calibrator,
     run_dir: pathlib.Path,
     swept: dict,
@@ -785,10 +791,24 @@ def _write_online_threshold_record(
     _say_the_threshold(calibrator)
     summary = calibrator.summary()
     threshold_db = _final_threshold_db(summary)
-    point = report.point_columns((point_id, algorithm))
     rows = _trajectory_rows(point, calibrator, summary, threshold_db)
+    point_id = point["point_id"]
     record_path = pathlib.Path(run_dir) / f"online_threshold_{point_id}.csv"
     report.write_csv(rows, record_path, swept)
+
+
+def _threshold_summary_row(point: dict, calibrator) -> dict:
+    """The calibrator's counters at the point's end, its threshold in dB.
+
+    Every counter calibrator.summary() holds, the ones the stderr line
+    prints among them, with the final threshold converted from nats.
+    """
+    summary = calibrator.summary()
+    threshold_db = _final_threshold_db(summary)
+    row = {**point, **summary}
+    del row["threshold"]
+    row["threshold_db"] = threshold_db
+    return row
 
 
 def _trajectory_rows(

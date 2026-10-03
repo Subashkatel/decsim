@@ -56,6 +56,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file |
 | `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_folder.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
 | `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |
+| `threshold_summary.csv` | `decsim/experiments/collect_command.py`, `_threshold_summary_row` | one row per online point, the counters its stderr line prints and the rest of the calibrator's summary at the end of its prefix: `point_id`, the swept paths and `algorithm`, then `windows`, `escalated`, `escalation_rate`, `target_escalation_rate`, `audited`, `audited_bad`, `kept_bad_rate`, `raises`, `relaxes`, `pending_audits` and `threshold_db` |
 
 `run.json`, the run file's copy and the patch together are the whole
 experiment: the commit plus the patch is the code, and the run file is

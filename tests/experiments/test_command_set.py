@@ -1104,6 +1104,39 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
     assert cut_trajectory == whole_trajectory
 
 
+def test_an_online_points_threshold_summary_is_its_end_counters(tmp_path):
+    """threshold_summary.csv holds the counters the stderr line prints.
+
+    The referents are files the run writes apart from the calibrator's
+    summary: the machine counts every weak decision as a decoded window
+    and every audit as an escalated one, since an audit sends a kept
+    window to the strong decoder, and the trajectory records each
+    audit's label and the final threshold.
+    """
+    config_path = _online_config(tmp_path, 60)
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    (summary,) = _csv_rows(out_dir / "threshold_summary.csv")
+    (sweep_row,) = _csv_rows(out_dir / "sweep.csv")
+    shots = _csv_rows(out_dir / "shots.csv")
+    trajectory = _online_trajectory_rows(out_dir)
+    decoded = sum(int(shot["decoded_windows"]) for shot in shots)
+    escalated = sum(int(shot["escalated_windows"]) for shot in shots)
+    events = [row["event"] for row in trajectory]
+    labeled = events.count("audit_clean") + events.count("audit_bad")
+    audits_started = int(summary["audited"]) + int(summary["pending_audits"])
+    columns = list(summary)
+    assert columns[:5] == list(sweep_row)[:5]
+    assert summary["point_id"] == sweep_row["point_id"]
+    assert int(summary["windows"]) == decoded == 20
+    assert int(summary["escalated"]) + audits_started == escalated
+    assert int(summary["audited"]) == labeled == 1
+    assert int(summary["audited_bad"]) == events.count("audit_bad")
+    assert summary["threshold_db"] == trajectory[-1]["threshold_db"]
+
+
 def test_a_saved_calibrator_whose_bytes_changed_is_refused(tmp_path):
     """A state that no longer hashes to its record is never unpickled.
 

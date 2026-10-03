@@ -1,24 +1,17 @@
-"""STYLE.md rule 1's wide-state exemption list is honest and short.
+"""STYLE.md rule 1's wide-state report, held to the package.
 
-The checker reads the list from the style guide, so the guide is the
-one place a reader learns which classes are wide on purpose. A name
-that no longer belongs there would silence a real report, so the list
-is checked against the code it exempts.
+The guide's exemption list is empty, so no class of the package may set
+more than six attributes, and no caller reaches past the windows facade.
 """
 
 import ast
 import importlib.util
 import pathlib
-import re
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 CHECKER_PATH = PACKAGE_ROOT / "tools" / "check_one_action.py"
-MAX_EXEMPTIONS = 8
-EXEMPTION_HEADING = "### Classes exempt from the six-attribute report"
-ENTRY_LINE = re.compile(r"^- `(\w+)` \(`([^`]+)`\):")
-BACKTICKED_NAME = re.compile(r"`([a-z_][a-z_0-9]*)`")
 
 
 def _checker():
@@ -29,60 +22,6 @@ def _checker():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def _class_definition(path: pathlib.Path, class_name: str):
-    """The named class of a file, or None when the file has no such class."""
-    text = path.read_text()
-    tree = ast.parse(text)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
-            continue
-        if node.name == class_name:
-            return node
-    return None
-
-
-def test_every_exempt_class_exists_where_the_guide_says_it_does():
-    checker = _checker()
-    guide = (PACKAGE_ROOT / "STYLE.md").read_text()
-    # the heading the checker reads the list from, so an empty list is
-    # an empty list and not a parse that found nothing
-    assert EXEMPTION_HEADING in guide
-    exemptions = checker.wide_state_exemptions()
-    _check_every_exempt_class_exists(exemptions)
-
-
-def _check_every_exempt_class_exists(exemptions) -> None:
-    for class_name, class_path in exemptions:
-        path = PACKAGE_ROOT / class_path
-        assert path.exists(), class_path
-        node = _class_definition(path, class_name)
-        assert node is not None, class_name
-
-
-def test_every_exempt_class_would_otherwise_be_reported():
-    """A class that is no longer wide leaves the list, so it stays honest."""
-    checker = _checker()
-    exemptions = checker.wide_state_exemptions()
-    _check_every_exempt_class_is_wide(checker, exemptions)
-
-
-def _check_every_exempt_class_is_wide(checker, exemptions) -> None:
-    for class_name, class_path in exemptions:
-        path = PACKAGE_ROOT / class_path
-        node = _class_definition(path, class_name)
-        init = checker.init_method(node)
-        assert init is not None, class_name
-        names = checker.self_attributes_assigned(init)
-        assert len(names) > checker.MAX_ATTRIBUTES, class_name
-
-
-def test_the_list_stays_short():
-    """Past eight names the rule is wrong, not the list (STYLE.md rule 1)."""
-    checker = _checker()
-    exemptions = checker.wide_state_exemptions()
-    assert len(exemptions) <= MAX_EXEMPTIONS
 
 
 def _wide_state_findings(checker, package):
@@ -166,68 +105,3 @@ def _without_trace_groups(reaches: dict) -> dict:
         if not reach.endswith(".trace"):
             kept[reach] = where
     return kept
-
-
-def _exemption_entries(guide: str) -> dict:
-    """Each exempt (class, path) mapped to the whole text of its entry."""
-    entries = {}
-    current = None
-    for line in _exemption_listing(guide):
-        match = ENTRY_LINE.match(line)
-        if match is not None:
-            current = (match.group(1), match.group(2))
-            entries[current] = line
-            continue
-        stripped = line.strip()
-        if current is None or not stripped:
-            continue
-        entries[current] = entries[current] + " " + stripped
-    return entries
-
-
-def _exemption_listing(guide: str) -> list:
-    """The guide's lines after the exemption heading, up to the next section."""
-    guide_lines = guide.splitlines()
-    lines = iter(guide_lines)
-    for line in lines:
-        if line.startswith(EXEMPTION_HEADING):
-            break
-    # the same iterator resumes after the heading
-    listing = []
-    for line in lines:
-        if line.startswith("## "):
-            break
-        listing.append(line)
-    return listing
-
-
-def test_every_exemption_sentence_names_every_attribute_its_class_holds():
-    """The entry is what a reader of rule 1 sees instead of the report.
-
-    An entry that does not name a collaborator leaves that collaborator
-    unexplained.
-    """
-    checker = _checker()
-    guide = (PACKAGE_ROOT / "STYLE.md").read_text()
-    entries = _exemption_entries(guide)
-    exemptions = checker.wide_state_exemptions()
-    missing = _unnamed_attributes(checker, entries)
-    assert set(entries) == exemptions
-    assert missing == {}
-
-
-def _unnamed_attributes(checker, entries: dict) -> dict:
-    """Each exempt class whose entry leaves attributes unnamed: those."""
-    missing_by_class = {}
-    for (class_name, class_path), entry in entries.items():
-        path = PACKAGE_ROOT / class_path
-        node = _class_definition(path, class_name)
-        init = checker.init_method(node)
-        assigned = checker.self_attributes_assigned(init)
-        attributes = set(assigned)
-        found = BACKTICKED_NAME.findall(entry)
-        named = set(found)
-        missing = attributes - named
-        if missing:
-            missing_by_class[class_name] = sorted(missing)
-    return missing_by_class

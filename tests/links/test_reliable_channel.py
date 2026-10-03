@@ -16,6 +16,7 @@ byte per tick: a message's first packet is 38 + 20 + 8 + 12 + 16 + 256
 = 86 (tests/links/test_framings.py).
 """
 
+import dataclasses
 import functools
 import gc
 import math
@@ -29,8 +30,12 @@ import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
+import decsim.links.link_profiles as link_profiles
 import decsim.links.reliable_channel as reliable_channel
 import decsim.links.settings as link_settings
+import decsim.machine as machine_module
+import decsim.settings as machine_settings
+import examples.two_tiers as two_tiers
 
 PATH_MTU_BYTES = 256
 RATE = 8_000_000  # bits per microsecond: one byte a tick
@@ -413,6 +418,65 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
         reliable_deliveries = [item.delivery_ticks for item in by_reliable]
         credit_deliveries = [item.delivery_ticks for item in by_credit]
         assert reliable_deliveries == credit_deliveries
+
+
+def _off_board_escalation(protocol) -> machine_settings.MachineSettings:
+    """The two-tier machine with its strong node one chassis hop away.
+
+    The escalation hop is the reference card's off-board one: 100 Gb/s,
+    400 bits a cycle at 250 MHz, 65 cycles of latency.
+    """
+    machine = two_tiers.points[0].machine
+    card = link_profiles.path_card(
+        machine.links,
+        "weak_decoder_to_strong_decoder",
+        clock=machine_settings.ROOM_CLOCK,
+        latency_cycles=65,
+        bits_per_cycle=400.0,
+        source="the reference card's off-board escalation hop",
+        protocol=protocol,
+    )
+    links = dataclasses.replace(
+        machine.links, weak_decoder_to_strong_decoder=card
+    )
+    return dataclasses.replace(machine, links=links)
+
+
+def test_a_reliable_link_at_no_errors_runs_as_its_credit_link_in_a_machine():
+    """RoCE v2 frames on the escalation hop of a whole shot, nothing lost."""
+    framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
+    room = machine_settings.ROOM_CLOCK
+    credit = credit_channel.CreditChannel.Settings(
+        framing=framing,
+        receive_buffer_frames=8,
+        credit_latency_cycles=65,
+        clock=room,
+    )
+    reliable = reliable_channel.ReliableChannel.Settings(
+        framing=framing,
+        receive_buffer_frames=8,
+        credit_latency_cycles=65,
+        window_packets=128,
+        ack_every_packets=66,
+        retransmit_timeout_cycles=100_000,
+        retry_count=7,
+        bit_error_rate=0.0,
+        clock=room,
+    )
+    by_credit_settings = _off_board_escalation(credit)
+    by_reliable_settings = _off_board_escalation(reliable)
+    by_credit = machine_module.Machine.build(by_credit_settings, 0)
+    by_reliable = machine_module.Machine.build(by_reliable_settings, 0)
+    frames = []
+    by_reliable.links.trace.frame_landed.connect(frames.append)
+
+    credit_result = by_credit.run()
+    reliable_result = by_reliable.run()
+
+    assert reliable_result.terminal_status == "complete"
+    assert len(frames) > 0
+    assert reliable_result.operation_results == credit_result.operation_results
+    assert reliable_result.link_traffic == credit_result.link_traffic
 
 
 def test_every_message_arrives_once_in_order_under_loss_property():

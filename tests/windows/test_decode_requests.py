@@ -715,7 +715,7 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     machine = declared_fabric.switching_machine(
         rounds=15,
         escalated_windows={0},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         weak_syndrome_buffer=settings,
     )
     requests = declared_run.EndedRequests()

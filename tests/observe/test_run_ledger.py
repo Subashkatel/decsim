@@ -365,7 +365,7 @@ def switching_double_window_mode(_generator, rounds):
     return declared_run.switching_run(
         rounds=rounds,
         escalates=True,
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
     )
 
 

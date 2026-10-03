@@ -12,21 +12,19 @@ set of updated checks (2303.04846 lines 784-786), one index per flip.
 """
 
 import dataclasses
-import pathlib
 
 import pytest
 
-import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.ports as ports
 import decsim.records.windows as window_records
+import decsim.settings as machine_settings
 import decsim.windows.boundary_payloads as boundary_payloads
+import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 import tests.declared_run as declared_run
-
-THIS_FILE = pathlib.Path(__file__)
-CONFIGS = THIS_FILE.parents[2] / "configs"
+import tests.escalation.test_strong_window_shapes as shape_tests
 
 
 def boundary_transfers(link_traffic: dict) -> list:
@@ -55,16 +53,7 @@ def _source_committing(commit_lo: int, commit_hi: int):
 
 def reference_run(distance: int):
     """One shot of the weak baseline at that distance."""
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": distance,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(distance, 0.003, 1.0)
     machine = machine_module.Machine.build(settings, 0)
     return machine.run()
 
@@ -234,25 +223,15 @@ def _pinned_faces(result) -> list:
     return faces
 
 
-def _pinned_run(strong_window: str, distance: int, seed: int = 0):
+def _pinned_run(strong_window, distance: int, seed: int = 0):
     """One shot of the redo window switching experiment's switching point.
 
-    The yaml names redo_window; the row under test replaces it in
-    the switching slot, which is where the build reads it from.
+    The row under test replaces the redo window in the switching slot,
+    which is where the build reads it from.
     """
-    config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": distance,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    strong_window_settings = declared_run.strong_window_settings(strong_window)
+    settings = shape_tests.weak_base_switching(distance, 0.008, 1.0)
     switching = dataclasses.replace(
-        settings.switching, strong_window=strong_window_settings
+        settings.switching, strong_window=strong_window
     )
     windows = window_settings.switching_windows(
         settings.windows, switching.strong_window
@@ -272,9 +251,9 @@ def test_a_pinned_face_is_charged_the_dense_width_of_its_seam_layer():
     dense row charges the seam layer, d*d-1 detectors on a bulk layer of
     a rotated surface code, so 8 bits at d=3 and 24 at d=5.
     """
-    result = _pinned_run("redo_window", 3)
+    result = _pinned_run(declared_run.REDO_WINDOW, 3)
     at_three = _pinned_faces(result)
-    wider = _pinned_run("redo_window", 5)
+    wider = _pinned_run(declared_run.REDO_WINDOW, 5)
     at_five = _pinned_faces(wider)
     widths_at_three = {payload_bits for _window_id, payload_bits in at_three}
     widths_at_five = {payload_bits for _window_id, payload_bits in at_five}
@@ -293,7 +272,7 @@ def test_a_two_faced_window_costs_the_sum_of_its_two_one_sided_halves():
     also priced on a window whose oldest layer holds two detectors and
     whose newest holds one: 2 and 1, a sum no single layer of it gives.
     """
-    result = _pinned_run("double_window", 3, 1)
+    result = _pinned_run(declared_run.DOUBLE_WINDOW, 3, 1)
     faces = _pinned_faces(result)
     charged = _charge_by_window(faces)
     counts = _face_counts(faces)
@@ -349,7 +328,7 @@ def test_a_far_pin_is_charged_the_layer_its_mask_lands_on():
     Bombin 2303.04846 lines 775-788 makes that update the input the
     strong task reads, and it is one layer.
     """
-    result = _pinned_run("double_window", 3, 0)
+    result = _pinned_run(declared_run.DOUBLE_WINDOW, 3, 0)
     near, far = _pins_by_direction(result)
     assert far == [8]
     assert near == [8]
@@ -403,17 +382,10 @@ def _parallel_run(distance: int, seed: int):
     The sparse row prices the flips the message carries, so which layer
     is counted is visible in the bits.
     """
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.005,
-            "qpu.distance": distance,
-            "qpu.round_period_microseconds": 1.0,
-        },
+    settings = machine_settings.weak_decoder_baseline(distance, 0.005, 1.0)
+    windows = declared_run.windows_on(
+        settings.windows, parallel_scheme.ParallelWindowScheme
     )
-    settings = point.settings
-    windows = declared_run.windows_on(settings.windows, "parallel")
     sparse = boundary_payloads.SparseSeamList.Settings()
     windows = dataclasses.replace(windows, boundary_payload=sparse)
     settings = dataclasses.replace(settings, windows=windows)

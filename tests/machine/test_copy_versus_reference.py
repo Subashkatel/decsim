@@ -16,7 +16,6 @@ processing on the decoder's own chip (2510.21600 lines 235-237).
 
 import dataclasses
 import functools
-import pathlib
 
 import numpy
 import pytest
@@ -28,20 +27,22 @@ import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.workload as workload_records
+import decsim.settings as machine_settings
+import decsim.windows.schemes.parallel as parallel_scheme
+import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
+import tests.escalation.test_strong_window_shapes as shape_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-CONFIGS = pathlib.Path("configs")
 WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
 # the seats each placement named here forms at
 SEATS = {
@@ -52,75 +53,75 @@ SEATS = {
 WEAK_SEATS = ("weak_decoder",)
 BOTH_DECODERS = ("weak_decoder", "strong_decoder")
 CHIP_THEN_HOST_DECODER = ("weak_decoder", "strong_syndrome_buffer")
-# (config, windows.kind, escalation.strong_window, formed_at): every seat
+# (machine, windowing scheme, strong window, formed_at): every seat
 # on every path a round takes, on the window shapes that read a round
 # whose predecessor the seat never formed (Skoric's B blocks, and the
 # strong side's regions of both shapes)
 STIM_GRID = (
     (
-        "bases/weak_decoder_baseline.yaml",
-        "sliding",
-        "redo_window",
+        machine_settings.weak_decoder_baseline,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         ("controller",),
     ),
     (
-        "bases/weak_decoder_baseline.yaml",
-        "sliding",
-        "redo_window",
+        machine_settings.weak_decoder_baseline,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         ("weak_syndrome_buffer",),
     ),
     (
-        "bases/weak_decoder_baseline.yaml",
-        "sliding",
-        "redo_window",
+        machine_settings.weak_decoder_baseline,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         WEAK_SEATS,
     ),
     (
-        "bases/weak_decoder_baseline.yaml",
-        "parallel",
-        "redo_window",
+        machine_settings.weak_decoder_baseline,
+        parallel_scheme.ParallelWindowScheme,
+        declared_run.REDO_WINDOW,
         WEAK_SEATS,
     ),
     (
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         ("weak_syndrome_buffer",),
     ),
     (
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         BOTH_DECODERS,
     ),
     (
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         CHIP_THEN_HOST_DECODER,
     ),
     (
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "double_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.DOUBLE_WINDOW,
         BOTH_DECODERS,
     ),
     (
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "double_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.DOUBLE_WINDOW,
         CHIP_THEN_HOST_DECODER,
     ),
     (
-        "bases/strong_decoder_baseline.yaml",
-        "sliding",
-        "redo_window",
+        machine_settings.strong_decoder_baseline,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         ("strong_syndrome_buffer",),
     ),
     (
-        "bases/strong_decoder_baseline.yaml",
-        "sliding",
-        "redo_window",
+        machine_settings.strong_decoder_baseline,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         ("strong_decoder",),
     ),
 )
@@ -131,16 +132,7 @@ YANG_CYCLES = {"decoder": (5, 1)}
 
 def _machine_formed_at(where: str, distance: int = 3):
     """The weak baseline, forming its detection events there."""
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": distance,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
     detection_events = _formed_at(settings, where)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
@@ -153,39 +145,31 @@ def _parallel_machine_formed_at(where: str):
     """The weak baseline on Skoric's A/B blocks, formed there."""
     formed_there = _machine_formed_at(where)
     settings = formed_there.settings
-    windows = declared_run.windows_on(settings.windows, "parallel")
+    windows = declared_run.windows_on(
+        settings.windows, parallel_scheme.ParallelWindowScheme
+    )
     settings = dataclasses.replace(settings, windows=windows)
     return machine_module.Machine.build(settings, 0)
 
 
 def _seated_machine(
-    config_name, windows_kind, strong_window, formed_at, latency_cycles=0
+    machine_function, scheme_row, strong_window, formed_at, latency_cycles=0
 ):
-    """A d=3 run of the config on that shape, formed at those seats.
+    """A d=3 run of the machine on that shape, formed at those seats.
 
     The seats form in latency_cycles on the section's clock, none by
     default, the reference card's cost.
     """
-    config_path = CONFIGS / config_name
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_function(3, 0.008, 1.0)
     detection_events = dataclasses.replace(
         settings.detection_events,
         formed_at=formed_at,
         latency_cycles=latency_cycles,
     )
-    windows = declared_run.windows_on(settings.windows, windows_kind)
+    windows = declared_run.windows_on(settings.windows, scheme_row)
     switching = settings.switching
     if switching is not None:
-        named = declared_run.strong_window_settings(strong_window)
-        switching = dataclasses.replace(switching, strong_window=named)
+        switching = dataclasses.replace(switching, strong_window=strong_window)
         windows = window_settings.switching_windows(
             windows, switching.strong_window
         )
@@ -303,16 +287,7 @@ def _decode_spans(machine) -> list:
 
 def _switching_machine_formed_at(where: str):
     """A switching run at d=3, where both tiers decode the same rounds."""
-    config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = shape_tests.weak_base_switching(3, 0.008, 1.0)
     detection_events = _formed_at(settings, where)
     settings = dataclasses.replace(settings, detection_events=detection_events)
     return machine_module.Machine.build(settings, 0)
@@ -325,16 +300,7 @@ def _double_window_switching_at_the_decoder():
     windows ahead of the seam, so the run withdraws weak decodes that
     were already submitted.
     """
-    config_path = CONFIGS / "experiments/switching/redo_window_switching.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = shape_tests.weak_base_switching(3, 0.008, 1.0)
     detection_events = _formed_at(settings, "decoder")
     double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = dataclasses.replace(
@@ -459,16 +425,7 @@ def _store_copy_bits(machine) -> int:
 
 def _machine(**weak_changes):
     """The weak baseline at d=3, counting its data movement."""
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
@@ -769,10 +726,10 @@ def test_disjoint_ranges_formed_at_the_decoder_decode_the_same_events():
 
 
 @pytest.mark.parametrize(
-    "config_name, windows_kind, strong_window, formed_at", STIM_GRID
+    "machine_function, scheme_row, strong_window, formed_at", STIM_GRID
 )
 def test_every_decoder_unit_consumes_stims_events_from_every_seat(
-    config_name, windows_kind, strong_window, formed_at
+    machine_function, scheme_row, strong_window, formed_at
 ):
     """What each unit's memory takes is Stim's events, bit for bit.
 
@@ -781,7 +738,7 @@ def test_every_decoder_unit_consumes_stims_events_from_every_seat(
     every hop, whichever seat formed it.
     """
     machine = _seated_machine(
-        config_name, windows_kind, strong_window, formed_at
+        machine_function, scheme_row, strong_window, formed_at
     )
     emitted = _raw_rounds(machine)
     landed = _landed_rounds(machine)
@@ -930,9 +887,9 @@ def test_a_strong_seat_forming_in_cycles_stores_each_escalated_round_once():
     again; each unit still consumes Stim's events, and the run ends.
     """
     machine = _seated_machine(
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         CHIP_THEN_HOST_DECODER,
         latency_cycles=5,
     )
@@ -991,9 +948,9 @@ def _lookback_workload(noisy_round: str = "X_ERROR(0.05) 0\nM(0.05) 0\n"):
 def _lookback_switching_machine(formed_at, seed):
     """Union-find switching on the lookback circuit, windows of 2 + 2."""
     machine = _seated_machine(
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         formed_at,
     )
     settings = machine.settings
@@ -1025,16 +982,19 @@ def _parallel_lookback_machine(unit_count: int):
     to 7, then the seam 3 to 5, whose round 4 reads round 2.
     """
     machine = _seated_machine(
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         BOTH_DECODERS,
     )
     settings = machine.settings
     # a flipped readout alone, so no fault straddles two blocks' commits
     workload = _lookback_workload("M(0.15) 0\n")
     windows = declared_run.windows_on(
-        settings.windows, "parallel", commit_rounds=1, buffer_rounds=1
+        settings.windows,
+        parallel_scheme.ParallelWindowScheme,
+        commit_rounds=1,
+        buffer_rounds=1,
     )
     # a declared decoder decodes no syndrome, so no fault's ownership is
     # asked of the blocks; the landed events are the check
@@ -1070,9 +1030,9 @@ def _reach_growing_machine(formed_at):
     declares the confidence, so only window 1 escalates.
     """
     machine = _seated_machine(
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         formed_at,
     )
     settings = machine.settings
@@ -1118,7 +1078,7 @@ def _reach_growing_machine(formed_at):
 
 
 def _declared_confidence(switching):
-    """The yaml's switching slot, deciding on the weak tier's declared gap."""
+    """The switching slot, deciding on the weak tier's declared gap."""
     confidence = declared_run.DeclaredConfidence.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=declared_run.ESCALATION_THRESHOLD_DECIBELS
@@ -1140,9 +1100,9 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
     round's detector: an observable's record of the round, or nothing.
     """
     machine = _seated_machine(
-        "experiments/switching/redo_window_switching.yaml",
-        "sliding",
-        "redo_window",
+        shape_tests.weak_base_switching,
+        sliding_scheme.SlidingWindowScheme,
+        declared_run.REDO_WINDOW,
         BOTH_DECODERS,
     )
     settings = machine.settings

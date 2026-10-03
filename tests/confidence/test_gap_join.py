@@ -9,21 +9,21 @@ is busy for the sum of the two solves, two units move them twice and
 overlap, and the committed corrections are the same either way.
 """
 
-import copy
 import dataclasses
 import json
 import math
-import pathlib
 
 import pytest
 
+import decsim.confidence.complementary as complementary
 import decsim.confidence.gap_join as gap_join_module
 import decsim.engine as engine_module
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.producers as producers
 import decsim.records.decoding as decoding_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
@@ -42,27 +42,23 @@ def _switching_machine(
     patch_count: int = 1,
 ):
     """The gate's switching card at d=3, priced so its ticks are declared."""
-    sections = copy.deepcopy(test_strong_window_shapes.GATE_SWITCHING_CARD)
-    sections["weak_decoder"]["kind"] = weak_microseconds
-    sections["weak_decoder"]["units"] = weak_units
-    sections["weak_decoder"]["result_blocks_unit"] = result_blocks_unit
-    escalation = sections["escalation"]
-    escalation["confidence_walk_microseconds"] = walk_microseconds
-    sections["strong_decoder"]["kind"] = 20.0
-    sections["qpu"]["distance"] = 3
-    sections["qpu"]["round_period_microseconds"] = 1.0
-    arguments = sections["workload"]["arguments"]
-    arguments["distance"] = 3
-    arguments["physical_error_probability"] = 0.008
-    if patch_count > 1:
-        sections["workload"]["function"] = "decsim.producers:memory_patches"
-        arguments["patch_count"] = patch_count
-    base_directory = pathlib.Path(".")
-    section_folders = dict.fromkeys(sections, base_directory)
-    settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="switching_validation", section_folders=section_folders
+    settings = test_strong_window_shapes.gate_switching()
+    weak_decoder = test_strong_window_shapes.priced_pool(
+        settings.weak_decoder, weak_microseconds, weak_units
     )
-    workload = settings.workload.made()
+    weak_decoder = dataclasses.replace(
+        weak_decoder, result_blocks_unit=result_blocks_unit
+    )
+    strong_decoder = test_strong_window_shapes.priced_pool(
+        settings.strong_decoder, 20.0
+    )
+    confidence = complementary.ComplementaryGap.Settings(
+        walk_microseconds=walk_microseconds
+    )
+    switching = dataclasses.replace(settings.switching, confidence=confidence)
+    workload = settings.workload
+    if patch_count > 1:
+        workload = _memory_patches(patch_count)
     trace = "off"
     if trace_path is not None:
         trace = str(trace_path)
@@ -70,9 +66,26 @@ def _switching_machine(
         settings.observation, record_switching_windows=True, trace=trace
     )
     settings = dataclasses.replace(
-        settings, workload=workload, observation=observation
+        settings,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        switching=switching,
+        workload=workload,
+        observation=observation,
     )
     return machine_module.Machine.build(settings, 0)
+
+
+def _memory_patches(patch_count: int):
+    """patch_count memory patches of the gate's card, 10 d rounds each."""
+    patches = producers.memory_patches(
+        "surface_code:rotated_memory_z",
+        "10d",
+        patch_count,
+        3,
+        test_strong_window_shapes.GATE_PHYSICAL_ERROR_PROBABILITY,
+    )
+    return workload_settings.WorkloadSettings.running(patches)
 
 
 def _weak_requests(machine) -> list:

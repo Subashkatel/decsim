@@ -34,24 +34,11 @@ def test_every_listener_hears_every_fire_once_in_connection_order():
 
 def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
     import dataclasses
-    import pathlib
 
-    import decsim.experiments.experiment as experiment
     import decsim.machine as machine_module
+    import decsim.settings as machine_settings
 
-    here = pathlib.Path(__file__)
-    repository = here.resolve()
-    repository = repository.parents[2]
-    config_path = repository / "configs/bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
     bare = machine_module.Machine.build(settings, 0)
     bare.run()
     every_listener = dataclasses.replace(

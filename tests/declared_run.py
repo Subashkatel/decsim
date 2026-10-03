@@ -20,6 +20,7 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -32,7 +33,6 @@ import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
-import decsim.tables as tables
 import decsim.windows.settings as window_settings
 
 # every declared stage of the fabric, in microseconds
@@ -164,31 +164,20 @@ def declared_switching(**changes):
     return dataclasses.replace(switching, **changes)
 
 
-def strong_window_settings(name):
-    """The record of the strong window row the name picks, as yaml reads it.
-
-    A name off the table is refused with the yaml's own sentence.
-    """
-    row = tables.row(
-        escalation_settings.STRONG_WINDOW_SHAPES,
-        "escalation.strong_window",
-        name,
-    )
-    return row.Settings()
+# the two strong window rows decsim ships, at their own settings
+REDO_WINDOW = strong_window_shapes.RedoWindow.Settings()
+DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
 
 
-def windows_on(windows, kind=None, **sizes):
+def windows_on(windows, scheme_row=None, **sizes):
     """The windows with another scheme row, other sizes, or both.
 
-    kind is the yaml's windows.kind word; None keeps the windows' own
+    scheme_row is a windowing scheme class; None keeps the windows' own
     row. A size left out keeps the scheme's own.
     """
     scheme = windows.scheme
-    if kind is not None:
-        row = tables.row(
-            window_settings.WINDOWING_SCHEMES, "windows.kind", kind
-        )
-        scheme = row.Settings(
+    if scheme_row is not None:
+        scheme = scheme_row.Settings(
             commit_rounds=scheme.commit_rounds,
             buffer_rounds=scheme.buffer_rounds,
         )
@@ -603,7 +592,7 @@ def switching_run(
     escalates=False,
     operations=None,
     run_both_at_once=False,
-    strong_window="redo_window",
+    strong_window=REDO_WINDOW,
     weak_units=1,
     seed=0,
     io_trace=False,
@@ -636,17 +625,14 @@ def switching_run(
         engine=DECLARED_ENGINE,
     )
     workload = declared_workload(operations, rounds)
-    strong_window_record = strong_window_settings(strong_window)
     plain_windows = window_settings.WindowSettings()
-    windows = window_settings.switching_windows(
-        plain_windows, strong_window_record
-    )
+    windows = window_settings.switching_windows(plain_windows, strong_window)
     decoder_manager = decoder_settings.DecoderManagerSettings(
         bulk_strong=bulk_strong
     )
     switching = declared_switching(
         run_both_at_once=run_both_at_once,
-        strong_window=strong_window_record,
+        strong_window=strong_window,
         clock=clock,
         threshold_cycles=threshold_cycles,
         switch_cycles=switch_cycles,

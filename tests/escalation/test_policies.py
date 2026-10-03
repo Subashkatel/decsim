@@ -27,7 +27,6 @@ import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -44,7 +43,6 @@ import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
-import tests.experiments.yaml_configs as yaml_configs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -289,16 +287,16 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="double_window",
+            strong_window=declared_run.DOUBLE_WINDOW,
             run_both_at_once=True,
         )
 
 
-def test_a_refusal_names_the_strong_window_row_the_yaml_chose():
+def test_a_refusal_names_the_strong_window_row_the_run_chose():
     """Four rows reach these refusals, so none of them may name one row.
 
-    The run shape carries escalation.strong_window (RunShape), and the
-    sentence a user reads names the row their yaml asked for.
+    The run shape carries the strong window (RunShape), and the sentence
+    a user reads names the row their settings asked for.
     """
     with pytest.raises(
         ValueError,
@@ -308,7 +306,7 @@ def test_a_refusal_names_the_strong_window_row_the_yaml_chose():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="double_window",
+            strong_window=declared_run.DOUBLE_WINDOW,
             run_both_at_once=True,
         )
 
@@ -318,7 +316,7 @@ def _double_window_settings(
 ) -> machine_settings.MachineSettings:
     """The gate's switching card with the double window and the sizes.
 
-    Every part is a table row, the way the yaml builds it.
+    Every part is written out as its record.
     """
     scheme = sliding_scheme.SlidingWindowScheme.Settings(
         commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
@@ -405,7 +403,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="double_window",
+            strong_window=declared_run.DOUBLE_WINDOW,
             switching=switching,
             online_threshold=online,
         )
@@ -417,73 +415,6 @@ def test_an_online_source_beside_run_both_at_once_is_refused():
         policies.Switching(
             threshold=online, expected_source=SOURCE, run_both_at_once=True
         )
-
-
-def _switching_config(
-    tmp_path,
-    *,
-    kind="switching",
-    threshold_source=None,
-    windows_kind=None,
-    terminal_policy=None,
-    boundaries=None,
-):
-    """A yaml with no boundary policy and no windowing scheme."""
-    escalation = {"kind": kind, "gap_threshold_db": 20.0}
-    if threshold_source is not None:
-        escalation["threshold_source"] = threshold_source
-    weak_decoder = _weak_unit()
-    workload = yaml_configs.memory_workload(9)
-    sweep_point = {
-        "axes": {
-            "workload.arguments.physical_error_probability": [0.008],
-            "qpu.distance": [3],
-            "qpu.round_period_microseconds": [1.0],
-        },
-        "collection": {"max_shots": 1},
-    }
-    strong_decoder = yaml_configs.strong_unit("belief_matching")
-    card = {
-        "escalation": escalation,
-        "workload": workload,
-        **weak_decoder,
-        **strong_decoder,
-        "sweep": [sweep_point],
-    }
-    card["windows"] = _windows_section(
-        windows_kind, terminal_policy, boundaries
-    )
-    return yaml_configs.write_config(tmp_path, card)
-
-
-def _weak_unit() -> dict:
-    """One pymatching unit on the fridge clock, the switching weak tier."""
-    return {
-        "weak_decoder": {
-            "kind": "pymatching",
-            "units": 1,
-            "unit_memory": {"bits": None},
-            "engine": {
-                "clock": "fridge",
-                "fetch_cycles_per_round": 1,
-                "fetch_cycles_per_job": 0,
-                "release_cycles_per_job": 1,
-                "release_cycles_per_round": 0,
-            },
-        }
-    }
-
-
-def _windows_section(windows_kind, terminal_policy, boundaries) -> dict:
-    """The minimal windows section, with the keys the caller named."""
-    windows = dict(yaml_configs.MINIMAL_CONFIG["windows"])
-    if windows_kind is not None:
-        windows["kind"] = windows_kind
-    if terminal_policy is not None:
-        windows["terminal_policy"] = terminal_policy
-    if boundaries is not None:
-        windows["boundaries"] = boundaries
-    return windows
 
 
 class _KeepEverything:
@@ -517,28 +448,17 @@ class _KeepEverything:
         del result
 
 
-def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
-    monkeypatch, tmp_path
-):
-    """One THRESHOLD_SOURCES row and one yaml name, nothing else."""
-    monkeypatch.setitem(
-        escalation_settings.THRESHOLD_SOURCES,
-        "keep_everything",
-        _KeepEverything,
+def test_a_threshold_source_written_outside_decsim_runs_from_its_record():
+    """A threshold source is one class and its Settings record, nothing else.
+
+    Every window's declared gap asks to escalate, and the source keeps
+    every weak result, so no strong request is made.
+    """
+    threshold = _KeepEverything.Settings(threshold_decibels=20.0)
+    switching = declared_run.declared_switching(threshold=threshold)
+    machine = fabric.switching_machine(
+        rounds=9, escalated_windows={0, 1, 2}, switching=switching
     )
-    config_path = _switching_config(
-        tmp_path, threshold_source="keep_everything"
-    )
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 0)
     assert isinstance(machine.switching.policy.threshold, _KeepEverything)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -702,7 +622,7 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
         scheme=scheme,
     )
@@ -714,93 +634,13 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     ]
 
 
-def test_a_windowing_scheme_named_in_a_yaml_runs_under_switching(
-    monkeypatch, tmp_path
-):
-    """The yaml path reads the declaration too, not the kind's name.
-
-    Before this round build/plan.py refused any windows.kind but sliding
-    under switching, so a row that declares a trailing tail ran when it
-    was handed in through Python and was refused when a yaml named it.
-    """
-    monkeypatch.setitem(
-        window_settings.WINDOWING_SCHEMES,
-        "delegating",
-        DelegatingWindowScheme,
-    )
-    config_path = _switching_config(tmp_path, windows_kind="delegating")
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 0)
-    planner_scheme = machine.windows.window_manager.planner.scheme
-
-    assert isinstance(planner_scheme, DelegatingWindowScheme)
-    result = machine.run()
-    assert result.terminal_status == "complete"
-
-
-def test_eager_boundaries_named_in_a_yaml_are_refused_under_switching(
-    tmp_path,
-):
-    """The boundary policy's key reaches the escalation's own refusal.
-
-    A yaml may name windows.boundaries; the escalation's check_plan is
-    what refuses eager shipping against a serial escalation, by the fact
-    the row declares.
-    """
-    config_path = _switching_config(tmp_path, boundaries="eager")
-    with pytest.raises(ValueError, match="serial switching requires held"):
-        config = experiment.load_experiment(config_path)
-        point = config.point_task(
-            {
-                "workload.arguments.physical_error_probability": 0.008,
-                "qpu.distance": 3,
-                "qpu.round_period_microseconds": 1.0,
-            },
-        )
-        settings = point.settings
-        machine_module.Machine.build(settings, 0)
-
-
-def test_held_boundaries_named_in_a_yaml_are_the_rows_the_run_gets(tmp_path):
-    """The key is read, not only defaulted."""
-    config_path = _switching_config(tmp_path, boundaries="held")
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 0)
-    boundary_policy = machine.windows.window_manager.courier.boundary_policy
-
-    assert settings.windows.boundary_policy == boundary_policies.Held.Settings()
-    assert isinstance(boundary_policy, boundary_policies.Held)
-
-
-def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):
-    """The policy's own refusal is the only one left."""
-    config_path = _switching_config(tmp_path, terminal_policy="flush")
+def test_a_flush_tail_is_refused_under_switching():
+    """A strong recovery reads past the last commit, which flush drops."""
+    held = boundary_policies.Held.Settings()
+    settings = _serial_switching_settings(held)
+    windows = dataclasses.replace(settings.windows, terminal_policy="flush")
+    settings = dataclasses.replace(settings, windows=windows)
     with pytest.raises(ValueError, match="no trailing tail context"):
-        config = experiment.load_experiment(config_path)
-        point = config.point_task(
-            {
-                "workload.arguments.physical_error_probability": 0.008,
-                "qpu.distance": 3,
-                "qpu.round_period_microseconds": 1.0,
-            },
-        )
-        settings = point.settings
         machine_module.Machine.build(settings, 0)
 
 
@@ -864,11 +704,11 @@ def test_a_soft_output_from_another_signal_is_refused():
     assert "does not match the switching threshold source" in str(refusal.value)
 
 
-def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
+def test_the_papers_twenty_decibels_is_the_threshold_in_nats():
     """Toshio 2510.25222 line 1623: "fix the gap threshold to be gth = 20 dB".
 
-    The key and the threshold record are in decibels because that is the
-    paper's unit; a gap is compared in nats, so the record converts once.
+    The threshold record is in decibels because that is the paper's
+    unit; a gap is compared in nats, so the record converts once.
     """
     twenty_decibels = threshold_sources.decibels_to_nats(20.0)
     natural_log_of_ten = math.log(10.0)

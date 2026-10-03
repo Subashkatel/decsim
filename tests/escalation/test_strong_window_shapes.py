@@ -21,106 +21,193 @@ on the round after the strong region. The gate's switching card, priced
 on both tiers so the run is deterministic, puts a run in that regime.
 """
 
-import copy
 import dataclasses
-import pathlib
 
 import pytest
 
-import decsim.confidence.signals as confidence_signals
+import decsim.confidence.complementary as complementary
 import decsim.config as config
+import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.threshold_sources as threshold_sources
+import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
+import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.ports as ports
+import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.schemes.sliding as sliding_scheme
+import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
-# The gate's switching card, section by section as the yaml reads.
-ONE_FRIDGE_CYCLE = {
-    "latency_cycles": 1,
-    "clock": "fridge",
-    "bits_per_cycle": None,
+# The gate's switching card: both clocks at 250 MHz, each hop one cycle
+# of its side's clock on an unbounded wire.
+FRIDGE_CLOCK = config.Clock.from_megahertz(250.0)
+ROOM_CLOCK = config.Clock.from_megahertz(250.0)
+GATE_PATH_CLOCKS = {
+    "qpu_to_controller": FRIDGE_CLOCK,
+    "controller_to_weak_buffer": FRIDGE_CLOCK,
+    "controller_to_strong_buffer": ROOM_CLOCK,
+    "weak_buffer_to_weak_decoder": FRIDGE_CLOCK,
+    "weak_decoder_to_strong_decoder": ROOM_CLOCK,
+    "strong_buffer_to_strong_decoder": ROOM_CLOCK,
+    "decoder_to_decoder": FRIDGE_CLOCK,
+    "weak_decoder_to_frame": FRIDGE_CLOCK,
+    "strong_decoder_to_frame": ROOM_CLOCK,
 }
-ONE_ROOM_CYCLE = {"latency_cycles": 1, "clock": "room", "bits_per_cycle": None}
-GATE_SWITCHING_CARD = {
-    "clocks": {"fridge": 250.0, "room": 250.0},
-    "qpu": {"kind": "stim_device"},
-    "controller": {
-        "clock": "fridge",
-        "readout_to_bits_cycles": 0,
-        "decision_to_pulse_cycles": 0,
-        "packing_cycles_per_round": 0,
-        "packing_rounds_in_flight": None,
-    },
-    "idle_policy": {"kind": "separate_decode_jobs"},
-    "links": {
-        "qpu_to_controller": ONE_FRIDGE_CYCLE,
-        "controller_to_weak_buffer": ONE_FRIDGE_CYCLE,
-        "controller_to_strong_buffer": ONE_ROOM_CYCLE,
-        "weak_buffer_to_weak_decoder": ONE_FRIDGE_CYCLE,
-        "weak_decoder_to_strong_decoder": ONE_ROOM_CYCLE,
-        "strong_buffer_to_strong_decoder": ONE_ROOM_CYCLE,
-        "decoder_to_decoder": ONE_FRIDGE_CYCLE,
-        "weak_decoder_to_frame": ONE_FRIDGE_CYCLE,
-        "strong_decoder_to_frame": ONE_ROOM_CYCLE,
-        "frame_to_controller": None,
-        "controller_to_qpu": None,
-    },
-    "weak_syndrome_buffer": {"bits": None},
-    "strong_syndrome_buffer": {"bits": None},
-    "windows": {
-        "kind": "sliding",
-        "commit_rounds": None,
-        "buffer_rounds": None,
-    },
-    "weak_decoder": {
-        "kind": "pymatching",
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "fridge",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 10,
-            "release_cycles_per_round": 0,
-        },
-    },
-    "strong_decoder": {
-        "kind": "belief_matching",
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "room",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 10,
-            "release_cycles_per_round": 0,
-        },
-    },
-    "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
-    "pauli_frame": {"clock": "fridge", "write_cycles": 1},
-    "workload": {
-        "kind": "producer",
-        "function": "decsim.producers:memory_circuit",
-        "arguments": {
-            "code_task": "surface_code:rotated_memory_z",
-            "rounds_per_shot": "10d",
-        },
-    },
-    "observation": {
-        "check_windows_with": "none",
-        "log_component_io": True,
-        "log": "off",
-    },
-}
+GATE_PHYSICAL_ERROR_PROBABILITY = 0.008
+
+
+def one_cycle_path(links, path_name: str, clock, latency_cycles: int = 1):
+    """One path of the card on an unbounded wire of one lane."""
+    return link_profiles.path_card(
+        links,
+        path_name,
+        clock=clock,
+        latency_cycles=latency_cycles,
+        bits_per_cycle=None,
+        source="the gate's switching card",
+        lane_count=1,
+        setup_cycles_per_transfer=0,
+        header_bits_per_transfer=0,
+        protocol=None,
+    )
+
+
+def gate_switching(
+    distance: int = 3,
+    rounds_per_shot=None,
+    strong_window=declared_run.REDO_WINDOW,
+    physical_error_probability: float = GATE_PHYSICAL_ERROR_PROBABILITY,
+) -> machine_settings.MachineSettings:
+    """The gate's switching card, at p 0.008 unless given, 1 us rounds.
+
+    PyMatching on the chip keeps a window whose complementary gap is at
+    least 20 dB and escalates any other to belief matching on the host,
+    both charged their measured wall clock. A shot is 10 d rounds unless
+    rounds_per_shot says otherwise.
+    """
+    if rounds_per_shot is None:
+        rounds_per_shot = 10 * distance
+    stim = stim_device.StimDevice.Settings()
+    qpu = qpu_settings.QpuSettings(
+        source=stim, round_period_microseconds=1.0, distance=distance
+    )
+    links = gate_links()
+    plain_windows = window_settings.WindowSettings()
+    windows = window_settings.switching_windows(plain_windows, strong_window)
+    weak_engine = decoder_settings.EngineSettings(
+        clock=FRIDGE_CLOCK, release_cycles_per_job=10
+    )
+    pymatching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=pymatching, engine=weak_engine
+    )
+    pauli_frame = pauli_frame_module.PauliFrameConfig(
+        write_cycles=1, clock=FRIDGE_CLOCK
+    )
+    workload = machine_settings.memory_workload(
+        distance, physical_error_probability, rounds_per_shot
+    )
+    observation = observe_settings.ObservationSettings(log_component_io=True)
+    strong_decoder = host_belief_matching()
+    switching = switching_slot(strong_window)
+    return machine_settings.MachineSettings(
+        clock=FRIDGE_CLOCK,
+        qpu=qpu,
+        links=links,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        switching=switching,
+        pauli_frame=pauli_frame,
+        workload=workload,
+        observation=observation,
+    )
+
+
+def weak_base_switching(
+    distance: int,
+    physical_error_probability: float,
+    round_period_microseconds: float,
+) -> machine_settings.MachineSettings:
+    """The weak base switching on the gate's slot, over one-cycle hops.
+
+    The switching experiment's redo window point: real PyMatching on the
+    weak base's chip unit escalates to belief matching on the host, the
+    strong side's four hops one room cycle each.
+    """
+    base = machine_settings.weak_decoder_baseline(
+        distance, physical_error_probability, round_period_microseconds
+    )
+    pymatching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=pymatching)
+    links = machine_settings.one_cycle_strong_side(base.links)
+    strong_window = declared_run.REDO_WINDOW
+    windows = window_settings.switching_windows(base.windows, strong_window)
+    strong_decoder = host_belief_matching()
+    switching = switching_slot(strong_window)
+    return dataclasses.replace(
+        base,
+        links=links,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        switching=switching,
+    )
+
+
+def host_belief_matching() -> decoder_settings.DecoderPoolSettings:
+    """Belief matching on one host unit, charged its measured wall clock."""
+    engine = decoder_settings.EngineSettings(
+        clock=ROOM_CLOCK, release_cycles_per_job=10
+    )
+    belief = belief_matching.BeliefMatchingDecoder.Settings(
+        max_iterations=30, belief_propagation_method="product_sum"
+    )
+    return decoder_settings.DecoderPoolSettings(algorithm=belief, engine=engine)
+
+
+def switching_slot(strong_window) -> escalation_settings.SwitchingSettings:
+    """Keep a complementary gap of 20 dB or more, escalate any other."""
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
+    )
+    return escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold, strong_window=strong_window
+    )
+
+
+def gate_links():
+    """The reference card with each of the gate's hops one cycle."""
+    reference = link_profiles.logical_reference_profile()
+    cards = {}
+    for path_name, clock in GATE_PATH_CLOCKS.items():
+        cards[path_name] = one_cycle_path(reference, path_name, clock)
+    return dataclasses.replace(reference, **cards)
+
+
+def priced_pool(pool, microseconds: float, unit_count: int = 1):
+    """The pool on PyMatching at a fixed latency, on unit_count units."""
+    card = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=microseconds
+    )
+    return dataclasses.replace(pool, algorithm=card, unit_count=unit_count)
 
 
 def _heard_requests(machine) -> declared_run.EndedRequests:
@@ -143,7 +230,7 @@ def test_the_double_window_absorbs_the_windows_it_covers():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
     )
     machine.run()
@@ -166,7 +253,7 @@ def test_the_double_window_leaves_once_its_far_boundary_is_determined():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
     )
     machine.run()
@@ -192,7 +279,9 @@ def test_the_double_window_leaves_once_its_far_boundary_is_determined():
 
 def test_the_double_window_at_the_operations_end_waits_for_terminal_data():
     machine = fabric.switching_machine(
-        rounds=9, escalated_windows={2}, strong_window="double_window"
+        rounds=9,
+        escalated_windows={2},
+        strong_window=declared_run.DOUBLE_WINDOW,
     )
     machine.run()
     submitted = fabric.log_lines_containing(
@@ -218,7 +307,7 @@ def test_a_region_at_a_back_to_back_seam_waits_for_its_own_weak_commit():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1, 4},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
     )
     waits = _recorded_waits(machine)
@@ -241,7 +330,9 @@ def _recorded_waits(machine) -> dict:
 
 def test_a_second_escalation_of_one_window_is_refused():
     machine = fabric.switching_machine(
-        rounds=9, escalated_windows={2}, strong_window="double_window"
+        rounds=9,
+        escalated_windows={2},
+        strong_window=declared_run.DOUBLE_WINDOW,
     )
     machine.run()
     shape = machine.windows.window_manager.strong_redecode.shape
@@ -265,7 +356,6 @@ def _gate_double_window_machine(
     strong_microseconds: float,
     weak_units: int,
     reread_buffer_regions: int,
-    strong_window: str = "double_window",
 ) -> machine_module.Machine:
     """The gate's switching card with a double window, both tiers priced.
 
@@ -275,28 +365,24 @@ def _gate_double_window_machine(
     window is requested, and staged as units free, long before the
     escalated window's verdict.
     """
-    sections = copy.deepcopy(GATE_SWITCHING_CARD)
-    sections["windows"]["commit_rounds"] = commit_rounds
-    sections["windows"]["buffer_rounds"] = buffer_rounds
-    sections["weak_decoder"]["kind"] = weak_microseconds
-    sections["weak_decoder"]["units"] = weak_units
-    sections["strong_decoder"]["kind"] = strong_microseconds
-    sections["escalation"]["strong_window"] = strong_window
-    sections["escalation"]["restart_reread_buffer_regions"] = (
-        reread_buffer_regions
+    strong_window = strong_window_shapes.DoubleWindow.Settings(
+        restart_reread_buffer_regions=reread_buffer_regions
     )
-    sections["qpu"]["distance"] = 3
-    sections["qpu"]["round_period_microseconds"] = 1.0
-    arguments = sections["workload"]["arguments"]
-    arguments["distance"] = 3
-    arguments["physical_error_probability"] = 0.008
-    base_directory = pathlib.Path(".")
-    section_folders = dict.fromkeys(sections, base_directory)
-    settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="switching_validation", section_folders=section_folders
+    settings = gate_switching(strong_window=strong_window)
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
+        commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
     )
-    workload = settings.workload.made()
-    settings = dataclasses.replace(settings, workload=workload)
+    windows = dataclasses.replace(settings.windows, scheme=scheme)
+    weak_decoder = priced_pool(
+        settings.weak_decoder, weak_microseconds, weak_units
+    )
+    strong_decoder = priced_pool(settings.strong_decoder, strong_microseconds)
+    settings = dataclasses.replace(
+        settings,
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+    )
     return machine_module.Machine.build(settings, 1)
 
 
@@ -331,7 +417,9 @@ def test_a_double_window_plan_claims_the_rounds_a_restart_would_read():
     claims nothing.
     """
     forward = fabric.switching_machine(
-        rounds=15, escalated_windows=set(), strong_window="double_window"
+        rounds=15,
+        escalated_windows=set(),
+        strong_window=declared_run.DOUBLE_WINDOW,
     )
     # W1 commits 4-6 and reads to 9; the re-read adds 1-3
     assert _claim(forward, 1) == tuple((1, index) for index in range(1, 10))
@@ -458,7 +546,9 @@ def test_the_double_window_lands_in_the_declared_backlog_regime():
     refused.
     """
     machine = fabric.switching_machine(
-        rounds=15, escalated_windows={1}, strong_window="double_window"
+        rounds=15,
+        escalated_windows={1},
+        strong_window=declared_run.DOUBLE_WINDOW,
     )
     machine.run()
     assert fabric.frame_tiers(machine) == [
@@ -481,8 +571,8 @@ class RecordingRedoWindow(strong_window_shapes.RedoWindow):
     """A shape row a study adds: the redo window, its plans noted.
 
     It fills the StrongWindowShape port on the redo window's own
-    layout and ports, which is what a new row does: one class, one table
-    entry, one yaml name, and nothing else changes.
+    layout and ports, which is what a new row does: one class and its
+    record, and nothing else changes.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -506,51 +596,17 @@ class RecordingRedoWindow(strong_window_shapes.RedoWindow):
         return assignment
 
 
-def test_a_shape_row_that_declares_only_the_ports_facts_loads_by_name():
-    """The escalation section reads a row's facts off the port alone."""
-    port_facts = strong_window_shapes.StrongWindowShape.__annotations__
-    facts = dict.fromkeys(port_facts, False)
-    record = type("PortOnlySettings", (), facts)
-    facts["Settings"] = record
-    row = type("PortOnlyShape", (), facts)
-    table = escalation_settings.STRONG_WINDOW_SHAPES
-    table["port_only"] = row
-    section = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "port_only",
-    }
-    clocks = config.ClockSettings({})
-    try:
-        settings = escalation_settings.SwitchingSettings.from_yaml(
-            section,
-            clocks,
-            None,
-            confidence_signals.confidence_settings,
-        )
-    finally:
-        del table["port_only"]
-    assert isinstance(settings.strong_window, record)
+def test_a_shape_row_added_from_outside_runs_by_its_record():
+    """A new strong window shape is one class and its Settings record.
 
-
-def test_a_shape_row_added_from_outside_runs_by_its_yaml_name():
-    """A new strong window shape is one class and one table row.
-
-    sinter's BUILT_IN_DECODERS is the shape: a name in the config
-    resolves to a class in the table, and the machine builds it with the
-    components the port needs (_decoding_all_built_in_decoders.py).
+    The machine builds the record's row with the components the port
+    needs, as it builds a shipped row.
     """
-    table = escalation_settings.STRONG_WINDOW_SHAPES
-    table["recording_redo_window"] = RecordingRedoWindow
-    try:
-        machine = fabric.switching_machine(
-            rounds=9,
-            escalated_windows={2},
-            strong_window="recording_redo_window",
-        )
-        machine.run()
-    finally:
-        del table["recording_redo_window"]
+    recording_row = RecordingRedoWindow.Settings()
+    machine = fabric.switching_machine(
+        rounds=9, escalated_windows={2}, strong_window=recording_row
+    )
+    machine.run()
     shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is RecordingRedoWindow
     assert shape.planned_windows == [2]
@@ -601,17 +657,11 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     rewrites the ledger. Both take the engine alone and the same ports,
     so the root builds a row without branching on its geometry.
     """
-    table = escalation_settings.STRONG_WINDOW_SHAPES
-    table["recording_double_window"] = RecordingDoubleWindow
-    try:
-        machine = fabric.switching_machine(
-            rounds=9,
-            escalated_windows={0},
-            strong_window="recording_double_window",
-        )
-        machine.run()
-    finally:
-        del table["recording_double_window"]
+    recording_row = RecordingDoubleWindow.Settings()
+    machine = fabric.switching_machine(
+        rounds=9, escalated_windows={0}, strong_window=recording_row
+    )
+    machine.run()
     shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is RecordingDoubleWindow
     assert shape.planned_windows == [0]
@@ -660,7 +710,7 @@ def test_a_pinned_strong_decode_starts_no_earlier_than_its_pin_lands():
     latency is 400 fridge cycles, so the delivery is far from the
     landing of the rounds.
     """
-    machine = _slow_boundary_machine("redo_window")
+    machine = _slow_boundary_machine(declared_run.REDO_WINDOW)
     engine = machine.engine
     delivered_ticks = {}
     started_ticks = {}
@@ -690,52 +740,26 @@ def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
     decode_requests.WindowInputGate.mask_input = start
 
 
-def _slow_boundary_machine(strong_window: str) -> machine_module.Machine:
+def _slow_boundary_machine(strong_window) -> machine_module.Machine:
     """The gate's switching card with a long decoder_to_decoder hop."""
-    sections = copy.deepcopy(GATE_SWITCHING_CARD)
-    sections["escalation"]["strong_window"] = strong_window
-    sections["links"]["decoder_to_decoder"] = {
-        "latency_cycles": 400,
-        "clock": "fridge",
-        "bits_per_cycle": None,
-    }
-    sections["qpu"]["distance"] = 3
-    sections["qpu"]["round_period_microseconds"] = 1.0
-    arguments = sections["workload"]["arguments"]
-    arguments["distance"] = 3
-    arguments["physical_error_probability"] = 0.008
-    base_directory = pathlib.Path(".")
-    section_folders = dict.fromkeys(sections, base_directory)
-    settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="pinned_delivery", section_folders=section_folders
+    settings = gate_switching(strong_window=strong_window)
+    slow_path = one_cycle_path(
+        settings.links, "decoder_to_decoder", FRIDGE_CLOCK, latency_cycles=400
     )
-    workload = settings.workload.made()
-    settings = dataclasses.replace(settings, workload=workload)
+    links = dataclasses.replace(settings.links, decoder_to_decoder=slow_path)
+    settings = dataclasses.replace(settings, links=links)
     return machine_module.Machine.build(settings, 0)
 
 
-def _gate_machine(strong_window: str) -> machine_module.Machine:
-    """The gate's own switching point, on the named strong window row.
+def _gate_machine(strong_window) -> machine_module.Machine:
+    """The gate's own switching point, on the strong window row given.
 
     p 0.008, d 3, 1 us rounds, seed 0: the point where the weak tier
     commits a correction that flips a seam detector of a window that
     later escalates, so the two-solve case a raw-read row must not fold
     is on the run, and so is the seam a pinned row must carry.
     """
-    sections = copy.deepcopy(GATE_SWITCHING_CARD)
-    sections["escalation"]["strong_window"] = strong_window
-    sections["qpu"]["distance"] = 3
-    sections["qpu"]["round_period_microseconds"] = 1.0
-    arguments = sections["workload"]["arguments"]
-    arguments["distance"] = 3
-    arguments["physical_error_probability"] = 0.008
-    base_directory = pathlib.Path(".")
-    section_folders = dict.fromkeys(sections, base_directory)
-    settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="switching_validation", section_folders=section_folders
-    )
-    workload = settings.workload.made()
-    settings = dataclasses.replace(settings, workload=workload)
+    settings = gate_switching(strong_window=strong_window)
     return machine_module.Machine.build(settings, 0)
 
 
@@ -782,7 +806,7 @@ def test_a_redo_window_strong_job_is_masked_where_its_weak_job_is(
     job masked too.
     """
     masked = _masked_jobs(monkeypatch)
-    machine = _gate_machine("redo_window")
+    machine = _gate_machine(declared_run.REDO_WINDOW)
     machine.run()
     weak_masked = _keys_of(masked, strong=False, changed_only=True)
     strong_keys = _keys_of(masked, strong=True, changed_only=False)
@@ -806,46 +830,6 @@ def _keys_of(masked: list, *, strong: bool, changed_only: bool) -> set:
     return keys
 
 
-def test_a_shape_name_off_the_table_is_refused_naming_the_rows():
-    """both_faces_pinned is the shape decsim refuses to build.
-
-    A strong window that pins both faces and absorbs nothing waits for
-    the window after it, which waits for the strong result: the serial
-    sliding chain deadlocks on it. It is not a row, and a name that is
-    not a row is refused naming the rows.
-    """
-    with pytest.raises(ValueError) as refusal:
-        fabric.switching_machine(
-            rounds=9,
-            escalated_windows=set(),
-            strong_window="both_faces_pinned",
-        )
-    assert "escalation.strong_window 'both_faces_pinned' is not a row" in str(
-        refusal.value
-    )
-
-
-def test_the_forward_row_that_reads_its_near_face_raw_is_not_a_row():
-    """A forward extent needs its near face pinned to explain its seam.
-
-    Read raw, the near face folds no committed neighbour, so the strong
-    decode can explain a seam defect differently from the neighbour's
-    commit and the committed corrections leave it lit (Bombin et al.
-    2303.04846 lines 775-788: the input is the syndrome plus every prior
-    committed correction). double_window is that extent with the
-    face pinned, and the unpinned name is refused naming the rows.
-    """
-    with pytest.raises(ValueError) as refusal:
-        fabric.switching_machine(
-            rounds=9,
-            escalated_windows=set(),
-            strong_window="forward",
-        )
-    message = str(refusal.value)
-    assert "escalation.strong_window 'forward' is not a row" in message
-    assert "double_window" in message
-
-
 def test_the_redo_window_row_reads_its_commit_region_and_one_buffer():
     """Bombin 2303.04846 lines 1456-1458: a pinned face needs no buffer.
 
@@ -856,7 +840,7 @@ def test_the_redo_window_row_reads_its_commit_region_and_one_buffer():
     machine = fabric.switching_machine(
         rounds=12,
         escalated_windows={1},
-        strong_window="redo_window",
+        strong_window=declared_run.REDO_WINDOW,
     )
     requests = _heard_requests(machine)
     machine.run()
@@ -881,7 +865,7 @@ def test_the_redo_window_row_pins_nothing_at_the_operations_first_window():
     machine = fabric.switching_machine(
         rounds=12,
         escalated_windows={0},
-        strong_window="redo_window",
+        strong_window=declared_run.REDO_WINDOW,
     )
     requests = _heard_requests(machine)
     machine.run()
@@ -918,18 +902,16 @@ def _is_pinned_face(attribution: dict) -> bool:
     return attribution["window_id"] == destination_window_id
 
 
-def test_a_yaml_names_the_redo_window_row_and_its_pin_crosses_the_wire():
-    """The row is one class, one table row and one yaml name.
+def test_the_redo_window_rows_pinned_faces_cross_the_wire():
+    """Every face the redo window pins is a message on decoder_to_decoder.
 
-    The gate's own switching card with escalation.strong_window
-    redo_window builds this row, and every face it pins is a
-    message on decoder_to_decoder: Skoric 2209.08552 lines 1038-1040
-    sends the artificial defects block to block, and Bombin's Fig. 14
+    Skoric 2209.08552 lines 1038-1040 sends the artificial defects block
+    to block, and Bombin's Fig. 14
     (lines 2256-2259) routes them through the boundary condition data
     store between decoder modules. A pinned face that crossed nothing
     would be free in the model.
     """
-    machine = _gate_machine("redo_window")
+    machine = _gate_machine(declared_run.REDO_WINDOW)
     result = machine.run()
     shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is strong_window_shapes.RedoWindow
@@ -958,7 +940,7 @@ def test_the_double_window_row_reads_exactly_the_rounds_it_commits():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
     )
     requests = _heard_requests(machine)
@@ -985,7 +967,7 @@ def test_the_double_window_row_pins_its_near_and_its_far_face():
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
     )
     result = machine.run()
@@ -1038,7 +1020,7 @@ def test_the_double_window_row_at_the_operations_end_has_no_far_pin():
     machine = fabric.switching_machine(
         rounds=9,
         escalated_windows={2},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
     )
     requests = _heard_requests(machine)
     result = machine.run()
@@ -1066,7 +1048,7 @@ def test_a_region_at_a_back_to_back_seam_reads_the_rounds_it_commits():
     machine = fabric.switching_machine(
         rounds=30,
         escalated_windows={1, 4},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
     )
     requests = _heard_requests(machine)
@@ -1089,7 +1071,7 @@ def test_a_region_at_a_back_to_back_seam_pins_its_near_face_on_itself():
     machine = fabric.switching_machine(
         rounds=30,
         escalated_windows={1, 4},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
     )
     result = machine.run()
@@ -1100,13 +1082,12 @@ def test_a_region_at_a_back_to_back_seam_pins_its_near_face_on_itself():
     assert sources_in_order == [seam_window_id, restart_window_id]
 
 
-def test_a_yaml_names_the_double_window_row_and_it_runs():
-    """The row is one class, one table row and one yaml name.
+def test_the_gate_card_on_the_double_window_runs_through():
+    """The gate's own switching card on the double window builds that row.
 
-    The gate's own switching card with escalation.strong_window
-    double_window builds this row and runs the point through.
+    It runs the point through with no strong window left pending.
     """
-    machine = _gate_machine("double_window")
+    machine = _gate_machine(declared_run.DOUBLE_WINDOW)
     result = machine.run()
     shape = machine.windows.window_manager.strong_redecode.shape
     assert type(shape) is strong_window_shapes.DoubleWindow
@@ -1127,9 +1108,7 @@ def test_a_re_reading_restart_window_owns_the_faults_the_far_pin_carries():
     faults crossing 18 to 19 and the region's far face is pinned on its
     commit.
     """
-    machine = _gate_double_window_machine(
-        3, 3, 40.0, 5.0, 2, 1, strong_window="double_window"
-    )
+    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2, 1)
     result = machine.run()
     resliced = fabric.log_lines_containing(machine, "re-sliced")
     sources = _pin_sources_into(result, 3)

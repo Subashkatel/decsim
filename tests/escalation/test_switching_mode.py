@@ -18,315 +18,70 @@ tests/escalation/declared_fabric.py, so every tick asserted there is
 arithmetic over declared latencies.
 """
 
+import dataclasses
 import json
-import math
 
 import pytest
 
-import decsim.collect as collect
+import decsim.confidence.cluster as cluster
 import decsim.config as decsim_config
+import decsim.decoders.union_find.cycle_count as cycle_count
+import decsim.decoders.union_find.decoder as union_find
+import decsim.escalation.threshold_sources as threshold_sources
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.windows as window_records
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
-from decsim.experiments.experiment import load_experiment
-from tests.experiments.yaml_configs import (
-    ERROR_RATE_PATH,
-    measure_point_shot,
-    memory_workload,
-    strong_unit,
-    write_config,
-)
-
-NEAR_THRESHOLD_P = 0.008
+import tests.escalation.test_strong_window_shapes as shape_tests
 
 
-def switching_config(
-    tmp_path, gap_threshold_db: float, rounds: int = 30, observation=None
-):
-    escalation = {"kind": "switching", "gap_threshold_db": gap_threshold_db}
-    weak_unit = {
-        "weak_decoder": {
-            "kind": "pymatching",
-            "units": 1,
-            "unit_memory": {"bits": None},
-            "engine": {
-                "clock": "fridge",
-                "fetch_cycles_per_round": 1,
-                "fetch_cycles_per_job": 0,
-                "release_cycles_per_job": 1,
-                "release_cycles_per_round": 0,
-            },
-        }
-    }
-    workload = memory_workload(rounds)
-    sweep_point = {
-        "axes": {
-            "workload.arguments.physical_error_probability": [NEAR_THRESHOLD_P],
-            "qpu.distance": [3],
-            "qpu.round_period_microseconds": [1.0],
-        },
-        "collection": {"max_shots": 1},
-    }
-    strong_decoder = strong_unit("belief_matching")
-    card = {
-        "escalation": escalation,
-        "workload": workload,
-        **weak_unit,
-        **strong_decoder,
-        "sweep": [sweep_point],
-    }
-    if observation is not None:
-        card["observation"] = observation
-    return write_config(tmp_path, card)
-
-
-def measured_shot(config, seed: int):
-    return measure_point_shot(
-        config,
-        physical_error_probability=NEAR_THRESHOLD_P,
-        distance=3,
-        round_period_microseconds=1.0,
-        seed=seed,
+def switching_settings(threshold_decibels: float, rounds_per_shot=None):
+    """The gate's switching card at d=3, p 0.008, on its own threshold."""
+    settings = shape_tests.gate_switching(rounds_per_shot=rounds_per_shot)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=threshold_decibels
     )
+    switching = dataclasses.replace(settings.switching, threshold=threshold)
+    return dataclasses.replace(settings, switching=switching)
 
 
-def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
-    weak_only_card = {
-        "escalation": {"kind": "switching", "gap_threshold_db": 20.0}
-    }
-    weak_only_path = write_config(tmp_path, weak_only_card)
-    with pytest.raises(ValueError, match="strong_decoder is not"):
-        load_experiment(weak_only_path)
-    strong_decoder = strong_unit("belief_matching")
-    no_threshold_card = {"escalation": {"kind": "switching"}}
-    no_threshold_card.update(strong_decoder)
-    no_threshold_path = write_config(tmp_path, no_threshold_card)
-    with pytest.raises(ValueError, match="needs gap_threshold_db"):
-        load_experiment(no_threshold_path)
-    weak_baseline_card = {
-        "escalation": {
-            "kind": "weak_baseline",
-            "gap_threshold_db": 20.0,
-        }
-    }
-    weak_baseline_path = write_config(tmp_path, weak_baseline_card)
-    with pytest.raises(ValueError, match="decides on no confidence"):
-        load_experiment(weak_baseline_path)
+def run_shot(settings, seed: int):
+    """One shot of the settings: its machine, run, and its result."""
+    machine = machine_module.Machine.build(settings, seed)
+    result = machine.run()
+    return machine, result
 
 
-def _restart_width_card(regions: int) -> dict:
-    """The switching card with the double window and the re-read width."""
-    escalation = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "double_window",
-        "restart_reread_buffer_regions": regions,
-    }
-    strong_decoder = strong_unit("belief_matching")
-    card = {"escalation": escalation}
-    card.update(strong_decoder)
-    return card
+def transfers_by_path(result) -> dict:
+    """The run's transfer count on each path of the card."""
+    transfers = {}
+    for edge in result.link_traffic["semantic_edges"]:
+        path = edge["path"]
+        count = edge["counters"]["transfer_count"]
+        transfers[path] = transfers.get(path, 0) + count
+    return transfers
 
 
-def test_both_restart_re_read_widths_load_from_the_escalation_section(
-    tmp_path,
-):
-    """Toshio 2510.25222 lines 1229-1235 allow both; Fig. 12 draws 1."""
-    no_reread_card = _restart_width_card(0)
-    no_reread_path = write_config(tmp_path, no_reread_card)
-    no_reread = load_experiment(no_reread_path)
-    one_region_card = _restart_width_card(1)
-    one_region_path = write_config(tmp_path, one_region_card)
-    one_region = load_experiment(one_region_path)
-
-    no_reread_point = no_reread.first_point_task()
-    one_region_point = one_region.first_point_task()
-
-    no_reread_escalation = no_reread_point.settings.switching
-    one_region_escalation = one_region_point.settings.switching
-    no_reread_window = no_reread_escalation.strong_window
-    one_region_window = one_region_escalation.strong_window
-    assert no_reread_window.restart_reread_buffer_regions == 0
-    assert one_region_window.restart_reread_buffer_regions == 1
-
-
-def test_a_wider_restart_re_read_and_another_kind_are_refused(tmp_path):
-    """Only the two widths have a referent, and only switching restarts."""
-    wide_card = _restart_width_card(2)
-    wide_path = write_config(tmp_path, wide_card)
-    with pytest.raises(ValueError, match="must be 0, a restart on the rounds"):
-        load_experiment(wide_path)
-    flag_card = _restart_width_card(True)
-    flag_path = write_config(tmp_path, flag_card)
-    with pytest.raises(ValueError, match="must be 0, a restart on the rounds"):
-        load_experiment(flag_path)
-    weak_card = {
-        "escalation": {
-            "kind": "weak_baseline",
-            "restart_reread_buffer_regions": 0,
-        }
-    }
-    weak_path = write_config(tmp_path, weak_card)
-    with pytest.raises(ValueError, match="decides on no confidence"):
-        load_experiment(weak_path)
-
-
-def test_a_restart_re_read_under_a_window_that_restarts_nothing_is_refused(
-    tmp_path,
-):
-    """The redo window absorbs no weak window, so none restarts."""
-    card = _restart_width_card(0)
-    card["escalation"]["strong_window"] = "redo_window"
-    path = write_config(tmp_path, card)
-    with pytest.raises(ValueError, match="restart_reread_buffer_regions"):
-        load_experiment(path)
-
-
-def _parallel_variant_card(run_both_at_once) -> dict:
-    """The switching card with Sec. III A's Step 1 asked for, or not.
-
-    Step 1 builds the strong job at weak readiness, so the room-side
-    write must not lag the weak syndrome buffer publication path; the card
-    wires the two store hops at one cycle each. On the reference numbers the
-    strong syndrome buffer is 0.26 us behind the weak syndrome buffer at 0.04
-    us and the build refuses.
-    """
-    escalation = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "run_both_at_once": run_both_at_once,
-    }
-    one_fridge_cycle = {
-        "latency_cycles": 1,
-        "clock": "fridge",
-        "bits_per_cycle": None,
-    }
-    # the weak input waits two microseconds, so a speculative strong decode
-    # submitted at weak readiness is live in the strong side when the weak
-    # verdict arrives and a confident window cancels it there
-    two_microseconds = {
-        "latency_cycles": 500,
-        "clock": "fridge",
-        "bits_per_cycle": None,
-    }
-    links = {
-        "qpu_to_controller": one_fridge_cycle,
-        "controller_to_weak_buffer": one_fridge_cycle,
-        "controller_to_strong_buffer": one_fridge_cycle,
-        "weak_buffer_to_weak_decoder": two_microseconds,
-    }
-    strong_decoder = strong_unit("belief_matching")
-    card = {"escalation": escalation, "links": links}
-    card.update(strong_decoder)
-    return card
-
-
-def _strong_request_counts(tmp_path, card: dict):
-    """One shot of the switching card, and its strong-request counts."""
-    from decsim.machine import Machine
-
-    tmp_path.mkdir()
-    config_path = write_config(tmp_path, card)
-    config = load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": NEAR_THRESHOLD_P,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    machine = Machine.build(settings, 0)
-    machine.run()
-    return machine.decoders.decoder_manager.strong_requests.counts
-
-
-def test_the_yaml_asks_for_the_papers_parallel_variant(tmp_path):
-    """Toshio 2510.25222 Sec. III A: Step 1 runs both decoders at once.
-
-    The default is the same section's on-demand variant (lines 631-640),
-    where a confident window makes no strong request at all; under
-    run_both_at_once every window's speculative strong decode starts and a
-    confident window cancels it.
-    """
-    on_demand_card = _parallel_variant_card(False)
-    parallel_card = _parallel_variant_card(True)
-    on_demand_directory = tmp_path / "on_demand"
-    parallel_directory = tmp_path / "parallel"
-    on_demand = _strong_request_counts(on_demand_directory, on_demand_card)
-    parallel = _strong_request_counts(parallel_directory, parallel_card)
-
-    assert on_demand.cancelled == 0
-    assert parallel.cancelled > 0
-
-
-@pytest.mark.parametrize("value", ["yes", 1, 0])
-def test_a_run_both_at_once_that_is_not_a_flag_is_refused(tmp_path, value):
-    card = _parallel_variant_card(value)
-    config_path = write_config(tmp_path, card)
-    sentence = (
-        f"escalation.run_both_at_once must be true or false, got {value!r}"
-    )
-    with pytest.raises(ValueError, match=sentence):
-        load_experiment(config_path)
-
-
-def test_a_kind_written_as_a_list_is_refused_with_the_rows(tmp_path):
-    card = {"escalation": {"kind": ["switching"]}}
-    config_path = write_config(tmp_path, card)
-    sentence = r"escalation.kind \['switching'\] is not a row of its table"
-    with pytest.raises(ValueError, match=sentence):
-        load_experiment(config_path)
-
-
-@pytest.mark.parametrize(
-    "threshold, sentence",
-    [
-        (-1.0, "gap_threshold_db must be finite and not negative"),
-        (math.inf, "gap_threshold_db must be finite and not negative"),
-        (True, "gap_threshold_db must be a number of decibels"),
-        ("20", "gap_threshold_db must be a number of decibels"),
-    ],
-)
-def test_a_threshold_that_is_no_nonnegative_decibel_count_is_refused(
-    tmp_path, threshold, sentence
-):
-    config_path = switching_config(tmp_path, threshold)
-    with pytest.raises(ValueError, match=sentence):
-        load_experiment(config_path)
-
-
-def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
-    config_path = switching_config(tmp_path, 20.0)
-    config = load_experiment(config_path)
-    log_of_ten = math.log(10.0)
-    expected_nats = 2.0 * log_of_ten
-    first_point = config.first_point_task()
-    threshold = first_point.settings.switching.threshold
-    assert math.isclose(threshold.threshold_nats, expected_nats)
-
-
-def test_every_window_commits_once_across_both_output_links(tmp_path):
+def test_every_window_commits_once_across_both_output_links():
     """Every window commits exactly once, over one of the output links.
 
     Escalations ride WSD then SBD then DO; kept windows ride WDO. WSD
     carries one selection per escalation and at most one region after
     it, so its transfers lie between one and two per escalation.
     """
-    config_path = switching_config(tmp_path, 20.0)
-    config = load_experiment(config_path)
+    settings = switching_settings(20.0)
     found_escalation = False
     for seed in range(6):
-        measurement = measured_shot(config, seed)
-        links = measurement.link_totals
-        escalations = links["strong_buffer_to_strong_decoder"]["transfers"]
-        escalation_hops = links["weak_decoder_to_strong_decoder"]["transfers"]
+        machine, result = run_shot(settings, seed)
+        transfers = transfers_by_path(result)
+        windows = len(machine.observation.windows.windows)
+        escalations = transfers.get("strong_buffer_to_strong_decoder", 0)
+        escalation_hops = transfers.get("weak_decoder_to_strong_decoder", 0)
         assert escalations <= escalation_hops <= 2 * escalations
-        assert links["strong_decoder_to_frame"]["transfers"] == escalations
-        assert (
-            links["weak_decoder_to_frame"]["transfers"] + escalations
-            == measurement.decoded_windows
-        )
+        assert transfers.get("strong_decoder_to_frame", 0) == escalations
+        kept = transfers["weak_decoder_to_frame"]
+        assert kept + escalations == windows
         found_escalation = found_escalation or escalations > 0
     assert found_escalation, (
         "no window escalated in 6 near-threshold "
@@ -334,30 +89,26 @@ def test_every_window_commits_once_across_both_output_links(tmp_path):
     )
 
 
-def test_zero_threshold_never_escalates(tmp_path):
-    config_path = switching_config(tmp_path, 0.0)
-    config = load_experiment(config_path)
-    measurement = measured_shot(config, seed=0)
-    links = measurement.link_totals
-    assert links["weak_decoder_to_strong_decoder"]["transfers"] == 0
-    assert links["strong_decoder_to_frame"]["transfers"] == 0
-    assert (
-        links["weak_decoder_to_frame"]["transfers"]
-        == measurement.decoded_windows
-    )
+def test_zero_threshold_never_escalates():
+    settings = switching_settings(0.0)
+    machine, result = run_shot(settings, 0)
+    transfers = transfers_by_path(result)
+    windows = len(machine.observation.windows.windows)
+    assert transfers.get("weak_decoder_to_strong_decoder", 0) == 0
+    assert transfers.get("strong_decoder_to_frame", 0) == 0
+    assert transfers["weak_decoder_to_frame"] == windows
 
 
-def test_unreachable_threshold_escalates_every_window(tmp_path):
-    config_path = switching_config(tmp_path, 1e6)
-    config = load_experiment(config_path)
-    measurement = measured_shot(config, seed=0)
-    links = measurement.link_totals
-    windows = measurement.decoded_windows
-    escalation_hops = links["weak_decoder_to_strong_decoder"]["transfers"]
+def test_unreachable_threshold_escalates_every_window():
+    settings = switching_settings(1e6)
+    machine, result = run_shot(settings, 0)
+    transfers = transfers_by_path(result)
+    windows = len(machine.observation.windows.windows)
+    escalation_hops = transfers["weak_decoder_to_strong_decoder"]
     assert windows <= escalation_hops <= 2 * windows
-    assert links["strong_buffer_to_strong_decoder"]["transfers"] == windows
-    assert links["strong_decoder_to_frame"]["transfers"] == windows
-    assert links["weak_decoder_to_frame"]["transfers"] == 0
+    assert transfers["strong_buffer_to_strong_decoder"] == windows
+    assert transfers["strong_decoder_to_frame"] == windows
+    assert transfers.get("weak_decoder_to_frame", 0) == 0
 
 
 def gaps_by_window(requests, weak_tier) -> dict:
@@ -388,7 +139,7 @@ def expected_tier_of(gap, threshold_nats, weak_tier, strong_tier):
     return strong_tier
 
 
-def test_gap_records_decide_the_selected_tier(tmp_path):
+def test_gap_records_decide_the_selected_tier():
     """Every recorded gap sits on the escalation decision's dividing line.
 
     Below the threshold the window's committed result is the strong
@@ -397,32 +148,16 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
     ordinary_window either way; the selected request key names the tier
     that produced the committed result.)
     """
-    from dataclasses import replace
-
-    import decsim.records.windows as window_records
-    from decsim.machine import Machine
-
-    config_path = switching_config(tmp_path, 20.0)
-    config = load_experiment(config_path)
-    first_point = config.first_point_task()
-    threshold_nats = first_point.settings.switching.threshold.threshold_nats
+    settings = switching_settings(20.0)
+    threshold_nats = settings.switching.threshold.threshold_nats
+    observation = dataclasses.replace(
+        settings.observation, record_switching_windows=True
+    )
+    settings = dataclasses.replace(settings, observation=observation)
     weak_tier = window_records.DecoderTier.WEAK
     strong_tier = window_records.DecoderTier.STRONG
     for seed in range(4):
-        point = config.point_task(
-            {
-                ERROR_RATE_PATH: NEAR_THRESHOLD_P,
-                "qpu.distance": 3,
-                "qpu.round_period_microseconds": 1.0,
-            },
-        )
-        settings = point.settings
-        observation = replace(
-            settings.observation, record_switching_windows=True
-        )
-        settings = replace(settings, observation=observation)
-        completed = Machine.build(settings, seed)
-        completed.run()
+        completed, _result = run_shot(settings, seed)
         requests = completed.observation.decode_records.requests
         gap_by_window = gaps_by_window(requests, weak_tier)
         windows = completed.observation.windows.windows
@@ -686,7 +421,7 @@ def test_a_pinned_speculative_decode_is_planned_when_its_weak_job_unparks():
     machine = fabric.switching_machine(
         rounds=9,
         escalated_windows={0, 1, 2},
-        strong_window="redo_window",
+        strong_window=declared_run.REDO_WINDOW,
         run_both_at_once=True,
     )
     machine.run()
@@ -763,37 +498,6 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
     assert timeline == expected_timeline
 
 
-def _walk_card(microseconds, weak_kind: str, confidence: str) -> dict:
-    """The switching card that prices the confidence signal's computation."""
-    escalation = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "confidence": confidence,
-        "confidence_walk_microseconds": microseconds,
-    }
-    weak_decoder = {
-        "weak_decoder": {
-            "kind": weak_kind,
-            "units": 1,
-            "unit_memory": {"bits": None},
-            "engine": {
-                "clock": "fridge",
-                "fetch_cycles_per_round": 1,
-                "fetch_cycles_per_job": 0,
-                "release_cycles_per_job": 1,
-                "release_cycles_per_round": 0,
-            },
-        }
-    }
-    observation = {"observation": {"record_switching_windows": True}}
-    card = {"escalation": escalation}
-    card.update(weak_decoder)
-    card.update(observation)
-    strong_decoder = strong_unit("belief_matching")
-    card.update(strong_decoder)
-    return card
-
-
 def _confidence_charges(machine) -> list:
     """The ticks each CONFIDENCE line of the run charged, in order."""
     charged = []
@@ -807,39 +511,42 @@ def _confidence_charges(machine) -> list:
     return charged
 
 
-def _walk_card_machine(tmp_path, microseconds):
-    """One d=3 shot of the walk card through the yaml, and its decodes."""
-    from decsim.machine import Machine
-
-    card = _walk_card(microseconds, "union_find", "cluster_gap")
-    config_path = write_config(tmp_path, card)
-    config = load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": NEAR_THRESHOLD_P,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
+def _walk_card_machine(microseconds):
+    """One d=3 shot of union-find's cluster gap, its walk priced."""
+    settings = switching_settings(20.0)
+    host_time = cycle_count.HostMeasuredTime()
+    union_find_decoder = union_find.UnionFindDecoder.Settings(timing=host_time)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, algorithm=union_find_decoder
     )
-    settings = point.settings
-    machine = Machine.build(settings, 0)
+    cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=microseconds)
+    switching = dataclasses.replace(settings.switching, confidence=cluster_gap)
+    observation = dataclasses.replace(
+        settings.observation, record_switching_windows=True
+    )
+    settings = dataclasses.replace(
+        settings,
+        weak_decoder=weak_decoder,
+        switching=switching,
+        observation=observation,
+    )
+    machine = machine_module.Machine.build(settings, 0)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
     machine.run()
     return machine, decodes
 
 
-def test_a_priced_confidence_walk_charges_its_card_once_per_window(tmp_path):
-    """escalation.confidence_walk_microseconds is a card, like a tier's.
+def test_a_priced_confidence_walk_charges_its_card_once_per_window():
+    """A confidence walk given a time is a card, like a tier's.
 
     The cluster gap's walk is a Dijkstra over the decode's own edge
     intervals (Meister et al. 2405.07433 Algorithm 2), charged on the
-    unit that grew them (decision D8). Left null it is measured on the
+    unit that grew them (decision D8). Left None it is measured on the
     host clock; given a number it is that number of microseconds per
-    window, so a yaml experiment can price it the way a decoder tier is
-    priced.
+    window, so a run can price it the way a decoder tier is priced.
     """
-    machine, decodes = _walk_card_machine(tmp_path, 12.0)
+    machine, decodes = _walk_card_machine(12.0)
     expected_ticks = decsim_config.microseconds_to_ticks(12.0)
     charged = _confidence_charges(machine)
     weak_decodes = decodes.of_pool("default")
@@ -847,26 +554,6 @@ def test_a_priced_confidence_walk_charges_its_card_once_per_window(tmp_path):
     assert len(charged) == len(weak_decodes)
     for ticks in charged:
         assert ticks == expected_ticks
-
-
-def test_a_negative_confidence_walk_is_refused_by_name(tmp_path):
-    card = _walk_card(-1.0, "union_find", "cluster_gap")
-    config_path = write_config(tmp_path, card)
-    with pytest.raises(
-        ValueError,
-        match="escalation.confidence_walk_microseconds must be finite",
-    ):
-        load_experiment(config_path)
-
-
-def test_a_confidence_walk_that_is_not_a_number_is_refused_by_name(tmp_path):
-    card = _walk_card("fast", "union_find", "cluster_gap")
-    config_path = write_config(tmp_path, card)
-    with pytest.raises(
-        ValueError,
-        match="escalation.confidence_walk_microseconds must be a number",
-    ):
-        load_experiment(config_path)
 
 
 def test_a_windows_commit_instant_says_whether_its_result_is_provisional(
@@ -909,18 +596,13 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
     per solve left the first one open to the end of the run.
     """
     trace_path = tmp_path / "gap.trace.json"
-    observation = {"trace": str(trace_path)}
-    config_path = switching_config(tmp_path, 0.0, 9, observation)
-    config = load_experiment(config_path)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": NEAR_THRESHOLD_P,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
+    settings = switching_settings(0.0, rounds_per_shot=9)
+    observation = dataclasses.replace(
+        settings.observation, trace=str(trace_path)
     )
-    shot = collect.run_shot(task, 0)
-    shot.machine.observation.trace_writer.write(str(trace_path))
+    settings = dataclasses.replace(settings, observation=observation)
+    machine, _result = run_shot(settings, 0)
+    machine.observation.trace_writer.write(str(trace_path))
     text = trace_path.read_text()
     document = json.loads(text)
     residences = [
@@ -928,7 +610,7 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
         for row in document
         if row["ph"] == "X" and row["name"].endswith(" input in memory")
     ]
-    windows = shot.machine.observation.windows.windows
+    windows = machine.observation.windows.windows
 
     assert len(residences) == len(windows)
     for row in residences:

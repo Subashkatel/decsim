@@ -86,7 +86,7 @@ def switching_machine(
     *,
     rounds: int,
     escalated_windows,
-    strong_window: str = "redo_window",
+    strong_window=declared_run.REDO_WINDOW,
     run_both_at_once: bool = False,
     round_microseconds: float = 1.0,
     escalation_microseconds: Optional[float] = None,
@@ -120,8 +120,7 @@ def switching_machine(
         algorithm=strong, engine=declared_run.DECLARED_ENGINE
     )
     boundary_policy = boundary_policies.Held.Settings()
-    strong_window_settings = declared_run.strong_window_settings(strong_window)
-    if strong_window_settings.absorbs_weak_windows:
+    if strong_window.absorbs_weak_windows:
         boundary_policy = boundary_policies.Eager.Settings()
     operation = program_records.Operation(
         id=1, name="mem1", qubits=(1,), patches=(1,)
@@ -145,7 +144,7 @@ def switching_machine(
     if switching is None:
         switching = declared_run.declared_switching(
             run_both_at_once=run_both_at_once,
-            strong_window=strong_window_settings,
+            strong_window=strong_window,
         )
     links = declared_profile(escalation_microseconds)
     readout_cycles = declared_cycles("readout_to_bits")

@@ -38,16 +38,19 @@ import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
-import decsim.collect as collect
-import decsim.confidence.signals as confidence_signals
+import decsim.confidence.cluster as cluster
+import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.controller.policies as idle_policies
+import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoders as decoders
+import decsim.decoders.relay_belief_propagation.decoder as relay_bp
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.detector_error_model.detector_chronology as detector_chronology
@@ -56,9 +59,9 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.experiments.experiment as experiment
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
+import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -89,8 +92,9 @@ import decsim.windows.schemes.naive_online as naive_online
 import decsim.windows.settings as window_settings
 import examples.deltakit_example as finite_example
 import examples.live_memory_example as live_example
+import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
-import tests.experiments.yaml_configs as yaml_configs
+import tests.escalation.test_strong_window_shapes as shape_tests
 import tests.machine.decoder_arrangements as decoder_arrangements
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -99,7 +103,6 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 THIS_FILE = pathlib.Path(__file__)
 TESTS_DIRECTORY = THIS_FILE.parents[1]
-CONFIGS = TESTS_DIRECTORY.parent / "configs"
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 # the syndrome bits of one round of a distance-three patch
 BITS_PER_ROUND = 8
@@ -209,16 +212,7 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
 
 def test_a_new_decoder_is_one_class_and_its_settings_record():
     """Gate point 1's settings run to completion on a decoder added here."""
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
     fake = FakeWeakDecoder.Settings()
     weak_decoder = dataclasses.replace(settings.weak_decoder, algorithm=fake)
     settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
@@ -234,16 +228,7 @@ def test_a_new_decoder_is_one_class_and_its_settings_record():
 
 def test_a_second_table_row_runs_gate_point_one():
     """Gate point 1's settings run to completion on the union_find row."""
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
     host_time = cycle_count_module.HostMeasuredTime()
     union_find_settings = union_find_decoder.UnionFindDecoder.Settings(
         timing=host_time
@@ -271,49 +256,13 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     tick, because no component has queued anything while the rest of the
     machine is still being built.
     """
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
 
     machine.start()
 
     assert machine.engine.idle is False
-
-
-def test_a_yaml_section_nobody_owns_is_refused_naming_the_sections():
-    with pytest.raises(
-        ValueError, match=r"the yaml has no section \['buffers'\]; the sections"
-    ):
-        machine_settings.MachineSettings.from_mapping(
-            {"buffers": {}}, name="x", section_folders={}
-        )
-
-
-@pytest.mark.parametrize(
-    "qpu_entry,sentence",
-    [
-        ({}, r"the yaml needs the sections \['qpu'\]"),
-        ({"qpu": 3}, "the yaml section qpu holds 3; a section is a mapping"),
-    ],
-)
-def test_a_section_missing_or_not_a_mapping_is_refused_with_a_sentence(
-    qpu_entry, sentence
-):
-    sections = _required_sections_but_the_qpu()
-    sections.update(qpu_entry)
-    with pytest.raises(ValueError, match=sentence):
-        machine_settings.MachineSettings.from_mapping(
-            sections, name="x", section_folders={}
-        )
 
 
 def test_the_wiring_reaches_its_components():
@@ -363,9 +312,8 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     bound only by assemble, and the machine assembled by hand gives the
     result Machine.build gives.
     """
-    config = experiment.load_experiment("configs/examples/two_tiers.yaml")
-    point = config.first_point_task()
-    settings = point.settings
+    distance_three = two_tiers.points[0]
+    settings = distance_three.machine
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
         settings.switching, settings.weak_decoder, engine
@@ -1601,16 +1549,28 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     assert any("algorithm mem(" in line for line in idle_lines)
 
 
-# the settings a weak row needs beyond its defaults: Union-Find names
-# its timing, here the host's measured time
-WEAK_ROW_ARGUMENTS = {
-    "union_find": {"timing": cycle_count_module.HostMeasuredTime()},
+# the weak rows under test at their own settings; Union-Find names its
+# timing, here the host's measured time
+HOST_TIME = cycle_count_module.HostMeasuredTime()
+WEAK_ALGORITHMS = {
+    "union_find": union_find_decoder.UnionFindDecoder.Settings(
+        timing=HOST_TIME
+    ),
+    "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder.Settings(),
+    "relay_bp": relay_bp.RelayBeliefPropagationDecoder.Settings(),
+    "belief_matching": belief_matching.BeliefMatchingDecoder.Settings(),
+    "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder.Settings(),
+    "tesseract": tesseract.TesseractDecoder.Settings(),
+}
+CONFIDENCE_SIGNALS = {
+    "complementary_gap": complementary.ComplementaryGap,
+    "cluster_gap": cluster.ClusterGap,
 }
 
 
 def _switching_memory(weak_kind: str, confidence: str):
     """A d=3 memory whose weak tier, the named row, reports the signal."""
-    signal_row = confidence_signals.CONFIDENCE_SIGNALS[confidence]
+    signal_row = CONFIDENCE_SIGNALS[confidence]
     signal_settings = signal_row.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=20.0
@@ -1618,9 +1578,7 @@ def _switching_memory(weak_kind: str, confidence: str):
     switching = escalation_settings.SwitchingSettings(
         confidence=signal_settings, threshold=threshold
     )
-    row = decoder_settings.DECODERS[weak_kind]
-    row_arguments = WEAK_ROW_ARGUMENTS.get(weak_kind, {})
-    weak_algorithm = row.Settings(**row_arguments)
+    weak_algorithm = WEAK_ALGORITHMS[weak_kind]
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak_algorithm,
         engine=ENGINE_CARD,
@@ -1757,7 +1715,7 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
 def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused_by_name(
     weak_kind, confidence, sentence
 ):
-    """The pairing is refused at the yaml boundary, with its citation.
+    """The pairing is refused at build, with its citation.
 
     Union-Find, BP-OSD and relay-BP do not minimise weight inside a
     fixed logical class (Lee et al. arXiv:2510.05795 Sec. 2.1.1);
@@ -1838,16 +1796,7 @@ class CountingSyndromeBufferSettings(
 
 def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     """Gate point 1's settings run to completion on a store plugged in."""
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
     weak_store = settings.weak_syndrome_buffer
     counting = CountingSyndromeBufferSettings(
         bits=weak_store.bits,
@@ -1911,16 +1860,7 @@ class AlwaysReadyFactorySettings:
 
 def test_a_factory_written_outside_decsim_is_built_by_its_record():
     """The part calls the record's build, whatever factory it is."""
-    config_path = CONFIGS / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
     always_ready = AlwaysReadyFactorySettings()
     settings = dataclasses.replace(settings, magic_state_factory=always_ready)
     machine = machine_module.Machine.build(settings, 0)
@@ -2625,61 +2565,47 @@ def link_totals(machine, path):
     return transfers, payload_bits
 
 
-def reference_run(escalation_kind, folder):
-    """One shot of reference.yaml at d=3, p=0.001, on one escalation kind.
+# a base's shot at d = 3: thirty rounds of eight checks, and the nine
+# data qubits read out at its end
+BASE_ROUNDS = 30
+CHECKS_PER_ROUND = 8
+DATA_QUBITS = 9
 
-    The kind decides which decoder sections fill the machine's slots, so
-    the yaml is read again under that kind, from a copy in the folder.
-    """
-    reference = CONFIGS / "reference.yaml"
-    text = reference.read_text()
-    shipped_kind = "  kind: weak_baseline "
-    assert text.count(shipped_kind) == 1
-    named_kind = f"  kind: {escalation_kind} "
-    config_path = folder / "reference.yaml"
-    named_text = text.replace(shipped_kind, named_kind)
-    config_path.write_text(named_text)
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    machine = machine_module.Machine.build(point.settings, 0)
+
+def base_run(base):
+    """One shot of the base at d=3, p=0.001."""
+    settings = base(3, 0.001, 1.0)
+    machine = machine_module.Machine.build(settings, 0)
     machine.run()
     return machine
 
 
-def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop(
-    tmp_path,
-):
-    """Fifteen rounds are fifteen transfers carrying the round's own bits.
+def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
+    """Every round is one transfer carrying the round's own bits.
 
     Toshio et al. 2510.25222 price the syndrome data of each round
     between the system controller and the weak decoder as T_comm^weak
     (Table I), so the write into the weak syndrome buffer is a transfer like
-    every other hop rather than a free store: reference.yaml at d = 3
-    puts its fifteen rounds on controller_to_weak_buffer. The two hops
-    carry different widths, because the card's row forms the detection
-    events at the controller: the readout hop carries the 129 measured
-    outcomes, and the store hop the 120 events they formed, eight per
-    round.
+    every other hop rather than a free store: the weak base at d = 3
+    puts its thirty rounds on controller_to_weak_buffer. The two hops
+    carry different widths, because the base forms the detection events
+    at the controller: the readout hop carries the measured outcomes,
+    the data qubits' with the last round, and the store hop the events
+    they formed, eight per round.
     """
-    machine = reference_run("weak_baseline", tmp_path)
+    machine = base_run(machine_settings.weak_decoder_baseline)
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    assert link_totals(machine, store_hop) == (15, 120)
-    assert link_totals(machine, readout_hop) == (15, 129)
+    events = BASE_ROUNDS * CHECKS_PER_ROUND
+    outcomes = events + DATA_QUBITS
+    assert link_totals(machine, store_hop) == (BASE_ROUNDS, events)
+    assert link_totals(machine, readout_hop) == (BASE_ROUNDS, outcomes)
     assert link_totals(machine, room_hop) == (0, 0)
 
 
-def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop(
-    tmp_path,
-):
+def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     """The same law on the strong syndrome buffer, the only one it fills.
 
     T_comm^strong is Toshio's symbol for the same transport to the
@@ -2688,13 +2614,15 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop(
     once, at the width it leaves the controller, and the weak syndrome buffer
     sees none of them.
     """
-    machine = reference_run("strong_only", tmp_path)
+    machine = base_run(machine_settings.strong_decoder_baseline)
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    assert link_totals(machine, room_hop) == (15, 120)
-    assert link_totals(machine, readout_hop) == (15, 129)
+    events = BASE_ROUNDS * CHECKS_PER_ROUND
+    outcomes = events + DATA_QUBITS
+    assert link_totals(machine, room_hop) == (BASE_ROUNDS, events)
+    assert link_totals(machine, readout_hop) == (BASE_ROUNDS, outcomes)
     assert link_totals(machine, store_hop) == (0, 0)
 
 
@@ -2741,47 +2669,46 @@ def test_a_plan_with_windows_and_no_decoder_is_refused():
 
 # ---- a room-side landing that arrives after its operation closed
 
-# The reproducer's links: every hop of the weak path one fridge cycle,
-# so the weak tier commits the last window before round 15's copy
-# finishes crossing controller_to_strong_buffer, whose 0.26 us is the
-# reference card's (Caune 2410.05202 Fig. 1a F).
-FRIDGE_CYCLE = {"latency_cycles": 1, "clock": "fridge", "bits_per_cycle": None}
-LATE_LANDING_LINKS = {
-    "qpu_to_controller": FRIDGE_CYCLE,
-    "controller_to_weak_buffer": FRIDGE_CYCLE,
-    "weak_buffer_to_weak_decoder": FRIDGE_CYCLE,
-    "decoder_to_decoder": FRIDGE_CYCLE,
-    "weak_decoder_to_frame": FRIDGE_CYCLE,
-}
-FREE_CROSSING = {"latency_cycles": 0, "clock": "fridge", "bits_per_cycle": None}
-LATE_LANDING_ESCALATION = {
-    "kind": "switching",
-    "confidence": "complementary_gap",
-    "gap_threshold_db": 20.0,
-    "threshold_source": "fixed",
-    "strong_window": "redo_window",
-}
 
+def late_landing_shot(strong_crossing_cycles=None):
+    """One seeded shot of the reproducer, its room-side crossing as given.
 
-def late_landing_shot(directory, links):
-    """One seeded shot of the reproducer, its room-side crossing as given."""
-    directory.mkdir(parents=True, exist_ok=True)
-    strong_decoder = yaml_configs.strong_unit(30.0)
-    card = {
-        "escalation": LATE_LANDING_ESCALATION,
-        "links": links,
-        **strong_decoder,
-    }
-    config_path = yaml_configs.write_config(directory, card)
-    experiment_config = experiment.load_experiment(config_path)
-    task = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
+    The gate's switching card on 15 rounds at p 0.001, both tiers on
+    fixed cards. controller_to_strong_buffer keeps the reference card's
+    0.26 us (Caune 2410.05202 Fig. 1a F) unless a cycle count on the
+    fridge clock is given, so the weak tier commits the last window
+    before round 15's copy finishes crossing it.
+    """
+    settings = shape_tests.gate_switching(
+        rounds_per_shot=15, physical_error_probability=0.001
     )
-    return collect.run_shot(task, 0)
+    reference = link_profiles.logical_reference_profile()
+    crossing = reference.controller_to_strong_buffer
+    if strong_crossing_cycles is not None:
+        crossing = shape_tests.one_cycle_path(
+            settings.links,
+            "controller_to_strong_buffer",
+            shape_tests.FRIDGE_CLOCK,
+            latency_cycles=strong_crossing_cycles,
+        )
+    links = dataclasses.replace(
+        settings.links, controller_to_strong_buffer=crossing
+    )
+    weak_decoder = shape_tests.priced_pool(settings.weak_decoder, 0.028)
+    weak_engine = dataclasses.replace(
+        weak_decoder.engine, release_cycles_per_job=1
+    )
+    weak_decoder = dataclasses.replace(weak_decoder, engine=weak_engine)
+    strong_decoder = shape_tests.priced_pool(settings.strong_decoder, 30.0)
+    settings = dataclasses.replace(
+        settings,
+        links=links,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    return machine, result
 
 
 def frame_commit_ticks(machine):
@@ -2793,9 +2720,7 @@ def frame_commit_ticks(machine):
     return tuple(ticks)
 
 
-def test_a_landing_after_its_operations_close_costs_the_result_nothing(
-    tmp_path,
-):
+def test_a_landing_after_its_operations_close_costs_the_result_nothing():
     """The weak tier decided the result; the late copy changes no tick.
 
     On a 0.028 us weak card the last window commits at 15.224 us, so
@@ -2806,23 +2731,17 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing(
     where every landing precedes the close, commits on exactly the same
     ticks.
     """
-    priced_directory = tmp_path / "priced"
-    priced = late_landing_shot(priced_directory, LATE_LANDING_LINKS)
-    free_links = {
-        **LATE_LANDING_LINKS,
-        "controller_to_strong_buffer": FREE_CROSSING,
-    }
-    free_directory = tmp_path / "free"
-    free = late_landing_shot(free_directory, free_links)
+    priced_machine, priced_run = late_landing_shot()
+    free_machine, free_run = late_landing_shot(strong_crossing_cycles=0)
 
-    assert priced.result.terminal_status == "complete"
-    receiver = priced.machine.readout.strong_syndrome_round_receiver
+    assert priced_run.terminal_status == "complete"
+    receiver = priced_machine.readout.strong_syndrome_round_receiver
     assert receiver.store.occupancy == 0
-    assert frame_commit_ticks(priced.machine) == frame_commit_ticks(
-        free.machine
+    assert frame_commit_ticks(priced_machine) == frame_commit_ticks(
+        free_machine
     )
-    priced_result = priced.result.operation_results[0]
-    free_result = free.result.operation_results[0]
+    priced_result = priced_run.operation_results[0]
+    free_result = free_run.operation_results[0]
     assert priced_result.logical_observables == free_result.logical_observables
 
 
@@ -2876,19 +2795,6 @@ ESCALATED_WEAK_REQUEST = (
 )
 
 
-def arrangement_point_task(folder, arrangement):
-    """One decoder arrangement's point, read from its yaml."""
-    config_path = decoder_arrangements.write_arrangement(folder, arrangement)
-    config = experiment.load_experiment(config_path)
-    return config.point_task(
-        {
-            yaml_configs.ERROR_RATE_PATH: ARRANGEMENT_PHYSICAL_ERROR,
-            "qpu.distance": ARRANGEMENT_DISTANCE,
-            "qpu.round_period_microseconds": ARRANGEMENT_ROUND_PERIOD_US,
-        },
-    )
-
-
 def record_one_decode(decodes, reference, job, result, outcome, ended_ticks):
     """The run's answer on one request beside the untimed model's answer."""
     del ended_ticks
@@ -2898,7 +2804,7 @@ def record_one_decode(decodes, reference, job, result, outcome, ended_ticks):
     decodes.append((outcome, job.window_id, run_correction, model_correction))
 
 
-def timed_and_untimed_decodes(folder, arrangement):
+def timed_and_untimed_decodes(arrangement):
     """Every request of the arrangement's shots, beside the untimed model's.
 
     The software model is a second Machine built from the same settings
@@ -2907,11 +2813,10 @@ def timed_and_untimed_decodes(folder, arrangement):
     run seed (relay_bp's gamma table, window_decoder.py `_gamma_seed`)
     reads the table the priced run read.
     """
-    task = arrangement_point_task(folder, arrangement)
+    settings = decoder_arrangements.ARRANGEMENTS[arrangement]()
     models = built_window_models.BuiltWindowModels()
     decodes = []
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.settings
         machine = machine_module.Machine.build(settings, seed, models)
         untimed = machine_module.Machine.build(settings, seed, models)
         reference = untimed.decoders.primary_decoder.decoder
@@ -2944,7 +2849,7 @@ def decodes_with_outcome(decodes, outcome):
 
 @pytest.mark.parametrize("arrangement", SINGLE_TIER_ARRANGEMENTS)
 def test_a_single_tier_arrangement_commits_what_the_model_decodes(
-    tmp_path, arrangement
+    arrangement,
 ):
     """IBM's rule for their gross-code FPGA decoder, on every window.
 
@@ -2963,7 +2868,7 @@ def test_a_single_tier_arrangement_commits_what_the_model_decodes(
     agrees bit for bit, so no change to timing, buffers, links or pools
     can move a correction without this failing.
     """
-    decodes = timed_and_untimed_decodes(tmp_path, arrangement)
+    decodes = timed_and_untimed_decodes(arrangement)
 
     differing = corrections_that_differ(decodes)
 
@@ -2974,7 +2879,7 @@ def test_a_single_tier_arrangement_commits_what_the_model_decodes(
 
 @pytest.mark.parametrize("arrangement", SWITCHING_ARRANGEMENTS)
 def test_a_switching_arrangements_kept_windows_match_the_weak_model(
-    tmp_path, arrangement
+    arrangement,
 ):
     """The same rule where the weak tier's answer stands.
 
@@ -2987,7 +2892,7 @@ def test_a_switching_arrangements_kept_windows_match_the_weak_model(
     decodes from the same window error model and the same syndrome
     (IBM arXiv 2510.21600 lines 488-495).
     """
-    decodes = timed_and_untimed_decodes(tmp_path, arrangement)
+    decodes = timed_and_untimed_decodes(arrangement)
     kept = decodes_with_outcome(decodes, KEPT_WEAK_REQUEST)
     escalated = decodes_with_outcome(decodes, ESCALATED_WEAK_REQUEST)
 
@@ -3027,15 +2932,14 @@ def qldpc_arrangement_predictions(circuit, shot_events):
     return predictions
 
 
-def arrangement_predictions_and_events(folder, arrangement):
+def arrangement_predictions_and_events(arrangement):
     """The arrangement's prediction per shot, the circuit, and the events."""
-    task = arrangement_point_task(folder, arrangement)
+    settings = decoder_arrangements.ARRANGEMENTS[arrangement]()
     models = built_window_models.BuiltWindowModels()
     predictions = []
     shot_events = []
     sampled = None
     for seed in ARRANGEMENT_SEEDS:
-        settings = task.settings
         machine = machine_module.Machine.build(settings, seed, models)
         result = machine.run()
         sampled = machine.observation.sampled_shots.shots_by_operation[1]
@@ -3047,7 +2951,7 @@ def arrangement_predictions_and_events(folder, arrangement):
 
 @pytest.mark.parametrize("arrangement", MATCHING_ARRANGEMENTS)
 def test_a_matching_arrangement_predicts_what_qldpcs_sliding_windows_predict(
-    tmp_path, arrangement
+    arrangement,
 ):
     """The priced arrangement run beside an outside sliding-window decoder.
 
@@ -3066,7 +2970,7 @@ def test_a_matching_arrangement_predicts_what_qldpcs_sliding_windows_predict(
     allowing it.
     """
     predictions, circuit, shot_events = arrangement_predictions_and_events(
-        tmp_path, arrangement
+        arrangement
     )
 
     reference_predictions = qldpc_arrangement_predictions(circuit, shot_events)
@@ -4022,15 +3926,6 @@ def _direct_matching_prediction(
 
 def _transfer_paths(run: _Run) -> set[str]:
     return {row["path"] for row in run.result.link_traffic["transfers"]}
-
-
-def _required_sections_but_the_qpu() -> dict:
-    """Every required section as an empty mapping, the qpu left out."""
-    sections = {}
-    for name in machine_settings.REQUIRED_SECTIONS:
-        sections[name] = {}
-    del sections["qpu"]
-    return sections
 
 
 def _first_round_read_by_the_fifth_program() -> "_FifthRoundReadsTheFirst":

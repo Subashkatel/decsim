@@ -1558,10 +1558,9 @@ observation:                       # what a run records beyond its results
                                    # (detection_events), on the RunResult without
                                    # the trace, and writes the counts to the run
                                    # folder:
-                                   # shot_data_movement.csv, one row per shot per path,
-                                   # and data_movement.csv, the point's mean over shots
-                                   # by path and then by memory class. false writes
-                                   # neither file, because a run that counted nothing
+                                   # shot_data_movement.csv, one row per shot per path
+                                   # with the memory class it crosses. false writes
+                                   # no file, because a run that counted nothing
                                    # has no counts and a row of zeros would say
                                    # otherwise
   confidence_shot_count: 100       # a count of shots from seed 0, or all. When a

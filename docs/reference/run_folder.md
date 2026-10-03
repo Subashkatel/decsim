@@ -50,8 +50,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
-| `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
-| `data_movement.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point per path, then per memory class, averaged over the point's shots |
+| `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on. A point's mean per shot on a path or a memory class is a counter's sum over those rows divided by the point's distinct seeds; `references` and `referenced_rounds` repeat on every row of a shot, so they count once per seed |
 | `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
 | `run.json` | `decsim/experiments/run_folder.py`, `write_run_record` | one object: what ran, where, and with which library versions |
 | `<run file>.py`, `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of the run file: a Python run file under its own name beside the results, or every yaml file in the config chain in `config/`, each at its place relative to the others, so every `extends` still resolves. The copy is written once: a later run into the folder must bring the same text, or a run file whose points have the ids `run.json` recorded, which differs only in how far they run (a pilot's caps raised) and replaces the copy; any other run file is refused |
@@ -386,10 +385,9 @@ sample counts. A tier with no window has no column.
 
 ### `residence.csv`
 
-One row per traced shot per structure, then one per link path. The two
-data movement files, `shot_data_movement.csv` and `data_movement.csv`,
-are described in the table at the top of this page and are not tabulated
-here.
+One row per traced shot per structure, then one per link path.
+`shot_data_movement.csv` is described in the table at the top of this
+page and is not tabulated here.
 
 | Column | What it is |
 | --- | --- |

@@ -50,7 +50,6 @@ import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
-import decsim.observe.data_movement as data_movement
 import decsim.records.windows as window_records
 
 # the measurement's fields that are not columns of shots.csv: the
@@ -66,16 +65,6 @@ NON_COLUMN_FIELDS = (
     "trace_path",
     "window_statuses",
     "confidence",
-)
-# the counters shot_data_movement.csv carries per path, as
-# observe/data_movement.py's json_value names them
-MOVEMENT_COUNTERS = (
-    "copies",
-    "copied_rounds",
-    "copy_bits",
-    "moves",
-    "moved_rounds",
-    "move_bits",
 )
 # the counters a hold books for the whole shot: a reference is a token
 # on a store's slot and belongs to no path, so these repeat on every row
@@ -607,73 +596,6 @@ def refuse_pieces_of_another_tree(folders: list) -> None:
     _refuse_a_point_of_two_trees(code_by_point)
 
 
-class _PointMovement:
-    """One sweep point's data-movement totals, one row at a time.
-
-    A row carries one shot's counters on one path, so it belongs to that
-    path's totals and to the totals of the memory class the path
-    crosses. It also carries the shot's own hold counters, which belong
-    to no path and are read once per shot: the rows of one shot are
-    together in the order a run writes them and in the merged order of
-    several folders, so a seed that differs from the last one is the
-    next shot.
-    """
-
-    def __init__(self) -> None:
-        self.by_shot = fold.RowTotals(sums=REFERENCE_COUNTERS)
-        self.by_group = {}
-        self.last_seed = None
-
-    def add(self, row: dict) -> None:
-        """One shot's row on one path, into the three totals it belongs to."""
-        seed = row["seed"]
-        if seed != self.last_seed:
-            self.by_shot.add(row)
-            self.last_seed = seed
-        at_path = self._group_totals("path", row["path"])
-        at_path.add(row)
-        at_class = self._group_totals("memory_class", row["memory_class"])
-        at_class.add(row)
-
-    def paths(self) -> list:
-        """Every path the point's shots copied or moved along, in order."""
-        return self._names_of("path")
-
-    def classes(self) -> list:
-        """The memory classes these rows crossed, cheapest first.
-
-        The order is observe/data_movement.py's own CLASS_ORDER, so the
-        grouped table reads the way the counters group it.
-        """
-        crossed = self._names_of("memory_class")
-        listed = []
-        for memory_class in data_movement.CLASS_ORDER:
-            if memory_class.value in crossed:
-                listed.append(memory_class.value)
-        return listed
-
-    def totals_of(self, grouping: str, name: str):
-        """One path's or one memory class's counter sums."""
-        return self.by_group[(grouping, name)]
-
-    def _group_totals(self, grouping: str, name: str):
-        """The totals of one path or class, made the first time it shows."""
-        key = (grouping, name)
-        totals = self.by_group.get(key)
-        if totals is None:
-            totals = fold.RowTotals(sums=MOVEMENT_COUNTERS)
-            self.by_group[key] = totals
-        return totals
-
-    def _names_of(self, grouping: str) -> list:
-        """The names one grouping holds, sorted."""
-        names = []
-        for group, name in self.by_group:
-            if group == grouping:
-                names.append(name)
-        return sorted(names)
-
-
 def _refused_or_ordered(folders: list, point_ids: list):
     """The fold's row order, once the folders pass every refusal.
 
@@ -709,10 +631,7 @@ def _fold_the_folders(
     samples_rows = _rows_of_counts(counts, list(shot_totals))
     _write_rows(samples_rows, samples_path, swept)
     _fold_shot_links(folders, order, out_dir, swept)
-    movement_totals = _fold_shot_movement(folders, order, out_dir, swept)
-    per_movement = _movement_rows_of(movement_totals)
-    movement_path = out_dir / "data_movement.csv"
-    _write_rows(per_movement, movement_path, swept)
+    _fold_shot_movement(folders, order, out_dir, swept)
     _fold_latency_samples(folders, order, out_dir, swept)
     _fold_window_confidence(folders, order, out_dir, swept)
     histogram = _folded_confidence_histogram(folders)
@@ -749,13 +668,10 @@ def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> None:
 
 def _fold_shot_movement(
     folders: list, order, out_dir: Path, swept: dict
-) -> dict:
-    """Every folder's shot_data_movement.csv into one, and its totals."""
-    totals = {}
-    add_a_row = functools.partial(_add_a_movement_row, totals)
+) -> None:
+    """Every folder's shot_data_movement.csv into one; no summary reads it."""
     name = "shot_data_movement.csv"
-    _fold_one_file(folders, name, order, out_dir, swept, add_a_row)
-    return totals
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
 
 
 def _fold_latency_samples(
@@ -1102,48 +1018,6 @@ def _add_a_shot(totals: dict, row: dict) -> None:
         at_point = _shot_totals(row)
         totals[point] = at_point
     at_point.add(row)
-
-
-def _add_a_movement_row(totals: dict, row: dict) -> None:
-    """One shot's row on one path into its sweep point's totals."""
-    point = sweep_point_of(row)
-    at_point = totals.get(point)
-    if at_point is None:
-        at_point = _PointMovement()
-        totals[point] = at_point
-    at_point.add(row)
-
-
-def _movement_rows_of(totals: dict) -> list:
-    """One point's paths and then its memory classes, point by point.
-
-    Two tables in one file, told apart by the grouping column. The
-    second one is the grouping the classical sources ask for: a DRAM
-    access costs "a couple of orders-of-magnitude higher than the cost
-    of an internal cache access" (Horowitz, ISSCC 2014 lines 232-247)
-    and an accelerator's access costs what the memory it reads costs
-    (Dally, CACM 2020 lines 231-234), so a copy into a register and a
-    copy across a cryostat link may not be summed into one count. Every
-    number is a mean over the point's shots.
-    """
-    rows = []
-    for point in totals:
-        at_point = totals[point]
-        for row in _movement_rows_at_point(point, at_point):
-            rows.append(row)
-    return rows
-
-
-def _movement_rows_at_point(point: tuple, movement: _PointMovement) -> list:
-    """One point's two tables: a row per path, then a row per class."""
-    rows = []
-    for path in movement.paths():
-        row = _movement_row(point, "path", path, movement)
-        rows.append(row)
-    for memory_class in movement.classes():
-        row = _movement_row(point, "memory_class", memory_class, movement)
-        rows.append(row)
-    return rows
 
 
 def _write_rows(rows: list, path: Path, swept: dict) -> None:
@@ -1665,30 +1539,6 @@ def _tally_of(counters: Optional[dict], name: str) -> int:
     if counters is None:
         return 0
     return counters[name]
-
-
-def _movement_row(
-    point: tuple, grouping: str, name: str, movement: _PointMovement
-) -> dict:
-    """One point's mean over shots for one path or one memory class.
-
-    The reference columns are the point's own, the same on every row: a
-    reference belongs to the shot and not to a path, so it is counted
-    over the point's shots and not over the rows of one path, which some
-    of the point's shots may not have at all.
-    """
-    row = point_columns(point)
-    row["grouping"] = grouping
-    row["name"] = name
-    group = movement.totals_of(grouping, name)
-    shots = movement.by_shot.rows
-    for counter in MOVEMENT_COUNTERS:
-        total = group.sums[counter]
-        row[f"{counter}_per_shot"] = total / shots
-    for counter in REFERENCE_COUNTERS:
-        held = movement.by_shot.sums[counter]
-        row[f"{counter}_per_shot"] = held / shots
-    return row
 
 
 def _window_confidence_row(

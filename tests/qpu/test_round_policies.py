@@ -147,6 +147,11 @@ def test_per_operation_counts_given_as_a_dict_are_refused_naming_the_form():
         round_policies.PerOperationRounds({1: 3})
 
 
+def test_per_operation_counts_with_an_item_that_is_no_pair_are_refused():
+    with pytest.raises(ValueError, match=r"tuple\(counts.items\(\)\)"):
+        round_policies.PerOperationRounds(((1, 3), (2, 3, 4)))
+
+
 @pytest.mark.parametrize("round_count", [2.5, True, "3"])
 def test_a_round_count_that_is_not_a_whole_number_is_refused(round_count):
     with pytest.raises(ValueError, match="a whole number of rounds"):

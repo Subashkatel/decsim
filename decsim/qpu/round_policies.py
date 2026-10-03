@@ -156,22 +156,15 @@ def _check_round_count(name: str, value, minimum: int) -> None:
     raise ValueError(f"{name} must give >= {minimum} {unit} (got {value})")
 
 
-def _is_pairs(value) -> bool:
-    """Whether the value is a tuple of two-item tuples."""
-    if not isinstance(value, tuple):
-        return False
-    for pair in value:
-        if not isinstance(pair, tuple) or len(pair) != 2:
-            return False
-    return True
-
-
 def _check_pairs(rounds_by_operation) -> None:
     """The counts are a tuple of (operation id, round count) pairs."""
-    if _is_pairs(rounds_by_operation):
-        return
-    raise ValueError(
+    refusal = ValueError(
         "PerOperationRounds.rounds_by_operation must be a tuple of "
         f"(operation id, round count) pairs, got {rounds_by_operation!r}; "
         "tuple(counts.items()) turns a dict into one"
     )
+    if not isinstance(rounds_by_operation, tuple):
+        raise refusal
+    for pair in rounds_by_operation:
+        if not isinstance(pair, tuple) or len(pair) != 2:
+            raise refusal

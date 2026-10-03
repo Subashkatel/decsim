@@ -1,5 +1,7 @@
 """The decoder settings at the yaml boundary."""
 
+import typing
+
 import pytest
 
 import decsim.config as config
@@ -465,6 +467,15 @@ def test_the_manager_holds_its_scheduler_as_a_record_that_builds_it():
     assert record.__dataclass_params__.frozen
     assert type(first) is schedulers.FifoScheduler
     assert first is not second
+
+
+def test_the_scheduler_record_names_the_rule_it_builds():
+    """Every public signature is annotated: build returns a Scheduler."""
+    build = decoder_settings.SchedulerSettings.build
+
+    hints = typing.get_type_hints(build)
+
+    assert hints["return"] is schedulers.Scheduler
 
 
 def test_a_manager_clock_the_clocks_do_not_have_is_refused_at_no_cost():

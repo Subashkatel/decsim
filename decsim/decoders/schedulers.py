@@ -7,8 +7,18 @@ thing to vary.
 """
 
 import dataclasses
+from typing import Protocol
 
 import decsim.records.decoding as decoding_records
+
+
+class Scheduler(Protocol):
+    """A ready-queue rule: the waiting job a free unit serves next."""
+
+    def pop(
+        self, queue: list[decoding_records.DecodeJob]
+    ) -> decoding_records.DecodeJob:
+        """Remove and return the next job of the queue."""
 
 
 class FifoScheduler:

@@ -328,12 +328,9 @@ class DecoderPoolSettings:
 
 
 class SchedulerSettings(Protocol):
-    """A ready-queue rule's settings record (schedulers.py), which builds it.
+    """A ready-queue rule's settings record (schedulers.py), which builds it."""
 
-    The rule it builds has pop(queue), the waiting job served next.
-    """
-
-    def build(self):
+    def build(self) -> schedulers.Scheduler:
         """A fresh rule, one per manager."""
 
 

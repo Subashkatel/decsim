@@ -53,6 +53,17 @@ def test_a_word_width_on_a_pool_that_reads_in_place_is_refused():
         )
 
 
+def test_a_result_blocking_value_that_is_not_a_boolean_is_refused_by_name():
+    """A word is truthy, so "no" would block the unit; only a flag is read."""
+    algorithm = matching.PyMatchingDecoder.Settings()
+    sentence = "result_blocks_unit 'yes' is not a flag"
+
+    with pytest.raises(ValueError, match=sentence):
+        decoder_settings.DecoderPoolSettings(
+            algorithm, result_blocks_unit="yes"
+        )
+
+
 def test_a_linear_pool_charges_tau_dec_for_every_round_of_the_job():
     """T_dec(r) = tau_dec r, 2510.25222 lines 968-971: 0.4 us x 10 rounds."""
     clock = config.Clock(period_ticks=4_000)

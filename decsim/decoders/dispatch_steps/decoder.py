@@ -64,7 +64,6 @@ class DispatchStepsSettings:
     name = "dispatch_steps"
 
     def __post_init__(self) -> None:
-        _check_path(self.device, self.path)
         config.check_whole_count("workers", self.workers, "graph workers")
         _check_workers(self.path, self.workers)
 
@@ -196,19 +195,6 @@ def _kernel_rows(device: str) -> tuple:
         if kernel.device == device:
             rows.append(kernel)
     return tuple(rows)
-
-
-def _check_path(device: str, path: str) -> None:
-    """A device and path with a measured card; the A100 has no device path."""
-    if (device, path) in measurements.CARDS:
-        return
-    measured = sorted(measurements.CARDS)
-    raise ValueError(
-        f"device {device!r} with path {path!r} has no card in "
-        f"dispatch_steps; the measured ones are {measured} (the device "
-        "path's graph fire is compiled for compute capability 9.0 and up, "
-        "dispatch_kernel.cu v0.15.2 line 491)"
-    )
 
 
 def _check_workers(path: str, workers: int) -> None:

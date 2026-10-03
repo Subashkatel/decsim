@@ -104,7 +104,7 @@ def start_run(
 ) -> str:
     """The code state, the run file and run.json, before the first shot.
 
-    run_file is None for a run no file describes (the tools/ examples).
+    run_file is None for a run no file describes (the examples/ scripts).
     point_ids are the run's points in order (write_run_record). Returns
     the start time.
     """
@@ -263,7 +263,7 @@ def write_run_record(
     Sampling is deterministic from (stim version, circuit, distance,
     rounds, p, seed), so run.json plus the seeds are the raw data.
     run_files are the run file and, for a yaml, the bases its extends
-    chain reads, none for a run no file describes (the tools/ examples).
+    chain reads, none for a run no file describes (the examples/ scripts).
     point_ids are the run's points in order, which is the order a fold
     writes the rows in.
     """

@@ -92,7 +92,6 @@ requires_git = pytest.mark.skipif(
 
 EVERY_FILE = (
     "sweep.csv",
-    "links.csv",
     "shots.csv",
     "shot_links.csv",
     "window_samples.csv",

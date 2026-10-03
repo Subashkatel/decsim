@@ -34,10 +34,10 @@ fold in a staging folder beside it and move it in in place of the
 earlier fold's files, so a refused fold leaves the last one as it was.
 
 A run folder holds facts that add up and nothing else. No summary is
-stored: `sweep.csv` and `links.csv` are computed from the additive files
-when they are written, and a run folds them over every piece, so a
-sweep cut into pieces, stopped and picked up again, gives the numbers
-one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
+stored: `sweep.csv` is computed from the additive files when it is
+written, and a run folds it over every piece, so a sweep cut into
+pieces, stopped and picked up again, gives the numbers one uncut run
+gives (`decsim/experiments/report.py`, `fold_pieces`).
 
 ## What a folder holds
 
@@ -50,7 +50,6 @@ one uncut run gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
-| `links.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point per link, averaged over that point's shots |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on |
 | `data_movement.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point per path, then per memory class, averaged over the point's shots |
 | `residence.csv` | `decsim/experiments/residence.py`, `write_residence` | one row per traced shot per structure, then per link path: how long a round or window sat there, and how long a move waited on the wire |
@@ -255,7 +254,9 @@ counters.
 | `queue_wait_us`, `serialization_us`, `propagation_us` | the three parts of the time the path charged |
 
 The link set is data, not schema: a topology with another link adds rows
-here and moves no column of any file.
+here and moves no column of any file. A link's mean per shot at a point
+is the mean of a column over that point's rows of the link, and its bits
+per transfer is the mean `payload_bits` over the mean `transfers`.
 
 ### `window_samples.csv`
 
@@ -382,19 +383,6 @@ Then `buffer0_ready_to_frame_<tier>_median_us` and
 window at the point: the formed-to-commit time of the kept windows
 (`weak`) and of the escalated ones (`strong`), each over that tier's own
 sample counts. A tier with no window has no column.
-
-### `links.csv`
-
-One row per sweep point per link path, averaged over that point's shots.
-
-| Column | What it is |
-| --- | --- |
-| `point_id`, the swept paths, `algorithm` | the point |
-| `link` | the path's name |
-| `transfers_per_shot`, `payload_bits_per_shot` | the means |
-| `bits_per_transfer` | the payload bits divided by the transfers |
-| `unknown_payload_transfers_per_shot` | the mean count of transfers with no stated size |
-| `queue_wait_us_per_shot`, `serialization_us_per_shot`, `propagation_us_per_shot` | the mean time each part of the path charged |
 
 ### `residence.csv`
 

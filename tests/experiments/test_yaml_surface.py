@@ -939,7 +939,7 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
         for seed in range(2)
     ]
     rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
-    links_path = run_dir / "links.csv"
+    links_path = run_dir / "shot_links.csv"
     per_link = report.read_rows(links_path)
     assert len(rows) == 1
     assert rows[0]["algorithm"] == 0.028
@@ -1001,7 +1001,7 @@ def test_a_run_writes_its_run_record_and_per_shot_records(
     tmp_path, monkeypatch
 ):
     # One tiny run end to end: a dated results folder that holds
-    # run.json, the config copy, shots.csv, sweep.csv and links.csv.
+    # run.json, the config copy, shots.csv, sweep.csv and shot_links.csv.
     import csv
 
     config_path = yaml_configs.write_config(tmp_path, {})
@@ -1025,7 +1025,8 @@ def test_a_run_writes_its_run_record_and_per_shot_records(
 
     assert run_dir.parent.name == "results"
     assert run_dir.name.endswith("_unit_test_config")
-    assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()
+    assert (run_dir / "sweep.csv").exists()
+    assert (run_dir / "shot_links.csv").exists()
 
 
 def test_a_points_record_holds_the_sections_it_resolved_to(tmp_path):

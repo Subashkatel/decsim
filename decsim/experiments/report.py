@@ -10,9 +10,9 @@ derived from those rows at read time, which is sinter's shape
 seconds and a Counter of custom counts, __add__ sums them, and every
 rate or interval is computed from the summed row); gem5 keeps its
 Distribution statistics the same way, as counts per bucket summed
-across simulations. So sweep.csv and links.csv read the same whether
-one process ran every shot or many ran a piece each: a run's shots are
-pieces too, and the fold of the pieces builds both files.
+across simulations. So sweep.csv reads the same whether one process
+ran every shot or many ran a piece each: a run's shots are pieces too,
+and the fold of the pieces builds it.
 
 What a summary needs off those rows is a count, a true count, a sum, a
 max and an exact mean per sweep point, and none of those grows with the
@@ -170,15 +170,6 @@ CONFIDENCE_BINS_PER_DECIBEL = 10
 # shot's failure, Toshio's P(e|g) (2510.25222 lines 807-841)
 WINDOW_HISTOGRAM = "window"
 SHOT_MINIMUM_HISTOGRAM = "shot_minimum"
-# links.csv is the mean of these over a point's shots, one row per link
-LINK_MEANS = (
-    "transfers",
-    "payload_bits",
-    "unknown_payload_transfers",
-    "queue_wait_us",
-    "serialization_us",
-    "propagation_us",
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -416,11 +407,9 @@ def shot_rows(measurements: list) -> list:
 def shot_link_rows(measurements: list) -> list:
     """One row per shot per link: that shot's own ledger counters.
 
-    links.csv is the mean of these over a point's shots. They are a
-    file of their own rather than sixty more columns of shots.csv
-    because the link set is data and not schema: the counters are the
-    columns links.csv already has, so the summary is a mean over rows,
-    and a topology with another link adds rows and moves no column.
+    They are a file of their own rather than sixty more columns of
+    shots.csv because the link set is data and not schema: a topology
+    with another link adds rows and moves no column.
     """
     rows = []
     for measurement in measurements:
@@ -739,8 +728,8 @@ def _fold_the_folders(
 
     A pass reads one file of every folder at once, writes the folded
     file row by row and feeds the totals its summary needs, so no pass
-    holds a folder's rows. The three derived files come last, off the
-    totals the passes built, each point's swept values beside its rows.
+    holds a folder's rows. The derived files come off the totals the
+    passes built, each point's swept values beside its rows.
     """
     shot_totals, prefixes = _fold_shots(folders, order, out_dir, swept, rules)
     counts = _folded_counts(folders)
@@ -750,10 +739,7 @@ def _fold_the_folders(
     samples_path = out_dir / "window_samples.csv"
     samples_rows = _rows_of_counts(counts, list(shot_totals))
     _write_rows(samples_rows, samples_path, swept)
-    link_totals = _fold_shot_links(folders, order, out_dir, swept)
-    per_link = _link_rows_of(link_totals)
-    links_path = out_dir / "links.csv"
-    write_csv(per_link, links_path, swept)
+    _fold_shot_links(folders, order, out_dir, swept)
     movement_totals = _fold_shot_movement(folders, order, out_dir, swept)
     per_movement = _movement_rows_of(movement_totals)
     movement_path = out_dir / "data_movement.csv"
@@ -786,13 +772,10 @@ def _add_a_folded_shot(
     _add_to_the_prefix(prefixes, rules, row)
 
 
-def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> dict:
-    """Every folder's shot_links.csv into one, and the per-link totals."""
-    totals = {}
-    add_a_link = functools.partial(_add_a_shot_link, totals)
+def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> None:
+    """Every folder's shot_links.csv into one; no summary reads it."""
     name = "shot_links.csv"
-    _fold_one_file(folders, name, order, out_dir, swept, add_a_link)
-    return totals
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
 
 
 def _fold_shot_movement(
@@ -1150,32 +1133,6 @@ def _add_a_shot(totals: dict, row: dict) -> None:
         at_point = _shot_totals(row)
         totals[point] = at_point
     at_point.add(row)
-
-
-def _add_a_shot_link(totals: dict, row: dict) -> None:
-    """One shot's row on one link into that point's and link's totals."""
-    point = sweep_point_of(row)
-    at_point = totals.get(point)
-    if at_point is None:
-        at_point = {}
-        totals[point] = at_point
-    link = row["link"]
-    at_link = at_point.get(link)
-    if at_link is None:
-        at_link = fold.RowTotals(means=LINK_MEANS)
-        at_point[link] = at_link
-    at_link.add(row)
-
-
-def _link_rows_of(totals: dict) -> list:
-    """One row per point per link, the points and the links in order."""
-    rows = []
-    for point in totals:
-        at_point = totals[point]
-        for path in sorted(at_point):
-            row = _link_row(point, path, at_point[path])
-            rows.append(row)
-    return rows
 
 
 def _add_a_movement_row(totals: dict, row: dict) -> None:
@@ -1782,27 +1739,6 @@ def _algorithm_text(algorithm) -> str:
     if isinstance(algorithm, str):
         return algorithm
     return f"{algorithm:g} us"
-
-
-def _link_row(point: tuple, path: str, totals) -> dict:
-    """One link's averaged counters at one sweep point."""
-    transfers = totals.mean("transfers")
-    payload_bits = totals.mean("payload_bits")
-    bits_per_transfer = 0.0
-    if transfers:
-        bits_per_transfer = payload_bits / transfers
-    row = point_columns(point)
-    row["link"] = path
-    row["transfers_per_shot"] = transfers
-    row["payload_bits_per_shot"] = payload_bits
-    row["bits_per_transfer"] = bits_per_transfer
-    row["unknown_payload_transfers_per_shot"] = totals.mean(
-        "unknown_payload_transfers"
-    )
-    row["queue_wait_us_per_shot"] = totals.mean("queue_wait_us")
-    row["serialization_us_per_shot"] = totals.mean("serialization_us")
-    row["propagation_us_per_shot"] = totals.mean("propagation_us")
-    return row
 
 
 def _paths_counted(counted: dict) -> list:

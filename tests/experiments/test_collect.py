@@ -1,7 +1,9 @@
 """The experiments layer's referents: sinter's collect, and a recorded sweep.
 
 Referent one is a sweep of reference.yaml recorded before decsim.collect
-existed, its sweep.csv and links.csv kept in data/. Ten of its numbers
+existed, its sweep.csv and its per-link means kept in data/, each mean
+the one shot_links.csv gives a link over the point's shots. Ten of its
+numbers
 were amended when the controller-to-store hop stopped being priced at
 the raw readout width: the recorded run's own buffer fill, its
 per-syndrome buffer hop and that hop's link row. Eight zero columns were
@@ -49,6 +51,7 @@ import json
 import pathlib
 import re
 import shutil
+import statistics
 import time
 
 import numpy
@@ -135,6 +138,16 @@ FULL_HISTORY_PAIR = {
 # how long the first unit waits for its release before it gives up
 RELEASE_WAIT_SECONDS = 20
 
+# the ledger counters shot_links.csv carries per shot per link
+LINK_COUNTERS = (
+    "transfers",
+    "payload_bits",
+    "unknown_payload_transfers",
+    "queue_wait_us",
+    "serialization_us",
+    "propagation_us",
+)
+
 # the observation keys that record a run without changing a shot's row
 RECORDING_ONLY_OBSERVATION = {
     "trace": "chrome",
@@ -164,19 +177,18 @@ def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
     measurements = yaml_configs.run_sweep(tasks, 2)
     _rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
     folded_sweep_path = run_dir / "sweep.csv"
-    folded_links_path = run_dir / "links.csv"
+    shot_links_path = run_dir / "shot_links.csv"
     sweep_now = _csv_rows(folded_sweep_path)
-    links_now = _csv_rows(folded_links_path)
+    shot_links = _csv_rows(shot_links_path)
     sweep_path = DATA / "reference_sweep.csv"
     links_path = DATA / "reference_links.csv"
     sweep_before = _csv_rows(sweep_path)
     links_before = _csv_rows(links_path)
     sweep_measured = _without_point_id(sweep_now)
-    links_measured = _without_point_id(links_now)
     assert len(sweep_measured) == 1
     stable_now = _stable_columns(sweep_measured[0])
     assert stable_now == _stable_columns(sweep_before[0])
-    assert links_measured == links_before
+    assert _link_means(shot_links) == links_before
 
 
 def test_a_full_history_point_reproduces_the_retired_direct_columns(
@@ -797,6 +809,33 @@ def _stable_columns(row: dict) -> dict:
         if not _is_wall_clock_column(column):
             stable[column] = value
     return stable
+
+
+def _link_means(shot_link_rows: list) -> list:
+    """Each link's counters averaged over one point's shots, as text.
+
+    A mean is statistics.fmean, and bits_per_transfer is the mean
+    payload over the mean transfers, zero on a link that sent nothing.
+    """
+    rows_by_link = {}
+    for row in shot_link_rows:
+        rows_by_link.setdefault(row["link"], []).append(row)
+    mean_rows = []
+    for link in sorted(rows_by_link):
+        rows = rows_by_link[link]
+        means = {}
+        for counter in LINK_COUNTERS:
+            values = [float(row[counter]) for row in rows]
+            means[counter] = statistics.fmean(values)
+        bits_per_transfer = 0.0
+        if means["transfers"]:
+            bits_per_transfer = means["payload_bits"] / means["transfers"]
+        mean_row = {"algorithm": rows[0]["algorithm"], "link": link}
+        for counter in LINK_COUNTERS:
+            mean_row[f"{counter}_per_shot"] = str(means[counter])
+        mean_row["bits_per_transfer"] = str(bits_per_transfer)
+        mean_rows.append(mean_row)
+    return mean_rows
 
 
 def _without_point_id(rows: list) -> list:

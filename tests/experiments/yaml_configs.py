@@ -96,7 +96,8 @@ def folded_run(tmp_path, measurements: list) -> tuple:
     the point's record names no swept path, so the run folder's
     files hold only what the shots measured. Returns the sweep rows the
     fold computed, before csv turns an empty cell into text, and the
-    run folder, whose links.csv and data_movement.csv the fold wrote.
+    run folder, whose shot_links.csv and data_movement.csv the fold
+    wrote.
     """
     temporary_dir = tempfile.mkdtemp(dir=tmp_path)
     experiment_dir = pathlib.Path(temporary_dir)

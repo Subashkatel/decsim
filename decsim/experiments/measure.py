@@ -258,7 +258,7 @@ class ShotMeasurement:
     # referee reached a different owned observable contribution
     referee_window_disagreements: int
     # path -> the run's own ledger counters plus rounds/windows context,
-    # for links.csv; the totals come straight off the ledger's counters
+    # for shot_links.csv; the totals come straight off the ledger's counters
     link_totals: dict
     sim_wall_seconds: float
     # the shot's copies, references and moves as the RunResult carries

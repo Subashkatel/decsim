@@ -162,7 +162,6 @@ ls results/reference
 ```
 config
 latency_samples.csv
-links.csv
 pieces
 points
 residence.csv

@@ -745,7 +745,6 @@ def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
 # every file a fold writes from the pieces' rows
 FOLDED_FILES = (
     "sweep.csv",
-    "links.csv",
     "shots.csv",
     "shot_links.csv",
     "window_samples.csv",

@@ -21,8 +21,8 @@ Three things, in this order, and a file is done only when all three hold.
    where it is stored.
 3. A new component plugs in. A better QPU model, another decoder, a
    different buffer or link, arrives as one class that implements the
-   port the machine already has, is named in the yaml, and nothing else
-   changes. That is gem5's shape: a component owns its settings and its
+   port the machine already has, is passed in Python to the part that
+   holds it, and nothing else changes. That is gem5's shape: a component owns its settings and its
    state, talks to other components only through named ports, and the
    part that holds it wires it. The machine is a handful of parts, each
    building and wiring its own components, and one root connects the
@@ -114,7 +114,7 @@ here, the idle round accounting and the round sender, set five and one.
 ## Rule 2. Names are full words that say what the thing is
 
 No abbreviations. No acronyms except these, which are words in this field
-and stay: qpu, id, io, xor, yaml, json. docs/reference/glossary.md maps
+and stay: qpu, id, io, xor, json. docs/reference/glossary.md maps
 decsim's names to the literature's names, both ways.
 
     wm            -> window_manager
@@ -140,12 +140,14 @@ starts with `is_`, `has_`, `can_`, or reads as a question (`verbose` and
 `idle` are fine; `flag` is not). A duration field ends in `_microseconds`
 or `_ticks`; a count ends in `_count`.
 
-Link paths and yaml keys are plain words too. The link path names are
+Link paths and settings are plain words too. The link path names are
 listed in [The link paths](docs/reference/glossary.md#the-link-paths),
-and the config keys read the same way: readout_to_bits_cycles,
+and settings read the same way: readout_to_bits_cycles,
 decision_to_pulse_cycles, packing_cycles_per_round,
 packing_rounds_in_flight, result_blocks_unit, write_cycles,
-setup_cycles_per_transfer, log_component_io, check_windows_with.
+setup_cycles_per_transfer, log_component_io. A product or a paper's
+design is never a component's name; an experiment writes the numbers
+it takes from one, with the source in a comment.
 
 ## Rule 3. Comments say why, in the present tense
 
@@ -167,8 +169,8 @@ does not already say it. Review checks this; no tool can.
 
 A check is necessary in exactly two places.
 
-Where input enters decsim: a yaml file, a call on the experiments
-layer, a Stim circuit, a Deltakit circuit, a data file, a device reading.
+Where input enters decsim: a setting given in Python, a run file, a
+Stim circuit, a Deltakit circuit, a data file, a device reading.
 That input is checked once, at that boundary, loudly, with a message
 that reads as a sentence, and raises ValueError.
 
@@ -187,7 +189,7 @@ never application logic both apply.
 
 Everything else is not necessary and is deleted, with its test. Inside
 the machine a function trusts what its callers send: a check that no
-yaml, no experiments-layer call and no runtime path can trigger goes,
+setting, no run file and no runtime path can trigger goes,
 together with the test that forced the state by hand. Asking for such
 a check is out of scope, not a defect.
 
@@ -224,11 +226,10 @@ says so.
 
 ## Rule 7. Components plug in through ports
 
-This is the shape of every component. The ownership and the name table
-are gem5's (a SimObject's Python class is its params; `allClasses` maps
-a name to a class); the table plus one abstract class per pluggable
-component is sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring
-is gem5's late port bind: a component declares each neighbour as a `ports.Port`
+This is the shape of every component. The ownership is gem5's (a
+SimObject's Python class is its params, as a component's settings
+record is its); one abstract class per pluggable component, the port,
+is sinter's `Decoder`; the wiring is gem5's late port bind: a component declares each neighbour as a `ports.Port`
 class attribute, its constructor takes settings only, and the part that
 holds it binds each wire by attribute assignment, the wires inside the
 part when the part is built and the wires to another part when the
@@ -270,15 +271,17 @@ handed. Every hop rides the link fabric, so it is built first and each
 part is handed it at `build`; every other wire that crosses from one
 part to another is in `Machine.assemble`, which connects the parts. One
 root object, `Machine`, compiles the plan, builds the parts and
-assembles them; no component builds or looks up another. The yaml has one section per component, each section
-builds one settings dataclass, and a pluggable component's section
-carries one `kind` key naming a row in its package's table
-(`qpu: {kind: stim_device, ...}`, `weak_decoder: {kind: union_find, ...}`).
+assembles them; no component builds or looks up another. A user builds
+a machine in Python: each part's settings record holds its components'
+records, and a pluggable component is chosen by the record passed for
+it (`StimDevice.Settings()` as the QPU's source,
+`UnionFindDecoder.Settings()` as a pool's algorithm).
 
-Adding a component means: write one class that implements the port, add
-one row to that table, add its section to the yaml reference. Nothing
-else changes. A change that makes adding a component take more than that
-is not done. A new kind of component, one no table lists, is built and
+Adding a component means: write one class that implements the port,
+give it a settings record whose `build` makes it, each field with its
+unit in its name and a default, and pass that record to its part.
+Nothing else changes. A change that makes adding a component take more
+than that is not done. A component no part holds yet is built and
 wired in the part it belongs to; a neighbour it needs from another part
 is one more argument of that part's `connect` and one more line of
 `Machine.assemble`. The port also lets an old and a new implementation coexist
@@ -356,7 +359,7 @@ capitalization. Rule 2 is this tree's own naming rule and every name in
 the files keeps it, and a reader crossing from `window_decoder.py` into
 `union_find.c` should have to change language and nothing else.
 
-## Rule 10. The package order, the rows, and the ports
+## Rule 10. The package order, the classes, and the ports
 
 The packages import each other in one direction only: the `uses`
 relation is a partial order, so the top levels can be cut off and the
@@ -364,15 +367,15 @@ rest still runs (Parnas 1972 lines 505-529; Dijkstra's THE levels,
 dijkstra_the.txt 52-57). `tools/check_uses_graph.py`, run by
 `tools/check.sh`, fails on any cycle and prints the levels, which
 machine.py's docstring names. No component recognises another
-component's row by its class: a fact a caller needs about a row is
-declared on the port and answered by every row, never read off the
-row's type, because a class is what the port promises not to reveal
+component by its class: a fact a caller needs about a neighbour is
+declared on the port and answered by every implementation, never read
+off its type, because a class is what the port promises not to reveal
 (gem5's port API, arXiv 2007.03152 lines 489-491).
 `tools/check_row_recognition.py`, run by the same script, fails on any
 class a module tests against that is not on its list, and the list holds
-only the yaml boundary's types, the record shapes a reader meets two of,
-the runtime-checkable ports and the foreign types; a row class on it
-would be the defect. And `decsim/ports.py`
+only the input boundary's types, the record shapes a reader meets two
+of, the runtime-checkable ports and the foreign types; a component's
+class on it would be the defect. And `decsim/ports.py`
 is the slowest layer of all: a port method added, renamed or removed
 needs a design note saying why, the way a golden move does.
 
@@ -438,7 +441,7 @@ master): it pins what the code does, not what it should do. Its three
 known failure modes are handled in this order. It pins bugs, so a bug
 found on the way gets a referent and its own commit rather than a
 golden move. It is blind beyond its points, so "reachable" in this
-document means reachable by the gate points, the tests, or a yaml key.
+document means reachable by the gate points, the tests, or a setting.
 It is brittle to incidental text, so the golden carries two hashes, one
 over results and one over the log; a change to a log line's text or
 source name regenerates only the log hash and states in its commit
@@ -498,8 +501,8 @@ they had not. The twelve looks, in order:
    its own commit, never mixed with a change of behaviour.
 8. Consistency. The existing code's way wins over taste, and a rule here
    wins over the existing code.
-9. Documentation. reference.yaml, docs/reference and STYLE.md move in the
-   same commit as the surface they describe.
+9. Documentation. A settings record's docstring, docs/reference and
+   STYLE.md move in the same commit as the surface they describe.
 10. Every line. Every line asked for is read, not skimmed; a line the
     reviewer cannot follow is a finding, because the next reader will
     not follow it either.

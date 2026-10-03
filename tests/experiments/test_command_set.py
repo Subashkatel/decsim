@@ -51,12 +51,13 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import tests.experiments.yaml_configs as yaml_configs
-import tests.observe.gate_point as gate_point
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
 CONFIGS_DIR = yaml_configs.CONFIGS_DIR
+# The weak base, the yaml form of gate point 1.
+WEAK_DECODER_BASELINE = CONFIGS_DIR / "bases" / "weak_decoder_baseline.yaml"
 # The run files examples/ ships, each run with `decsim run`.
 EXAMPLES_DIR = CONFIGS_DIR.parent / "examples"
 EXAMPLES = ("my_first_sweep.py", "priced_cards_example.py", "two_tiers.py")
@@ -480,7 +481,7 @@ def test_show_names_the_class_of_a_row_that_takes_no_setting():
 
 
 def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
-    config_path = gate_point.CONFIG_PATH
+    config_path = WEAK_DECODER_BASELINE
     lines = _run_one_shot(config_path, seed=0, out_dir=tmp_path)
     config = experiment.load_experiment(config_path)
     point = config.first_point_task()
@@ -497,7 +498,7 @@ def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
 
 
 def test_run_with_trace_writes_the_shots_trace_file(tmp_path):
-    config_path = gate_point.CONFIG_PATH
+    config_path = WEAK_DECODER_BASELINE
     _run_one_shot(config_path, seed=0, out_dir=tmp_path, trace=True)
     trace_dir = tmp_path / "trace"
     entries = trace_dir.iterdir()

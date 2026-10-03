@@ -20,172 +20,100 @@ about.
 decsim calls the two the **weak tier** and the **strong tier**, which
 are the words Toshio et al. use (arXiv:2510.25222, Sec. III A).
 "Unsure" has to be a number, and that number is the window's
-**confidence**: this config's signal decodes the window twice, each
+**confidence**: this machine's signal decodes the window twice, each
 solve forced into one of the two logical answers, and subtracts the two
 weights, so a small gap means the decoder had almost no reason to prefer
-the answer it picked. [Two tiers](../explanation/two_tiers.md) explains
-the signals and the shapes behind the knobs.
+the answer it picked.
 
-## Step 1. Read the config
+## Step 1. Read the run file
 
-This lesson's config ships with decsim, as
-`configs/examples/two_tiers.yaml`. Both tiers are priced by cards rather
-than measured, so every tick below is the same on your machine as on
-this page's.
+This lesson's run file ships with decsim as `examples/two_tiers.py`.
+Both tiers are priced by cards rather than measured, so every tick below
+is the same on your machine as on this page's. The switching record and
+the two decoders come first:
 
-```yaml configs/examples/two_tiers.yaml
-# Two tiers on priced cards, so the whole switching loop is
-# deterministic and the same on every host. Both tiers are Toshio et
-# al.'s linear decoder (arXiv:2510.25222 lines 968-971): a decode of r
-# rounds costs tau_dec r on the unit, and a round reaches the decoder
-# T_comm after it is measured. Their backlog simulations set
-# T_weak_comm = tau_gen and T_strong_comm = tau_strong_dec = 10 tau_gen
-# (lines 1109-1114), tau_gen being this sweep's 1.0 us round period at
-# 250 cycles. tau_weak_dec is 0.4 tau_gen, one of the values the paper
-# sweeps (lines 1125-1126); the complementary gap decodes each window
-# twice, so each decode costs 0.2 tau_gen a round. The weak T_comm sits
-# on controller_to_weak_buffer and the strong one on
-# weak_decoder_to_strong_decoder, which carries the escalated rounds up.
-# docs/tutorials/two_tiers.md runs this config. Every key is documented
-# in reference.yaml.
-extends: ../bases/weak_decoder_baseline.yaml
-
-escalation:
-  kind: switching
-  gap_threshold_db: 20.0
-  strong_window: redo_window
-
-links:
-  qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-  controller_to_weak_buffer: {latency_cycles: 250, clock: fridge, bits_per_cycle: null}   # T_weak_comm
-  controller_to_strong_buffer: {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  weak_buffer_to_weak_decoder: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-  weak_decoder_to_strong_decoder: {latency_cycles: 2500, clock: room, bits_per_cycle: null}   # T_strong_comm
-  strong_buffer_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  decoder_to_decoder:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-  weak_decoder_to_frame: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-  strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  frame_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-  controller_to_qpu:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-
-weak_decoder:
-  kind: 0.0                         # the matching answers; the engine times it
-  units: 1
-  unit_memory:
-    bits: null
-  engine:
-    clock: fridge
-    fetch_cycles_per_round: 50      # 0.2 tau_gen a decode, two decodes a window
-    fetch_cycles_per_job: 0
-    release_cycles_per_job: 0
-    release_cycles_per_round: 0
-strong_decoder:
-  kind: 0.0
-  units: 1
-  unit_memory:
-    bits: null
-  engine:
-    clock: room
-    fetch_cycles_per_round: 2500    # tau_strong_dec, ten tau_gen
-    fetch_cycles_per_job: 0
-    release_cycles_per_job: 0
-    release_cycles_per_round: 0
-
-sweep:
-  - axes:
-      workload.arguments.physical_error_probability: [0.008]
-      qpu.distance: [3, 5]
-      qpu.round_period_microseconds: [1.0]
-    collection: {max_shots: 50}
+```python examples/two_tiers.py
+complementary_gap = complementary.ComplementaryGap.Settings()
+threshold = threshold_sources.FixedThreshold.Settings(
+    threshold_decibels=THRESHOLD_DECIBELS
+)
+switching = escalation_settings.SwitchingSettings(
+    confidence=complementary_gap, threshold=threshold
+)
+weak_decoder = decoder_settings.linear_decoder_pool(
+    WEAK_DECODE_MICROSECONDS_PER_ROUND,
+    machine_settings.FRIDGE_CLOCK,
+    solves_per_window=2,
+)
+strong_decoder = decoder_settings.linear_decoder_pool(
+    STRONG_DECODE_MICROSECONDS_PER_ROUND,
+    machine_settings.ROOM_CLOCK,
+    solves_per_window=1,
+)
 ```
 
-The `escalation` section is the new part.
+- `SwitchingSettings` turns the weak base into a two-tier machine: the
+  weak tier decodes every window first, and a window escalates to the
+  strong tier when its confidence is below the threshold.
+- `ComplementaryGap.Settings()` is the confidence signal: the two forced
+  solves and the difference of their weights.
+- `FixedThreshold.Settings(threshold_decibels=20.0)` is the confidence
+  below which a window escalates, written in the paper's decibels.
+  decsim converts it once into natural-log weight, the unit the decoder
+  compares in (`decsim/escalation/threshold_sources.py`,
+  `decibels_to_nats`).
+- The switching record's `strong_window` is left at its default,
+  `RedoWindow.Settings()`: the strong decoder re-reads the escalated
+  window's commit region and one buffer region ahead of it, with its
+  past face pinned on the correction the window before it committed.
 
-- `kind: switching` is the word of `ESCALATION_KINDS` that runs the weak tier
-  first and escalates. The other two rows are `weak_baseline`, one tier
-  only, and `strong_only`, the accurate decoder on everything.
-- `gap_threshold_db: 20.0` is the confidence below which a window is
-  escalated, written in the paper's decibels. decsim converts it once,
-  at load, into natural-log weight, which is the unit the decoder
-  compares in (`decsim/escalation/settings.py`, `decibels_to_nats`).
-- `strong_window: redo_window` says which rounds the strong
-  decoder re-reads: the escalated window's commit region and one buffer
-  region ahead of it, with its past face pinned on the correction the
-  window before it committed.
+Both decoders are Toshio et al.'s linear decoder: a decode of r rounds
+costs a fixed time per round, tau_dec r. This sweep's round period is
+one microsecond, one **syndrome generation time** (tau_gen).
+`linear_decoder_pool` puts that time on the decoder unit's fetch stage
+and prices the algorithm at zero.
 
-Both decoder sections are Toshio et al.'s linear decoder: a decode of r
-rounds costs a fixed time per round, tau_dec r. This sweep's round
-period is one microsecond, one **syndrome generation time** (tau_gen),
-which is 250 cycles of the 250 MHz clocks.
+- The weak tier's tau_weak_dec is 0.4 tau_gen a round. Its confidence
+  signal decodes each window twice, so `solves_per_window=2` makes each
+  solve 0.2 microseconds a round.
+- The strong tier's tau_strong_dec is 10 tau_gen, 10 microseconds a
+  round.
 
-- `kind: 0.0` prices the algorithm stage at zero, so the time sits on
-  the engine's fetch stage.
-- The weak tier's `fetch_cycles_per_round: 50` is 0.2 microseconds a
-  round. Its confidence signal decodes each window twice, so the two
-  decodes cost tau_weak_dec = 0.4 tau_gen a round between them.
-- The strong tier's `fetch_cycles_per_round: 2500` is 10 microseconds a
-  round, tau_strong_dec = 10 tau_gen.
-- Two link cards carry the paper's T_comm, the time from a round's
-  measurement to its decoder: 250 cycles (one tau_gen) on
-  `controller_to_weak_buffer`, and 2500 cycles (ten tau_gen) on
-  `weak_decoder_to_strong_decoder`, the hop an escalation crosses.
+Then, for each distance, the loop moves the paper's T_comm, the time
+from a round's measurement to its decoder, onto two links:
+
+```python examples/two_tiers.py
+    weak_side = link_profiles.with_path_latency(
+        base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
+    )
+    strong_side = machine_settings.one_cycle_strong_side(weak_side)
+    links = link_profiles.with_path_latency(
+        strong_side,
+        "weak_decoder_to_strong_decoder",
+        STRONG_COMMUNICATION_MICROSECONDS,
+    )
+```
+
+One tau_gen on `controller_to_weak_buffer`, ten on
+`weak_decoder_to_strong_decoder`, the hop an escalation crosses, and
+one cycle on each other hop of the strong side.
 
 The cards price time and nothing else: both tiers still decode for
 real, on the minimum-weight perfect matching path, so the logical
-failures below are measured and only the time is stated
-(`decsim/decoders/settings.py`, `DecoderSettings`).
-[How to run a timing study whose numbers do not depend on your computer](../how-to/run_a_timing_only_study.md) says more about cards.
+failures below are measured and only the time is stated.
 
-`decsim show` prints the config as decsim resolved it:
-
-```bash
-decsim show configs/examples/two_tiers.yaml
-```
-
-```
-config: configs/examples/two_tiers.yaml <- configs/bases/weak_decoder_baseline.yaml
-qpu: kind stim_device
-windows: kind sliding
-escalation: kind switching
-workload: kind producer
-links: card two_tiers.yaml
-sweep block 1: workload.arguments.physical_error_probability [0.008], qpu.distance [3, 5], qpu.round_period_microseconds [1.0]; max_shots 50, min_shots 0, piece_rounds 20000
-log: off
-trace: off
-values:
-class = "decsim.settings.MachineSettings"
-clock.class = "decsim.config.Clock"
-clock.period_ticks = 4000
-qpu.class = "decsim.qpu.settings.QpuSettings"
-qpu.source.class = "decsim.qpu.stim_device.StimDevice.Settings"
-qpu.code_card.class = "decsim.qpu.code_geometry.SurfaceCodeModel.Settings"
-qpu.round_period_microseconds = [1.0]  [sweep, configs/examples/two_tiers.yaml:58-63]
-qpu.distance = [3, 5]  [sweep, configs/examples/two_tiers.yaml:58-63]
-```
-
-Below `values:` the list goes on to every value the machine is built
-with, one per line: the layer that set it (your file, a preset it
-extends, the sweep, or the default) and the yaml lines it came from. A
-line ending in `.class` names the record a section or a row built, so
-a row that takes no setting, such as `windows.boundary_policy` here,
-still has a line. A line with no source is a value decsim works out
-from others, such as `clock.period_ticks`, a 250 MHz cycle in ticks.
-That is the machine's clock, the domain the yaml's `controller.clock`
-names, so further down `controller.clock = null`: the controller runs
-on the machine's clock.
-
-Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the weak tier and
-keeps every round a strong re-decode might still ask for;
+Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the
+weak tier and keeps every round a strong re-decode might still ask for;
 `strong_syndrome_buffer` holds the rounds an escalation carries up to
 the strong decoder, and nothing else in this run.
 
 ## Step 2. Run the sweep
 
 ```bash
-decsim run configs/examples/two_tiers.yaml --out results/two_tiers
+decsim run examples/two_tiers.py --out results/two_tiers
 ```
 
-The command prints the same resolved config, then one line per point as
+The command prints what it is about to run, then one line per point as
 it finishes, then the summary. This is the summary:
 
 ```
@@ -220,8 +148,8 @@ data movement: observation.data_movement was off, so this run counted no copies,
 every column: results/two_tiers/sweep.csv
 ```
 
-`algorithm: 0 us` is the card; the decode time is on the engine, as
-Step 1 said.
+`algorithm: 0 us` is the card; the decode time is on the unit's fetch
+stage, as Step 1 said.
 
 Read `service time per window, mean` against the weak tier's own cost.
 A window here is six rounds, so its two weak decodes cost 2.4
@@ -245,7 +173,7 @@ A sweep gives averages. To see one window escalate you need the trace,
 so run a single shot with `--trace`.
 
 ```bash
-decsim run configs/examples/two_tiers.yaml --seed 1 --trace --out results/two_tiers_shot
+decsim run examples/two_tiers.py --seed 1 --trace --out results/two_tiers_shot
 ```
 
 ```
@@ -412,14 +340,12 @@ eight things happen that did not happen for window 0.
 `W3 committed` at 18.408 is worth reading carefully. The window
 provisionally commits on the weak answer as soon as the verdict is in
 (`decsim/windows/window_commits.py`, `commit`). What it does not do is
-ship its boundary: this run's boundary policy is `held`, chosen for you
-because the escalation may escalate and `redo_window` does not
-absorb the windows it covers. A strong window absorbs a weak window when
-it decodes the same rounds again and replaces that window's answer, so
-the weak window never ships a boundary of its own
-(`decsim/windows/settings.py`,
-`BOUNDARY_POLICIES`, and the `boundaries` key's docstring). The held
-boundary ships only when the strong answer lands, which is the
+ship its boundary: this run's boundary policy is held, the one the redo
+window's record hands `switching_windows`, because the redo window does
+not absorb the windows it covers. A strong window absorbs a
+weak window when it decodes the same rounds again and replaces that
+window's answer, so the weak window never ships a boundary of its own.
+The held boundary ships only when the strong answer lands, which is the
 `decoder_to_decoder` move at 88.420
 (`decsim/windows/window_commits.py`, `finish_strong`).
 
@@ -462,16 +388,6 @@ The listing goes on with window 4's own escalation. Its second
 transfer carries only rounds `16..18`, 88 bits, because rounds `13..15`
 are already in the strong syndrome buffer from window 3.
 
-To price the strong tier's off-board hops with a measured cable instead
-of the room-clock cards above, set `links.kind` to
-`roce_v2_cpu` or `roce_v2_gpu` and delete the four strong-side cards, so
-the row's numbers stand. They come from Backline (arXiv:2609.09270),
-which measured a real round trip from a controller to a CPU or GPU over
-Ethernet: half of that round trip on the write into the strong syndrome
-buffer, on the escalation and on the reply, and
-zero on the strong store's own read
-([D14](../explanation/decisions.md#d14-the-strong-tiers-off-board-path-can-be-priced-by-a-measured-round-trip)).
-
 ## What you learned
 
 - Switching runs the weak tier on everything and the strong tier on the
@@ -483,10 +399,7 @@ zero on the strong store's own read
 
 ## Read next
 
-- [Two tiers](../explanation/two_tiers.md): the four tables behind the knobs
-  above, the other two confidence signals, and the other strong window
-  shapes.
-- [Windows and boundaries](../explanation/windows_and_boundaries.md): what a commit region, a
-  buffer region and a seam are.
-- [How to read a trace and follow one round or one window](../how-to/read_a_trace.md): the trace format and the other ways to
-  read it.
+- [Build a machine step by step](build_a_machine.md): this lesson's
+  machine, built part by part.
+- [The parts](../reference/parts.md): every settings record a machine
+  is built from.

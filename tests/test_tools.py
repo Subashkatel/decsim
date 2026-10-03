@@ -281,7 +281,8 @@ def test_the_tutorial_check_runs_the_pages_own_commands():
         "```\n"
     )
 
-    commands = check.page_commands(text)
+    blocks = check.fenced_blocks(text)
+    commands = check.block_commands(blocks[0].lines)
 
     assert len(commands) == 2
     assert commands[0].split() == [
@@ -293,6 +294,33 @@ def test_the_tutorial_check_runs_the_pages_own_commands():
         "1:1",
     ]
     assert commands[1] == "cut -d, -f1 results/shot/sweep.csv"
+
+
+@pytest.mark.parametrize(
+    "shown, difference_count", [("2", 0), ("3", 1)], ids=["same", "moved"]
+)
+def test_the_tutorial_check_runs_the_python_blocks_as_one_session(
+    tmp_path, shown, difference_count
+):
+    """A later block reads what an earlier one set, and its print is held."""
+    check = _tool("check_tutorial_runs")
+    text = (
+        "```python\n"
+        "count = 1\n"
+        "```\n"
+        "```python\n"
+        "print(count + 1)\n"
+        "```\n"
+        "```\n"
+        f"{shown}\n"
+        "```\n"
+    )
+    tutorial = check.Tutorial(page="page.md", is_priced=True)
+    blocks = check.fenced_blocks(text)
+
+    _outputs, differences = check.run_page(tutorial, blocks, tmp_path)
+
+    assert len(differences) == difference_count
 
 
 @pytest.mark.parametrize(
@@ -311,9 +339,11 @@ def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
     tutorial = check.TUTORIALS[2]
     text, outputs = _page_and_its_own_output(check, tutorial.page)
     moved = re.sub(shown_line, moved_line, text, count=1, flags=re.MULTILINE)
+    blocks = check.fenced_blocks(text)
+    moved_blocks = check.fenced_blocks(moved)
 
-    unmoved_differences = check.page_differences(tutorial, text, outputs)
-    moved_differences = check.page_differences(tutorial, moved, outputs)
+    unmoved_differences = check.page_differences(tutorial, blocks, outputs)
+    moved_differences = check.page_differences(tutorial, moved_blocks, outputs)
 
     assert tutorial.is_priced
     assert moved != text
@@ -322,20 +352,22 @@ def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
 
 
 def test_a_wall_clock_tutorial_holds_its_counts_and_not_its_timings():
-    """first_run's load is the host's; its failure count is the seed's."""
+    """first_sweep's load is the host's; its failure count is the seed's."""
     check = _tool("check_tutorial_runs")
-    tutorial = check.TUTORIALS[0]
+    tutorial = check.TUTORIALS[1]
     text, outputs = _page_and_its_own_output(check, tutorial.page)
     new_load = re.sub(
         r"^(load .*: )[0-9.]+", r"\g<1>99.99", text, count=1, flags=re.MULTILINE
     )
     new_count = text.replace(
-        "logical failures: 0 of 2 scored shots",
-        "logical failures: 1 of 2 scored shots",
+        "logical failures: 16 of 400 scored shots",
+        "logical failures: 17 of 400 scored shots",
     )
+    load_blocks = check.fenced_blocks(new_load)
+    count_blocks = check.fenced_blocks(new_count)
 
-    load_differences = check.page_differences(tutorial, new_load, outputs)
-    count_differences = check.page_differences(tutorial, new_count, outputs)
+    load_differences = check.page_differences(tutorial, load_blocks, outputs)
+    count_differences = check.page_differences(tutorial, count_blocks, outputs)
 
     assert not tutorial.is_priced
     assert new_load != text

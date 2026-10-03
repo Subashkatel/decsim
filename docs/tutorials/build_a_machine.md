@@ -10,10 +10,11 @@ the machine makes between parts. It takes about ten minutes.
 It assumes you have done [Two tiers](two_tiers.md), because it builds
 that lesson's machine.
 
-## The six parts
+## The parts
 
-A machine is six parts. Each is a small record in `decsim/build/` of the
-components one stage of the loop holds:
+A machine is six parts, and a switching machine has a seventh. Each is
+a small record in `decsim/build/` of the components one stage of the
+loop holds:
 
 | Part | What it holds |
 | --- | --- |
@@ -23,13 +24,14 @@ components one stage of the loop holds:
 | `Windows` | the planner, the window manager, the verdict |
 | `Decoders` | each tier's decoder units and their managers |
 | links | the link fabric every hop rides |
+| `Switching` | the confidence signal, the decision and the strong window side |
 
 A part's `build` makes its components and wires them to one another.
 `Machine.assemble` wires the parts to each other.
 
 ## Step 1. Read the settings
 
-Run the lines of every step in one Python session, from the top of the
+Run the blocks of every step in one Python session, from the top of the
 repository.
 
 ```python
@@ -41,35 +43,42 @@ import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
 import decsim.engine as engine_module
-import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
+import decsim.windows.built_window_models as built_window_models
+import examples.two_tiers as two_tiers
 
-config = experiment.load_experiment("configs/examples/two_tiers.yaml")
-point = config.first_point_task()
-settings = point.settings
+settings = two_tiers.points[0].machine
 ```
 
-`settings` is a `MachineSettings`: one record per section of the yaml.
-You could also write it in Python, as
-[How to plug a component in without a table row](../how-to/plug_in_without_a_table_row.md)
-does.
+`settings` is the `MachineSettings` of the run file's first point, at
+distance 3: one record for each part of the machine.
 
 ## Step 2. Compile what the parts are built for
 
-Some things are read from the settings before any part exists, because
-more than one part is built for them: the escalation policy, the plan
-(the windows, the circuit and the round clock), the
-detection event formation, the decoder units, and the store slots: which
-syndrome buffers a decoder reads, and whether it reads them in place.
+Some things are built from the settings before any part exists, because
+more than one part is built for them: the switching part, the plan (the
+windows, the circuit and the round clock), the detection event
+formation, the decoder units, and the store slots: which syndrome
+buffers a decoder reads, and whether it reads them in place.
 
 ```python
 engine = engine_module.Engine()
-escalation_policy = escalation_build.build_escalation_policy(
-    settings.escalation, settings.weak_decoder
+switching = escalation_build.build_switching(
+    settings.switching, settings.weak_decoder, engine
 )
-plan = plan_build.build_plan(settings, escalation_policy)
-window_tier = escalation_policy.primary_tier
-escalates = escalation_policy.requires_strong_context
+plan = plan_build.build_plan(
+    settings.qpu,
+    settings.workload,
+    settings.windows,
+    settings.idle_policy,
+    settings.detection_events,
+    settings.switching,
+    settings.decoder_manager.bulk_strong,
+    switching,
+)
+window_tier = settings.window_tier
+window_decoder = settings.decoder_settings_for(window_tier.value)
+escalates = settings.switching is not None
 detection_events = readout_part.build_detection_events(
     settings.detection_events,
     settings.clock,
@@ -78,12 +87,19 @@ detection_events = readout_part.build_detection_events(
     escalates,
 )
 pool = decoders_part.build_decoder_pool(
-    settings, plan, escalation_policy, detection_events
+    window_decoder,
+    settings.strong_decoder,
+    window_tier,
+    escalates,
+    settings.clock,
+    plan,
+    detection_events,
+    switching.confidence_signal,
 )
 weak_store_slot, strong_store_slot = machine_module.store_slots(
     settings, window_tier, pool
 )
-print(type(escalation_policy).__name__, plan.round_ticks)
+print(type(switching.policy).__name__, plan.round_ticks)
 ```
 
 It prints:
@@ -92,12 +108,12 @@ It prints:
 Switching 1000000
 ```
 
-The policy is the `switching` row the yaml names, and one round is a
-million ticks, one microsecond.
+The policy is the switching record's, and one round is a million ticks,
+one microsecond.
 
 ## Step 3. Build each part
 
-One line per part:
+One call per part:
 
 ```python
 links = machine_module.build_links(settings, engine)
@@ -121,10 +137,19 @@ readout = readout_part.Readout.build(
     links,
 )
 windows = windows_part.Windows.build(
-    settings, engine, plan, escalation_policy, links
+    settings.windows,
+    settings.workload,
+    settings.switching,
+    window_decoder,
+    window_tier,
+    settings.clock,
+    engine,
+    plan,
+    links,
+    built_window_models.BuiltWindowModels(),
 )
 decoders = decoders_part.Decoders.build(
-    settings.decoder_manager, engine, pool, escalation_policy
+    settings.decoder_manager, settings.clock, engine, pool
 )
 ```
 
@@ -159,7 +184,16 @@ readout part has a strong syndrome buffer; a weak-only run's would be
 
 ```python
 machine = machine_module.Machine.assemble(
-    settings, engine, plan, links, qpu, control, readout, windows, decoders
+    settings,
+    engine,
+    plan,
+    links,
+    qpu,
+    control,
+    readout,
+    windows,
+    decoders,
+    switching,
 )
 print(readout.syndrome_round_sender.windows is windows.window_manager)
 print(windows.window_manager.requester.decode_queue is decoders.decoder_manager)
@@ -171,7 +205,7 @@ True
 ```
 
 `assemble` makes every wire that crosses from one part to another, in
-four `connect` calls you can read in `decsim/machine.py`. It then starts
+the `connect` calls you can read in `decsim/machine.py`. It then starts
 the parts, gives each random component its seed, connects the observers
 and loads the program.
 
@@ -192,20 +226,17 @@ The run took 279.888 microseconds of machine time, and its one memory
 operation came out right. `Machine.build(settings, 0)` builds the same
 machine, and gives the same result.
 
-`tests/machine/test_machine.py::test_a_machine_built_part_by_part_runs_as_the_one_call_does`
-runs the steps of this page and checks every output on it.
-
 ## What you did
 
 You built the machine the way `Machine.build` does: the shared pieces
-first, then one part per line, then `assemble`. To change one part,
-build your own in that part's line and keep the rest.
+first, then one part per call, then `assemble`. To change one part,
+build your own in that part's call and keep the rest.
 
 ## Read next
 
 - [How to add a component to a part](../how-to/add_a_component_to_a_part.md):
-  a new kind of component, one no table lists.
-- [How to add a row to a table](../how-to/add_a_table_row.md): a new
-  row of a component decsim already has, such as a decoder.
-- [Architecture](../explanation/architecture.md): the parts and the
-  components, and why they are shaped this way.
+  a new kind of component.
+- [How to add a decoder backend](../how-to/add_a_decoder_backend.md): a
+  new decoder.
+- [The parts](../reference/parts.md): every settings record a machine is
+  built from.

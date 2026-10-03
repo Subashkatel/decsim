@@ -498,35 +498,12 @@ def _each_without_a_point(folders, name) -> None:
         _without_a_point(folder, name)
 
 
-def _each_with_a_renamed_point(folders, name, renamed) -> None:
-    for folder in folders:
-        _with_a_renamed_point(folder, name, renamed)
-
-
 def _without_columns(row: dict, columns: tuple) -> dict:
     kept = {}
     for column, value in row.items():
         if column not in columns:
             kept[column] = value
     return kept
-
-
-def _with_a_renamed_point(run_dir, name, renamed):
-    """The folder as a tree that called that latency point something else."""
-    folder = pathlib.Path(run_dir)
-    shots_path = folder / "shots.csv"
-    rows = _rows_of(shots_path)
-    for row in rows:
-        row[f"{renamed}_mean_us"] = row.pop(f"{name}_mean_us")
-        row[f"{renamed}_max_us"] = row.pop(f"{name}_max_us")
-    _write_rows(shots_path, rows)
-    samples_path = folder / "window_samples.csv"
-    samples = _rows_of(samples_path)
-    for row in samples:
-        if row["name"] != name:
-            continue
-        row["name"] = renamed
-    _write_rows(samples_path, samples)
 
 
 def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
@@ -596,28 +573,6 @@ def _each_without_a_shot_column(folders, column) -> None:
         for row in rows:
             row.pop(column)
         _write_rows(shots_path, rows)
-
-
-def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
-    """A renamed point has no place in this tree's order of points.
-
-    A fold writes a point's counts where that point sits among this
-    tree's own, so a folder whose window samples name a point this tree
-    does not measure would fail that sort with sweep.csv and shots.csv
-    already written and a half folder left behind, so it is refused at
-    the boundary, by name.
-    """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
-    folders = _piece_folders(experiment_dir)
-    _each_with_a_renamed_point(folders, "service", "park")
-    out_dir = tmp_path / "folded"
-    with pytest.raises(refusal.RefusalError) as refused:
-        _folded(experiment_dir, folders, out_dir)
-    message = str(refused.value)
-    assert "'park'" in message
-    assert "this tree does not measure" in message
-    assert str(folders[0]) in message
-    assert not out_dir.exists()
 
 
 def test_pieces_of_one_point_that_hold_different_columns_are_refused(

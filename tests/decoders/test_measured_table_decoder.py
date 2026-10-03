@@ -57,10 +57,8 @@ def test_a_tier_with_no_relay_bp_keys_is_priced_by_the_relay_bp_1_line():
     model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
-    section = {"device": "a100", "partition": "whole"}
-    settings = measured_table.MeasuredTableSettings.from_yaml(
-        section, None, "strong_decoder"
-    )
+    fields = {"device": "a100", "partition": "whole"}
+    settings = measured_table.MeasuredTableSettings(**fields)
     table = measured_table.MeasuredTable(settings)
     physical = model.require_faults(PHYSICAL)
     compiled = table.decoder.window_decoder.compiled_model(physical)
@@ -89,16 +87,14 @@ def test_relay_bp_5_runs_the_gpus_iterations_and_is_priced_by_its_line():
     model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
     detection_events, _ = windows.sampled_shots(circuit, 2200, 12)
     job = windows.job_for(model, detection_events[40])
-    section = {
+    fields = {
         "device": "a100",
         "gamma0": 0.35,
         "gamma_interval": [-0.254, 0.985],
         "relay_set_count": 600,
         "converged_solution_count": 5,
     }
-    settings = measured_table.MeasuredTableSettings.from_yaml(
-        section, None, "strong_decoder"
-    )
+    settings = measured_table.MeasuredTableSettings(**fields)
     table = measured_table.MeasuredTable(settings)
     window_decoder = table.decoder.window_decoder
     reservation = window_decoder.reserve_run_seed(20260923)
@@ -126,10 +122,8 @@ def test_a_multi_instance_gpu_slice_is_priced_by_its_own_measured_line(
     model = windows.whole_circuit_window(circuit, 15, REQUIREMENT)
     detection_events, _ = windows.sampled_shots(circuit, 1, 11)
     job = windows.job_for(model, detection_events[0])
-    section = {"device": "a100", "partition": partition}
-    settings = measured_table.MeasuredTableSettings.from_yaml(
-        section, None, "strong_decoder"
-    )
+    fields = {"device": "a100", "partition": partition}
+    settings = measured_table.MeasuredTableSettings(**fields)
     table = measured_table.MeasuredTable(settings)
     ticket = table.submit(job, 0)
     result = table.result(ticket)
@@ -216,7 +210,7 @@ def test_the_device_runs_one_decode_at_a_time():
 
 
 def test_relay_bp_5_on_a_device_never_measured_at_it_is_refused():
-    section = {
+    fields = {
         "device": "gh200",
         "gamma0": 0.35,
         "gamma_interval": [-0.254, 0.985],
@@ -224,15 +218,13 @@ def test_relay_bp_5_on_a_device_never_measured_at_it_is_refused():
         "converged_solution_count": 5,
     }
     with pytest.raises(ValueError) as refusal:
-        measured_table.MeasuredTableSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
+        measured_table.MeasuredTableSettings(**fields)
     relay_bp_5 = (
         "{'gamma0': 0.35, 'relay_set_count': 600, "
         "'gamma_interval': (-0.254, 0.985), 'converged_solution_count': 5}"
     )
     assert str(refusal.value) == (
-        "strong_decoder.device 'gh200' with partition 'whole', bases "
+        "device 'gh200' with partition 'whole', bases "
         f"'together' and the Relay-BP keys {relay_bp_5} has no measurement "
         "in measured_table; the measured ones are "
         "[('a100', 'whole', 'together', {}), "
@@ -247,13 +239,11 @@ def test_relay_bp_5_on_a_device_never_measured_at_it_is_refused():
 
 
 def test_a_bases_row_off_the_table_is_refused():
-    section = {"device": "gh200", "bases": "xz"}
+    fields = {"device": "gh200", "bases": "xz"}
     with pytest.raises(ValueError) as refusal:
-        measured_table.MeasuredTableSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
+        measured_table.MeasuredTableSettings(**fields)
     assert str(refusal.value) == (
-        "strong_decoder.bases 'xz' is not a row of its table; the rows are "
+        "bases 'xz' is not a row of its table; the rows are "
         "['apart', 'together']"
     )
 

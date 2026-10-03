@@ -310,24 +310,3 @@ def test_a_negative_field_is_refused_by_name():
         cycle_count_module.CycleCount(CLOCK, cycles_per_edge=-0.5)
     with pytest.raises(ValueError, match="finite"):
         cycle_count_module.CycleCount(CLOCK, cycles_per_edge=math.nan)
-
-
-def test_a_key_the_block_does_not_have_is_refused_by_name():
-    clocks = config.ClockSettings({"helios": MEGAHERTZ})
-    block = {"clock": "helios", "cycles_per_edeg": 4}
-    with pytest.raises(ValueError, match="cycles_per_edeg"):
-        cycle_count_module.CycleCount.from_yaml(block, clocks, "weak_decoder")
-
-
-def test_the_yaml_block_resolves_its_clock_and_defaults_the_rest_to_zero():
-    clocks = config.ClockSettings({"helios": MEGAHERTZ})
-    block = {"clock": "helios", "delay_cycles": 3, "setup_cycles": 4}
-    count = cycle_count_module.CycleCount.from_yaml(
-        block, clocks, "weak_decoder"
-    )
-    assert count.clock == CLOCK
-    assert count.delay_cycles == 3
-    assert count.setup_cycles == 4
-    assert count.setup_cycles_per_edge == 0
-    assert count.cycles_per_edge == 0.0
-    assert count.setup_cycles_per_vertex == 0

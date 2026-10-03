@@ -14,15 +14,11 @@ is the bb-decoders extra; the reference tests skip until it is
 installed. The yaml refusals need no wheel.
 """
 
-import dataclasses
-
 import numpy
 import pytest
 import stim
 
-import decsim.config as config
 import decsim.decoders.decoder as decoder_module
-import decsim.decoders.settings as decoder_settings
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.tesseract.window_decoder as tesseract_window
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -225,52 +221,6 @@ def test_a_fixed_detector_order_seed_replaces_the_run_seed():
     assert built.config.det_orders == orders
 
 
-def test_the_tier_sections_keys_reach_the_rows_settings():
-    section = {
-        "kind": "tesseract",
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "decoder",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 1,
-            "release_cycles_per_round": 0,
-        },
-        "detector_beam": 7,
-        "beam_climbing": False,
-        "no_revisit_detectors": False,
-        "priority_queue_limit": 50_000,
-        "detector_order_method": "breadth_first",
-        "detector_order_count": 3,
-        "detector_order_seed": 2384753,
-        "merge_errors": True,
-    }
-    clocks = config.ClockSettings({"decoder": 250.0})
-    tier = decoder_settings.DecoderPoolSettings.from_yaml(
-        section, clocks, "strong_decoder"
-    )
-    expected = dataclasses.replace(SETTINGS, detector_order_seed=2384753)
-    assert tier.algorithm == expected
-
-
-def test_a_section_with_no_keys_keeps_the_short_beam_profile():
-    """The defaults are the values the row was hard-wired to before."""
-    settings = tesseract.TesseractDecoder.Settings.from_yaml(
-        {}, None, "weak_decoder"
-    )
-    assert settings == tesseract.TesseractDecoder.Settings(
-        detector_beam=15,
-        beam_climbing=True,
-        no_revisit_detectors=True,
-        priority_queue_limit=200_000,
-        detector_order_method="index",
-        detector_order_count=16,
-        detector_order_seed=None,
-        merge_errors=False,
-    )
-
-
 @pytest.mark.parametrize(
     ("key", "value", "sentence"),
     [
@@ -282,9 +232,6 @@ def test_a_section_with_no_keys_keeps_the_short_beam_profile():
         ("detector_beam", -1, "at least 0"),
         ("priority_queue_limit", 0, "search states, at least 1"),
         ("detector_order_count", True, "orders, at least 1"),
-        ("beam_climbing", 1, "must be true or false"),
-        ("no_revisit_detectors", None, "must be true or false"),
-        ("merge_errors", 1, "must be true or false"),
         ("detector_order_method", "random", "is not a row of its table"),
         ("detector_order_seed", -1, "must be None or a whole number from 0"),
         ("detector_order_seed", 1.5, "must be None or a whole number from 0"),
@@ -295,16 +242,14 @@ def test_a_section_with_no_keys_keeps_the_short_beam_profile():
 def test_a_search_key_of_the_wrong_type_or_range_is_refused(
     key: str, value, sentence: str
 ) -> None:
-    """A count is a whole number, a switch a boolean, a method a row.
+    """A count is a whole number, a method a row.
 
     A detector-order seed is the uint64 build_det_orders takes
     (tesseract-decoder src/utils.h:42-45).
     """
-    section = {key: value}
-    with pytest.raises(ValueError, match=f"weak_decoder.{key} .*{sentence}"):
-        tesseract.TesseractDecoder.Settings.from_yaml(
-            section, None, "weak_decoder"
-        )
+    fields = {key: value}
+    with pytest.raises(ValueError, match=f"{key} .*{sentence}"):
+        tesseract.TesseractDecoder.Settings(**fields)
 
 
 def test_a_row_with_a_fixed_order_seed_names_no_run_seed_owner_but_timing():
@@ -384,7 +329,7 @@ def test_a_measured_decode_charges_the_search_and_not_the_build(monkeypatch):
 
 
 def test_a_beam_the_backend_cannot_build_leaves_the_shot_unscored():
-    """The yaml takes a beam of 2**31, which the backend's build refuses.
+    """The record takes a beam of 2**31, which the backend's build refuses.
 
     TesseractConfig takes det_beam as a C++ int (tesseract-decoder
     src/tesseract.pybind.h:57), so the build raises at compile and again
@@ -392,10 +337,7 @@ def test_a_beam_the_backend_cannot_build_leaves_the_shot_unscored():
     exception as its reason, as a search that raises does.
     """
     pytest.importorskip("tesseract_decoder")
-    section = {"detector_beam": 2**31}
-    settings = tesseract.TesseractDecoder.Settings.from_yaml(
-        section, None, "strong_decoder"
-    )
+    settings = tesseract.TesseractDecoder.Settings(detector_beam=2**31)
     row = tesseract.TesseractDecoder(settings=settings)
     circuit = windows.memory_circuit(3, ROUNDS, 0.005)
     model = windows.whole_circuit_window(

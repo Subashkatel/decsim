@@ -141,11 +141,14 @@ def _wire_ticks(channel, bits: int) -> int:
 
 
 @pytest.mark.parametrize(
-    "card_name, echo_bits, echo_microseconds",
-    [("roce_v2_gpu", 128, 4.5), ("nvqlink_gpu", 256, 3.839)],
+    "profile, echo_bits, echo_microseconds",
+    [
+        (link_profiles.roce_v2_measured_profile("gpu"), 128, 4.5),
+        (link_profiles.nvqlink_measured_profile(), 256, 3.839),
+    ],
 )
 def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
-    card_name, echo_bits, echo_microseconds
+    profile, echo_bits, echo_microseconds
 ):
     """Backline 2609.09270 Table III, 4.5 us; NVQLink 2510.25213, 3.839 us.
 
@@ -155,8 +158,6 @@ def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
     nothing is counted twice.
     """
     pytest.importorskip("relay_bp")
-    card = link_profiles.LINK_FABRICS[card_name]
-    profile = card.base_card()
     settings = dispatch_steps.DispatchStepsSettings("gh200", "device")
     backend = dispatch_steps.DispatchSteps(settings)
     job = _region_job()
@@ -175,13 +176,11 @@ def test_the_fire_is_the_graph_round_trip_less_the_echo_it_holds():
 
 
 def test_an_a100_device_path_is_refused_naming_the_cards():
-    section = {"device": "a100", "path": "device"}
+    fields = {"device": "a100", "path": "device"}
     with pytest.raises(ValueError) as refusal:
-        dispatch_steps.DispatchStepsSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
+        dispatch_steps.DispatchStepsSettings(**fields)
     assert str(refusal.value) == (
-        "strong_decoder.device 'a100' with path 'device' has no card in "
+        "device 'a100' with path 'device' has no card in "
         "dispatch_steps; the measured ones are [('a100', 'host'), "
         "('gh200', 'device'), ('gh200', 'host')] (the device path's graph "
         "fire is compiled for compute capability 9.0 and up, "
@@ -191,25 +190,20 @@ def test_an_a100_device_path_is_refused_naming_the_cards():
 
 def test_a_worker_count_of_true_is_refused_on_the_host_path():
     """A bool is refused though Python counts it an int."""
-    section = {"device": "gh200", "path": "host", "workers": True}
+    fields = {"device": "gh200", "path": "host", "workers": True}
     with pytest.raises(ValueError) as refusal:
-        dispatch_steps.DispatchStepsSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
+        dispatch_steps.DispatchStepsSettings(**fields)
     assert str(refusal.value) == (
-        "strong_decoder.workers must be a whole number of graph workers, "
-        "at least 1 (got True)"
+        "workers must be a whole number of graph workers, at least 1 (got True)"
     )
 
 
 def test_workers_on_the_device_path_are_refused():
-    section = {"device": "gh200", "path": "device", "workers": 4}
+    fields = {"device": "gh200", "path": "device", "workers": 4}
     with pytest.raises(ValueError) as refusal:
-        dispatch_steps.DispatchStepsSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
+        dispatch_steps.DispatchStepsSettings(**fields)
     assert str(refusal.value) == (
-        "strong_decoder.workers is the host path's; the device path "
+        "workers is the host path's; the device path "
         "decodes on its one dispatcher"
     )
 

@@ -6,34 +6,29 @@ job, so a strong backend's measured line prices the decode whether the
 referee checks it or not.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.decoders.decoders as decoders
+import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.verify_windows as verify_windows
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
-import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
+import decsim.settings as machine_settings
 import tests.decoders.windows as windows
-import tests.experiments.yaml_configs as yaml_configs
 
 
-def _algorithm_spans(folder, card: dict, check_windows_with: str) -> list:
-    """(start, end) ticks of every algorithm stage of one card's run."""
-    folder.mkdir()
-    observation = {"check_windows_with": check_windows_with}
-    checked_card = {**card, "observation": observation}
-    config_path = yaml_configs.write_config(folder, checked_card)
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 5,
-            "qpu.round_period_microseconds": 1.0,
-        },
+def _algorithm_spans(strong_algorithm) -> list:
+    """(start, end) ticks of every algorithm stage of one strong-only run."""
+    base = machine_settings.strong_decoder_baseline(5, 0.001, 1.0)
+    strong_decoder = dataclasses.replace(
+        base.strong_decoder, algorithm=strong_algorithm
     )
-    machine = machine_module.Machine.build(point.settings)
+    settings = dataclasses.replace(base, strong_decoder=strong_decoder)
+    machine = machine_module.Machine.build(settings)
     machine.run()
     records = machine.observation.stages.records
     return [
@@ -43,18 +38,14 @@ def _algorithm_spans(folder, card: dict, check_windows_with: str) -> list:
     ]
 
 
-def test_the_referee_leaves_a_measured_table_tiers_spans_unchanged(tmp_path):
+def test_the_referee_leaves_a_measured_table_tiers_spans_unchanged():
     pytest.importorskip("relay_bp")
     pytest.importorskip("tesseract_decoder")
-    strong_decoder = yaml_configs.strong_unit("measured_table")
-    strong_decoder["strong_decoder"]["device"] = "a100"
-    card = {"escalation": {"kind": "strong_only"}, **strong_decoder}
+    measured = measured_table.MeasuredTableDecoder.Settings(device="a100")
+    checked = verify_windows.TesseractCheckedDecoder.Settings(inner=measured)
 
-    unchecked_folder = tmp_path / "unchecked"
-    checked_folder = tmp_path / "checked"
-
-    unchecked_spans = _algorithm_spans(unchecked_folder, card, "none")
-    checked_spans = _algorithm_spans(checked_folder, card, "tesseract")
+    unchecked_spans = _algorithm_spans(measured)
+    checked_spans = _algorithm_spans(checked)
 
     assert len(unchecked_spans) > 0
     assert checked_spans == unchecked_spans
@@ -109,19 +100,3 @@ def test_the_referee_record_builds_the_referee_around_its_decoder():
 
     assert isinstance(referee, verify_windows.TesseractCheckedDecoder)
     assert isinstance(referee.inner, decoders.PresetLatencyDecoder)
-
-
-def test_the_yaml_check_wraps_the_decoder_of_the_window_tier(tmp_path):
-    """observation.check_windows_with wraps that tier's record, as today."""
-    observation = {"check_windows_with": "tesseract"}
-    config_path = yaml_configs.write_config(
-        tmp_path, {"observation": observation}
-    )
-    config = experiment.load_experiment(config_path)
-
-    point = config.first_point_task()
-    settings = point.settings
-
-    checked = settings.weak_decoder.algorithm
-    assert isinstance(checked, verify_windows.TesseractCheckedDecoder.Settings)
-    assert settings.strong_decoder is None

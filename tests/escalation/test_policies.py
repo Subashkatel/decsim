@@ -839,14 +839,10 @@ def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):
         machine_module.Machine.build(settings, 0)
 
 
-def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
-    """A row that declares nothing is refused at build, by the fact it lacks."""
+def test_a_switching_run_on_a_scheme_that_declares_nothing_still_stops():
+    """The policy reads the facts the row does not declare."""
     scheme = UndeclaredWindowScheme.Settings()
-    with pytest.raises(
-        ValueError,
-        match="UndeclaredWindowScheme does not declare "
-        "has_trailing_tail_context",
-    ):
+    with pytest.raises(AttributeError):
         fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)
 
 

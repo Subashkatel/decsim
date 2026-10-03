@@ -52,9 +52,8 @@ def write(
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
-    facts are the piece's own lines of piece.json, beside the counts
-    read off its shots and the confidence it recorded
-    (report.confidence_shot_count_of). state is an adaptive point's
+    facts are the piece's own lines of piece.json, beside the confidence
+    it recorded (report.confidence_shot_count_of). state is an adaptive point's
     calibrator after the piece's last shot, which the point's next piece
     starts from; it is pickled beside the files and its sha256 goes in
     piece.json.
@@ -65,7 +64,6 @@ def write(
     staging.mkdir(parents=True)
     record = report.record_of(measurements)
     report.write_record(record, staging, None)
-    counts = _counts_of(record.shots)
     identity = run_folder.piece_identity()
     confidence_shot_count = report.confidence_shot_count_of(measurements)
     piece = {
@@ -73,7 +71,6 @@ def write(
         "first_seed": first_seed,
         "count": count,
         "confidence_shot_count": confidence_shot_count,
-        **counts,
         **facts,
         **identity,
     }
@@ -228,32 +225,3 @@ def _range_of(folder: pathlib.Path) -> tuple:
     last_seed = int(last_text)
     count = last_seed - first_seed + 1
     return (first_seed, count)
-
-
-def _counts_of(shots: list) -> dict:
-    """The piece's shot counts, the lines a planner reads without its rows.
-
-    core_seconds is the shots' own simulated wall time, the cost a
-    planner deals pieces by. The window status counts are the summary's
-    own sums (report.STATUS_SUMS), so a status reads without the rows
-    why a piece's shots went unscored, as sinter keeps its discards
-    beside its shots (sinter/_data/_task_stats.py:71).
-    """
-    scored_shots = _sum_of(shots, "is_scored")
-    counts = {
-        "scored_shots": scored_shots,
-        "failures": _sum_of(shots, "logical_failure"),
-        "unscored_shots": len(shots) - scored_shots,
-        "core_seconds": _sum_of(shots, "sim_wall_seconds"),
-    }
-    for name in report.STATUS_SUMS:
-        counts[name] = _sum_of(shots, name)
-    return counts
-
-
-def _sum_of(shots: list, column: str):
-    """One column summed over the piece's shot rows."""
-    values = []
-    for row in shots:
-        values.append(row[column])
-    return sum(values)

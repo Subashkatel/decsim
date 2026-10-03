@@ -114,7 +114,7 @@ SHOT_MAXES = (
     *LOAD_MAXES,
 )
 # the windows by final status and the replaced provisional ones left
-# uncorrected, summed per point and per piece (pieces.write)
+# uncorrected, summed per point
 STATUS_SUMS = (
     *measure.WINDOW_STATUS_COLUMNS,
     "provisional_no_correction_windows",

@@ -776,16 +776,13 @@ def _save_the_piece(
 ) -> None:
     """One unit's measurements saved as its piece.
 
-    The piece counts the rounds its shots ran, since a shot's cost grows
-    with its rounds, and the peak memory and the package versions of the
+    The piece records the peak memory and the package versions of the
     process that ran it. An adaptive point's piece keeps its calibrator
     as the unit's shots left it.
     """
     point_id = unit.task.strong_id()
     rows = outcome.rows
-    rounds = sum(row.executed_rounds for row in rows)
     piece_facts = {
-        "rounds": rounds,
         "peak_memory_mb": outcome.peak_memory_mb,
         "packages": outcome.module_versions,
     }

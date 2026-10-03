@@ -14,6 +14,8 @@ it reduces to. One microsecond is 1_000_000 ticks.
 
 import random
 
+import pytest
+
 import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
@@ -87,6 +89,25 @@ def test_a_frame_waits_for_the_credit_of_the_frame_c_places_before_it():
     assert transfer.serialization_ticks == 500
     assert transfer.queue_wait_ticks == 600
     assert transfer.serializer_end_ticks == 1100
+
+
+def test_a_credit_protocol_on_an_unbounded_wire_stops_at_its_first_frame():
+    """A frame has no wire time without a rate, so the first send stops."""
+    engine = decsim.engine.Engine()
+    clock = config.Clock(50)
+    hundred_bit_flits = flits(100)
+    protocol = credit_channel.CreditChannel.Settings(
+        hundred_bit_flits, 2, 2, clock
+    )
+    settings = link_settings.ChannelSettings(
+        "test", 300, None, "test", protocol
+    )
+    channel = credit_channel.CreditChannel(settings, engine)
+    delivered = []
+    send_at(engine, channel, 0, 500, 0, delivered)
+
+    with pytest.raises(AttributeError, match="input_bits_per_microsecond"):
+        engine.run()
 
 
 def test_with_credits_to_spare_whole_frames_cross_as_the_ideal_row_property():

@@ -98,7 +98,7 @@ class ChannelSettings:
     (credit_channel.py, reliable_channel.py); None is the ideal wire,
     the whole transfer on an unbounded buffer with nothing lost. A
     packet protocol cuts every message into frames of known size, so it
-    needs a bounded wire.
+    runs on a bounded wire; on an unbounded one its first frame stops.
     """
 
     name: str
@@ -117,12 +117,6 @@ class ChannelSettings:
         )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
-        if self.protocol is not None and self.capacity is None:
-            raise ValueError(
-                f"channel {self.name!r} runs a packet protocol, which cuts "
-                f"every message into frames of known size; give it a "
-                f"bounded wire (bits_per_cycle)"
-            )
 
 
 @dataclasses.dataclass(frozen=True)

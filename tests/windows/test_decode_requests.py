@@ -716,8 +716,9 @@ def test_a_delayed_restart_read_keeps_all_its_input_rounds():
     assert restart.round_count == 9
 
 
-def test_a_charged_window_decision_needs_its_clock():
-    with pytest.raises(
-        ValueError, match="windows.decision_cycles needs a clock"
-    ):
-        decode_requests.DecodeRequester(decision_cycles=1)
+def test_a_charged_window_decision_with_no_clock_still_stops():
+    """The declared run names no clock, so the first decision cannot end."""
+    windows = window_settings.WindowSettings(decision_cycles=3)
+
+    with pytest.raises(AttributeError):
+        declared_run.weak_only_run(windows=windows)

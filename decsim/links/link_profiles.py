@@ -8,10 +8,9 @@ bits over the rate, the law ns-3's point-to-point device times a packet
 by (point-to-point-net-device.cc:243). bandwidth_limited_profile keeps
 those latencies and provisions finite rates from the run's geometry so
 contention becomes measurable; capacity_scale sweeps the whole fabric.
-roce_v2_measured_profile is the reference card with the strong tier's
-off-board path priced by Backline's measured RoCE v2 round trip; it is
-the roce_v2_cpu and roce_v2_gpu rows. with_risc_q_weak_loop puts any
-card's weak loop on Liu et al.'s measured fiber network. path_card
+The roce_v2_cpu, roce_v2_gpu and nvqlink_gpu rows are the reference card
+with the strong tier's off-board path priced by a measured RoCE round
+trip. path_card
 prices one path in cycles of a clock, a per-transfer setup cost
 (setup_cycles_per_transfer) included, and from_yaml puts each of the
 yaml's own cards through it.
@@ -256,36 +255,6 @@ NVQLINK_SOURCE = (
 _NVQLINK_RATE_SOURCE = (
     "100 Gb/s, NVQLink 2510.25213 line 382 and Fig. 2 (lines 438-439), "
     "the FPGA's Ethernet link to the GPU host's NIC"
-)
-
-# Liu et al., arXiv 2603.16203, a QEC system built on RISC-Q: a leaf
-# node's syndrome aggregator sends a round to the root node's decoder
-# over fiber and the root's error distributor sends the correction back
-# (lines 892-904). Each latency is rounded up to whole cycles of the
-# 250 MHz reference clock.
-_RISC_Q_UPLINK_MICROSECONDS = 0.16  # 157 ns, 2603.16203 lines 895-897
-_RISC_Q_DOWNLINK_MICROSECONDS = 0.164  # 155 + 9 ns, 2603.16203 lines 903-904
-# four 10 Gb/s transceivers after 64b/66b coding, 38.788 Gb/s (lines
-# 971-975), at the 38.79 bits a 250 MHz cycle per lane a card writes
-_RISC_Q_FIBER_BITS_PER_MICROSECOND = 38_790
-_RISC_Q_UPLINK_SOURCE = (
-    "RISC-Q leaf to root over fiber, 157 ns (Liu 2603.16203 lines "
-    "895-897), up to 40 cycles of 250 MHz"
-)
-_RISC_Q_DOWNLINK_SOURCE = (
-    "RISC-Q root to leaf over fiber, 155 ns, and the leaf's error "
-    "distribution, 9 ns (Liu 2603.16203 lines 903-904)"
-)
-_RISC_Q_FIBER_RATE_SOURCE = (
-    "four 10 Gb/s transceivers after 64b/66b coding, 38.788 Gb/s "
-    "(Liu 2603.16203 lines 971-975)"
-)
-# The aggregator hands the decoder a whole input frame (lines 668-670),
-# so the decoder's read of the store is one on-chip cycle with no rate,
-# an estimate.
-_RISC_Q_FRAME_SOURCE = (
-    "one 250 MHz cycle on chip, an estimate: the aggregator hands the "
-    "decoder a whole frame (Liu 2603.16203 lines 668-670)"
 )
 
 # decsim prices one number per hop, so each leg of the round trip is
@@ -620,131 +589,44 @@ def bandwidth_limited_profile(
     )
 
 
-def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
+def _measured_round_trip_card(
+    round_trip_microseconds: float,
+    measurement_source: str,
+    rate_source: str,
+    echo_payload_bits: int,
+    row_name: str,
+) -> settings.FabricSettings:
     """The reference card with the strong path on a measured round trip.
 
-    Backline (arXiv 2609.09270, Sec. V-C and Table III) measures one
-    number: an FPGA controller writes into a coprocessor's memory over
-    RoCE v2 with a one-sided RDMA write, the coprocessor polls that
-    buffer and writes the reply back, and the controller times the whole
-    round trip in its own clock. The paper gives no per-direction
-    number, so the split below is decsim's rule rather than a
-    measurement: the controller's write into strong syndrome buffer, the
-    escalation request and the strong decoder's reply to the frame each
-    carry one half of the round trip, and the strong store's read into
-    the strong decoder is zero because the coprocessor polls a buffer in
-    its own memory. The three legs that cross the cable serialize their
-    bits at its 100 Gb/s (lines 1229-1230), and the measured round trip
-    already holds the 16-byte echo payload's time on it (line 1611), so
-    each leg's latency is its half less that time: an echo of that
-    payload, out, polled and back, takes the measured median exactly.
-
-    The card prices that median. It does not cover the first, warm-up
-    round trip, 4.64 us on the CPU path and 9.27 us on the GPU path, nor
-    the tails, which on the CPU path reach 2.420 us at P99, 2.475 us at
-    P99.999 and 2.590 us at the maximum, and on the GPU path 4.985 us,
-    5.255 us and 5.285 us. Every other hop keeps the number and the
-    source of logical_reference_profile.
-
-    Args:
-        coprocessor: "cpu" or "gpu", the two paths Backline measured.
+    Backline (arXiv 2609.09270, Sec. V-C and Table III) and NVQLink
+    (arXiv 2510.25213, Sec. 2.4) each measure one number: an FPGA
+    controller writes into a coprocessor's memory over RoCE, the
+    coprocessor polls that buffer and writes the reply back, and the
+    controller times the whole round trip in its own clock. Neither
+    gives a per-direction number, so the split is decsim's rule rather
+    than a measurement: the controller's write into the strong syndrome
+    buffer, the escalation request and the strong decoder's reply to the
+    frame each carry one half of the round trip, and the strong store's
+    read into the strong decoder is zero because the coprocessor polls a
+    buffer in its own memory. The three legs that cross the cable
+    serialize their bits at its 100 Gb/s, and the measured round trip
+    already holds the echo payload's time on it, so each leg's latency
+    is its half less that time: an echo of that payload, out, polled and
+    back, takes the measured median exactly. The card prices that
+    median, not a warm-up round trip nor the tail. Every other hop keeps
+    the number and the source of logical_reference_profile.
     """
-    round_trip_microseconds, measurement_source = _roce_v2_measurement(
-        coprocessor
-    )
     cable_rate = settings.CapacitySettings(
-        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
+        _OFF_BOARD_BITS_PER_MICROSECOND, rate_source
     )
     strong_paths = _roce_v2_strong_paths(
         round_trip_microseconds,
         measurement_source,
         cable_rate,
-        ROCE_V2_ECHO_PAYLOAD_BITS,
+        echo_payload_bits,
     )
     reference = logical_reference_profile()
-    row_name = f"roce_v2_{coprocessor}"
     return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
-
-
-def nvqlink_measured_profile() -> settings.FabricSettings:
-    """The reference card with the strong path on NVQLink's round trip.
-
-    NVQLink (arXiv 2510.25213, Sec. 2.4) measures one number the way
-    Backline does: an FPGA sends RoCE packets that land in GPU memory, a
-    persistent GPU kernel loops each back, and the FPGA times the round
-    trip, 3.839 us in the steady-state median (line 485). The split is
-    roce_v2_measured_profile's, on the 32-byte echo payload (lines
-    402-403) and the 100 Gb Ethernet link (line 382, Fig. 2): an echo of
-    that payload takes the median exactly.
-
-    The connection is unreliable by choice (lines 376-388), so a frame
-    is never retransmitted: the ideal protocol row, whose wire loses
-    nothing, since the 100G cables are engineered for a bit error rate
-    under 1e-15 (lines 381-383). No framing row is attached: the
-    measured round trip already holds the framing of its 32-byte RoCE
-    echo (line 403), and the credit row that carries a framing needs a
-    receive buffer and a credit latency the paper does not state. The
-    card prices the steady-state median, not the warm-up period at the
-    start of a run (lines 413-416, Fig. 4: a 95th percentile of 4.02 us)
-    nor the tail (standard deviation 35 ns, maximum 3.96 us, line 485).
-    """
-    cable_rate = settings.CapacitySettings(
-        _OFF_BOARD_BITS_PER_MICROSECOND, _NVQLINK_RATE_SOURCE
-    )
-    strong_paths = _roce_v2_strong_paths(
-        NVQLINK_ROUND_TRIP_MICROSECONDS,
-        NVQLINK_SOURCE,
-        cable_rate,
-        NVQLINK_ECHO_PAYLOAD_BITS,
-    )
-    reference = logical_reference_profile()
-    row_name = "nvqlink_gpu"
-    return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
-
-
-def with_risc_q_weak_loop(
-    card: settings.FabricSettings,
-) -> settings.FabricSettings:
-    """The card with its weak loop on Liu et al.'s measured fiber network.
-
-    The root's 20 ns of pre-decode work (arXiv 2603.16203 lines 897-899)
-    is the receiver's own, so the uplink leaves it out. Every other hop
-    keeps the given card's number.
-    """
-    fiber_rate = settings.CapacitySettings(
-        _RISC_Q_FIBER_BITS_PER_MICROSECOND, _RISC_Q_FIBER_RATE_SOURCE
-    )
-    uplink = _actual_path(
-        "controller_to_weak_buffer",
-        _RISC_Q_UPLINK_MICROSECONDS,
-        _RISC_Q_UPLINK_SOURCE,
-        ROUND_PAYLOAD_SOURCE,
-        fiber_rate,
-    )
-    controller_to_weak_buffer = dataclasses.replace(
-        uplink, excludes_receiver_processing=True
-    )
-    weak_buffer_to_weak_decoder = _actual_path(
-        "weak_buffer_to_weak_decoder",
-        _REFERENCE_CYCLE_MICROSECONDS,
-        _RISC_Q_FRAME_SOURCE,
-        DECODER_INPUT_PAYLOAD_SOURCE,
-    )
-    weak_decoder_to_frame = _actual_path(
-        "weak_decoder_to_frame",
-        _RISC_Q_DOWNLINK_MICROSECONDS,
-        _RISC_Q_DOWNLINK_SOURCE,
-        RESULT_PAYLOAD_SOURCE,
-        fiber_rate,
-    )
-    profile_name = f"{card.profile_name} with the risc_q weak loop"
-    return dataclasses.replace(
-        card,
-        controller_to_weak_buffer=controller_to_weak_buffer,
-        weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
-        weak_decoder_to_frame=weak_decoder_to_frame,
-        profile_name=profile_name,
-    )
 
 
 class LogicalReferenceFabric:
@@ -800,7 +682,13 @@ class RoceV2CpuFabric:
     @staticmethod
     def base_card() -> settings.FabricSettings:
         """The numbers a yaml's per-path cards override."""
-        return roce_v2_measured_profile("cpu")
+        return _measured_round_trip_card(
+            ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS,
+            ROCE_V2_CPU_SOURCE,
+            _OFF_BOARD_RATE_SOURCE,
+            ROCE_V2_ECHO_PAYLOAD_BITS,
+            "roce_v2_cpu",
+        )
 
 
 class RoceV2GpuFabric:
@@ -819,7 +707,13 @@ class RoceV2GpuFabric:
     @staticmethod
     def base_card() -> settings.FabricSettings:
         """The numbers a yaml's per-path cards override."""
-        return roce_v2_measured_profile("gpu")
+        return _measured_round_trip_card(
+            ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS,
+            ROCE_V2_GPU_SOURCE,
+            _OFF_BOARD_RATE_SOURCE,
+            ROCE_V2_ECHO_PAYLOAD_BITS,
+            "roce_v2_gpu",
+        )
 
 
 class NvqlinkGpuFabric:
@@ -835,8 +729,22 @@ class NvqlinkGpuFabric:
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
-        return nvqlink_measured_profile()
+        """The numbers a yaml's per-path cards override.
+
+        The connection is unreliable by choice (2510.25213 lines
+        376-388), so no frame is retransmitted: the ideal protocol row,
+        since the 100G cables are engineered for a bit error rate under
+        1e-15 (lines 381-383). The measured round trip already holds the
+        framing of its 32-byte echo (line 403), so no framing row is
+        attached.
+        """
+        return _measured_round_trip_card(
+            NVQLINK_ROUND_TRIP_MICROSECONDS,
+            NVQLINK_SOURCE,
+            _NVQLINK_RATE_SOURCE,
+            NVQLINK_ECHO_PAYLOAD_BITS,
+            "nvqlink_gpu",
+        )
 
 
 # links.kind names one of these rows: which numbers the section's
@@ -952,18 +860,6 @@ def with_path_latency(
     )
     changed = dataclasses.replace(path, channel=channel)
     return dataclasses.replace(links, **{path_name: changed})
-
-
-def _roce_v2_measurement(coprocessor: str) -> tuple:
-    """(round trip in microseconds, source) of one echo row of Table III."""
-    if coprocessor == "cpu":
-        return ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS, ROCE_V2_CPU_SOURCE
-    if coprocessor == "gpu":
-        return ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS, ROCE_V2_GPU_SOURCE
-    raise ValueError(
-        f"a measured RoCE v2 card names the coprocessor Backline echoed "
-        f"from, 'cpu' or 'gpu', not {coprocessor!r}"
-    )
 
 
 def _roce_v2_strong_paths(

@@ -12,7 +12,6 @@ RoCE v2 rows; Liu et al. 2603.16203 for the RISC-Q weak loop.
 """
 
 import ast
-import dataclasses
 import fractions
 import math
 import pathlib
@@ -285,10 +284,10 @@ def test_every_payload_source_that_names_a_field_names_a_real_one():
     bandwidth = link_profiles.bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
     provisioned = payload_sources_of(bandwidth)
     stated.extend(provisioned)
-    measured_cpu = link_profiles.roce_v2_measured_profile("cpu")
+    measured_cpu = link_profiles.RoceV2CpuFabric.base_card()
     measured_on_the_cpu_path = payload_sources_of(measured_cpu)
     stated.extend(measured_on_the_cpu_path)
-    measured_gpu = link_profiles.roce_v2_measured_profile("gpu")
+    measured_gpu = link_profiles.RoceV2GpuFabric.base_card()
     measured_on_the_gpu_path = payload_sources_of(measured_gpu)
     stated.extend(measured_on_the_gpu_path)
     unknown = _unknown_fields(stated, declared)
@@ -575,15 +574,15 @@ def _cites_backline(source: str) -> bool:
 
 
 @pytest.mark.parametrize(
-    ("measured_profile", "arguments", "echo_bits", "round_trip_microseconds"),
+    ("measured_row", "echo_bits", "round_trip_microseconds"),
     [
-        (link_profiles.roce_v2_measured_profile, ("cpu",), 128, 2.305),
-        (link_profiles.roce_v2_measured_profile, ("gpu",), 128, 4.5),
-        (link_profiles.nvqlink_measured_profile, (), 256, 3.839),
+        (link_profiles.RoceV2CpuFabric, 128, 2.305),
+        (link_profiles.RoceV2GpuFabric, 128, 4.5),
+        (link_profiles.NvqlinkGpuFabric, 256, 3.839),
     ],
 )
 def test_an_echo_of_the_measured_payload_takes_the_measured_round_trip(
-    measured_profile, arguments, echo_bits, round_trip_microseconds
+    measured_row, echo_bits, round_trip_microseconds
 ):
     """The paper's own echo, replayed on the card, is the paper's median.
 
@@ -594,7 +593,7 @@ def test_an_echo_of_the_measured_payload_takes_the_measured_round_trip(
     memory, and the reply back, each its latency and its bits' time on
     its wire.
     """
-    profile = measured_profile(*arguments)
+    profile = measured_row.base_card()
     out = profile.weak_decoder_to_strong_decoder
     poll = profile.strong_buffer_to_strong_decoder
     back = profile.strong_decoder_to_frame
@@ -623,9 +622,12 @@ def _crossing_ticks(path_settings, bits: int) -> int:
     return latency + wire_ticks
 
 
-@pytest.mark.parametrize("coprocessor", ["cpu", "gpu"])
+@pytest.mark.parametrize(
+    "measured_row",
+    [link_profiles.RoceV2CpuFabric, link_profiles.RoceV2GpuFabric],
+)
 def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
-    coprocessor,
+    measured_row,
 ):
     """Backline 2609.09270 lines 1229-1230: a 100 Gb direct-attach cable.
 
@@ -633,7 +635,7 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
     microsecond; the poll reads the coprocessor's own memory, so it
     crosses no cable and is unbounded.
     """
-    profile = link_profiles.roce_v2_measured_profile(coprocessor)
+    profile = measured_row.base_card()
     write = profile.controller_to_strong_buffer.channel.capacity
     escalation = profile.weak_decoder_to_strong_decoder.channel.capacity
     reply = profile.strong_decoder_to_frame.channel.capacity
@@ -649,8 +651,8 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
 def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
     """Only the four strong-side hops move: the rest is the default card."""
     reference = link_profiles.logical_reference_profile()
-    measured_cpu = link_profiles.roce_v2_measured_profile("cpu")
-    measured_gpu = link_profiles.roce_v2_measured_profile("gpu")
+    measured_cpu = link_profiles.RoceV2CpuFabric.base_card()
+    measured_gpu = link_profiles.RoceV2GpuFabric.base_card()
     unchanged = paths_outside_the_strong_side(reference)
     assert paths_outside_the_strong_side(measured_cpu) == unchanged
     assert paths_outside_the_strong_side(measured_gpu) == unchanged
@@ -663,7 +665,7 @@ def test_the_cpu_rows_strong_side_sources_cite_backline():
     "repository weak-to-strong model choice"; on this row it is a leg of
     a measured round trip and cites the paper it was read from.
     """
-    profile = link_profiles.roce_v2_measured_profile("cpu")
+    profile = link_profiles.RoceV2CpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_backline)
     assert cited == [
@@ -678,7 +680,7 @@ def test_the_cpu_rows_strong_side_sources_cite_backline():
 
 def test_the_gpu_rows_strong_side_sources_cite_backline():
     """The same four hops, read from the GPU echo row."""
-    profile = link_profiles.roce_v2_measured_profile("gpu")
+    profile = link_profiles.RoceV2GpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_backline)
     assert cited == [
@@ -706,12 +708,6 @@ def test_an_instruction_hop_moves_its_word_in_one_cycle(path):
     assert word_ticks == 4000
 
 
-def test_a_coprocessor_backline_did_not_echo_from_is_refused():
-    """The measurement covers two paths, and the refusal names them."""
-    with pytest.raises(ValueError, match="'cpu' or 'gpu'"):
-        link_profiles.roce_v2_measured_profile("fpga")
-
-
 def strong_buffer_source_of(built) -> str:
     """The source a run's traffic report kept for the strong-buffer hop."""
     snapshot = built.observation.traffic.snapshot()
@@ -724,7 +720,7 @@ def strong_buffer_source_of(built) -> str:
 
 def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
     """The four strong-side hops read one measurement, 2510.25213."""
-    profile = link_profiles.nvqlink_measured_profile()
+    profile = link_profiles.NvqlinkGpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_nvqlink)
     assert cited == [
@@ -737,7 +733,7 @@ def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
 
 def test_the_nvqlink_rows_strong_side_retransmits_nothing():
     """An unreliable connection by choice (2510.25213 lines 376-388)."""
-    profile = link_profiles.nvqlink_measured_profile()
+    profile = link_profiles.NvqlinkGpuFabric.base_card()
     strong_side = (
         profile.controller_to_strong_buffer,
         profile.weak_decoder_to_strong_decoder,
@@ -751,7 +747,7 @@ def test_the_nvqlink_rows_strong_side_retransmits_nothing():
 @pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)
 def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps(path):
     """NVQLink's 100 Gb Ethernet link (2510.25213 line 382, Fig. 2)."""
-    profile = link_profiles.nvqlink_measured_profile()
+    profile = link_profiles.NvqlinkGpuFabric.base_card()
     path_settings = profile.path_settings(path)
     capacity = path_settings.channel.capacity
     rate = capacity.input_bits_per_microsecond
@@ -760,7 +756,7 @@ def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps(path):
 
 def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
     reference = link_profiles.logical_reference_profile()
-    measured = link_profiles.nvqlink_measured_profile()
+    measured = link_profiles.NvqlinkGpuFabric.base_card()
     unchanged = paths_outside_the_strong_side(reference)
     assert paths_outside_the_strong_side(measured) == unchanged
 
@@ -809,41 +805,6 @@ def test_a_path_latency_that_rounds_to_no_ticks_is_refused():
 
     with pytest.raises(ValueError, match=sentence):
         link_profiles.with_path_latency(reference, "frame_to_controller", 1e-7)
-
-
-def test_the_risc_q_weak_loop_is_liu_et_als_fiber_network():
-    """Liu 2603.16203 lines 895-904 and 971-975.
-
-    The round goes up in 157 ns, 40 cycles of 250 MHz once rounded up,
-    and the correction comes back in 155 + 9 ns, 41 cycles, both at the
-    four transceivers' 38.788 Gb/s, held at 38.79 bits a lane a cycle.
-    The decoder reads its whole frame in one cycle with no rate.
-    """
-    reference = link_profiles.logical_reference_profile()
-    card = link_profiles.with_risc_q_weak_loop(reference)
-    uplink = card.controller_to_weak_buffer.channel
-    downlink = card.weak_decoder_to_frame.channel
-    frame_read = card.weak_buffer_to_weak_decoder.channel
-    uplink_rate = uplink.capacity.input_bits_per_microsecond
-    downlink_rate = downlink.capacity.input_bits_per_microsecond
-
-    assert uplink.propagation_latency_ticks == 40 * 4_000
-    assert downlink.propagation_latency_ticks == 41 * 4_000
-    assert (uplink_rate, downlink_rate) == (38_790, 38_790)
-    assert frame_read.propagation_latency_ticks == 4_000
-    assert frame_read.capacity is None
-
-
-def test_the_risc_q_weak_loop_keeps_every_other_hop_of_its_card():
-    measured = link_profiles.roce_v2_measured_profile("cpu")
-    card = link_profiles.with_risc_q_weak_loop(measured)
-    restored = dataclasses.replace(
-        card,
-        controller_to_weak_buffer=measured.controller_to_weak_buffer,
-        weak_buffer_to_weak_decoder=measured.weak_buffer_to_weak_decoder,
-        weak_decoder_to_frame=measured.weak_decoder_to_frame,
-    )
-    assert restored == measured
 
 
 def _cites_nvqlink(source: str) -> bool:

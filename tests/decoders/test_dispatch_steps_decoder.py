@@ -143,8 +143,8 @@ def _wire_ticks(channel, bits: int) -> int:
 @pytest.mark.parametrize(
     "profile, echo_bits, echo_microseconds",
     [
-        (link_profiles.roce_v2_measured_profile("gpu"), 128, 4.5),
-        (link_profiles.nvqlink_measured_profile(), 256, 3.839),
+        (link_profiles.RoceV2GpuFabric.base_card(), 128, 4.5),
+        (link_profiles.NvqlinkGpuFabric.base_card(), 256, 3.839),
     ],
 )
 def test_an_echo_on_a_published_card_costs_its_measured_round_trip(

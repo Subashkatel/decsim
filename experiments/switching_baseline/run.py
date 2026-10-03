@@ -54,6 +54,13 @@ ROUNDS_PER_SHOT = 100
 # a chosen cluster-gap threshold, not a calibrated point: the paper's
 # 20 dB is on the complementary gap
 THRESHOLD_DECIBELS = 20.0
+# the three strong-side legs that cross the cable to the host
+STRONG_CABLE_LEGS = (
+    "controller_to_strong_buffer",
+    "weak_decoder_to_strong_decoder",
+    "strong_decoder_to_frame",
+)
+EXPERIMENT_ONE_LINKS_SOURCE = "experiments/switching_baseline/run.py"
 SWITCHING_COLLECTION = decsim.CollectionSettings(
     max_failures=100, max_shots=5_000_000, min_shots=0, piece_rounds=5000
 )
@@ -200,16 +207,57 @@ def window_plan() -> window_settings.WindowSettings:
 
 
 def experiment_one_links() -> link_settings.FabricSettings:
-    """Backline's CPU round trip on the strong side, RISC-Q's on the weak.
+    """A measured RoCE v2 round trip on the strong side, fiber on the weak.
 
-    The four strong-side paths keep the roce_v2_cpu card: half the
-    2.305 us round trip on each leg that crosses the cable and nothing
-    for the host's poll (2609.09270 lines 35-36). The weak loop is
-    RISC-Q's measured fiber network (2603.16203), and the readout, the
-    decision and the pulse keep the reference card.
+    Each strong leg that crosses the 100 Gb/s cable is half the 2.305 us
+    median CPU echo (2609.09270 Table III, line 1627) less the 16-byte
+    echo's time on that cable (line 1611), and the host's poll of its
+    own memory costs nothing. The weak loop is a leaf-to-root fiber
+    network (2603.16203): a round goes up in 157 ns (lines 895-897) and
+    the correction comes back in 155 + 9 ns (lines 903-904), on four
+    lanes of 38.79 bits a 250 MHz cycle (lines 971-975), and the decoder
+    reads its whole frame in one cycle (lines 668-670), an estimate.
+    Every other hop keeps the reference card.
     """
-    roce = link_profiles.roce_v2_measured_profile("cpu")
-    return link_profiles.with_risc_q_weak_loop(roce)
+    links = link_profiles.logical_reference_profile()
+    leg_microseconds = 2.305 / 2 - 128 / 100_000
+    for path_name in STRONG_CABLE_LEGS:
+        links = link_profiles.with_path_latency(
+            links, path_name, leg_microseconds
+        )
+    # the uplink's latency leaves out the root's own 20 ns of work
+    # (lines 897-899); the other hops' numbers hold their receiver's
+    uplink = _fridge_path(links, "controller_to_weak_buffer", 40, 38.79)
+    frame_read = _fridge_path(links, "weak_buffer_to_weak_decoder", 1, None)
+    downlink = _fridge_path(links, "weak_decoder_to_frame", 41, 38.79)
+    poll = _fridge_path(links, "strong_buffer_to_strong_decoder", 0, None)
+    return dataclasses.replace(
+        links,
+        controller_to_weak_buffer=uplink,
+        weak_buffer_to_weak_decoder=_with_receiver(frame_read),
+        weak_decoder_to_frame=_with_receiver(downlink),
+        strong_buffer_to_strong_decoder=_with_receiver(poll),
+        profile_name="roce_v2_cpu with the risc_q weak loop",
+    )
+
+
+def _fridge_path(links, path_name, latency_cycles, bits_per_lane_cycle):
+    """One path in cycles of the chip clock, four lanes when it has a rate."""
+    lane_count = 1 if bits_per_lane_cycle is None else 4
+    return link_profiles.path_card(
+        links,
+        path_name,
+        clock=machine_settings.FRIDGE_CLOCK,
+        latency_cycles=latency_cycles,
+        bits_per_cycle=bits_per_lane_cycle,
+        source=EXPERIMENT_ONE_LINKS_SOURCE,
+        lane_count=lane_count,
+    )
+
+
+def _with_receiver(path: link_settings.PathSettings):
+    """The path whose latency holds its receiver's processing too."""
+    return dataclasses.replace(path, excludes_receiver_processing=False)
 
 
 def switching_baseline_points() -> list:

@@ -298,10 +298,10 @@ def test_the_tutorial_check_runs_the_pages_own_commands():
 @pytest.mark.parametrize(
     "shown_line, moved_line",
     [
-        (r"^(queue wait, mean: )[0-9.]+", r"\g<1>999.000"),
+        (r"^(3,15,50,)[0-9.]+", r"\g<1>99.9"),
         (r"^88\.424 ", "88.425 "),
     ],
-    ids=["summary timing", "trace tick"],
+    ids=["sweep column", "trace tick"],
 )
 def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
     shown_line, moved_line
@@ -321,26 +321,33 @@ def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
     assert len(moved_differences) == 1
 
 
-def test_a_wall_clock_tutorial_holds_its_counts_and_not_its_timings():
-    """first_run's load is the host's; its failure count is the seed's."""
+def test_a_wall_clock_tutorial_holds_its_qpu_tick_and_not_its_decode_tick():
+    """first_run's fully done is the host's; its execution done, the seed's."""
     check = _tool("check_tutorial_runs")
     tutorial = check.TUTORIALS[0]
     text, outputs = _page_and_its_own_output(check, tutorial.page)
-    new_load = re.sub(
-        r"^(load .*: )[0-9.]+", r"\g<1>99.99", text, count=1, flags=re.MULTILINE
+    new_fully_done = re.sub(
+        r"^(fully done: )[0-9]+", r"\g<1>99", text, count=1, flags=re.MULTILINE
     )
-    new_count = text.replace(
-        "logical failures: 0 of 2 scored shots",
-        "logical failures: 1 of 2 scored shots",
+    new_execution_done = re.sub(
+        r"^(execution done: )[0-9]+",
+        r"\g<1>99",
+        text,
+        count=1,
+        flags=re.MULTILINE,
     )
 
-    load_differences = check.page_differences(tutorial, new_load, outputs)
-    count_differences = check.page_differences(tutorial, new_count, outputs)
+    decode_differences = check.page_differences(
+        tutorial, new_fully_done, outputs
+    )
+    qpu_differences = check.page_differences(
+        tutorial, new_execution_done, outputs
+    )
 
     assert not tutorial.is_priced
-    assert new_load != text
-    assert load_differences == []
-    assert len(count_differences) == 1
+    assert new_fully_done != text
+    assert decode_differences == []
+    assert len(qpu_differences) == 1
 
 
 def _stub_git(tmp_path, status):

@@ -86,43 +86,18 @@ saves whole the moment it ends; step 5 shows what that buys. Shots
 inside a piece stay serial, which is what keeps a shot's result a
 function of its seed alone.
 
-The summary, from a run of it. Its counts are yours too; its ticks are
-that host's, because this config names a decoder rather than pricing
-one:
+It prints one line per point as the point finishes:
 
 ```
 {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
 {"qpu.distance": 5, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
 {"qpu.distance": 7, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
-qpu.distance: 3
-qpu.round_period_microseconds: 1.0
-workload.arguments.physical_error_probability: 0.003
-algorithm: pymatching
-load (service per window / window inter-arrival): 2.53
-logical failures: 16 of 400 scored shots
-logical error rate among scored shots: 0.04, 95% 0.023 to 0.0641 (cap)
-unscored shots: 0 of 400 (0)
-throughput: 0.412 rounds per us
-queue wait, mean: 12.764 us
-service time per window, mean: 7.593 us
-ready to frame commit: median 26.504 us, p99 55.052 us
-
-qpu.distance: 5
-...
-logical failures: 12 of 400 scored shots
-logical error rate among scored shots: 0.03, 95% 0.0156 to 0.0518 (cap)
-unscored shots: 0 of 400 (0)
-...
-qpu.distance: 7
-...
-logical failures: 8 of 400 scored shots
-logical error rate among scored shots: 0.02, 95% 0.00867 to 0.039 (cap)
-unscored shots: 0 of 400 (0)
-...
 ```
 
-Sixteen failures out of 400 at distance 3, twelve at distance 5, eight
-at distance 7. The logical error rate falls as the code gets bigger,
+Its `sweep.csv`, which step 3 reads, counts sixteen failures out of 400
+at distance 3, twelve at distance 5 and eight at distance 7. Those
+counts are yours too, since they follow from the seeds. The logical
+error rate falls as the code gets bigger,
 which is what a code below its threshold does: more physical qubits buy
 a better logical qubit.
 
@@ -160,8 +135,7 @@ qpu.distance,shots,logical_failures,state,logical_error_rate_estimate,logical_er
 7,400,8,cap,0.02,0.00867317036911831,0.03902627671162005
 ```
 
-The rows come in the sweep's order, distance 3, 5 and 7, the order the
-summary printed them. Each row's first columns name its point: its id,
+The rows come in the sweep's order, distance 3, 5 and 7. Each row's first columns name its point: its id,
 then one column per yaml path the sweep sets, here the error rate, the
 distance and the round period.
 

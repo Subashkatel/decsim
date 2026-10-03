@@ -108,29 +108,14 @@ decsim run configs/reference.yaml --out results/reference
 ```
 
 It first prints what the yaml resolved to, one line per component, then
-the summary of each point:
+one line per point as it finishes:
 
 ```
 {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 2 shots done (cap)
-qpu.distance: 3
-qpu.round_period_microseconds: 1.0
-workload.arguments.physical_error_probability: 0.001
-algorithm: pymatching
-load (service per window / window inter-arrival): 2.39
-logical failures: 0 of 2 scored shots
-logical error rate among scored shots: below 0.842 at 95% (cap)
-unscored shots: 0 of 2 (0)
-throughput: 0.449 rounds per us
-queue wait, mean: 2.603 us
-service time per window, mean: 7.158 us
-ready to frame commit: median 15.772 us, p99 22.726 us
-
-data movement: observation.data_movement was off, so this run counted no copies, references or moves
-
-every column: results/reference/sweep.csv
 ```
 
-Two new words:
+The numbers are in the folder's `sweep.csv`, one row per point, which
+step 5 reads. Two new words for its columns:
 
 - A **window** is a slice of rounds that one decode covers. A decoder
   does not wait for the whole run before deciding: it takes the rounds a
@@ -138,20 +123,19 @@ Two new words:
   about, and slides on. Here each shot's 15 rounds became four windows.
 - A **frame commit** is the moment the correction for a window is
   written into the **Pauli frame**, the running record of every
-  correction decided so far. `ready to frame commit` is therefore the
-  time from a window having all its rounds to its correction being
-  recorded, which is the reaction time this configuration achieves.
+  correction decided so far. The `buffer0_ready_to_frame_median_us`
+  column is therefore the time from a window having all its rounds to
+  its correction being recorded, which is the reaction time this
+  configuration achieves.
 
-`load` is the ratio of the time a window spends being decoded to the
-time between windows arriving. Above 1 the decoder cannot keep up, and
-work queues. It is above 1 here because PyMatching in Python on a
-small window is slow compared to one microsecond a round; the figure
-itself is this host's, like every tick in the block.
+The `load` column is the ratio of the time a window spends being
+decoded to the time between windows arriving. Above 1 the decoder
+cannot keep up, and work queues. PyMatching in Python on a small window
+is slow compared to one microsecond a round, so it is often above 1
+here; the value is this host's, like every tick of the row.
 
-`p99` is the 99th percentile: ninety-nine windows in a hundred finished
-within it. The `data movement` line says the run did not count copies,
-references and moves, because the key `data_movement` in the
-`observation` section of `configs/reference.yaml` is off by default.
+A `_p99_us` column is the 99th percentile: ninety-nine windows in a
+hundred finished within it.
 
 ## Step 4. Open the run folder
 
@@ -226,7 +210,7 @@ The row's first columns name its point. `point_id`, left out here, is a
 hash of every setting the point ran with, so two points that differ in
 any setting have two ids. After it comes one column per yaml path the
 sweep sets, named by that path, holding the point's value there: the
-lines the terminal printed at the top of the point's block. Every other
+values in braces on the point's progress line. Every other
 csv file of the folder names its rows the same way, so a table of any
 of them groups by a setting with no parsing.
 

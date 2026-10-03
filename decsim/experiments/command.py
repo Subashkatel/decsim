@@ -109,23 +109,16 @@ def _run_a_batch_task(parsed) -> None:
 
 
 def _collect(parsed) -> None:
-    """Every chosen point collected until it stops, then the summary."""
+    """Every chosen point collected until it stops."""
     import decsim.experiments.collect_command as collect_command
-    import decsim.experiments.report as report
 
-    run_dir, rows = collect_command.run_experiment(
+    collect_command.run_experiment(
         parsed.run_file,
         parsed.out,
         processes=parsed.processes,
         only=parsed.only,
         shot_count=parsed.shots,
     )
-    if not rows:
-        return
-    lines = report.terminal_lines(rows, run_dir)
-    text = "\n".join(lines)
-    print(text)
-    print(f"\nevery column: {run_dir}/sweep.csv")
 
 
 def _run_one_shot(parsed) -> None:

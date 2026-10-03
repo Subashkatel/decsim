@@ -82,15 +82,6 @@ def measured_shots(config_path, count, probability=0.001):
     return measurements
 
 
-def lines_starting_with(lines, opening):
-    """Every terminal line that opens with that label."""
-    found = []
-    for line in lines:
-        if line.startswith(opening):
-            found.append(line)
-    return found
-
-
 # the counters a shot splits over its paths, one share a row
 PATH_COLUMNS = (
     "copies",
@@ -296,34 +287,27 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
             ]
         },
     )
-    run_dir, rows = collect_command.run_experiment(silent_path)
-    lines = sweep_report.terminal_lines(rows, run_dir)
+    run_dir, _rows = collect_command.run_experiment(silent_path)
     movement_path = run_dir / "shot_data_movement.csv"
     point_path = run_dir / "data_movement.csv"
 
     assert not movement_path.exists()
     assert not point_path.exists()
-    assert lines[-1].startswith("data movement: observation.data_movement")
 
 
-def test_a_counting_run_writes_both_files_and_the_terminal_lines(
-    tmp_path, monkeypatch
-):
+def test_a_counting_run_writes_both_files(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
-    run_dir, rows = collect_command.run_experiment(config_path)
-    lines = sweep_report.terminal_lines(rows, run_dir)
-    copied = lines_starting_with(lines, "bits copied per shot")
-    moved = lines_starting_with(lines, "bits moved per shot")
+    run_dir, _rows = collect_command.run_experiment(config_path)
     movement_path = run_dir / "shot_data_movement.csv"
     point_path = run_dir / "data_movement.csv"
+    shot_rows = sweep_report.read_rows(movement_path)
+    copied = {row["memory_class"] for row in shot_rows if row["copy_bits"]}
+    moved = {row["memory_class"] for row in shot_rows if row["move_bits"]}
 
-    assert movement_path.exists()
     assert point_path.exists()
-    assert len(copied) == 1
-    assert len(moved) == 1
-    assert "on_chip" in copied[0]
-    assert "off_board" in moved[0]
+    assert "on_chip" in copied
+    assert "off_board" in moved
 
 
 def test_pieces_of_one_shot_fold_to_the_whole_runs_movement_rows(tmp_path):

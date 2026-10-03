@@ -62,21 +62,10 @@ decsim run configs/examples/priced_cards_example.yaml
 
 ```
 {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 20 shots done (cap)
-qpu.distance: 3
-qpu.round_period_microseconds: 1.0
-workload.arguments.physical_error_probability: 0.001
-algorithm: 1 us
-load (service per window / window inter-arrival): 0.36
-logical failures: 0 of 20 scored shots
-logical error rate among scored shots: below 0.168 at 95% (cap)
-unscored shots: 0 of 20 (0)
-throughput: 0.997 rounds per us
-queue wait, mean: 0.000 us
-service time per window, mean: 1.064 us
-ready to frame commit: median 1.076 us, p99 1.076 us
 ```
 
-`algorithm: 1 us` is the card. `load: 0.36` says the decoder is
+The point's `sweep.csv` row holds the numbers. Its `algorithm` column
+is the card, 1 microsecond. Its `load` of 0.36 says the decoder is
 comfortably ahead of the round rate, which is what a 1 microsecond
 decode against a 1 microsecond round with a distance 3 commit region
 should give. Compare that with the same sweep on a named decoder, whose
@@ -102,7 +91,7 @@ configuration and the seed.
 The decode does. A priced tier still decodes the window through
 PyMatching and still returns a correction, so the logical error rate is
 still measured; only the time it is charged comes from the card, so the
-logical failures above are real decodes.
+logical failures in `sweep.csv` are real decodes.
 
 If you want a run with no syndrome data at all, `qpu.kind: timing_only`
 emits payloads that state the code's size per round and carry no values,

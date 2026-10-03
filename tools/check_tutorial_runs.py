@@ -11,9 +11,8 @@ of the config and the seed, so each block is compared whole: the
 timings, the trace and the counts alike. On a page that names a decoder,
 a decode is charged the wall clock it took (decsim/decoders/decoder.py,
 decode_timed), so only the lines no clock moves are compared there: the
-logical failure counts, their rate and the unscored shots, the
-correctness check, the QPU's finishing
-tick, the decoded observable, and everything `cut` and `ls` print.
+correctness check, the QPU's finishing tick, the decoded observable,
+and everything `cut` and `ls` print.
 
 Run it from the repo root in an environment with the run extra:
 `python tools/check_tutorial_runs.py`.
@@ -35,8 +34,7 @@ CONFIGS = CHECKOUT / "configs"
 FENCE = "```"
 COMMAND_WORDS = ("decsim", "cut", "ls", "rm")
 CLOCK_FREE_LINE = re.compile(
-    r"^(?:terminal status|execution done|operation 1|logical failures"
-    r"|logical error rate among scored shots|unscored shots): "
+    r"^(?:terminal status|execution done|operation 1): "
 )
 
 
@@ -152,8 +150,9 @@ def run_commands(commands: list, scratch: pathlib.Path) -> list:
 def command_output(command: str, scratch: pathlib.Path) -> Printed:
     """What one command prints to the terminal; a failure stops the check.
 
-    The progress lines go to stderr and the summary to stdout, so the two
-    are read as one stream, unbuffered, in the order a terminal shows.
+    The progress lines go to stderr and a shot's narration to stdout, so
+    the two are read as one stream, unbuffered, in the order a terminal
+    shows.
     """
     environment = dict(os.environ)
     environment["PYTHONUNBUFFERED"] = "1"

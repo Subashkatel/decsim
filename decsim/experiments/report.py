@@ -332,37 +332,6 @@ def write_csv(rows: list, path: Path, swept: Optional[dict] = None) -> None:
         writer.writerows(rows)
 
 
-def terminal_lines(rows: list, report_dir: Path) -> list:
-    """The terminal summary: one labeled block per sweep point.
-
-    Full names, no abbreviations; the full record is sweep.csv. Under
-    each point come the bits its shots copied and moved, grouped by the
-    memory class the hop crossed, read back from the folder's
-    data_movement.csv. A run with observation.data_movement off wrote no
-    such file and says so once at the end, because a run that counted
-    nothing has no counts and a row of zeros would claim otherwise.
-    """
-    movement = _data_movement_of(report_dir)
-    point_ids = [row["point_id"] for row in rows]
-    swept = run_folder.swept_values(report_dir, point_ids)
-    blocks = []
-    for row in rows:
-        values = swept[row["point_id"]]
-        block = _terminal_block(row, values)
-        at_point = _movement_at_point(movement, row)
-        with_classes = _block_with_classes(block, at_point)
-        blocks.append(with_classes)
-    joined_blocks = "\n\n".join(blocks)
-    lines = joined_blocks.split("\n")
-    if not movement:
-        lines.append("")
-        lines.append(
-            "data movement: observation.data_movement was off, so this run "
-            "counted no copies, references or moves"
-        )
-    return lines
-
-
 def shot_data_movement_rows(measurements: list) -> list:
     """One row per shot per path: that shot's own copy and move counters.
 
@@ -1655,92 +1624,6 @@ def _add_tier_split_columns(row: dict, counts: dict, point: tuple) -> None:
         row[f"{prefix}_p99_us"] = percentile_of_counts(multiset, 0.99)
 
 
-def _terminal_block(row: dict, values: dict) -> str:
-    """One sweep point's terminal block, one labeled line per number.
-
-    The block opens with the point's value at each swept path. The
-    lines above the latency ones are columns every row has. The failures
-    and their rate are of the scored shots, which the rate's label says,
-    and the unscored shots are counted beside them. The latency lines
-    are the points the row holds (_points_held), because a row folded
-    from an older tree's folders holds only the points that tree
-    measured.
-    """
-    algorithm = row["algorithm"]
-    algorithm_text = _algorithm_text(algorithm)
-    unscored_fraction = row["unscored_shots"] / row["shots"]
-    rate_text = _terminal_rate_text(row)
-    lines = []
-    for path, value in values.items():
-        lines.append(f"{path}: {value}")
-    lines += [
-        f"algorithm: {algorithm_text}",
-        f"load (service per window / window inter-arrival): {row['load']:.2f}",
-        f"logical failures: {row['logical_failures']} of "
-        f"{row['scored_shots']} scored shots",
-        f"logical error rate among scored shots: {rate_text}",
-        f"unscored shots: {row['unscored_shots']} of {row['shots']} "
-        f"({unscored_fraction:.3g})",
-        f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
-    ]
-    latency_lines = _terminal_latency_lines(row)
-    lines.extend(latency_lines)
-    return "\n".join(lines)
-
-
-def _terminal_rate_text(row: dict) -> str:
-    """The estimate with its 95 percent limits and the prefix's state.
-
-    A cap with no failure has its upper limit alone, and a point with
-    no estimate, adaptive or unscored, says so.
-    """
-    state = row["state"]
-    rate = row["logical_error_rate_estimate"]
-    high = row["logical_error_rate_high"]
-    if rate is not None:
-        low = row["logical_error_rate_low"]
-        return f"{rate:.3g}, 95% {low:.3g} to {high:.3g} ({state})"
-    if high is not None:
-        return f"below {high:.3g} at 95% ({state})"
-    return f"none ({state})"
-
-
-def _terminal_latency_lines(row: dict) -> list:
-    """The block's latency lines, for the points the row holds.
-
-    A point the row does not hold gets no line at all, not a line of
-    zeros and not a placeholder, for the reason it gets no column
-    either (_points_held): a zero here would say the windows took no
-    time, when what happened is that nobody measured them. sinter
-    prints the same way, a counter a file does not carry being simply
-    absent from what the folded table shows
-    (.pydeps/sinter/_data/_task_stats.py:71, custom_counts is a
-    Counter[str]).
-    """
-    held = _points_held(row)
-    lines = []
-    if "queue_wait" in held:
-        lines.append(f"queue wait, mean: {row['queue_wait_mean_us']:.3f} us")
-    if "service" in held:
-        lines.append(
-            f"service time per window, mean: {row['service_mean_us']:.3f} us"
-        )
-    if "buffer0_ready_to_frame" in held:
-        lines.append(
-            f"ready to frame commit: median "
-            f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
-            f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us"
-        )
-    return lines
-
-
-def _algorithm_text(algorithm) -> str:
-    """A named algorithm as its name, a latency card as its microseconds."""
-    if isinstance(algorithm, str):
-        return algorithm
-    return f"{algorithm:g} us"
-
-
 def _paths_counted(counted: dict) -> list:
     """Every path one shot copied or moved along, in path order."""
     paths = set(counted["copies_by_path"])
@@ -1806,51 +1689,6 @@ def _movement_row(
         held = movement.by_shot.sums[counter]
         row[f"{counter}_per_shot"] = held / shots
     return row
-
-
-def _data_movement_of(report_dir: Path) -> list:
-    """A folder's per-point data-movement rows, empty when it wrote none."""
-    path = Path(report_dir) / "data_movement.csv"
-    if not path.is_file():
-        return []
-    return read_rows(path)
-
-
-def _movement_at_point(movement: list, row: dict) -> list:
-    """The memory-class rows of one sweep point, in cost order."""
-    point = sweep_point_of(row)
-    found = []
-    for movement_row in movement:
-        if movement_row["grouping"] != "memory_class":
-            continue
-        if sweep_point_of(movement_row) == point:
-            found.append(movement_row)
-    return found
-
-
-def _block_with_classes(block: str, at_point: list) -> str:
-    """One point's block with its by-class bit lines under it."""
-    if not at_point:
-        return block
-    lines = [block]
-    copied = _class_bits_line("bits copied per shot", at_point, "copy_bits")
-    lines.append(copied)
-    moved = _class_bits_line("bits moved per shot", at_point, "move_bits")
-    lines.append(moved)
-    return "\n".join(lines)
-
-
-def _class_bits_line(label: str, at_point: list, counter: str) -> str:
-    """One line: a class and its bits per shot, the classes it crossed."""
-    named = []
-    for row in at_point:
-        bits = row[f"{counter}_per_shot"]
-        if bits:
-            named.append(f"{row['name']} {bits:.0f}")
-    if not named:
-        return f"{label} by memory class: none"
-    listed = ", ".join(named)
-    return f"{label} by memory class: {listed}"
 
 
 def _window_confidence_row(

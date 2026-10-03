@@ -424,9 +424,11 @@ def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
 
 def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
     """The seed text is the one the experiments layer's yaml points use."""
-    settings = threshold_sources.OnlineThreshold.Settings(20.0)
+    settings = threshold_sources.OnlineThreshold.Settings(
+        20.0, distance=5, physical_error_probability=0.003
+    )
 
-    source = settings.for_point(distance=5, physical_error_probability=0.003)
+    source = settings.for_point()
 
     expected = random.Random("online-threshold d=5 p=0.003")
     twenty_decibels = threshold_sources.decibels_to_nats(20.0)
@@ -435,8 +437,8 @@ def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
 
 
 def test_an_online_source_with_no_error_probability_is_refused():
-    settings = threshold_sources.OnlineThreshold.Settings(20.0)
+    settings = threshold_sources.OnlineThreshold.Settings(20.0, distance=5)
     sentence = "physical_error_probability=None"
 
     with pytest.raises(ValueError, match=sentence):
-        settings.for_point(distance=5, physical_error_probability=None)
+        settings.for_point()

@@ -93,12 +93,7 @@ class ThresholdSettings(Protocol):
     def threshold_nats(self) -> float:
         """The threshold as the weight a gap is compared in."""
 
-    def for_point(
-        self,
-        *,
-        distance: Optional[int],
-        physical_error_probability: Optional[float],
-    ) -> Optional[ports.ThresholdSource]:
+    def for_point(self) -> Optional[ports.ThresholdSource]:
         """The source a sweep point's shots share; None for most rows."""
 
     def build(self) -> ports.ThresholdSource:
@@ -333,9 +328,9 @@ def _threshold(
 
     A row that reads a calibration table takes the point's threshold
     from the csv's column, a relative csv path read from base_directory;
-    a row built once per sweep point takes the online card and its
-    starting threshold, and any other row the threshold alone, all in
-    decibels.
+    a row built once per sweep point takes the online card, its starting
+    threshold and the point's facts its seed reads, and any other row
+    the threshold alone, all in decibels.
     """
     gap_threshold_db = _gap_threshold_db(
         section, threshold_source, threshold_row
@@ -349,7 +344,11 @@ def _threshold(
             table_path, column, **point_facts
         )
     if threshold_row.built_per_sweep_point:
-        return threshold_row.Settings.from_yaml(online, gap_threshold_db)
+        distance = point_facts["distance"]
+        physical_error_probability = point_facts["physical_error_probability"]
+        return threshold_row.Settings.from_yaml(
+            online, gap_threshold_db, distance, physical_error_probability
+        )
     return threshold_row.Settings(threshold_decibels=gap_threshold_db)
 
 

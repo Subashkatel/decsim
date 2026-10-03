@@ -382,8 +382,8 @@ class ExperimentConfig:
         """
         path = self.config_files[0]
         with _refused_in(path):
-            resolved, settings, record_options = self._read_point(values)
-            task = _point_task_of(settings, resolved, values)
+            settings, record_options = self._read_point(values)
+            task = _point_task_of(settings, values)
             return dataclasses.replace(task, record_options=record_options)
 
     def experiment(self) -> Experiment:
@@ -478,7 +478,7 @@ class ExperimentConfig:
         return Experiment(self.name, (point,))
 
     def _read_point(self, values: Mapping) -> tuple:
-        """A point's resolved sections, its settings and record options."""
+        """A point's settings and record options, from its resolved sections."""
         resolved = self.resolved_sections(values)
         machine_sections, record_options = _split_record_options(resolved)
         settings = machine_settings.MachineSettings.from_mapping(
@@ -486,7 +486,7 @@ class ExperimentConfig:
             name=self.name,
             section_folders=self.section_folders,
         )
-        return resolved, settings, record_options
+        return settings, record_options
 
 
 def resolved_description(
@@ -697,34 +697,27 @@ def _shipped_experiment_names() -> list:
 
 
 def _point_task_of(
-    settings: machine_settings.MachineSettings,
-    resolved: dict,
-    values: Mapping,
+    settings: machine_settings.MachineSettings, values: Mapping
 ) -> collect.Task:
     """A point's task: its workload made, its online threshold source built.
 
-    The online source's seed reads the point's distance and error rate
-    from its resolved sections, so a point that sweeps neither still
-    finds them.
+    The online source's seed reads the point's facts off its threshold
+    record, which the yaml reader filled from the point's sections.
     """
     workload = settings.workload.made()
-    online_threshold = _online_threshold_of(settings.switching, resolved)
+    online_threshold = _online_threshold_of(settings.switching)
     point_settings = dataclasses.replace(settings, workload=workload)
     metadata = copy.deepcopy(dict(values))
     return collect.Task(point_settings, metadata, online_threshold)
 
 
 def _online_threshold_of(
-    switching: Optional[escalation_settings.SwitchingSettings], resolved: dict
+    switching: Optional[escalation_settings.SwitchingSettings],
 ) -> Optional[Any]:
     """The source the point's shots share, when its threshold row has one."""
     if switching is None:
         return None
-    facts = machine_settings.point_facts(resolved)
-    return switching.threshold.for_point(
-        distance=facts["distance"],
-        physical_error_probability=facts["physical_error_probability"],
-    )
+    return switching.threshold.for_point()
 
 
 def _split_record_options(resolved: dict) -> tuple:

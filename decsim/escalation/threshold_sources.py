@@ -117,14 +117,8 @@ class FixedThreshold:
             """The threshold as the weight a gap is compared in."""
             return decibels_to_nats(self.threshold_decibels)
 
-        def for_point(
-            self,
-            *,
-            distance: Optional[int],
-            physical_error_probability: Optional[float],
-        ) -> None:
+        def for_point(self) -> None:
             """A constant builds nothing shared across a point's shots."""
-            del distance, physical_error_probability
 
         def build(self) -> "FixedThreshold":
             """A fresh source at this threshold."""
@@ -452,7 +446,9 @@ class OnlineThreshold:
         audit_rate], because the audits reach the strong tier beside the
         target and max_escalation_rate bounds the strong duty they make
         together (OnlineThresholdController). Defaults are the validated
-        drift-replay configuration.
+        drift-replay configuration. distance and
+        physical_error_probability are the point's facts the audits'
+        random stream is seeded from, so they name the point too.
         """
 
         threshold_decibels: float
@@ -463,6 +459,8 @@ class OnlineThreshold:
         adjust_factor: float = 2.0
         min_escalation_rate: float = 1e-5
         max_escalation_rate: float = 0.30
+        distance: Optional[int] = None
+        physical_error_probability: Optional[float] = None
 
         def __post_init__(self) -> None:
             checked_decibels(self.threshold_decibels, "threshold_decibels")
@@ -472,11 +470,17 @@ class OnlineThreshold:
 
         @classmethod
         def from_yaml(
-            cls, section: Mapping, threshold_decibels: float
+            cls,
+            section: Mapping,
+            threshold_decibels: float,
+            distance: Optional[int],
+            physical_error_probability: Optional[float],
         ) -> "OnlineThreshold.Settings":
             """The `online` card, every key optional, from its start.
 
-            The card's step_db is the record's step_decibels.
+            The card's step_db is the record's step_decibels; distance
+            and physical_error_probability are the point's, as its yaml
+            writes them.
             """
             if not isinstance(section, Mapping):
                 raise ValueError(
@@ -492,7 +496,12 @@ class OnlineThreshold:
                     section, "escalation.online", key, default
                 )
             knobs["step_decibels"] = knobs.pop("step_db")
-            values = {"threshold_decibels": threshold_decibels, **knobs}
+            values = {
+                "threshold_decibels": threshold_decibels,
+                **knobs,
+                "distance": distance,
+                "physical_error_probability": physical_error_probability,
+            }
             return tables.section_record("escalation.online", cls, values)
 
         @property
@@ -504,12 +513,7 @@ class OnlineThreshold:
             """The step in natural-log weight units."""
             return decibels_to_nats(self.step_decibels)
 
-        def for_point(
-            self,
-            *,
-            distance: Optional[int],
-            physical_error_probability: Optional[float],
-        ) -> "OnlineThreshold":
+        def for_point(self) -> "OnlineThreshold":
             """The one instance a sweep point's shots share, point-seeded.
 
             Both loops are assembled here, where they are read: the rate
@@ -519,6 +523,8 @@ class OnlineThreshold:
             as they are written, so a rerun of the point draws the same
             audits.
             """
+            distance = self.distance
+            physical_error_probability = self.physical_error_probability
             _refuse_a_seed_with_no_fact(distance, physical_error_probability)
             step_nats = self.step_nats()
             tracker = EscalationRateTracker(
@@ -645,8 +651,13 @@ _ONLINE_DEFAULTS = {
 
 
 def _check_online_numbers(online) -> None:
-    """Every knob of the online card is a finite number."""
+    """Every knob of the online card is a finite number.
+
+    The point's facts are not knobs: for_point refuses a missing one.
+    """
     for field in dataclasses.fields(online):
+        if field.name in POINT_FACTS:
+            continue
         value = getattr(online, field.name)
         is_finite = config.is_number(value) and math.isfinite(value)
         if not is_finite:

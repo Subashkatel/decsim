@@ -26,6 +26,9 @@ import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect_command as collect_command
+import decsim.experiments.collection as collection_module
+import decsim.experiments.experiment as experiment
+import decsim.experiments.refusal as refusal
 import tests.experiments.yaml_configs as yaml_configs
 from decsim.experiments.experiment import load_experiment
 from tests.escalation.test_switching_mode import (
@@ -429,6 +432,70 @@ def test_the_online_seed_reads_its_distance_and_error_rate_by_path(tmp_path):
     assert generator.getstate() == expected.getstate()
 
 
+# Two error rates a Stim circuit prints alike: the lowered workloads
+# are one, and only the calibrator's seed text tells the points apart.
+PRINTED_ALIKE = (0.001, 0.0010000000000000002)
+
+
+def _online_task_at(tmp_path, folder_name: str, probability: float):
+    """The one point of an online switching yaml at this error rate.
+
+    The rate is written in the workload and not swept, so it is no
+    part of the point's metadata.
+    """
+    folder = tmp_path / folder_name
+    folder.mkdir()
+    card = {"threshold_source": "online", "gap_threshold_db": 20.0}
+    config_path = source_config(folder, card)
+    config_text = config_path.read_text()
+    raw = yaml.safe_load(config_text)
+    raw["qpu"]["round_period_microseconds"] = 1.0
+    raw["workload"]["arguments"]["physical_error_probability"] = probability
+    raw["sweep"] = [
+        {"axes": {"qpu.distance": [3]}, "collection": {"max_shots": 1}}
+    ]
+    edited_text = yaml.safe_dump(raw)
+    config_path.write_text(edited_text)
+    config = load_experiment(config_path)
+    return config.first_point_task()
+
+
+def _one_online_point(task) -> experiment.Experiment:
+    """The task as the one point of an experiment, under a fixed name."""
+    point = experiment.Point(
+        "online",
+        task.settings,
+        task.metadata,
+        online_threshold=task.online_threshold,
+    )
+    collection = collection_module.CollectionSettings(max_shots=1)
+    return experiment.Experiment("online", [point], collection)
+
+
+def test_two_online_points_whose_seeds_differ_have_two_ids(tmp_path):
+    """The seed text picks the windows the calibrator audits."""
+    plain_rate, nudged_rate = PRINTED_ALIKE
+    plain = _online_task_at(tmp_path, "plain", plain_rate)
+    nudged = _online_task_at(tmp_path, "nudged", nudged_rate)
+
+    assert plain.metadata == nudged.metadata
+    assert plain.strong_id() != nudged.strong_id()
+
+
+def test_a_folder_refuses_an_online_point_whose_seed_changed(tmp_path):
+    """Its pieces were drawn under the other seed, so none is reused."""
+    plain_rate, nudged_rate = PRINTED_ALIKE
+    plain = _online_task_at(tmp_path, "plain", plain_rate)
+    nudged = _online_task_at(tmp_path, "nudged", nudged_rate)
+    run_dir = tmp_path / "run"
+    first_study = _one_online_point(plain)
+    collect_command.recorded_points(run_dir, first_study)
+    second_study = _one_online_point(nudged)
+
+    with pytest.raises(refusal.RefusalError, match="recorded the point online"):
+        collect_command.recorded_points(run_dir, second_study)
+
+
 def test_online_source_learns_across_a_point_and_records_the_path(tmp_path):
     """One calibrator serves every shot of the point.
 
@@ -581,11 +648,8 @@ class _OutsideLearningThreshold(_OutsideCalibratedThreshold):
     class Settings(threshold_sources.OnlineThreshold.Settings):
         """The online row's record, building this row for a point."""
 
-        def for_point(
-            self, *, distance, physical_error_probability
-        ) -> "_OutsideLearningThreshold":
+        def for_point(self) -> "_OutsideLearningThreshold":
             """One instance of this row for the point."""
-            del distance, physical_error_probability
             return _OutsideLearningThreshold(self.threshold_nats)
 
 

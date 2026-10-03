@@ -36,11 +36,28 @@ FOLD_SHAPE = "--cpus-per-task=1 --mem=16G --time=12:00:00"
 
 @dataclasses.dataclass(frozen=True)
 class JobShape:
-    """What one array task asks Slurm for: cores, walltime and memory."""
+    """What one array task asks Slurm for: cores, walltime and memory.
+
+    Each is at least 1: sbatch reads a time limit of zero as no limit
+    and a memory of zero as all of each node's memory (sbatch(1),
+    --time and --mem), so a 0 would run a job nobody asked for.
+    """
 
     cores: int
     hours: int
     memory_mb: int
+
+    def __post_init__(self) -> None:
+        shape = {
+            "--cores": self.cores,
+            "--hours": self.hours,
+            "--memory-mb": self.memory_mb,
+        }
+        for flag, value in shape.items():
+            if value < 1:
+                raise refusal.RefusalError(
+                    f"{flag} must be at least 1, got {value}"
+                )
 
 
 def launch(

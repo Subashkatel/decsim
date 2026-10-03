@@ -1744,6 +1744,25 @@ def _named_library(path: pathlib.Path, digest) -> dict:
     return {str(absolute): digest}
 
 
+@pytest.mark.parametrize(
+    "flag, value", [("--cores", "0"), ("--hours", "0"), ("--memory-mb", "-1")]
+)
+def test_a_slurm_task_asking_for_no_core_hour_or_memory_is_refused(
+    tmp_path, capsys, flag, value
+):
+    """A task has a core, an hour and some memory, or nothing is written."""
+    run_file = run_files.write_run_file(tmp_path)
+    out_dir = tmp_path / "out"
+    arguments = [str(run_file), "--out", str(out_dir), "--slurm", "--dry-run"]
+
+    with pytest.raises(SystemExit):
+        command.main(["run", *arguments, flag, value])
+
+    printed = capsys.readouterr()
+    assert f"{flag} must be at least 1, got {value}" in printed.err
+    assert not out_dir.exists()
+
+
 def test_array_tasks_then_the_fold_write_the_local_runs_rows(tmp_path):
     """The referent is one local run of the same four points.
 

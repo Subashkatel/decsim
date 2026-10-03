@@ -248,6 +248,16 @@ def test_a_joint_footprint_uses_its_whole_route_or_the_default() -> None:
     assert delivery_ticks == [200, 300]
 
 
+def test_a_routed_readout_estimate_without_attribution_is_refused() -> None:
+    """Unrefused, the estimate would price the default path, not the route."""
+    engine = decsim.engine.Engine()
+    route = link_settings.ReadoutRoute(("left",), FREE_PATH)
+    fabric = fabric_with(engine, readout_routes=(route,))
+
+    with pytest.raises(RuntimeError):
+        fabric.expected_delay_ticks(PATH.QPU_TO_CONTROLLER, 8, 0)
+
+
 def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
     engine = decsim.engine.Engine()
     first_wire = bounded_path("first", 1000.0, 0)

@@ -68,6 +68,7 @@ SourceSettings = Union[
     syndrome_devices.SyndromeBitDevice.Settings,
     stim_device.RecordedStimDevice.Settings,
     streaming_stim_device.StreamingStimDevice.Settings,
+    stim_device.BurstStimDevice.Settings,
 ]
 # the settings record of whichever code card the run prices
 CodeCardSettings = Union[
@@ -87,10 +88,12 @@ class QpuSettings:
     syndrome_bits (seeded random bits shaped like the code's syndrome),
     recorded_stim (a released experiment's measurements replayed),
     streaming_stim (repeated Stim fragments executed as the controller
-    requests rounds). code_card is a card
-    row's Settings record (CODE_CARDS, above: rotated_surface, the
-    default, after Stim's generated surface_code:rotated_memory_z;
-    bivariate_bicycle, Bravyi et al. 2308.07915), which builds the card
+    requests rounds), and BurstStimDevice's record (stim_device sampling
+    each shot with one error burst the decoders are not told of).
+    code_card is a card row's Settings record (CODE_CARDS, above:
+    rotated_surface, the default, after Stim's generated
+    surface_code:rotated_memory_z; bivariate_bicycle, Bravyi et al.
+    2308.07915), which builds the card
     at distance, None being the card's own, with the windows record's
     commit and buffer sizes. layout builds which code every patch runs
     on, the uniform layout by default. error_model_provider is a circuit

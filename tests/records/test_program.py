@@ -29,6 +29,28 @@ def test_operation_magic_state_need_uses_override_then_clifford_fallback():
     assert demanded.needs_magic_state
 
 
+def test_operation_planning_view_snapshots_configuration_without_circuit():
+    """The view copies the tuples, omits the circuit, resolves the mode."""
+    circuit = object()
+    operation = make_operation(
+        qubits=["q0"],
+        patches=["patch"],
+        predecessors=[1],
+        decoder_boundary_predecessors=[2],
+        circuit=circuit,
+    )
+    view = program_records.OperationPlanningView.from_operation(operation)
+    operation.qubits.append("q1")
+
+    assert view.qubits == ("q0",)
+    assert view.patches == ("patch",)
+    assert view.predecessors == (1,)
+    assert view.decoder_boundary_predecessors == (2,)
+    assert view.feedback_boundary_mode == "trailing_buffer"
+    assert not hasattr(view, "circuit")
+    assert not hasattr(view, "needs_magic_state")
+
+
 def test_operation_planning_view_preserves_explicit_feedback_mode():
     """An operation's own feedback boundary mode beats the run's default."""
     operation = make_operation(feedback_boundary_mode="committed_region")

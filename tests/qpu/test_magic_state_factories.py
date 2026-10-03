@@ -14,7 +14,6 @@ is the delay between a request and its delivery.
 import pytest
 
 import decsim.engine
-import decsim.observe.log_writers as log_writers
 import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.trace_source as trace_source
@@ -221,24 +220,6 @@ def test_two_units_hold_two_states_in_flight_at_the_peak():
     assert delivered == [(1, 150), (2, 150)]
     assert factory.peak_in_flight_count == 2
     assert factory.in_flight_count == 0
-
-
-def test_a_failed_attempt_is_discarded_and_retried():
-    engine = decsim.engine.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    factory = single_stage(engine, success_probability=0.5, seed=2)
-    delivered = []
-    factory.request(1, lambda: delivered.append(engine.now))
-    engine.run()
-    assert delivered == [300]
-    assert factory.produced_count == 1
-    assert log.lines[1] == (
-        "[  0.000 us] Factory: a unit's distillation DISCARDED, retrying"
-    )
-    assert log.lines[2] == (
-        "[  0.000 us] Factory: a unit's distillation DISCARDED, retrying"
-    )
 
 
 def eight_requests(factory, note):

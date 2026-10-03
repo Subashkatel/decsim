@@ -539,6 +539,14 @@ def test_width_zero_restarts_on_the_round_after_the_strong_region():
     ]
 
 
+def test_a_re_read_width_with_no_referent_is_refused():
+    """Toshio 2510.25222 lines 1229-1235 allow 0 and 1; 2 would run on."""
+    with pytest.raises(ValueError, match="restart_reread_buffer_regions"):
+        strong_window_shapes.DoubleWindow.Settings(
+            restart_reread_buffer_regions=2
+        )
+
+
 def test_the_double_window_lands_in_the_declared_backlog_regime():
     """1 us rounds against a 10 us weak decode: W1 escalates with W2 landed.
 

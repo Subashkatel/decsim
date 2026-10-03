@@ -681,6 +681,60 @@ def test_one_calibrator_learns_across_every_shot_of_its_point():
     assert after_two_shots["windows"] == 2 * first_shot_windows
 
 
+class _OwnPointThreshold:
+    """A threshold row a study adds that builds its own source per point.
+
+    for_point is what built_per_sweep_point promises. This row keeps the
+    point's threshold in nats and learns nothing, which is all the law
+    needs: the instance the point's task builds is the one its shots run.
+    """
+
+    audits_by_escalating = False
+    reads_a_calibration_table = False
+    built_per_sweep_point = True
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings(threshold_sources.FixedThreshold.Settings):
+        """The fixed record, building this row's source once a point."""
+
+        def for_point(self, facts) -> "_OwnPointThreshold":
+            """One instance of this row for the point."""
+            del facts
+            return _OwnPointThreshold(self.threshold_nats)
+
+    def __init__(self, threshold_nats: float) -> None:
+        self.threshold_nats = threshold_nats
+
+    def decide_keep(self, job, result) -> bool:
+        """The gap against the threshold, both in nats."""
+        del job
+        return result.soft_output.gap >= self.threshold_nats
+
+    def learn_from_strong_result(self, window_key, result) -> None:
+        """A constant learns nothing."""
+        del window_key
+        del result
+
+
+def test_a_row_built_per_point_is_the_source_its_shots_decide_on():
+    """The task installs what for_point returns, whatever the row's name.
+
+    collect.Task keeps the record's for_point instance, and Machine.build
+    hands it to the policy it builds (build/escalation.py,
+    _threshold_source), so every shot of the point decides on it.
+    """
+    own = _OwnPointThreshold.Settings(20.0)
+    gate = _gate_on(own)
+    task = collect.Task(gate, {})
+
+    installed = task.online_threshold
+    shot = collect.run_shot(task, 0)
+
+    assert type(installed) is _OwnPointThreshold
+    assert installed.threshold_nats == own.threshold_nats
+    assert shot.machine.switching.policy.threshold is installed
+
+
 def test_an_online_point_reproduces_its_decisions():
     """The calibrator's random stream is seeded by the point's facts.
 

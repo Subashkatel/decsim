@@ -402,7 +402,6 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         window_tier,
         escalates,
         settings.clock,
-        plan,
         detection_events,
         signal,
     )

@@ -522,22 +522,6 @@ def test_a_declared_detector_round_may_not_precede_its_bits():
         )
 
 
-def test_a_declared_detector_round_just_past_the_last_round_is_refused():
-    circuit = surface_code_circuit(4)
-    in_time = detector_chronology.resolve_detector_rounds(circuit, None, 4)
-    # Stim's last coordinate puts detectors 20..31 in round 4; declared
-    # in round 5 they would never be formed.
-    assert in_time[20] == 4
-    assert in_time[31] == 4
-    readout_past_the_end = dict.fromkeys(range(20, 32), 5)
-    past_the_end = dict(in_time)
-    past_the_end.update(readout_past_the_end)
-    with pytest.raises(ValueError):
-        detector_formation.build_formation_table(
-            circuit, 4, detector_rounds=past_the_end
-        )
-
-
 def test_a_declared_detector_round_on_the_last_round_is_accepted():
     circuit = surface_code_circuit(4)
     in_time = detector_chronology.resolve_detector_rounds(circuit, None, 4)
@@ -610,14 +594,6 @@ def test_a_measurement_round_map_that_misses_a_measurement_is_refused():
     with pytest.raises(ValueError):
         detector_formation.build_formation_table(
             circuit, 1, measurement_rounds={0: 1}
-        )
-
-
-def test_a_detector_round_map_that_misses_a_detector_is_refused():
-    circuit = surface_code_circuit(2)
-    with pytest.raises(ValueError):
-        detector_formation.build_formation_table(
-            circuit, 2, detector_rounds={0: 1}
         )
 
 

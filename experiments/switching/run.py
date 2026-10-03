@@ -86,13 +86,19 @@ def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
 
 
 def redo_window_switching(distance: int) -> machine_settings.MachineSettings:
-    """PyMatching's complementary gap decides; belief matching redoes."""
+    """PyMatching's complementary gap decides; belief matching redoes.
+
+    The strong tier is the strong base's.
+    """
     base = machine_settings.weak_decoder_baseline(
         distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
-    strong_decoder = machine_settings.HOST_BELIEF_MATCHING_POOL
+    strong_base = machine_settings.strong_decoder_baseline(
+        distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
+    )
+    strong_decoder = strong_base.strong_decoder
     complementary_gap = complementary.ComplementaryGap.Settings()
     return _switching(base, complementary_gap, weak_decoder, strong_decoder)
 

@@ -368,17 +368,32 @@ _BASELINE_ROUNDS_PER_DISTANCE = 10
 _BELIEF_MATCHING = belief_matching.BeliefMatchingDecoder.Settings(
     max_iterations=30, belief_propagation_method="product_sum"
 )
-# the baselines' engine card, counted on the host's clock
+# The bases' engine: a round a cycle in and ten cycles to write the
+# correction out. No source states either count, so both are estimates.
+_ESTIMATED_ENGINE = decoder_settings.EngineSettings(
+    clock=FRIDGE_CLOCK,
+    fetch_cycles_per_round=1,
+    fetch_cycles_per_job=0,
+    release_cycles_per_job=10,
+    release_cycles_per_round=0,
+)
+# the same engine counted on the host's clock
 _HOST_ESTIMATED_ENGINE = dataclasses.replace(
-    decoder_settings.ESTIMATED_ENGINE, clock=ROOM_CLOCK
+    _ESTIMATED_ENGINE, clock=ROOM_CLOCK
+)
+# Matching's answer at the latency of a d = 3 lookup-table core, 7 cycles
+# at 250 MHz, 28 ns (LILLIPUT, 2108.06569 line 1070 and Table 4, text
+# lines 1088-1100). The core is a lookup table, so the card borrows its
+# time, not its answer.
+_TIMED_MATCHING = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+    preset_latency_microseconds=0.028
 )
 _UNBOUNDED_UNIT_MEMORY = decoder_settings.UnitMemorySettings(
     bits=None, word_bits=None
 )
 # Belief matching on one host unit with an unbounded memory, charged its
-# measured wall clock: the strong base's tier, and a strong tier a run
-# on the weak base escalates to.
-HOST_BELIEF_MATCHING_POOL = decoder_settings.DecoderPoolSettings(
+# measured wall clock: the strong base's tier.
+_HOST_BELIEF_MATCHING_POOL = decoder_settings.DecoderPoolSettings(
     algorithm=_BELIEF_MATCHING,
     unit_count=1,
     engine=_HOST_ESTIMATED_ENGINE,
@@ -406,9 +421,9 @@ def weak_decoder_baseline(
     )
     unit_memory = decoder_settings.UnitMemorySettings(bits=None, word_bits=None)
     weak_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=minimum_weight_perfect_matching.LILLIPUT_TIMED,
+        algorithm=_TIMED_MATCHING,
         unit_count=1,
-        engine=decoder_settings.ESTIMATED_ENGINE,
+        engine=_ESTIMATED_ENGINE,
         unit_memory=unit_memory,
         copies_input=True,
         copies_boundary_fold=True,
@@ -443,7 +458,7 @@ def strong_decoder_baseline(
     workload = memory_workload(
         distance, physical_error_probability, rounds_per_shot
     )
-    return _baseline(qpu, workload, links, None, HOST_BELIEF_MATCHING_POOL)
+    return _baseline(qpu, workload, links, None, _HOST_BELIEF_MATCHING_POOL)
 
 
 def one_cycle_strong_side(

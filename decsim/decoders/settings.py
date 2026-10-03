@@ -183,18 +183,6 @@ class EngineSettings:
             config.check_cycles(f"engine.{key}", cycles)
 
 
-_CLOCK_250_MEGAHERTZ = config.Clock.from_megahertz(250.0)
-# The shipped baselines' engine: one round a cycle in and ten cycles to
-# write the correction out. No source states either count.
-ESTIMATED_ENGINE = EngineSettings(
-    clock=_CLOCK_250_MEGAHERTZ,  # 2108.06569 Table 4
-    fetch_cycles_per_round=1,  # estimate
-    fetch_cycles_per_job=0,
-    release_cycles_per_job=10,  # estimate
-    release_cycles_per_round=0,
-)
-
-
 @dataclasses.dataclass(frozen=True)
 class DecoderPoolSettings:
     """One tier's pool of decoder units: the yaml's `<tier>_decoder` section.

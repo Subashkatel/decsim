@@ -57,6 +57,9 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 )
 
 CONFIGS_DIR = yaml_configs.CONFIGS_DIR
+# The run files examples/ ships, each run with `decsim run`.
+EXAMPLES_DIR = CONFIGS_DIR.parent / "examples"
+EXAMPLES = ("my_first_sweep.py", "priced_cards_example.py", "two_tiers.py")
 FOUR_POINT_SWEEP = {
     "sweep": [
         {
@@ -540,6 +543,24 @@ def test_run_shots_gives_the_first_shots_of_the_full_collection(tmp_path):
     seed_zero_rows = [row for row in full_rows if row["seed"] == "0"]
     assert len(full_rows) == 8
     assert first_rows == seed_zero_rows
+
+
+@pytest.mark.parametrize("name", EXAMPLES)
+def test_run_collects_a_first_shot_of_every_point_of_an_example(tmp_path, name):
+    example_path = EXAMPLES_DIR / name
+    study = experiment.load(example_path)
+    out_dir = tmp_path / "out"
+
+    command.main(
+        ["run", str(example_path), "--out", str(out_dir), "--shots", "1"]
+    )
+
+    shot_rows = _rows_without_wall_clock(out_dir, "shots.csv")
+    point_ids = {row["point_id"] for row in shot_rows}
+    seeds = {row["seed"] for row in shot_rows}
+    assert len(shot_rows) == len(study.points)
+    assert len(point_ids) == len(study.points)
+    assert seeds == {"0"}
 
 
 def test_run_seed_narrates_the_shot_of_the_point_only_names(tmp_path):

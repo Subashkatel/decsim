@@ -17,7 +17,9 @@ Clock, whose two methods are gem5's clockEdge and ticksToCycles
 current tick, and a span of ticks is rounded up to whole cycles.
 """
 
+import dataclasses
 import decimal
+from typing import Optional
 
 import pytest
 
@@ -75,6 +77,32 @@ def test_a_clock_from_no_positive_frequency_is_refused():
 def test_a_clock_faster_than_one_tick_is_refused():
     with pytest.raises(ValueError, match="has a period below one tick"):
         config.Clock.from_megahertz(3e6)
+
+
+@dataclasses.dataclass(frozen=True)
+class _PartSettings:
+    """A part's settings, which may name its own clock."""
+
+    clock: Optional[config.Clock] = None
+
+
+def test_settings_that_name_no_clock_run_on_the_machines():
+    """A part with no clock takes the machine's; one with a clock keeps it.
+
+    The two periods differ, so a fallback that handed every part the
+    machine's clock, or none, fails here; the lock's fridge and room are
+    both 250 MHz and cannot tell them apart.
+    """
+    machine_clock = config.Clock(4000)
+    own_clock = config.Clock(2000)
+    unclocked = _PartSettings()
+    clocked = _PartSettings(clock=own_clock)
+
+    on_the_machine = config.with_machine_clock(unclocked, machine_clock)
+    on_its_own = config.with_machine_clock(clocked, machine_clock)
+
+    assert on_the_machine.clock == machine_clock
+    assert on_its_own.clock == own_clock
 
 
 def test_a_cost_charged_mid_cycle_runs_from_the_next_edge():

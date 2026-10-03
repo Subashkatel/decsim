@@ -98,8 +98,9 @@ class WindowInputGate:
         make the work the seam costs follow the noise, a cost priced
         independent of the noise so that a sweep can read it. The mask
         is this side's: what a boundary is and how it lands on a round
-        layer are the window interaction's. Where the masked input is written is the decoder
-        side's, which is handed it here: with the copy fold the unit's
+        layer are the window interaction's. Where the masked input is
+        written is the decoder side's, which is handed it here: with the
+        copy fold the unit's
         stored rounds stay raw (cudaq-x keeps raw rounds and applies
         syndrome_mods at window assembly) and the job reads a masked
         duplicate; with the in-place fold the mask goes into the unit's

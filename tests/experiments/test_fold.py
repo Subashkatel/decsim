@@ -35,6 +35,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.records.decoding as decoding_records
+import tests.experiments.run_files as run_files
 import tests.experiments.yaml_configs as yaml_configs
 
 CANCELLING = (1e100, 1.0, -1e100, 1.0)
@@ -81,26 +82,15 @@ def _place_of(row):
     return int(row["place"])
 
 
-# A shot of the one point below runs fifteen QEC rounds: the reference
-# workload's rounds_per_shot, which its resolved record reads back.
-ROUNDS_PER_SHOT = 15
+# A shot of the one point below runs fifteen QEC rounds, the minimal
+# machine's, which its resolved record reads back.
+ROUNDS_PER_SHOT = run_files.ROUNDS_PER_SHOT
 
 
 def _one_point_config(folder, shots, piece_shots):
-    card = {
-        "collection": {"piece_rounds": piece_shots * ROUNDS_PER_SHOT},
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": [3],
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "collection": {"max_shots": shots},
-            }
-        ],
-    }
-    return yaml_configs.write_config(folder, card)
+    piece_rounds = piece_shots * ROUNDS_PER_SHOT
+    collection = {"max_shots": shots, "piece_rounds": piece_rounds}
+    return run_files.write_run_file(folder, collection=collection)
 
 
 def _pieces_of_one_point(tmp_path, shots, piece_shots):
@@ -739,9 +729,18 @@ def _rows_with_qpu_kind(rows, sweep, kind) -> list:
     return selected
 
 
+# the one point a confidence run collects
+CONFIDENCE_AXES = {
+    run_files.DISTANCE_PATH: (3,),
+    run_files.ROUND_PERIOD_PATH: (1.0,),
+    run_files.ERROR_RATE_PATH: (0.003,),
+}
+SWITCHING = {"machine": "switching"}
+EVERY_SHOT = {"confidence_shot_count": None}
+
+
 def test_a_switching_run_writes_both_confidence_files(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    run_dir = _confidence_run(tmp_path, overrides, 2)
+    run_dir = _confidence_run(tmp_path, SWITCHING, 2)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -755,9 +754,8 @@ def test_a_switching_run_writes_both_confidence_files(tmp_path):
 
 
 def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shot_count": "all"}
-    run_dir = _confidence_run(tmp_path, overrides, 3)
+    every = {**SWITCHING, "record_options": EVERY_SHOT}
+    run_dir = _confidence_run(tmp_path, every, 3)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -769,9 +767,8 @@ def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
 
 
 def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shot_count": 0}
-    run_dir = _confidence_run(tmp_path, overrides, 2)
+    none_sampled = {**SWITCHING, "record_options": {"confidence_shot_count": 0}}
+    run_dir = _confidence_run(tmp_path, none_sampled, 2)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -783,9 +780,8 @@ def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
 
 def test_pieces_fold_to_the_confidence_files_of_one_uncut_run(tmp_path):
     """Four one-shot pieces fold to the files one four-shot run writes."""
-    overrides = yaml_configs.fixed_threshold_switching()
-    uncut_dir = _confidence_run(tmp_path, overrides, 4, out="uncut")
-    pieces_dir = _confidence_run(tmp_path, overrides, 4, 1, out="pieces")
+    uncut_dir = _confidence_run(tmp_path, SWITCHING, 4, out="uncut")
+    pieces_dir = _confidence_run(tmp_path, SWITCHING, 4, 1, out="pieces")
     uncut_windows = uncut_dir / "window_confidence.csv"
     folded_windows = pieces_dir / "window_confidence.csv"
     uncut_histogram = uncut_dir / "confidence_histogram.csv"
@@ -808,10 +804,8 @@ def test_a_run_whose_escalation_reads_no_confidence_writes_neither_file(
 
 def test_a_piece_records_the_shots_its_confidence_rows_cover(tmp_path):
     """piece.json says what confidence it wrote: a count, all, or none."""
-    switching = yaml_configs.fixed_threshold_switching()
-    every = yaml_configs.fixed_threshold_switching()
-    every["observation"] = {"confidence_shot_count": "all"}
-    _confidence_run(tmp_path, switching, 1, out="sampled")
+    every = {**SWITCHING, "record_options": EVERY_SHOT}
+    _confidence_run(tmp_path, SWITCHING, 1, out="sampled")
     _confidence_run(tmp_path, every, 1, out="every")
     _confidence_run(tmp_path, {}, 1, out="plain")
 
@@ -833,8 +827,7 @@ def test_pieces_of_one_point_that_recorded_confidence_apart_are_refused(
     histogram would count fewer shots than the sweep row. The fold
     refuses and names the pieces, before it writes anything.
     """
-    overrides = yaml_configs.fixed_threshold_switching()
-    _confidence_run(tmp_path, overrides, 2, 1)
+    _confidence_run(tmp_path, SWITCHING, 2, 1)
     experiment_dir = tmp_path / "experiment"
     folders = _piece_folders(experiment_dir)
     older = folders[0]
@@ -933,25 +926,20 @@ def test_an_unscored_shot_is_in_neither_confidence_file():
 
 
 def _confidence_run(
-    tmp_path, overrides, shots, piece_shots=None, out="experiment"
+    tmp_path, arguments, shots, piece_shots=None, out="experiment"
 ):
-    """A one-point d3 collect of shots, in pieces if asked; its run folder."""
+    """A one-point d3 collect of shots, in pieces if asked; its run folder.
+
+    arguments are run_files.sweep's, the axes and collection aside.
+    """
+    collection = {"max_shots": shots}
     if piece_shots is not None:
-        piece_rounds = piece_shots * ROUNDS_PER_SHOT
-        overrides["collection"] = {"piece_rounds": piece_rounds}
-    overrides["sweep"] = [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.003],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": shots},
-        }
-    ]
-    config_path = yaml_configs.write_config(tmp_path, overrides)
+        collection["piece_rounds"] = piece_shots * ROUNDS_PER_SHOT
+    run_path = run_files.write_run_file(
+        tmp_path, axes=CONFIDENCE_AXES, collection=collection, **arguments
+    )
     experiment_dir = tmp_path / out
-    command.main(["run", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(run_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 

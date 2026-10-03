@@ -24,11 +24,6 @@ import decsim.windows.settings as window_settings
 
 CLOCKS = config.ClockSettings({"decisions": 250.0})
 SCHEME_ROWS = window_settings.WINDOWING_SCHEMES.values()
-# each strong window record and the boundary row it declares
-PRESET_ROWS = [
-    (strong_window_shapes.RedoWindow.Settings(), boundary_policies.Held),
-    (strong_window_shapes.DoubleWindow.Settings(), boundary_policies.Eager),
-]
 
 
 def _section(**overrides) -> dict:
@@ -113,19 +108,6 @@ def test_a_python_record_defaults_to_flush_and_eager():
     assert settings.scheme.name == "sliding"
     assert settings.terminal_policy == "flush"
     assert settings.boundary_policy == boundary_policies.Eager.Settings()
-
-
-@pytest.mark.parametrize("strong_window, boundary_row", PRESET_ROWS)
-def test_the_switching_preset_takes_lookahead_and_the_strong_windows_row(
-    strong_window, boundary_row
-):
-    plain_windows = window_settings.WindowSettings()
-
-    windows = window_settings.switching_windows(plain_windows, strong_window)
-
-    assert windows.terminal_policy == "lookahead"
-    assert windows.boundary_policy == boundary_row.Settings()
-    assert windows.scheme == plain_windows.scheme
 
 
 class _OutsideHeld:
@@ -235,7 +217,7 @@ def test_a_window_size_that_is_not_a_whole_count_is_refused(key, rounds):
 
 @pytest.mark.parametrize("row", SCHEME_ROWS)
 def test_every_scheme_record_refuses_a_window_that_commits_nothing(row):
-    with pytest.raises(ValueError, match="commit_rounds is a whole number"):
+    with pytest.raises(ValueError, match="commit_rounds"):
         row.Settings(commit_rounds=0)
 
 

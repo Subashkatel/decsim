@@ -41,10 +41,6 @@ class DecoderStage:
     cycles_per_job: int = 0
     cycles_per_round: int = 0
 
-    def __post_init__(self) -> None:
-        config.check_cycles("cycles_per_job", self.cycles_per_job)
-        config.check_cycles("cycles_per_round", self.cycles_per_round)
-
     def cycles_for(self, job: decoding_records.DecodeJob) -> int:
         """The stage's cycles for one job: per job plus per round."""
         round_cycles = self.cycles_per_round * job.round_count
@@ -110,12 +106,6 @@ class UnitTiming:
     def __post_init__(self) -> None:
         if self.clock.period_ticks < 1:
             raise ValueError("the unit's clock period must be at least a tick")
-        for stage in self.before + self.after:
-            if stage.name == ALGORITHM_STAGE:
-                raise ValueError(
-                    f"{ALGORITHM_STAGE!r} names the decoder itself, not a "
-                    "hardware stage"
-                )
 
     def stage_ticks(self, job: decoding_records.DecodeJob) -> dict:
         """Ticks per stage, by name.

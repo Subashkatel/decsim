@@ -12,6 +12,8 @@ the QPU is the QPU's own event, and the law for it is
 tests/qpu/test_cycle_clock.py.
 """
 
+import pytest
+
 import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.settings as controller_settings
@@ -77,3 +79,19 @@ def test_a_readout_landing_mid_cycle_is_charged_from_the_next_edge():
     # the crossing lands at 150_000, a quarter of the way into the first
     # microsecond, so the three cycles run from the edge at 1_000_000
     assert added[0] == 4_000_000
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "readout_to_bits_cycles",
+        "packing_cycles_per_round",
+        "decision_to_pulse_cycles",
+    ],
+)
+def test_a_negative_cycle_count_is_refused_by_its_name(key):
+    """A negative count would finish a stage before it started."""
+    sentence = f"controller.{key} must not be negative"
+
+    with pytest.raises(ValueError, match=sentence):
+        controller_settings.ControllerSettings(**{key: -1})

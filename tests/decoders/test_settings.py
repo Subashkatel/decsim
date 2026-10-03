@@ -562,7 +562,7 @@ def test_a_unit_memory_of_no_bits_is_refused_by_its_record():
 def test_toshios_pool_charges_tau_dec_for_every_round_of_the_job():
     """T_dec(r) = tau_dec r, 2510.25222 lines 968-971: 0.4 us x 10 rounds."""
     clock = config.Clock(period_ticks=4_000)
-    pool = decoder_settings.toshio_decoder_pool(0.4, clock)
+    pool = decoder_settings.toshio_decoder_pool(0.4, clock, solves_per_window=1)
     engine = pool.engine
     fetch = staged_decoder.MemoryFetchStage(
         "fetch",
@@ -584,4 +584,12 @@ def test_a_toshio_decode_time_off_the_clock_is_refused():
     """1 ns a round is a quarter of a 4 ns cycle."""
     clock = config.Clock(period_ticks=4_000)
     with pytest.raises(ValueError, match="not a whole number of cycles"):
-        decoder_settings.toshio_decoder_pool(0.001, clock)
+        decoder_settings.toshio_decoder_pool(0.001, clock, solves_per_window=1)
+
+
+def test_a_window_solved_twice_pays_half_of_toshios_time_on_each_solve():
+    """One unit, one time a round: 0.4 us over two solves is 50 cycles each."""
+    clock = config.Clock(period_ticks=4_000)
+    pool = decoder_settings.toshio_decoder_pool(0.4, clock, solves_per_window=2)
+
+    assert pool.engine.fetch_cycles_per_round == 50

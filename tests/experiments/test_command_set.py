@@ -139,6 +139,7 @@ def one_tree_reading_per_test(monkeypatch):
     """
     monkeypatch.setenv(run_folder.ALLOW_DIRTY_VARIABLE, "1")
     monkeypatch.delenv(run_folder.TREE_DIRTY_VARIABLE, raising=False)
+    monkeypatch.delenv(run_folder.TREE_PATCH_VARIABLE, raising=False)
     run_folder._tree_reading.cache_clear()
     yield
     run_folder._tree_reading.cache_clear()
@@ -1449,6 +1450,57 @@ def test_a_run_into_a_folder_of_another_commit_is_refused(tmp_path, capsys):
     assert run_path.read_text() == record_text
 
 
+def test_two_dirty_trees_of_one_commit_are_two_trees(
+    tmp_path, capsys, monkeypatch
+):
+    """A dirty tree is named by its commit and its patch's sha256.
+
+    One run file runs from two trees at one commit with other
+    uncommitted changes, each into its own folder, whose run.json names
+    the sha256 of its code_state.patch. The second tree's run into the
+    first folder is refused, and so is the fold of a point whose pieces
+    the two trees ran, as a piece copied in by hand leaves it.
+    """
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
+    _as_a_tree_with_the_patch(monkeypatch, "first edit\n")
+    command.main(["run", str(config_path), "--out", str(first_dir)])
+    _as_a_tree_with_the_patch(monkeypatch, "second edit\n")
+    command.main(["run", str(config_path), "--out", str(second_dir)])
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path), "--out", str(first_dir)])
+    run_refusal = capsys.readouterr().err
+    (first_piece,) = first_dir.glob("pieces/*/1-1")
+    (second_piece,) = second_dir.glob("pieces/*/1-1")
+    shutil.rmtree(first_piece)
+    shutil.copytree(second_piece, first_piece)
+    with pytest.raises(SystemExit):
+        command.main(["run", "--fold", "--out", str(first_dir)])
+    fold_refusal = capsys.readouterr().err
+
+    first_git = _manifest_of(first_dir)["git"]
+    second_git = _manifest_of(second_dir)["git"]
+    first_patch = (first_dir / "code_state.patch").read_bytes()
+    first_patch_sha256 = hashlib.sha256(first_patch).hexdigest()
+    assert first_git["patch_sha256"] == first_patch_sha256
+    assert first_git["commit"] == second_git["commit"]
+    assert first_git["patch_sha256"] != second_git["patch_sha256"]
+    assert f"patch {first_patch_sha256}" in run_refusal
+    assert "ran different code" in fold_refusal
+
+
+def _as_a_tree_with_the_patch(monkeypatch, patch_text: str) -> None:
+    """The tree read again, as one whose uncommitted code is patch_text."""
+    monkeypatch.setattr(
+        run_folder, "_code_state_patch", lambda _checkout: patch_text
+    )
+    run_folder._tree_reading.cache_clear()
+
+
 def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
     tmp_path, monkeypatch
 ):
@@ -1704,7 +1756,8 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
     )
     at_the_end = _manifest_of(out_dir)
 
-    assert at_the_start["git"] == {"commit": "aaaaaaa", "dirty": False}
+    assert at_the_start["git"]["commit"] == "aaaaaaa"
+    assert at_the_start["git"]["dirty"] is False
     assert at_the_end["git"] == at_the_start["git"]
     assert at_the_end["finished_utc"] is not None
 

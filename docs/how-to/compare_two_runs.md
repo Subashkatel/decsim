@@ -154,8 +154,10 @@ counts those windows in `referee_window_disagreements`.
   scored shot or a cap with no failure, has no comparison to make, and
   `diff` says so.
 - **The run record.** `run.json` in each folder carries the git
-  commit, whether the checkout was dirty, the library versions and the
-  command line. Two runs on different commits are two experiments.
+  commit, whether the checkout was dirty, the sha256 of its uncommitted
+  changes, the library versions and the command line. Two runs on
+  different commits, or on one commit with different changes, are two
+  experiments.
 - **The run file.** Each folder holds a verbatim copy of its run file,
   a yaml chain in `config/`. Diff those two folders before diffing the numbers.
 - **Whether either run measured a wall clock.** `latency_samples.csv`

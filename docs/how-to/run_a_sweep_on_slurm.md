@@ -44,8 +44,8 @@ cd ../decsim-pinned
 git cannot read. It checks once when you submit, and again in every
 task. `ALLOW_DIRTY=1` overrides the refusals.
 
-Every piece's `piece.json` records the commit and the dirty flag, so a
-result names its code. The interpreter decides which tree is imported,
+Every piece's `piece.json` records the commit, the dirty flag and the
+sha256 of the uncommitted changes, so a result names its code. The interpreter decides which tree is imported,
 not the directory you submit from. An environment installed with
 `pip install -e` from another checkout imports that checkout, so a
 worktree needs `PYTHONPATH` naming it.

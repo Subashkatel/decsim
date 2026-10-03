@@ -49,6 +49,9 @@ CONFIG_FOLDER = "config"
 # whose interpreter has no git of its own (a job script exports it):
 # "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
+# The sha256 of the code state patch the launcher saw, exported with
+# the dirty flag; empty when the tree was clean.
+TREE_PATCH_VARIABLE = "DECSIM_TREE_PATCH_SHA256"
 # Set, it lets a run go on from a tree git does not vouch for.
 ALLOW_DIRTY_VARIABLE = "ALLOW_DIRTY"
 # what open gives a new file before the umask filters it
@@ -152,12 +155,12 @@ def finish_run(
 
 
 def refuse_another_tree(run_dir: pathlib.Path) -> None:
-    """A folder whose run.json names another commit, or the same one dirty.
+    """A folder whose run.json names another commit, or other changes.
 
     A folder's rows pool the shots of every run into it, so they must
-    have run one simulator; a run asks before it writes anything. A
-    dirty flag nobody could read says nothing either way, so only two
-    read flags that differ are refused. A new folder from a tree whose
+    have run one simulator; a run asks before it writes anything. The
+    same commit clean against dirty, or dirty with another code state
+    patch, is another simulator too. A new folder from a tree whose
     commit cannot be read is refused unless ALLOW_DIRTY_VARIABLE is set,
     since its results could not say what ran.
     """
@@ -168,22 +171,39 @@ def refuse_another_tree(run_dir: pathlib.Path) -> None:
     recorded = read_json(run_path)
     recorded_git = recorded["git"]
     this_git = _git_state()
-    is_same_commit = recorded_git["commit"] == this_git["commit"]
-    flags = (recorded_git["dirty"], this_git["dirty"])
-    is_same_flag = None in flags or flags[0] == flags[1]
-    if is_same_commit and is_same_flag:
+    if _is_one_tree(recorded_git, this_git):
         return
     raise refusal.RefusalError(
         f"{run_dir} holds a run of commit {recorded_git['commit']} dirty "
-        f"{recorded_git['dirty']}, and this is commit {this_git['commit']} "
-        f"dirty {this_git['dirty']}; a folder holds one tree's results, so "
-        "give --out a new folder"
+        f"{recorded_git['dirty']} patch {recorded_git.get('patch_sha256')}, "
+        f"and this is commit {this_git['commit']} dirty {this_git['dirty']} "
+        f"patch {this_git['patch_sha256']}; a folder holds one tree's "
+        "results, so give --out a new folder"
     )
+
+
+def _is_one_tree(recorded_git: dict, this_git: dict) -> bool:
+    """One commit, and no dirty flag or patch hash read apart.
+
+    A flag or hash nobody could read (None) says nothing either way, so
+    only two read values that differ are refused. A run.json written
+    before the patch hash was recorded has none, which reads as None.
+    """
+    if recorded_git["commit"] != this_git["commit"]:
+        return False
+    for key in ("dirty", "patch_sha256"):
+        recorded_value = recorded_git.get(key)
+        this_value = this_git[key]
+        if None in (recorded_value, this_value):
+            continue
+        if recorded_value != this_value:
+            return False
+    return True
 
 
 def _refuse_an_unread_commit() -> None:
     """A tree whose commit neither git nor its .git files can name."""
-    commit, _is_dirty = _tree_reading()
+    commit, _is_dirty, _patch_sha256 = _tree_reading()
     if commit is not None or os.environ.get(ALLOW_DIRTY_VARIABLE):
         return
     checkout = _checkout()
@@ -204,12 +224,13 @@ def piece_identity() -> dict:
     process that ran the shots, with its measurements
     (collect.imported_module_versions).
     """
-    commit, is_dirty = _tree_reading()
+    commit, is_dirty, patch_sha256 = _tree_reading()
     python_version = platform.python_version()
     processor_model = _processor_model()
     return {
         "commit": commit,
         "dirty": is_dirty,
+        "patch_sha256": patch_sha256,
         "python": python_version,
         "host": platform.node(),
         "processor_model": processor_model,
@@ -234,6 +255,27 @@ def snapshot_code_state(
     if run_file is not None:
         _copy_the_run_file(run_file, run_dir)
     checkout = _checkout()
+    patch_text = _code_state_patch(checkout)
+    if patch_text is not None:
+        patch_path = run_dir / "code_state.patch"
+        patch_path.write_text(patch_text, encoding="utf-8")
+
+
+def code_state_sha256(checkout: pathlib.Path) -> Optional[str]:
+    """The sha256 of the tree's code_state.patch; None when it has none."""
+    patch_text = _code_state_patch(checkout)
+    if patch_text is None:
+        return None
+    patch_bytes = patch_text.encode("utf-8")
+    digest = hashlib.sha256(patch_bytes)
+    return digest.hexdigest()
+
+
+def _code_state_patch(checkout: pathlib.Path) -> Optional[str]:
+    """code_state.patch's text: git diff HEAD, then each untracked file.
+
+    None when the code is its commit's, or when git cannot answer.
+    """
     diff = _git_output(
         "git", "-C", str(checkout), "diff", "HEAD", *CODE_PATHSPEC
     )
@@ -244,11 +286,10 @@ def snapshot_code_state(
     for relative in untracked:
         patch = _untracked_patch(checkout, relative)
         patches.append(patch)
-    if patches:
-        patch_path = run_dir / "code_state.patch"
-        patch_text = "\n".join(patches)
-        patch_lines = patch_text + "\n"
-        patch_path.write_text(patch_lines)
+    if not patches:
+        return None
+    patch_text = "\n".join(patches)
+    return patch_text + "\n"
 
 
 def write_run_record(
@@ -892,16 +933,16 @@ def _git_state() -> dict:
     carries the decoder and the task's metadata in every row of its csv
     for the same reason (sinter/_data/_task_stats.py:196-204 through
     _data/_csv_out.py:56-65). decsim's run folder is where that belongs
-    here, so run.json names the commit and says whether the tree had
-    uncommitted changes.
+    here, so run.json names the commit, says whether the tree had
+    uncommitted changes, and hashes them.
     """
-    commit, is_dirty = _tree_reading()
-    return {"commit": commit, "dirty": is_dirty}
+    commit, is_dirty, patch_sha256 = _tree_reading()
+    return {"commit": commit, "dirty": is_dirty, "patch_sha256": patch_sha256}
 
 
 @functools.lru_cache(maxsize=1)
 def _tree_reading() -> tuple:
-    """(commit, dirty) of the tree this code came from, read once.
+    """(commit, dirty, patch sha256) of the tree this code came from, once.
 
     Read at the first ask, which every caller takes before its work,
     and reused by every later ask. A run writes run.json at its start
@@ -922,13 +963,14 @@ def _tree_reading() -> tuple:
     cached on it rather than recomputed per row
     (sinter/_data/_task.py:248-270).
 
-    The launcher's answer about dirtiness wins when it is given, because
-    the launcher looked at the tree as the job started, which is the
-    tree the process went on to import; this process's own git looks
-    later, and edits made after the import did not run. The container
-    image ships no git binary at all, which is why the commit falls back
-    to reading the tree's own git files and why the dirty flag is None
-    rather than clean when nobody could answer.
+    The launcher's answer about dirtiness and its patch's sha256 wins
+    when it is given, because the launcher looked at the tree as the job
+    started, which is the tree the process went on to import; this
+    process's own git looks later, and edits made after the import did
+    not run. The container image ships no git binary at all, which is
+    why the commit falls back to reading the tree's own git files and
+    why the dirty flag is None rather than clean when nobody could
+    answer.
     """
     checkout = _checkout()
     commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
@@ -937,7 +979,10 @@ def _tree_reading() -> tuple:
     is_dirty = _dirty_from_the_launcher()
     if is_dirty is None:
         is_dirty = _code_is_dirty(checkout)
-    return commit, is_dirty
+    patch_sha256 = os.environ.get(TREE_PATCH_VARIABLE)
+    if not patch_sha256:
+        patch_sha256 = code_state_sha256(checkout)
+    return commit, is_dirty, patch_sha256
 
 
 def fresh_tree_reading() -> tuple:

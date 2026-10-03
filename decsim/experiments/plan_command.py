@@ -106,10 +106,11 @@ def refuse_an_unnamed_tree() -> None:
     different tasks different code, and the pieces would name a commit
     none of them ran; a tree git cannot read cannot name its code at
     all. The reading is taken fresh, at submission and again in every
-    task, and handed to the run records through TREE_DIRTY_VARIABLE,
-    since a job's interpreter may have no git of its own. gem5 prints
-    its version, build date, host and command line at every start for
-    the same reason (gem5 src/python/m5/main.py:524-537).
+    task, and handed to the run records through TREE_DIRTY_VARIABLE and
+    TREE_PATCH_VARIABLE, since a job's interpreter may have no git of
+    its own. gem5 prints its version, build date, host and command line
+    at every start for the same reason
+    (gem5 src/python/m5/main.py:524-537).
     """
     checkout, commit, is_dirty = run_folder.fresh_tree_reading()
     dirty_text = _dirty_text(is_dirty)
@@ -118,6 +119,8 @@ def refuse_an_unnamed_tree() -> None:
     print(f"decsim commit: {commit_text}, dirty: {dirty_text}")
     if is_dirty is not None:
         os.environ[run_folder.TREE_DIRTY_VARIABLE] = dirty_text
+        patch_sha256 = run_folder.code_state_sha256(checkout)
+        os.environ[run_folder.TREE_PATCH_VARIABLE] = patch_sha256 or ""
     if os.environ.get(run_folder.ALLOW_DIRTY_VARIABLE):
         return
     if is_dirty:

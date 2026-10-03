@@ -15,10 +15,14 @@ import enum
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.experiments.yaml_configs as yaml_configs
 
 
@@ -148,11 +152,22 @@ def test_a_write_cost_refusal_names_its_yaml_path():
     )
 
 
-def test_a_charged_write_without_a_clock_is_refused():
-    engine = engine_module.Engine()
+def test_a_charged_write_with_no_clock_still_stops():
+    """A run that names no clock cannot land the first window's write."""
+    algorithm = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    workload = declared_run.declared_workload(None, 6)
+    qpu = declared_run.declared_qpu()
+    frame = pauli_frame_module.PauliFrameConfig(write_cycles=1, clock=None)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak, pauli_frame=frame
+    )
+    machine = machine_module.Machine.build(settings, 0)
 
-    with pytest.raises(ValueError):
-        pauli_frame_module.PauliFrame(engine, clock=None, write_cycles=1)
+    with pytest.raises(AttributeError):
+        machine.run()
 
 
 @pytest.mark.parametrize("key", ["clock", "write_cycles"])

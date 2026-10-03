@@ -231,13 +231,6 @@ class TableThreshold(FixedThreshold):
 
         def build(self) -> "TableThreshold":
             """A fresh source at the point's threshold, once it is read."""
-            if self.threshold_decibels is None:
-                raise ValueError(
-                    f"threshold_table {self.table} gives a point its "
-                    "threshold once the point's row is read: "
-                    "Machine.build and a point's task read it "
-                    "(settings.at_point())"
-                )
             return TableThreshold(self.threshold_nats)
 
 

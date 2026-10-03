@@ -14,47 +14,127 @@ import json
 
 import pytest
 
+import decsim.collect as collect
+import decsim.confidence.complementary as complementary
 import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
+import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.threshold_sources as threshold_sources
+import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
+import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.magic_state_factories as magic_state_factories
+import decsim.qpu.settings as qpu_settings
+import decsim.qpu.stim_device as stim_device
+import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
+import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
-import tests.experiments.test_measure as measure_tests
+import tests.escalation.test_strong_window_shapes as shape_tests
 import tests.observe.gate_point as gate_point
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 SEED = gate_point.SEED
 POINT_LOG_SHA256 = gate_point.POINT_LOG_SHA256
 
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
 _METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
-# the switching run's one-microsecond weak card
-ONE_MICROSECOND_WEAK = {
-    "kind": 1.0,
-    "unit_memory": {"bits": None},
-    "engine": {
-        "clock": "fridge",
-        "fetch_cycles_per_round": 1,
-        "fetch_cycles_per_job": 0,
-        "release_cycles_per_job": 10,
-        "release_cycles_per_round": 0,
-    },
+# the switching run's hops, in cycles of the fridge clock; the rest of
+# the card is the reference card's own
+SWITCHING_HOP_CYCLES = {
+    "qpu_to_controller": 1,
+    "controller_to_weak_buffer": 1,
+    "controller_to_strong_buffer": 1,
+    "weak_buffer_to_weak_decoder": 1,
+    "strong_buffer_to_strong_decoder": 2,
+    "weak_decoder_to_strong_decoder": 5,
+    "decoder_to_decoder": 1,
+    "weak_decoder_to_frame": 1,
+    "strong_decoder_to_frame": 3,
 }
-# the withdrawal run of test_measure: a five-microsecond weak card under
-# double_window, which takes back a queued request when it re-slices
-RE_SLICED_WINDOWS = {
-    "escalation": {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "double_window",
-    },
-    "weak_decoder": {
-        "kind": 5.0,
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": measure_tests.ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
-    },
-}
+FRIDGE_CLOCK = machine_settings.FRIDGE_CLOCK
+
+
+def switching_settings(
+    trace_path,
+    *,
+    weak_microseconds: float = 1.0,
+    weak_units: int = 1,
+    strong_units: int = 1,
+    run_both_at_once: bool = False,
+    strong_window=declared_run.REDO_WINDOW,
+) -> machine_settings.MachineSettings:
+    """A weak tier at a preset latency beside a 10 us strong one, traced.
+
+    PyMatching charged a fixed latency on both tiers, each unit fetching
+    a round a fridge cycle and releasing a job in ten, keeps a window
+    whose complementary gap is 20 dB or more; a d=3 memory of 30 rounds
+    at p 0.008, a round a microsecond.
+    """
+    engine = decoder_settings.EngineSettings(
+        clock=FRIDGE_CLOCK, release_cycles_per_job=10
+    )
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=_preset_matching(weak_microseconds),
+        unit_count=weak_units,
+        engine=engine,
+    )
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=_preset_matching(10.0),
+        unit_count=strong_units,
+        engine=engine,
+    )
+    stim = stim_device.StimDevice.Settings()
+    qpu = qpu_settings.QpuSettings(
+        source=stim, round_period_microseconds=1.0, distance=3
+    )
+    plain_windows = window_settings.WindowSettings()
+    windows = window_settings.switching_windows(plain_windows, strong_window)
+    threshold = threshold_sources.FixedThreshold.Settings(20.0)
+    switching = escalation_settings.SwitchingSettings(
+        confidence=complementary.ComplementaryGap.Settings(),
+        threshold=threshold,
+        run_both_at_once=run_both_at_once,
+        strong_window=strong_window,
+    )
+    pauli_frame = pauli_frame_module.PauliFrameConfig(
+        write_cycles=1, clock=FRIDGE_CLOCK
+    )
+    observation = observe_settings.ObservationSettings(trace=str(trace_path))
+    workload = machine_settings.memory_workload(3, 0.008, 30)
+    return machine_settings.MachineSettings(
+        clock=FRIDGE_CLOCK,
+        qpu=qpu,
+        links=_switching_links(),
+        windows=windows,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        switching=switching,
+        pauli_frame=pauli_frame,
+        workload=workload,
+        observation=observation,
+    )
+
+
+def _preset_matching(microseconds: float):
+    return minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=microseconds
+    )
+
+
+def _switching_links():
+    """The reference card with the switching run's hops on the fridge."""
+    reference = link_profiles.logical_reference_profile()
+    cards = {}
+    for path_name, cycles in SWITCHING_HOP_CYCLES.items():
+        cards[path_name] = shape_tests.one_cycle_path(
+            reference, path_name, FRIDGE_CLOCK, cycles
+        )
+    return dataclasses.replace(reference, **cards)
 
 
 def _settings(trace_path=None, data_movement=False):
@@ -302,16 +382,13 @@ def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
     decode's stages and no two of its stages overlap.
     """
     trace_path = tmp_path / "pair.trace.json"
-    observation = {"trace": str(trace_path)}
-    weak_decoder = {**ONE_MICROSECOND_WEAK, "units": 2}
-    sections = {"weak_decoder": weak_decoder, "observation": observation}
-    shot = measure_tests.switching_run(
-        tmp_path,
-        20.0,
-        run_both_at_once=run_both_at_once,
+    settings = switching_settings(
+        trace_path,
+        weak_units=2,
         strong_units=2,
-        sections=sections,
+        run_both_at_once=run_both_at_once,
     )
+    shot = collect.run_shot(collect.Task(settings, {}), 0)
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
     stages = _rows_with(complete_rows, "cat", "stage")
@@ -335,9 +412,11 @@ def test_a_withdrawn_request_leaves_the_queue_when_it_is_withdrawn(tmp_path):
     the end of the run.
     """
     trace_path = tmp_path / "withdrawn.trace.json"
-    observation = {"trace": str(trace_path)}
-    sections = {**RE_SLICED_WINDOWS, "observation": observation}
-    shot = measure_tests.switching_run(tmp_path, 20.0, sections=sections)
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    settings = switching_settings(
+        trace_path, weak_microseconds=5.0, strong_window=double_window
+    )
+    shot = collect.run_shot(collect.Task(settings, {}), 0)
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
     queued = _rows_with(complete_rows, "cat", "window,queue")

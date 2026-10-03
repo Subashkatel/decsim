@@ -5,6 +5,7 @@ import typing
 import pytest
 
 import decsim.config as config
+import decsim.decoders.minimum_weight_perfect_matching.decoder as matching
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
@@ -45,6 +46,26 @@ def test_a_unit_memory_of_no_bits_is_refused_by_its_record():
 
     with pytest.raises(ValueError, match=sentence):
         decoder_settings.UnitMemorySettings(bits=0)
+
+
+def test_a_unit_memory_word_of_no_whole_bits_is_refused_by_its_record():
+    """A fraction of a bit would price every fetch at a fraction of a word."""
+    sentence = "unit_memory.word_bits must be a whole number of bits"
+
+    with pytest.raises(ValueError, match=sentence):
+        decoder_settings.UnitMemorySettings(word_bits=2.5)
+
+
+def test_a_word_width_on_a_pool_that_reads_in_place_is_refused():
+    """The store prices that read; a width here would price it twice."""
+    algorithm = matching.PyMatchingDecoder.Settings()
+    memory = decoder_settings.UnitMemorySettings(word_bits=8)
+    sentence = "reads the rounds where the store keeps them"
+
+    with pytest.raises(ValueError, match=sentence):
+        decoder_settings.DecoderPoolSettings(
+            algorithm, unit_memory=memory, copies_input=False
+        )
 
 
 def test_a_linear_pool_charges_tau_dec_for_every_round_of_the_job():

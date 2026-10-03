@@ -107,17 +107,6 @@ class PointCollection:
         if self.tracker.stop_kind is not None:
             _say_the_point_stopped(self)
 
-    def count_the_saved(self, run_dir: pathlib.Path) -> None:
-        """The saved pieces from the next seed on, up to a gap, counted.
-
-        A plan and a status read a point's prefix this way, shot by
-        shot, as a collect reads it before it runs a piece.
-        """
-        prefix = pieces.contiguous_ranges(self.saved, self.next_seed)
-        for first_seed, count in prefix:
-            self._make_pending(first_seed, count)
-        self.count_the_pending(run_dir)
-
     def rule(self) -> collection_module.PointRule:
         """What the point's summary reads its prefix by."""
         is_adaptive = self.task.online_threshold is not None
@@ -365,7 +354,7 @@ def recorded_points(
     Every point's record is built first, which runs its build, so a
     point the build refuses stops the run before any shot, and a point
     whose name the folder holds for another machine is refused. Only
-    then are the records written, so a refused plan or collect leaves
+    then are the records written, so a refused launch or run leaves
     the results folder as it was. Returns each point's collection
     state, in the experiment's order.
     """

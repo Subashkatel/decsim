@@ -311,9 +311,10 @@ _WEAK_BASELINE_PATH_CLOCKS = {
     "frame_to_controller": FRIDGE_CLOCK,
     "controller_to_qpu": FRIDGE_CLOCK,
 }
-# The hops the strong base prices: the readout and both stores' writes
-# on the chip, the strong chain on the host. The weak chain and the
-# escalation keep the reference card.
+# The hops the strong base prices: the readout, the weak store's write,
+# the decision and the pulse on the chip; the strong store's write and
+# the strong chain on the host. The weak chain and the escalation keep
+# the reference card.
 _STRONG_BASELINE_PATH_CLOCKS = {
     "qpu_to_controller": FRIDGE_CLOCK,
     "controller_to_weak_buffer": FRIDGE_CLOCK,

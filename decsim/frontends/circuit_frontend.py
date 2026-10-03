@@ -130,9 +130,7 @@ def _stream_program(
     segments sample the owner's shot, so they carry its circuit too.
     """
     circuit = _finite_circuit(physical)
-    segment_ids = _segment_ids(operations, stream_id)
-    operations = _carrying(operations, segment_ids, circuit)
-    segments = _segments(operations, stream_id)
+    operations, segments = _segments_carrying(operations, stream_id, circuit)
     owner = _owner(stream_id, segments, circuit)
     round_counts[stream_id] = _owner_round_count(physical)
     regions = _protected_regions(operations, segments, owner)
@@ -176,18 +174,22 @@ def _emitters(operations: list) -> list:
     return emitters
 
 
-def _segments(operations: list, stream_id) -> list:
-    """The operations that run a slice of the stream, in program order."""
+def _segments_carrying(operations: list, stream_id, circuit) -> tuple:
+    """The operations with the stream's segments carrying the circuit.
+
+    The segments, the operations that run a slice of the stream, come
+    back too, in program order.
+    """
+    carried = []
     segments = []
     for operation in operations:
-        if operation.stream_id == stream_id:
-            segments.append(operation)
-    return segments
-
-
-def _segment_ids(operations: list, stream_id) -> set:
-    segments = _segments(operations, stream_id)
-    return {segment.id for segment in segments}
+        if operation.stream_id != stream_id:
+            carried.append(operation)
+            continue
+        segment = dataclasses.replace(operation, circuit=circuit)
+        carried.append(segment)
+        segments.append(segment)
+    return carried, segments
 
 
 def _carrying(operations: list, operation_ids: set, circuit) -> list:

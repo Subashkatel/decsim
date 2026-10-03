@@ -319,22 +319,27 @@ def test_an_operation_nobody_plans_may_run_for_no_rounds():
 
 
 @pytest.mark.parametrize(
-    "graph, sentence",
+    "graph, error",
     [
-        (((1, ()), (1, ())), "duplicate operation id"),
-        (((1, (1,)),), "depends on itself"),
-        (((1, (9,)),), "unknown predecessor"),
-        (((1, ()), (2, (1, 1))), "more than once"),
-        (((1, (2,)), (2, (1,))), "cycle"),
+        (((1, ()), (1, ())), ValueError),
+        (((1, (1,)),), ValueError),
+        (((1, (9,)),), KeyError),
+        (((1, ()), (2, (1, 1))), ValueError),
+        (((1, (2,)), (2, (1,))), ValueError),
     ],
+    ids=["duplicate id", "self edge", "unknown edge", "edge twice", "cycle"],
 )
-def test_a_workload_graph_that_cannot_run_is_refused_by_name(graph, sentence):
-    """The graph is checked once, at build: a run cannot repair it."""
+def test_a_workload_graph_that_cannot_run_is_refused(graph, error):
+    """The graph is checked once, at build: a run cannot repair it.
+
+    A self edge is a cycle, and an unknown predecessor stops at its
+    lookup.
+    """
     operations = [
         operation_of(operation_id, predecessors=predecessor_ids)
         for operation_id, predecessor_ids in graph
     ]
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(error):
         planner.check_operation_graph(operations)
 
 

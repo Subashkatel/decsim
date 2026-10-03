@@ -706,24 +706,14 @@ def _tier_settings(
 
 
 def _check_decode_slots(settings: MachineSettings) -> None:
-    """Switching fills all three slots; without it one decoder at most."""
+    """Without switching, one decoder; a second would run on ignored."""
     has_weak = settings.weak_decoder is not None
     has_strong = settings.strong_decoder is not None
-    if settings.switching is None:
-        if has_weak and has_strong:
-            raise ValueError(
-                "weak_decoder and strong_decoder are both set and switching "
-                "is not; a run with no switching decodes its windows on one "
-                "decoder, so set switching or drop one decoder"
-            )
+    has_two_decoders = has_weak and has_strong
+    if settings.switching is not None or not has_two_decoders:
         return
-    if not has_strong:
-        raise ValueError(
-            "switching is set and strong_decoder is not; switching "
-            "escalates a window to the strong decoder, so set strong_decoder"
-        )
-    if not has_weak:
-        raise ValueError(
-            "switching is set and weak_decoder is not; switching decodes "
-            "every window on the weak decoder first, so set weak_decoder"
-        )
+    raise ValueError(
+        "weak_decoder and strong_decoder are both set and switching is "
+        "not; a run with no switching decodes its windows on one decoder, "
+        "so set switching or drop one decoder"
+    )

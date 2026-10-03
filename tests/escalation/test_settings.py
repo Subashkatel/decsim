@@ -38,12 +38,14 @@ def test_a_switching_record_refuses_a_cost_by_its_own_field():
         _switching(threshold_cycles=-1)
 
 
-def test_switching_without_a_strong_decoder_names_the_empty_slot():
-    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
-    switching = _switching()
+def test_two_decoders_without_switching_are_refused():
+    """With no switching every window decodes on one decoder.
 
-    with pytest.raises(
-        ValueError, match="switching is set and strong_decoder is not"
-    ):
-        machine_settings.MachineSettings(weak_decoder=weak, switching=switching)
+    The strong decoder would be built and never handed a window, so the
+    run would go on as if it were not there.
+    """
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    pool = decoder_settings.DecoderPoolSettings(algorithm=matching)
+
+    with pytest.raises(ValueError, match="both set and switching is not"):
+        machine_settings.MachineSettings(weak_decoder=pool, strong_decoder=pool)

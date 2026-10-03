@@ -71,21 +71,6 @@ REQUIRED_SECTIONS = (
     "pauli_frame",
     "workload",
 )
-# Where a point's yaml writes each fact a threshold row reads at the
-# point (threshold_sources.POINT_FACTS): the code distance, the physical
-# error probability the workload's maker takes, the round period, and
-# the window's commit and buffer rounds.
-POINT_FACT_PATHS = {
-    "distance": ("qpu", "distance"),
-    "physical_error_probability": (
-        "workload",
-        "arguments",
-        "physical_error_probability",
-    ),
-    "round_period_microseconds": ("qpu", "round_period_microseconds"),
-    "commit_rounds": ("windows", "commit_rounds"),
-    "buffer_rounds": ("windows", "buffer_rounds"),
-}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -232,7 +217,7 @@ class MachineSettings:
             decoder_manager_section, clocks
         )
         escalation_folder = section_folders.get("escalation")
-        facts = point_facts(sections)
+        facts = _point_facts(sections)
         switching = escalation_settings.SwitchingSettings.from_yaml(
             escalation_section,
             clocks,
@@ -299,22 +284,26 @@ class MachineSettings:
         )
 
 
-def point_facts(sections: Mapping) -> dict:
-    """A point's facts by name, from its resolved sections; None if absent."""
-    facts = {}
-    for name, path in POINT_FACT_PATHS.items():
-        facts[name] = _value_at(sections, path)
-    return facts
+def _point_facts(sections: Mapping) -> dict:
+    """The facts a threshold row reads at the point, None where left out.
 
-
-def _value_at(sections: Mapping, path: tuple) -> object:
-    """The value a path of keys reaches, or None where a key is missing."""
-    value = sections
-    for key in path:
-        if not isinstance(value, Mapping):
-            return None
-        value = value.get(key)
-    return value
+    The names are threshold_sources.POINT_FACTS. The physical error
+    probability is the one the workload's maker takes; an arguments
+    value that is no mapping is the workload's to refuse.
+    """
+    qpu = sections["qpu"]
+    windows = sections["windows"]
+    arguments = sections["workload"].get("arguments")
+    probability = None
+    if isinstance(arguments, Mapping):
+        probability = arguments.get("physical_error_probability")
+    return {
+        "distance": qpu.get("distance"),
+        "physical_error_probability": probability,
+        "round_period_microseconds": qpu.get("round_period_microseconds"),
+        "commit_rounds": windows.get("commit_rounds"),
+        "buffer_rounds": windows.get("buffer_rounds"),
+    }
 
 
 def _checked(

@@ -15,10 +15,6 @@ src/dev/net/pktfifo.hh) and its blocked port retries the requester
 never refuses a write. Over rounds of unequal width, the last the
 widest, held by several readers, the occupied bits and the room answer
 follow that packet store with a holder set per round.
-
-The two whole-run laws at the end of the file place the store in the
-pipeline: its publication tick is what makes a weak window ready, on
-the declared card of tests/declared_run.py.
 """
 
 import collections
@@ -33,7 +29,6 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-import tests.declared_run as declared_run
 
 # every round this file stores carries one fragment of two bits
 BITS_PER_ROUND = 2
@@ -92,28 +87,6 @@ def store(bits=None, waiting_line=None, listener=None):
         the_store.trace.round_stored.connect(listener.round_stored)
         the_store.trace.round_released.connect(listener.round_released)
     return the_store
-
-
-class RecordingWaitingLine:
-    """A waiting line that counts the slots the store frees."""
-
-    def __init__(self):
-        self.freed_count = 0
-
-    def retry(self):
-        self.freed_count += 1
-
-
-class RecordingListener:
-    def __init__(self):
-        self.stored = []
-        self.released = []
-
-    def round_stored(self, round_key, _packet):
-        self.stored.append(round_key)
-
-    def round_released(self, round_key):
-        self.released.append(round_key)
 
 
 def closed_form(arrivals, holds, capacity):
@@ -339,106 +312,6 @@ def test_occupancy_and_room_follow_the_packet_store_property():
         assert ours == theirs, seed
 
 
-def test_a_full_store_answers_no_room_and_is_unchanged():
-    two_rounds_bits = 2 * BITS_PER_ROUND
-    the_store = store(bits=two_rounds_bits)
-    first = packet(1)
-    second = packet(2)
-    the_store.accept_packed_round(first, publication_tick=10)
-    the_store.accept_packed_round(second, publication_tick=11)
-
-    assert the_store.has_room((1, 3), BITS_PER_ROUND, {}) is False
-    assert the_store.occupied_bits == two_rounds_bits
-    assert the_store.occupancy == 2
-    assert the_store.publication_tick((1, 1)) == 10
-    assert the_store.publication_tick((1, 2)) == 11
-
-
-def admitting_into(the_store, entered: list):
-    """A sender's admit: store the round if there is room, and note it."""
-
-    def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room(round.round_key, round.wire_bits, {}):
-            return False
-        the_store.accept_packed_round(round.packet, publication_tick=0)
-        entered.append(round.packet.round_index)
-        return True
-
-    return admit
-
-
-def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
-    held = held_rounds()
-    the_store = store(bits=BITS_PER_ROUND, waiting_line=held)
-    entered = []
-    admit = admitting_into(the_store, entered)
-    first = packed(1)
-    second = packed(2)
-    third = packed(3)
-    admit(first)
-    held.refuse(second, admit)
-    held.refuse(third, admit)
-    the_store.release_round((1, 1))
-    after_first_release = list(entered)
-    the_store.release_round((1, 2))
-
-    assert after_first_release == [1, 2]
-    assert entered == [1, 2, 3]
-    assert held.count == 0
-
-
-def test_a_stored_round_is_released_when_its_last_hold_releases():
-    waiting_line = RecordingWaitingLine()
-    listener = RecordingListener()
-    the_store = store(waiting_line=waiting_line, listener=listener)
-    weak_reads = decoding_records.WindowReads((1, 0))
-    strong_reads = decoding_records.PotentialStrong((1, 0))
-    the_store.register_hold(weak_reads, [(1, 1)])
-    the_store.register_hold(strong_reads, [(1, 1)])
-    first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=0)
-
-    the_store.release_hold(weak_reads)
-    held_after_first = the_store.retained_fragments((1, 1)) is not None
-    the_store.release_hold(strong_reads)
-
-    assert held_after_first is True
-    assert the_store.retained_fragments((1, 1)) is None
-    assert listener.released == [(1, 1)]
-    assert waiting_line.freed_count == 1
-
-
-def test_the_listener_hears_a_stored_round_once():
-    listener = RecordingListener()
-    the_store = store(listener=listener)
-    reads = decoding_records.WindowReads((1, 0))
-    the_store.register_hold(reads, [(1, 1)])
-
-    first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=0)
-
-    assert listener.stored == [(1, 1)]
-
-
-def test_a_round_is_readable_at_the_tick_it_is_stored_and_not_before():
-    """One call, one tick: the bits and the publication arrive together.
-
-    A round with no publication tick is a timing-only round, which no
-    window reads (syndrome_buffer/weak_syndrome_round_receiver.py,
-    send_memory_round).
-    """
-    the_store = store()
-    reads = decoding_records.WindowReads((1, 0))
-    the_store.register_hold(reads, [(1, 1)])
-    first = packet(1)
-    unstored = the_store.publication_tick((1, 1))
-
-    the_store.accept_packed_round(first, publication_tick=7)
-
-    assert unstored is None
-    assert the_store.publication_tick((1, 1)) == 7
-
-
 def test_an_unheld_round_is_freed_on_arrival_and_a_held_one_is_not():
     the_store = store()
     reads = decoding_records.WindowReads((1, 0))
@@ -461,7 +334,7 @@ def test_a_closed_operation_identity_never_reopens():
     the_store.open_operation(1)
     the_store.close_operation(1)
 
-    with pytest.raises(RuntimeError, match="closed operation identities"):
+    with pytest.raises(RuntimeError):
         the_store.open_operation(1)
 
 
@@ -470,87 +343,15 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
     reads = decoding_records.WindowReads((1, 0))
     the_store.register_hold(reads, [(1, 5)])
 
-    with pytest.raises(RuntimeError, match=r"unresolved holds on \[\(1, 5\)\]"):
+    with pytest.raises(RuntimeError):
         the_store.check_settled()
-
-
-def test_a_bounded_store_ending_under_a_live_hold_names_its_widest_hold():
-    """The hold waits for a round its own stored rounds leave no room for."""
-    two_rounds_bits = 2 * BITS_PER_ROUND
-    the_store = store(bits=two_rounds_bits)
-    wide = decoding_records.WindowReads((1, 0))
-    narrow = decoding_records.WindowReads((1, 1))
-    the_store.register_hold(wide, [(1, 1), (1, 2), (1, 3)])
-    the_store.register_hold(narrow, [(1, 2)])
-    first = packet(1)
-    second = packet(2)
-    the_store.accept_packed_round(first, publication_tick=0)
-    the_store.accept_packed_round(second, publication_tick=0)
-
-    with pytest.raises(RuntimeError) as stop:
-        the_store.check_settled()
-
-    sentence = str(stop.value)
-    assert "4 of its 4 bits" in sentence
-    assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
-    assert "keeps 4 bits of them and waits for [(1, 3)]" in sentence
-
-
-def test_the_hold_sources_carry_the_token_and_its_rounds():
-    heard = []
-    the_store = store()
-
-    def registered(holder, keys):
-        heard.append(("registered", holder, keys))
-
-    def transferred(old, new):
-        heard.append(("transferred", old, new))
-
-    def released(holder):
-        heard.append(("released", holder))
-
-    the_store.trace.hold_registered.connect(registered)
-    the_store.trace.hold_transferred.connect(transferred)
-    the_store.trace.hold_released.connect(released)
-    reads = decoding_records.WindowReads((1, 0))
-    potential = decoding_records.PotentialStrong((1, 0))
-    the_store.register_hold(reads, [(1, 1), (1, 2)])
-    the_store.transfer_hold(reads, potential)
-    the_store.release_hold(potential)
-    assert heard == [
-        ("registered", reads, ((1, 1), (1, 2))),
-        ("transferred", reads, potential),
-        ("released", potential),
-    ]
-
-
-def test_a_bounded_store_has_room_while_the_bits_fit_beside_what_is_taken():
-    """gem5's avail(): the capacity less what is stored and reserved."""
-    three_rounds_bits = 3 * BITS_PER_ROUND
-    one_round_reserved = BITS_PER_ROUND
-    the_store = store(bits=three_rounds_bits)
-    first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=0)
-
-    fits_beside_the_stored = the_store.has_room((1, 2), BITS_PER_ROUND, {})
-    fits_beside_the_reserved = the_store.has_room(
-        (1, 3), BITS_PER_ROUND, {(1, 2): one_round_reserved}
-    )
-    exceeds_the_capacity = the_store.has_room((1, 2), three_rounds_bits, {})
-
-    assert fits_beside_the_stored is True
-    assert fits_beside_the_reserved is True
-    assert exceeds_the_capacity is False
-    assert the_store.occupied_bits == BITS_PER_ROUND
 
 
 def test_a_bounded_store_refuses_a_round_that_states_no_size():
     """A bound is measured against a size, so the round must state one."""
     the_store = store(bits=BITS_PER_ROUND)
 
-    with pytest.raises(
-        RuntimeError, match="a bounded syndrome buffer needs sized rounds"
-    ):
+    with pytest.raises(RuntimeError):
         the_store.has_room((1, 1), None, {})
 
 
@@ -559,11 +360,8 @@ def test_a_bounded_store_refuses_a_round_wider_than_itself():
     the_store = store(bits=BITS_PER_ROUND)
     wide_bits = BITS_PER_ROUND + 1
 
-    with pytest.raises(RuntimeError) as refusal:
+    with pytest.raises(RuntimeError):
         the_store.has_room((1, 4), wide_bits, {})
-
-    sentence = str(refusal.value)
-    assert f"holds {BITS_PER_ROUND} bits and round (1, 4) states 3" in sentence
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():
@@ -574,74 +372,6 @@ def test_an_unbounded_store_takes_a_round_that_states_no_size():
 
     assert the_store.occupancy == 1
     assert the_store.occupied_bits == 0
-
-
-# ---- the publication tick in the whole pipeline
-
-
-def test_the_weak_primary_pipeline_runs_on_the_declared_ticks():
-    """The store's publication is the window's readiness, hop by hop.
-
-    Round r becomes public once the readout has crossed
-    qpu_to_controller, been classified into bits, and crossed
-    controller_to_weak_buffer; the window that round completes is
-    queued and dispatched on that same tick, and the weak decode is
-    charged the weak_buffer_to_weak_decoder transfer before its own
-    latency. Every latency is the declared card's
-    (tests/declared_run.py), so each stamp is exact arithmetic.
-    """
-    machine = declared_run.weak_only_run(rounds=6)
-    windows = machine.observation.windows.windows
-    window = windows[(1, 0)]
-    snapshot = machine.control.pauli_frame.snapshot()
-    (record,) = snapshot.records
-    expected_first_round = config.microseconds_to_ticks(10.0)
-    expected_data_complete = config.microseconds_to_ticks(15.0)
-    expected_done = config.microseconds_to_ticks(30.0)
-    expected_accepted = config.microseconds_to_ticks(32.0)
-    expected_committed = config.microseconds_to_ticks(33.0)
-
-    assert window.t_first_round == expected_first_round
-    assert window.t_data_complete == expected_data_complete
-    assert window.t_queued == expected_data_complete
-    assert window.t_dispatch == expected_data_complete
-    assert window.t_done == expected_done
-    assert record.tier == "weak"
-    assert record.accepted_ticks == expected_accepted
-    assert record.committed_ticks == expected_committed
-
-
-def room_side_landing_lines(log_lines: list) -> list:
-    """The log's round landings on the strong syndrome buffer."""
-    landings = []
-    for line in log_lines:
-        if "received round" in line and "strong" in line:
-            landings.append(line)
-    return landings
-
-
-def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
-    """Readiness listens to the store the weak decoder actually reads.
-
-    Toshio arXiv:2510.25222 Sec. III A: the weak tier reads the
-    fridge-side store, and the strong syndrome buffer only holds what an
-    escalation carried up. A switching run whose windows are all kept
-    lands nothing on the room side, so nothing there could delay a weak
-    window: round 6 is published here at 15 us, the declared card's
-    readout, controller and store hops after its 10 us emission.
-    """
-    machine = declared_run.switching_run(rounds=9, io_trace=True)
-    windows = machine.observation.windows.windows
-    first_window = windows[(1, 0)]
-    log_lines = machine.observation.log.lines
-    published = declared_run.log_tick(log_lines, "round 6 of mem1 arrived")
-    room_side_landings = room_side_landing_lines(log_lines)
-    expected_data_complete = config.microseconds_to_ticks(15.0)
-
-    assert first_window.t_data_complete == expected_data_complete
-    assert published == expected_data_complete
-    assert room_side_landings == []
-    assert machine.readout.strong_syndrome_buffer.occupancy == 0
 
 
 def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():

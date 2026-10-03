@@ -9,37 +9,21 @@ the rows one unsharded run would have written.
 
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
-import decsim.experiments.experiment as experiment
 import decsim.experiments.report as sweep_report
-import tests.experiments.yaml_configs as yaml_configs
+import tests.experiments.run_files as run_files
 
-COUNTING_SWEEP = {
+# one point, every copy and move counted, two shots
+COUNTING = {
     "observation": {"data_movement": True},
-    "sweep": [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.001],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": 2},
-        }
-    ],
+    "collection": {"max_shots": 2},
 }
 
 
-def measured_shots(config_path, count):
-    """That config's first point, one measured shot per seed."""
-    config = experiment.load_experiment(config_path)
+def measured_shots(count: int) -> list:
+    """The counting point, one measured shot per seed."""
     measurements = []
     for seed in range(count):
-        measurement = yaml_configs.measure_point_shot(
-            config,
-            physical_error_probability=0.001,
-            distance=3,
-            round_period_microseconds=1.0,
-            seed=seed,
-        )
+        measurement = run_files.measured_shot(seed, **COUNTING)
         measurements.append(measurement)
     return measurements
 
@@ -63,9 +47,8 @@ def _column_sums(rows: list, columns: tuple) -> dict:
     return sums
 
 
-def test_a_shots_rows_add_up_to_that_shots_own_counters(tmp_path):
-    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
-    measurements = measured_shots(config_path, 1)
+def test_a_shots_rows_add_up_to_that_shots_own_counters():
+    measurements = measured_shots(1)
     rows = sweep_report.shot_data_movement_rows(measurements)
     counted = measurements[0].data_movement
     summed = _column_sums(rows, PATH_COLUMNS)
@@ -77,9 +60,8 @@ def test_a_shots_rows_add_up_to_that_shots_own_counters(tmp_path):
     assert referenced_rounds == {counted["referenced_rounds"]}
 
 
-def test_each_rows_memory_class_is_the_one_the_counters_placed(tmp_path):
-    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
-    measurements = measured_shots(config_path, 1)
+def test_each_rows_memory_class_is_the_one_the_counters_placed():
+    measurements = measured_shots(1)
     rows = sweep_report.shot_data_movement_rows(measurements)
     class_by_path = {row["path"]: row["memory_class"] for row in rows}
 
@@ -93,23 +75,7 @@ def test_each_rows_memory_class_is_the_one_the_counters_placed(tmp_path):
 def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
     """observation.data_movement off means no counts, which is not zero."""
     monkeypatch.chdir(tmp_path)
-    silent_path = yaml_configs.write_config(
-        tmp_path,
-        {
-            "sweep": [
-                {
-                    "axes": {
-                        "workload.arguments.physical_error_probability": [
-                            0.001
-                        ],
-                        "qpu.distance": [3],
-                        "qpu.round_period_microseconds": [1.0],
-                    },
-                    "collection": {"max_shots": 1},
-                }
-            ]
-        },
-    )
+    silent_path = run_files.write_run_file(tmp_path)
     run_dir, _rows = collect_command.run_experiment(silent_path)
     movement_path = run_dir / "shot_data_movement.csv"
 
@@ -118,8 +84,8 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
 
 def test_a_counting_run_writes_the_rows(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    config_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
-    run_dir, _rows = collect_command.run_experiment(config_path)
+    run_path = run_files.write_run_file(tmp_path, **COUNTING)
+    run_dir, _rows = collect_command.run_experiment(run_path)
     movement_path = run_dir / "shot_data_movement.csv"
     shot_rows = sweep_report.read_rows(movement_path)
     copied = {row["memory_class"] for row in shot_rows if row["copy_bits"]}
@@ -131,11 +97,13 @@ def test_a_counting_run_writes_the_rows(tmp_path, monkeypatch):
 
 def test_pieces_of_one_shot_fold_to_the_whole_runs_movement_rows(tmp_path):
     """The fold's precondition: the file adds, so pieces equal one run."""
-    whole_path = yaml_configs.write_config(tmp_path, COUNTING_SWEEP)
+    whole_path = run_files.write_run_file(tmp_path, **COUNTING)
     cut_folder = tmp_path / "cut_config"
     cut_folder.mkdir()
-    cut_card = {**COUNTING_SWEEP, "collection": {"piece_rounds": 1}}
-    cut_path = yaml_configs.write_config(cut_folder, cut_card)
+    cut_collection = {"max_shots": 2, "piece_rounds": 1}
+    cut_path = run_files.write_run_file(
+        cut_folder, **{**COUNTING, "collection": cut_collection}
+    )
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     command.main(["run", str(whole_path), "--out", str(whole_dir)])

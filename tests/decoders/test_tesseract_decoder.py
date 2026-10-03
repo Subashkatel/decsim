@@ -41,6 +41,20 @@ SETTINGS = tesseract.TesseractDecoder.Settings(
     merge_errors=True,
 )
 PROFILE_SHOTS = 100
+# tesseract-decoder's tesseract-short-beam profile, the Tesseract paper's
+# short beam setting (2503.10988 lines 592-593); the paper names four of
+# its values, the rest are the profile's
+# (src/tesseract_sinter_compat.pybind.h:466-472)
+SHORT_BEAM = tesseract.TesseractDecoder.Settings(
+    detector_beam=15,
+    beam_climbing=True,
+    no_revisit_detectors=True,
+    priority_queue_limit=200_000,
+    detector_order_method="index",
+    detector_order_count=16,
+    detector_order_seed=2_384_753,
+    merge_errors=True,
+)
 # the least seed build_det_orders cannot take as a uint64
 ONE_PAST_UINT64 = 2**64
 
@@ -188,7 +202,7 @@ def test_the_short_beam_row_predicts_the_packages_profile_property(
         bit_packed_detection_event_data=packed
     )
     predictions = numpy.unpackbits(predicted, axis=1, bitorder="little")
-    row = tesseract.TesseractDecoder(settings=tesseract.TESSERACT_SHORT_BEAM)
+    row = tesseract.TesseractDecoder(settings=SHORT_BEAM)
     for shot, prediction in zip(detection_events, predictions, strict=True):
         job = windows.job_for(model, shot)
         result = row.decode(job)
@@ -253,7 +267,7 @@ def test_a_search_key_of_the_wrong_type_or_range_is_refused(
 
 
 def test_a_row_with_a_fixed_order_seed_names_no_run_seed_owner_but_timing():
-    row = tesseract.TesseractDecoder(settings=tesseract.TESSERACT_SHORT_BEAM)
+    row = tesseract.TesseractDecoder(settings=SHORT_BEAM)
 
     (timing,) = row.run_seed_children()
 

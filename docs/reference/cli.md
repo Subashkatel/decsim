@@ -56,4 +56,3 @@ Every argument below is read from the `argparse` definition that parses it. An a
 | `file` | required | the trace file one shot wrote |
 | `--round` | None | the round, as op:index |
 | `--window` | None | the window, as op:id |
-| `--html` | None | write the page here |

@@ -124,16 +124,6 @@ arrive.
 
 A key the trace does not carry is refused with the keys it does carry.
 
-## 5. Write the path as a page
-
-```bash
-decsim trace follow \
-  results/<run>/trace/<id>_seed<seed>.trace.json --round 1:1 --html path.html
-```
-
-`--html` writes the same path as one self-contained page, one lane per
-component.
-
 ## What is in the file
 
 | In the file | What it is |

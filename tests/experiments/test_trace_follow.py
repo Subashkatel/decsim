@@ -237,57 +237,15 @@ def test_the_counts_read_as_one_sentence(traced):
     assert lines[0] == "copies 4, references 1 job and 1 hold, moves 3"
 
 
-def test_the_page_carries_every_row_of_the_table(traced):
-    followed = trace_follow.follow(traced, "round", "1:1")
-
-    written = trace_follow.page(followed)
-
-    cells = [f"<td>{hop.what}</td>" for hop in followed.hops]
-    assert all(cell in written for cell in cells)
-    assert written.count("<tr>") == len(followed.hops) + 1
-
-
-def test_the_page_needs_no_second_file(traced):
-    """One self-contained page: no script, no stylesheet, no image."""
-    followed = trace_follow.follow(traced, "window", "1:0")
-
-    written = trace_follow.page(followed)
-
-    assert "<script" not in written
-    assert "src=" not in written
-    assert "http" not in written
-
-
-def test_the_page_draws_one_lane_per_component(traced):
-    followed = trace_follow.follow(traced, "window", "1:0")
-
-    written = trace_follow.page(followed)
-
-    lanes = {hop.where for hop in followed.hops}
-    assert written.count("<div class='lane'>") == len(lanes)
-    assert "Decoder unit default#0" in written
-
-
-def test_the_command_prints_the_table_and_writes_the_page(trace_path, tmp_path):
+def test_the_command_prints_the_table(trace_path, capsys):
     import decsim.experiments.command as command
 
-    page_path = tmp_path / "one.html"
+    command.main(["trace", "follow", str(trace_path), "--round", "1:1"])
 
-    command.main(
-        [
-            "trace",
-            "follow",
-            str(trace_path),
-            "--round",
-            "1:1",
-            "--html",
-            str(page_path),
-        ]
-    )
-
-    written = page_path.read_text()
-    assert "<table>" in written
-    assert "d3 seed0" in written
+    printed = capsys.readouterr().out
+    assert printed.startswith("round 1:1 of ")
+    assert "d3 seed0" in printed
+    assert "copies 4, references 1 job and 1 hold, moves 3" in printed
 
 
 def test_a_command_line_naming_neither_a_round_nor_a_window_is_refused():

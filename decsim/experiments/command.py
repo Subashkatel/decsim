@@ -15,7 +15,7 @@ loads Stim. The console script and `python -m decsim` both land here.
     decsim status <results folder>
     decsim show <yaml>
     decsim plot <run_dir> [--figure timeline|stage_breakdown] [--out PATH]
-    decsim trace follow <file> --round k:n | --window k:n [--html PATH]
+    decsim trace follow <file> --round k:n | --window k:n
 
 What the experiments layer refuses reaches the user as one sentence and
 exit 1 (decsim/experiments/refusal.py); anything else keeps its

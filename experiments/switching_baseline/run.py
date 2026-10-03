@@ -32,7 +32,6 @@ import decsim.confidence.cluster as cluster
 import decsim.controller.settings as controller_settings
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.settings as decoder_settings
-import decsim.decoders.union_find.decoder as union_find
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -98,8 +97,7 @@ def weak_alone(
 ) -> machine_settings.MachineSettings:
     """The machine with no escalation: union-find keeps every window.
 
-    Helios's union-find (HELIOS_TIMED) runs on a RISC-Q root's engine
-    and folds the boundary into its own copy (2301.08419 lines 632-640).
+    Helios's union-find runs on a RISC-Q root's engine (HELIOS_POOL).
     Readout, packing, event forming and the frame are the presets'
     sourced values.
     """
@@ -113,11 +111,6 @@ def weak_alone(
     # the store's costs are paid once in the windows' decision
     weak_syndrome_buffer = syndrome_buffer_module.SyndromeBufferSettings(
         clock=machine_settings.FRIDGE_CLOCK
-    )
-    weak_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=union_find.HELIOS_TIMED,
-        engine=decoder_settings.RISC_Q_HELIOS_ENGINE,
-        copies_boundary_fold=False,
     )
     # no manager on Helios's path (2603.16203 lines 669-670), one region
     # a decode (2510.25222 lines 1255-1258)
@@ -146,7 +139,7 @@ def weak_alone(
         links=links,
         weak_syndrome_buffer=weak_syndrome_buffer,
         windows=windows,
-        weak_decoder=weak_decoder,
+        weak_decoder=machine_settings.HELIOS_POOL,
         decoder_manager=decoder_manager,
         pauli_frame=pauli_frame_module.YANG_FRAME_UPDATE,
         workload=workload,

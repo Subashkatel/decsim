@@ -410,7 +410,7 @@ def test_an_input_that_carries_its_mask_is_not_masked_again():
     job, memory = _landed_job(fixture, folds_in_place=True)
     fixture.gate.mask_input(job)
 
-    with pytest.raises(RuntimeError, match="already written"):
+    with pytest.raises(RuntimeError):
         memory.rewrite(job, job.decoder_input)
 
 

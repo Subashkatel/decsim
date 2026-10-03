@@ -29,10 +29,24 @@ FOLD_IN_PLACE = 2
 SWITCHING = 3
 STUDY_BLOCKS = (CONTROL, INPUT_IN_PLACE, FOLD_IN_PLACE, SWITCHING)
 # Toshio et al.'s linear decoders on the grid's 250 MHz clocks: 0.4 and
-# 10 tau_gen a round at tau_gen = 1 us (2510.25222 lines 1109-1114)
+# 10 tau_gen a round at tau_gen = 1 us (2510.25222 lines 1109-1114). The
+# switching block's complementary gap solves each weak window twice.
 _CLOCK_250_MEGAHERTZ = config.Clock(period_ticks=4_000)
-WEAK_TOSHIO = decoder_settings.toshio_decoder_pool(0.4, _CLOCK_250_MEGAHERTZ)
-STRONG_TOSHIO = decoder_settings.toshio_decoder_pool(10.0, _CLOCK_250_MEGAHERTZ)
+WEAK_ONE_SOLVE = decoder_settings.toshio_decoder_pool(
+    0.4, _CLOCK_250_MEGAHERTZ, solves_per_window=1
+)
+WEAK_TWO_SOLVES = decoder_settings.toshio_decoder_pool(
+    0.4, _CLOCK_250_MEGAHERTZ, solves_per_window=2
+)
+WEAK_TOSHIO_BY_BLOCK = {
+    CONTROL: WEAK_ONE_SOLVE,
+    INPUT_IN_PLACE: WEAK_ONE_SOLVE,
+    FOLD_IN_PLACE: WEAK_ONE_SOLVE,
+    SWITCHING: WEAK_TWO_SOLVES,
+}
+STRONG_TOSHIO = decoder_settings.toshio_decoder_pool(
+    10.0, _CLOCK_250_MEGAHERTZ, solves_per_window=1
+)
 
 
 def block_settings(block_index):
@@ -110,8 +124,9 @@ def test_every_study_block_sweeps_the_same_points_on_priced_cards(
     """A priced card decodes on no host clock, so the counts repeat."""
     settings = block_settings(block_index)
     distances = swept_distances(block_index)
-    assert settings.weak_decoder.algorithm == WEAK_TOSHIO.algorithm
-    assert settings.weak_decoder.engine == WEAK_TOSHIO.engine
+    weak = WEAK_TOSHIO_BY_BLOCK[block_index]
+    assert settings.weak_decoder.algorithm == weak.algorithm
+    assert settings.weak_decoder.engine == weak.engine
     assert distances == [3, 5, 7]
 
 

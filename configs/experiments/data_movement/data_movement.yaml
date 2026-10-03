@@ -51,7 +51,8 @@
 # tau_weak_dec is 0.4 tau_gen, one of the paper's swept values (lines
 # 1125-1126). Blocks 1 to 3 compute no confidence, so the weak tier
 # decodes a window once at 0.4 tau_gen a round; block 4's complementary
-# gap decodes it twice, which costs 0.8 tau_gen a round there. Every
+# gap decodes it twice, so each solve there costs half, 0.2 tau_gen a
+# round, and the window 0.4 tau_gen a round in all. Every
 # block carries T_weak_comm on controller_to_weak_buffer, and block 4
 # T_strong_comm on weak_decoder_to_strong_decoder, the hop that takes
 # the escalated rounds up. Every key is documented in reference.yaml.
@@ -106,6 +107,7 @@ sweep:
   - axes:                           # 4: the strong tier and its links
       links.controller_to_weak_buffer:  # T_weak_comm, tau_gen
         - {latency_cycles: 250, clock: fridge, bits_per_cycle: null}
+      weak_decoder.engine.fetch_cycles_per_round: [50]  # 0.4 tau_gen over two solves
       escalation:
         - kind: switching
           gap_threshold_db: 20.0    # the paper's threshold, Sec. IV

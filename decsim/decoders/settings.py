@@ -576,34 +576,34 @@ def _latency_settings(kind, section_name: str):
 
 
 def toshio_decoder_pool(
-    decode_microseconds_per_round: float, clock: config.Clock
+    decode_microseconds_per_round: float,
+    clock: config.Clock,
+    *,
+    solves_per_window: int,
 ) -> DecoderPoolSettings:
     """One unit of Toshio et al.'s linear decoder: T_dec(r) = tau_dec r.
 
-    Toshio et al. charge a decode of r rounds tau_dec r (2510.25222
-    lines 968-971), and the double window's weak decoder
-    tau_dec (r_com + r_buf) for one window (lines 1309-1311). The fetch
-    stage's per-round cycles carry all of it, since a stage's cycles
-    scale with the job's rounds (staged_decoder.py
-    DecoderStage.cycles_for); every other stage costs nothing, and the
-    matching row answers in no time of its own. tau_dec is a whole
-    number of the clock's cycles, paid once a decode, so a confidence
-    that decodes a window twice, the complementary gap, pays it twice.
-    The paper sets T_weak_comm = tau_gen and T_strong_comm =
-    tau_strong_dec = 10 tau_gen and sweeps tau_weak_dec over 0, 0.1,
-    0.4, 0.7 and 0.9 tau_gen (lines 1109-1114, 1125-1133). T_comm, a
-    round's latency to the decoder (lines 1035-1036), is a link's, not
-    the unit's: the weak decoder's sits on controller_to_weak_buffer,
-    and the strong decoder's on weak_decoder_to_strong_decoder, which
-    carries a switching run's escalated rounds up.
+    decode_microseconds_per_round is Toshio's tau_dec (2510.25222 lines
+    968-971, 1309-1311): one unit's whole time a round of a window, its
+    soft output included (lines 602-604). A window solved
+    solves_per_window times, two under the complementary gap, pays
+    tau_dec / solves_per_window a round on each solve. The fetch stage
+    carries it, as its cycles scale with the job's rounds; every other
+    stage and the matching row cost nothing. T_comm (lines 1035-1036) is
+    a link's: controller_to_weak_buffer for the weak decoder,
+    weak_decoder_to_strong_decoder for the strong one. The paper's
+    values are at lines 1109-1114 and 1125-1133.
     """
+    config.check_whole_count("solves_per_window", solves_per_window, "solves")
     decode_ticks = config.microseconds_to_ticks(decode_microseconds_per_round)
-    cycles, remainder_ticks = divmod(decode_ticks, clock.period_ticks)
+    solve_share_ticks = clock.period_ticks * solves_per_window
+    cycles, remainder_ticks = divmod(decode_ticks, solve_share_ticks)
     if remainder_ticks:
         raise ValueError(
             f"Toshio's per-round decode time of "
-            f"{decode_microseconds_per_round} us is not a whole number of "
-            f"cycles of a {clock.period_ticks}-tick clock"
+            f"{decode_microseconds_per_round} us over {solves_per_window} "
+            f"solves is not a whole number of cycles of a "
+            f"{clock.period_ticks}-tick clock"
         )
     engine = EngineSettings(
         clock=clock,

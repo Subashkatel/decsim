@@ -109,6 +109,8 @@ TIER_PATH = {
     "strong": (ESCALATED_PATH, "buffer0_first_round_to_frame", "first round"),
 }
 BREAKDOWN_ERROR_RATE = 0.003
+# the escalated window the path figure spreads out, one segment a bar
+PATH_DETAIL_DISTANCE = 9
 TIER_UNIT = {"weak": ("µs", 1.0), "strong": ("ms", 1e3)}
 TIER_WINDOWS = {
     "weak": "windows union-find kept",
@@ -136,6 +138,8 @@ def main(folder: pathlib.Path) -> None:
     decode_time_figure(histograms, decode_time_path)
     stage_means = stage_means_of(folder)
     breakdown_figure(stage_means, breakdown_path)
+    path_detail_path = plots_folder / "escalated_path.png"
+    path_detail_figure(stage_means, path_detail_path)
 
 
 def rows_of(folder: pathlib.Path) -> list:
@@ -504,6 +508,49 @@ def draw_breakdown(
         fontsize=8,
         frameon=False,
     )
+
+
+def path_detail_figure(stage_means: dict, path: pathlib.Path) -> None:
+    """One escalated window's path, a bar per segment, on a log axis.
+
+    The segments of an escalated window run from microseconds to tens of
+    milliseconds, so on the breakdown's linear axis the first ones are
+    under a pixel; here each has its own bar, in the order the window
+    passes them, with its mean time at its end. A segment of zero time
+    has no bar on a log axis, so it shows its value alone.
+    """
+    tier = "strong"
+    path_segments, span_stage, span_start = TIER_PATH[tier]
+    point = (BREAKDOWN_ERROR_RATE, PATH_DETAIL_DISTANCE, tier)
+    names = list(path_segments)
+    means_us = []
+    for segment in path_segments.values():
+        mean_us = segment_mean_us(stage_means, point, segment)
+        means_us.append(mean_us)
+    colors = [segment[0] for segment in path_segments.values()]
+    positions = list(range(len(names)))
+    figure, axis = pyplot.subplots(
+        figsize=(plots.PANEL_WIDTH_INCHES * 1.8, plots.PANEL_HEIGHT_INCHES),
+        layout="constrained",
+    )
+    axis.barh(positions, means_us, height=0.6, color=colors, log=True)
+    smallest = min(mean for mean in means_us if mean > 0)
+    for position, mean_us in zip(positions, means_us, strict=True):
+        label_at = max(mean_us, smallest / 2)
+        axis.text(
+            label_at, position, f" {mean_us:,.3f}", va="center", fontsize=8
+        )
+    axis.set_yticks(positions, names)
+    axis.invert_yaxis()
+    axis.set_xlim(smallest / 4, max(means_us) * 20)
+    axis.set_xlabel("mean time per window (µs, log scale)")
+    total_us = stage_means[(*point, span_stage)]
+    axis.set_title(
+        f"{TIER_WINDOWS[tier]}, d={PATH_DETAIL_DISTANCE}, "
+        f"{X} = {BREAKDOWN_ERROR_RATE:g}\n"
+        f"{span_start} to Pauli frame: {total_us:,.3f} µs in all"
+    )
+    plots.save(figure, path)
 
 
 def single_panel(title: str) -> tuple:

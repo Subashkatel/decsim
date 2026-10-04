@@ -1,12 +1,9 @@
 """The windows part: which windows exist, when each is decoded, where it goes.
 
-The window manager is the part's face to the rest of the machine: the
-stores tell it which rounds landed, it closes each window whose rounds
-are in, the requester asks the decoder manager for a decode, the
-verdict keeps the result or escalates it, and the committer writes the
-correction and carries the boundary to the next window. A switching run
-adds the join of a window's solves; the switching part binds its strong
-re-decode and its signal onto this part's components.
+The window manager closes each window whose rounds are in, the requester
+asks the decoder manager for a decode, the verdict keeps the result or
+escalates it, and the committer writes the correction and carries the
+boundary to the next window.
 """
 
 import dataclasses
@@ -40,10 +37,7 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    gap_join is None on a run with no switching. The switching part
-    (build/escalation.py Switching) owns the strong side and binds it
-    onto these components' optional ports when the machine connects the
-    parts.
+    gap_join is None on a run with no switching.
     """
 
     models: window_planner_module.WindowModels
@@ -79,11 +73,8 @@ class Windows:
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
-        One line per component, in the order a window meets them, then
-        the wires inside the part. window_decoder is the settings of
-        window_tier, the tier that decodes the plan's windows; a card
-        that names no clock runs on machine_clock. built_models is the
-        window error model cache the shot reads and fills.
+        built_models is the window error model cache the shot reads and
+        fills.
         """
         run_plan = plan.run_plan
         models = window_planner_module.WindowModels(built_models)
@@ -250,9 +241,7 @@ def _retention(
 ) -> round_retention_module.RoundRetention:
     """Which store holds a window's rounds, and for how long.
 
-    A switching run keeps every round a strong redo would read. The
-    reads the run places while it goes hold the rounds before their
-    first by the same rule as the reads the plan placed.
+    A switching run keeps every round a strong redo would read.
     """
     formation_reads = plan.formation_reads
     return round_retention_module.RoundRetention(
@@ -278,8 +267,7 @@ def _verdict(
 ) -> window_commits.WindowVerdict:
     """Whether a decoded window is kept, priced on the switching clock.
 
-    A run with no switching keeps every result at once; a switching slot
-    that names no clock prices its verdict on machine_clock.
+    A run with no switching keeps every result at once.
     """
     if switching is None:
         return window_commits.WindowVerdict(engine)
@@ -295,10 +283,7 @@ def _verdict(
 def _copies_the_boundary_fold(
     window_decoder: Optional[decoder_settings.DecoderPoolSettings],
 ) -> bool:
-    """Whether the tier that decodes the plan's windows folds into a copy.
-
-    A run with no decoder decodes no window, so the default is moot.
-    """
+    """Whether the tier that decodes the plan's windows folds into a copy."""
     if window_decoder is None:
         return True
     return window_decoder.copies_boundary_fold

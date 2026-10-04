@@ -29,9 +29,7 @@ import decsim.ports as ports
 class Control:
     """What issues the program to the QPU and closes the feedback loop.
 
-    pauli_frame is None when the run commits into no frame. streams is
-    the no-feedback row when no operation shares a stream or declares a
-    protected region.
+    pauli_frame is None when the run commits into no frame.
     """
 
     execution_runtime: execution_runtime_module.ExecutionRuntime
@@ -55,12 +53,7 @@ class Control:
         plan: plan_build.Plan,
         links: ports.Link,
     ) -> "Control":
-        """Every component of the control side, wired to one another.
-
-        The controller and the frame run on machine_clock when they name
-        no clock. One line per component, in the order an operation
-        meets them, then the wires inside the part.
-        """
+        """Every component of the control side, wired to one another."""
         clocked_controller = config.with_machine_clock(
             controller, machine_clock
         )

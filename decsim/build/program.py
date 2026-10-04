@@ -43,12 +43,7 @@ def load_program(
 
 
 def _register_streams(plan, window_manager) -> dict:
-    """Declare physical state independently of decoder model selection.
-
-    gem5's AbstractMemory owns its backing state independently of timing
-    policy; selecting a model likewise cannot create or reset this history.
-    Returns each stream's source round limit, None for an open-ended one.
-    """
+    """Declare each stream to the source; its round limit, None if open."""
     resolved_by_id = {
         resolved.operation_id: resolved
         for resolved in plan.run_plan.resolved_operations

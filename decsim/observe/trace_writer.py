@@ -19,7 +19,6 @@ import decsim.config as config
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
-import decsim.links.channel as channel_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.decoding as decoding_records
@@ -260,7 +259,7 @@ class TraceWriter:
             window_key = (attribution.operation_id, attribution.window_id)
             self._step_window_flow(thread, window_key, start)
 
-    def frame_landed(self, record: channel_module.FrameRecord) -> None:
+    def frame_landed(self, record: transfer_records.FrameRecord) -> None:
         """One frame on its channel's frame lane, from its start to its end."""
         timing = record.timing
         thread = f"{record.channel} frames"

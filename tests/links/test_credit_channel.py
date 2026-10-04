@@ -22,6 +22,7 @@ import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
 import decsim.links.settings as link_settings
+import decsim.records.transfers as transfer_records
 
 
 def credit_settings(
@@ -54,7 +55,7 @@ def send_at(engine, channel, tick, payload_bits, setup_ticks, delivered):
     """Send at the tick; the transfer is appended to delivered."""
     delay = tick - engine.now
 
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
 
     def send():
         channel.send(framed, tick, setup_ticks, delivered.append)
@@ -228,7 +229,7 @@ def test_the_expected_delay_is_the_delay_when_nothing_else_arrives():
     send_at(engine, channel, 0, 300, 0, delivered)
     engine.schedule(10, lambda: None)
     engine.run()
-    framed = channel_module.FramedPayload(500)
+    framed = transfer_records.FramedPayload(500)
     expected = channel.expected_delay_ticks(framed, engine.now, 0)
     send_at(engine, channel, engine.now, 500, 0, delivered)
 

@@ -80,7 +80,7 @@ class LinkFabric:
         selected_bits, _selection, _source = _select_payload(
             path, binding.settings, payload_bits
         )
-        framed = channel_module.FramedPayload(
+        framed = transfer_records.FramedPayload(
             selected_bits, binding.settings.header_bits_per_transfer
         )
         return binding.channel.expected_delay_ticks(
@@ -113,7 +113,7 @@ class LinkFabric:
             on_delivered=on_delivered,
         )
         self._send_count += 1
-        framed = channel_module.FramedPayload(
+        framed = transfer_records.FramedPayload(
             selected_bits, binding.settings.header_bits_per_transfer
         )
         binding.channel.send(

@@ -54,6 +54,7 @@ import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
 import decsim.links.settings as link_settings
+import decsim.records.transfers as transfer_records
 import decsim.seeding as seeding
 
 # rxe's completer never spends a retry count of 7, the largest a card
@@ -404,7 +405,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         if not self.trace.frame_landed.has_listeners:
             return
         packet = transmission.packet
-        record = channel_module.FrameRecord(
+        record = transfer_records.FrameRecord(
             channel=self._settings.name,
             transfer_sequence=packet.message.sequence,
             frame_index=packet.frame_index,
@@ -456,7 +457,7 @@ class _Transmission:
     """One trip of one packet across the wire."""
 
     packet: _Packet
-    timing: channel_module.FrameTiming
+    timing: transfer_records.FrameTiming
     timing_index: int
     is_lost: bool
     requests_ack: bool

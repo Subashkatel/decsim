@@ -1736,16 +1736,15 @@ class Channel(Protocol):
     where the net device frames and the channel times the crossing
     (point-to-point-net-device.cc TransmitStart calls
     point-to-point-channel.cc TransmitStart), and gem5's packet queue
-    (src/mem/packet_queue.hh:62-63). framed is a FramedPayload
-    (links/channel.py). trace holds frame_landed, one FrameRecord per
-    frame.
+    (src/mem/packet_queue.hh:62-63). trace holds frame_landed, one
+    FrameRecord per frame.
     """
 
     trace: Any
 
     def send(
         self,
-        framed,
+        framed: transfer_records.FramedPayload,
         now_ticks: int,
         setup_ticks: int,
         on_delivered: Callable[[transfer_records.Transfer], None],
@@ -1753,7 +1752,10 @@ class Channel(Protocol):
         """Carry one framed payload; on_delivered runs at its delivery."""
 
     def expected_delay_ticks(
-        self, framed, now_ticks: int, setup_ticks: int
+        self,
+        framed: transfer_records.FramedPayload,
+        now_ticks: int,
+        setup_ticks: int,
     ) -> int:
         """What the transfer would pay if nothing else reached the channel."""
 

@@ -58,13 +58,6 @@ class LogicalLedger:
         )
         self.contributions = kept
 
-    def owns_strong_window(self, owner_key: tuple) -> bool:
-        """Whether a strong window already claims that owner's extent."""
-        contribution = self.contributions.get(owner_key)
-        if contribution is None:
-            return False
-        return contribution.ownership_kind == "strong_window"
-
     def install(
         self, contribution: decoding_records.LogicalContribution
     ) -> None:

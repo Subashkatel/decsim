@@ -9,7 +9,7 @@ the part builds it and wires it.
 
 If what you have is another kind of a component decsim already has,
 you want [How to add a decoder backend](add_a_decoder_backend.md) or
-[How to add a store, a link card, a signal or a policy](add_a_store_card_signal_or_policy.md)
+[How to add a store, a link card, a signal, a policy or a scheme](add_a_store_card_signal_policy_or_scheme.md)
 instead: a class that fills the component's port, with a settings
 record a machine names.
 
@@ -118,6 +118,9 @@ this way:
 `tests/machine/test_machine.py`, reads every port that is not optional on every component of a built
 machine, so a wire you forgot fails there by name. Then add one test of
 what the new component does, in the test folder of its package.
+A new settings record under `decsim/` needs `python tools/docs_map.py`
+too, so [the parts page](../reference/parts.md) lists it;
+`tests/test_docs.py` fails until it does.
 
 ## Read next
 

@@ -1,9 +1,10 @@
 [decsim docs](../README.md) › [How-to guides](README.md)
 
-# How to add a store, a link card, a signal or a policy
+# How to add a store, a link card, a signal, a policy or a scheme
 
 You want a machine to use a weak syndrome buffer, a link card, a
-confidence signal or an escalation policy of your own. Each one is a
+confidence signal, an escalation policy or a windowing scheme of your
+own. Each one is a
 record you put in a field of the machine's settings. A decoder is the
 same kind of job, with a page of its own:
 [How to add a decoder backend](add_a_decoder_backend.md).
@@ -115,3 +116,47 @@ A card is numbers, not a class: a `FabricSettings` record, one
   decode in flight ([Two tiers](../tutorials/two_tiers.md)).
 - **Worked example:** `Switching` in `decsim/escalation/policies.py`.
   **Tests:** `tests/escalation/`.
+
+## A windowing scheme
+
+- **Field:** `windows.scheme`, typed `SchemeSettings`
+  (`decsim/windows/settings.py`).
+- **Record:** `name`, `commit_rounds` and `buffer_rounds` (None is the
+  code distance) and `build(terminal_policy)`. Check the sizes with
+  `window_data.check_window_sizes(self)` in `__post_init__`, and add
+  your row to `SCHEME_ROWS` in `tests/windows/test_settings.py`.
+- **Component:** fills `ports.WindowingScheme`. Set its three flags;
+  the port's docstring says what each one means. `data_complete` says
+  when a window has its rounds; `window_data.sliding_data_complete` is
+  the rule every shipped row uses.
+- **The plan:** `plan_operation` returns an `OperationWindowPlan`
+  (`decsim/records/windows.py`). Rounds count from 1.
+  - `windows`: one `WindowGeometry` per window, `buffer_lo` to
+    `buffer_hi` read, `commit_lo` to `commit_hi` committed.
+  - `internal_dependencies`: `(earlier, later)` window indices; the
+    later window waits for the earlier one.
+  - `entry_window_indices` wait for the operation before;
+    `exit_window_indices` are what the operation after waits for.
+  - `windowed` False decodes the operation as one batch, and
+    `batch_preceding_idle_rounds` folds the idle rounds before it into
+    that batch. Only `naive_online` sets them so.
+  - `protocol`: `WindowProtocol.GENERIC`. The other member is Tan's
+    sandwich alone: one-layer seams, graphlike decoders only.
+- **Every plan must hold,** or the build refuses it:
+  - the commit regions, in plan order, cover the rounds with no gap or
+    overlap;
+  - a window with `closed_temporal_boundaries` is the later end of a
+    dependency and cuts no fault.
+- **Which window decodes a fault:** with dependencies, the shallowest
+  window whose commit rounds the fault touches
+  (`decsim/detector_error_model/window_ownership_dag.py`). So a seam
+  decodes only its own rounds.
+- **On a machine:**
+
+  ```python
+  windows = dataclasses.replace(base.windows, scheme=MyScheme.Settings())
+  machine = dataclasses.replace(base, windows=windows)
+  ```
+
+- **Worked example:** `decsim/windows/schemes/sandwich.py`.
+  **Tests:** `tests/windows/schemes/test_sandwich.py`.

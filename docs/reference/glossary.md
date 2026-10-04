@@ -159,7 +159,7 @@ In the papers' symbols, `r_com` is the commit region's round count,
 | restart window, `PotentialRestart` | the window the weak decoder restarts on after an escalation | Toshio Sec. III C, Fig. 12 (2510.25222.txt lines 1232-1251) |
 | re-read width, `restart_reread_buffer_regions` | how far back into the strong region the restarted weak decode reads | Toshio Sec. III C |
 | boundary, `boundary_in`, artificial defects | the previous window's correction folded into this one. qLDPC calls it `net_error`, cuda-q QEC calls it `syndrome_mods` | Skoric Sec. I B, which calls them artificial defects (2209.08552.txt lines 269-281) |
-| seam window, sandwich schedule | Tan's type-2 window, the block between two independent type-1 windows | Tan, arXiv:2209.09219, supplementary material, the sandwich decoder section, p.14 of the arXiv pdf, and Fig. S4(b) |
+| seam window, sandwich schedule | Tan's type-2 window, the block between two independent type-1 windows. decsim's `sandwich` row is Tan's seam offset t = 0, a seam one round thick | Tan, arXiv:2209.09219, supplementary material, the sandwich decoder section, p.14 of the arXiv pdf, and Fig. S4(b) |
 
 ## The two tiers and the confidence
 

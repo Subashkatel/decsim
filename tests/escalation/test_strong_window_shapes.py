@@ -392,8 +392,10 @@ def test_a_double_window_plan_claims_the_rounds_a_restart_would_read():
     assert _claim(forward, 4) == tuple((1, index) for index in range(10, 16))
     assert _claim(forward, 0) is None
     ordinary = fabric.switching_machine(rounds=15, escalated_windows=set())
-    for window_index in range(5):
-        assert _claim(ordinary, window_index) is None
+    ordinary_claims = [
+        _claim(ordinary, window_index) for window_index in range(5)
+    ]
+    assert ordinary_claims == [None, None, None, None, None]
 
 
 def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
@@ -689,9 +691,9 @@ def test_a_pinned_strong_decode_starts_no_earlier_than_its_pin_lands():
     _watch_pin_and_start(engine, delivered_ticks, started_ticks)
     machine.run()
     pinned_keys = set(delivered_ticks) & set(started_ticks)
+    waits = [started_ticks[key] - delivered_ticks[key] for key in pinned_keys]
     assert pinned_keys
-    for key in sorted(pinned_keys):
-        assert started_ticks[key] >= delivered_ticks[key]
+    assert min(waits) >= 0
 
 
 def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
@@ -889,11 +891,8 @@ def test_the_redo_window_rows_pinned_faces_cross_the_wire():
     assert type(shape) is strong_window_shapes.RedoWindow
     strong_windows = _strong_window_keys(machine)
     pinned = _pinned_boundary_transfers(result)
-    pinned_windows = set()
-    pinned_bits = set()
-    for window_id, payload_bits in pinned:
-        pinned_windows.add((1, window_id))
-        pinned_bits.add(payload_bits)
+    pinned_windows = {(1, window_id) for window_id, _bits in pinned}
+    pinned_bits = {payload_bits for _window_id, payload_bits in pinned}
     assert pinned_windows == strong_windows
     assert len(pinned) == len(strong_windows)
     # a d=3 bulk layer carries d*d-1 = 8 detectors, one bit each under
@@ -944,9 +943,8 @@ def test_the_double_window_row_pins_its_near_and_its_far_face():
     )
     result = machine.run()
     pinned = _pinned_boundary_transfers(result)
-    assert len(pinned) == 2
-    for window_id, _payload_bits in pinned:
-        assert window_id == 1
+    pinned_windows = [window_id for window_id, _payload_bits in pinned]
+    assert pinned_windows == [1, 1]
     sources = _pin_sources(result)
     # W1's own dependency, and the window that restarts the chain past
     # the strong region 4-12

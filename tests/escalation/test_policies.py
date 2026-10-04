@@ -190,7 +190,8 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     machine = machine_module.Machine.build(settings, 1)
     machine.run()
     weak_gaps = _weak_gaps(machine)
-    below = sum(1 for gap in weak_gaps if gap < threshold_nats)
+    is_below = [gap < threshold_nats for gap in weak_gaps]
+    below = sum(is_below)
     strong_frame_writes = _strong_frame_writes(machine)
     assert len(weak_gaps) == 10
     assert below == 3

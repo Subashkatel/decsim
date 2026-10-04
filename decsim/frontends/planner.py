@@ -209,7 +209,7 @@ def _resolve_geometry(code):
 def _resolve_operation(
     operation, code, layout, rounds_policy, geometry, round_ticks, base_nodes
 ) -> program_records.ResolvedOperationPlanning:
-    operation_code = layout.code_for_op(operation)
+    operation_code = layout.code_for_operation(operation)
     if operation_code is not code:
         raise ValueError(
             f"layout operation {operation.id} selected a code different "

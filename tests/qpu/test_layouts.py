@@ -37,8 +37,8 @@ class RecordingLayout:
         self.code = code
         self.calls = []
 
-    def code_for_op(self, operation):
-        self.calls.append(("code_for_op", operation))
+    def code_for_operation(self, operation):
+        self.calls.append(("code_for_operation", operation))
         return self.code
 
     def code_for_patch(self, patch_identity):
@@ -125,7 +125,7 @@ def test_a_layout_written_outside_decsim_hears_every_hook_of_a_run():
     operation = one_operation()
     view = program_records.OperationPlanningView.from_operation(operation)
     assert calls_by_name["codes"] == [None]
-    assert calls_by_name["code_for_op"] == [view]
+    assert calls_by_name["code_for_operation"] == [view]
     assert calls_by_name["spatial_nodes_for"] == [view]
     assert calls_by_name["resources_for"] == [view]
     assert calls_by_name["code_for_patch"] == [11]
@@ -155,7 +155,7 @@ def test_an_operation_selector_that_returns_another_card_is_refused():
         del operation
         return code_geometry.SurfaceCodeModel(distance=3)
 
-    layout.code_for_op = another_card
+    layout.code_for_operation = another_card
     settings = settings_with(layout=layout)
     with pytest.raises(ValueError, match="layout operation 4 selected a code"):
         machine_module.Machine.build(settings)

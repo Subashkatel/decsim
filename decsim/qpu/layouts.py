@@ -35,7 +35,7 @@ class UniformLayout:
         del patch_id
         return self.code
 
-    def code_for_op(
+    def code_for_operation(
         self, operation: program_records.OperationPlanningView
     ) -> ports.CodeModel:
         """The one code, whatever the operation."""

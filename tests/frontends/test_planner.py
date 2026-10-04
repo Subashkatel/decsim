@@ -173,7 +173,7 @@ class RecordingLayout:
         self.operation_calls = []
         self.patch_calls = []
 
-    def code_for_op(self, operation):
+    def code_for_operation(self, operation):
         del operation
         return self.code
 

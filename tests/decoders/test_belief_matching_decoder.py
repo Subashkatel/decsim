@@ -17,7 +17,7 @@ import numpy
 import pymatching
 
 import decsim.decoders.belief_matching.decoder as belief_matching
-import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 ROUNDS = 3

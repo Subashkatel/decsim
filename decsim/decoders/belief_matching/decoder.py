@@ -23,9 +23,9 @@ import scipy.special
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 POSTERIOR_FLOOR = 1e-15
 POSTERIOR_CEILING = 1.0 - POSTERIOR_FLOOR

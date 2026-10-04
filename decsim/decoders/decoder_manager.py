@@ -32,10 +32,10 @@ import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.log_sources as log_sources
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records

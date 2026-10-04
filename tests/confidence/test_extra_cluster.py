@@ -31,9 +31,9 @@ import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import tests.confidence.independent_extra_growth as independent_extra_growth
 import tests.decoders.test_union_find_compiled_decoder as decoder_corpus
 import tests.decoders.windows as windows

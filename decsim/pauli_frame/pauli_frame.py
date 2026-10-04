@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.windows as window_records
@@ -48,18 +49,6 @@ class PauliFrameConfig:
         return PauliFrame(
             engine, clock=self.clock, write_cycles=self.write_cycles
         )
-
-
-@dataclasses.dataclass(frozen=True)
-class PauliFrameCommitRecord:
-    """One accepted correction, kept in the order the frame accepted it."""
-
-    window_key: tuple
-    tier: str
-    run_sequence: int
-    accepted_ticks: int
-    committed_ticks: int
-    logical_observables: Optional[ObservableBits]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -109,7 +98,7 @@ class PauliFrame:
         self._log_received(tier, window_key, observables)
         accepted_ticks = self.engine.now
         committed_ticks = self._write_edge(accepted_ticks)
-        record = PauliFrameCommitRecord(
+        record = decoding_records.PauliFrameCommitRecord(
             window_key=window_key,
             tier=tier,
             run_sequence=request_key.run_sequence,
@@ -229,7 +218,7 @@ class PauliFrame:
 class _PendingWrite:
     """A correction whose write cost is still being charged."""
 
-    record: PauliFrameCommitRecord
+    record: decoding_records.PauliFrameCommitRecord
     on_committed: Callable[[], None]
 
 

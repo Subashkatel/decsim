@@ -23,7 +23,6 @@ import dataclasses
 import fractions
 import math
 from collections.abc import Callable
-from typing import Optional
 
 import decsim.config as config
 import decsim.engine
@@ -32,47 +31,6 @@ import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
 
 OnDelivered = Callable[[transfer_records.Transfer], None]
-
-
-@dataclasses.dataclass(frozen=True)
-class FramedPayload:
-    """What one transfer puts on the wire: its payload, and its path's header.
-
-    The ledger counts the payload and the wire serializes both. A payload of
-    unknown size rides an unbounded channel only.
-    """
-
-    payload_bits: Optional[int]
-    header_bits: int = 0
-
-
-@dataclasses.dataclass(frozen=True)
-class FrameTiming:
-    """One frame's trip across a wire, in ticks.
-
-    bits is None for a payload of unknown size on an unbounded wire.
-    """
-
-    bits: Optional[int]
-    credit_wait_ticks: int
-    start_ticks: int
-    end_ticks: int
-    landed_ticks: int
-
-
-@dataclasses.dataclass(frozen=True)
-class FrameRecord:
-    """One frame on one channel, reported when its message is delivered.
-
-    A reliable channel also reports each lost frame and each retransmission.
-    """
-
-    channel: str
-    transfer_sequence: int
-    frame_index: int
-    timing: FrameTiming
-    is_lost: bool = False
-    is_retransmission: bool = False
 
 
 class Channel:
@@ -92,7 +50,7 @@ class Channel:
 
     def send(
         self,
-        framed: FramedPayload,
+        framed: transfer_records.FramedPayload,
         now_ticks: int,
         setup_ticks: int,
         on_delivered: OnDelivered,
@@ -122,7 +80,10 @@ class Channel:
         )
 
     def expected_delay_ticks(
-        self, framed: FramedPayload, now_ticks: int, setup_ticks: int
+        self,
+        framed: transfer_records.FramedPayload,
+        now_ticks: int,
+        setup_ticks: int,
     ) -> int:
         """The delay a transfer would pay if nothing else reached the channel.
 
@@ -208,13 +169,13 @@ class IdealWire:
         return copy.copy(self)
 
     def cross(
-        self, framed: FramedPayload, ready_ticks: int
-    ) -> tuple[FrameTiming, ...]:
+        self, framed: transfer_records.FramedPayload, ready_ticks: int
+    ) -> tuple[transfer_records.FrameTiming, ...]:
         """Take the wire's next slot for the whole transfer."""
         self.crossing_count += 1
         if self._capacity is None:
             landed_ticks = ready_ticks + self._propagation_ticks
-            timing = FrameTiming(
+            timing = transfer_records.FrameTiming(
                 None, 0, ready_ticks, ready_ticks, landed_ticks
             )
             return (timing,)
@@ -224,7 +185,9 @@ class IdealWire:
         end_ticks = start_ticks + serialization
         self._free_ticks = end_ticks
         landed_ticks = end_ticks + self._propagation_ticks
-        timing = FrameTiming(wire_bits, 0, start_ticks, end_ticks, landed_ticks)
+        timing = transfer_records.FrameTiming(
+            wire_bits, 0, start_ticks, end_ticks, landed_ticks
+        )
         return (timing,)
 
 
@@ -268,11 +231,11 @@ def transfer_for(
 
 def frame_records(
     channel_name: str, transfer_sequence: int, timings: tuple
-) -> tuple[FrameRecord, ...]:
+) -> tuple[transfer_records.FrameRecord, ...]:
     """One record per frame of one transfer, in sending order."""
     records = []
     for frame_index, timing in enumerate(timings):
-        record = FrameRecord(
+        record = transfer_records.FrameRecord(
             channel_name, transfer_sequence, frame_index, timing
         )
         records.append(record)
@@ -298,7 +261,7 @@ def serialization_ticks(
 class _Request:
     """One send waiting for its setup, then for the wire."""
 
-    framed: FramedPayload
+    framed: transfer_records.FramedPayload
     request_ticks: int
     setup_ticks: int
     ready_ticks: int

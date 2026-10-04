@@ -20,10 +20,10 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.decoder as tesseract_decoder
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.trace_source as trace_source
 

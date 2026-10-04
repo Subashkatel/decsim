@@ -16,14 +16,10 @@ import json
 from typing import Any, Optional, Union
 
 import decsim.config as config
-import decsim.decoders.decoder_memory as decoder_memory_module
-import decsim.decoders.decoder_unit as decoder_unit_module
-import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
-import decsim.links.channel as channel_module
-import decsim.pauli_frame.pauli_frame as pauli_frame_module
-import decsim.qpu.cycle_clock as cycle_clock
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -217,7 +213,7 @@ class TraceWriter:
         if event.kind == "RELEASED":
             self._end_held_round(round_key)
 
-    def command_event(self, event: cycle_clock.QPUCommandEvent) -> None:
+    def command_event(self, event: program_records.QPUCommandEvent) -> None:
         """A command arrived at the QPU or started on a boundary."""
         kind = event.kind.lower()
         name = f"command {kind}"
@@ -261,7 +257,7 @@ class TraceWriter:
             window_key = (attribution.operation_id, attribution.window_id)
             self._step_window_flow(thread, window_key, start)
 
-    def frame_landed(self, record: channel_module.FrameRecord) -> None:
+    def frame_landed(self, record: transfer_records.FrameRecord) -> None:
         """One frame on its channel's frame lane, from its start to its end."""
         timing = record.timing
         thread = f"{record.channel} frames"
@@ -542,7 +538,7 @@ class TraceWriter:
     def job_dispatched(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The job left the ready queue for a unit."""
         closing = {"unit": unit.name}
@@ -551,7 +547,7 @@ class TraceWriter:
     def input_landed(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The job's input is in the unit's own memory."""
         thread = _unit_thread(unit.name)
@@ -576,7 +572,7 @@ class TraceWriter:
     def job_started(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
@@ -593,7 +589,7 @@ class TraceWriter:
     def job_finished(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The unit's physical decode ended."""
         thread = _unit_thread(unit.name)
@@ -607,7 +603,9 @@ class TraceWriter:
         args = open_row["args"]
         self._complete(thread, name, "window,service", start, duration, args)
 
-    def stage_recorded(self, record: staged_decoder.DecoderStageRecord) -> None:
+    def stage_recorded(
+        self, record: decoding_records.DecoderStageRecord
+    ) -> None:
         """One stage of one job on the lane of the unit that ran it.
 
         Two decodes of one window can run on two units at once (a forced-class
@@ -630,7 +628,7 @@ class TraceWriter:
         self,
         memory_name: str,
         _job: decoding_records.DecodeJob,
-        decoder_input: decoder_memory_module.DecoderInput,
+        decoder_input: decoding_records.DecoderInput,
     ) -> None:
         """One job's rounds landed in a unit's memory."""
         unit_name = _unit_of_memory(memory_name)
@@ -643,7 +641,7 @@ class TraceWriter:
         self,
         memory_name: str,
         job: decoding_records.DecodeJob,
-        decoder_input: decoder_memory_module.DecoderInput,
+        decoder_input: decoding_records.DecoderInput,
     ) -> None:
         """The unit's memory freed the job's rounds."""
         unit_name = _unit_of_memory(memory_name)
@@ -658,7 +656,7 @@ class TraceWriter:
     # ---- the frame
 
     def correction_accepted(
-        self, record: pauli_frame_module.PauliFrameCommitRecord
+        self, record: decoding_records.PauliFrameCommitRecord
     ) -> None:
         """The frame took one window's correction."""
         window = window_text(record.window_key)
@@ -675,7 +673,7 @@ class TraceWriter:
         self._end_window_flow("Frame", record.window_key, self.engine.now)
 
     def correction_committed(
-        self, record: pauli_frame_module.PauliFrameCommitRecord
+        self, record: decoding_records.PauliFrameCommitRecord
     ) -> None:
         """The frame's write for one window has landed."""
         window = window_text(record.window_key)

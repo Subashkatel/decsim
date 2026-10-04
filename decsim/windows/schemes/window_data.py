@@ -6,11 +6,15 @@ operation's end is satisfied by a successor's rounds, by memory rounds,
 by a closed tail, or by every successor being exhausted.
 """
 
+from typing import Optional
+
 import decsim.config as config
 import decsim.records.windows as window_records
 
 
-def check_window_sizes(scheme_settings) -> None:
+def check_window_sizes(
+    commit_rounds: Optional[int], buffer_rounds: Optional[int]
+) -> None:
     """A scheme's commit and buffer sizes, each a whole count or None.
 
     A window is a commit region of ncom rounds and a buffer region of
@@ -18,8 +22,8 @@ def check_window_sizes(scheme_settings) -> None:
     window that commits no round never moves the stream on, so ncom is
     at least one; a buffer may be empty. None is the code distance.
     """
-    _check_window_rounds("commit_rounds", scheme_settings.commit_rounds, 1)
-    _check_window_rounds("buffer_rounds", scheme_settings.buffer_rounds, 0)
+    _check_window_rounds("commit_rounds", commit_rounds, 1)
+    _check_window_rounds("buffer_rounds", buffer_rounds, 0)
 
 
 def sliding_data_complete(

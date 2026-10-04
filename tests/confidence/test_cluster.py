@@ -17,9 +17,9 @@ import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )

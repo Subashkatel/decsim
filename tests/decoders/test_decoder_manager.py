@@ -19,10 +19,10 @@ import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.detector_error_model.detection_event_formation as event_formation
-import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.formation as formation_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
@@ -46,15 +46,15 @@ class OneRoundSource:
     def formation_table(self, operation_id):
         """The one table: one event, the round's first outcome."""
         del operation_id
-        recipe = detector_formation.DetectorRecipe(
+        recipe = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
-            kind=detector_formation.LayerKind.PREPARATION,
+            kind=formation_records.LayerKind.PREPARATION,
             records=((1, 0),),
             reference_parity=0,
             coordinates=(),
         )
-        return detector_formation.FormationTable(
+        return formation_records.FormationTable(
             round_count=1,
             packet_width_by_round={1: 2},
             readout_slot_start=None,
@@ -69,23 +69,23 @@ class TwoRoundSource:
     def formation_table(self, operation_id):
         """One event a round, the second the XOR of both rounds' outcome."""
         del operation_id
-        first = detector_formation.DetectorRecipe(
+        first = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
-            kind=detector_formation.LayerKind.PREPARATION,
+            kind=formation_records.LayerKind.PREPARATION,
             records=((1, 0),),
             reference_parity=0,
             coordinates=(),
         )
-        second = detector_formation.DetectorRecipe(
+        second = formation_records.DetectorRecipe(
             detector_index=1,
             round_index=2,
-            kind=detector_formation.LayerKind.BULK,
+            kind=formation_records.LayerKind.BULK,
             records=((1, 0), (2, 0)),
             reference_parity=0,
             coordinates=(),
         )
-        return detector_formation.FormationTable(
+        return formation_records.FormationTable(
             round_count=2,
             packet_width_by_round={1: 1, 2: 1},
             readout_slot_start=None,

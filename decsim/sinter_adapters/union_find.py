@@ -16,9 +16,9 @@ import stim
 
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_identity_validation as fault_identities
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
 
 
 class UnionFindDecoder(sinter.Decoder):

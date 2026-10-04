@@ -16,8 +16,8 @@ import random
 from collections.abc import Mapping
 from typing import Any, Optional
 
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records

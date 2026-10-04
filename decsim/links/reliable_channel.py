@@ -52,8 +52,8 @@ import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
-import decsim.links.framings as framings
 import decsim.links.settings as link_settings
+import decsim.records.transfers as transfer_records
 import decsim.seeding as seeding
 
 # rxe's completer never spends a retry count of 7, the largest a card
@@ -79,7 +79,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         is wrong.
         """
 
-        framing: framings.FramingSettings
+        framing: link_settings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
         window_packets: int
@@ -404,7 +404,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         if not self.trace.frame_landed.has_listeners:
             return
         packet = transmission.packet
-        record = channel_module.FrameRecord(
+        record = transfer_records.FrameRecord(
             channel=self._settings.name,
             transfer_sequence=packet.message.sequence,
             frame_index=packet.frame_index,
@@ -456,7 +456,7 @@ class _Transmission:
     """One trip of one packet across the wire."""
 
     packet: _Packet
-    timing: channel_module.FrameTiming
+    timing: transfer_records.FrameTiming
     timing_index: int
     is_lost: bool
     requests_ack: bool
@@ -495,7 +495,7 @@ class _TimerState:
     expiry: Optional[decsim.engine.Event] = None
 
 
-def _require_roce_framing(framing: framings.FramingSettings) -> None:
+def _require_roce_framing(framing: link_settings.FramingSettings) -> None:
     """This protocol is RoCE's go-back-N, whose ACKs are RoCE packets.
 
     PCIe's data link replay needs the base specification, not in hand;

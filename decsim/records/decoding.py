@@ -1,9 +1,10 @@
-"""One decode: the job, the result, and the holds that keep its rounds.
+"""One decode: its job, input, stages and result, and the holds on its rounds.
 
 A weak decode runs first and fast; an escalated strong decode re-decodes
 the same window (Toshio et al. 2510.25222 Sec. III A). The confidence,
 the request outcome and the run's shape live here too, because the
-escalation policy reads them with the result.
+escalation policy reads them with the result, and so does the frame's
+record of the correction it accepted, which closes the decode.
 """
 
 from collections.abc import Callable
@@ -14,6 +15,8 @@ from typing import Any, Optional, Union
 import numpy
 
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 
@@ -268,6 +271,31 @@ class RephaseGuard:
         return ()
 
 
+# Every hold a syndrome buffer keeps rounds for; the store asks it the
+# three questions above and never reads which one it is.
+Hold = Union[
+    WindowReads,
+    PotentialStrong,
+    PotentialRestart,
+    LaterStreamReads,
+    PendingStrong,
+    StrongInputInFlight,
+    DecoderInputHold,
+    RephaseGuard,
+]
+
+
+@dataclass(frozen=True)
+class SyndromeBufferingPlan:
+    """The holds every window places on the stores.
+
+    A hold names the rounds a consumer keeps alive.
+    """
+
+    weak_holds: tuple
+    potential_holds: tuple
+
+
 @dataclass(frozen=True)
 class DecoderServiceKey:
     """Identity of one decoder service (a batch of requests served together)."""
@@ -308,6 +336,52 @@ class RequestProcessingOutcome(Enum):
     WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
 
 
+@dataclass(frozen=True)
+class MaterializedSyndromeRound:
+    """One immutable syndrome round owned by the decoder side."""
+
+    operation_id: Any  # an opaque identity
+    round_index: int
+    fragments: tuple[round_records.RetainedSyndromeFragment, ...]
+
+
+@dataclass(frozen=True)
+class DecoderInput:
+    """Immutable local input for one decoder request.
+
+    Rounds are ordered by operation identity and round index.
+    """
+
+    operation_id: int
+    window_id: int
+    request_key: Optional[window_records.DecoderRequestKey]
+    rounds: tuple[MaterializedSyndromeRound, ...]
+
+    def fragments(self) -> list:
+        """The landed fragments, round by round."""
+        fragments = []
+        for round_input in self.rounds:
+            fragments.extend(round_input.fragments)
+        return fragments
+
+    def size_bits(self) -> Optional[int]:
+        """The bits this input occupies; None when a fragment states none.
+
+        An input with no rounds is no bits at all.
+        """
+        fragments = self.fragments()
+        return round_records.fragment_wire_bits(fragments)
+
+    def held_bits(self) -> int:
+        """The bits this input holds in a memory.
+
+        Rounds that state no size hold none; only a bounded memory needs
+        a size, and it refuses such an input before it lands.
+        """
+        bits = self.size_bits()
+        return round_records.stated_bits(bits)
+
+
 def distinct_round_count(payloads: list) -> int:
     """The distinct (operation_id, round_index) rounds of the payloads.
 
@@ -336,13 +410,13 @@ class DecodeJob:
     # rounds the decoder processes: the distinct rounds landed in its
     # input, plus batched idle rounds
     round_count: int
-    detector_error_model: Optional[Any] = (
-        None  # window detector error model (data-path decoders)
-    )
+    # the window's error model, which a data-path decoder reads
+    detector_error_model: Optional[fault_models.WindowErrorModel] = None
     payloads: list = field(
         default_factory=list
     )  # transfer-source view; cleared after materialization
-    decoder_input: Optional[Any] = None  # materialized decoder memory value
+    # the rounds as they sit in the unit's memory, once they have landed
+    decoder_input: Optional[DecoderInput] = None
     # the raw rounds before the first payload, in round order, read out
     # of the store with them when the tier's decoder forms the events
     # and has not formed that first round (detection_events,
@@ -471,6 +545,64 @@ class LogicalContribution:
     commit_hi: int
     ownership_kind: str
     logical_observables: Optional[tuple[int, ...]]
+
+
+@dataclass(frozen=True)
+class PauliFrameCommitRecord:
+    """One accepted correction, kept in the order the frame accepted it."""
+
+    window_key: tuple
+    tier: str
+    run_sequence: int
+    accepted_ticks: int
+    committed_ticks: int
+    logical_observables: Optional[tuple[int, ...]]
+
+
+@dataclass(frozen=True)
+class DecoderStageRecord:
+    """One stage of one job: name, cycles charged, start and end ticks."""
+
+    operation_id: int
+    window_id: int
+    stage: str
+    cycles: Optional[int]  # None for the algorithm, priced in time
+    start_ticks: int
+    end_ticks: int
+    # the unit the decode ran on, the lane it belongs to, as each LLVM
+    # XRay record carries the thread it ran on
+    # (tools/llvm-xray/xray-converter.cc:232-245)
+    unit_name: str
+    # the (operation, round) identities a formation stage turned into
+    # detection events here; empty for every stage that forms none
+    round_keys: tuple = ()
+    # the run ordinals of the requests this decode serves, so a reader
+    # can tell one window's decodes apart: its two forced-class solves,
+    # its strong re-decode, and the members of a merged batch all carry
+    # the same window key and different ordinals
+    run_sequences: tuple = ()
+    # the decode was cancelled while this stage was open: the stage ends
+    # at the cancel, and no latency point reads it
+    cancelled: bool = False
+    # the tick a unit took this decode. The window record keeps the last
+    # decode's, so a window decoded more than once needs each decode's
+    # own here, beside the run ordinals that name them
+    dispatch_ticks: Optional[int] = None
+    # the tick this decode first may compute: its input landed and its
+    # window owed no boundary. What it waited for after this tick is the
+    # unit's compute, which is a wait of a different kind
+    ready_ticks: Optional[int] = None
+    # the rounds the decode read, the job's own count: a strong decode's
+    # r_strong is what Toshio's backlog bound divides by (2510.25222
+    # lines 1270-1300), and the window record keeps only the last decode
+    round_count: int = 0
+    # the ticks the decode had waited inside a strong backend when this
+    # stage closed (DecodeJob.backend_queue_wait_ticks), all of it by the
+    # algorithm stage's end
+    backend_queue_wait_ticks: int = 0
+    # the ticks the decode's input read took in its store
+    # (DecodeJob.store_read_ticks)
+    store_read_ticks: int = 0
 
 
 class DecoderEvidence(Enum):

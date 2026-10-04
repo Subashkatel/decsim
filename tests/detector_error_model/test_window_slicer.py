@@ -18,9 +18,9 @@ import stim
 
 from decsim.detector_error_model import (
     detector_chronology,
-    fault_model_contracts,
     window_slicer,
 )
+from decsim.records import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL

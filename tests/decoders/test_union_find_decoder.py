@@ -22,8 +22,8 @@ import scipy.sparse
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.rounds as round_records
 
 # rows 0..3 and 4..7 are two boundaryless 4-cycles, rows 8..11 a chain

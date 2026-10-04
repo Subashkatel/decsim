@@ -103,7 +103,7 @@ def test_a_reference_hop_delivers_its_latency_after_its_bits_serialize():
     weak_store = profile.controller_to_weak_buffer.channel
     engine = decsim.engine.Engine()
     channel = channel_module.Channel(weak_store, engine)
-    framed = channel_module.FramedPayload(120)
+    framed = transfer_records.FramedPayload(120)
     delivered = []
     channel.send(framed, 0, 0, delivered.append)
     engine.run()
@@ -341,7 +341,7 @@ def test_a_nominal_round_serializes_in_exactly_one_round_period():
     engine = decsim.engine.Engine()
     readout = profile.qpu_to_controller.channel
     channel = channel_module.Channel(readout, engine)
-    framed = channel_module.FramedPayload(8)
+    framed = transfer_records.FramedPayload(8)
     delivered = []
     channel.send(framed, 0, 0, delivered.append)
     engine.run()
@@ -406,7 +406,7 @@ def test_a_cards_cycles_cost_its_clocks_period_in_whole_ticks():
     )
     engine = decsim.engine.Engine()
     channel = channel_module.Channel(path.channel, engine)
-    framed = channel_module.FramedPayload(8)
+    framed = transfer_records.FramedPayload(8)
     delivered = []
     channel.send(framed, 0, 0, delivered.append)
     engine.run()

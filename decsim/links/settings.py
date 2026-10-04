@@ -63,8 +63,32 @@ class PayloadSettings:
             raise ValueError("input_bits must be nonnegative")
 
 
+class FramingSettings(Protocol):
+    """A framing row's settings record (framings.py), which builds it.
+
+    has_acknowledgement_packet says whether the framing has a packet of
+    its own for an acknowledgement, which the reliable protocol needs.
+    """
+
+    has_acknowledgement_packet: bool
+
+    def build(self) -> ports.Framing:
+        """A fresh framing."""
+
+
 class PacketProtocolSettings(Protocol):
-    """A packet protocol's settings record, which builds its channel."""
+    """A packet protocol's settings record, which builds its channel.
+
+    Every packet protocol cuts a message into frames and credits them
+    from a receive buffer (credit_channel.py): framing cuts the frames,
+    receive_buffer_frames is the buffer's C frames, and
+    credit_latency_cycles is a credit's return L_c on clock.
+    """
+
+    framing: FramingSettings
+    receive_buffer_frames: int
+    credit_latency_cycles: int
+    clock: config.Clock
 
     def build(
         self,

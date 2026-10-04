@@ -9,9 +9,9 @@ import dataclasses
 from typing import Optional
 
 import decsim.detector_error_model.detector_formation as formation
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.records.circuits as circuit_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.windows as window_records
 
 

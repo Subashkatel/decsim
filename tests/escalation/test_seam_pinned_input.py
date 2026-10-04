@@ -47,9 +47,9 @@ import numpy
 import pytest
 import stim
 
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_commits as window_commits

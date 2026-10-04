@@ -27,13 +27,13 @@ import pytest
 
 import decsim.config as config
 import decsim.engine
-import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.reliable_channel as reliable_channel
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
+import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
 import examples.two_tiers as two_tiers
 
@@ -118,7 +118,7 @@ def seed_losing(pattern):
 def send_at(engine, channel, tick, payload_bytes, delivered):
     delay = tick - engine.now
     payload_bits = payload_bytes * 8
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
 
     def send():
         channel.send(framed, tick, 0, delivered.append)
@@ -372,8 +372,8 @@ def test_an_acknowledged_message_is_let_go_under_loss():
     second_callback = _Delivery(delivered)
     first_reference = weakref.ref(first_callback)
     second_reference = weakref.ref(second_callback)
-    first_payload = channel_module.FramedPayload(1600)
-    second_payload = channel_module.FramedPayload(1600)
+    first_payload = transfer_records.FramedPayload(1600)
+    second_payload = transfer_records.FramedPayload(1600)
     first_send = functools.partial(
         channel.send, first_payload, 0, 0, first_callback
     )
@@ -531,7 +531,7 @@ def test_the_expected_delay_leaves_out_the_window_wait():
     settings = reliable_settings(0.0, window_packets=1, ack_every_packets=1)
     channel = seeded_channel(engine, settings, 1)
     payload_bits = 512 * 8
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
     expected = channel.expected_delay_ticks(framed, 0, 0)
     delivered = []
     send_at(engine, channel, 0, 512, delivered)
@@ -547,7 +547,7 @@ def test_the_expected_delay_is_the_delivery_within_the_window():
     settings = reliable_settings(0.0)
     channel = seeded_channel(engine, settings, 1)
     payload_bits = 512 * 8
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
     expected = channel.expected_delay_ticks(framed, 0, 0)
     delivered = []
     send_at(engine, channel, 0, 512, delivered)

@@ -22,6 +22,8 @@ from typing import Any, Optional, Protocol, Union, runtime_checkable
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
+import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -234,27 +236,35 @@ class RetainedRounds(Protocol):
 
     A hold names the rounds its holder will read from the moment it is
     placed, so the store may hold a round it has not received yet; the
-    holder is any record that answers referenced_operation_ids,
-    operation_ids_read_at_once and holders_waited_for
-    (records/decoding.py).
+    holder is one of the hold records, which answer
+    referenced_operation_ids, operation_ids_read_at_once and
+    holders_waited_for (records/decoding.py Hold).
     """
 
-    def register_hold(self, holder, round_keys: tuple) -> None:
+    def register_hold(
+        self, holder: decoding_records.Hold, round_keys: tuple
+    ) -> None:
         """Keep these rounds for this holder until it releases them."""
 
-    def replace_hold(self, holder, round_keys: tuple) -> None:
+    def replace_hold(
+        self, holder: decoding_records.Hold, round_keys: tuple
+    ) -> None:
         """The holder reads a different span now; the old span may go."""
 
-    def transfer_hold(self, old_holder, new_holder) -> None:
+    def transfer_hold(
+        self,
+        old_holder: decoding_records.Hold,
+        new_holder: decoding_records.Hold,
+    ) -> None:
         """The same span passes to a new holder, with no gap between."""
 
-    def release_hold(self, holder) -> None:
+    def release_hold(self, holder: decoding_records.Hold) -> None:
         """The holder is done; rounds no other holder wants may go."""
 
-    def has_hold(self, holder) -> bool:
+    def has_hold(self, holder: decoding_records.Hold) -> bool:
         """Whether this holder's span is live."""
 
-    def hold_round_identities(self, holder) -> tuple:
+    def hold_round_identities(self, holder: decoding_records.Hold) -> tuple:
         """The rounds this holder keeps, in the order it named them."""
 
     def release_round_if_unheld(self, round_key: tuple) -> bool:
@@ -552,7 +562,10 @@ class WindowPlan(Protocol):
         """A window a strong region covers is never weak-decoded."""
 
     def reslice_window(
-        self, key: tuple, buffer_lo: int, model
+        self,
+        key: tuple,
+        buffer_lo: int,
+        model: Optional[fault_models.WindowErrorModel],
     ) -> window_records.Window:
         """Move a window's read start and install the model it reads with."""
 
@@ -573,7 +586,7 @@ class WindowPlan(Protocol):
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The error model of one strong window of that operation.
 
         prior_faults is what a pinned face's neighbour has committed,
@@ -653,11 +666,13 @@ class WindowRetention(Protocol):
         """No earlier escalation can re-slice the window: its claim ends."""
 
     def release_hold_if_live(
-        self, owner, store: Optional[RetainedRounds] = None
+        self,
+        owner: decoding_records.Hold,
+        store: Optional[RetainedRounds] = None,
     ) -> None:
         """Drop a hold that is still live; nothing for one already gone."""
 
-    def release_strong_hold_if_live(self, owner) -> None:
+    def release_strong_hold_if_live(self, owner: decoding_records.Hold) -> None:
         """Drop a room-side hold when it is still registered."""
 
     def release_absorbed_strong_hold(
@@ -747,6 +762,16 @@ class WindowJobBuilder(Protocol):
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
 
+    def stamp_first_round(
+        self, window: window_records.Window, store: RetainedRounds
+    ) -> None:
+        """Note when the window's first round became readable in the store."""
+
+    def assemble_payloads(
+        self, window: window_records.Window, store: RetainedRounds
+    ) -> list:
+        """The window's stored payloads, with successor overflow rounds."""
+
 
 @runtime_checkable
 class WindowRequests(Protocol):
@@ -791,7 +816,7 @@ class BoundaryCourier(Protocol):
         self,
         source_key: tuple,
         destination: window_records.Window,
-        model,
+        model: Optional[fault_models.WindowErrorModel],
         operation: program_records.Operation,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
@@ -800,12 +825,28 @@ class BoundaryCourier(Protocol):
 
 @runtime_checkable
 class StrongRedecode(Protocol):
-    """The strong tier's window side, as the committer and verdict see it.
+    """The strong tier's window side, as the weak windows see it.
 
-    A kept weak result halts the strong request it made unnecessary,
-    held here or on the strong side's manager (Toshio et al. 2510.25222
-    lines 606-614).
+    The requester asks it for the speculative strong decode that starts
+    beside a weak one (Toshio et al. 2510.25222 lines 598-601); the
+    committer, the verdict and the window manager ask it to escalate,
+    release and cancel. A kept weak result halts the strong request it
+    made unnecessary, held here or on the strong side's manager (lines
+    606-614).
     """
+
+    def parallel_strong_submission(
+        self, weak_job: decoding_records.DecodeJob
+    ) -> Optional[decoding_records.Submission]:
+        """The speculative strong decode started beside the weak job.
+
+        None when the weak job is parked or the strong job is held.
+        """
+
+    def unparked_submission(
+        self, window_key: tuple
+    ) -> Optional[decoding_records.Submission]:
+        """The weak job left its park: its speculative decode, or None."""
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the strong tier to re-decode the weak job's window."""
@@ -860,12 +901,16 @@ class DecoderInputFold(Protocol):
     """
 
     def fold_into_a_copy(
-        self, job: decoding_records.DecodeJob, masked_input
+        self,
+        job: decoding_records.DecodeJob,
+        masked_input: decoding_records.DecoderInput,
     ) -> None:
         """Give the job a masked duplicate; the unit's rounds stay raw."""
 
     def fold_in_place(
-        self, job: decoding_records.DecodeJob, masked_input
+        self,
+        job: decoding_records.DecodeJob,
+        masked_input: decoding_records.DecoderInput,
     ) -> None:
         """Write the masked input into the unit's own memory."""
 
@@ -1066,7 +1111,7 @@ class Decoder(Protocol):
     the stage ledger and the referee audit.
     """
 
-    fault_model_requirement: Any
+    fault_model_requirement: fault_models.DecoderFaultModelRequirement
     stage_recorded: Union[trace_source.TraceSource, trace_source.SilentSource]
     window_checked: Union[trace_source.TraceSource, trace_source.SilentSource]
     forced_solve_unavailable: Union[
@@ -1460,7 +1505,7 @@ class DetectionEventFormer(Protocol):
     def formation_table(
         self,
         operation_id: Any,  # an opaque identity
-    ):
+    ) -> formation_records.FormationTable:
         """The operation's formation table, the rounds executed so far."""
 
 
@@ -1546,8 +1591,9 @@ class WindowModelSource(Protocol):
 
     The window planner asks it per window; the default is the syndrome
     source's own (SyndromeSource.window_model_source). The requirement
-    and the model are the detector error model's records, named here by
-    position only, so the window side never imports that package.
+    and the model are records (records/fault_model_contracts.py), so the
+    window side names them without importing the package that builds
+    them.
     """
 
     # per_operation retains the root-owned circuit; none does not require it.
@@ -1560,7 +1606,7 @@ class WindowModelSource(Protocol):
         windows: list,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
         window_protocol: window_records.WindowProtocol,
     ) -> list:
@@ -1570,7 +1616,7 @@ class WindowModelSource(Protocol):
         self,
         stream_id: Any,  # an opaque identity
         window: window_records.Window,
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The model of one window of a dynamic stream, laid at runtime."""
 
     def register_dynamic_stream(
@@ -1578,7 +1624,7 @@ class WindowModelSource(Protocol):
         stream_operation: program_records.Operation,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
     ) -> Optional[int]:
         """Note a dynamic stream; the rounds it can supply, or None."""
 
@@ -1600,10 +1646,10 @@ class WindowModelSource(Protocol):
         window: window_records.Window,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple = (),
         prior_faults: Optional[dict] = None,
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """One strong window's model, its non-owned round ranges excluded.
 
         prior_faults names the faults a pinned face's neighbour has
@@ -1716,16 +1762,15 @@ class Channel(Protocol):
     where the net device frames and the channel times the crossing
     (point-to-point-net-device.cc TransmitStart calls
     point-to-point-channel.cc TransmitStart), and gem5's packet queue
-    (src/mem/packet_queue.hh:62-63). framed is a FramedPayload
-    (links/channel.py). trace holds frame_landed, one FrameRecord per
-    frame.
+    (src/mem/packet_queue.hh:62-63). trace holds frame_landed, one
+    FrameRecord per frame.
     """
 
     trace: Any
 
     def send(
         self,
-        framed,
+        framed: transfer_records.FramedPayload,
         now_ticks: int,
         setup_ticks: int,
         on_delivered: Callable[[transfer_records.Transfer], None],
@@ -1733,7 +1778,10 @@ class Channel(Protocol):
         """Carry one framed payload; on_delivered runs at its delivery."""
 
     def expected_delay_ticks(
-        self, framed, now_ticks: int, setup_ticks: int
+        self,
+        framed: transfer_records.FramedPayload,
+        now_ticks: int,
+        setup_ticks: int,
     ) -> int:
         """What the transfer would pay if nothing else reached the channel."""
 
@@ -1874,7 +1922,7 @@ class ConfidenceSignal(Protocol):
     """
 
     source: decoding_records.SoftOutputSource
-    fault_model_requirement: Any
+    fault_model_requirement: fault_models.DecoderFaultModelRequirement
     decoder_evidence_requirement: frozenset
     evidence_refusal: str
     forced_logical_classes: tuple
@@ -1999,6 +2047,38 @@ class MagicStateFactory(Protocol):
 
 
 @runtime_checkable
+class IdleRounds(Protocol):
+    """The idle accounting, as an idle policy carries a round through it.
+
+    The policy decides how a round travels and whether it is charged as
+    decode work; the accounting sends it and keeps the counts.
+    """
+
+    def emit_memory_round(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
+        """The round travels as a feedback-memory round of the operation."""
+
+    def submit_idle_decode_if_due(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
+        """Count one idle round; charge a job at each full commit region."""
+
+    def submit_idle_decode_for_remaining_rounds(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+    ) -> None:
+        """Charge the rounds after the last full commit region as one job."""
+
+
+@runtime_checkable
 class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 
@@ -2009,7 +2089,7 @@ class IdlePolicy(Protocol):
 
     def relay(
         self,
-        idle_rounds,
+        idle_rounds: IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
         round_index: int,
@@ -2018,7 +2098,7 @@ class IdlePolicy(Protocol):
 
     def end_idle_period(
         self,
-        idle_rounds,
+        idle_rounds: IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
     ) -> None:
@@ -2061,3 +2141,76 @@ class CodeModel(Protocol):
 
     def data_bits_per_readout(self, patch_count: int) -> int:
         """Data-qubit bits the final readout of this many patches adds."""
+
+
+@runtime_checkable
+class LayoutModel(Protocol):
+    """Which code every patch and every operation runs on, and its claims."""
+
+    def code_for_op(
+        self, operation: program_records.OperationPlanningView
+    ) -> CodeModel:
+        """The code the operation runs on."""
+
+    def code_for_patch(
+        self,
+        patch_id: Any,  # an opaque identity
+    ) -> CodeModel:
+        """The code the patch runs on."""
+
+    def codes(self) -> list:
+        """Every code the layout declares."""
+
+    def spatial_nodes_for(
+        self,
+        operation: program_records.OperationPlanningView,
+        *,
+        base_spatial_node_count: int,
+    ) -> int:
+        """Decoding-graph nodes per round of the operation."""
+
+    def patch_spatial_nodes_for(
+        self,
+        patch_identity: Any,  # an opaque identity
+        *,
+        base_spatial_node_count: int,
+    ) -> int:
+        """Decoding-graph nodes per round of the patch."""
+
+    def resources_for(
+        self, operation: program_records.OperationPlanningView
+    ) -> list[program_records.ResourceClaim]:
+        """The resources the operation holds while it runs."""
+
+
+# ------------------------------ what a listener reads off what it hears
+
+
+@runtime_checkable
+class DecoderMemory(Protocol):
+    """A decoder unit's input memory, as a listener reads its size."""
+
+    capacity_bits: Optional[int]
+
+
+@runtime_checkable
+class DecoderUnit(Protocol):
+    """A decoder unit, as a listener of its pool and its service reads it.
+
+    The pool fires unit_busy(unit) and unit_freed(unit), the service
+    fires each job's dispatch, landing, start and finish with its unit,
+    and a listener reads the unit's names and its memory's size, never
+    its state.
+    """
+
+    name: str
+    pool: str
+    memory: DecoderMemory
+
+
+@runtime_checkable
+class WindowBacklog(Protocol):
+    """The window manager, as the decode backlog sampler reads it."""
+
+    def rounds_backlog(self) -> tuple:
+        """Rounds arrived and not decoded: (operation id, patch, rounds)."""

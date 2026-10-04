@@ -13,7 +13,6 @@ import stim
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as formation
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.settings as event_settings
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
@@ -24,6 +23,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.circuits as circuit_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings

@@ -22,6 +22,7 @@ import pytest
 import stim
 
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.records.formation as formation_records
 
 DISTANCES = (3, 5)
 
@@ -70,8 +71,8 @@ def test_the_three_layer_kinds_split_as_half_bulk_half(distance):
     by_kind = collections.Counter(recipe.kind for recipe in table.detectors)
     half = (distance * distance - 1) // 2
 
-    assert by_kind[detector_formation.LayerKind.PREPARATION] == half
-    assert by_kind[detector_formation.LayerKind.READOUT] == half
+    assert by_kind[formation_records.LayerKind.PREPARATION] == half
+    assert by_kind[formation_records.LayerKind.READOUT] == half
 
 
 @pytest.mark.parametrize("distance", DISTANCES)

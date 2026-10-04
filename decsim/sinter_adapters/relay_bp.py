@@ -21,8 +21,8 @@ import stim
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_model_builders as window_builders
+import decsim.records.fault_model_contracts as fault_models
 
 
 class RelayBeliefPropagationDecoder(sinter.Decoder):

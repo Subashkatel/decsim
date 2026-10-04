@@ -16,7 +16,7 @@ import numpy
 import pytest
 import scipy.sparse
 
-from decsim.detector_error_model import fault_model_contracts
+from decsim.records import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL

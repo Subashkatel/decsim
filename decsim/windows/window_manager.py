@@ -18,6 +18,7 @@ from typing import Any, Optional, Union
 
 import decsim.engine as engine_module
 import decsim.ports as ports
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
@@ -112,7 +113,9 @@ class WindowManager:
         )
         self.tracker.register_stream(stream_operation, source_round_limit)
 
-    def install_planned_holds(self, buffering_plan) -> None:
+    def install_planned_holds(
+        self, buffering_plan: decoding_records.SyndromeBufferingPlan
+    ) -> None:
         """Check the stores against the plan and place its holds."""
         self.retention.install_planned_holds(buffering_plan)
 

@@ -12,7 +12,7 @@ different claim.
 import dataclasses
 from typing import Any
 
-import decsim.controller.idle_rounds as idle_rounds_module
+import decsim.ports as ports
 import decsim.records.program as program_records
 
 
@@ -43,7 +43,7 @@ class Ignore:
 
     def relay(
         self,
-        idle_rounds: idle_rounds_module.IdleRoundAccounting,
+        idle_rounds: ports.IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
         round_index: int,
@@ -53,7 +53,7 @@ class Ignore:
 
     def end_idle_period(
         self,
-        idle_rounds: idle_rounds_module.IdleRoundAccounting,
+        idle_rounds: ports.IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
     ) -> None:
@@ -76,7 +76,7 @@ class SeparateDecodeJobs:
 
     def relay(
         self,
-        idle_rounds: idle_rounds_module.IdleRoundAccounting,
+        idle_rounds: ports.IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
         round_index: int,
@@ -87,7 +87,7 @@ class SeparateDecodeJobs:
 
     def end_idle_period(
         self,
-        idle_rounds: idle_rounds_module.IdleRoundAccounting,
+        idle_rounds: ports.IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
     ) -> None:

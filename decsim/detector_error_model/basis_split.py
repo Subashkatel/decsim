@@ -25,9 +25,9 @@ import scipy.sparse
 import stim
 
 from decsim.detector_error_model import (
-    fault_model_contracts,
     stim_fault_catalog,
 )
+from decsim.records import fault_model_contracts
 
 BASES = ("X", "Z")
 # the Stim instructions that measure a qubit; the last one in a memory

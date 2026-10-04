@@ -22,7 +22,7 @@ requests its weak decode afresh, and only then ends the claim.
 """
 
 import dataclasses
-from typing import Any, Optional, Protocol, Union, runtime_checkable
+from typing import Optional, Protocol, Union, runtime_checkable
 
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -34,28 +34,6 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
-
-
-@dataclasses.dataclass(frozen=True)
-class StrongAssignment:
-    """A strong window assigned to an escalated weak window.
-
-    job is the strong job when the row builds it now, None when the row
-    holds it until its conditions fire; held_plan is then the row's own
-    record, handed back when the redecode asks for the job, and
-    round_count the strong window's rounds. folded_boundaries names the
-    neighbours whose committed boundaries the row folds into the job's
-    input (Bombin et al. 2303.04846 lines 775-788). first_round is the
-    strong window's first round, so the carried rounds before it are the
-    raw rounds a forming strong side reads.
-    """
-
-    request_key: window_records.DecoderRequestKey
-    job: Optional[decoding_records.DecodeJob]
-    held_plan: Any = None  # an opaque identity
-    round_count: int = 0
-    folded_boundaries: tuple = ()
-    first_round: int = 1
 
 
 class StrongWindowPorts:
@@ -99,20 +77,24 @@ class StrongWindowShape(Protocol):
     boundary_policy: ports.BoundaryPolicySettings
     window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
 
-    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
+    def plan(
+        self, weak_job: decoding_records.DecodeJob
+    ) -> pending_strong_windows.StrongAssignment:
         """Assign the strong window; build its job now or hold it."""
 
     def release_conditions(
-        self, assignment: StrongAssignment
+        self, assignment: pending_strong_windows.StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
         """What must happen before a held job may be built."""
 
     def held_job(
-        self, assignment: StrongAssignment
+        self, assignment: pending_strong_windows.StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
         """The held job, once its rounds are there; None while they are not."""
 
-    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+    def rounds_to_carry(
+        self, assignment: pending_strong_windows.StrongAssignment
+    ) -> tuple:
         """The rounds the row reads that the strong side does not have yet."""
 
 
@@ -165,7 +147,9 @@ class RedoWindow(StrongWindowPorts):
             """A fresh redo window on the run's engine."""
             return RedoWindow(engine)
 
-    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
+    def plan(
+        self, weak_job: decoding_records.DecodeJob
+    ) -> pending_strong_windows.StrongAssignment:
         """The near-pinned job, built now or held for its own rounds."""
         key = (weak_job.operation_id, weak_job.window_id)
         region = self.regions.redo_region(key)
@@ -181,18 +165,20 @@ class RedoWindow(StrongWindowPorts):
         return _assignment_of(self, held)
 
     def release_conditions(
-        self, assignment: StrongAssignment
+        self, assignment: pending_strong_windows.StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
         """The rounds it reads, stored in the strong syndrome buffer."""
         return _stored_rounds_conditions(assignment.held_plan)
 
     def held_job(
-        self, assignment: StrongAssignment
+        self, assignment: pending_strong_windows.StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
         """The job, once every round it reads is stored."""
         return _job_once_stored(self, assignment.held_plan)
 
-    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+    def rounds_to_carry(
+        self, assignment: pending_strong_windows.StrongAssignment
+    ) -> tuple:
         """The rounds it reads that the strong syndrome buffer lacks."""
         return _rounds_not_stored(self, assignment.held_plan)
 
@@ -267,7 +253,9 @@ class DoubleWindow(StrongWindowPorts):
 
     # ---- the shape
 
-    def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
+    def plan(
+        self, weak_job: decoding_records.DecodeJob
+    ) -> pending_strong_windows.StrongAssignment:
         """Lay out the double window; hold its job until it may start.
 
         The job waits for the restart window's weak commit or, at the
@@ -333,7 +321,7 @@ class DoubleWindow(StrongWindowPorts):
             self._log_assignment(held, resolved_region)
             if restart_key is not None:
                 self._restart_weak_chain(restart_key, plan, restart_model)
-            return StrongAssignment(
+            return pending_strong_windows.StrongAssignment(
                 strong_request_key,
                 None,
                 held_plan=held,
@@ -346,7 +334,7 @@ class DoubleWindow(StrongWindowPorts):
                 self.retention.release_strong_hold_if_live(guard)
 
     def release_conditions(
-        self, assignment: StrongAssignment
+        self, assignment: pending_strong_windows.StrongAssignment
     ) -> pending_strong_windows.ReleaseConditions:
         """The far boundary, and its own weak commit when it pins on it.
 
@@ -364,7 +352,7 @@ class DoubleWindow(StrongWindowPorts):
         )
 
     def held_job(
-        self, assignment: StrongAssignment
+        self, assignment: pending_strong_windows.StrongAssignment
     ) -> Optional[decoding_records.DecodeJob]:
         """The held job, once every round it reads is stored.
 
@@ -380,7 +368,9 @@ class DoubleWindow(StrongWindowPorts):
             return None
         return self._build_strong_job(held)
 
-    def rounds_to_carry(self, assignment: StrongAssignment) -> tuple:
+    def rounds_to_carry(
+        self, assignment: pending_strong_windows.StrongAssignment
+    ) -> tuple:
         """The rounds of its extent that the strong syndrome buffer lacks."""
         held = assignment.held_plan
         return self.retention.context_rounds_in_flight(
@@ -625,14 +615,14 @@ def _held_redo(
 
 def _assignment_of(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
-) -> StrongAssignment:
+) -> pending_strong_windows.StrongAssignment:
     """The job now, or the assignment held until its rounds are stored."""
     crossing = shape.retention.context_rounds_in_flight(
         held.key, held.read_keys
     )
     if crossing:
         _log_hold(shape, held, crossing)
-        return StrongAssignment(
+        return pending_strong_windows.StrongAssignment(
             held.request_key,
             None,
             held_plan=held,
@@ -641,7 +631,7 @@ def _assignment_of(
             first_round=held.strong_window.start_round,
         )
     job = _strong_job_of(shape, held)
-    return StrongAssignment(
+    return pending_strong_windows.StrongAssignment(
         held.request_key,
         job,
         round_count=job.round_count,

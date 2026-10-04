@@ -33,9 +33,9 @@ import dataclasses
 import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
-import decsim.links.framings as framings
 import decsim.links.settings as link_settings
 import decsim.ports as ports
+import decsim.records.transfers as transfer_records
 
 
 class CreditChannel(channel_module.Channel):
@@ -53,7 +53,7 @@ class CreditChannel(channel_module.Channel):
         usable. Every field is written, since each is a sourced hardware number.
         """
 
-        framing: framings.FramingSettings
+        framing: link_settings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
         clock: config.Clock
@@ -108,8 +108,8 @@ class CreditWire:
         return copied
 
     def cross(
-        self, framed: channel_module.FramedPayload, ready_ticks: int
-    ) -> tuple[channel_module.FrameTiming, ...]:
+        self, framed: transfer_records.FramedPayload, ready_ticks: int
+    ) -> tuple[transfer_records.FrameTiming, ...]:
         """Send the message's frames in order, each when it has a credit."""
         self.crossing_count += 1
         frame_bits = self._framing.frames(
@@ -129,7 +129,7 @@ class CreditWire:
 
     def cross_frame(
         self, bits: int, ready_ticks: int
-    ) -> channel_module.FrameTiming:
+    ) -> transfer_records.FrameTiming:
         """Send one frame: wait for the wire and a credit, then serialize."""
         queue_ticks = max(ready_ticks, self._free_ticks)
         start_ticks = self.next_start_ticks(ready_ticks)
@@ -142,7 +142,7 @@ class CreditWire:
         self._credit_returns.append(credit_return_ticks)
         self._free_ticks = end_ticks
         credit_wait_ticks = start_ticks - queue_ticks
-        return channel_module.FrameTiming(
+        return transfer_records.FrameTiming(
             bits,
             credit_wait_ticks,
             start_ticks,

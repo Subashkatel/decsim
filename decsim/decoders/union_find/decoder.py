@@ -13,9 +13,9 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 
 class UnionFindDecoder(decoder_module.WindowDecoderBase):

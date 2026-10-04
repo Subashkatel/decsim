@@ -14,10 +14,10 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.verify_windows as verify_windows
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.settings as machine_settings
 import tests.decoders.windows as windows
 from decsim.decoders.minimum_weight_perfect_matching import (

@@ -82,11 +82,11 @@ class _Shape:
         self.missing_rounds = tuple(missing_rounds)
         self.planned = []
 
-    def plan(self, weak_job) -> shapes.StrongAssignment:
+    def plan(self, weak_job) -> pending_module.StrongAssignment:
         self.planned.append(weak_job)
         if self.is_held:
-            return shapes.StrongAssignment(self.job.request_key, None)
-        return shapes.StrongAssignment(self.job.request_key, self.job)
+            return pending_module.StrongAssignment(self.job.request_key, None)
+        return pending_module.StrongAssignment(self.job.request_key, self.job)
 
     def release_conditions(self, assignment):
         del assignment

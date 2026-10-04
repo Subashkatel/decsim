@@ -11,7 +11,6 @@ from collections.abc import Callable, Iterable
 
 import decsim.config as config
 import decsim.ports as ports
-import decsim.qpu.layouts as layouts
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
@@ -26,18 +25,7 @@ class RunPlan:
     resolved_patches: tuple[program_records.ResolvedPatchPlanning, ...]
     round_ticks: int
     execution: window_records.WindowPlan
-    buffering: "SyndromeBufferingPlan"
-
-
-@dataclasses.dataclass(frozen=True)
-class SyndromeBufferingPlan:
-    """The holds every window places on the stores.
-
-    A hold names the rounds a consumer keeps alive.
-    """
-
-    weak_holds: tuple
-    potential_holds: tuple
+    buffering: decoding_records.SyndromeBufferingPlan
 
 
 def plan_execution(
@@ -45,7 +33,7 @@ def plan_execution(
     operations: tuple[program_records.OperationPlanningView, ...],
     planned_operation_ids: tuple[int, ...],
     code: ports.CodeModel,
-    layout: layouts.LayoutModel,
+    layout: ports.LayoutModel,
     scheme: ports.WindowingScheme,
     rounds_policy: ports.RoundsPolicy,
     fallback_round_microseconds: float,
@@ -327,7 +315,7 @@ def _plan_syndrome_buffering(
     formation_reads: window_records.FormationReads = (
         window_records.NO_FORMING_READER
     ),
-) -> SyndromeBufferingPlan:
+) -> decoding_records.SyndromeBufferingPlan:
     """Plan logical holds over one upstream round allocation.
 
     formation_reads says which reads also hold the raw rounds before
@@ -356,7 +344,9 @@ def _plan_syndrome_buffering(
                 absorbs_weak_windows,
                 formation_reads,
             )
-    return SyndromeBufferingPlan(tuple(weak.holds), tuple(strong.holds))
+    return decoding_records.SyndromeBufferingPlan(
+        tuple(weak.holds), tuple(strong.holds)
+    )
 
 
 def _hold_window(

@@ -14,6 +14,7 @@ import types
 from typing import Any, Optional
 
 import decsim.ports as ports
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
@@ -42,7 +43,7 @@ class WindowModels:
         # models object builds them, so it is where they live
         self.model_by_window: dict = {}
 
-    def requirement(self) -> object:
+    def requirement(self) -> fault_models.DecoderFaultModelRequirement:
         """What a model must offer every decoder that may decode it."""
         requirement = self.decoder.fault_model_requirement
         if self.strong_decoder is None:
@@ -86,7 +87,7 @@ class WindowModels:
         self,
         stream_id: Any,  # an opaque identity
         window: window_records.Window,
-    ) -> object:
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The model of one window of a dynamic stream, or None."""
         if self.provider is None:
             return None
@@ -126,7 +127,7 @@ class WindowModels:
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ) -> object:
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The model of one strong window, with the listed faults excluded.
 
         prior_faults is what the neighbour of a pinned face has already
@@ -234,7 +235,10 @@ class WindowPlanner:
         return window
 
     def reslice_window(
-        self, key: tuple, buffer_lo: int, model: object
+        self,
+        key: tuple,
+        buffer_lo: int,
+        model: Optional[fault_models.WindowErrorModel],
     ) -> window_records.Window:
         """Move a window's read start and install the model it reads with."""
         window = self.plan.windows[key]
@@ -269,7 +273,7 @@ class WindowPlanner:
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ) -> object:
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The error model of one strong window of that operation."""
         return self.models.strong_model_for_operation(
             operation,

@@ -17,10 +17,10 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
@@ -111,52 +111,6 @@ class UnitTiming:
         return ticks
 
 
-@dataclasses.dataclass(frozen=True)
-class DecoderStageRecord:
-    """One stage of one job: name, cycles charged, start and end ticks."""
-
-    operation_id: int
-    window_id: int
-    stage: str
-    cycles: Optional[int]  # None for the algorithm, priced in time
-    start_ticks: int
-    end_ticks: int
-    # the unit the decode ran on, the lane it belongs to, as each LLVM
-    # XRay record carries the thread it ran on
-    # (tools/llvm-xray/xray-converter.cc:232-245)
-    unit_name: str
-    # the (operation, round) identities a formation stage turned into
-    # detection events here; empty for every stage that forms none
-    round_keys: tuple = ()
-    # the run ordinals of the requests this decode serves, so a reader
-    # can tell one window's decodes apart: its two forced-class solves,
-    # its strong re-decode, and the members of a merged batch all carry
-    # the same window key and different ordinals
-    run_sequences: tuple = ()
-    # the decode was cancelled while this stage was open: the stage ends
-    # at the cancel, and no latency point reads it
-    cancelled: bool = False
-    # the tick a unit took this decode. The window record keeps the last
-    # decode's, so a window decoded more than once needs each decode's
-    # own here, beside the run ordinals that name them
-    dispatch_ticks: Optional[int] = None
-    # the tick this decode first may compute: its input landed and its
-    # window owed no boundary. What it waited for after this tick is the
-    # unit's compute, which is a wait of a different kind
-    ready_ticks: Optional[int] = None
-    # the rounds the decode read, the job's own count: a strong decode's
-    # r_strong is what Toshio's backlog bound divides by (2510.25222
-    # lines 1270-1300), and the window record keeps only the last decode
-    round_count: int = 0
-    # the ticks the decode had waited inside a strong backend when this
-    # stage closed (DecodeJob.backend_queue_wait_ticks), all of it by the
-    # algorithm stage's end
-    backend_queue_wait_ticks: int = 0
-    # the ticks the decode's input read took in its store
-    # (DecodeJob.store_read_ticks)
-    store_read_ticks: int = 0
-
-
 class StagedDecoder(decoder_module.DecoderBase):
     """A decoder on a unit: its stages walked as engine events.
 
@@ -164,12 +118,13 @@ class StagedDecoder(decoder_module.DecoderBase):
     (priced, or measured on the host clock); the result reaches
     on_result when the last stage ends, None when the job was cancelled
     meanwhile. Trace source: stage_recorded(record), one
-    DecoderStageRecord per stage, fired when the stage ends. A record
-    closed by a cancel says so: gem5 stops a squashed instruction where
-    it stands and counts it apart (src/cpu/o3/inst_queue.cc:895-908,
-    :294-298 and :1442), and decoder switching halts the strong
-    decoder's ongoing computation at the weak decoder's confident
-    verdict (Toshio et al. 2510.25222 lines 598-601 and 610-612).
+    DecoderStageRecord (records/decoding.py) per stage, fired when the
+    stage ends. A record closed by a cancel says so: gem5 stops a
+    squashed instruction where it stands and counts it apart
+    (src/cpu/o3/inst_queue.cc:895-908, :294-298 and :1442), and decoder
+    switching halts the strong decoder's ongoing computation at the weak
+    decoder's confident verdict (Toshio et al. 2510.25222 lines 598-601
+    and 610-612).
     """
 
     def __init__(self, decoder: ports.Decoder, timing: UnitTiming):
@@ -313,7 +268,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         running.open_stage = None
         job = running.job
         sequences = _run_sequences(job)
-        record = DecoderStageRecord(
+        record = decoding_records.DecoderStageRecord(
             job.operation_id,
             job.window_id,
             step.name,

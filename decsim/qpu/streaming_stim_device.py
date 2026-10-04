@@ -12,12 +12,13 @@ import stim
 
 import decsim.config as config
 import decsim.detector_error_model.detector_formation as formation
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.stim_stream_models as stream_models
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
+import decsim.records.fault_model_contracts as fault_models
+import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -161,7 +162,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     def formation_table(
         self,
         operation_id: Any,  # an opaque identity
-    ) -> formation.FormationTable:
+    ) -> formation_records.FormationTable:
         """The recipes of the stream's rounds executed so far."""
         stream = self._stream_for(operation_id)
         table = stream.history.table
@@ -390,7 +391,7 @@ class _History:
         self.measurement_rounds: dict[int, int] = {}
         self.round_count = 0
         self.is_final = False
-        self.table: Optional[formation.FormationTable] = None
+        self.table: Optional[formation_records.FormationTable] = None
 
     def append(
         self,

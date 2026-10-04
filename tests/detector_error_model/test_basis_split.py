@@ -14,9 +14,9 @@ import pytest
 import stim
 
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.detector_error_model.window_model_builders as builders
+import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED.joined(

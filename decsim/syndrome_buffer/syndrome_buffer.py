@@ -24,6 +24,7 @@ from typing import Any, ClassVar, Optional
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.ports as ports
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
 import decsim.trace_source as trace_source
@@ -226,13 +227,17 @@ class SyndromeBuffer:
 
     # ---- holds
 
-    def register_hold(self, holder, round_keys: tuple) -> None:
+    def register_hold(
+        self, holder: decoding_records.Hold, round_keys: tuple
+    ) -> None:
         """Keep the listed rounds alive for one consumer token."""
         record = self._hold_record(holder, round_keys)
         self.holds.register(holder, record)
         self.trace.hold_registered.fire(holder, record.round_keys)
 
-    def replace_hold(self, holder, round_keys: tuple) -> None:
+    def replace_hold(
+        self, holder: decoding_records.Hold, round_keys: tuple
+    ) -> None:
         """Re-point a live hold at a new set of rounds."""
         record = self._hold_record(holder, round_keys)
         orphaned = self.holds.replace(holder, record)
@@ -240,24 +245,24 @@ class SyndromeBuffer:
 
     def transfer_hold(
         self,
-        old_holder: Any,  # an opaque identity
-        new_holder: Any,  # an opaque identity
+        old_holder: decoding_records.Hold,
+        new_holder: decoding_records.Hold,
     ) -> None:
         """Move a live hold to a new token without freeing its rounds."""
         self.holds.transfer(old_holder, new_holder)
         self.trace.hold_transferred.fire(old_holder, new_holder)
 
-    def release_hold(self, holder: Any) -> None:  # an opaque identity
+    def release_hold(self, holder: decoding_records.Hold) -> None:
         """Drop a hold; rounds with no remaining holder are freed."""
         orphaned = self.holds.release(holder)
         self.trace.hold_released.fire(holder)
         self._free_stored(orphaned)
 
-    def has_hold(self, holder: Any) -> bool:  # an opaque identity
+    def has_hold(self, holder: decoding_records.Hold) -> bool:
         """True while this holder token is live."""
         return self.holds.is_live(holder)
 
-    def hold_round_identities(self, holder: Any) -> tuple:  # an opaque identity
+    def hold_round_identities(self, holder: decoding_records.Hold) -> tuple:
         """The rounds a live holder keeps."""
         return self.holds.round_keys_of(holder)
 

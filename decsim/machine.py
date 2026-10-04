@@ -19,17 +19,19 @@ Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
 what tools/check_uses_graph.py prints and check.sh enforces:
 
     0  compiled_libraries, config, records, trace_source
-    1  engine, ports, seeding
-    2  controller, detector_error_model, links, pauli_frame,
+    1  engine, seeding
+    2  ports
+    3  controller, detector_error_model, links, pauli_frame,
        syndrome_buffer, windows
-    3  decoders, escalation, qpu
-    4  confidence, frontends, observe, sinter_adapters
-    5  build, producers
-    6  settings
-    7  machine (this file)
-    8  collect
-    9  experiments
-    10 __main__
+    4  decoders, escalation, qpu
+    5  confidence, frontends, sinter_adapters
+    6  build, producers
+    7  observe
+    8  settings
+    9  machine (this file)
+    10 collect
+    11 experiments
+    12 __main__
 
 The eleven priced hops are the line where a call stops being local
 (Waldo 1994, waldo1994.txt 302-304 and 852-855): a call across a hop

@@ -23,16 +23,6 @@ import decsim.trace_source as trace_source
 # Any stands for them in every signature below.
 
 
-@dataclasses.dataclass(frozen=True)
-class QPUCommandEvent:
-    """When a command arrived at the QPU, and when it started."""
-
-    # "ARRIVED" or "STARTED"; the event ledger reads these words.
-    kind: str
-    tick: int
-    command: program_records.RunOperationBody
-
-
 class QPUDevice:
     """Runs issued operation bodies on one QEC cycle clock.
 
@@ -77,7 +67,9 @@ class QPUDevice:
             raise ValueError(
                 "zero-duration detector emitters must finalize a stream round"
             )
-        event = QPUCommandEvent("ARRIVED", self.engine.now, command)
+        event = program_records.QPUCommandEvent(
+            "ARRIVED", self.engine.now, command
+        )
         self.trace.command_event.fire(event)
         self._live.commands_waiting.append(command)
         boundary = self.next_boundary()
@@ -226,7 +218,9 @@ class QPUDevice:
             self._start_command(command)
 
     def _start_command(self, command: program_records.RunOperationBody) -> None:
-        event = QPUCommandEvent("STARTED", self.engine.now, command)
+        event = program_records.QPUCommandEvent(
+            "STARTED", self.engine.now, command
+        )
         self.trace.command_event.fire(event)
         command = self.idle_rounds.start_command(command)
         operation = command.operation

@@ -20,6 +20,7 @@ import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.settings as link_settings
+import decsim.records.transfers as transfer_records
 
 
 def bounded_channel(engine, bits_per_microsecond, latency_ticks):
@@ -41,7 +42,7 @@ def send_at(engine, channel, tick, payload_bits, setup_ticks, delivered):
     """Send at the tick; the transfer is appended to delivered."""
     delay = tick - engine.now
 
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
 
     def send():
         channel.send(framed, tick, setup_ticks, delivered.append)
@@ -93,7 +94,7 @@ def test_a_header_is_serialized_with_the_payload_and_counted_apart():
     delivered = []
     payload_bits = 8
     header_bits = 24
-    framed = channel_module.FramedPayload(
+    framed = transfer_records.FramedPayload(
         payload_bits=payload_bits, header_bits=header_bits
     )
 
@@ -220,7 +221,7 @@ def test_the_expected_delay_is_the_delivery_when_nothing_overtakes():
     delivered = []
     expected = []
 
-    framed = channel_module.FramedPayload(8)
+    framed = transfer_records.FramedPayload(8)
 
     def ask_then_send():
         delay = channel.expected_delay_ticks(framed, 10, 5)
@@ -247,7 +248,7 @@ def test_the_expected_delay_counts_a_transfer_still_in_setup_ahead():
     delivered = []
     expected = []
 
-    framed = channel_module.FramedPayload(8)
+    framed = transfer_records.FramedPayload(8)
 
     def ask_then_send():
         delay = channel.expected_delay_ticks(framed, 5, 20000)
@@ -265,7 +266,7 @@ def test_the_expected_delay_counts_a_transfer_still_in_setup_ahead():
 def test_the_expected_delay_leaves_the_channel_untouched():
     engine = decsim.engine.Engine()
     channel = bounded_channel(engine, 1000.0, 0)
-    framed = channel_module.FramedPayload(8)
+    framed = transfer_records.FramedPayload(8)
     channel.expected_delay_ticks(framed, 10, 5)
     delivered = []
     send_at(engine, channel, 10, 8, 5, delivered)

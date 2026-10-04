@@ -22,8 +22,8 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
 
 BOUNDARY = -1
 # the compiled decoder counts lengths, ticks and walk distances in int64

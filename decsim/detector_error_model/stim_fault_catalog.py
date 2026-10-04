@@ -19,8 +19,8 @@ import stim
 
 from decsim.detector_error_model import (
     fault_identity_validation,
-    fault_model_contracts,
 )
+from decsim.records import fault_model_contracts
 
 
 @dataclasses.dataclass(frozen=True)

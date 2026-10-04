@@ -74,6 +74,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
+import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.results as result_records
 import decsim.records.rounds as round_records
@@ -3747,7 +3748,7 @@ def _separate_terminal_settings(placement: str) -> tuple:
     terminal_ids = tuple(
         recipe.detector_index
         for recipe in table.detectors
-        if recipe.kind is detector_formation.LayerKind.READOUT
+        if recipe.kind is formation_records.LayerKind.READOUT
     )
     source = stim_device.RecordedStimDevice(
         measurements,

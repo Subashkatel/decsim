@@ -257,6 +257,47 @@ class TransferRecord:
     transfer: Transfer
 
 
+@dataclass(frozen=True)
+class FramedPayload:
+    """What one transfer puts on the wire: its payload, and its path's header.
+
+    The ledger counts the payload and the wire serializes both. A payload of
+    unknown size rides an unbounded channel only.
+    """
+
+    payload_bits: Optional[int]
+    header_bits: int = 0
+
+
+@dataclass(frozen=True)
+class FrameTiming:
+    """One frame's trip across a wire, in ticks.
+
+    bits is None for a payload of unknown size on an unbounded wire.
+    """
+
+    bits: Optional[int]
+    credit_wait_ticks: int
+    start_ticks: int
+    end_ticks: int
+    landed_ticks: int
+
+
+@dataclass(frozen=True)
+class FrameRecord:
+    """One frame on one channel, reported when its message is delivered.
+
+    A reliable channel also reports each lost frame and each retransmission.
+    """
+
+    channel: str
+    transfer_sequence: int
+    frame_index: int
+    timing: FrameTiming
+    is_lost: bool = False
+    is_retransmission: bool = False
+
+
 def _read_range(window: window_records.Window) -> tuple:
     """The inclusive round range a window reads."""
     first_round = window.commit_lo

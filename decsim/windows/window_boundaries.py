@@ -17,6 +17,7 @@ from typing import Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -159,7 +160,7 @@ class BoundaryCourier:
         self,
         source_key: tuple,
         destination: window_records.Window,
-        model,
+        model: Optional[fault_models.WindowErrorModel],
         operation: program_records.Operation,
         request_key: window_records.DecoderRequestKey,
     ) -> None:

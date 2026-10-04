@@ -4,6 +4,7 @@ import dataclasses
 from typing import Optional, Union
 
 import decsim.config as config
+import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
@@ -84,7 +85,7 @@ class QpuSettings:
         return code, layout
 
 
-def _the_layouts_one_code(layout: layouts.LayoutModel):
+def _the_layouts_one_code(layout: ports.LayoutModel):
     """The one code a layout declares; a layout of several is refused."""
     declared_codes = layout.codes()
     codes = list(declared_codes)

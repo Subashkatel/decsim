@@ -238,7 +238,7 @@ class RoundAssembler:
 
 @dataclasses.dataclass
 class _PackingContext:
-    """One round in assembly: its route and the fragments so far."""
+    """One round being packed from its fragments."""
 
     identity: tuple
     round_key: tuple

@@ -66,7 +66,10 @@ class Streams(Protocol):
 
 
 class NoFeedbackStreams:
-    """A run whose operations share no streams and declare no regions."""
+    """A run whose operations share no stream.
+
+    They declare no protected region either.
+    """
 
     # the row takes the wires the other row does, so the control part
     # wires either the same way
@@ -138,7 +141,11 @@ class NoFeedbackStreams:
 
 
 class FeedbackStreams:
-    """The stream bindings, the live streams and the protected cycle."""
+    """The controller's bookkeeping of the run's shared streams.
+
+    It holds each operation's stream binding, each live stream and its
+    protected cycle.
+    """
 
     # a cadence change frees an operation the runtime is holding
     runtime = ports.Port(ports.OperationRuntime)
@@ -754,7 +761,7 @@ class FeedbackStreams:
 
 @dataclasses.dataclass
 class _ProtectedCycle:
-    """A protected stream's cycle: its region and its next boundary."""
+    """A protected stream's QEC cycle, boundary by boundary."""
 
     # the active protected region, None while the stream is unprotected
     region: object = None
@@ -765,7 +772,7 @@ class _ProtectedCycle:
 
 @dataclasses.dataclass
 class _LiveStream:
-    """One stream's state: its next round and, when protected, its cycle."""
+    """One live stream's state."""
 
     next_round: int = 0
     cycle: _ProtectedCycle = dataclasses.field(default_factory=_ProtectedCycle)
@@ -779,7 +786,10 @@ class _LiveStream:
 
 
 class _StreamTable:
-    """The program's protected regions and the resolved plan they read."""
+    """The index of the program's protected regions.
+
+    It keeps the resolved operations and patches the regions read.
+    """
 
     def __init__(self, regions, resolved_operations, resolved_patches) -> None:
         self.regions = tuple(regions)

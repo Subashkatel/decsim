@@ -23,7 +23,9 @@ import decsim.trace_source as trace_source
 
 
 class RoundTransmitter:
-    """Sends a stored round on its route and counts it until it lands.
+    """Sends each stored round on its route.
+
+    It counts the round in flight until it lands.
 
     Trace source: round_event(RoundEvent) with kinds CWB_SENT and
     FEEDBACK_MEMORY_DELIVERED.

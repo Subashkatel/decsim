@@ -116,8 +116,9 @@ POINTS = (
     "output_link_per_window",
     "frame_commit",  # the frame accepted the correction -> committed
     # Totals. The buffer0 pair starts the clock at the publication in the
-    # syndrome buffer the first decode reads; the qpu pair starts it when the round leaves the QPU (the QC
-    # send), so it includes QC, controller processing, packing and CWB.
+    # syndrome buffer the first decode reads; the qpu pair starts it when
+    # the round leaves the QPU (the QC send), so it includes QC,
+    # controller processing, packing and CWB.
     "buffer0_ready_to_frame",  # window complete in the buffer -> frame
     "buffer0_first_round_to_frame",  # first round in the buffer -> frame
     "qpu_last_round_to_frame",  # last required round off QPU -> frame

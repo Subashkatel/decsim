@@ -43,7 +43,8 @@ VIOLIN_BINS = 40
 # A window's stages from its first round readable in the weak syndrome
 # buffer to its correction written in the Pauli frame, in the order
 # they happen. Each is one recorded point of
-# decsim/experiments/measure.py, and they add up to TOTAL_STAGE.
+# decsim/experiments/measure.py, and a tier's stages add up to its
+# TIER_SPAN.
 STAGES = {
     "buffer_fill": "wait for the window's rounds",
     "admission_wait": "window into the decode queue",
@@ -60,7 +61,13 @@ STAGES = {
     "output_link_per_window": "send correction to the Pauli frame",
     "frame_commit": "write the Pauli frame",
 }
-TOTAL_STAGE = "buffer0_first_round_to_frame"
+# Each tier's bar: the recorded span it draws, where that span starts,
+# and the stages outside it. A kept window's bar starts when the window
+# is formed, so the wait for its rounds is left out.
+TIER_SPAN = {
+    "weak": ("buffer0_ready_to_frame", "window formed", {"buffer_fill"}),
+    "strong": ("buffer0_first_round_to_frame", "first round", set()),
+}
 # one color per stage, by kind: the rounds arriving in gray, waiting in
 # oranges and reds, data moving in blues, decoding in greens, the
 # verdict's work in purples
@@ -404,9 +411,8 @@ def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
 
     Each bar is one distance's mean time per window, split into the
     stages in the order they happen. Means, unlike medians, add up, so
-    a bar's length is the mean time from the window's first round
-    readable in the weak syndrome buffer to its correction written in
-    the Pauli frame: the number at its end.
+    a bar's length is the mean of its tier's span (TIER_SPAN) to the
+    correction written in the Pauli frame: the number at its end.
     """
     drawn_stages = stages_with_time(stage_means)
     tiers = list(TIER_WINDOWS)
@@ -457,13 +463,17 @@ def draw_breakdown(
 ) -> None:
     """One tier's stacked bars at one error rate, a bar per distance."""
     unit_name, unit_us = TIER_UNIT[tier]
+    span_stage, span_start, left_out_stages = TIER_SPAN[tier]
     distances = []
     for distance in DISTANCES:
-        if (error_rate, distance, tier, TOTAL_STAGE) in stage_means:
+        if (error_rate, distance, tier, span_stage) in stage_means:
             distances.append(distance)
     lefts = [0.0] * len(distances)
     positions = list(range(len(distances)))
-    for stage in drawn_stages:
+    bar_stages = [
+        stage for stage in drawn_stages if stage not in left_out_stages
+    ]
+    for stage in bar_stages:
         widths = []
         for distance in distances:
             key = (error_rate, distance, tier, stage)
@@ -482,7 +492,7 @@ def draw_breakdown(
     widest = max(lefts, default=1.0)
     axis.set_xlim(0, widest * 1.2)
     axis.set_xlabel(
-        f"mean time per window, first round to Pauli frame ({unit_name})"
+        f"mean time per window, {span_start} to Pauli frame ({unit_name})"
     )
     axis.set_title(f"{TIER_WINDOWS[tier]}, {X} = {error_rate:g}")
 

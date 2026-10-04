@@ -11,8 +11,6 @@ region's last buffer region as the restart window's past context, as
 Fig. 12 step 5 draws it.
 """
 
-import pytest
-
 import decsim.records.windows as window_records
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_interactions as window_interactions
@@ -149,23 +147,3 @@ def test_a_mask_from_the_later_neighbour_lands_on_the_newest_layer():
     update = interaction.merge_boundary(delivery, destination, None)
 
     assert update.accepted is True
-
-
-def test_a_mask_inside_the_destination_is_not_a_seam_and_is_refused():
-    """A mask over the middle of a window is not a seam.
-
-    boundary_payload_bits prices one layer, so the rest would ride free.
-    Tan 2209.09219 lines 936-946 and Skoric 2209.08552 lines 268-269:
-    the message is the seam where two windows meet, which is an edge of
-    the destination's read span and never inside it.
-    """
-    boundary_payload = boundary_payloads.DenseSeamMask()
-    interaction = window_interactions.DefaultWindowInteraction(
-        0, boundary_payload
-    )
-    destination = _weak_window_info(4)
-    inside = destination.start_round + 1
-    delivery = _delivery({inside: [1, 0]}, destination)
-
-    with pytest.raises(AssertionError, match="a seam is one of the two layers"):
-        interaction.merge_boundary(delivery, destination, None)

@@ -117,6 +117,21 @@ Line by line:
   (0,)` is what the decoder concluded, `truth (0,)` is what Stim knows
   it really was. They agree, so this shot did not fail.
 
+To watch the shot as it runs, add `--log print`. decsim then prints
+the engine's log: one line for each step a part takes, with its time.
+
+```bash
+decsim run examples/priced_cards_example.py --seed 0 --log print --out results/first_shot_log
+```
+
+The log starts:
+
+```
+[  0.000 us] Controller: START memory  (Clifford, qubits (0,))
+[  1.000 us] QPU: memory fires round 1/30
+[  1.008 us] Decoder manager: round 1 of memory arrived (op now has rounds 1..1)
+```
+
 ## Step 4. Collect one point
 
 Without `--seed`, `decsim run` runs every point until its collection

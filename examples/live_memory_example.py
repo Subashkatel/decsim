@@ -187,11 +187,11 @@ def _recorded_values(fragments) -> dict:
         return {}
     physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
     physical = _read_json(physical_path)
-    inputs_dir = fragments.parent
-    point_folder = inputs_dir.parent
-    points_dir = point_folder.parent
-    run_dir = points_dir.parent
-    recorded = _recorded_arguments(run_dir)
+    inputs_folder = fragments.parent
+    point_folder = inputs_folder.parent
+    points_folder = point_folder.parent
+    results_folder = points_folder.parent
+    recorded = _recorded_arguments(results_folder)
     for name, value in physical.items():
         if value is not None:
             recorded[name] = value
@@ -203,9 +203,9 @@ def _recorded_values(fragments) -> dict:
     return recorded
 
 
-def _recorded_arguments(run_dir: pathlib.Path) -> dict:
+def _recorded_arguments(results_folder: pathlib.Path) -> dict:
     """The circuit's values the run that saved the fragments recorded."""
-    arguments_path = run_dir / "arguments.json"
+    arguments_path = results_folder / "arguments.json"
     if not arguments_path.exists():
         return {}
     arguments = _read_json(arguments_path)

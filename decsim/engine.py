@@ -70,7 +70,7 @@ class Engine:
     ) -> Event:
         """Queue an action to run `delay` ticks from now; the event returns."""
         if delay < 0:
-            raise ValueError(
+            raise RuntimeError(
                 f"cannot schedule an action in the past: delay {delay} "
                 f"at tick {self.now}"
             )

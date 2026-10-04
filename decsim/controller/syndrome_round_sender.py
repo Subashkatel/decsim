@@ -147,6 +147,7 @@ class SyndromeRoundSender:
         # yet landed there; the packing stage's bound reads it
         # (RoundsInFlight), as it reads the transmitter's in_flight
         self.strong_crossing_count = 0
+        self.publishes_from_strong_store = False
 
     def start(self) -> None:
         """Read once which store the plan's windows come from.

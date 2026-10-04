@@ -235,7 +235,7 @@ class RepetitionMemory:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The card's own distance and round count."""
+        """The card's own keys."""
 
         distance: int
         round_count: int

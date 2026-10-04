@@ -3,9 +3,11 @@
 `python plot.py <results folder>` writes the folder's plots/, one
 figure per question: the share of windows escalated, the formed-to-
 commit latency, the logical error rate of switching against union-find
-alone, and whether the strong decoder keeps up. The folder holds
-status.csv, as `decsim status` writes it, and configurations.csv, each
-configuration's id and name. In the rate figure a point with no
+alone, whether the strong decoder keeps up, and each decoder's decode
+time per window by distance. The folder holds status.csv, as `decsim
+status` writes it, configurations.csv, each configuration's id and
+name, and decode_time.csv, the "algorithm" counts of each
+configuration's window_samples.csv. In the rate figure a point with no
 failures is a hollow marker at its upper bound, and a point failing more
 than half its shots is left out, as decsim.plots.error_rate draws them.
 """
@@ -14,7 +16,10 @@ import csv
 import pathlib
 import sys
 
+import matplotlib.lines as lines
+import matplotlib.patches as patches
 import matplotlib.pyplot as pyplot
+import numpy
 
 import decsim.plots as plots
 
@@ -29,6 +34,10 @@ SHOWN_NAME = {
 }
 X = "physical error rate"
 RATE = "logical_error_rate_per_round"
+TIER_COLOR = {"weak": "C0", "strong": "C1"}
+TIER_NAME = {"weak": "union-find (weak)", "strong": "Relay-BP-5 (strong)"}
+VIOLIN_HALF_WIDTH = 0.8
+VIOLIN_BINS = 40
 
 
 def main(folder: pathlib.Path) -> None:
@@ -41,10 +50,13 @@ def main(folder: pathlib.Path) -> None:
     latency_path = plots_folder / "latency.png"
     rate_path = plots_folder / "logical_error_rate.png"
     strong_path = plots_folder / "strong_decoder.png"
+    decode_time_path = plots_folder / "decode_time.png"
     escalated_figure(switching_rows, escalated_path)
     latency_figure(rows, latency_path)
     error_rate_figure(rows, rate_path)
     strong_figure(switching_rows, strong_path)
+    histograms = decode_time_histograms(folder)
+    decode_time_figure(histograms, decode_time_path)
 
 
 def rows_of(folder: pathlib.Path) -> list:
@@ -202,6 +214,119 @@ def strong_figure(rows: list, path: pathlib.Path) -> None:
     for axis in figure_axes:
         rate_axis(axis)
     plots.save(figure, path)
+
+
+def decode_time_histograms(folder: pathlib.Path) -> dict:
+    """The switching run's decode times, a value-to-count map per window kind.
+
+    The key is (physical error rate, distance, tier, round period in us).
+    """
+    decode_time_path = folder / "decode_time.csv"
+    with open(decode_time_path) as handle:
+        decode_time_rows = list(csv.DictReader(handle))
+    histograms = {}
+    for row in decode_time_rows:
+        if SHOWN_NAME[row["configuration"]] != SWITCHING:
+            continue
+        error_rate = float(row["physical_error_rate"])
+        distance = int(row["distance"])
+        round_period = float(row["round_period_us"])
+        key = (error_rate, distance, row["tier"], round_period)
+        histogram = histograms.setdefault(key, {})
+        value = float(row["value_us"])
+        histogram[value] = histogram.get(value, 0) + int(row["count"])
+    return histograms
+
+
+def decode_time_figure(histograms: dict, path: pathlib.Path) -> None:
+    """Decode time per window against distance, a panel per error rate.
+
+    Each violin is one tier's windows at one distance and rate, its width
+    the share of windows at that time; a line marks the median and a
+    triangle the slowest window. The dashed line is the time the chip
+    takes to measure one window, distance rounds of one round period.
+    """
+    figure, axis_by_rate = plots.panels(X, ERROR_RATES)
+    for (error_rate, distance, tier, _), histogram in histograms.items():
+        axis = axis_by_rate[error_rate]
+        color = TIER_COLOR[tier]
+        draw_violin(axis, distance, histogram, color)
+    round_periods = {key[3] for key in histograms}
+    (round_period,) = round_periods
+    window_times = [distance * round_period for distance in DISTANCES]
+    for axis in axis_by_rate.values():
+        axis.plot(DISTANCES, window_times, "--", color="gray")
+        axis.set_yscale("log")
+        axis.set_xticks(DISTANCES)
+        axis.set_xlabel("code distance")
+        axis.set_ylabel("decode time per window (us)")
+        axis.grid(True, which="major", alpha=plots.MINOR_GRID_ALPHA)
+    legend_handles = decode_time_legend(round_period)
+    figure.legend(
+        handles=legend_handles,
+        loc="outside lower center",
+        ncols=len(legend_handles),
+    )
+    plots.save(figure, path)
+
+
+def draw_violin(axis, position: int, histogram: dict, color: str) -> None:
+    """One violin of a value-to-count map, on a log axis.
+
+    The widths are counts in equal steps of log time, so a tier spanning
+    four decades keeps its shape on the log axis.
+    """
+    values = numpy.array(sorted(histogram))
+    counts = numpy.array([histogram[value] for value in values])
+    log_values = numpy.log10(values)
+    median = weighted_median(values, counts)
+    slowest = values[-1]
+    axis.hlines(median, position - 0.5, position + 0.5, color=color)
+    axis.plot(position, slowest, "v", color=color)
+    if log_values[0] == log_values[-1]:
+        return
+    bin_counts, bin_edges = numpy.histogram(
+        log_values, bins=VIOLIN_BINS, weights=counts
+    )
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    half_widths = VIOLIN_HALF_WIDTH * bin_counts / bin_counts.max()
+    center_times = 10**bin_centers
+    left = position - half_widths
+    right = position + half_widths
+    axis.fill_betweenx(center_times, left, right, color=color, alpha=0.5)
+
+
+def weighted_median(values, counts) -> float:
+    """The value at which half the counted windows are at or below."""
+    cumulative_counts = numpy.cumsum(counts)
+    half_count = cumulative_counts[-1] / 2
+    median_index = numpy.searchsorted(cumulative_counts, half_count)
+    return values[median_index]
+
+
+def decode_time_legend(round_period: float) -> list:
+    """The decode-time figure's legend: the tiers, the marks, the window."""
+    handles = []
+    for tier, color in TIER_COLOR.items():
+        tier_patch = patches.Patch(
+            color=color, alpha=0.5, label=TIER_NAME[tier]
+        )
+        handles.append(tier_patch)
+    median_line = lines.Line2D([], [], color="black", label="median")
+    slowest_mark = lines.Line2D(
+        [],
+        [],
+        color="black",
+        marker="v",
+        linestyle="None",
+        label="slowest window",
+    )
+    window_label = f"one window measured ({round_period:g} us rounds)"
+    window_line = lines.Line2D(
+        [], [], color="gray", linestyle="--", label=window_label
+    )
+    handles.extend([median_line, slowest_mark, window_line])
+    return handles
 
 
 def single_panel(title: str) -> tuple:

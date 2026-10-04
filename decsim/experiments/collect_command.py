@@ -68,18 +68,18 @@ class PointCollection:
         a point whose saved pieces reach its stop starts nothing. An
         adaptive point hands out one piece at a time.
         """
-        if self.task.online_threshold is not None:
-            wanted = 1
+        unit_count = self._unit_count(wanted)
         units = []
-        while self.tracker.stop_kind is None and len(units) < wanted:
+        while self.tracker.stop_kind is None and len(units) < unit_count:
             count = self._next_piece_count()
             if count == 0:
                 break
             unit = self._hand_out(run_dir, count)
-            if unit is None and not units:
-                self.count_the_pending(run_dir)
             if unit is not None:
                 units.append(unit)
+                continue
+            if not units:
+                self.count_the_pending(run_dir)
         return units
 
     def count_the_pending(self, run_dir: pathlib.Path) -> None:
@@ -116,6 +116,12 @@ class PointCollection:
         first_seed, count = self.last_piece
         folder = pieces.piece_dir(run_dir, point_id, first_seed, count)
         return _task_as_the_piece_left_it(self.task, folder)
+
+    def _unit_count(self, wanted: int) -> int:
+        """The units to hand out now: one at a time on an adaptive point."""
+        if self.task.online_threshold is not None:
+            return 1
+        return wanted
 
     def _hand_out(
         self, run_dir: pathlib.Path, count: int

@@ -5,13 +5,13 @@ seal boundary, using Stim's generated memory and functional PyMatching.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Optional, Union
 
 import numpy
 import pytest
 
 import decsim.config as config
-import decsim.controller.settings as controller_settings
+import decsim.controller.policies as idle_policies
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.settings as workload_settings
@@ -26,10 +26,27 @@ import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 # the default QPU round period, 1.1 microseconds, in ticks
 ROUND_TICKS = 1_100_000
+
+IdlePolicySettings = Union[
+    idle_policies.SeparateDecodeJobsSettings, idle_policies.IgnoreSettings
+]
+
+# each test below runs once under each idle policy
+SEPARATE_DECODE_JOBS = idle_policies.SeparateDecodeJobsSettings()
+IGNORE = idle_policies.IgnoreSettings()
+BOTH_IDLE_POLICIES = pytest.mark.parametrize(
+    "idle_policy",
+    [SEPARATE_DECODE_JOBS, IGNORE],
+    ids=["separate_decode_jobs", "ignore"],
+)
 
 
 @pytest.fixture(params=["live", "finite"])
@@ -78,12 +95,12 @@ def test_a_live_stream_that_no_region_ends_is_refused_at_its_seal(
     first = _segment(1, 0, ())
     second = _segment(2, 3, (1,))
     segments = (first, second)[:segment_count]
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 3})
+    policy = round_policies.PerOperationRounds(((100, 0), (1, 3), (2, 3)))
     workload = workload_settings.WorkloadSettings(
         operations=segments, dynamic_streams=(owner,), rounds_policy=policy
     )
     machine, _ = _machine(workload, 0)
-    with pytest.raises(RuntimeError, match="no protected region ends it"):
+    with pytest.raises(RuntimeError, match="the end operation"):
         machine.run()
 
 
@@ -151,7 +168,7 @@ def test_a_finished_finite_stream_leaves_its_idle_patch_to_the_policy() -> None:
         blocked_by=1,
         emits_detector_data=False,
     )
-    policy = round_policies.PerOperationRounds({100: 3, 1: 3, 2: 2})
+    policy = round_policies.PerOperationRounds(((100, 3), (1, 3), (2, 2)))
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting),
         dynamic_streams=(owner,),
@@ -313,7 +330,9 @@ def test_a_continuation_s_last_round_ends_a_window_of_its_source() -> None:
         emits_detector_data=False,
     )
     counts = {100: owner_round_count, 1: 15, 2: 3, 4: 0}
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, resumed, readout),
         dynamic_streams=(owner,),
@@ -369,9 +388,9 @@ def test_a_continuation_keeps_a_later_declared_segment_s_windows() -> None:
     assert rounds == list(range(1, 37))
 
 
-@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@BOTH_IDLE_POLICIES
 def test_a_stream_group_shrunk_to_one_patch_runs_to_completion(
-    idle_policy: str,
+    idle_policy: IdlePolicySettings,
 ) -> None:
     """A stream on patches 0 and 1, then an operation on patch 0 alone.
 
@@ -382,9 +401,9 @@ def test_a_stream_group_shrunk_to_one_patch_runs_to_completion(
     assert ("started", 2) in ticks
 
 
-@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@BOTH_IDLE_POLICIES
 def test_a_shrunk_group_gives_the_waiting_decision_its_buffer(
-    idle_policy: str,
+    idle_policy: IdlePolicySettings,
 ) -> None:
     """While the operation on patch 0 waits, both patches stay idle.
 
@@ -399,10 +418,10 @@ def test_a_shrunk_group_gives_the_waiting_decision_its_buffer(
 
 
 @pytest.mark.parametrize("distance", [3, 5])
-@pytest.mark.parametrize("idle_policy", ["separate_decode_jobs", "ignore"])
+@BOTH_IDLE_POLICIES
 @pytest.mark.parametrize("waiting_patch", [0, 1])
 def test_a_closed_stream_boundary_releases_as_a_finite_operation_does(
-    idle_policy: str, waiting_patch: int, distance: int
+    idle_policy: IdlePolicySettings, waiting_patch: int, distance: int
 ) -> None:
     """The stream's last window is queued before the seal reaches it.
 
@@ -449,9 +468,9 @@ def test_a_waiting_stream_decision_reads_its_buffer_from_the_idle_patch(
     trailing = "trailing_buffer"
     stream_prefix = _stream_prefix()
     charged = _feedback_run(
-        stream_prefix, "separate_decode_jobs", waiting_patch, trailing
+        stream_prefix, SEPARATE_DECODE_JOBS, waiting_patch, trailing
     )
-    ignored = _feedback_run(stream_prefix, "ignore", waiting_patch, trailing)
+    ignored = _feedback_run(stream_prefix, IGNORE, waiting_patch, trailing)
     events = charged[0]
     assert events == ignored[0]
     ticks = _ticks_by_event(events)
@@ -519,7 +538,9 @@ def _released_region_workload(
         emits_detector_data=False,
     )
     region = program_records.ProtectedRegion(100, 2, 3)
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 1, 3: 0})
+    policy = round_policies.PerOperationRounds(
+        ((100, 0), (1, 3), (2, 1), (3, 0))
+    )
     return workload_settings.WorkloadSettings(
         operations=(prefix, waiting, readout),
         dynamic_streams=(owner,),
@@ -561,7 +582,9 @@ def _finite_windows(round_count: int, distance: int, mode: str) -> list:
         3, "after", (0,), patches=(0,), predecessors=(1,), circuit=after_circuit
     )
     counts = {100: round_count, 1: round_count, 2: 1, 3: 3}
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting, after),
         dynamic_streams=(owner,),
@@ -576,10 +599,16 @@ def _committed_windows(
 ) -> list:
     """The spans of the windows a Stim run of the workload commits."""
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=distance, device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=distance, source=source)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -632,7 +661,7 @@ def _finite_group_workload() -> tuple:
         blocked_by=1,
         emits_detector_data=False,
     )
-    policy = round_policies.PerOperationRounds({100: 9, 1: 3, 2: 8})
+    policy = round_policies.PerOperationRounds(((100, 9), (1, 3), (2, 8)))
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting),
         dynamic_streams=(owner,),
@@ -718,7 +747,9 @@ def _region_workload(
         owner, id=1, name="prefix", stream_id=100, stream_offset=0
     )
     region = program_records.ProtectedRegion(100, 3, 4)
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     return workload_settings.WorkloadSettings(
         operations=(prefix, *later),
         dynamic_streams=(owner,),
@@ -731,12 +762,18 @@ def _stim_machine(
     workload: workload_settings.WorkloadSettings, device
 ) -> machine_module.Machine:
     """A d=3 run of the workload on a Stim source, one-microsecond rounds."""
+    source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(
-        distance=3, device=device, round_period_microseconds=1.0
+        distance=3, source=source, round_period_microseconds=1.0
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=decoder
     )
@@ -754,7 +791,7 @@ def _emitted_rounds(machine: machine_module.Machine) -> list:
     return rounds
 
 
-def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
+def _shrunk_group_run(blocked_by, idle_policy: IdlePolicySettings) -> dict:
     """The runtime's ticks for a two-patch stream then a patch-0 operation."""
     group = (0, 1)
     owner = program_records.Operation(100, "memory", group, patches=group)
@@ -764,7 +801,7 @@ def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
     later = program_records.Operation(
         2, "later", (0,), patches=(0,), predecessors=(1,), blocked_by=blocked_by
     )
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 1})
+    policy = round_policies.PerOperationRounds(((100, 0), (1, 3), (2, 1)))
     workload = workload_settings.WorkloadSettings(
         operations=(segment, later),
         dynamic_streams=(owner,),
@@ -772,10 +809,14 @@ def _shrunk_group_run(blocked_by, idle_policy: str) -> dict:
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
-    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
-        workload=workload, weak_decoder=decoder, idle_policy=idle
+        workload=workload, weak_decoder=decoder, idle_policy=idle_policy
     )
     machine = machine_module.Machine.build(settings, 0)
     events, _ = _events_and_end(machine)
@@ -828,7 +869,9 @@ def _recorder(events: list, kind: str):
 def _prefix_run(operations: tuple, mode: str) -> tuple:
     """Ticks from the prefix's end to the release, and to its commit."""
     stream = program_records.Operation(100, "memory", (0,), patches=(0,))
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 0, 3: 1, 4: 3})
+    policy = round_policies.PerOperationRounds(
+        ((100, 0), (1, 3), (2, 0), (3, 1), (4, 3))
+    )
     workload = workload_settings.WorkloadSettings(
         operations=operations,
         dynamic_streams=(stream,),
@@ -837,7 +880,12 @@ def _prefix_run(operations: tuple, mode: str) -> tuple:
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, weak_decoder=decoder
     )
@@ -911,7 +959,7 @@ def _commit_recorder(machine: machine_module.Machine, commit_ticks: dict):
 
 def _feedback_run(
     prefix_shape: tuple,
-    idle_policy: str,
+    idle_policy: IdlePolicySettings,
     waiting_patch: int,
     mode: str,
     distance: int = 3,
@@ -922,7 +970,9 @@ def _feedback_run(
     waiting = program_records.Operation(
         2, "waiting", patches, patches=patches, predecessors=(1,), blocked_by=1
     )
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     workload = workload_settings.WorkloadSettings(
         operations=(prefix, waiting),
         dynamic_streams=streams,
@@ -931,11 +981,18 @@ def _feedback_run(
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
-    idle = controller_settings.IdlePolicySettings(kind=idle_policy)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     qpu = qpu_settings.QpuSettings(distance=distance)
     settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=decoder, idle_policy=idle
+        workload=workload,
+        qpu=qpu,
+        weak_decoder=decoder,
+        idle_policy=idle_policy,
     )
     machine = machine_module.Machine.build(settings, 0)
     return _events_and_end(machine)
@@ -990,12 +1047,18 @@ def _machine(
 ) -> tuple[machine_module.Machine, streaming_stim_device.StreamingStimDevice]:
     program = memory_programs.memory_program()
     source = streaming_stim_device.StreamingStimDevice(programs={100: program})
+    source_record = declared_run.GivenSource(source)
     qpu = qpu_settings.QpuSettings(
-        distance=3, device=source, round_period_microseconds=1.0
+        distance=3, source=source_record, round_period_microseconds=1.0
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     links = _zero_delay_links(data_hop_ticks)
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True
@@ -1026,7 +1089,7 @@ def _workload(final_round: int) -> workload_settings.WorkloadSettings:
         emits_detector_data=False,
     )
     region = program_records.ProtectedRegion(100, 1, 2)
-    policy = round_policies.PerOperationRounds({100: 0, 1: 0, 2: 0})
+    policy = round_policies.PerOperationRounds(((100, 0), (1, 0), (2, 0)))
     return workload_settings.WorkloadSettings(
         operations=(begin, finish),
         dynamic_streams=(owner,),

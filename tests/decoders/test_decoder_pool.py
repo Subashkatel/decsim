@@ -3,8 +3,7 @@
 A job that may not start yet is staged where the least work is left,
 and a free unit a staged job waits on is not an empty one: the two
 forced-class solves of one window are two ordinary jobs, so the unit
-count alone decides whether they overlap (configs/reference.yaml,
-escalation.confidence).
+count alone decides whether they overlap.
 
 The law: with known deterministic work, dispatching each job to the
 server with the least work left starts it at the tick a central FIFO
@@ -20,6 +19,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
@@ -271,7 +271,13 @@ def test_a_released_unit_is_offered_after_the_ones_freed_before_it():
     assert unit is second
 
 
-def test_a_pool_with_no_unit_is_refused():
-    settings = _settings(0)
-    with pytest.raises(ValueError, match="needs at least 1 unit"):
-        decoder_pool.DecoderPool(None, settings)
+def test_a_tier_with_no_unit_is_refused():
+    """A pool of no units would hold every job forever.
+
+    The tier's record is where the count enters; the build makes every
+    pool from it, or one unit when the run has no decoder.
+    """
+    algorithm = decoders.PresetLatencyDecoder.Settings(1.0)
+
+    with pytest.raises(ValueError, match="whole number of engines"):
+        decoder_settings.DecoderPoolSettings(algorithm=algorithm, unit_count=0)

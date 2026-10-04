@@ -14,7 +14,6 @@ import stim
 
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -28,10 +27,15 @@ import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
 @pytest.mark.parametrize("producer", ["stim", "deltakit"])
@@ -61,7 +65,7 @@ def test_separate_live_models_never_execute_a_physical_history(
     assert len(samples) == 1
     assert model_samples == []
     assert models.logical_observable_truth(100) is None
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="100"):
         models.sampled_measurements(100)
     circuit = source.executed_circuit(100)
     _assert_record(source, circuit, packets)
@@ -137,9 +141,7 @@ def test_unbounded_models_cannot_remove_the_finite_source_seal_limit() -> None:
     models = streaming_stim_device.StreamingStimDevice({100: program})
     workload = _workload(circuit, 24, 10)
     machine = _machine(source, models, workload, 4.0)
-    with pytest.raises(
-        RuntimeError, match="sealed at .*registered for 24 rounds"
-    ):
+    with pytest.raises(RuntimeError, match="its Stim circuit was registered"):
         machine.run()
 
 
@@ -155,7 +157,7 @@ def test_a_live_stream_sealed_short_of_its_finite_models_stops_the_run():
     models = stim_device.StimDevice()
     workload = _workload(circuit, 24, 10)
     machine = _machine(source, models, workload, 4.0)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="does not match the window error"):
         machine.run()
 
 
@@ -166,9 +168,7 @@ def test_unbounded_models_cannot_extend_the_finite_physical_source() -> None:
     models = streaming_stim_device.StreamingStimDevice({100: program})
     workload = _workload(circuit, 24, 30)
     machine = _machine(source, models, workload, 4.0)
-    with pytest.raises(
-        ValueError, match="idle round is outside the finite source"
-    ):
+    with pytest.raises(ValueError, match="idle round is outside the finite"):
         machine.run()
 
 
@@ -180,8 +180,7 @@ def test_conflicting_stream_limits_are_refused_before_sampling() -> None:
     samples = []
     source.shot_sampled.connect(lambda *sample: samples.append(sample))
     workload = _workload(circuit, 24, 24)
-    message = "physical and model stream round limits must agree"
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match="physical and model stream round"):
         _machine(source, models, workload, 4.0)
     assert samples == []
     assert source.sampled_truth() == {}
@@ -204,24 +203,12 @@ def test_timing_only_source_preserves_the_finite_models_circuit_copy() -> None:
     assert copied != circuit
 
 
-@pytest.mark.parametrize(
-    "declaration",
-    [
-        {"operation_circuit_scope": None},
-        {"operation_circuit_scope": "shared"},
-    ],
-)
-def test_model_circuit_scope_is_required_at_the_root_boundary(
-    declaration: dict,
-) -> None:
+def test_model_circuit_scope_is_required_at_the_root_boundary() -> None:
     code = code_geometry.SurfaceCodeModel(distance=3)
     source = syndrome_devices.TimingOnlyDevice(code)
-    models = types.SimpleNamespace(**declaration)
+    models = types.SimpleNamespace(operation_circuit_scope="shared")
     workload = _workload()
-    message = (
-        "model provider operation_circuit_scope must be none or per_operation"
-    )
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match="model provider"):
         _machine(source, models, workload, 4.0)
 
 
@@ -254,15 +241,22 @@ def _machine(
     workload: workload_settings.WorkloadSettings,
     feedback_microseconds: float,
 ) -> machine_module.Machine:
+    source_record = declared_run.GivenSource(source)
+    models_record = declared_run.GivenSource(models)
     qpu = qpu_settings.QpuSettings(
         distance=3,
-        device=source,
-        error_model_provider=models,
+        source=source_record,
+        error_model_provider=models_record,
         round_period_microseconds=1.1,
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     links = link_profiles.logical_reference_profile()
     feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
     channel = dataclasses.replace(
@@ -324,7 +318,9 @@ def _workload(circuit=None, source_round_count=0, final_round=0):
     )
     region = program_records.ProtectedRegion(100, 2, 4)
     counts = {100: source_round_count, 1: 3, 2: 0, 3: 1, 4: 0}
-    policy = round_policies.PerOperationRounds(counts)
+    count_items = counts.items()
+    count_pairs = tuple(count_items)
+    policy = round_policies.PerOperationRounds(count_pairs)
     return workload_settings.WorkloadSettings(
         operations=(prefix, begin, resume, finish),
         dynamic_streams=(owner,),

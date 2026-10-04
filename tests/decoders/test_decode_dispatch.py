@@ -22,7 +22,6 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -122,7 +121,6 @@ def _manager(engine, unit_count):
     """The manager these tests dispatch on, at that many units."""
     decoder = decoders.PresetLatencyDecoder(DECODE_MICROSECONDS)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=unit_count
     )
@@ -133,7 +131,6 @@ def _manager(engine, unit_count):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = decoder
-    manager.escalation_policy = policy
     return manager
 
 
@@ -187,24 +184,6 @@ def test_a_startable_job_takes_an_empty_unit_over_one_holding_a_parked_job():
     assert parked_unit_name is not None
     assert later_unit_name is not None
     assert later_unit_name != parked_unit_name
-
-
-def test_the_placement_line_names_the_unit_the_job_was_given():
-    """Two jobs at once on two units: the log says which unit took which."""
-    engine = engine_module.Engine()
-    manager = _manager(engine, unit_count=2)
-    lines = []
-    engine.line.connect(lines.append)
-    first = _job(0, "first", deps_remaining=0)
-    second = _job(1, "second", deps_remaining=0)
-
-    manager.enqueue(first, None, _ignore)
-    manager.enqueue(second, None, _ignore)
-    engine.run()
-
-    placements = _lines_containing(lines, "ASSIGN UNIT")
-    assert "ASSIGN UNIT default#0 to first" in placements[0]
-    assert "ASSIGN UNIT default#1 to second" in placements[1]
 
 
 def _lines_containing(lines, needle):

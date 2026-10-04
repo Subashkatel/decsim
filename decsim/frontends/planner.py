@@ -7,11 +7,10 @@ and the buffers read the plan and never change it.
 """
 
 import dataclasses
-import math
-from collections.abc import Callable
-from typing import Optional
+from collections.abc import Callable, Iterable
 
 import decsim.config as config
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
@@ -22,43 +21,25 @@ import decsim.records.windows as window_records
 class RunPlan:
     """Derived values consumed by one simulator run."""
 
-    code_geometry: program_records.ResolvedCodeGeometry
     resolved_operations: tuple[program_records.ResolvedOperationPlanning, ...]
     resolved_patches: tuple[program_records.ResolvedPatchPlanning, ...]
     round_ticks: int
     execution: window_records.WindowPlan
-    buffering: "SyndromeBufferingPlan"
-
-
-@dataclasses.dataclass(frozen=True)
-class SyndromeBufferingPlan:
-    """The holds every window places on the stores.
-
-    A hold names the rounds a consumer keeps alive. The sufficient set
-    is the union of every hold, None when an open-ended dynamic stream
-    makes it unbounded. A store smaller than it can fill, and the run
-    then stops and says how many rounds were left held for store room.
-    """
-
-    weak_holds: tuple
-    potential_holds: tuple
-    sufficient_live_rounds: Optional[tuple]
-    strong_sufficient_live_rounds: Optional[tuple]
+    buffering: decoding_records.SyndromeBufferingPlan
 
 
 def plan_execution(
     *,
     operations: tuple[program_records.OperationPlanningView, ...],
     planned_operation_ids: tuple[int, ...],
-    code,
-    layout,
-    scheme,
-    rounds_policy,
+    code: ports.CodeModel,
+    layout: ports.LayoutModel,
+    scheme: ports.WindowingScheme,
+    rounds_policy: ports.RoundsPolicy,
     fallback_round_microseconds: float,
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
-    has_open_ended_dynamic_streams: bool = False,
     formation_reads: window_records.FormationReads = (
         window_records.NO_FORMING_READER
     ),
@@ -68,7 +49,7 @@ def plan_execution(
     _check_geometry_counts(code)
     patch_count_by_id = _patch_count_by_operation_id(operations)
     base_nodes = _base_nodes_by_patch_count(code, patch_count_by_id)
-    geometry = _resolve_geometry(code, base_nodes[1])
+    geometry = _resolve_geometry(code)
     resolved = []
     patches_by_key = {}
     for operation in operations:
@@ -96,11 +77,9 @@ def plan_execution(
         retain_strong_context=retain_strong_context,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=restart_reread_buffer_regions,
-        has_open_ended_dynamic_streams=has_open_ended_dynamic_streams,
         formation_reads=formation_reads,
     )
     return RunPlan(
-        code_geometry=geometry,
         resolved_operations=tuple(resolved),
         resolved_patches=tuple(patches),
         round_ticks=round_ticks,
@@ -113,14 +92,15 @@ def check_operation_graph(
     operations: list[program_records.Operation],
     *,
     validate_blockers: bool = False,
-    external_blocker_ids=(),
+    external_blocker_ids: Iterable[int] = (),
     dependency_field: str = "predecessors",
 ) -> None:
     """Refuse a dependency graph a dictionary or an empty queue would hide.
 
-    Operation ids are the graph's stable keys: no id twice, no edge to an
-    unknown or to itself, no cycle; a blocker, when checked, names a
-    known operation.
+    Operation ids are the graph's stable keys: no id twice, no edge
+    twice, no cycle (an edge to itself is one); an edge to an unknown id
+    stops at its lookup; a blocker, when checked, names a known
+    operation.
     """
     by_id = _index_by_id(operations)
     external_ids = set(external_blocker_ids)
@@ -132,14 +112,16 @@ def check_operation_graph(
         indegree[operation_id] = 0
     for operation in operations:
         predecessor_ids = getattr(operation, dependency_field)
-        _check_predecessors(operation, predecessor_ids, by_id, successors)
+        _check_predecessors(operation, predecessor_ids, successors)
         indegree[operation.id] = len(predecessor_ids)
         if validate_blockers:
             _check_blocker(operation, valid_blocker_ids)
     _check_acyclic(by_id, successors, indegree)
 
 
-def check_workload_identity(operations, decode_operations, dynamic_streams):
+def check_workload_identity(
+    operations: tuple, decode_operations: tuple, dynamic_streams: tuple
+) -> None:
     """Refuse operation and stream keys the runtime maps could confuse.
 
     An id names one object across the three roles, an operation is never
@@ -169,12 +151,6 @@ def _resolve_round_ticks(code, fallback_round_microseconds: float) -> int:
     if round_microseconds is None:
         round_microseconds = fallback_round_microseconds
     round_microseconds = float(round_microseconds)
-    # QpuSettings refuses a run period that is not finite, so only the
-    # card's own period reaches this.
-    if not math.isfinite(round_microseconds):
-        raise ValueError(
-            "the code card's round_microseconds must be a finite number"
-        )
     round_ticks = config.microseconds_to_ticks(round_microseconds)
     if round_ticks < 1:
         raise ValueError("resolved round cadence must be at least one tick")
@@ -184,8 +160,8 @@ def _resolve_round_ticks(code, fallback_round_microseconds: float) -> int:
 def _check_geometry_counts(code) -> None:
     """A zero or fractional geometry never terminates; refuse the card.
 
-    The labels are the keys a yaml sets them by: the sweep's distance and
-    windows.commit_rounds and windows.buffer_rounds.
+    The labels are the settings that set them: the point's distance and
+    the scheme's commit_rounds and buffer_rounds.
     """
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
@@ -219,7 +195,7 @@ def _base_nodes_by_patch_count(code, patch_count_by_id: dict) -> dict:
     return base_nodes
 
 
-def _resolve_geometry(code, one_patch_node_count: int):
+def _resolve_geometry(code):
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     return program_records.ResolvedCodeGeometry(
@@ -227,14 +203,13 @@ def _resolve_geometry(code, one_patch_node_count: int):
         distance=code.distance,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        one_patch_spatial_node_count=one_patch_node_count,
     )
 
 
 def _resolve_operation(
     operation, code, layout, rounds_policy, geometry, round_ticks, base_nodes
 ) -> program_records.ResolvedOperationPlanning:
-    operation_code = layout.code_for_op(operation)
+    operation_code = layout.code_for_operation(operation)
     if operation_code is not code:
         raise ValueError(
             f"layout operation {operation.id} selected a code different "
@@ -337,16 +312,12 @@ def _plan_syndrome_buffering(
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
-    has_open_ended_dynamic_streams: bool = False,
     formation_reads: window_records.FormationReads = (
         window_records.NO_FORMING_READER
     ),
-) -> SyndromeBufferingPlan:
+) -> decoding_records.SyndromeBufferingPlan:
     """Plan logical holds over one upstream round allocation.
 
-    Weak and possible-strong consumers may overlap, but overlapping holds
-    do not create another physical packet allocation, so the sufficient
-    witness is the union of round identities, not a sum of ledgers.
     formation_reads says which reads also hold the raw rounds before
     their first (windows/round_retention.py keeps the same rule for the
     reads it places while the run goes).
@@ -373,17 +344,8 @@ def _plan_syndrome_buffering(
                 absorbs_weak_windows,
                 formation_reads,
             )
-    weak_sufficient = weak.sufficient_live_rounds(
-        has_open_ended_dynamic_streams
-    )
-    strong_sufficient = strong.sufficient_live_rounds(
-        has_open_ended_dynamic_streams
-    )
-    return SyndromeBufferingPlan(
-        tuple(weak.holds),
-        tuple(strong.holds),
-        weak_sufficient,
-        strong_sufficient,
+    return decoding_records.SyndromeBufferingPlan(
+        tuple(weak.holds), tuple(strong.holds)
     )
 
 
@@ -524,25 +486,14 @@ def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
 
 
 class _HoldSet:
-    """The holds one consumer places, and their union."""
+    """The holds one consumer places."""
 
     def __init__(self):
         self.holds = []
-        self._live_rounds = set()
 
     def add(self, owner, round_keys: tuple) -> None:
         """Record a hold and the rounds it keeps alive."""
         self.holds.append((owner, round_keys))
-        self._live_rounds.update(round_keys)
-
-    def sufficient_live_rounds(self, is_open_ended: bool) -> Optional[tuple]:
-        """Every round any hold names; None when a stream never ends."""
-        if is_open_ended:
-            return None
-        ordered = sorted(
-            self._live_rounds, key=identity_records.stable_identity_bytes
-        )
-        return tuple(ordered)
 
 
 def _materialize_execution_plan(
@@ -696,9 +647,7 @@ def _index_by_id(operations) -> dict:
     return by_id
 
 
-def _check_predecessors(
-    operation, predecessor_ids, by_id: dict, successors: dict
-) -> None:
+def _check_predecessors(operation, predecessor_ids, successors: dict) -> None:
     seen = set()
     for predecessor_id in predecessor_ids:
         if predecessor_id in seen:
@@ -707,13 +656,6 @@ def _check_predecessors(
                 f"{predecessor_id} more than once"
             )
         seen.add(predecessor_id)
-        if predecessor_id == operation.id:
-            raise ValueError(f"operation {operation.id} depends on itself")
-        if predecessor_id not in by_id:
-            raise ValueError(
-                f"operation {operation.id} has unknown predecessor "
-                f"{predecessor_id}"
-            )
         successors[predecessor_id].append(operation.id)
 
 

@@ -1,26 +1,24 @@
-"""Every listener of one run, built from the observation section and wired.
+"""Every listener of one run, built from the observation settings and wired.
 
-The Machine builds the parts; this module builds what watches them
-and connects each listener to the sources it hears, in pipeline order.
-It is the only place that knows which yaml key builds which listener, so
-a new listener is one class in observe/ and one connection here
-(STYLE.md rule 7: observation is reached through the callbacks a
-component fires, never through a port, so a component runs with nothing
-connected).
-
-The wiring runs after every component is built and before the workload
-is loaded, because the program's first operation is issued while it
-loads: the narrator's first line, the QPU's first command and the
-runtime's first stamps are all fired there, and a listener connected
-afterwards would miss them.
+The only place that knows which setting builds which listener, so a new
+listener is one class in observe/ and one connection here. Observation
+is reached through the sources a component fires, never through a port,
+so a component runs with nothing connected. The wiring runs before the
+workload is loaded, because the first operation is issued while it
+loads and a later listener would miss its lines and stamps.
 """
 
 import functools
-from typing import Any, Optional
+from typing import Optional
 
+import decsim.build.control as control_part
+import decsim.build.decoders as decoders_part
+import decsim.build.escalation as escalation_build
+import decsim.build.qpu as qpu_part
+import decsim.build.readout as readout_part
+import decsim.build.windows as windows_part
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
-import decsim.observe.burst_flags as burst_flags_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -40,32 +38,27 @@ import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
+import decsim.ports as ports
 
 
 def observe(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
     *,
-    links: Any,
-    qpu: Any,
-    control: Any,
-    readout: Any,
-    windows: Any,
-    decoders: Any,
+    links: ports.Link,
+    qpu: qpu_part.Qpu,
+    control: control_part.Control,
+    readout: readout_part.Readout,
+    windows: windows_part.Windows,
+    decoders: decoders_part.Decoders,
+    switching: Optional[escalation_build.Switching],
     process_name: str,
     traffic_ledger: link_traffic.TrafficLedger,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
-    A listener reaches the component it hears through the machine's part
-    that holds it (decsim/build); the parts sit above this package in the
-    package order, so they arrive untyped. A component a run may not have
-    reads as None, and the listeners that hear it take None; the decoder
-    managers, one per side, are heard as one tuple by every listener of
-    the decode path. It stays whole past the size prompt: it is the run's
-    one list of listeners, in pipeline order, one built or connected per
-    line, and a split would only hand the list from one half to the
-    other.
+    A component a run lacks reads as None. It is the run's one list of
+    listeners in pipeline order, so it stays whole past the size prompt.
     """
     window_manager = windows.window_manager
     decoder_managers = _decoder_managers(decoders)
@@ -86,9 +79,7 @@ def observe(
     sampled_shots = _connect_sampled_shots(qpu.syndrome_source)
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
-    confidence = _connect_confidence(
-        windows.escalation_policy, decoder_managers
-    )
+    confidence = _connect_confidence(switching, decoder_managers)
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
     if data_movement is not None:
@@ -104,7 +95,6 @@ def observe(
     )
     decoder_utilization = _decoder_utilization(engine, decoder_managers)
     frame_corrections = _frame_corrections(control.pauli_frame)
-    burst_flags = _connect_burst_flags(windows.burst_detector)
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
@@ -124,7 +114,6 @@ def observe(
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
         round_events=round_events,
-        burst_flags=burst_flags,
         confidence=confidence,
     )
 
@@ -226,7 +215,9 @@ def _connect_data_movement(
     """
     qpu.device.trace.round_emitted.connect(data_movement.round_emitted)
     links.trace.transfer_delivered.connect(data_movement.transfer_delivered)
-    _connect_store_counts(data_movement, readout.weak_syndrome_buffer)
+    weak_syndrome_buffer = readout.weak_syndrome_buffer
+    if weak_syndrome_buffer is not None:
+        _connect_store_counts(data_movement, weak_syndrome_buffer)
     strong_syndrome_buffer = readout.strong_syndrome_buffer
     if strong_syndrome_buffer is not None:
         _connect_store_counts(data_movement, strong_syndrome_buffer)
@@ -257,9 +248,11 @@ def _connect_trace_writer(
     for source in _copy_sources(readout, windows, decoders):
         source.connect(trace_writer.copy_made)
     _connect_controller_trace(trace_writer, readout)
-    _connect_store_trace(
-        trace_writer, readout.weak_syndrome_buffer, "weak syndrome buffer"
-    )
+    weak_syndrome_buffer = readout.weak_syndrome_buffer
+    if weak_syndrome_buffer is not None:
+        _connect_store_trace(
+            trace_writer, weak_syndrome_buffer, "weak syndrome buffer"
+        )
     strong_syndrome_buffer = readout.strong_syndrome_buffer
     if strong_syndrome_buffer is not None:
         _connect_store_trace(
@@ -321,8 +314,10 @@ def _copy_sources(readout, windows, decoders) -> list:
     sources = [
         readout.controller.trace.copy_made,
         readout.assembler.trace.copy_made,
-        readout.weak_syndrome_round_receiver.trace.copy_made,
     ]
+    weak_syndrome_round_receiver = readout.weak_syndrome_round_receiver
+    if weak_syndrome_round_receiver is not None:
+        sources.append(weak_syndrome_round_receiver.trace.copy_made)
     strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
     if strong_syndrome_round_receiver is not None:
         sources.append(strong_syndrome_round_receiver.trace.copy_made)
@@ -430,10 +425,10 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    escalation_policy, decoder_managers: tuple
+    switching, decoder_managers: tuple
 ) -> Optional[decode_records_module.ConfidenceLedger]:
-    """The confidence ledger, only when a confidence decides the verdict."""
-    if not escalation_policy.decides_on_a_confidence:
+    """The confidence ledger, only on a run whose confidence decides."""
+    if switching is None:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:
@@ -467,6 +462,8 @@ def _connect_round_events(
         readout.weak_syndrome_round_receiver,
     )
     for component in components:
+        if component is None:
+            continue
         component.trace.round_event.connect(round_events.record)
     instruction_output = control.instruction_output
     instruction_output.trace.output_event.connect(round_events.output)
@@ -521,17 +518,6 @@ def _frame_corrections(
         corrections.correction_committed
     )
     return corrections
-
-
-def _connect_burst_flags(
-    burst_detector,
-) -> Optional[burst_flags_module.BurstFlags]:
-    """The rounds the detector fired on; a run without one has none."""
-    if burst_detector is None:
-        return None
-    flags = burst_flags_module.BurstFlags()
-    burst_detector.trace.round_flagged.connect(flags.round_flagged)
-    return flags
 
 
 def _decoder_utilization(

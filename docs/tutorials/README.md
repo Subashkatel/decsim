@@ -8,9 +8,9 @@ order. Each was run end to end, and every output on its page is from
 that run, so if your screen disagrees with the page, the page is out of
 date and worth reporting.
 
-- [Your first run](first_run.md): install, run one shot, open the run
-  folder, read a figure, and follow one round of syndrome data through
-  the machine. Ten minutes.
+- [Your first run](first_run.md): install, read a run file, run one
+  shot, open the results folder, and follow one round of syndrome data
+  through the machine. Ten minutes.
 - [Your first sweep](first_sweep.md): run a small sweep on four
   processes, read its exact error bars, stop it and pick it up again.
   Fifteen minutes.

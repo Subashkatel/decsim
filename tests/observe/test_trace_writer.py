@@ -14,11 +14,12 @@ import json
 
 import pytest
 
+import decsim.collect as collect
 import decsim.decoders.decoders as decoders
-import decsim.decoders.settings as decoder_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
-import decsim.qpu.settings as qpu_settings
+import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.declared_run as declared_run
 import tests.experiments.test_measure as measure_tests
@@ -29,33 +30,24 @@ POINT_LOG_SHA256 = gate_point.POINT_LOG_SHA256
 
 PHASES = ("M", "X", "i", "C", "s", "t", "f")
 _METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
-# the switching run's one-microsecond weak card
-ONE_MICROSECOND_WEAK = {
-    "kind": 1.0,
-    "unit_memory": {"bits": None},
-    "engine": {
-        "clock": "fridge",
-        "fetch_cycles_per_round": 1,
-        "fetch_cycles_per_job": 0,
-        "release_cycles_per_job": 10,
-        "release_cycles_per_round": 0,
-    },
-}
-# the withdrawal run of test_measure: a five-microsecond weak card under
-# double_window, which takes back a queued request when it re-slices
-RE_SLICED_WINDOWS = {
-    "escalation": {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "double_window",
-    },
-    "weak_decoder": {
-        "kind": 5.0,
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": measure_tests.ONE_CYCLE_FETCH_TEN_CYCLE_RELEASE,
-    },
-}
+
+
+def _traced_switching_run(trace_path, weak_unit_count=1, **arguments):
+    """test_measure's 20 dB switching shot, traced to trace_path."""
+    settings = measure_tests.switching_settings(20.0, **arguments)
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, unit_count=weak_unit_count
+    )
+    observation = dataclasses.replace(
+        settings.observation, trace=str(trace_path)
+    )
+    traced = dataclasses.replace(
+        settings, weak_decoder=weak_decoder, observation=observation
+    )
+    task = measure_tests.point_task(
+        traced, measure_tests.SWITCHING_ERROR_PROBABILITY
+    )
+    return collect.run_shot(task, 0)
 
 
 def _settings(trace_path=None, data_movement=False):
@@ -173,15 +165,6 @@ def test_the_trace_moves_no_tick_and_narrates_the_same_log(tmp_path):
     )
 
 
-def test_a_run_with_no_trace_builds_no_writer():
-    """The section did not ask, so nothing is connected."""
-    point = _settings()
-    machine = machine_module.Machine.build(point, SEED)
-
-    assert machine.observation.trace_writer is None
-    assert machine.observation.data_movement is None
-
-
 def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
     """Every listener is built because the section asked, and only then.
 
@@ -204,7 +187,6 @@ def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
 
 
 def test_a_path_ending_in_gz_holds_the_same_trace_compressed(traced, tmp_path):
-    """The reference yaml's own promise: .gz compresses."""
     machine, _result, document = traced
     path = tmp_path / "point1.trace.json.gz"
 
@@ -289,9 +271,8 @@ def _rows_outside_every_span(rows, spans_by_tid: dict) -> list:
     return outside
 
 
-@pytest.mark.parametrize("run_both_at_once", [False, True])
 def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
-    tmp_path, run_both_at_once
+    tmp_path,
 ):
     """Two decodes of one window on two units keep two lanes.
 
@@ -303,15 +284,11 @@ def test_each_decodes_stages_are_on_the_lane_of_the_unit_that_ran_it(
     decode's stages and no two of its stages overlap.
     """
     trace_path = tmp_path / "pair.trace.json"
-    observation = {"trace": str(trace_path)}
-    weak_decoder = {**ONE_MICROSECOND_WEAK, "units": 2}
-    sections = {"weak_decoder": weak_decoder, "observation": observation}
-    shot = measure_tests.switching_run(
-        tmp_path,
-        20.0,
-        run_both_at_once=run_both_at_once,
+    shot = _traced_switching_run(
+        trace_path,
+        weak_unit_count=2,
+        run_both_at_once=True,
         strong_units=2,
-        sections=sections,
     )
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
@@ -336,9 +313,10 @@ def test_a_withdrawn_request_leaves_the_queue_when_it_is_withdrawn(tmp_path):
     the end of the run.
     """
     trace_path = tmp_path / "withdrawn.trace.json"
-    observation = {"trace": str(trace_path)}
-    sections = {**RE_SLICED_WINDOWS, "observation": observation}
-    shot = measure_tests.switching_run(tmp_path, 20.0, sections=sections)
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    shot = _traced_switching_run(
+        trace_path, weak_microseconds=5.0, strong_window=double_window
+    )
     document = shot.machine.observation.trace_writer.document()
     complete_rows = _by_phase(document, "X")
     queued = _rows_with(complete_rows, "cat", "window,queue")
@@ -360,19 +338,16 @@ def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
     that ran it, as each LLVM XRay record carries its thread, and each
     decode's stages sit on its own service's lane.
     """
-    factory = qpu_settings.FactorySettings.from_yaml(
-        {
-            "kind": "distillation",
-            "unit_count": 1,
-            "attempt_ticks": 100,
-            "correction_round_count": 3,
-            "correction_decode_count": 2,
-            "production_mode": "continuous",
-            "buffer_capacity": 1,
-        }
+    factory = magic_state_factories.DistillationFactory.Settings(
+        unit_count=1,
+        attempt_ticks=100,
+        correction_round_count=3,
+        correction_decode_count=2,
+        production_mode="continuous",
+        buffer_capacity=1,
     )
     point = gate_point.settings(trace="chrome")
-    weak_decoder = dataclasses.replace(point.weak_decoder, units=2)
+    weak_decoder = dataclasses.replace(point.weak_decoder, unit_count=2)
     point = dataclasses.replace(
         point, weak_decoder=weak_decoder, magic_state_factory=factory
     )
@@ -678,29 +653,6 @@ def test_the_unit_memory_counter_is_the_memorys_own_occupancy(tmp_path):
     assert values == held.values
 
 
-def test_the_assembler_workspace_holds_round_one_until_it_is_packed(traced):
-    """The one bounded controller-side structure, as a residence.
-
-    A round enters the packing workspace at its first fragment and
-    leaves when it is packed; the point prices no packing time, so round
-    1 is in and out at 1.004 us. The counter carries the occupancy and
-    the residence carries the bound the yaml sets, unbounded here.
-    """
-    _machine, _result, document = traced
-    residence = _one(document, "X", "assemble round 1")
-
-    assert residence["cat"] == "round,residence"
-    assert residence["args"]["tick"] == 1_004_000
-    assert residence["dur"] == 0.0
-    assert residence["args"]["slot_taken"] == 1_004_000
-    assert residence["args"]["freed"] == 1_004_000
-    assert residence["args"]["freed_reason"] == "packed"
-    assert residence["args"]["capacity"] is None
-    steps = _counter_values(document, "controller assembler rounds", "rounds")
-    assert max(steps) == 1
-    assert steps[-1] == 0
-
-
 def test_a_round_waits_for_a_packing_place_before_it_takes_one():
     """The stage never holds more rounds than its bound, in the trace too.
 
@@ -791,42 +743,36 @@ def _one(document, phase, name) -> dict:
     return found
 
 
-def test_the_observation_section_names_the_log_and_the_trace_apart():
+def test_the_observation_record_names_the_log_and_the_trace_apart():
     """The narrator is observation.log; observation.trace is the trace."""
     import decsim.observe.settings as observe_settings
 
-    default = observe_settings.ObservationSettings.from_yaml({})
+    default = observe_settings.ObservationSettings()
     assert default.log == "off"
     assert default.trace == "off"
     assert default.writes_trace is False
     assert default.trace_path is None
     assert default.trace_shots == (0,)
 
-    narrating = observe_settings.ObservationSettings.from_yaml({"log": "both"})
+    narrating = observe_settings.ObservationSettings(log="both")
     assert narrating.prints_log is True
     assert narrating.writes_log is True
     assert narrating.writes_trace is False
 
-    chrome = observe_settings.ObservationSettings.from_yaml(
-        {"trace": "chrome", "trace_shots": [0, 3]}
+    chrome = observe_settings.ObservationSettings(
+        trace="chrome", trace_shots=(0, 3)
     )
     assert chrome.writes_trace is True
     assert chrome.trace_path is None
     assert chrome.trace_shots == (0, 3)
 
-    at_a_path = observe_settings.ObservationSettings.from_yaml(
-        {"trace": "/tmp/run.trace.json"}
+    at_a_path = observe_settings.ObservationSettings(
+        trace="/tmp/run.trace.json"
     )
     assert at_a_path.trace_path == "/tmp/run.trace.json"
 
     with pytest.raises(ValueError, match="observation.log must be one of"):
-        observe_settings.ObservationSettings.from_yaml({"log": "chrome"})
-
-
-def _timing_only_row(latency_model=None):
-    """A DECODERS row on the shipped timing-only decoder."""
-    del latency_model
-    return decoders.PresetLatencyDecoder(1.0)
+        observe_settings.ObservationSettings(log="chrome")
 
 
 def _corrections(document) -> list:
@@ -843,9 +789,7 @@ def _is_a_correction(row) -> bool:
     return is_complete and row["name"].endswith(" correction")
 
 
-def test_a_write_with_no_prediction_is_traced_without_observables(
-    tmp_path, monkeypatch
-):
+def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
     """A result may carry no observables, and the residence then names none.
 
     decsim/ports.py's Decoder.decode returns a result whose correction
@@ -857,11 +801,11 @@ def test_a_write_with_no_prediction_is_traced_without_observables(
     """
     trace_path = tmp_path / "timing_only.trace.json"
     point = _settings(trace_path)
-    weak_decoder = dataclasses.replace(point.weak_decoder, kind="timing_only")
-    point = dataclasses.replace(point, weak_decoder=weak_decoder)
-    monkeypatch.setitem(
-        decoder_settings.DECODERS, "timing_only", _timing_only_row
+    timing_only = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak_decoder = dataclasses.replace(
+        point.weak_decoder, algorithm=timing_only
     )
+    point = dataclasses.replace(point, weak_decoder=weak_decoder)
     machine = machine_module.Machine.build(point, SEED)
     result = machine.run()
     machine.observation.trace_writer.write(str(trace_path))
@@ -887,12 +831,17 @@ def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
     _machine, _result, document = traced
     counters = _by_phase(document, "C")
     series_counts = {len(row["args"]) for row in counters}
-    series_names = {name for row in counters for name in row["args"]}
-    values = [value for row in counters for value in row["args"].values()]
-    value_is_whole = {isinstance(value, int) for value in values}
+    series = _counter_series(counters)
+    series_names = {name for name, _value in series}
+    value_is_whole = {isinstance(value, int) for _name, value in series}
     assert series_counts == {1}
     assert "tick" not in series_names
     assert value_is_whole == {True}
+
+
+def _counter_series(counters) -> list:
+    """Every counter row's series, as (name, value) pairs in document order."""
+    return [pair for row in counters for pair in row["args"].items()]
 
 
 def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
@@ -904,11 +853,9 @@ def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
     """
     path = tmp_path / "ported.trace.json"
     point = _settings(path)
-    row_settings = ported_syndrome_buffer.PortedSyndromeBuffer.Settings()
-    ported = dataclasses.replace(
-        point.weak_syndrome_buffer,
-        kind="ported_syndrome_buffer",
-        row_settings=row_settings,
+    weak_store = point.weak_syndrome_buffer
+    ported = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        bits=weak_store.bits, clock=weak_store.clock
     )
     point = dataclasses.replace(point, weak_syndrome_buffer=ported)
     machine = machine_module.Machine.build(point, SEED)

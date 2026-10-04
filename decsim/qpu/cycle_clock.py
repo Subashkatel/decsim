@@ -1,17 +1,11 @@
 """The QEC cycle clock: one syndrome round per cycle on every live patch.
 
-The QPU runs syndrome extraction on every live patch every cycle, whether
-or not an operation is using the patch: every measure qubit is read out
-each cycle (Google, Suppressing quantum errors by scaling a surface code
-logical qubit, 2207.06431; Google, Quantum error correction below the
-surface code threshold, 2408.13687), and the extraction does not pause
-for a patch no instruction is using, so that patch emits an idle round;
-what those rounds cost the decoder is the idle policy's question, with
-its sources in controller/policies.py. Operations start on a cycle
-boundary and occupy whole cycles; a command that arrives on a boundary
-starts on that boundary (QubiC, 2404.15260 Sec. IV: a pulse timestamp is
-the time after which the pulse plays). This module owns that cadence
-only; program dependencies, windows and decoder state live elsewhere.
+Every measure qubit is read out each cycle (Google 2207.06431,
+2408.13687) and extraction does not pause for an unused patch, so that
+patch emits an idle round. Operations start on a cycle boundary and
+occupy whole cycles; a command that arrives on a boundary starts on it
+(QubiC 2404.15260 Sec. IV: a pulse timestamp is the time after which it
+plays).
 """
 
 import dataclasses
@@ -29,37 +23,13 @@ import decsim.trace_source as trace_source
 # Any stands for them in every signature below.
 
 
-@dataclasses.dataclass(frozen=True)
-class QPUCommandEvent:
-    """When a command arrived at the QPU, and when it started."""
-
-    # "ARRIVED" or "STARTED"; the event ledger reads these words.
-    kind: str
-    tick: int
-    command: program_records.RunOperationBody
-
-
 class QPUDevice:
     """Runs issued operation bodies on one QEC cycle clock.
 
-    Every cycle emits one syndrome round per running operation and per
-    idle patch; the source that produces its bits and the three ends
-    that output reaches are ports. A readout leaves at the tick its
-    syndrome source names
-    (SyndromeSource.readout_departure_tick), never before an earlier
-    readout of one of its patches: it waits behind that one, as gem5's
-    packet queue with forceOrder schedules a packet after the last one
-    to the same address rather than ahead of it
-    (gem5 src/mem/packet_queue.cc:134-147), and a tick
-    before the readout is refused, as that queue asserts
-    (packet_queue.cc:114). Trace sources: command_event(QPUCommandEvent)
-    when a command arrives and when it starts; round_emitted(readout)
-    for every readout a round produces, at the boundary it is read out;
-    and round_event(RoundEvent) with kind EMITTED when a readout leaves
-    for the controller, on the readout path's own ledger. The event is
-    the emitter's own: gem5's SimObject reports its statistics from the
-    object the event happened in
-    (gem5 src/base/stats/group.hh:60-92).
+    A readout leaves at the tick its source names, never before an earlier
+    readout of one of its patches: it waits behind it, as gem5's packet
+    queue with forceOrder does (src/mem/packet_queue.cc:134-147), and a tick
+    before the readout is refused, as that queue asserts (:114).
     """
 
     # the device model that produces each round's bits, shared with the
@@ -97,7 +67,9 @@ class QPUDevice:
             raise ValueError(
                 "zero-duration detector emitters must finalize a stream round"
             )
-        event = QPUCommandEvent("ARRIVED", self.engine.now, command)
+        event = program_records.QPUCommandEvent(
+            "ARRIVED", self.engine.now, command
+        )
         self.trace.command_event.fire(event)
         self._live.commands_waiting.append(command)
         boundary = self.next_boundary()
@@ -116,7 +88,11 @@ class QPUDevice:
         """The first cycle boundary not earlier than the tick."""
         return self.clock.edge(0, tick)
 
-    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+    def are_patches_idle(
+        self,
+        operation_id: Any,  # an opaque identity
+        patches: tuple,
+    ) -> bool:
         """Every group member is idle after the same completed operation."""
         for patch in patches:
             idle = self._live.idle_by_patch.get(patch)
@@ -129,7 +105,7 @@ class QPUDevice:
     def emit_idle_stream_round(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -155,15 +131,16 @@ class QPUDevice:
         )
 
     def emit_feedback_memory_round(
-        self, operation_id: Any, patch: Any, round_index: int
+        self,
+        operation_id: Any,  # an opaque identity
+        patch: Any,  # an opaque identity
+        round_index: int,
     ) -> None:
         """Deliver the timing-only round of an idle patch.
 
-        It carries no values but is as wide as the patch's syndrome: the
-        extraction reads every measure qubit every cycle whether or not an
-        instruction uses the patch (Google 2207.06431 lines 118-125, "All
-        stabilisers are measured in this manner concurrently"), so every
-        wire and memory the round crosses can price it.
+        It carries no values but is as wide as the patch's syndrome: "All
+        stabilisers are measured in this manner concurrently" (Google 2207.06431
+        lines 118-125), so every wire and memory it crosses can price it.
         """
         size_bits = self.code.syndrome_bits_per_round(1)
         payload = round_records.QPUReadout(
@@ -241,7 +218,9 @@ class QPUDevice:
             self._start_command(command)
 
     def _start_command(self, command: program_records.RunOperationBody) -> None:
-        event = QPUCommandEvent("STARTED", self.engine.now, command)
+        event = program_records.QPUCommandEvent(
+            "STARTED", self.engine.now, command
+        )
         self.trace.command_event.fire(event)
         command = self.idle_rounds.start_command(command)
         operation = command.operation
@@ -303,9 +282,8 @@ class QPUDevice:
     def _send(self, readout: round_records.QPUReadout, route) -> None:
         """Hand the readout on at its departure tick, behind its patches'.
 
-        A readout that leaves now, with no readout of its patches still
-        waiting, is handed on at once, so a source that names the
-        boundary sends in the order the cycle produced its readouts.
+        A readout leaving now with none of its patches' still waiting goes at
+        once, so a boundary source sends in the order the cycle produced them.
         """
         now = self.engine.now
         stated_tick = self.syndrome_source.readout_departure_tick(readout, now)
@@ -375,7 +353,7 @@ def _fragment_slots(operation, payload_count: int) -> tuple[int, int]:
 
 @dataclasses.dataclass
 class _RunningOperation:
-    """An operation body on the QPU and how many rounds it has emitted."""
+    """An operation body running on the QPU."""
 
     command: program_records.RunOperationBody
     emitted_round_count: int
@@ -383,7 +361,7 @@ class _RunningOperation:
 
 @dataclasses.dataclass
 class _IdlePatch:
-    """A patch between operations and how many idle rounds it has emitted."""
+    """A patch idling between operations."""
 
     operation_id: object
     emitted_round_count: int
@@ -391,13 +369,7 @@ class _IdlePatch:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the QPU device reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the QPU device reports, as one member."""
 
     command_event: trace_source.TraceSource = trace_source.new_source()
     round_emitted: trace_source.TraceSource = trace_source.new_source()
@@ -406,17 +378,11 @@ class _TraceSources:
 
 @dataclasses.dataclass
 class _LiveOperations:
-    """What the clock is running this cycle, and what it has emitted.
+    """The clock's live state, as one member.
 
-    running_by_operation_id and idle_by_patch are what a cycle emits a
-    round for; commands_waiting are the bodies whose start the clock has
-    not reached; scheduled_boundaries and last_emitted_boundary keep a
-    cycle boundary from being scheduled or emitted twice; is_finished
-    closes the clock once the workload is done; departure_tick_by_patch
-    is the tick the latest readout of a patch that had to wait leaves
-    at, so a later one queues behind it. gem5 groups a
-    component's many members the same way
-    (gem5 src/base/stats/group.hh:60-92).
+    scheduled_boundaries and last_emitted_boundary keep a boundary from
+    being scheduled or emitted twice; departure_tick_by_patch is the latest
+    waiting readout's tick, so a later one queues behind it.
     """
 
     running_by_operation_id: dict = dataclasses.field(default_factory=dict)

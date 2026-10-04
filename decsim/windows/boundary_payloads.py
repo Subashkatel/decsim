@@ -10,9 +10,10 @@ syndrome updated"). Two rows say how that update is written on the wire:
 a dense mask over the layer, which is what both compiled
 implementations carry, and a sparse list of the flipped detectors, which
 is Skoric's artificial-defect list (2209.08552 lines 265-269, 1038-1040)
-and Bombin's small set. The row is named by windows.boundary_payload.
+and Bombin's small set. WindowSettings.boundary_payload holds the row.
 """
 
+import dataclasses
 import math
 
 import decsim.records.windows as window_records
@@ -27,6 +28,14 @@ class DenseSeamMask:
     and cuda-q QEC carries `syndrome_mods` over the window's rows, so a
     compiled decoder pays this whether or not a bit is set.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The dense row, which takes no setting."""
+
+        def build(self) -> "DenseSeamMask":
+            """The one-bit-per-detector payload."""
+            return DenseSeamMask()
 
     def bits(self, seam: window_records.BoundarySeam) -> int:
         """The seam layer's detectors, one bit each."""
@@ -43,6 +52,14 @@ class SparseSeamList:
     layer, so it is ceil(log2(seam detectors)) wide, and a layer of one
     detector still needs one bit to name it.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The sparse row, which takes no setting."""
+
+        def build(self) -> "SparseSeamList":
+            """The one-index-per-flip payload."""
+            return SparseSeamList()
 
     def bits(self, seam: window_records.BoundarySeam) -> int:
         """One index per flip, each wide enough to name a seam detector."""

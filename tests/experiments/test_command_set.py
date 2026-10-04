@@ -8,21 +8,26 @@ command line is never the only record of a number.
 
 import csv
 import dataclasses
+import datetime
+import errno
 import functools
 import hashlib
+import importlib.metadata
 import json
-import math
 import pathlib
+import platform
 import resource
+import shlex
 import shutil
 import subprocess
 import sys
+import types
 
+import numpy
 import pytest
 import scipy.stats
 import sinter
 import stim
-import yaml
 
 import decsim.collect as collect
 import decsim.config as config
@@ -38,30 +43,57 @@ import decsim.experiments.pieces as pieces
 import decsim.experiments.plan_command as plan_command
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
-import decsim.experiments.run_command as run_command
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.producers as producers
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
+import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
-import tests.experiments.yaml_configs as yaml_configs
-import tests.observe.gate_point as gate_point
+import tests.experiments.run_files as run_files
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
-CONFIGS_DIR = yaml_configs.CONFIGS_DIR
-FOUR_POINT_SWEEP = {
-    "sweep": [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.001, 0.003],
-                "qpu.distance": [3, 5],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": 2},
-        }
-    ]
+THIS_FILE = pathlib.Path(__file__)
+THIS_PATH = THIS_FILE.resolve()
+REPOSITORY = THIS_PATH.parents[2]
+# The run files examples/ ships, each run with `decsim run`.
+EXAMPLES_DIR = REPOSITORY / "examples"
+EXAMPLES = (
+    "my_first_sweep.py",
+    "priced_cards_example.py",
+    "recipes.py",
+    "two_tiers.py",
+)
+FOUR_POINTS = {
+    "axes": run_files.FOUR_POINT_AXES,
+    "collection": {"max_shots": 2},
 }
+# the four points in pieces of one shot each
+FOUR_POINTS_CUT = {
+    "axes": run_files.FOUR_POINT_AXES,
+    "collection": {"max_shots": 2, "piece_rounds": 1},
+}
+# a switching point whose threshold learns online
+ONLINE = {"machine": "switching", "machine_arguments": {"online": {}}}
+# one noisy point, which fails often enough for a stop rule to stop it
+NOISY_AXES = {
+    run_files.DISTANCE_PATH: (3,),
+    run_files.ROUND_PERIOD_PATH: (1.0,),
+    run_files.ERROR_RATE_PATH: (0.02,),
+}
+
+
+def _run_one_shot(config_path, seed=0, out_dir=None, *, trace=False):
+    """`decsim run <file> --seed S`: the first point's one narrated shot."""
+    run_path = pathlib.Path(config_path)
+    study = experiment.load_one_point(run_path)
+    return collect_command.run_one_shot(
+        study, run_path, seed, out_dir, trace=trace
+    )
 
 
 # The suite's container ships no git, so the tests that need it skip.
@@ -73,7 +105,6 @@ requires_git = pytest.mark.skipif(
 
 EVERY_FILE = (
     "sweep.csv",
-    "links.csv",
     "shots.csv",
     "shot_links.csv",
     "window_samples.csv",
@@ -104,41 +135,39 @@ def _rows_of_every_file(run_dir) -> dict:
     }
 
 
+def _rows_of_seed(rows: list, seed: str) -> list:
+    """The rows one seed's shots wrote, in file order."""
+    found = []
+    for row in rows:
+        if row["seed"] == seed:
+            found.append(row)
+    return found
+
+
 @pytest.fixture(autouse=True)
-def one_tree_reading_per_test():
+def one_tree_reading_per_test(monkeypatch):
     """Every test here takes its own reading of the tree.
 
     run_folder reads the tree once per process, which is what a cluster
     task is. The suite is one process running many runs, and one of
     these tests answers for git itself, so the reading is dropped
-    around each test rather than carried between them.
+    around each test rather than carried between them. A batch task
+    refuses a tree git does not vouch for, which tests/test_tools.py
+    holds; here a task runs on the tree as it stands, and the reading
+    it exports goes when the test ends.
     """
+    monkeypatch.setenv(run_folder.ALLOW_DIRTY_VARIABLE, "1")
+    monkeypatch.delenv(run_folder.TREE_DIRTY_VARIABLE, raising=False)
+    monkeypatch.delenv(run_folder.TREE_PATCH_VARIABLE, raising=False)
     run_folder._tree_reading.cache_clear()
     yield
     run_folder._tree_reading.cache_clear()
 
 
 def _manifest_of(run_dir):
-    path = run_dir / "manifest.json"
+    path = run_dir / "run.json"
     text = path.read_text()
     return json.loads(text)
-
-
-def _commit_of_this_tree():
-    """This test file's own checkout at HEAD, read without git.
-
-    Walked up from this file rather than from the module under test, so
-    a manifest that named some other tree would fail here. The container
-    the suite runs in has no git binary, which is why the git files are
-    read directly; the reader knows a worktree's .git file and the refs
-    it shares with the repo.
-    """
-    this_file = pathlib.Path(__file__)
-    here = this_file.resolve()
-    checkout = here
-    while not (checkout / ".git").exists():
-        checkout = checkout.parent
-    return run_folder._commit_from_git_files(checkout)
 
 
 def test_an_unknown_verb_prints_the_verbs_and_fails():
@@ -153,304 +182,20 @@ def test_help_prints_the_verbs_without_failing(capsys):
     assert printed.err.strip() == command.usage()
 
 
-@pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
-def test_show_lists_every_sections_kind_of_every_shipped_config(name):
-    config_path = CONFIGS_DIR / name
-    config = experiment.load_experiment(config_path)
-    first_point = config.first_point_task()
-    lines = experiment.resolved_description(config, first_point.settings)
-    text = "\n".join(lines)
-    assert f"config: {config_path}" in lines[0]
-    assert "qpu: kind stim_device" in text
-    assert "sweep block 1:" in text
-    assert "log: " in text
-    assert "trace: " in text
-
-
-@pytest.mark.parametrize(
-    "qpu_kind, sentence",
-    [
-        ("recorded_stim", "required positional arguments: 'measurements'"),
-        ("streaming_stim", "required positional argument: 'programs'"),
-    ],
-)
-@pytest.mark.parametrize("verb", ["show", "run"])
-def test_show_and_run_stop_at_a_source_the_yaml_cannot_build(
-    tmp_path, verb, qpu_kind, sentence
-):
-    """The first point's machine is built, so show stops where run would."""
-    qpu = {"qpu": {"kind": qpu_kind}}
-    config_path = yaml_configs.write_config(tmp_path, qpu)
-
-    with pytest.raises(TypeError, match=sentence):
-        command.main([verb, str(config_path)])
-
-
-@pytest.mark.parametrize("verb", ["show", "run"])
-def test_show_and_run_refuse_a_maker_that_is_not_there_in_one_line(
-    tmp_path, capsys, verb
-):
-    """The first point makes the workload, so show refuses what run would."""
-    workload = {
-        "kind": "producer",
-        "function": "decsim.producers:no_such_maker",
-        "arguments": {},
-    }
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-
-    with pytest.raises(SystemExit) as stopped:
-        command.main([verb, str(config_path)])
-    printed = capsys.readouterr()
-
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert "names no maker" in printed.err
-
-
-def test_show_builds_a_point_whose_threshold_learns_online(tmp_path, capsys):
-    """The first point's threshold is built per point, as the run builds it."""
-    overrides = yaml_configs.online_threshold()
-    config_path = yaml_configs.write_config(tmp_path, overrides)
-
-    command.main(["show", str(config_path)])
-    printed = capsys.readouterr()
-
-    assert "escalation: kind switching" in printed.out
-
-
 def test_run_builds_a_point_whose_threshold_learns_online(tmp_path):
     """The one shot runs its point's threshold, as a collect's shot does."""
-    overrides = yaml_configs.online_threshold()
-    config_path = yaml_configs.write_config(tmp_path, overrides)
+    run_file = run_files.write_run_file(tmp_path, **ONLINE)
     out_dir = tmp_path / "run"
 
-    run_command.run_one_shot(config_path, out_dir=out_dir)
+    _run_one_shot(run_file, out_dir=out_dir)
 
     assert (out_dir / "result.json").exists()
 
 
-def test_show_names_the_fabric_card_the_run_resolved_to():
-    """The card is one line, because every hop on it is priced.
-
-    A null card is the reference profile's numbers for that path
-    (decsim/links/link_profiles.py logical_reference_profile), so the
-    reader needs the card's name and nothing else.
-    """
-    config_path = CONFIGS_DIR / "reference.yaml"
-    config = experiment.load_experiment(config_path)
-    first_point = config.first_point_task()
-    lines = experiment.resolved_description(config, first_point.settings)
-    text = "\n".join(lines)
-    assert "links: card reference.yaml" in text
-
-
-def _line_number_of(path, text: str) -> int:
-    file_text = path.read_text()
-    lines = file_text.splitlines()
-    return lines.index(text) + 1
-
-
-def test_show_names_each_values_layer_and_the_line_that_set_it(tmp_path):
-    """Every value, the layer that set it and the yaml line it came from.
-
-    A value your file writes, one a preset it extends writes, a swept
-    one and one no file writes (its line is the one reference.yaml
-    documents it on).
-    """
-    reference_path = CONFIGS_DIR / "reference.yaml"
-    preset_path = tmp_path / "preset.yaml"
-    preset_path.write_text(
-        f"extends: {reference_path}\n"
-        "controller:\n"
-        "  clock: fridge\n"
-        "  readout_to_bits_cycles: 0\n"
-        "  packing_cycles_per_round: 0\n"
-        "  decision_to_pulse_cycles: 3\n"
-    )
-    config_path = tmp_path / "mine.yaml"
-    config_path.write_text(
-        "extends: preset.yaml\n"
-        "pauli_frame:\n"
-        "  kind: logical_register\n"
-        "  clock: fridge\n"
-        "  write_cycles: 5\n"
-    )
-    config = experiment.load_experiment(config_path)
-
-    first_point = config.first_point_task()
-    lines = experiment.value_lines(config, first_point.settings)
-
-    sweep_line = _line_number_of(reference_path, "sweep:")
-    last_sweep_line = _line_number_of(
-        reference_path, "      qpu.round_period_microseconds: [1.0]"
-    )
-    bound_line = _line_number_of(
-        reference_path,
-        "  packing_rounds_in_flight: null   # packing assembly workspace: "
-        "rounds in flight",
-    )
-    assert (
-        f"controller.decision_to_pulse_cycles = 3  [preset preset.yaml, "
-        f"{preset_path}:6]"
-    ) in lines
-    assert (
-        f"pauli_frame.write_cycles = 5  [your file, {config_path}:5]" in lines
-    )
-    assert (
-        f"qpu.distance = [3]  [sweep, {reference_path}:{sweep_line}-"
-        f"{last_sweep_line}]"
-    ) in lines
-    assert (
-        "controller.packing_rounds_in_flight = null  "
-        f"[default, configs/reference.yaml:{bound_line}]"
-    ) in lines
-
-
-def test_show_names_no_line_for_a_value_no_key_names_alone(tmp_path):
-    """A derived or renamed value prints no source, never a guessed one.
-
-    A channel's ticks come from its card's latency and clock, and a
-    section's clock period from the domain it names and that domain's
-    frequency; neither is one yaml key's value. unit_memory.bits and
-    clocks.fridge are their own keys'.
-    """
-    reference_path = CONFIGS_DIR / "reference.yaml"
-    config_path = tmp_path / "mine.yaml"
-    config_path.write_text(
-        f"extends: {reference_path}\n"
-        "links:\n"
-        "  qpu_to_controller:\n"
-        "    clock: fridge\n"
-        "    bits_per_cycle: null\n"
-        "    latency_cycles: 7\n"
-    )
-    config = experiment.load_experiment(config_path)
-
-    first_point = config.first_point_task()
-    lines = experiment.value_lines(config, first_point.settings)
-
-    bits_line = _first_line_starting(reference_path, "    bits: null")
-    fridge_line = _first_line_starting(reference_path, "  fridge:")
-    assert (
-        "links.qpu_to_controller.channel.propagation_latency_ticks = 28000"
-    ) in lines
-    assert "controller.clock.period_ticks = 4000" in lines
-    assert (
-        "clocks.fridge = 250.0  "
-        f"[preset reference.yaml, {reference_path}:{fridge_line}]"
-    ) in lines
-    assert (
-        "weak_decoder.unit_memory.bits = null  "
-        f"[preset reference.yaml, {reference_path}:{bits_line}]"
-    ) in lines
-
-
-@functools.cache
-def _key_paths_by_line(path) -> dict:
-    """Each line of a yaml file that writes a mapping key, and that key."""
-    with open(path) as handle:
-        root = yaml.compose(handle)
-    by_line = {}
-    pending = [((), root)]
-    while pending:
-        prefix, node = pending.pop()
-        if node.id != "mapping":
-            continue
-        for key_node, value_node in node.value:
-            key = prefix + (key_node.value,)
-            line = key_node.start_mark.line + 1
-            by_line[line] = key
-            pending.append((key, value_node))
-    return by_line
-
-
-def _cited_line(value_line: str) -> tuple:
-    """The file and the first line a value line's bracket cites."""
-    _, _, bracket = value_line.rpartition("  [")
-    origin = bracket.removesuffix("]")
-    _, _, source = origin.rpartition(", ")
-    file_text, _, lines = source.rpartition(":")
-    first_line, _, _ = lines.partition("-")
-    return file_text, int(first_line)
-
-
-def _value_key(value_line: str) -> tuple:
-    """The yaml key a value line's value is read from, a swept one's sweep."""
-    dotted, _, rest = value_line.partition(" = ")
-    if "  [sweep, " in rest:
-        return ("sweep",)
-    names = dotted.split(".")
-    path = tuple(names)
-    return experiment._yaml_key(path)
-
-
-def _cited_lines(lines: list) -> list:
-    cited = []
-    for line in lines:
-        if "  [" in line:
-            cited.append(line)
-    return cited
-
-
-def _miscited_lines(cited: list) -> list:
-    miscited = []
-    for line in cited:
-        if not _cites_its_own_key(line):
-            miscited.append(line)
-    return miscited
-
-
-def _cites_its_own_key(value_line: str) -> bool:
-    """Whether the line a value line cites writes that value's key."""
-    file_text, first_line = _cited_line(value_line)
-    cited_path = CONFIGS_DIR.parent / file_text
-    key_paths = _key_paths_by_line(cited_path)
-    return key_paths[first_line] == _value_key(value_line)
-
-
-@pytest.mark.parametrize("name", yaml_configs.SHIPPED_CONFIGS)
-def test_every_line_show_cites_holds_the_key_of_its_value(name):
-    """Run on a shipped config, show cites only its values' own keys."""
-    config_path = CONFIGS_DIR / name
-    config = experiment.load_experiment(config_path)
-    point = config.first_point_task()
-    lines = experiment.value_lines(config, point.settings)
-    cited = _cited_lines(lines)
-
-    miscited = _miscited_lines(cited)
-
-    assert cited
-    assert miscited == []
-
-
-def _first_line_starting(path, start: str) -> int:
-    text = path.read_text()
-    lines = text.splitlines()
-    for number, line in enumerate(lines, start=1):
-        if line.startswith(start):
-            return number
-    raise AssertionError(f"{path} has no line starting {start!r}")
-
-
-def test_show_prints_every_value_after_the_sections(capsys):
-    config_path = CONFIGS_DIR / "reference.yaml"
-    config = experiment.load_experiment(config_path)
-    first_point = config.first_point_task()
-    value_lines = experiment.value_lines(config, first_point.settings)
-
-    command.main(["show", str(config_path)])
-    printed = capsys.readouterr()
-
-    lines = printed.out.splitlines()
-    values_at = lines.index("values:")
-    assert lines[values_at + 1 :] == value_lines
-
-
 def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
-    config_path = gate_point.CONFIG_PATH
-    lines = run_command.run_one_shot(config_path, seed=0, out_dir=tmp_path)
-    config = experiment.load_experiment(config_path)
-    point = config.first_point_task()
+    run_file = run_files.write_run_file(tmp_path)
+    lines = _run_one_shot(run_file, seed=0, out_dir=tmp_path)
+    point = run_files.first_task()
     settings = point.settings
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -464,12 +209,126 @@ def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
 
 
 def test_run_with_trace_writes_the_shots_trace_file(tmp_path):
-    config_path = gate_point.CONFIG_PATH
-    run_command.run_one_shot(config_path, seed=0, out_dir=tmp_path, trace=True)
+    run_file = run_files.write_run_file(tmp_path)
+    _run_one_shot(run_file, seed=0, out_dir=tmp_path, trace=True)
     trace_dir = tmp_path / "trace"
     entries = trace_dir.iterdir()
     written = sorted(entries)
     assert len(written) == 1
+
+
+def _four_point_names(tmp_path) -> tuple:
+    """The four-point sweep's run file, and its point names in order."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    study = experiment.load(config_path)
+    names = [point.name for point in study.points]
+    return config_path, names
+
+
+def test_run_list_prints_the_point_names_in_order(tmp_path, capsys):
+    config_path, names = _four_point_names(tmp_path)
+
+    command.main(["run", str(config_path), "--list"])
+
+    printed = capsys.readouterr()
+    assert printed.out.splitlines() == names
+
+
+def test_run_only_collects_the_one_point_it_names(tmp_path):
+    config_path, names = _four_point_names(tmp_path)
+    out_dir = tmp_path / "out"
+
+    command.main(
+        ["run", str(config_path), "--out", str(out_dir), "--only", names[1]]
+    )
+
+    points_dir = out_dir / "points"
+    recorded = sorted(path.name for path in points_dir.iterdir())
+    assert recorded == [names[1]]
+    manifest = _manifest_of(out_dir)
+    assert len(manifest["points"]) == 4
+    sweep_path = out_dir / "sweep.csv"
+    sweep_rows = _rows(sweep_path)
+    assert len(sweep_rows) == 1
+
+
+def test_run_shots_gives_the_first_shots_of_the_full_collection(tmp_path):
+    config_path, names = _four_point_names(tmp_path)
+    full_dir = tmp_path / "full"
+    first_dir = tmp_path / "first"
+
+    command.main(["run", str(config_path), "--out", str(full_dir)])
+    command.main(
+        ["run", str(config_path), "--out", str(first_dir), "--shots", "1"]
+    )
+
+    full_rows = _rows_without_wall_clock(full_dir, "shots.csv")
+    first_rows = _rows_without_wall_clock(first_dir, "shots.csv")
+    seed_zero_rows = _rows_of_seed(full_rows, "0")
+    assert len(full_rows) == 8
+    assert first_rows == seed_zero_rows
+
+
+@pytest.mark.parametrize("name", EXAMPLES)
+def test_run_collects_a_first_shot_of_every_point_of_an_example(tmp_path, name):
+    example_path = EXAMPLES_DIR / name
+    study = experiment.load(example_path)
+    out_dir = tmp_path / "out"
+
+    command.main(
+        ["run", str(example_path), "--out", str(out_dir), "--shots", "1"]
+    )
+
+    shot_rows = _rows_without_wall_clock(out_dir, "shots.csv")
+    point_ids = {row["point_id"] for row in shot_rows}
+    seeds = {row["seed"] for row in shot_rows}
+    assert len(shot_rows) == len(study.points)
+    assert len(point_ids) == len(study.points)
+    assert seeds == {"0"}
+
+
+def test_run_seed_narrates_the_shot_of_the_point_only_names(tmp_path):
+    config_path, names = _four_point_names(tmp_path)
+    out_dir = tmp_path / "out"
+
+    command.main(
+        [
+            "run",
+            str(config_path),
+            "--seed",
+            "1",
+            "--only",
+            names[2],
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    record_path = out_dir / "points" / names[2] / "machine.json"
+    record = run_folder.read_json(record_path)
+    assert record["seeds"] == [[1, 1]]
+    assert (out_dir / "result.json").exists()
+
+
+@pytest.mark.parametrize(
+    "arguments, message",
+    [
+        (["--seed", "0", "--shots", "2"], "--seed runs one narrated shot"),
+        (["--trace"], "--log and --trace narrate the one shot --seed runs"),
+        (["--shots", "0"], "a shot count is at least 1, got 0"),
+    ],
+)
+def test_run_refuses_options_that_ask_two_things(
+    tmp_path, capsys, arguments, message
+):
+    config_path = run_files.write_run_file(tmp_path)
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["run", str(config_path), *arguments])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 2
+    assert message in printed.err
 
 
 def _csv_rows(path: pathlib.Path) -> list:
@@ -501,19 +360,18 @@ def _hashes_of(folder: pathlib.Path, *names: str) -> dict:
     return hashes
 
 
-def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
+def test_a_run_folder_holds_the_points_values_and_workload(tmp_path):
     """What the run ran, every value of it, and the workload as files."""
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
-    lines = run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
-    resolved_dir = out_dir / "resolved"
-    resolved_path = _one_file(resolved_dir, "*.json")
+    lines = _run_one_shot(config_path, seed=0, out_dir=out_dir)
+    resolved_dir = out_dir / "points"
+    resolved_path = _one_file(resolved_dir, "*/machine.json")
     resolved_text = resolved_path.read_text()
     resolved = json.loads(resolved_text)
-    inputs_dir = out_dir / "inputs" / resolved_path.stem
+    inputs_dir = resolved_path.parent / "inputs"
     hashes_text = (inputs_dir / "hashes.json").read_text()
     hashes = json.loads(hashes_text)
-    maker = resolved["maker"]
 
     assert "terminal status: complete" in lines[2]
     assert resolved["seeds"] == [[0, 1]]
@@ -522,33 +380,34 @@ def test_a_run_folder_holds_the_points_values_workload_and_maker(tmp_path):
     assert hashes == _hashes_of(
         inputs_dir, "operation_1.stim", "operations.json"
     )
-    assert maker["function"] == "decsim.producers:memory_circuit"
-    assert maker["arguments"]["rounds_per_shot"] == 15
     assert (out_dir / "result.json").exists()
 
 
-def test_a_shots_rounds_add_up_every_patchs_rounds(tmp_path):
+def test_a_shots_rounds_add_up_every_patchs_rounds():
     """Three patches of fifteen rounds are forty-five patch-rounds.
 
     Tesseract 2503.10988 lines 287-290 count the rounds across every
     code in the shot, so a per-round rate compares with one memory.
     """
-    workload = yaml_configs.memory_workload(15)
-    workload["function"] = "decsim.producers:memory_patches"
-    workload["arguments"]["patch_count"] = 3
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-    config = experiment.load_experiment(config_path)
-    task = config.point_task(
-        {
-            yaml_configs.ERROR_RATE_PATH: 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        }
-    )
+    task = three_patch_task()
 
-    record = run_folder.point_record(task)
+    record = run_folder.point_record("point", task)
 
     assert record["rounds_per_shot"] == 45
+
+
+def three_patch_task() -> collect.Task:
+    """The minimal machine's point running three 15-round memory patches."""
+    cells = {
+        run_files.ERROR_RATE_PATH: 0.001,
+        run_files.DISTANCE_PATH: 3,
+        run_files.ROUND_PERIOD_PATH: 1.0,
+    }
+    base = run_files.minimal_machine(cells)
+    patches = producers.memory_patches(run_files.CODE_TASK, 15, 3, 3, 0.001)
+    workload = workload_settings.WorkloadSettings.running(patches)
+    settings = dataclasses.replace(base, workload=workload)
+    return collect.Task(settings, cells)
 
 
 def test_a_streams_rounds_are_its_segments_counted_once():
@@ -567,188 +426,39 @@ def test_a_streams_rounds_are_its_segments_counted_once():
         syndrome_fragment_index=0,
         syndrome_fragment_count=1,
     )
-    rounds = round_policies.PerOperationRounds({100: 3, 1: 3})
+    rounds = round_policies.PerOperationRounds(((100, 3), (1, 3)))
     workload = workload_settings.WorkloadSettings(
         operations=(segment,), decode_operations=(owner,), rounds_policy=rounds
     )
-    qpu = qpu_settings.QpuSettings(distance=3, kind="timing_only")
+    timing_only = syndrome_devices.TimingOnlyDevice.Settings()
+    qpu = qpu_settings.QpuSettings(distance=3, source=timing_only)
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    weak_decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
     task = collect.Task(settings, {})
 
-    record = run_folder.point_record(task)
+    record = run_folder.point_record("point", task)
 
     assert record["rounds_per_shot"] == 3
 
 
-# A maker that answers a longer memory each time it is called, so a
-# point made twice records one workload and runs another.
-GROWING_MAKER = """
-import decsim.producers as producers
-
-CALLS = []
-
-
-def growing_memory(distance, physical_error_probability):
-    CALLS.append(distance)
-    rounds = 15 + 3 * (len(CALLS) - 1)
-    return producers.memory_circuit(
-        "surface_code:rotated_memory_z",
-        rounds,
-        distance,
-        physical_error_probability,
-    )
-"""
-
-
-def test_a_collect_makes_each_points_workload_once(tmp_path, monkeypatch):
-    """The workload recorded in inputs/ is the one the shots ran."""
-    maker_path = tmp_path / "growing_maker.py"
-    maker_path.write_text(GROWING_MAKER)
-    monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.delitem(sys.modules, "growing_maker", raising=False)
-    workload = {
-        "kind": "producer",
-        "function": "growing_maker:growing_memory",
-        "arguments": {"distance": "${qpu.distance}"},
-    }
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-    run_dir = tmp_path / "run"
-
-    command.main(["collect", str(config_path), "--out", str(run_dir)])
-
-    growing_maker = sys.modules["growing_maker"]
-    assert growing_maker.CALLS == [3]
-
-
-WAITING_MAKER = """
-import decsim.records.program as program
-import decsim.records.workload as workload
-
-
-def wait(**_arguments):
-    operation = program.Operation(
-        1, "wait", (0,), patches=(0,), emits_detector_data=False
-    )
-    return workload.Workload((operation,), {1: 3})
-"""
-
-
-def test_a_collect_of_a_workload_with_no_detector_rounds_is_refused(
-    tmp_path, monkeypatch, capsys
-):
-    """A shot that sends no detector data has no rounds to size or score.
-
-    Its rounds per shot are zero, so collect refuses the point before it
-    sizes a piece, as its scoring would refuse the first shot.
-    """
-    maker_path = tmp_path / "waiting_maker.py"
-    maker_path.write_text(WAITING_MAKER)
-    monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.delitem(sys.modules, "waiting_maker", raising=False)
-    workload = {"kind": "producer", "function": "waiting_maker:wait"}
-    card = {
-        "workload": workload,
-        "qpu": {"kind": "timing_only"},
-        "sweep": yaml_configs.QPU_ONLY_SWEEP,
-    }
-    config_path = yaml_configs.write_config(tmp_path, card)
-    run_dir = tmp_path / "run"
-
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["collect", str(config_path), "--out", str(run_dir)])
-    printed = capsys.readouterr()
-
-    assert stopped.value.code == 1
-    assert "sends detector data" in printed.err
-
-
-def test_a_run_folders_inputs_rerun_the_point_without_the_maker(tmp_path):
-    """The files row reads inputs/ back, and the shot is the same shot."""
-    config_path = yaml_configs.write_config(tmp_path, {})
-    first_dir = tmp_path / "first"
-    run_command.run_one_shot(config_path, seed=0, out_dir=first_dir)
-    resolved_dir = first_dir / "resolved"
-    resolved_path = _one_file(resolved_dir, "*.json")
-    inputs_dir = first_dir / "inputs" / resolved_path.stem
-    operations_path = inputs_dir / "operations.json"
-    files = {"kind": "files", "operations": str(operations_path)}
-    rerun_folder = tmp_path / "rerun"
-    rerun_folder.mkdir()
-    rerun_card = {"workload": files, "sweep": yaml_configs.QPU_ONLY_SWEEP}
-    rerun_path = yaml_configs.write_config(rerun_folder, rerun_card)
-    second_dir = tmp_path / "second"
-    run_command.run_one_shot(rerun_path, seed=0, out_dir=second_dir)
-    first_result = (first_dir / "result.json").read_text()
-    second_result = (second_dir / "result.json").read_text()
-
-    assert second_result == first_result
-
-
-@pytest.mark.parametrize(
-    "function",
-    ["decsim.producers:memory_circuit", "decsim.producers.memory_circuit"],
-)
-def test_a_points_record_names_the_maker_in_either_of_its_forms(
-    tmp_path, function
-):
-    """pkgutil.resolve_name reads both forms, so the run records both."""
-    workload = yaml_configs.memory_workload(15)
-    workload["function"] = function
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-    out_dir = tmp_path / "out"
-
-    run_command.run_one_shot(config_path, out_dir=out_dir)
-
-    resolved_dir = out_dir / "resolved"
-    resolved_path = _one_file(resolved_dir, "*.json")
-    resolved_text = resolved_path.read_text()
-    resolved = json.loads(resolved_text)
-    assert resolved["maker"]["function"] == function
-
-
-def test_a_points_record_names_the_maker_its_row_answers(tmp_path, monkeypatch):
-    """The row says what made its workload; the runner names no row.
-
-    The producer row under a second name answers the same maker, so the
-    record holds it whatever the row is called.
-    """
-    monkeypatch.setitem(
-        workload_settings.WORKLOADS,
-        "made_elsewhere",
-        workload_settings.ProducerWorkload,
-    )
-    workload = yaml_configs.memory_workload(15)
-    workload["kind"] = "made_elsewhere"
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-    out_dir = tmp_path / "out"
-
-    run_command.run_one_shot(config_path, out_dir=out_dir)
-
-    resolved_dir = out_dir / "resolved"
-    resolved_path = _one_file(resolved_dir, "*.json")
-    resolved_text = resolved_path.read_text()
-    resolved = json.loads(resolved_text)
-    maker = resolved["maker"]
-    assert maker["function"] == "decsim.producers:memory_circuit"
-    assert maker["arguments"]["rounds_per_shot"] == 15
-
-
 def test_a_point_recorded_again_hashes_only_its_inputs(tmp_path):
     """A retried folder records its points again over the first record."""
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
-    task = config.first_point_task()
+    task = run_files.first_task()
     run_dir = tmp_path / "run"
 
-    point_id = run_folder.record_point(run_dir, task)
-    run_folder.record_point(run_dir, task)
+    run_folder.record_point(run_dir, "point", task)
+    run_folder.record_point(run_dir, "point", task)
 
-    inputs_dir = run_dir / "inputs" / point_id
+    inputs_dir = run_dir / "points" / "point" / "inputs"
     hashes_path = inputs_dir / "hashes.json"
     hashes_text = hashes_path.read_text()
     hashes = json.loads(hashes_text)
@@ -761,16 +471,16 @@ def test_a_collect_run_again_into_its_folder_reruns_no_saved_piece(tmp_path):
     A piece's folder is written whole or not at all, so one that exists
     holds its shots, and the fold of the second run is the first's.
     """
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     pieces_dir = out_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
     first_status = piece_path.stat()
-    report_dir = yaml_configs.run_folder_of(out_dir)
+    report_dir = out_dir
     first_rows = _rows_without_wall_clock(report_dir, "sweep.csv")
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     second_status = piece_path.stat()
     second_rows = _rows_without_wall_clock(report_dir, "sweep.csv")
@@ -787,10 +497,10 @@ def test_a_piece_records_the_peak_memory_of_the_process_that_ran_it(
     falls, so the piece's peak is above zero and at most this process's
     peak read after it (ru_maxrss in kilobytes on Linux).
     """
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     pieces_dir = out_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
@@ -801,6 +511,128 @@ def test_a_piece_records_the_peak_memory_of_the_process_that_ran_it(
     assert 0 < piece["peak_memory_mb"] <= peak_after_mb
 
 
+def test_a_piece_records_the_interpreter_packages_and_slurm_task(
+    tmp_path, monkeypatch
+):
+    """The referents are the interpreter's and the packages' own versions.
+
+    A rerun needs what sampled and decoded beside the commit, and the
+    array job and task name the Slurm task when one ran the piece.
+    """
+    monkeypatch.setenv("SLURM_JOB_ID", "14700001")
+    monkeypatch.setenv("SLURM_ARRAY_JOB_ID", "14700000")
+    monkeypatch.setenv("SLURM_ARRAY_TASK_ID", "7")
+    config_path = run_files.write_run_file(tmp_path)
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    pieces_dir = out_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    assert piece["python"] == platform.python_version()
+    assert piece["packages"]["stim"] == stim.__version__
+    assert piece["packages"]["numpy"] == numpy.__version__
+    assert piece["slurm_job_id"] == "14700001"
+    assert piece["slurm_array_job_id"] == "14700000"
+    assert piece["slurm_array_task_id"] == "7"
+
+
+def test_a_pooled_piece_names_the_decoder_package_its_worker_loaded(
+    tmp_path, monkeypatch
+):
+    """relay_bp loads in the worker that decodes, not in the saving parent.
+
+    The referent is the version relay-bp's installed distribution states,
+    since the module states none of its own.
+    """
+    monkeypatch.delitem(sys.modules, "relay_bp", raising=False)
+    config_path = run_files.write_run_file(
+        tmp_path, machine_arguments={"weak_decoder": "relay_bp"}
+    )
+    out_dir = tmp_path / "out"
+    pooled = ["run", str(config_path), "--out", str(out_dir)]
+
+    command.main([*pooled, "--processes", "2"])
+
+    pieces_dir = out_dir / "pieces"
+    piece_path = _one_file(pieces_dir, "*/*/piece.json")
+    piece_text = piece_path.read_text()
+    piece = json.loads(piece_text)
+    distribution_version = importlib.metadata.version("relay-bp")
+    assert "relay_bp" not in sys.modules
+    assert piece["packages"]["relay_bp"] == distribution_version
+
+
+def test_a_module_that_states_its_version_is_named_by_it(monkeypatch):
+    stated = types.ModuleType("example_package")
+    stated.__version__ = "3.1.4"
+    monkeypatch.setitem(sys.modules, "example_package", stated)
+
+    versions = collect.imported_module_versions()
+
+    assert versions["example_package"] == "3.1.4"
+
+
+def test_a_module_whose_wheel_lists_no_top_level_is_found_by_its_files(
+    tmp_path, monkeypatch
+):
+    """A maturin wheel, relay-bp's among them, writes no top_level.txt.
+
+    Its module is named by the folder its files sit in, on every Python.
+    """
+    package = tmp_path / "example_wheel"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    dist_info = tmp_path / "example_wheel-1.2.3.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: example-wheel\nVersion: 1.2.3\n"
+    )
+    (dist_info / "RECORD").write_text(
+        "example_wheel/__init__.py,,\nexample_wheel-1.2.3.dist-info/RECORD,,\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    unstated = types.ModuleType("example_wheel")
+    monkeypatch.setitem(sys.modules, "example_wheel", unstated)
+
+    versions = collect.imported_module_versions()
+
+    assert versions["example_wheel"] == "1.2.3"
+
+
+def test_the_standard_library_and_submodules_are_left_out():
+    versions = collect.imported_module_versions()
+
+    assert "json" not in versions
+    assert "stim" in versions
+    assert "decsim.collect" not in versions
+
+
+def test_a_piece_names_the_processor_linux_lists(tmp_path, monkeypatch):
+    processor_info = tmp_path / "cpuinfo"
+    processor_info.write_text(
+        "processor\t: 0\nmodel name\t: Example CPU 9000 @ 2.00GHz\n"
+    )
+    monkeypatch.setattr(run_folder, "PROCESSOR_INFO_FILE", processor_info)
+
+    identity = run_folder.piece_identity()
+
+    assert identity["processor_model"] == "Example CPU 9000 @ 2.00GHz"
+
+
+def test_a_piece_with_no_processor_list_names_the_platforms_processor(
+    tmp_path, monkeypatch
+):
+    missing = tmp_path / "no_cpuinfo"
+    monkeypatch.setattr(run_folder, "PROCESSOR_INFO_FILE", missing)
+
+    identity = run_folder.piece_identity()
+
+    assert identity["processor_model"] == platform.processor()
+
+
 def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     """The uncut collect is the oracle for a cut one that lost a piece.
 
@@ -808,15 +640,14 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     it missing, then the same collect again: it runs that piece alone
     and every folded file is the uncut run's.
     """
-    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    whole_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     cut_folder = tmp_path / "cut_config"
     cut_folder.mkdir()
-    cut_card = {**FOUR_POINT_SWEEP, "collection": {"piece_rounds": 1}}
-    cut_path = yaml_configs.write_config(cut_folder, cut_card)
+    cut_path = run_files.write_run_file(cut_folder, **FOUR_POINTS_CUT)
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(cut_path), "--out", str(cut_dir)])
     second_pieces = cut_dir.glob("pieces/*/1-1")
     cut_pieces = sorted(second_pieces)
     lost_piece = cut_pieces[0]
@@ -824,13 +655,11 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     kept_status = (kept_piece / "piece.json").stat()
     shutil.rmtree(lost_piece)
 
-    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
+    command.main(["run", str(cut_path), "--out", str(cut_dir)])
 
     reissued_status = (kept_piece / "piece.json").stat()
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
-    cut_rows = _rows_of_every_file(cut_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    cut_rows = _rows_of_every_file(cut_dir)
     assert lost_piece.is_dir()
     assert reissued_status.st_mtime_ns == kept_status.st_mtime_ns
     assert cut_rows == whole_rows
@@ -838,10 +667,10 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
 
 def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
     """A killed writer's staging folder: the piece runs, the fold skips it."""
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     whole_dir = tmp_path / "whole"
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(whole_dir)])
+    command.main(["run", str(config_path), "--out", str(whole_dir)])
     pieces_dir = whole_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
     point_dir = piece_path.parent.parent
@@ -854,13 +683,11 @@ def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
     partial.mkdir(parents=True)
     (partial / "shots.csv").write_text("half a file")
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     written = out_dir / "pieces" / point_dir.name / piece_path.parent.name
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    out_run_dir = yaml_configs.run_folder_of(out_dir)
-    out_rows = _rows_of_every_file(out_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    out_rows = _rows_of_every_file(out_dir)
     assert (written / "piece.json").exists()
     assert out_rows == whole_rows
 
@@ -872,10 +699,8 @@ def test_two_writers_of_one_piece_both_leave_it_whole(tmp_path, monkeypatch):
     and its piece.json. Each ends with the piece in place and no staging
     folder left behind.
     """
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
-    ((task, _collection),) = config.point_tasks()
-    measurements = yaml_configs.run_sweep([task], 1)
+    task = run_files.first_task()
+    measurements = run_files.run_sweep([task], 1)
     experiment_dir = tmp_path / "experiment"
     point_id = task.strong_id()
     write_json = run_folder.write_json
@@ -893,124 +718,6 @@ def test_two_writers_of_one_piece_both_leave_it_whole(tmp_path, monkeypatch):
     assert names == ["0-0"]
     assert (folder / "piece.json").is_file()
     assert (folder / "shots.csv").is_file()
-
-
-NOISY_AXES = {
-    "workload.arguments.physical_error_probability": [0.02],
-    "qpu.distance": [3],
-    "qpu.round_period_microseconds": [1.0],
-}
-
-
-def _piece_counts_read_by_csv(folder: pathlib.Path) -> dict:
-    """A piece's counts summed straight from its own shots.csv."""
-    counts_names = (
-        "is_scored",
-        "logical_failure",
-        "sim_wall_seconds",
-        *report.STATUS_SUMS,
-    )
-    sums = dict.fromkeys(counts_names, 0)
-    shots_path = folder / "shots.csv"
-    shot_rows = _csv_rows(shots_path)
-    for row in shot_rows:
-        typed = fold.typed_row(row)
-        for name in counts_names:
-            sums[name] += typed[name]
-    shots = len(shot_rows)
-    scored_shots = sums.pop("is_scored")
-    core_seconds = sums.pop("sim_wall_seconds")
-    counts = {
-        "count": shots,
-        "scored_shots": scored_shots,
-        "failures": sums.pop("logical_failure"),
-        "unscored_shots": shots - scored_shots,
-        "core_seconds": pytest.approx(core_seconds),
-    }
-    return {**counts, **sums}
-
-
-def _piece_facts_and_references(experiment_dir: pathlib.Path) -> list:
-    """Each piece's piece.json lines, beside what its own files give."""
-    configurations_path = experiment_dir / "configurations.csv"
-    (configuration,) = _csv_rows(configurations_path)
-    records = run_folder.resolved_by_point(experiment_dir)
-    pairs = []
-    folders = experiment_dir.glob("pieces/*/*")
-    for folder in sorted(folders):
-        piece = pieces.read_piece(folder)
-        reference = _piece_counts_read_by_csv(folder)
-        rounds_per_shot = records[folder.parent.name]["rounds_per_shot"]
-        reference["configuration_id"] = configuration["configuration_id"]
-        reference["rounds"] = rounds_per_shot * reference["count"]
-        written = {name: piece[name] for name in reference}
-        pairs.append((written, reference))
-    return pairs
-
-
-def test_a_configuration_line_is_staged_under_its_writers_own_name(tmp_path):
-    """Two collects of one experiment may record their lines at once.
-
-    Each stages configurations.csv under a name no other writer uses,
-    so a copy another writer is staging beside it is left as it was.
-    """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    config = experiment.load_experiment(config_path)
-    experiment_dir = tmp_path / "experiment"
-    experiment_dir.mkdir()
-    others_copy = experiment_dir / ".configurations.csv.partial"
-    others_copy.write_text("another writer's copy\n")
-
-    run_folder.record_configuration(experiment_dir, config)
-
-    configurations = run_folder.recorded_configurations(experiment_dir)
-    assert others_copy.read_text() == "another writer's copy\n"
-    assert list(configurations) == [run_folder.configuration_id(config)]
-
-
-def test_a_configuration_path_with_a_comma_quote_and_semicolon_reads_back(
-    tmp_path,
-):
-    """Python's csv module reads the row decsim wrote, and reopens its yaml."""
-    folder = tmp_path / "semi;colon"
-    folder.mkdir()
-    written_path = yaml_configs.write_config(folder, FOUR_POINT_SWEEP)
-    config_path = folder / 'my,"quoted".yaml'
-    written_path.rename(config_path)
-    config = experiment.load_experiment(config_path)
-    experiment_dir = tmp_path / "experiment"
-    experiment_dir.mkdir()
-
-    run_folder.record_configuration(experiment_dir, config)
-
-    configurations_path = experiment_dir / "configurations.csv"
-    (row,) = _csv_rows(configurations_path)
-    configurations = run_folder.recorded_configurations(experiment_dir)
-    (reopened,) = configurations[row["configuration_id"]]
-    assert row["name"] == 'my,"quoted"'
-    assert reopened.config_files[0] == config.config_files[0]
-
-
-def test_a_piece_records_its_counts_rounds_and_configuration(tmp_path):
-    """piece.json's lines against the piece's own shots.csv, summed by csv.
-
-    A planner or a status reads piece.json without the shot rows, so
-    each count there is the sum of its column over the piece's shots,
-    its rounds are its shots times the point's rounds per shot, and its
-    configuration is the one configurations.csv names.
-    """
-    collection = {"max_shots": 12, "piece_rounds": 45}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
-    out_dir = tmp_path / "out"
-
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-
-    pairs = _piece_facts_and_references(out_dir)
-    written = [pair[0] for pair in pairs]
-    references = [pair[1] for pair in pairs]
-    assert len(pairs) > 1
-    assert written == references
 
 
 def _shots_to_the_target(shots_path, target: int) -> int:
@@ -1037,41 +744,40 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
     starts no piece past the shot of the third failure, so it holds the
     uncut run's shots up to that one and no more.
     """
-    whole_card = {
-        "sweep": [{"axes": NOISY_AXES, "collection": {"max_shots": 30}}]
-    }
-    whole_path = yaml_configs.write_config(tmp_path, whole_card)
+    whole_card = {"axes": NOISY_AXES, "collection": {"max_shots": 30}}
+    whole_path = run_files.write_run_file(tmp_path, **whole_card)
     target_folder = tmp_path / "target_config"
     target_folder.mkdir()
     collection = {"max_shots": 30, "max_failures": 3, "piece_rounds": 1}
-    target_card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    target_path = yaml_configs.write_config(target_folder, target_card)
+    target_path = run_files.write_run_file(
+        target_folder, axes=NOISY_AXES, collection=collection
+    )
     whole_dir = tmp_path / "whole"
     target_dir = tmp_path / "target"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_shots_path = whole_run_dir / "shots.csv"
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
+    whole_shots_path = whole_dir / "shots.csv"
     expected_shots = _shots_to_the_target(whole_shots_path, 3)
 
-    command.main(["collect", str(target_path), "--out", str(target_dir)])
+    command.main(["run", str(target_path), "--out", str(target_dir)])
 
-    target_run_dir = yaml_configs.run_folder_of(target_dir)
     target_pieces = target_dir.glob("pieces/*/*")
     assert expected_shots < 30
     assert len(list(target_pieces)) == expected_shots
-    assert _shot_count_of(target_run_dir) == expected_shots
+    assert _shot_count_of(target_dir) == expected_shots
 
 
 # a shot of NOISY_AXES runs 15 rounds, so a piece holds two shots
 TWO_SHOT_PIECE_ROUNDS = 30
 
 
-def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
+def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path, monkeypatch):
     """The referent is one collect run to the raised cap from the start.
 
     A cap of 3 in pieces of two ends on a piece of one shot, 2-2. The
     cap raised to 4 runs seed 3 alone beside it, so no seed is run
-    twice, and the fold is the uncut run's.
+    twice, and the fold is the uncut run's. The seeds the second
+    collect runs are noted as it runs them, since a saved piece's
+    folder is never written twice and so cannot show a seed run again.
     """
     whole_dir = tmp_path / "whole"
     raised_dir = tmp_path / "raised"
@@ -1079,6 +785,11 @@ def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
         tmp_path, "whole_config", {"max_shots": 4}, whole_dir
     )
     _collected_noisy_point(tmp_path, "first", {"max_shots": 3}, raised_dir)
+    ran_seeds = []
+    noting = functools.partial(
+        _run_the_unit_and_note, ran_seeds, collect.run_unit
+    )
+    monkeypatch.setattr(collect, "run_unit", noting)
 
     raised_run_dir = _collected_noisy_point(
         tmp_path, "second", {"max_shots": 4}, raised_dir
@@ -1086,6 +797,7 @@ def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path):
 
     whole_rows = _rows_of_every_file(whole_run_dir)
     raised_rows = _rows_of_every_file(raised_run_dir)
+    assert ran_seeds == [3]
     assert _piece_names(raised_dir) == ["0-1", "2-2", "3-3"]
     assert raised_rows == whole_rows
 
@@ -1118,99 +830,21 @@ def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     assert raised_rows == whole_rows
 
 
-def test_a_collect_onto_pieces_of_another_commit_is_refused_before_a_shot(
-    tmp_path,
-):
-    """The saved piece is rewritten as a process at another commit saves it.
-
-    Raising the cap would add this tree's pieces to it, so the collect is
-    refused before it runs a shot, and the run folder keeps the earlier
-    tree's manifest and summary byte for byte.
-    """
-    experiment_dir = tmp_path / "experiment"
-    run_dir = _collected_noisy_point(
-        tmp_path, "first", {"max_shots": 1}, experiment_dir
-    )
-    (piece_path,) = experiment_dir.glob("pieces/*/0-0/piece.json")
-    piece_text = piece_path.read_text()
-    piece = json.loads(piece_text)
-    other_commit = "b" * 40
-    piece["commit"] = other_commit
-    other_text = json.dumps(piece)
-    piece_path.write_text(other_text)
-    manifest_path = run_dir / "manifest.json"
-    manifest_bytes = manifest_path.read_bytes()
-    sweep_path = run_dir / "sweep.csv"
-    sweep_bytes = sweep_path.read_bytes()
-    second_dir = tmp_path / "second"
-    second_dir.mkdir()
-    raised = {"max_shots": 2, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": raised}]}
-    config_path = yaml_configs.write_config(second_dir, card)
-
-    with pytest.raises(refusal.RefusalError) as refused:
-        collect_command.run_experiment(config_path, experiment_dir)
-
-    said = str(refused.value)
-    assert "ran different code" in said
-    assert f"(commit {other_commit}, dirty" in said
-    assert "this collect (commit" in said
-    assert _piece_names(experiment_dir) == ["0-0"]
-    assert manifest_path.read_bytes() == manifest_bytes
-    assert sweep_path.read_bytes() == sweep_bytes
-
-
 def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
     """The NOISY_AXES point collected into out_dir under this collection."""
     folder = tmp_path / name
     folder.mkdir()
     keys = {**collection, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": keys}]}
-    config_path = yaml_configs.write_config(folder, card)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-    return yaml_configs.run_folder_of(out_dir)
+    config_path = run_files.write_run_file(
+        folder, axes=NOISY_AXES, collection=keys
+    )
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    return out_dir
 
 
 def _piece_names(experiment_dir) -> list:
     folders = experiment_dir.glob("pieces/*/*")
     return sorted(folder.name for folder in folders)
-
-
-def test_a_resumed_collect_keeps_every_saved_shots_residence_rows(tmp_path):
-    """The uncut collect's residence.csv is the referent of a resumed one's.
-
-    Three traced shots in pieces of one; the first piece is lost, as a
-    killed job leaves it, and the collect run again runs it alone. Its
-    residence table still holds the rows of all three traced shots.
-    """
-    card = {
-        "observation": {"trace": "chrome", "trace_shots": [0, 1, 2]},
-        "sweep": [
-            {
-                "axes": NOISY_AXES,
-                "collection": {"max_shots": 3, "piece_rounds": 15},
-            }
-        ],
-    }
-    config_path = yaml_configs.write_config(tmp_path, card)
-    whole_dir = tmp_path / "whole"
-    resumed_dir = tmp_path / "resumed"
-    command.main(["collect", str(config_path), "--out", str(whole_dir)])
-    command.main(["collect", str(config_path), "--out", str(resumed_dir)])
-    (first_piece,) = resumed_dir.glob("pieces/*/0-0")
-    shutil.rmtree(first_piece)
-
-    command.main(["collect", str(config_path), "--out", str(resumed_dir)])
-
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_path = whole_run_dir / "residence.csv"
-    whole_rows = _csv_rows(whole_path)
-    resumed_run_dir = yaml_configs.run_folder_of(resumed_dir)
-    resumed_path = resumed_run_dir / "residence.csv"
-    resumed_rows = _csv_rows(resumed_path)
-    seeds = {row["seed"] for row in resumed_rows}
-    assert seeds == {"0", "1", "2"}
-    assert resumed_rows == whole_rows
 
 
 def _sweep_row_of(run_dir) -> dict:
@@ -1233,14 +867,14 @@ def test_a_target_stop_reports_its_exact_limits_and_unbiased_estimate(
     shot_error_rate_to_piece_error_rate of the shot's.
     """
     collection = {"max_shots": 30, "max_failures": 3, "piece_rounds": 1}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
+    config_path = run_files.write_run_file(
+        tmp_path, axes=NOISY_AXES, collection=collection
+    )
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    run_dir = yaml_configs.run_folder_of(out_dir)
-    row = _sweep_row_of(run_dir)
+    row = _sweep_row_of(out_dir)
     shots = row["prefix_scored_shots"]
     low_second_shape = shots - 2
     high_second_shape = shots - 3
@@ -1270,19 +904,18 @@ def test_pieces_past_the_stop_leave_the_estimate_as_the_serial_run_has_it(
     nowhere in the prefix, the estimate or the limits.
     """
     collection = {"max_shots": 30, "max_failures": 2, "piece_rounds": 1}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
+    config_path = run_files.write_run_file(
+        tmp_path, axes=NOISY_AXES, collection=collection
+    )
     serial_dir = tmp_path / "serial"
     pooled_dir = tmp_path / "pooled"
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
-    pooled = ["collect", str(config_path), "--out", str(pooled_dir)]
+    command.main(["run", str(config_path), "--out", str(serial_dir)])
+    pooled = ["run", str(config_path), "--out", str(pooled_dir)]
 
     command.main([*pooled, "--processes", "8"])
 
-    serial_run_dir = yaml_configs.run_folder_of(serial_dir)
-    pooled_run_dir = yaml_configs.run_folder_of(pooled_dir)
-    serial = _sweep_row_of(serial_run_dir)
-    pooled_row = _sweep_row_of(pooled_run_dir)
+    serial = _sweep_row_of(serial_dir)
+    pooled_row = _sweep_row_of(pooled_dir)
     assert pooled_row["shots"] > serial["shots"]
     assert pooled_row["prefix_shots"] == serial["prefix_shots"]
     assert pooled_row["state"] == serial["state"]
@@ -1308,15 +941,16 @@ def test_a_point_that_saved_its_stop_starts_no_piece_when_run_again(
 ):
     """A rerun counts the saved pieces, finds the stop, and runs nothing."""
     collection = {"max_shots": 30, "max_failures": 2, "piece_rounds": 1}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
+    config_path = run_files.write_run_file(
+        tmp_path, axes=NOISY_AXES, collection=collection
+    )
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     first_pieces = out_dir.glob("pieces/*/*")
     first_names = sorted(first_pieces)
     capsys.readouterr()
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
     second_pieces = out_dir.glob("pieces/*/*")
@@ -1333,22 +967,41 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     Their failures would reach a target of two, but the prefix is seed 0
     alone, so the point runs seed 1 and does not stop.
     """
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
-    task = config.first_point_task()
+    task = run_files.first_task()
     point_id = task.strong_id()
     _write_a_saved_piece(tmp_path, point_id, 0, [True])
     _write_a_saved_piece(tmp_path, point_id, 2, [True])
     settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
     point_folders = pieces.folders_of(tmp_path, [point_id])
     saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection(task, settings, 1, 15, saved)
+    point = collect_command.PointCollection("d3", task, settings, 1, 15, saved)
 
     units = point.next_units(tmp_path, 1)
 
     assert units == [collect.Unit(task, 1, 1)]
     assert point.tracker.stop_kind is None
     assert point.tracker.counts.failures == 1
+
+
+def test_a_new_piece_ends_where_the_next_saved_piece_starts(tmp_path):
+    """A piece handed out before a saved one stops at that one's first seed.
+
+    Seeds 0 and 2 are saved in pieces of one shot and a piece is three
+    shots, so seed 1's piece is one shot, and a piece of three would run
+    seed 2 again; the piece after seed 2 is whole.
+    """
+    task = run_files.first_task()
+    point_id = task.strong_id()
+    _write_a_saved_piece(tmp_path, point_id, 0, [False])
+    _write_a_saved_piece(tmp_path, point_id, 2, [False])
+    settings = collection_module.CollectionSettings(max_shots=6)
+    point_folders = pieces.folders_of(tmp_path, [point_id])
+    saved = pieces.saved_counts(point_folders)
+    point = collect_command.PointCollection("d3", task, settings, 3, 15, saved)
+
+    units = point.next_units(tmp_path, 2)
+
+    assert units == [collect.Unit(task, 1, 1), collect.Unit(task, 3, 3)]
 
 
 def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
@@ -1362,9 +1015,7 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     rows (collection.PrefixTracker); the piece's other two shots ran
     past the stop, and the progress line says so.
     """
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
-    task = config.first_point_task()
+    task = run_files.first_task()
     point_id = task.strong_id()
     failed = [False, True, False, False]
     _write_a_saved_piece(tmp_path, point_id, 0, failed)
@@ -1373,7 +1024,7 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     )
     point_folders = pieces.folders_of(tmp_path, [point_id])
     saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection(task, settings, 4, 15, saved)
+    point = collect_command.PointCollection("d3", task, settings, 4, 15, saved)
 
     units = point.next_units(tmp_path, 1)
 
@@ -1381,9 +1032,27 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     assert units == []
     assert point.tracker.stop_kind is failure_statistics.StopKind.MINIMUM
     assert point.tracker.counts.shots == 2
-    assert printed.err.endswith(
-        ": 2 shots done (minimum); 2 more ran past the stop\n"
+    assert (
+        printed.err == "d3: 2 shots done (minimum); 2 more ran past the stop\n"
     )
+
+
+def test_a_stopped_point_says_so_once(tmp_path, capsys):
+    """The collector counts every point after each share; one line a stop."""
+    task = run_files.first_task()
+    point_id = task.strong_id()
+    _write_a_saved_piece(tmp_path, point_id, 0, [True, False])
+    settings = collection_module.CollectionSettings(max_shots=2)
+    point_folders = pieces.folders_of(tmp_path, [point_id])
+    saved = pieces.saved_counts(point_folders)
+    point = collect_command.PointCollection("d3", task, settings, 2, 15, saved)
+    point.next_units(tmp_path, 1)
+    capsys.readouterr()
+
+    point.count_the_pending(tmp_path)
+
+    printed = capsys.readouterr()
+    assert printed.err == ""
 
 
 def _write_a_saved_piece(
@@ -1409,13 +1078,13 @@ def test_a_collect_of_no_processes_is_refused_before_its_folder(
     tmp_path, capsys
 ):
     """Zero processes would deal no piece and finish having run nothing."""
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
 
     with pytest.raises(SystemExit):
         command.main(
             [
-                "collect",
+                "run",
                 str(config_path),
                 "--out",
                 str(out_dir),
@@ -1430,45 +1099,48 @@ def test_a_collect_of_no_processes_is_refused_before_its_folder(
     assert not out_dir.exists()
 
 
-def test_a_sweep_block_that_says_shots_is_refused(tmp_path, capsys):
-    """A block's shots are its collection's max_shots, and nothing else."""
-    card = {"sweep": [{"axes": NOISY_AXES, "shots": 2}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
+def test_a_point_whose_shot_runs_no_round_is_refused_before_its_record(
+    tmp_path,
+):
+    """A shot of no round sizes no piece and decodes nothing.
 
-    with pytest.raises(SystemExit):
-        command.main(["collect", str(config_path)])
-
-    printed = capsys.readouterr()
-    assert "sweep block 1 is" in printed.err
-    assert "a collection of its own, where max_shots is" in printed.err
-
-
-def test_a_point_two_blocks_collect_two_ways_is_refused(tmp_path, capsys):
-    first = {"axes": NOISY_AXES, "collection": {"max_shots": 2}}
-    second = {"axes": NOISY_AXES, "collection": {"max_shots": 3}}
-    card = {"sweep": [first, second]}
-    config_path = yaml_configs.write_config(tmp_path, card)
+    MachineSettings() holds the empty workload, so the point is refused
+    where its record is built, before the folder holds any of it.
+    """
+    run_file = tmp_path / "empty.py"
+    run_file.write_text(
+        "import decsim\n"
+        "\n"
+        "experiment = decsim.Experiment(\n"
+        '    "empty",\n'
+        '    [decsim.Point("empty", decsim.MachineSettings())],\n'
+        "    decsim.CollectionSettings(max_shots=1),\n"
+        ")\n"
+    )
     out_dir = tmp_path / "out"
 
-    with pytest.raises(SystemExit):
-        command.main(["collect", str(config_path), "--out", str(out_dir)])
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(run_file, out_dir)
 
-    printed = capsys.readouterr()
-    lines = printed.err.splitlines()
-    assert "is in two sweep blocks that collect it two ways" in lines[-1]
-    assert "max_shots 2" in lines[-1]
-    assert "max_shots 3" in lines[-1]
+    assert str(refused.value) == (
+        "the point empty runs no QEC round: no operation of its workload "
+        "runs a round that emits detector data, so its shots would decode "
+        "nothing; give it a workload, as decsim.settings.memory_workload "
+        "makes one"
+    )
+    assert not (out_dir / "points").exists()
 
 
 def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
     """An online point's shots are not independent, so no target stops it."""
-    overrides = yaml_configs.online_threshold()
-    overrides["collection"] = {"max_failures": 5}
-    config_path = yaml_configs.write_config(tmp_path, overrides)
+    collection = {"max_shots": 1, "max_failures": 5}
+    config_path = run_files.write_run_file(
+        tmp_path, collection=collection, **ONLINE
+    )
     out_dir = tmp_path / "out"
 
     with pytest.raises(SystemExit):
-        command.main(["collect", str(config_path), "--out", str(out_dir)])
+        command.main(["run", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
     lines = printed.err.splitlines()
@@ -1491,24 +1163,59 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     whole_config = _online_config(tmp_path, 60)
-    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
+    command.main(["run", str(whole_config), "--out", str(whole_dir)])
     cut_config = _online_config(tmp_path, 15)
-    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+    command.main(["run", str(cut_config), "--out", str(cut_dir)])
     _lose_the_piece(cut_dir, "2-2")
     _lose_the_piece(cut_dir, "3-3")
 
-    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
+    command.main(["run", str(cut_config), "--out", str(cut_dir)])
 
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
-    whole_decisions = _shot_decisions(whole_run_dir)
-    cut_decisions = _shot_decisions(cut_run_dir)
-    whole_trajectory = _online_trajectory_rows(whole_run_dir)
-    cut_trajectory = _online_trajectory_rows(cut_run_dir)
+    whole_decisions = _shot_decisions(whole_dir)
+    cut_decisions = _shot_decisions(cut_dir)
+    whole_trajectory = _online_trajectory_rows(whole_dir)
+    cut_trajectory = _online_trajectory_rows(cut_dir)
     assert _piece_names(cut_dir) == ["0-0", "1-1", "2-2", "3-3"]
     assert cut_decisions == whole_decisions
     assert whole_trajectory[-1]["window_count"] == "20"
     assert cut_trajectory == whole_trajectory
+
+
+def test_an_online_points_threshold_summary_is_its_end_counters(tmp_path):
+    """threshold_summary.csv holds the counters the stderr line prints.
+
+    The referents are files the run writes apart from the calibrator's
+    summary: the machine counts every weak decision as a decoded window
+    and every audit as an escalated one, since an audit sends a kept
+    window to the strong decoder, and the trajectory records each
+    audit's label and the final threshold.
+    """
+    config_path = _online_config(tmp_path, 60)
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    summary_path = out_dir / "threshold_summary.csv"
+    sweep_path = out_dir / "sweep.csv"
+    shots_path = out_dir / "shots.csv"
+    (summary,) = _csv_rows(summary_path)
+    (sweep_row,) = _csv_rows(sweep_path)
+    shots = _csv_rows(shots_path)
+    trajectory = _online_trajectory_rows(out_dir)
+    decoded = sum(int(shot["decoded_windows"]) for shot in shots)
+    escalated = sum(int(shot["escalated_windows"]) for shot in shots)
+    events = [row["event"] for row in trajectory]
+    labeled = events.count("audit_clean") + events.count("audit_bad")
+    audits_started = int(summary["audited"]) + int(summary["pending_audits"])
+    columns = list(summary)
+    sweep_columns = list(sweep_row)
+    assert columns[:5] == sweep_columns[:5]
+    assert summary["point_id"] == sweep_row["point_id"]
+    assert int(summary["windows"]) == decoded == 20
+    assert int(summary["escalated"]) + audits_started == escalated
+    assert int(summary["audited"]) == labeled == 1
+    assert int(summary["audited_bad"]) == events.count("audit_bad")
+    assert summary["threshold_db"] == trajectory[-1]["threshold_db"]
 
 
 def test_a_saved_calibrator_whose_bytes_changed_is_refused(tmp_path):
@@ -1518,11 +1225,8 @@ def test_a_saved_calibrator_whose_bytes_changed_is_refused(tmp_path):
     file, as a damaged copy on a shared disk would hold, and the read
     refuses it by name.
     """
-    overrides = yaml_configs.online_threshold()
-    config_path = yaml_configs.write_config(tmp_path, overrides)
-    config = experiment.load_experiment(config_path)
-    task = config.first_point_task()
-    measurements = yaml_configs.run_sweep([task], 1)
+    task = run_files.first_task(**ONLINE)
+    measurements = run_files.run_sweep([task], 1)
     experiment_dir = tmp_path / "experiment"
     point_id = task.strong_id()
     calibrator = task.online_threshold
@@ -1554,15 +1258,19 @@ def _online_config(tmp_path, piece_rounds: int):
     Written over the same file each time; the collect that read it has
     run by then.
     """
-    overrides = yaml_configs.online_threshold()
-    overrides["escalation"]["online"] = {
+    online = {
         "audit_rate": 0.3,
         "target_escalation_rate": 0.2,
         "max_escalation_rate": 0.5,
     }
     collection = {"max_shots": 4, "piece_rounds": piece_rounds}
-    overrides["sweep"] = [{"axes": NOISY_AXES, "collection": collection}]
-    return yaml_configs.write_config(tmp_path, overrides)
+    return run_files.write_run_file(
+        tmp_path,
+        axes=NOISY_AXES,
+        collection=collection,
+        machine="switching",
+        machine_arguments={"online": online},
+    )
 
 
 # the shot columns no wall clock prices
@@ -1595,18 +1303,17 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
     """The values the design fixed first, then what was measured.
 
     Wickham's tidy order (Tidy Data, J. Stat. Softw. 59(10), 2014,
-    section 2.3): one column per yaml path the sweep sets, right after
+    section 2.3): one column per path the sweep sets, right after
     the point id, in every file a point's rows are in.
     """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     out_dir = tmp_path / "out"
 
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    run_dir = yaml_configs.run_folder_of(out_dir)
-    sweep_path = run_dir / "sweep.csv"
-    shots_path = run_dir / "shots.csv"
-    links_path = run_dir / "shot_links.csv"
+    sweep_path = out_dir / "sweep.csv"
+    shots_path = out_dir / "shots.csv"
+    links_path = out_dir / "shot_links.csv"
     sweep_header = fold.header_of(sweep_path)
     shots_header = fold.header_of(shots_path)
     links_header = fold.header_of(links_path)
@@ -1631,119 +1338,10 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
     }
 
 
-def test_a_point_holds_its_own_value_at_a_path_another_block_sets(tmp_path):
-    """Each point has a value at every swept path, so no cell is missing.
-
-    The first block leaves the window and the frame as the file writes
-    them, and the second block leaves the distance; a mapping is one
-    cell of compact json, as sinter writes json_metadata
-    (sinter/_data/_csv_out.py:35-37).
-    """
-    frame = {"clock": "fridge", "write_cycles": 2}
-    card = {
-        "qpu": {"kind": "stim_device", "distance": 3},
-        "workload": yaml_configs.memory_workload(15),
-        "sweep": [
-            {"axes": {"qpu.distance": [5]}, "collection": {"max_shots": 1}},
-            {
-                "axes": {"windows.commit_rounds": [2], "pauli_frame": [frame]},
-                "collection": {"max_shots": 1},
-            },
-        ],
-    }
-    card["workload"]["arguments"]["physical_error_probability"] = 0.001
-    config_path = yaml_configs.write_config(tmp_path, card)
-    out_dir = tmp_path / "out"
-
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-
-    sweep_path = yaml_configs.run_folder_of(out_dir) / "sweep.csv"
-    first, second = _csv_rows(sweep_path)
-    assert first["qpu.distance"] == "5"
-    assert first["windows.commit_rounds"] == "null"
-    assert first["pauli_frame"] == '{"clock":"fridge","write_cycles":1}'
-    assert second["qpu.distance"] == "3"
-    assert second["windows.commit_rounds"] == "2"
-    assert second["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
-
-
-def test_a_swept_reference_is_written_as_the_value_it_resolved_to(tmp_path):
-    """A table is built from the value a point ran, not the text it wrote."""
-    card = {
-        "qpu": {"kind": "stim_device", "distance": 7},
-        "workload": yaml_configs.memory_workload(15),
-        "sweep": [
-            {
-                "axes": {
-                    "qpu.distance": ["${windows.commit_rounds}"],
-                    "windows.commit_rounds": [3, 5],
-                },
-                "collection": {"max_shots": 1},
-            }
-        ],
-    }
-    card["workload"]["arguments"]["physical_error_probability"] = 0.001
-    config_path = yaml_configs.write_config(tmp_path, card)
-    out_dir = tmp_path / "out"
-
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-
-    sweep_path = yaml_configs.run_folder_of(out_dir) / "sweep.csv"
-    rows = _csv_rows(sweep_path)
-    distances = [row["qpu.distance"] for row in rows]
-    assert distances == ["3", "5"]
-
-
-def test_a_child_axis_under_a_swept_mapping_shows_in_the_mappings_cell(
-    tmp_path,
-):
-    """The mapping is placed first, then its child: the point ran both."""
-    frame = {"clock": "fridge", "write_cycles": 1}
-    card = {
-        "qpu": {"kind": "stim_device", "distance": 3},
-        "workload": yaml_configs.memory_workload(15),
-        "sweep": [
-            {
-                "axes": {
-                    "pauli_frame": [frame],
-                    "pauli_frame.write_cycles": [2],
-                },
-                "collection": {"max_shots": 1},
-            }
-        ],
-    }
-    card["workload"]["arguments"]["physical_error_probability"] = 0.001
-    config_path = yaml_configs.write_config(tmp_path, card)
-    out_dir = tmp_path / "out"
-
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-
-    sweep_path = yaml_configs.run_folder_of(out_dir) / "sweep.csv"
-    (row,) = _csv_rows(sweep_path)
-    assert row["pauli_frame"] == '{"clock":"fridge","write_cycles":2}'
-    assert row["pauli_frame.write_cycles"] == "2"
-
-
-def test_every_point_records_its_own_makers_arguments(tmp_path):
-    """Each point's maker was called with its own arguments and version."""
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    out_dir = tmp_path / "out"
-
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-
-    records = run_folder.resolved_by_point(out_dir)
-    arguments = [record["maker"]["arguments"] for record in records.values()]
-    made_at = {
-        (made["physical_error_probability"], made["distance"])
-        for made in arguments
-    }
-    assert made_at == {(0.001, 3), (0.001, 5), (0.003, 3), (0.003, 5)}
-
-
 def test_a_manifest_names_every_installed_package(tmp_path):
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
-    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
     manifest = _manifest_of(out_dir)
     packages = manifest["versions"]["packages"]
 
@@ -1760,9 +1358,9 @@ def test_a_manifest_names_the_library_a_loader_loads(
     absolute path.
     """
     monkeypatch.delenv(compiled_decoder.LIBRARY_VARIABLE, raising=False)
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
-    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
     manifest = _manifest_of(out_dir)
     union_find_path = compiled_union_find_library.resolve()
     expected = {str(union_find_path): _sha256_of(union_find_path)}
@@ -1791,25 +1389,360 @@ def test_a_manifest_names_a_library_loaded_from_outside_the_package(
     library_path = tmp_path / "elsewhere" / "union_find.so"
     _write_library(library_path, library_bytes)
     monkeypatch.setenv(compiled_decoder.LIBRARY_VARIABLE, str(library_path))
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
 
-    run_command.run_one_shot(config_path, seed=0, out_dir=out_dir)
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
 
     manifest = _manifest_of(out_dir)
     expected = _named_library(library_path, expected_digest)
     assert manifest["compiled_libraries"] == expected
 
 
+def test_a_run_file_with_other_points_is_refused_in_the_folder(tmp_path):
+    """A folder's copy of its run file is the one that made its rows.
+
+    A grid split one file a distance names other points in each file,
+    so the second file into the first one's folder is refused and the
+    folder keeps its copy.
+    """
+    three_path = _one_distance_config(tmp_path, 3)
+    five_path = _one_distance_config(tmp_path, 5)
+    out_dir = tmp_path / "out"
+    collect_command.run_experiment(three_path, out_dir)
+    copy_path = out_dir / three_path.name
+    copy_text = copy_path.read_text()
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(five_path, out_dir)
+
+    assert "holds another unit_test_config.py" in str(refused.value)
+    assert copy_path.read_text() == copy_text
+
+
+def _one_distance_config(tmp_path, distance: int) -> pathlib.Path:
+    """The four-point sweep at one distance, in a folder of its own."""
+    folder = tmp_path / f"d{distance}"
+    folder.mkdir()
+    axes = {**run_files.FOUR_POINT_AXES, run_files.DISTANCE_PATH: (distance,)}
+    collection = {"max_shots": 2, "piece_rounds": 1}
+    return run_files.write_run_file(folder, axes=axes, collection=collection)
+
+
+def test_a_raised_stop_rule_replaces_the_folders_run_file_copy(tmp_path):
+    """The same points run further: the copy is the file that ran last."""
+    out_dir = tmp_path / "out"
+    _collected_noisy_point(tmp_path, "first", {"max_shots": 2}, out_dir)
+
+    _collected_noisy_point(tmp_path, "second", {"max_shots": 3}, out_dir)
+
+    second_path = tmp_path / "second" / "unit_test_config.py"
+    copy_path = out_dir / "unit_test_config.py"
+    assert copy_path.read_text() == second_path.read_text()
+
+
+def test_a_shot_replayed_into_a_collection_keeps_its_records(tmp_path):
+    """The collection's machine.json and run.json points stay as written.
+
+    The collection's record holds what its fold needs (experiment), which
+    a one-shot record does not, so a replay must not write over it.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    out_dir = tmp_path / "out"
+    collect_command.run_experiment(config_path, out_dir)
+    point_records = out_dir.glob("points/*/machine.json")
+    record_paths = sorted(point_records)
+    records_before = [path.read_bytes() for path in record_paths]
+    manifest_before = _manifest_of(out_dir)
+    points_before = manifest_before["points"]
+
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
+
+    records_after = [path.read_bytes() for path in record_paths]
+    assert records_after == records_before
+    manifest_after = _manifest_of(out_dir)
+    assert manifest_after["points"] == points_before
+    assert (out_dir / "result.json").exists()
+
+
+def test_a_replay_of_a_point_recorded_with_other_settings_is_refused(
+    tmp_path,
+):
+    """A saved record of another id under the name is another machine."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    out_dir = tmp_path / "out"
+    collect_command.run_experiment(config_path, out_dir)
+    study = experiment.load_one_point(config_path)
+    (point,) = study.points
+    record_path = out_dir / "points" / point.name / "machine.json"
+    record = run_folder.read_json(record_path)
+    record["id"] = "0" * 64
+    record_text = json.dumps(record)
+    record_path.write_text(record_text)
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        _run_one_shot(config_path, seed=0, out_dir=out_dir)
+
+    assert "with other settings or metadata" in str(refused.value)
+    assert not (out_dir / "result.json").exists()
+
+
+def test_a_record_class_names_settings_and_not_results(tmp_path):
+    """machine.json names each settings record's class; result.json none.
+
+    The class tells two records with the same fields apart, which is a
+    setting's identity; a result's fields are all it holds.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    out_dir = tmp_path / "out"
+
+    _run_one_shot(config_path, seed=0, out_dir=out_dir)
+
+    (record_path,) = out_dir.glob("points/*/machine.json")
+    record = run_folder.read_json(record_path)
+    result_text = (out_dir / "result.json").read_text()
+    assert record["settings"]["class"] == "decsim.settings.MachineSettings"
+    assert '"class"' not in result_text
+
+
+def test_a_run_into_a_folder_of_another_commit_is_refused(tmp_path, capsys):
+    """A folder's rows pool every run into it, so they ran one tree.
+
+    run.json is rewritten as a run at another commit leaves it, and the
+    next run into the folder is refused before it writes anything,
+    naming the commit the folder holds.
+    """
+    run_file = run_files.write_run_file(tmp_path)
+    out_dir = tmp_path / "out"
+    command.main(["run", str(run_file), "--out", str(out_dir)])
+    record = _manifest_of(out_dir)
+    other_commit = "b" * 40
+    record["git"]["commit"] = other_commit
+    run_path = out_dir / run_folder.RUN_FILE
+    record_text = json.dumps(record)
+    run_path.write_text(record_text)
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit) as stopped:
+        command.main(["run", str(run_file), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    assert stopped.value.code == 1
+    assert f"holds a run of commit {other_commit}" in printed.err
+    assert run_path.read_text() == record_text
+
+
+def test_two_dirty_trees_of_one_commit_are_two_trees(
+    tmp_path, capsys, monkeypatch
+):
+    """A dirty tree is named by its commit and its patch's sha256.
+
+    One run file runs from two trees at one commit with other
+    uncommitted changes, each into its own folder, whose run.json names
+    the sha256 of its code_state.patch. The second tree's run into the
+    first folder is refused, and so is the fold of a point whose pieces
+    the two trees ran, as a piece copied in by hand leaves it.
+    """
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
+    _as_a_tree_with_the_patch(monkeypatch, "first edit\n")
+    command.main(["run", str(config_path), "--out", str(first_dir)])
+    _as_a_tree_with_the_patch(monkeypatch, "second edit\n")
+    command.main(["run", str(config_path), "--out", str(second_dir)])
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path), "--out", str(first_dir)])
+    run_captured = capsys.readouterr()
+    run_refusal = run_captured.err
+    (first_piece,) = first_dir.glob("pieces/*/1-1")
+    (second_piece,) = second_dir.glob("pieces/*/1-1")
+    shutil.rmtree(first_piece)
+    shutil.copytree(second_piece, first_piece)
+    with pytest.raises(SystemExit):
+        command.main(["run", "--fold", "--out", str(first_dir)])
+    fold_captured = capsys.readouterr()
+    fold_refusal = fold_captured.err
+
+    first_manifest = _manifest_of(first_dir)
+    second_manifest = _manifest_of(second_dir)
+    first_git = first_manifest["git"]
+    second_git = second_manifest["git"]
+    first_patch = (first_dir / "code_state.patch").read_bytes()
+    first_patch_hash = hashlib.sha256(first_patch)
+    first_patch_sha256 = first_patch_hash.hexdigest()
+    assert first_git["patch_sha256"] == first_patch_sha256
+    assert first_git["commit"] == second_git["commit"]
+    assert first_git["patch_sha256"] != second_git["patch_sha256"]
+    assert f"patch {first_patch_sha256}" in run_refusal
+    assert f"{first_piece} ran commit" in fold_refusal
+
+
+def test_a_run_onto_pieces_another_tree_saved_is_refused_before_a_shot(
+    tmp_path, capsys
+):
+    """A capped point whose saved pieces all ran another tree.
+
+    They reach its cap, so a run again would skip them as done and fold
+    them under this folder's run.json as this tree's. The run is refused
+    before it writes anything, and the folder is as the first run left
+    it.
+    """
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
+    out_dir = tmp_path / "out"
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    other_commit = "b" * 40
+    piece_paths = out_dir.glob("pieces/*/*/piece.json")
+    _as_pieces_run_at_commit(piece_paths, other_commit)
+    run_path = out_dir / run_folder.RUN_FILE
+    record_bytes = run_path.read_bytes()
+    before = _run_folder_bytes(out_dir)
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    assert f"ran commit {other_commit}" in printed.err
+    assert run_path.read_bytes() == record_bytes
+    assert _run_folder_bytes(out_dir) == before
+
+
+def test_a_fold_of_two_points_saved_by_two_trees_is_refused(tmp_path, capsys):
+    """Every piece of a folder ran the tree its run.json names.
+
+    One point's pieces all ran another tree, which agrees with itself
+    point by point, and the fold still refuses, publishing nothing.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    out_dir = tmp_path / "out"
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    point_dirs = out_dir.glob("pieces/*")
+    first_point_dir = min(point_dirs)
+    other_commit = "b" * 40
+    piece_paths = first_point_dir.glob("*/piece.json")
+    _as_pieces_run_at_commit(piece_paths, other_commit)
+    before = _run_folder_bytes(out_dir)
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        command.main(["run", "--fold", "--out", str(out_dir)])
+
+    printed = capsys.readouterr()
+    assert f"{first_point_dir}" in printed.err
+    assert f"ran commit {other_commit}" in printed.err
+    assert _run_folder_bytes(out_dir) == before
+
+
+@pytest.mark.parametrize("record", ["run.json", "piece.json"])
+def test_a_record_with_no_patch_hash_stops_a_run_before_a_shot(
+    tmp_path, record
+):
+    """A record from before the patch hash cannot name its tree.
+
+    Two shots are saved and the record loses its patch_sha256, as a
+    record an older tree wrote has none; the run again under a raised
+    cap stops on the missing key and runs no shot.
+    """
+    out_dir = tmp_path / "out"
+    first_config = _capped_noisy_config(tmp_path, 2, 15)
+    command.main(["run", str(first_config), "--out", str(out_dir)])
+    piece_paths = out_dir.glob("pieces/*/*/piece.json")
+    records = {
+        "run.json": [out_dir / run_folder.RUN_FILE],
+        "piece.json": list(piece_paths),
+    }
+    _as_records_with_no_patch_hash(records[record])
+    raised_config = _capped_noisy_config(tmp_path, 3, 15)
+
+    with pytest.raises(KeyError, match="patch_sha256"):
+        command.main(["run", str(raised_config), "--out", str(out_dir)])
+
+    assert _piece_names(out_dir) == ["0-0", "1-1"]
+
+
+def test_a_fold_of_a_folder_whose_run_json_has_no_patch_hash_stops(
+    tmp_path,
+):
+    """With no piece to compare, an older run.json still stops a fold.
+
+    The pieces are gone, as before a first piece is saved, and run.json
+    loses its patch_sha256, as one an older tree wrote has none. The
+    fold stops on the missing key and publishes nothing.
+    """
+    out_dir = tmp_path / "out"
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    pieces_dir = out_dir / pieces.PIECES_FOLDER
+    shutil.rmtree(pieces_dir)
+    run_path = out_dir / run_folder.RUN_FILE
+    record = run_folder.read_json(run_path)
+    del record["git"]["patch_sha256"]
+    run_folder.write_json(run_path, record)
+    before = _run_folder_bytes(out_dir)
+
+    with pytest.raises(KeyError, match="patch_sha256"):
+        command.main(["run", "--fold", "--out", str(out_dir)])
+
+    assert _run_folder_bytes(out_dir) == before
+
+
+def _as_records_with_no_patch_hash(record_paths) -> None:
+    """The records as a tree from before the patch hash wrote them."""
+    for record_path in record_paths:
+        written = run_folder.read_json(record_path)
+        identity = written.get("git", written)
+        del identity["patch_sha256"]
+        run_folder.write_json(record_path, written)
+
+
+def _as_pieces_run_at_commit(piece_paths, commit: str) -> None:
+    """The pieces as a process at another commit would have saved them."""
+    for piece_path in piece_paths:
+        piece = run_folder.read_json(piece_path)
+        piece["commit"] = commit
+        run_folder.write_json(piece_path, piece)
+
+
+def _as_a_tree_with_the_patch(monkeypatch, patch_text: str) -> None:
+    """The tree read again, as one whose uncommitted code is patch_text."""
+    monkeypatch.setattr(
+        run_folder, "_code_state_patch", lambda _checkout: patch_text
+    )
+    run_folder._tree_reading.cache_clear()
+
+
+def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
+    tmp_path, monkeypatch
+):
+    """A run whose commit cannot be read could not say what ran."""
+    monkeypatch.delenv(run_folder.ALLOW_DIRTY_VARIABLE)
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
+    monkeypatch.setattr(run_folder, "_commit_from_git_files", lambda _: None)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    refused_dir = tmp_path / "refused"
+    allowed_dir = tmp_path / "allowed"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(config_path, refused_dir)
+    monkeypatch.setenv(run_folder.ALLOW_DIRTY_VARIABLE, "1")
+    collect_command.run_experiment(config_path, allowed_dir)
+
+    assert "cannot be read" in str(refused.value)
+    assert not (refused_dir / "run.json").exists()
+    assert (allowed_dir / "run.json").exists()
+
+
 def test_a_run_where_git_cannot_answer_records_no_patch(tmp_path, monkeypatch):
     """The container the suite runs in ships no git."""
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    run_folder.snapshot_code_state(config, out_dir)
+    run_folder.snapshot_code_state(config_path, out_dir)
 
     assert not (out_dir / "code_state.patch").exists()
 
@@ -1834,12 +1767,11 @@ def test_an_uncommitted_edit_is_in_the_code_patch(tmp_path, monkeypatch):
     subprocess.run([*commit, "-q", "-m", "one"], cwd=tree, check=True)
     (tree / "maker.py").write_text("VALUE = 2\n")
     monkeypatch.setattr(run_folder, "_checkout", lambda: tree)
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
-    run_folder.snapshot_code_state(config, out_dir)
+    run_folder.snapshot_code_state(config_path, out_dir)
 
     patch_path = out_dir / "code_state.patch"
     apply = ["git", "-C", str(replay), "apply", str(patch_path)]
@@ -1856,11 +1788,10 @@ def test_an_untracked_file_is_in_the_code_patch(tmp_path, monkeypatch):
     new_module = tree / "maker.py"
     new_module.write_text("VALUE = 1\n")
     monkeypatch.setattr(run_folder, "_checkout", lambda: tree)
-    config_path = yaml_configs.write_config(tmp_path, {})
-    config = experiment.load_experiment(config_path)
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
-    run_folder.snapshot_code_state(config, out_dir)
+    run_folder.snapshot_code_state(config_path, out_dir)
     replay = tmp_path / "replay"
     subprocess.run(["git", "init", "-q", str(replay)], check=True)
     patch_path = out_dir / "code_state.patch"
@@ -1870,14 +1801,42 @@ def test_an_untracked_file_is_in_the_code_patch(tmp_path, monkeypatch):
     assert (replay / "maker.py").read_text() == "VALUE = 1\n"
 
 
+@requires_git
+def test_a_results_folder_in_the_checkout_leaves_the_tree_clean(
+    tmp_path, monkeypatch
+):
+    """A run's own run.json and run file copy are results, not code.
+
+    A planned batch writes them inside the checkout before its tasks
+    start, and every task refuses a dirty tree, so they must not read
+    as uncommitted code; an edit to the code still does.
+    """
+    tree_folder = tmp_path / "tree"
+    tree = _git_tree_with_maker(tree_folder)
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit"]
+    subprocess.run(["git", "-C", str(tree), "add", "maker.py"], check=True)
+    subprocess.run([*commit, "-q", "-m", "one"], cwd=tree, check=True)
+    results_folder = tree / "results" / "2026-10-02_sweep"
+    results_folder.mkdir(parents=True)
+    (results_folder / "run.json").write_text("{}\n")
+    monkeypatch.setattr(run_folder, "_checkout", lambda: tree)
+
+    _checkout, _commit, with_results = run_folder.fresh_tree_reading()
+    (tree / "maker.py").write_text("VALUE = 2\n")
+    _checkout, _commit, with_an_edit = run_folder.fresh_tree_reading()
+
+    assert with_results is False
+    assert with_an_edit is True
+
+
 def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     serial_dir = tmp_path / "serial"
     pooled_dir = tmp_path / "pooled"
-    command.main(["collect", str(config_path), "--out", str(serial_dir)])
+    command.main(["run", str(config_path), "--out", str(serial_dir)])
     command.main(
         [
-            "collect",
+            "run",
             str(config_path),
             "--out",
             str(pooled_dir),
@@ -1885,10 +1844,8 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
             "4",
         ]
     )
-    serial_run_dir = yaml_configs.run_folder_of(serial_dir)
-    serial_rows = _rows_of_every_file(serial_run_dir)
-    pooled_run_dir = yaml_configs.run_folder_of(pooled_dir)
-    pooled_rows = _rows_of_every_file(pooled_run_dir)
+    serial_rows = _rows_of_every_file(serial_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
     assert pooled_rows == serial_rows
 
 
@@ -1899,33 +1856,30 @@ def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_point(tmp_path):
     into pieces of one shot, serially and in a pool. Every file the
     three fold to is the same, row for row, but for the wall clock.
     """
-    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    whole_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     cut_folder = tmp_path / "cut_config"
     cut_folder.mkdir()
-    cut_card = {**FOUR_POINT_SWEEP, "collection": {"piece_rounds": 1}}
-    cut_path = yaml_configs.write_config(cut_folder, cut_card)
+    cut_path = run_files.write_run_file(cut_folder, **FOUR_POINTS_CUT)
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     pooled_dir = tmp_path / "pooled"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    command.main(["collect", str(cut_path), "--out", str(cut_dir)])
-    pooled = ["collect", str(cut_path), "--out", str(pooled_dir)]
+    command.main(["run", str(whole_path), "--out", str(whole_dir)])
+    command.main(["run", str(cut_path), "--out", str(cut_dir)])
+    pooled = ["run", str(cut_path), "--out", str(pooled_dir)]
     command.main([*pooled, "--processes", "4"])
 
     whole_pieces = whole_dir.glob("pieces/*/*")
     cut_pieces = cut_dir.glob("pieces/*/*")
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
-    cut_rows = _rows_of_every_file(cut_run_dir)
-    pooled_run_dir = yaml_configs.run_folder_of(pooled_dir)
-    pooled_rows = _rows_of_every_file(pooled_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    cut_rows = _rows_of_every_file(cut_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
     assert len(list(whole_pieces)) == 4
     assert len(list(cut_pieces)) == 8
     assert cut_rows == whole_rows
     assert pooled_rows == whole_rows
 
 
+@requires_git
 def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     tmp_path, monkeypatch
 ):
@@ -1934,18 +1888,22 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     A cluster task starts in the folder its job was submitted from and
     may import a checkout pinned somewhere else, so the manifest reads
     the tree decsim came from. Here the run is made from a directory
-    that is no checkout at all, and the commit is still the one this
-    test's own tree is at.
+    that is no checkout at all, with git silenced as in the container,
+    which reads the tree's git files instead; the commit is still the
+    one git itself reads for this test's own tree.
     """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    rev_parse = ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"]
+    head = subprocess.run(rev_parse, check=True, capture_output=True, text=True)
+    commit_of_this_tree = head.stdout.strip()
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     out_dir = tmp_path / "run"
     monkeypatch.chdir(tmp_path)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-    run_dir = yaml_configs.run_folder_of(out_dir)
-    manifest = _manifest_of(run_dir)
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    manifest = _manifest_of(out_dir)
     recorded = manifest["git"]
 
-    assert recorded["commit"] == _commit_of_this_tree()
+    assert recorded["commit"] == commit_of_this_tree
     assert "dirty" in recorded
 
 
@@ -1963,20 +1921,18 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     each on purpose: one process launched by two different launchers is
     the test bench's own shape and never a cluster job's.
     """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     dirty_dir = tmp_path / "dirty"
     clean_dir = tmp_path / "clean"
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
     run_folder._tree_reading.cache_clear()
-    command.main(["collect", str(config_path), "--out", str(dirty_dir)])
+    command.main(["run", str(config_path), "--out", str(dirty_dir)])
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
     run_folder._tree_reading.cache_clear()
-    command.main(["collect", str(config_path), "--out", str(clean_dir)])
+    command.main(["run", str(config_path), "--out", str(clean_dir)])
 
-    dirty_run_dir = yaml_configs.run_folder_of(dirty_dir)
-    clean_run_dir = yaml_configs.run_folder_of(clean_dir)
-    dirty_manifest = _manifest_of(dirty_run_dir)
-    clean_manifest = _manifest_of(clean_run_dir)
+    dirty_manifest = _manifest_of(dirty_dir)
+    clean_manifest = _manifest_of(clean_dir)
     dirty = dirty_manifest["git"]
     clean = clean_manifest["git"]
     assert dirty["dirty"] is True
@@ -1993,35 +1949,35 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
     one commit for the first write and another for the second, and both
     manifests name the first, which is the code the run imported.
     """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     out_dir = tmp_path / "run"
     started_utc = run_folder.utc_now()
-    config = experiment.load_experiment(config_path)
     out_dir.mkdir()
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "0")
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: "aaaaaaa")
     run_folder._tree_reading.cache_clear()
 
-    run_folder.write_manifest(config, out_dir, [], started_utc)
+    run_folder.write_run_record(out_dir, config_path, [], started_utc)
     at_the_start = _manifest_of(out_dir)
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: "bbbbbbb")
     finished_utc = run_folder.utc_now()
-    run_folder.write_manifest(
-        config, out_dir, [], started_utc, finished_utc=finished_utc
+    run_folder.write_run_record(
+        out_dir, config_path, [], started_utc, finished_utc=finished_utc
     )
     at_the_end = _manifest_of(out_dir)
 
-    assert at_the_start["git"] == {"commit": "aaaaaaa", "dirty": False}
+    assert at_the_start["git"]["commit"] == "aaaaaaa"
+    assert at_the_start["git"]["dirty"] is False
     assert at_the_end["git"] == at_the_start["git"]
     assert at_the_end["finished_utc"] is not None
 
 
 def test_two_pieces_that_hold_the_same_shot_are_refused(tmp_path, capsys):
     """A piece copied in under another range would count its shots twice."""
-    config_path = yaml_configs.write_config(tmp_path, {})
+    config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     pieces_dir = out_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
     piece_dir = piece_path.parent
@@ -2030,7 +1986,7 @@ def test_two_pieces_that_hold_the_same_shot_are_refused(tmp_path, capsys):
     capsys.readouterr()
 
     with pytest.raises(SystemExit) as stopped:
-        command.main(["collect", str(config_path), "--out", str(out_dir)])
+        command.main(["run", str(config_path), "--out", str(out_dir)])
 
     printed = capsys.readouterr()
     lines = printed.err.splitlines()
@@ -2038,8 +1994,8 @@ def test_two_pieces_that_hold_the_same_shot_are_refused(tmp_path, capsys):
     assert "is in more than one of" in lines[-1]
 
 
-def test_run_refuses_a_yaml_that_is_not_there(tmp_path, capsys):
-    missing = tmp_path / "not_a_config.yaml"
+def test_run_refuses_a_run_file_that_is_not_there(tmp_path, capsys):
+    missing = tmp_path / "not_a_run_file.py"
     with pytest.raises(SystemExit) as stopped:
         command.main(["run", str(missing)])
 
@@ -2047,97 +2003,33 @@ def test_run_refuses_a_yaml_that_is_not_there(tmp_path, capsys):
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
     assert printed.err.startswith(f"decsim: {missing} is not a file")
-    assert "reference.yaml" in printed.err
-    assert "examples/two_tiers.yaml" in printed.err
-    assert "bases/" not in printed.err
+    assert "the shipped experiments are" in printed.err
 
 
-def test_show_refuses_a_sweep_axis_the_yaml_layer_does_not_have(
-    tmp_path, capsys
-):
-    unknown_axis = {
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": [3],
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "algorithm": ["pymatching"],
-                "collection": {"max_shots": 1},
-            }
-        ]
-    }
-    config_path = yaml_configs.write_config(tmp_path, unknown_axis)
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["show", str(config_path)])
+def test_a_run_with_no_folder_writes_a_new_dated_one(tmp_path, monkeypatch):
+    """results/<date>_<experiment>/, and a second run that day gets _2."""
+    run_file = run_files.write_run_file(tmp_path, **run_files.REFERENCE)
+    monkeypatch.chdir(tmp_path)
 
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert "sweep block 1 is " in printed.err
-    assert "a block is axes" in printed.err
+    first_dir, _rows = collect_command.run_experiment(run_file)
+    second_dir, _rows = collect_command.run_experiment(run_file)
+
+    today = datetime.date.today()
+    day = today.isoformat()
+    expected = pathlib.Path("results") / f"{day}_reference"
+    assert first_dir == expected
+    assert second_dir == expected.with_name(f"{expected.name}_2")
+    assert (first_dir / "sweep.csv").is_file()
 
 
 @pytest.mark.parametrize("shots", [0, -1, 1.5, "many", True])
-def test_show_refuses_a_shot_cap_that_is_not_a_whole_number_of_one_or_more(
-    tmp_path, capsys, shots
+def test_a_shot_cap_that_is_not_a_whole_number_of_one_or_more_is_refused(
+    shots,
 ):
-    bad_count = {
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": [3],
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "collection": {"max_shots": shots},
-            }
-        ]
-    }
-    config_path = yaml_configs.write_config(tmp_path, bad_count)
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["show", str(config_path)])
+    refusal_text = "collection max_shots must be a whole number of at least 1"
 
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    refusal_text = "sweep block 1 collection max_shots must be a whole number"
-    assert refusal_text in printed.err
-
-
-def test_show_refuses_a_sweep_axis_written_as_one_value_not_a_list(
-    tmp_path, capsys
-):
-    scalar_axis = {
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": 3,
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "collection": {"max_shots": 1},
-            }
-        ]
-    }
-    config_path = yaml_configs.write_config(tmp_path, scalar_axis)
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["show", str(config_path)])
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    sentence = "sweep block 1 axis qpu.distance must be a list of at least"
-    assert sentence in printed.err
-
-
-def test_plot_refuses_a_figure_it_does_not_draw(tmp_path, capsys):
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["plot", str(tmp_path), "--figure", "everything"])
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert printed.err.startswith("decsim: no figure named everything")
+    with pytest.raises(ValueError, match=refusal_text):
+        collection_module.CollectionSettings(max_shots=shots)
 
 
 def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):
@@ -2149,31 +2041,6 @@ def test_trace_refuses_an_action_it_does_not_have(tmp_path, capsys):
     assert stopped.value.code == 1
     assert printed.err.count("\n") == 1
     assert printed.err.startswith("decsim: decsim trace has no action")
-
-
-def test_a_build_refusal_under_run_is_one_line(tmp_path, capsys):
-    """A yaml that loads but that a row refuses at build, as a sentence.
-
-    burst_detector kind event_count sends a burst's windows to the
-    strong decoder, which only escalation kind switching has, so the
-    weak baseline is refused when the machine is built
-    (decsim/build/escalation.py).
-    """
-    base_path = CONFIGS_DIR / "bases/weak_decoder_baseline.yaml"
-    config_path = tmp_path / "burst.yaml"
-    config_path.write_text(
-        f"extends: {base_path}\nburst_detector:\n  kind: event_count\n"
-    )
-
-    with pytest.raises(SystemExit) as stopped:
-        command.main(["run", str(config_path)])
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err.count("\n") == 1
-    assert printed.err.startswith(
-        f"decsim: {config_path}: burst_detector.kind event_count"
-    )
 
 
 def _write_library(path: pathlib.Path, contents) -> None:
@@ -2191,236 +2058,105 @@ def _named_library(path: pathlib.Path, digest) -> dict:
     return {str(absolute): digest}
 
 
-def _plan(config_paths: list, experiment_dir: pathlib.Path, tasks: int):
-    """The yamls planned by `decsim plan`; the new round's folder or None."""
-    arguments = [str(path) for path in config_paths]
-    before = pieces.round_dirs(experiment_dir)
-    out = ["--out", str(experiment_dir), "--tasks", str(tasks)]
-    command.main(["plan", *arguments, *out])
-    after = pieces.round_dirs(experiment_dir)
-    if len(after) == len(before):
-        return None
-    return after[-1]
+@pytest.mark.parametrize(
+    "flag, value", [("--cores", "0"), ("--hours", "0"), ("--memory-mb", "-1")]
+)
+def test_a_slurm_task_asking_for_no_core_hour_or_memory_is_refused(
+    tmp_path, capsys, flag, value
+):
+    """A task has a core, an hour and some memory, or nothing is written."""
+    run_file = run_files.write_run_file(tmp_path)
+    out_dir = tmp_path / "out"
+    arguments = [str(run_file), "--out", str(out_dir), "--slurm", "--dry-run"]
+
+    with pytest.raises(SystemExit):
+        command.main(["run", *arguments, flag, value])
+
+    printed = capsys.readouterr()
+    assert f"{flag} must be at least 1, got {value}" in printed.err
+    assert not out_dir.exists()
 
 
-def _run_the_round(round_dir: pathlib.Path, task_order=None) -> None:
-    """Every task of a round's plan, each as its own collect --plan."""
-    tasks_path = round_dir / "tasks.csv"
-    task_numbers = [row["task"] for row in _csv_rows(tasks_path)]
-    if task_order is not None:
-        task_numbers = task_order
-    plan_path = round_dir / "plan.csv"
-    for task_number in task_numbers:
-        command.main(
-            ["collect", "--plan", str(plan_path), "--task", str(task_number)]
+def test_array_tasks_then_the_fold_write_the_local_runs_rows(tmp_path):
+    """The referent is one local run of the same four points.
+
+    The launcher records the points; each array task then runs the line
+    run.sbatch holds, in whatever order the array runs them, and the fold
+    job's fold writes every file the local run wrote, row for row but the
+    wall clock. The run file reads a file beside it, as a threshold table
+    is read, and every task finds it.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    _read_a_file_beside(config_path)
+    local_dir = tmp_path / "local"
+    split_dir = tmp_path / "split"
+    command.main(["run", str(config_path), "--out", str(local_dir)])
+    job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
+    plan_command.launch(config_path, split_dir, job, dry_run=True)
+
+    task_3 = _task_arguments(split_dir, "3")
+    command.main(task_3)
+    task_1 = _task_arguments(split_dir, "1")
+    command.main(task_1)
+    task_0 = _task_arguments(split_dir, "0")
+    command.main(task_0)
+    task_2 = _task_arguments(split_dir, "2")
+    command.main(task_2)
+    command.main(["run", "--fold", "--out", str(split_dir)])
+
+    assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)
+
+
+def test_an_array_task_refuses_a_run_file_edited_since_the_launch(
+    tmp_path, capsys
+):
+    """Task i of an edited run file may name another point, so it stops."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    split_dir = tmp_path / "split"
+    job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
+    plan_command.launch(config_path, split_dir, job, dry_run=True)
+    with config_path.open("a") as run_file:
+        run_file.write("# edited after the launch\n")
+    task = _task_arguments(split_dir, "0")
+
+    with pytest.raises(SystemExit):
+        command.main(task)
+
+    printed = capsys.readouterr()
+    saved_pieces = split_dir.glob("pieces/*")
+    assert f"holds another {config_path.name} than" in printed.err
+    assert not any(saved_pieces)
+
+
+def _read_a_file_beside(run_path: pathlib.Path) -> None:
+    """The run file made to read a file written beside it."""
+    beside = run_path.with_name("beside.txt")
+    beside.write_text("read by the run file\n")
+    with run_path.open("a") as run_file:
+        run_file.write(
+            "import pathlib\n"
+            'pathlib.Path(__file__).with_name("beside.txt").read_text()\n'
         )
 
 
-def _plan_and_run_until_stopped(config_paths: list, experiment_dir) -> int:
-    """Rounds planned and run until every point has stopped; how many."""
-    rounds = 0
-    while True:
-        round_dir = _plan(config_paths, experiment_dir, 3)
-        if round_dir is None:
-            return rounds
-        _run_the_round(round_dir)
-        rounds += 1
+def _task_arguments(run_dir: pathlib.Path, index: str) -> list:
+    """The decsim arguments in run.sbatch's task line, at one task index."""
+    run_script = run_dir / plan_command.RUN_SCRIPT
+    script_text = run_script.read_text()
+    script_lines = script_text.splitlines()
+    task_line = script_lines[-1]
+    indexed_line = task_line.replace("$SLURM_ARRAY_TASK_ID", index)
+    words = shlex.split(indexed_line)
+    return words[3:]
 
 
-def _planned_ranges(round_dir: pathlib.Path) -> list:
-    """A round's pieces as (point id, first seed, count)."""
-    plan_path = round_dir / "plan.csv"
-    ranges = []
-    for _task, piece in pieces.read_plan(plan_path):
-        ranges.append((piece.point_id, piece.first_seed, piece.count))
-    return ranges
-
-
-def _cut_four_point_sweep(tmp_path) -> pathlib.Path:
-    """The four-point sweep, its pieces one shot each, in its own folder."""
-    cut_folder = tmp_path / "cut_config"
-    cut_folder.mkdir()
-    cut_card = {**FOUR_POINT_SWEEP, "collection": {"piece_rounds": 1}}
-    return yaml_configs.write_config(cut_folder, cut_card)
-
-
-def test_a_planned_run_with_a_lost_piece_planned_again_is_the_uncut_run(
-    tmp_path,
-):
-    """The uncut collect is the oracle for rounds that lost a piece.
-
-    Round one cuts every point into pieces of one shot over three tasks;
-    one piece is then deleted, as a task killed before its rename leaves
-    it missing. Round two plans that piece alone, with its own seeds,
-    and the status fold of both rounds is the uncut run's, file by file;
-    status writes points in its own order, so the rows are compared in
-    one order.
-    """
-    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    cut_path = _cut_four_point_sweep(tmp_path)
-    whole_dir = tmp_path / "whole"
-    cut_dir = tmp_path / "cut"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    first_round = _plan([cut_path], cut_dir, 3)
-    _run_the_round(first_round)
-    second_pieces = cut_dir.glob("pieces/*/1-1")
-    lost_piece, *_kept = sorted(second_pieces)
-    shutil.rmtree(lost_piece)
-
-    second_round = _plan([cut_path], cut_dir, 3)
-    _run_the_round(second_round)
-    command.main(["status", str(cut_dir)])
-
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_rows = _sorted_rows_of_every_file(whole_run_dir)
-    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
-    cut_rows = _sorted_rows_of_every_file(cut_run_dir)
-    lost_point = lost_piece.parent.name
-    assert _planned_ranges(second_round) == [(lost_point, 1, 1)]
-    assert _plan([cut_path], cut_dir, 3) is None
-    assert cut_rows == whole_rows
-
-
-def _rounds_planned_without_running(
-    config_path: pathlib.Path, experiment_dir: pathlib.Path, rounds: int
-) -> list:
-    """Each round's sorted pieces, for rounds planned with none run."""
-    planned_rounds = []
-    for _round in range(rounds):
-        round_dir = _plan([config_path], experiment_dir, 2)
-        round_ranges = _planned_ranges(round_dir)
-        planned_rounds.append(sorted(round_ranges))
-    return planned_rounds
-
-
-def _rounds_of_saved_pieces(experiment_dir: pathlib.Path) -> set:
-    """The rounds whose tasks saved the experiment's pieces."""
-    rounds = set()
-    for folder in experiment_dir.glob("pieces/*/*"):
-        piece = pieces.read_piece(folder)
-        rounds.add(piece["round"])
-    return rounds
-
-
-def test_a_piece_no_round_ran_is_planned_once_a_round(tmp_path):
-    """A piece every earlier round listed and none ran is planned once.
-
-    Rounds whose arrays never started leave each of their pieces listed
-    in several plans; the next plan still names each seed range once,
-    and the same pieces every round.
-    """
-    config_path = _cut_four_point_sweep(tmp_path)
-    experiment_dir = tmp_path / "experiment"
-
-    planned_rounds = _rounds_planned_without_running(
-        config_path, experiment_dir, 4
-    )
-
-    first_round = planned_rounds[0]
-    assert len(set(first_round)) == len(first_round)
-    assert planned_rounds == [first_round] * 4
-
-
-def _targeted_sweep(tmp_path) -> pathlib.Path:
-    """The four-point sweep with a failure target, in one-shot pieces.
-
-    The target is out of reach, so every round extends each point.
-    """
-    (block,) = FOUR_POINT_SWEEP["sweep"]
-    targeted_block = {
-        **block,
-        "collection": {"max_failures": 1000, "max_shots": 8},
-    }
-    card = {"sweep": [targeted_block], "collection": {"piece_rounds": 1}}
-    return yaml_configs.write_config(tmp_path, card)
-
-
-def test_a_piece_saved_by_an_earlier_round_is_not_run_or_planned_again(
-    tmp_path,
-):
-    """A piece planned again, then saved by its first round, is done.
-
-    Round two plans round one's pieces again while none is saved; once
-    round one saves them, round two's tasks skip them and round three
-    plans only new seeds.
-    """
-    config_path = _targeted_sweep(tmp_path)
-    experiment_dir = tmp_path / "experiment"
-    first_round = _plan([config_path], experiment_dir, 2)
-    second_round = _plan([config_path], experiment_dir, 2)
-
-    _run_the_round(first_round)
-    _run_the_round(second_round)
-    third_round = _plan([config_path], experiment_dir, 2)
-
-    first_ranges = _planned_ranges(first_round)
-    second_ranges = _planned_ranges(second_round)
-    third_ranges = _planned_ranges(third_round)
-    assert second_ranges == first_ranges
-    assert _rounds_of_saved_pieces(experiment_dir) == {1}
-    assert not set(first_ranges) & set(third_ranges)
-
-
-def _one_distance_config(tmp_path, distance: int) -> pathlib.Path:
-    """The four-point sweep at one distance, in a folder of its own."""
-    folder = tmp_path / f"d{distance}"
-    folder.mkdir()
-    (block,) = FOUR_POINT_SWEEP["sweep"]
-    axes = {**block["axes"], "qpu.distance": [distance]}
-    card = {
-        "sweep": [{**block, "axes": axes}],
-        "collection": {"piece_rounds": 1},
-    }
-    return yaml_configs.write_config(folder, card)
-
-
-def _sorted_rows_of_every_file(run_dir) -> dict:
-    """Each file's rows without the wall clock, in one order for all."""
-    rows = _rows_of_every_file(run_dir)
-    return {name: sorted(rows[name], key=_row_key) for name in rows}
-
-
-def _row_key(row: dict) -> list:
-    cells = row.items()
-    return sorted(cells)
-
-
-def test_pieces_of_two_distances_fold_to_one_run(tmp_path):
-    """Two yamls, one a distance, of one configuration are one run.
-
-    The sweep and the collection are no part of a configuration's id, so
-    a grid split one file a distance is one configuration. Planned
-    together, run as two tasks in reverse order, and folded by status,
-    its rows are the uncut two-distance run's; the fold writes points in
-    its own order, so the rows are compared in one order.
-    """
-    whole_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    split_paths = [
-        _one_distance_config(tmp_path, 3),
-        _one_distance_config(tmp_path, 5),
-    ]
-    whole_dir = tmp_path / "whole"
-    split_dir = tmp_path / "split"
-    command.main(["collect", str(whole_path), "--out", str(whole_dir)])
-    round_dir = _plan(split_paths, split_dir, 2)
-
-    _run_the_round(round_dir, task_order=[1, 0])
-    command.main(["status", str(split_dir)])
-
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    whole_rows = _sorted_rows_of_every_file(whole_run_dir)
-    split_run_dir = yaml_configs.run_folder_of(split_dir)
-    split_rows = _sorted_rows_of_every_file(split_run_dir)
-    assert split_rows == whole_rows
-
-
-def _typed_status_rows(experiment_dir: pathlib.Path) -> list:
-    status_path = experiment_dir / "status.csv"
-    return report.read_rows(status_path)
+def _typed_sweep_rows(experiment_dir: pathlib.Path) -> list:
+    sweep_path = experiment_dir / "sweep.csv"
+    return report.read_rows(sweep_path)
 
 
 def _estimate_by_the_statistics(row: dict) -> tuple:
-    """failure_statistics on a status row's own prefix counts and stop."""
+    """failure_statistics on a sweep row's own prefix counts and stop."""
     stop_kind = failure_statistics.StopKind(row["state"])
     estimate = failure_statistics.estimate(
         row["prefix_failures"], row["prefix_scored_shots"], stop_kind
@@ -2429,7 +2165,7 @@ def _estimate_by_the_statistics(row: dict) -> tuple:
 
 
 def _estimate_of(row: dict) -> tuple:
-    """A status row's estimate and limits, an empty cell as None."""
+    """A sweep row's estimate and limits, an empty cell as None."""
     columns = (
         "logical_error_rate_estimate",
         "logical_error_rate_low",
@@ -2444,244 +2180,51 @@ def _estimate_of(row: dict) -> tuple:
     return tuple(values)
 
 
-def test_a_status_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
+def test_a_sweep_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
     """The referent is failure_statistics on the row's own counts and stop.
 
-    One noisy point with a target of three failures runs round after
-    round until the plan has nothing left; status gives it the target
-    state, and its estimate and exact limits are the ones the
-    statistics module gives the same failures, scored shots and stop.
+    One noisy point with a target of three failures runs until it
+    stops; its row has the target state, and its estimate and exact
+    limits are the ones the statistics module gives the same failures,
+    scored shots and stop.
     """
     collection = {"max_shots": 60, "max_failures": 3, "piece_rounds": 45}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
+    config_path = run_files.write_run_file(
+        tmp_path, axes=NOISY_AXES, collection=collection
+    )
     out_dir = tmp_path / "out"
 
-    rounds = _plan_and_run_until_stopped([config_path], out_dir)
-    command.main(["status", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    (row,) = _typed_status_rows(out_dir)
-    assert rounds > 1
+    (row,) = _typed_sweep_rows(out_dir)
     assert row["state"] == "target"
     assert row["prefix_failures"] == 3
     assert _estimate_of(row) == _estimate_by_the_statistics(row)
 
 
-def test_an_online_points_planned_pieces_run_in_one_task_as_the_uncut_point(
-    tmp_path,
-):
-    """The referent is the uncut collect: one piece of all four shots.
+def test_a_fold_keeps_a_point_its_run_file_no_longer_sweeps(tmp_path):
+    """A fold folds what was recorded, not what the run file makes now.
 
-    Planned over three tasks, the online point's four one-shot pieces go
-    to one task in seed order, each starting from the calibrator the one
-    before it saved; a collect then finds them all saved and folds them.
-    Its decisions and threshold trajectory are the uncut run's.
-    """
-    whole_dir = tmp_path / "whole"
-    cut_dir = tmp_path / "cut"
-    whole_config = _online_config(tmp_path, 60)
-    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
-    cut_config = _online_config(tmp_path, 15)
-
-    round_dir = _plan([cut_config], cut_dir, 3)
-    _run_the_round(round_dir)
-    command.main(["collect", str(cut_config), "--out", str(cut_dir)])
-
-    plan_path = round_dir / "plan.csv"
-    plan_rows = _csv_rows(plan_path)
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
-    whole_trajectory = _online_trajectory_rows(whole_run_dir)
-    cut_trajectory = _online_trajectory_rows(cut_run_dir)
-    assert _values_of_rows(plan_rows, ("task", "first_seed")) == [
-        ("0", "0"),
-        ("0", "1"),
-        ("0", "2"),
-        ("0", "3"),
-    ]
-    assert _shot_decisions(cut_run_dir) == _shot_decisions(whole_run_dir)
-    assert cut_trajectory == whole_trajectory
-
-
-def _values_of_rows(rows: list, columns: tuple) -> list:
-    values = []
-    for row in rows:
-        row_values = _values_of(row, columns)
-        values.append(row_values)
-    return values
-
-
-def test_a_rounds_extension_is_openmcs_ratio_of_the_target(tmp_path):
-    """Round two plans shots x (target / failures) in all, less round one's.
-
-    OpenMC extends a run by the ratio of the uncertainty it has to the
-    one it wants, squared (trigger.cpp); for a failure count the squared
-    ratio is the target over the failures seen. Round one plans one
-    piece, having nothing measured.
-    """
-    collection = {"max_shots": 1000, "max_failures": 50, "piece_rounds": 90}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
-    out_dir = tmp_path / "out"
-    first_round = _plan([config_path], out_dir, 3)
-    _run_the_round(first_round)
-    (first_piece,) = out_dir.glob("pieces/*/*")
-    counts = pieces.read_piece(first_piece)
-    needed = counts["count"] * 50 / counts["failures"]
-    wanted = math.ceil(needed)
-
-    second_round = _plan([config_path], out_dir, 3)
-
-    first_ranges = _planned_ranges(first_round)
-    second_ranges = _planned_ranges(second_round)
-    second_shots = sum(piece[2] for piece in second_ranges)
-    assert first_ranges[0][1:] == (0, 6)
-    assert counts["failures"] > 0
-    assert second_shots == wanted - counts["count"]
-
-
-def test_a_task_whose_point_its_yaml_no_longer_makes_is_refused(
-    tmp_path, capsys
-):
-    """A plan names points by id, so a yaml changed after it is refused.
-
-    The task's yaml now makes other points, so the plan's point is none
-    of them, and the task says so and asks for a new plan rather than
-    running something the plan did not name.
-    """
-    config_path = yaml_configs.write_config(tmp_path, {})
-    out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 1)
-    changed_card = {
-        "sweep": [{"axes": NOISY_AXES, "collection": {"max_shots": 1}}]
-    }
-    yaml_configs.write_config(tmp_path, changed_card)
-    plan_path = round_dir / "plan.csv"
-
-    with pytest.raises(SystemExit):
-        command.main(["collect", "--plan", str(plan_path), "--task", "0"])
-
-    printed = capsys.readouterr()
-    assert "no point of" in printed.err
-    assert "plan again" in printed.err
-
-
-def test_a_point_two_configurations_reach_is_planned_once(tmp_path):
-    """One point, two configurations: its seeds are planned once.
-
-    The yamls differ in a base distance their sweeps both set, so their
-    configuration ids differ and their four points are the same four.
-    """
-    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
-    second_path = _base_distance_config(tmp_path, 7, FOUR_POINT_SWEEP)
-    experiment_dir = tmp_path / "experiment"
-
-    round_dir = _plan([first_path, second_path], experiment_dir, 3)
-
-    planned = _planned_ranges(round_dir)
-    point_ids = {point_id for point_id, _first, _count in planned}
-    assert len(planned) == 4
-    assert len(point_ids) == 4
-
-
-def test_a_point_two_configurations_collect_two_ways_is_refused(
-    tmp_path, capsys
-):
-    """A point stops by one rule, so two collections for it are refused.
-
-    The first configuration has collected its points. A plan of both is
-    refused before it writes anything, so every record keeps the owner
-    and the stopping rule it had, byte for byte.
-    """
-    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
-    (block,) = FOUR_POINT_SWEEP["sweep"]
-    other_block = {**block, "collection": {"max_shots": 3}}
-    other_sweep = {"sweep": [other_block]}
-    second_path = _base_distance_config(tmp_path, 7, other_sweep)
-    experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(first_path), "--out", str(experiment_dir)])
-    records_before = _record_bytes(experiment_dir)
-    arguments = [str(first_path), str(second_path)]
-    out = ["--out", str(experiment_dir), "--tasks", "3"]
-
-    with pytest.raises(SystemExit):
-        command.main(["plan", *arguments, *out])
-
-    printed = capsys.readouterr()
-    round_dirs = pieces.round_dirs(experiment_dir)
-    assert "two configurations" in printed.err
-    assert round_dirs == []
-    assert _record_bytes(experiment_dir) == records_before
-
-
-def _record_bytes(experiment_dir: pathlib.Path) -> dict:
-    """Each resolved/ record's name and bytes, and configurations.csv's."""
-    paths = experiment_dir.glob("resolved/*.json")
-    recorded = {path.name: path.read_bytes() for path in paths}
-    configurations_path = experiment_dir / "configurations.csv"
-    recorded["configurations.csv"] = configurations_path.read_bytes()
-    return recorded
-
-
-def _base_distance_config(tmp_path, distance: int, card: dict):
-    """The card over a base qpu distance, in a folder of its own."""
-    folder = tmp_path / f"base_distance_{distance}"
-    folder.mkdir()
-    qpu = {"kind": "stim_device", "distance": distance}
-    return yaml_configs.write_config(folder, {**card, "qpu": qpu})
-
-
-def test_status_keeps_a_point_its_yaml_no_longer_sweeps(tmp_path):
-    """Status folds what was recorded, not what the yamls make now.
-
-    Four points are collected; the yaml then drops one error rate. The
-    two points it no longer makes keep their pieces, and status still
+    Four points are collected; the run file then drops one error rate. The
+    two points it no longer makes keep their pieces, and a fold still
     counts them, every saved shot once.
     """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
-    (block,) = FOUR_POINT_SWEEP["sweep"]
-    narrower_axes = {**block["axes"], ERROR_RATE_AXIS: [0.001]}
-    narrower_card = {"sweep": [{**block, "axes": narrower_axes}]}
-    yaml_configs.write_config(tmp_path, narrower_card)
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
+    narrower_axes = {
+        **run_files.FOUR_POINT_AXES,
+        run_files.ERROR_RATE_PATH: (0.001,),
+    }
+    run_files.write_run_file(
+        tmp_path, axes=narrower_axes, collection={"max_shots": 2}
+    )
 
-    command.main(["status", str(experiment_dir)])
+    command.main(["run", "--fold", "--out", str(experiment_dir)])
 
-    rows = _typed_status_rows(experiment_dir)
+    rows = _typed_sweep_rows(experiment_dir)
     assert len(rows) == 4
     assert _total_shots(rows) == 8
-
-
-def test_status_counts_a_point_two_configurations_recorded_once(tmp_path):
-    """A base setting changed between collects makes a second configuration.
-
-    Its sweep sets the changed setting, so its points are the first
-    configuration's, already saved: status counts each once, under the
-    configuration that recorded it last.
-    """
-    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
-    experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(first_path), "--out", str(experiment_dir)])
-    qpu = {"kind": "stim_device", "distance": 7}
-    changed_card = {**FOUR_POINT_SWEEP, "qpu": qpu}
-    first_folder = first_path.parent
-    second_path = yaml_configs.write_config(first_folder, changed_card)
-    command.main(["collect", str(second_path), "--out", str(experiment_dir)])
-
-    command.main(["status", str(experiment_dir)])
-
-    rows = _typed_status_rows(experiment_dir)
-    second_config = experiment.load_experiment(second_path)
-    second_id = run_folder.configuration_id(second_config)
-    configuration_ids = {row["configuration_id"] for row in rows}
-    assert len(rows) == 4
-    assert _total_shots(rows) == 8
-    assert configuration_ids == {second_id}
-
-
-# the sweep axis of a memory maker's physical error rate
-ERROR_RATE_AXIS = "workload.arguments.physical_error_probability"
 
 
 def _total_shots(rows: list) -> int:
@@ -2691,321 +2234,18 @@ def _total_shots(rows: list) -> int:
     return total
 
 
-def test_a_status_row_is_its_points_sweep_row_and_its_rounds(tmp_path):
-    """status.csv carries every column the fold gives a point, and more.
-
-    Each row holds its point's sweep.csv row whole, the per-round and
-    plan-unbiased estimates among them, then the rounds and core seconds
-    of all its pieces: two shots of fifteen rounds each here.
-    """
-    config_path = yaml_configs.write_config(tmp_path, FOUR_POINT_SWEEP)
-    experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
-
-    command.main(["status", str(experiment_dir)])
-
-    status_path = experiment_dir / "status.csv"
-    status_rows = _csv_rows(status_path)
-    run_dir = yaml_configs.run_folder_of(experiment_dir)
-    sweep_path = run_dir / "sweep.csv"
-    sweep_rows = _csv_rows(sweep_path)
-    typed_rows = _typed_status_rows(experiment_dir)
-    rounds = {row["rounds"] for row in typed_rows}
-    assert _sweep_cells_status_misses(status_rows, sweep_rows) == []
-    assert rounds == {30}
-
-
-def _sweep_cells_status_misses(status_rows: list, sweep_rows: list) -> list:
-    """Each (point id, column) of sweep.csv its status row lacks or changes."""
-    status_by_point = {row["point_id"]: row for row in status_rows}
-    missed = []
-    for sweep_row in sweep_rows:
-        point_id = sweep_row["point_id"]
-        status_row = status_by_point[point_id]
-        point_missed = _cells_missed(point_id, status_row, sweep_row)
-        missed.extend(point_missed)
-    return missed
-
-
-def _cells_missed(point_id: str, status_row: dict, sweep_row: dict) -> list:
-    missed = []
-    for column, cell in sweep_row.items():
-        if status_row.get(column) != cell:
-            missed.append((point_id, column))
-    return missed
-
-
-def test_a_rounds_last_piece_is_cut_to_what_the_time_cap_allows(tmp_path):
-    """The time cap bounds a round's shots below one whole piece.
-
-    One piece of six shots is saved; the cap is then set to its core
-    seconds and one hundredth more, which at its seconds a shot allows
-    seven shots in all. The next round plans one shot, not a whole
-    piece past the cap.
-    """
-    collection = {"max_shots": 1000, "max_failures": 1000, "piece_rounds": 90}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
-    out_dir = tmp_path / "out"
-    first_round = _plan([config_path], out_dir, 1)
-    _run_the_round(first_round)
-    (first_piece,) = out_dir.glob("pieces/*/*")
-    saved = pieces.read_piece(first_piece)
-    capped = {**collection, "max_core_seconds": saved["core_seconds"] * 1.01}
-    capped_card = {"sweep": [{"axes": NOISY_AXES, "collection": capped}]}
-    yaml_configs.write_config(tmp_path, capped_card)
-
-    second_round = _plan([config_path], out_dir, 1)
-
-    point_id = first_piece.parent.name
-    assert saved["count"] == 6
-    assert _planned_ranges(second_round) == [(point_id, 6, 1)]
-
-
-@pytest.mark.parametrize(
-    "flag, shape_arguments",
-    [
-        ("--tasks", ["--tasks", "0"]),
-        ("--cores", ["--tasks", "1", "--cores", "0"]),
-        ("--hours", ["--tasks", "1", "--hours", "-1"]),
-        ("--memory-mb", ["--tasks", "1", "--memory-mb", "-1"]),
-    ],
-)
-def test_a_plan_asking_for_no_task_core_hour_or_memory_is_refused(
-    tmp_path, capsys, flag, shape_arguments
-):
-    """A round has a task, and a task a core, an hour and some memory."""
-    config_path = yaml_configs.write_config(tmp_path, {})
-    experiment_dir = tmp_path / "experiment"
-    arguments = [str(config_path), "--out", str(experiment_dir)]
-
-    with pytest.raises(SystemExit):
-        command.main(["plan", *arguments, *shape_arguments])
-
-    printed = capsys.readouterr()
-    assert f"{flag} must be at least 1" in printed.err
-    assert not experiment_dir.exists()
-
-
-@pytest.mark.parametrize(
-    "flag, task_count, shape",
-    [
-        ("--tasks", 0, (1, 1, 1)),
-        ("--cores", 1, (0, 1, 1)),
-        ("--hours", 1, (1, -1, 1)),
-        ("--memory-mb", 1, (1, 1, -1)),
-    ],
-)
-def test_plan_round_refuses_no_task_core_hour_or_memory_before_writing(
-    tmp_path, flag, task_count, shape
-):
-    """plan_round itself refuses a shape below one, whoever calls it.
-
-    shape is the task's cores, hours and memory in MB.
-    """
-    job = plan_command.JobShape(*shape)
-    config_path = yaml_configs.write_config(tmp_path, {})
-    experiment_dir = tmp_path / "experiment"
-
-    with pytest.raises(refusal.RefusalError) as refused:
-        plan_command.plan_round([config_path], experiment_dir, task_count, job)
-
-    assert f"{flag} must be at least 1" in str(refused.value)
-    assert not experiment_dir.exists()
-
-
-def test_an_online_point_is_one_tasks_in_every_round_with_the_same_seeds(
-    tmp_path,
-):
-    """Two rounds that may run at once hold one online point's same pieces.
-
-    Round two is planned before round one runs, as when round one's
-    array is still queued: it deals the point's four pieces again to one
-    task, in seed order, cut where round one cut them. Run in either
-    order, the rounds save each piece once and the fold is the uncut
-    run's.
-    """
-    whole_dir = tmp_path / "whole"
-    cut_dir = tmp_path / "cut"
-    whole_config = _online_config(tmp_path, 60)
-    command.main(["collect", str(whole_config), "--out", str(whole_dir)])
-    cut_config = _online_config(tmp_path, 15)
-    first_round = _plan([cut_config], cut_dir, 3)
-    second_round = _plan([cut_config], cut_dir, 3)
-
-    _run_the_round(second_round)
-    _run_the_round(first_round)
-    command.main(["status", str(cut_dir)])
-
-    first_plan_path = first_round / "plan.csv"
-    second_plan_path = second_round / "plan.csv"
-    first_plan = _csv_rows(first_plan_path)
-    second_plan = _csv_rows(second_plan_path)
-    cut_run_dir = yaml_configs.run_folder_of(cut_dir)
-    whole_run_dir = yaml_configs.run_folder_of(whole_dir)
-    assert _values_of_rows(second_plan, ("task", "first_seed", "count")) == [
-        ("0", "0", "1"),
-        ("0", "1", "1"),
-        ("0", "2", "1"),
-        ("0", "3", "1"),
-    ]
-    assert second_plan == first_plan
-    assert _piece_names(cut_dir) == ["0-0", "1-1", "2-2", "3-3"]
-    assert _shot_decisions(cut_run_dir) == _shot_decisions(whole_run_dir)
-
-
-def test_a_point_that_changed_configuration_is_in_one_run_folder(tmp_path):
-    """Status rebuilds every configuration's run folder, emptied ones too.
-
-    A base setting changed between collects moves every point to the
-    second configuration. After status, the first configuration's run
-    folder holds none of them, so reading every run folder counts each
-    saved shot once; the pieces themselves are untouched.
-    """
-    first_path = _base_distance_config(tmp_path, 5, FOUR_POINT_SWEEP)
-    experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(first_path), "--out", str(experiment_dir)])
-    qpu = {"kind": "stim_device", "distance": 7}
-    changed_card = {**FOUR_POINT_SWEEP, "qpu": qpu}
-    first_folder = first_path.parent
-    second_path = yaml_configs.write_config(first_folder, changed_card)
-    command.main(["collect", str(second_path), "--out", str(experiment_dir)])
-    pieces_before = _piece_names(experiment_dir)
-
-    command.main(["status", str(experiment_dir)])
-
-    sweep_rows = _rows_of_every_run_folder(experiment_dir)
-    assert _total_shots(sweep_rows) == 8
-    assert len(sweep_rows) == 4
-    assert _piece_names(experiment_dir) == pieces_before
-
-
-def _rows_of_every_run_folder(experiment_dir: pathlib.Path) -> list:
-    """Every combined/*/sweep.csv's rows, typed."""
-    rows = []
-    for sweep_path in experiment_dir.glob("combined/*/sweep.csv"):
-        folder_rows = report.read_rows(sweep_path)
-        rows.extend(folder_rows)
-    return rows
-
-
-def test_a_plain_collect_and_an_older_planned_task_run_each_seed_once(
-    tmp_path,
-):
-    """A plain collect cuts its pieces where a planned piece begins or ends.
-
-    Round one plans seeds 0 to 5 and seed 6; only the first task runs.
-    The cap is raised to ten and a plain collect runs on: it saves seed
-    6 as the plan cut it, then seeds 7 to 9. The planned task run later
-    finds seed 6 saved and runs nothing, so every seed is saved once.
-    """
-    config_path = _capped_noisy_config(tmp_path, 7, 90)
-    out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 2)
-    plan_path = round_dir / "plan.csv"
-    command.main(["collect", "--plan", str(plan_path), "--task", "0"])
-    _capped_noisy_config(tmp_path, 10, 90)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-
-    command.main(["collect", "--plan", str(plan_path), "--task", "1"])
-    command.main(["status", str(out_dir)])
-
-    (row,) = _typed_status_rows(out_dir)
-    (_first_piece, second_piece) = _planned_ranges(round_dir)
-    assert second_piece[1:] == (6, 1)
-    assert _piece_names(out_dir) == ["0-5", "6-6", "7-9"]
-    assert row["shots"] == 10
-
-
-def test_a_planned_piece_saved_under_another_cut_is_not_run_again(tmp_path):
-    """A planned task runs only the seeds no saved piece holds.
-
-    Round one plans seeds 0 to 5 and seed 6. Before it runs, a plain
-    collect with pieces of two shots saves seeds 0 to 6 in four pieces.
-    The round's tasks then find their seeds saved and run nothing.
-    """
-    config_path = _capped_noisy_config(tmp_path, 7, 90)
-    out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 2)
-    _capped_noisy_config(tmp_path, 7, 30)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-
-    _run_the_round(round_dir)
-    command.main(["status", str(out_dir)])
-
-    (row,) = _typed_status_rows(out_dir)
-    assert _piece_names(out_dir) == ["0-1", "2-3", "4-5", "6-6"]
-    assert row["shots"] == 7
-    assert _plan([config_path], out_dir, 2) is None
-
-
 def _capped_noisy_config(tmp_path, max_shots: int, piece_rounds: int):
     """The noisy point with a shot cap and no target, written in place."""
     collection = {"max_shots": max_shots, "piece_rounds": piece_rounds}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    return yaml_configs.write_config(tmp_path, card)
+    return run_files.write_run_file(
+        tmp_path, axes=NOISY_AXES, collection=collection
+    )
 
 
-def test_a_status_row_counts_and_costs_one_reading_of_the_pieces(
-    tmp_path, monkeypatch
-):
-    """A round that ends while status runs is in all of a row or in none.
-
-    Round one's piece of six shots is saved and round two's is planned;
-    round two ends right after status folds. The row's rounds are its
-    shots' rounds, fifteen a shot, not the rounds of pieces the fold
-    never read.
-    """
-    collection = {"max_shots": 60, "max_failures": 60, "piece_rounds": 90}
-    card = {"sweep": [{"axes": NOISY_AXES, "collection": collection}]}
-    config_path = yaml_configs.write_config(tmp_path, card)
-    out_dir = tmp_path / "out"
-    first_round = _plan([config_path], out_dir, 1)
-    _run_the_round(first_round)
-    second_round = _plan([config_path], out_dir, 1)
-    fold = collect_command.write_the_run_folder
-    fold_then_run = functools.partial(_fold_then_run, fold, second_round)
-    monkeypatch.setattr(collect_command, "write_the_run_folder", fold_then_run)
-
-    command.main(["status", str(out_dir)])
-
-    (row,) = _typed_status_rows(out_dir)
-    assert row["shots"] == 6
-    assert row["rounds"] == 6 * 15
-
-
-def _fold_then_run(fold, round_dir: pathlib.Path, *arguments) -> list:
-    """The fold, then a round's tasks, as a round that ends mid-status."""
-    rows = fold(*arguments)
-    _run_the_round(round_dir)
-    return rows
-
-
-def test_an_online_piece_with_no_saved_piece_before_it_is_refused(
-    tmp_path, capsys
-):
-    """An online piece starts from the calibrator the piece before saved.
-
-    A plan edited to hold only the point's third piece, seed 2, runs
-    nothing: no piece ends at seed 2, so there is no calibrator to start
-    from, and the collect says so and asks for a new plan.
-    """
-    config_path = _online_config(tmp_path, 15)
-    out_dir = tmp_path / "out"
-    round_dir = _plan([config_path], out_dir, 1)
-    plan_path = round_dir / "plan.csv"
-    plan_rows = _csv_rows(plan_path)
-    third_rows = [row for row in plan_rows if row["first_seed"] == "2"]
-    _write_csv_rows(plan_path, third_rows)
-    point_id = third_rows[0]["point_id"]
-
-    with pytest.raises(SystemExit):
-        command.main(["collect", "--plan", str(plan_path), "--task", "0"])
-
-    printed = capsys.readouterr()
-    point_folders = pieces.folders_of(out_dir, [point_id])
-    assert "has no saved piece ending at seed 2" in printed.err
-    assert point_folders == []
+def _drop_column(rows: list, column: str) -> None:
+    """Each row loses the column, as a csv measured without it reads."""
+    for row in rows:
+        del row[column]
 
 
 def _write_csv_rows(path: pathlib.Path, rows: list) -> None:
@@ -3017,72 +2257,64 @@ def _write_csv_rows(path: pathlib.Path, rows: list) -> None:
         writer.writerows(rows)
 
 
-def test_a_refused_status_leaves_the_last_run_folder_as_it_was(tmp_path):
+def test_a_refused_fold_leaves_the_last_run_folder_as_it_was(tmp_path):
     """A fold that is refused publishes nothing, so the last one stands.
 
-    Ten shots in two pieces are folded by a status. The second piece
-    then loses a column of its shots.csv, as a piece measured by other
-    code would, and a second status is refused. Every file of the run
-    folder and status.csv are byte for byte what the first status wrote.
+    Ten shots in two pieces are folded by the run. The second piece then
+    loses a column of its shots.csv, as a piece measured by other code
+    would, and a second fold is refused. Every file of the run folder is
+    byte for byte what the first fold wrote.
     """
     config_path = _capped_noisy_config(tmp_path, 10, 75)
     out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-    command.main(["status", str(out_dir)])
+    command.main(["run", str(config_path), "--out", str(out_dir)])
     before = _run_folder_bytes(out_dir)
     piece_folders = out_dir.glob("pieces/*/*")
     second_piece = max(piece_folders, key=lambda folder: folder.name)
     shots_path = second_piece / "shots.csv"
     shot_rows = _csv_rows(shots_path)
-    for row in shot_rows:
-        del row["queue_wait_mean_us"]
+    _drop_column(shot_rows, "queue_wait_mean_us")
     _write_csv_rows(shots_path, shot_rows)
 
     with pytest.raises(SystemExit):
-        command.main(["status", str(out_dir)])
+        command.main(["run", "--fold", "--out", str(out_dir)])
 
     assert _run_folder_bytes(out_dir) == before
 
 
-def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:
-    """Each file of combined/ and status.csv, by its path, and its bytes."""
-    paths = [
-        path for path in experiment_dir.glob("combined/**/*") if path.is_file()
-    ]
-    status_path = experiment_dir / "status.csv"
-    paths.append(status_path)
-    return {str(path): path.read_bytes() for path in paths}
-
-
-def test_rounds_planned_again_before_the_last_ran_run_each_seed_once(
+def test_a_fold_that_fails_part_way_leaves_the_last_run_folder_as_it_was(
     tmp_path, monkeypatch
 ):
-    """The seeds planned by every round are one set, less the saved ones.
+    """A fold that raises after writing some files publishes none of them.
 
-    Round one plans seeds 0 to 9 in one piece; a plain collect capped at
-    five shots saves 0 to 4. Round two plans the rest, 5 to 9, and round
-    three is planned before round two runs. Round three lists seeds 5 to
-    9 once, and its task runs each of them once.
+    The second fold writes shots.csv whole, then the disk fills partway
+    through sweep.csv. Both went into the staging folder, so every file
+    of the run folder is what the first fold wrote.
     """
+    config_path = _capped_noisy_config(tmp_path, 2, 15)
     out_dir = tmp_path / "out"
-    config_path = _capped_noisy_config(tmp_path, 10, 150)
-    _plan([config_path], out_dir, 1)
-    _capped_noisy_config(tmp_path, 5, 150)
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-    _capped_noisy_config(tmp_path, 10, 150)
-    _plan([config_path], out_dir, 1)
-    third_round = _plan([config_path], out_dir, 1)
-    ran_seeds = []
-    run_unit = functools.partial(
-        _run_the_unit_and_note, ran_seeds, collect.run_unit
-    )
-    monkeypatch.setattr(collect, "run_unit", run_unit)
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+    before = _run_folder_bytes(out_dir)
+    monkeypatch.setattr(report, "write_csv", _write_part_then_fill_the_disk)
 
-    _run_the_round(third_round)
+    with pytest.raises(OSError, match="No space left on device"):
+        command.main(["run", "--fold", "--out", str(out_dir)])
 
-    ((_point_id, first_seed, count),) = _planned_ranges(third_round)
-    assert (first_seed, count) == (5, 5)
-    assert ran_seeds == [5, 6, 7, 8, 9]
+    assert _run_folder_bytes(out_dir) == before
+
+
+def _write_part_then_fill_the_disk(_rows, path, _swept=None) -> None:
+    """write_csv on a disk that fills after the header's first column."""
+    path.write_text("point_id,")
+    raise OSError(errno.ENOSPC, "No space left on device", str(path))
+
+
+def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:
+    """Each file of the fold and the records, and its bytes."""
+    csv_paths = experiment_dir.glob("*.csv")
+    record_paths = experiment_dir.glob("points/*/machine.json")
+    paths = [*csv_paths, *record_paths]
+    return {str(path): path.read_bytes() for path in paths}
 
 
 def _run_the_unit_and_note(ran_seeds: list, run_unit, unit, measure):
@@ -3090,56 +2322,3 @@ def _run_the_unit_and_note(ran_seeds: list, run_unit, unit, measure):
     end_seed = unit.first_seed + unit.seeds
     ran_seeds.extend(range(unit.first_seed, end_seed))
     return run_unit(unit, measure)
-
-
-def test_two_yaml_names_of_one_configuration_fold_into_one_run_folder(
-    tmp_path,
-):
-    """A configuration's run folder is named by the first yaml recorded.
-
-    t2.yaml and t6.yaml say the same thing, so they are one
-    configuration id. Collected in that order, then folded by status,
-    they write one run folder, t2's, holding the point once.
-    """
-    config_path = _capped_noisy_config(tmp_path, 1, 15)
-    out_dir = tmp_path / "out"
-    first_path = tmp_path / "t2.yaml"
-    second_path = tmp_path / "t6.yaml"
-    shutil.copyfile(config_path, first_path)
-    shutil.copyfile(config_path, second_path)
-    command.main(["collect", str(first_path), "--out", str(out_dir)])
-    command.main(["collect", str(second_path), "--out", str(out_dir)])
-
-    command.main(["status", str(out_dir)])
-
-    run_folder_dir = yaml_configs.run_folder_of(out_dir)
-    swept_rows = _rows_of_every_run_folder(out_dir)
-    assert run_folder_dir.name.startswith("t2-")
-    assert [row["shots"] for row in swept_rows] == [1]
-
-
-def test_status_retires_the_fold_of_a_second_folder_of_one_configuration(
-    tmp_path,
-):
-    """A folder an older collect named by another yaml loses its fold.
-
-    The run folder is copied to a second name with the same id, as a
-    collect of a second yaml name wrote it before one folder per id.
-    Status leaves the point in one sweep.csv, and the second folder keeps
-    what is not a fold's, its manifest.
-    """
-    config_path = _capped_noisy_config(tmp_path, 1, 15)
-    out_dir = tmp_path / "out"
-    command.main(["collect", str(config_path), "--out", str(out_dir)])
-    run_folder_dir = yaml_configs.run_folder_of(out_dir)
-    _name, identity8 = run_folder_dir.name.rsplit("-", 1)
-    second_dir = run_folder_dir.with_name(f"t6-{identity8}")
-    shutil.copytree(run_folder_dir, second_dir)
-
-    command.main(["status", str(out_dir)])
-
-    swept_rows = _rows_of_every_run_folder(out_dir)
-    second_files = sorted(path.name for path in second_dir.iterdir())
-    assert [row["shots"] for row in swept_rows] == [1]
-    assert "manifest.json" in second_files
-    assert not {"sweep.csv", "resolved", "inputs"} & set(second_files)

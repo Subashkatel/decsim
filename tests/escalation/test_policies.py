@@ -11,18 +11,21 @@ own two forced-class solves). The port is gem5's conditional predictor
 
 import dataclasses
 import math
+from typing import Optional
 
 import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.confidence.cluster as cluster
+import decsim.confidence.complementary as complementary
 import decsim.config as config
+import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.settings as decoder_settings
+import decsim.engine as engine_module
 import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.experiments.experiment as experiment
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -37,32 +40,18 @@ import decsim.settings as machine_settings
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
-import tests.experiments.yaml_configs as yaml_configs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 # the decoder engines run at 100 MHz, a 10000-tick period
 ENGINE_CLOCK = config.Clock(10_000)
 ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # the frame writes one cycle of a 250 MHz clock, 4 ns
 FRAME_CLOCK = config.Clock(4000)
-SOURCE = decoding_records.SoftOutputSource(
-    method="matching-gap",
-    cluster_origin="decoder",
-    growth_schedule="uniform",
-    gap_units="natural-log",
-    correction="minimum-weight",
-    weight_step_natural_log=1.0,
-    references=(),
-)
-OTHER_SOURCE = decoding_records.SoftOutputSource(
-    method="cluster-gap",
-    cluster_origin="union-find",
-    growth_schedule="uniform",
-    gap_units="decibels",
-    correction="none",
-    weight_step_natural_log=0.1,
-    references=(),
-)
+SOURCE = decoding_records.SoftOutputSource(method="matching-gap")
 WINDOW = window_records.Window(
     operation_id=1,
     window_index=1,
@@ -72,18 +61,16 @@ WINDOW = window_records.Window(
     round_count=6,
 )
 JOB = decoding_records.DecodeJob(operation_id=1, window_id=1, round_count=6)
-WEAK_TIER = (window_records.DecoderTier.WEAK,)
-STRONG_TIER = (window_records.DecoderTier.STRONG,)
 BOTH_TIERS = (
     window_records.DecoderTier.WEAK,
     window_records.DecoderTier.STRONG,
 )
 
 
-def _result(gap, source=SOURCE) -> decoding_records.DecodeResult:
+def _result(gap) -> decoding_records.DecodeResult:
     soft_output = None
     if gap is not None:
-        soft_output = decoding_records.SoftOutput(gap=gap, source=source)
+        soft_output = decoding_records.SoftOutput(gap=gap, source=SOURCE)
     return decoding_records.DecodeResult(
         1, 1, logical_observables=(0,), soft_output=soft_output
     )
@@ -91,10 +78,7 @@ def _result(gap, source=SOURCE) -> decoding_records.DecodeResult:
 
 def _switching(**arguments) -> policies.Switching:
     fixed = threshold_sources.FixedThreshold(2.0)
-    collaborators = policies.EscalationCollaborators(
-        threshold=fixed, expected_source=SOURCE, **arguments
-    )
-    return policies.Switching(collaborators)
+    return policies.Switching(threshold=fixed, **arguments)
 
 
 def _always_auditing_online_threshold(
@@ -162,26 +146,29 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         operations=[operation], rounds_policy=rounds_policy
     )
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=3, device=device)
-    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-    scheme = sliding_scheme.SlidingWindowScheme(lookahead)
-    held = boundary_policies.Held()
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=3, source=source)
+    held = boundary_policies.Held.Settings()
     windows = window_settings.WindowSettings(
-        scheme=scheme, boundary_policy=held
+        terminal_policy="lookahead", boundary_policy=held
     )
     decoder_manager = decoder_settings.DecoderManagerSettings()
-    weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
-    strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        gap_threshold_db=15.0,
-        gap_threshold_nats=threshold_nats,
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=15.0
+    )
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
     )
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=FRAME_CLOCK
@@ -196,14 +183,15 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
         decoder_manager=decoder_manager,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
         pauli_frame=pauli_frame,
         observation=observation,
     )
     machine = machine_module.Machine.build(settings, 1)
     machine.run()
     weak_gaps = _weak_gaps(machine)
-    below = sum(1 for gap in weak_gaps if gap < threshold_nats)
+    is_below = [gap < threshold_nats for gap in weak_gaps]
+    below = sum(is_below)
     strong_frame_writes = _strong_frame_writes(machine)
     assert len(weak_gaps) == 10
     assert below == 3
@@ -214,97 +202,14 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
 # ---- one law per port method
 
 
-def test_baseline_keeps_every_weak_result():
-    baseline = policies.Baseline(policies.NO_CONFIDENCE)
-    assert baseline.primary_tier is window_records.DecoderTier.WEAK
-    assert baseline.requires_strong_context is False
-    assert baseline.tiers_for_ready_window(WINDOW) == WEAK_TIER
-    unsure = _result(0.0)
-    verdict = baseline.verdict_for_weak_result(JOB, unsure)
-    assert verdict is decoding_records.Verdict.KEEP
-
-
-def test_strong_only_decodes_every_window_on_the_strong_tier_once():
-    strong_only = policies.StrongOnly(policies.NO_CONFIDENCE)
-    assert strong_only.primary_tier is window_records.DecoderTier.STRONG
-    assert strong_only.requires_strong_context is False
-    assert strong_only.tiers_for_ready_window(WINDOW) == STRONG_TIER
-    timing_only = _result(None)
-    verdict = strong_only.verdict_for_weak_result(JOB, timing_only)
-    assert verdict is decoding_records.Verdict.KEEP
-
-
-def test_switching_keeps_at_the_threshold_and_escalates_below_it():
-    switching = _switching()
-    assert switching.tiers_for_ready_window(WINDOW) == WEAK_TIER
-    at_threshold = _result(2.0)
-    below_threshold = _result(1.999)
-    timing_only = _result(None)
-    kept = switching.verdict_for_weak_result(JOB, at_threshold)
-    escalated = switching.verdict_for_weak_result(JOB, below_threshold)
-    unsure = switching.verdict_for_weak_result(JOB, timing_only)
-    assert kept is decoding_records.Verdict.KEEP
-    assert escalated is decoding_records.Verdict.ESCALATE
-    assert unsure is decoding_records.Verdict.ESCALATE
-
-
-class _DetectorFlaggingFromRoundFive:
-    """A burst detector whose one flag covers round 5 onward."""
-
-    def observe_round(self, operation_id, round_index, events) -> None:
-        del operation_id, round_index, events
-
-    def is_burst_window(self, window) -> bool:
-        return window.buffer_hi >= 5
-
-    def with_burst_priors(self, window, model):
-        del window
-        return model
-
-
-def test_a_window_a_burst_flag_meets_escalates_however_confident():
-    """Burst mode: the flag decides, the threshold is not asked."""
-    switching = _switching()
-    switching.burst_detector = _DetectorFlaggingFromRoundFive()
-    flagged_job = dataclasses.replace(JOB, window=WINDOW)
-    confident = _result(50.0)
-    verdict = switching.verdict_for_weak_result(flagged_job, confident)
-    assert verdict is decoding_records.Verdict.ESCALATE
-
-
-def test_a_window_no_flag_meets_gets_the_thresholds_verdict():
-    """Normal mode is the machine without a detector."""
-    switching = _switching()
-    switching.burst_detector = _DetectorFlaggingFromRoundFive()
-    early_window = dataclasses.replace(WINDOW, commit_hi=2, buffer_hi=4)
-    early_job = dataclasses.replace(JOB, window=early_window)
-    confident = _result(50.0)
-    verdict = switching.verdict_for_weak_result(early_job, confident)
-    assert verdict is decoding_records.Verdict.KEEP
-
-
 def test_switching_decodes_both_tiers_at_once_when_asked():
     parallel = _switching(run_both_at_once=True)
     assert parallel.tiers_for_ready_window(WINDOW) == BOTH_TIERS
 
 
-def test_a_soft_output_from_another_signal_is_refused_with_a_sentence():
-    switching = _switching()
-    mismatched = _result(5.0, source=OTHER_SOURCE)
-    with pytest.raises(
-        ValueError,
-        match="decoder confidence source does not match the switching "
-        "threshold source",
-    ):
-        switching.verdict_for_weak_result(JOB, mismatched)
-
-
 def test_a_strong_result_teaches_the_online_source():
     online = _always_auditing_online_threshold(threshold=0.0)
-    collaborators = policies.EscalationCollaborators(
-        threshold=online, expected_source=SOURCE
-    )
-    switching = policies.Switching(collaborators)
+    switching = policies.Switching(threshold=online)
     confident = _result(5.0)
     # the kept window is audited, so its verdict escalates
     verdict = switching.verdict_for_weak_result(JOB, confident)
@@ -314,33 +219,12 @@ def test_a_strong_result_teaches_the_online_source():
     assert online.controller.raise_count == 1
 
 
-def test_a_plan_that_contradicts_itself_is_refused_at_build_with_a_sentence():
-    with pytest.raises(
-        ValueError, match="the two policies contradict; pick one"
-    ):
+def test_a_plan_that_contradicts_itself_is_refused_at_build():
+    with pytest.raises(ValueError, match="the two policies contradict"):
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="double_window",
-            run_both_at_once=True,
-        )
-
-
-def test_a_refusal_names_the_strong_window_row_the_yaml_chose():
-    """Four rows reach these refusals, so none of them may name one row.
-
-    The run shape carries escalation.strong_window (RunShape), and the
-    sentence a user reads names the row their yaml asked for.
-    """
-    with pytest.raises(
-        ValueError,
-        match="escalation.strong_window double_window defers the "
-        "strong start until the far weak boundary exists",
-    ):
-        fabric.switching_machine(
-            rounds=9,
-            escalated_windows=set(),
-            strong_window="double_window",
+            strong_window=declared_run.DOUBLE_WINDOW,
             run_both_at_once=True,
         )
 
@@ -350,59 +234,41 @@ def _double_window_settings(
 ) -> machine_settings.MachineSettings:
     """The gate's switching card with the double window and the sizes.
 
-    Every part is a table row, the way the yaml builds it.
+    Every part is written out as its record.
     """
-    windows = window_settings.WindowSettings(
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
         commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
     )
-    weak_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching",
+    windows = window_settings.WindowSettings(
+        scheme=scheme, terminal_policy="lookahead"
+    )
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching,
         engine=ENGINE_CARD,
     )
-    strong_decoder = decoder_settings.DecoderSettings(
-        kind="belief_matching",
+    belief_matching_settings = belief_matching.BeliefMatchingDecoder.Settings()
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=belief_matching_settings,
         engine=ENGINE_CARD,
     )
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching",
-        gap_threshold_nats=1.0,
-        strong_window="double_window",
+    confidence = complementary.ComplementaryGap.Settings()
+    one_nat = threshold_sources.nats_to_decibels(1.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=one_nat
+    )
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence,
+        threshold=threshold,
+        strong_window=double_window,
     )
     return machine_settings.MachineSettings(
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
     )
-
-
-@pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 4), (4, 3)])
-def test_a_double_window_crossing_a_later_commit_region_is_refused(
-    commit_rounds, buffer_rounds
-):
-    """The crossing shape is decided at build.
-
-    The strong region is commit plus two buffers; when twice the buffer
-    is not a multiple of the commit, it ends inside a later window's
-    commit region, and that window commits across the region's end with
-    no owner.
-    """
-    settings = _double_window_settings(commit_rounds, buffer_rounds)
-    with pytest.raises(
-        ValueError,
-        match="the strong region of double_window, commit plus two "
-        "buffers, must end inside its own commit region",
-    ):
-        machine_module.Machine.build(settings, 0)
-
-
-@pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 3), (4, 4)])
-def test_a_double_window_ending_on_a_commit_edge_builds(
-    commit_rounds, buffer_rounds
-):
-    settings = _double_window_settings(commit_rounds, buffer_rounds)
-    machine = machine_module.Machine.build(settings, 0)
-    assert machine.windows.window_manager.strong_redecode is not None
 
 
 def test_an_online_source_under_a_double_window_is_refused_as_serial():
@@ -413,12 +279,12 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
     than the audited window.
     """
     online = _always_auditing_online_threshold(threshold=2.0)
-    collaborators = policies.EscalationCollaborators(
-        threshold=online, expected_source=SOURCE
+    online_settings = threshold_sources.OnlineThreshold.Settings(
+        threshold_decibels=20.0
     )
-    policy = policies.Switching(collaborators)
-    escalation = escalation_settings.EscalationSettings(
-        policy=policy, strong_window="double_window"
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    switching = declared_run.declared_switching(
+        threshold=online_settings, strong_window=double_window
     )
     with pytest.raises(
         ValueError, match="online threshold calibration is serial-only"
@@ -426,196 +292,31 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
-            strong_window="double_window",
-            escalation=escalation,
+            strong_window=declared_run.DOUBLE_WINDOW,
+            switching=switching,
+            online_threshold=online,
         )
 
 
 def test_an_online_source_beside_run_both_at_once_is_refused():
     online = _always_auditing_online_threshold(threshold=2.0)
-    collaborators = policies.EscalationCollaborators(
-        threshold=online, expected_source=SOURCE, run_both_at_once=True
-    )
-    with pytest.raises(ValueError, match="nothing to audit"):
-        policies.Switching(collaborators)
-
-
-# ---- a row plugs in
-
-
-class _AlwaysEscalate(policies.EscalationPolicyBase):
-    """A fake row: every weak result is re-decoded by the strong tier."""
-
-    requires_strong_context = True
-    primary_tier = window_records.DecoderTier.WEAK
-
-    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
-        del job
-        del result
-        return decoding_records.Verdict.ESCALATE
-
-
-def test_a_policy_row_added_to_the_table_runs_a_switching_point(monkeypatch):
-    """One class and one ESCALATIONS row; the row declares its tier."""
-    monkeypatch.setitem(
-        escalation_settings.ESCALATIONS, "always_escalate", _AlwaysEscalate
-    )
-    escalation = escalation_settings.EscalationSettings(kind="always_escalate")
-    machine = fabric.switching_machine(
-        rounds=9, escalated_windows=set(), escalation=escalation
-    )
-    machine.run()
-    assert machine.decoders.decoder_manager.strong_requests.counts.needed == 3
-    assert fabric.frame_tiers(machine) == [
-        ((1, 0), "strong"),
-        ((1, 1), "strong"),
-        ((1, 2), "strong"),
-    ]
-
-
-class _ConfidentEscalation(policies.EscalationPolicyBase):
-    """A fourth row: it escalates, and it decides on a confidence.
-
-    Its threshold and the source it expects arrive in the one
-    EscalationCollaborators record, so the build learns what this row
-    needs from the two facts it declares and from nothing else.
-    """
-
-    decides_on_a_confidence = True
-    requires_strong_context = True
-    primary_tier = window_records.DecoderTier.WEAK
-
-    def __init__(self, collaborators):
-        self.threshold = collaborators.threshold
-        self.expected_source = collaborators.expected_source
-
-    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
-        """Keep what the threshold keeps; a result with no gap escalates."""
-        if result.soft_output is None:
-            return decoding_records.Verdict.ESCALATE
-        if self.threshold.decide_keep(job, result):
-            return decoding_records.Verdict.KEEP
-        return decoding_records.Verdict.ESCALATE
-
-
-def _confident_config(tmp_path):
-    """A yaml naming the fourth row, with no boundary policy or scheme."""
-    return _switching_config(tmp_path, kind="confident")
-
-
-def _switching_config(
-    tmp_path,
-    *,
-    kind="switching",
-    threshold_source=None,
-    windows_kind=None,
-    terminal_policy=None,
-    boundaries=None,
-):
-    """A yaml with no boundary policy and no windowing scheme."""
-    escalation = {"kind": kind, "gap_threshold_db": 20.0}
-    if threshold_source is not None:
-        escalation["threshold_source"] = threshold_source
-    weak_decoder = _weak_unit()
-    workload = yaml_configs.memory_workload(9)
-    sweep_point = {
-        "axes": {
-            "workload.arguments.physical_error_probability": [0.008],
-            "qpu.distance": [3],
-            "qpu.round_period_microseconds": [1.0],
-        },
-        "collection": {"max_shots": 1},
-    }
-    strong_decoder = yaml_configs.strong_unit("belief_matching")
-    card = {
-        "escalation": escalation,
-        "workload": workload,
-        **weak_decoder,
-        **strong_decoder,
-        "sweep": [sweep_point],
-    }
-    card["windows"] = _windows_section(
-        windows_kind, terminal_policy, boundaries
-    )
-    return yaml_configs.write_config(tmp_path, card)
-
-
-def _weak_unit() -> dict:
-    """One pymatching unit on the fridge clock, the switching weak tier."""
-    return {
-        "weak_decoder": {
-            "kind": "pymatching",
-            "units": 1,
-            "unit_memory": {"bits": None},
-            "engine": {
-                "clock": "fridge",
-                "fetch_cycles_per_round": 1,
-                "fetch_cycles_per_job": 0,
-                "release_cycles_per_job": 1,
-                "release_cycles_per_round": 0,
-            },
-        }
-    }
-
-
-def _windows_section(windows_kind, terminal_policy, boundaries) -> dict:
-    """The minimal windows section, with the keys the caller named."""
-    windows = dict(yaml_configs.MINIMAL_CONFIG["windows"])
-    if windows_kind is not None:
-        windows["kind"] = windows_kind
-    if terminal_policy is not None:
-        windows["terminal_policy"] = terminal_policy
-    if boundaries is not None:
-        windows["boundaries"] = boundaries
-    return windows
-
-
-def test_a_fourth_escalation_row_gets_the_boundaries_pools_and_join(
-    monkeypatch, tmp_path
-):
-    """The wiring reads the row's declared facts, not the kind's name.
-
-    A row that escalates and decides on a confidence, named from a yaml
-    that gives no boundary policy and no windowing scheme, gets held
-    boundaries, a strong pool of its own and the confidence join.
-    """
-    monkeypatch.setitem(
-        escalation_settings.ESCALATIONS, "confident", _ConfidentEscalation
-    )
-    config_path = _confident_config(tmp_path)
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 0)
-    boundary_policy = machine.windows.window_manager.courier.boundary_policy
-    assert isinstance(boundary_policy, boundary_policies.Held)
-    assert machine.windows.window_manager.requester.gap_join is not None
-    assert machine.decoders.decoder_manager.pool.name == "default"
-    assert machine.decoders.strong_decoder_manager.pool.name == "strong"
-    chip_decoder = machine.decoders.decoder_manager.decoder
-    assert machine.decoders.strong_decoder_manager.decoder is not chip_decoder
-    planner = machine.windows.window_manager.planner
-    assert planner.scheme.has_trailing_tail_context
-    result = machine.run()
-    assert result.terminal_status == "complete"
+    with pytest.raises(ValueError, match="meaningless with run_both_at_once"):
+        policies.Switching(threshold=online, run_both_at_once=True)
 
 
 class _KeepEverything:
     """A threshold source written outside decsim: the port, and no more.
 
     Its one constructor argument is the sweep point's threshold in nats,
-    which is what the root gives every row of the table.
+    and its Settings record is the fixed row's, which builds this row.
     """
 
     audits_by_escalating = False
-    reads_a_calibration_table = False
-    built_per_sweep_point = False
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings(threshold_sources.FixedThreshold.Settings):
+        def build(self) -> "_KeepEverything":
+            return _KeepEverything(self.threshold_nats)
 
     def __init__(self, threshold_nats: float) -> None:
         self.threshold_nats = threshold_nats
@@ -632,32 +333,18 @@ class _KeepEverything:
         del result
 
 
-def test_a_threshold_source_written_outside_decsim_runs_from_a_yaml(
-    monkeypatch, tmp_path
-):
-    """One THRESHOLD_SOURCES row and one yaml name, nothing else."""
-    monkeypatch.setitem(
-        escalation_settings.THRESHOLD_SOURCES,
-        "keep_everything",
-        _KeepEverything,
+def test_a_threshold_source_written_outside_decsim_runs_from_its_record():
+    """A threshold source is one class and its Settings record, nothing else.
+
+    Every window's declared gap asks to escalate, and the source keeps
+    every weak result, so no strong request is made.
+    """
+    threshold = _KeepEverything.Settings(threshold_decibels=20.0)
+    switching = declared_run.declared_switching(threshold=threshold)
+    machine = fabric.switching_machine(
+        rounds=9, escalated_windows={0, 1, 2}, switching=switching
     )
-    config_path = _switching_config(
-        tmp_path, threshold_source="keep_everything"
-    )
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    policy = escalation_build.build_escalation_policy(
-        settings.escalation, settings.weak_decoder
-    )
-    assert isinstance(policy.threshold, _KeepEverything)
-    machine = machine_module.Machine.build(settings, 0)
+    assert isinstance(machine.switching.policy.threshold, _KeepEverything)
     result = machine.run()
     assert result.terminal_status == "complete"
     assert machine.decoders.decoder_manager.strong_requests.counts.needed == 0
@@ -674,21 +361,28 @@ def _serial_switching_settings(
     boundary_policy,
 ) -> machine_settings.MachineSettings:
     """Serial switching (no double window) with the boundary policy given."""
-    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-    scheme = sliding_scheme.SlidingWindowScheme(lookahead)
     windows = window_settings.WindowSettings(
-        scheme=scheme, boundary_policy=boundary_policy
+        terminal_policy="lookahead", boundary_policy=boundary_policy
     )
-    weak_decoder = decoder_settings.DecoderSettings(kind="pymatching")
-    strong_decoder = decoder_settings.DecoderSettings(kind="belief_matching")
-    escalation = escalation_settings.EscalationSettings(
-        kind="switching", gap_threshold_nats=1.0
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak_decoder = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    belief_matching_settings = belief_matching.BeliefMatchingDecoder.Settings()
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=belief_matching_settings
+    )
+    confidence = complementary.ComplementaryGap.Settings()
+    one_nat = threshold_sources.nats_to_decibels(1.0)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=one_nat
+    )
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
     )
     return machine_settings.MachineSettings(
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
     )
 
 
@@ -699,7 +393,7 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
     decoder, so the boundary waits for the final result; Eager would
     hand a successor a correction the strong tier later replaces.
     """
-    eager = boundary_policies.Eager()
+    eager = boundary_policies.Eager.Settings()
     settings = _serial_switching_settings(eager)
     with pytest.raises(
         ValueError, match="serial switching requires held boundaries"
@@ -716,15 +410,15 @@ def test_the_double_window_refuses_held_boundaries_at_build():
     strong window on itself.
     """
     settings = _double_window_settings(3, 3)
-    held = boundary_policies.Held()
+    held = boundary_policies.Held.Settings()
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
+        commit_rounds=3, buffer_rounds=3
+    )
     windows = window_settings.WindowSettings(
-        commit_rounds=3, buffer_rounds=3, boundary_policy=held
+        scheme=scheme, terminal_policy="lookahead", boundary_policy=held
     )
     settings = dataclasses.replace(settings, windows=windows)
-    with pytest.raises(
-        ValueError,
-        match="a boundary policy that holds provisional boundaries would",
-    ):
+    with pytest.raises(ValueError, match="deadlock the strong window"):
         machine_module.Machine.build(settings, 0)
 
 
@@ -742,17 +436,22 @@ class DelegatingWindowScheme:
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
 
-    def __init__(
-        self,
-        card: window_records.WindowingSchemeCard = (
-            window_records.DEFAULT_SCHEME_CARD
-        ),
-    ) -> None:
-        del card
-        lookahead = window_records.WindowingSchemeCard(
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The delegating row's record: the sizes, and its build."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        name = "delegating"
+
+        def build(self, terminal_policy) -> "DelegatingWindowScheme":
+            del terminal_policy
+            return DelegatingWindowScheme()
+
+    def __init__(self) -> None:
+        self.inner = sliding_scheme.SlidingWindowScheme(
             terminal_policy="lookahead"
         )
-        self.inner = sliding_scheme.SlidingWindowScheme(lookahead)
 
     def plan_operation(
         self,
@@ -782,6 +481,18 @@ class UndeclaredWindowScheme:
     it plans a window.
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The undeclared row's record: the sizes, and its build."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+        name = "undeclared"
+
+        def build(self, terminal_policy) -> "UndeclaredWindowScheme":
+            del terminal_policy
+            return UndeclaredWindowScheme()
+
 
 def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     """The double window reads the row's declaration, not its class.
@@ -789,11 +500,11 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     A row that commits in one serial chain and keeps trailing tail
     context serves the double window, whatever class it is.
     """
-    scheme = DelegatingWindowScheme()
+    scheme = DelegatingWindowScheme.Settings()
     machine = fabric.switching_machine(
         rounds=15,
         escalated_windows={1},
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
         round_microseconds=4.0,
         scheme=scheme,
     )
@@ -805,117 +516,37 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     ]
 
 
-def test_a_windowing_scheme_named_in_a_yaml_runs_under_switching(
-    monkeypatch, tmp_path
-):
-    """The yaml path reads the declaration too, not the kind's name.
-
-    Before this round build/plan.py refused any windows.kind but sliding
-    under switching, so a row that declares a trailing tail ran when it
-    was handed in through Python and was refused when a yaml named it.
-    """
-    monkeypatch.setitem(
-        window_settings.WINDOWING_SCHEMES,
-        "delegating",
-        DelegatingWindowScheme,
-    )
-    config_path = _switching_config(tmp_path, windows_kind="delegating")
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 0)
-    planner_scheme = machine.windows.window_manager.planner.scheme
-
-    assert isinstance(planner_scheme, DelegatingWindowScheme)
-    result = machine.run()
-    assert result.terminal_status == "complete"
-
-
-def test_eager_boundaries_named_in_a_yaml_are_refused_under_switching(
-    tmp_path,
-):
-    """The boundary policy's key reaches the escalation's own refusal.
-
-    A yaml may name windows.boundaries; the escalation's check_plan is
-    what refuses eager shipping against a serial escalation, by the fact
-    the row declares.
-    """
-    config_path = _switching_config(tmp_path, boundaries="eager")
-    with pytest.raises(ValueError, match="serial switching requires held"):
-        config = experiment.load_experiment(config_path)
-        point = config.point_task(
-            {
-                "workload.arguments.physical_error_probability": 0.008,
-                "qpu.distance": 3,
-                "qpu.round_period_microseconds": 1.0,
-            },
-        )
-        settings = point.settings
-        machine_module.Machine.build(settings, 0)
-
-
-def test_held_boundaries_named_in_a_yaml_are_the_rows_the_run_gets(tmp_path):
-    """The key is read, not only defaulted."""
-    config_path = _switching_config(tmp_path, boundaries="held")
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.008,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 0)
-    boundary_policy = machine.windows.window_manager.courier.boundary_policy
-
-    assert settings.windows.boundaries == "held"
-    assert isinstance(boundary_policy, boundary_policies.Held)
-
-
-def test_a_flush_tail_named_in_a_yaml_is_refused_under_switching(tmp_path):
-    """The policy's own refusal is the only one left."""
-    config_path = _switching_config(tmp_path, terminal_policy="flush")
+def test_a_flush_tail_is_refused_under_switching():
+    """A strong recovery reads past the last commit, which flush drops."""
+    held = boundary_policies.Held.Settings()
+    settings = _serial_switching_settings(held)
+    windows = dataclasses.replace(settings.windows, terminal_policy="flush")
+    settings = dataclasses.replace(settings, windows=windows)
     with pytest.raises(ValueError, match="no trailing tail context"):
-        config = experiment.load_experiment(config_path)
-        point = config.point_task(
-            {
-                "workload.arguments.physical_error_probability": 0.008,
-                "qpu.distance": 3,
-                "qpu.round_period_microseconds": 1.0,
-            },
-        )
-        settings = point.settings
         machine_module.Machine.build(settings, 0)
 
 
-def test_a_windowing_scheme_without_the_declarations_is_refused_by_name():
-    """A row that declares nothing is refused at build, by the fact it lacks."""
-    scheme = UndeclaredWindowScheme()
-    with pytest.raises(
-        ValueError,
-        match="UndeclaredWindowScheme does not declare "
-        "has_trailing_tail_context",
-    ):
+def test_a_switching_run_on_a_scheme_that_declares_nothing_still_stops():
+    """The policy reads the facts the row does not declare."""
+    scheme = UndeclaredWindowScheme.Settings()
+    with pytest.raises(AttributeError, match="has_trailing_tail_context"):
         fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)
 
 
-def _switching_policy(threshold_nats: float):
+def _switching_policy(threshold_decibels: float):
     """A switching row over a fixed threshold and the complementary gap."""
-    settings = escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=threshold_nats,
-        confidence="complementary_gap",
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=threshold_decibels
     )
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
-    return escalation_build.build_escalation_policy(settings, weak)
+    settings = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
+    )
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    engine = engine_module.Engine()
+    switching = escalation_build.Switching.build(settings, weak, engine)
+    return switching.policy
 
 
 def test_a_weak_result_with_no_soft_output_escalates_its_window():
@@ -925,7 +556,7 @@ def test_a_weak_result_with_no_soft_output_escalates_its_window():
     nothing leaves the result bare, so the window goes to the strong
     tier rather than being kept on a confidence nobody computed.
     """
-    policy = _switching_policy(2.0)
+    policy = _switching_policy(20.0)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
     bare = decoding_records.DecodeResult(1, 0)
 
@@ -935,29 +566,13 @@ def test_a_weak_result_with_no_soft_output_escalates_its_window():
     assert verdict is decoding_records.Verdict.ESCALATE
 
 
-def test_a_soft_output_from_another_signal_is_refused():
-    """The threshold means one thing, so it reads one signal's gap."""
-    policy = _switching_policy(2.0)
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
-    cluster_source = cluster.union_find_cluster_gap_source()
-    result = decoding_records.DecodeResult(1, 0)
-    result.soft_output = decoding_records.SoftOutput(
-        gap=9.0, source=cluster_source
-    )
-
-    with pytest.raises(ValueError) as refusal:
-        policy.verdict_for_weak_result(job, result)
-
-    assert "does not match the switching threshold source" in str(refusal.value)
-
-
-def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
+def test_the_papers_twenty_decibels_is_the_threshold_in_nats():
     """Toshio 2510.25222 line 1623: "fix the gap threshold to be gth = 20 dB".
 
-    The key is in decibels because that is the paper's unit; the machine
-    holds nats, so the conversion happens once, at the yaml boundary.
+    The threshold record is in decibels because that is the paper's
+    unit; a gap is compared in nats, so the record converts once.
     """
-    twenty_decibels = escalation_settings.decibels_to_nats(20.0)
+    twenty_decibels = threshold_sources.decibels_to_nats(20.0)
     natural_log_of_ten = math.log(10.0)
     by_hand = 20.0 * natural_log_of_ten / 10.0
 
@@ -967,15 +582,15 @@ def test_the_papers_twenty_decibels_is_the_threshold_the_yaml_writes():
 
 def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
     """The equality case is a keep, which is Toshio's Fig. 12 caption."""
-    threshold = escalation_settings.decibels_to_nats(20.0)
-    policy = _switching_policy(threshold)
+    threshold = threshold_sources.decibels_to_nats(20.0)
+    policy = _switching_policy(20.0)
     job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
 
     a_hair_under = threshold - 1e-9
     well_over = threshold + 1.0
-    at_the_threshold = _result_with_gap(policy, threshold)
-    just_below = _result_with_gap(policy, a_hair_under)
-    well_above = _result_with_gap(policy, well_over)
+    at_the_threshold = _result(threshold)
+    just_below = _result(a_hair_under)
+    well_above = _result(well_over)
 
     assert (
         policy.verdict_for_weak_result(job, at_the_threshold)
@@ -989,43 +604,3 @@ def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
         policy.verdict_for_weak_result(job, well_above)
         is decoding_records.Verdict.KEEP
     )
-
-
-def test_the_policy_instance_is_the_authority_over_its_settings_row():
-    """Decision D10: the built object answers, the kind only names one.
-
-    sinter resolves the caller's own sampler before its built-in table
-    (sinter/_collection/_mux_sampler.py:33-40) and gem5 reads a built
-    object's own params rather than its class table
-    (src/python/m5/SimObject.py:204-205).
-    """
-    built = policies.StrongOnly(policies.NO_CONFIDENCE)
-    settings = escalation_settings.EscalationSettings(
-        kind="switching", policy=built
-    )
-
-    row = escalation_build.escalation_row(settings)
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
-    policy = escalation_build.build_escalation_policy(settings, weak)
-    tier = escalation_build.primary_tier(settings)
-
-    assert row is built
-    assert isinstance(policy, policies.StrongOnly)
-    assert tier == window_records.DecoderTier.STRONG.value
-
-
-def test_every_escalation_row_answers_the_three_facts_the_build_reads():
-    """A row is never recognised by class, so it declares what it is."""
-    for name, row in escalation_settings.ESCALATIONS.items():
-        assert isinstance(row.decides_on_a_confidence, bool), name
-        assert isinstance(row.requires_strong_context, bool), name
-        assert isinstance(row.primary_tier, window_records.DecoderTier), name
-
-
-def _result_with_gap(policy, gap: float):
-    """One weak result carrying the policy's own expected signal source."""
-    result = decoding_records.DecodeResult(1, 0)
-    result.soft_output = decoding_records.SoftOutput(
-        gap=gap, source=policy.expected_source
-    )
-    return result

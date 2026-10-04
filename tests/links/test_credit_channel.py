@@ -14,12 +14,15 @@ it reduces to. One microsecond is 1_000_000 ticks.
 
 import random
 
+import pytest
+
 import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
 import decsim.links.settings as link_settings
+import decsim.records.transfers as transfer_records
 
 
 def credit_settings(
@@ -30,11 +33,10 @@ def credit_settings(
     latency_ticks,
     clock_period_ticks=1,
 ):
-    row = credit_channel.CreditChannel.Settings(
-        framing, buffer_frames, credit_latency_cycles
-    )
     clock = config.Clock(clock_period_ticks)
-    protocol = link_settings.ProtocolSettings("credit", row, clock)
+    protocol = credit_channel.CreditChannel.Settings(
+        framing, buffer_frames, credit_latency_cycles, clock
+    )
     capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
     return link_settings.ChannelSettings(
         "test", latency_ticks, capacity, "test", protocol
@@ -42,19 +44,18 @@ def credit_settings(
 
 
 def flits(flit_bits):
-    row_settings = framings.Flits.Settings(flit_bits)
-    return link_settings.FramingSettings("flits", row_settings)
+    return framings.Flits.Settings(flit_bits)
 
 
 def whole():
-    return link_settings.FramingSettings("whole")
+    return framings.Whole.Settings()
 
 
 def send_at(engine, channel, tick, payload_bits, setup_ticks, delivered):
     """Send at the tick; the transfer is appended to delivered."""
     delay = tick - engine.now
 
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
 
     def send():
         channel.send(framed, tick, setup_ticks, delivered.append)
@@ -89,6 +90,71 @@ def test_a_frame_waits_for_the_credit_of_the_frame_c_places_before_it():
     assert transfer.serialization_ticks == 500
     assert transfer.queue_wait_ticks == 600
     assert transfer.serializer_end_ticks == 1100
+
+
+def test_a_credit_latency_below_zero_is_refused():
+    """A credit back before its frame lands lets more than C frames fly."""
+    clock = config.Clock(50)
+    hundred_bit_flits = flits(100)
+
+    with pytest.raises(ValueError, match="credit_latency_cycles"):
+        credit_channel.CreditChannel.Settings(hundred_bit_flits, 1, -1, clock)
+
+
+def test_a_buffer_of_no_frames_stops_at_its_first_frame():
+    """With no credit to hold, the first frame has none to wait for."""
+    engine = decsim.engine.Engine()
+    hundred_bit_flits = flits(100)
+    settings = credit_settings(0, 2, hundred_bit_flits, 1_000_000, 300, 50)
+    channel = credit_channel.CreditChannel(settings, engine)
+    send_at(engine, channel, 0, 500, 0, [])
+
+    with pytest.raises(IndexError):
+        engine.run()
+
+
+def test_a_buffer_of_fewer_than_no_frames_stops_the_build():
+    engine = decsim.engine.Engine()
+    hundred_bit_flits = flits(100)
+    settings = credit_settings(-1, 2, hundred_bit_flits, 1_000_000, 300, 50)
+
+    with pytest.raises(ValueError):
+        credit_channel.CreditChannel(settings, engine)
+
+
+def test_a_credit_protocol_with_no_clock_stops_the_build():
+    """The credit latency is cycles, and cycles need a clock."""
+    engine = decsim.engine.Engine()
+    hundred_bit_flits = flits(100)
+    protocol = credit_channel.CreditChannel.Settings(
+        hundred_bit_flits, 2, 2, None
+    )
+    capacity = link_settings.CapacitySettings(1_000_000, "test")
+    settings = link_settings.ChannelSettings(
+        "test", 300, capacity, "test", protocol
+    )
+
+    with pytest.raises(AttributeError):
+        credit_channel.CreditChannel(settings, engine)
+
+
+def test_a_credit_protocol_on_an_unbounded_wire_stops_at_its_first_frame():
+    """A frame has no wire time without a rate, so the first send stops."""
+    engine = decsim.engine.Engine()
+    clock = config.Clock(50)
+    hundred_bit_flits = flits(100)
+    protocol = credit_channel.CreditChannel.Settings(
+        hundred_bit_flits, 2, 2, clock
+    )
+    settings = link_settings.ChannelSettings(
+        "test", 300, None, "test", protocol
+    )
+    channel = credit_channel.CreditChannel(settings, engine)
+    delivered = []
+    send_at(engine, channel, 0, 500, 0, delivered)
+
+    with pytest.raises(AttributeError, match="input_bits_per_microsecond"):
+        engine.run()
 
 
 def test_with_credits_to_spare_whole_frames_cross_as_the_ideal_row_property():
@@ -163,7 +229,7 @@ def test_the_expected_delay_is_the_delay_when_nothing_else_arrives():
     send_at(engine, channel, 0, 300, 0, delivered)
     engine.schedule(10, lambda: None)
     engine.run()
-    framed = channel_module.FramedPayload(500)
+    framed = transfer_records.FramedPayload(500)
     expected = channel.expected_delay_ticks(framed, engine.now, 0)
     send_at(engine, channel, engine.now, 500, 0, delivered)
 

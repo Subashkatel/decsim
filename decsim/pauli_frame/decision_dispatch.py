@@ -1,21 +1,17 @@
 """The frame's end of the frame-to-controller path.
 
-A decision leaves the frame side and lands at the controller, so the
-send is executed here: gem5 bills a transfer to the port it left by
-(gem5 src/mem/coherent_xbar.cc:354-357), and OMNeT++ refuses a module
-that sends a message it does not own (omnetpp-6.1.0
-src/sim/csimplemodule.cc:333-334). The line that
-narrates the dispatch is sourced at the end that executes it. What the
-controller then does with the decision is its own
-(controller/instruction_output.py), reached at the landing.
-
-A card that prices no path has no fabric at all: the decision is then
-available at the controller in the same instant, and only the
-controller's own decision-to-pulse cost stands.
+A decision leaves the frame side, so the send is executed here: gem5
+bills a transfer to the port it left by (src/mem/coherent_xbar.cc:354-357)
+and OMNeT++ refuses a module that sends a message it does not own
+(src/sim/csimplemodule.cc:333-334). A card that prices no path has no
+fabric: the decision is at the controller at once, and only the
+controller's decision-to-pulse cost stands.
 """
 
 import functools
+from collections.abc import Callable
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
@@ -30,10 +26,14 @@ class DecisionDispatch:
     link = ports.Port(ports.Link, optional=True)
     instruction_output = ports.Port(ports.InstructionReceiver)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
 
-    def dispatch_decision(self, decision, deliver) -> None:
+    def dispatch_decision(
+        self,
+        decision: program_records.Decision,
+        deliver: Callable[[program_records.Decision], None],
+    ) -> None:
         """Send one decision to the controller; deliver runs at the QPU."""
         self._log_dispatch(decision)
         landed = functools.partial(self._at_the_controller, decision, deliver)

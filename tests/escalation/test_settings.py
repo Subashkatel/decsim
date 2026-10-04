@@ -1,50 +1,62 @@
-"""Escalation control stages use gem5's integer cycles and named domains."""
+"""The switching slot's record and the decoder slots it switches between.
 
-import math
+SwitchingSettings (decsim/escalation/settings.py) is Toshio et al.
+2510.25222 Sec. III A's switch, weak first and strong on low
+confidence; MachineSettings (decsim/settings.py) holds the two decoder
+slots. The laws here are the slot's own refusals and the build's stop
+when a slot it needs is empty.
+"""
+
+import dataclasses
 
 import pytest
 
-import decsim.config as config
+import decsim.confidence.complementary as complementary
+import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.threshold_sources as threshold_sources
+import decsim.machine as machine_module
+import decsim.settings as machine_settings
+import tests.escalation.test_strong_window_shapes as shape_tests
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
-def test_switching_reads_both_cycle_costs_on_the_named_clock():
-    clocks = config.ClockSettings({"decisions": 125.0})
-    section = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "clock": "decisions",
-        "threshold_cycles": 3,
-        "switch_cycles": 4,
-    }
-    settings = escalation_settings.EscalationSettings.from_yaml(section, clocks)
-    assert settings.clock.period_ticks == 8000
-    assert settings.threshold_cycles == 3
-    assert settings.switch_cycles == 4
-
-
-def test_an_unnamed_escalation_clock_uses_the_controller_clock():
-    clocks = config.ClockSettings({})
-    controller_clock = config.Clock(123)
-    settings = escalation_settings.EscalationSettings.from_yaml(
-        {}, clocks, default_clock=controller_clock
+def _switching(**changes) -> escalation_settings.SwitchingSettings:
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
     )
-    assert settings.clock is controller_clock
-    assert settings.threshold_cycles == 0
-    assert settings.switch_cycles == 0
-
-
-def test_a_charged_escalation_cost_needs_its_clock():
-    with pytest.raises(
-        ValueError, match="charged escalation costs need a clock"
-    ):
-        escalation_settings.EscalationSettings(threshold_cycles=1)
-
-
-def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
-    """Decibels are 10 log10 of the ratio, the weight its natural log."""
-    weight_nats = math.log(100.0)
-
-    assert escalation_settings.nats_to_decibels(weight_nats) == pytest.approx(
-        20.0
+    return escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold, **changes
     )
+
+
+def test_a_switching_record_refuses_a_cost_by_its_own_field():
+    with pytest.raises(ValueError, match="threshold_cycles"):
+        _switching(threshold_cycles=-1)
+
+
+def test_two_decoders_without_switching_are_refused():
+    """With no switching every window decodes on one decoder.
+
+    The strong decoder would be built and never handed a window, so the
+    run would go on as if it were not there.
+    """
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    pool = decoder_settings.DecoderPoolSettings(algorithm=matching)
+
+    with pytest.raises(ValueError, match="both set and switching is not"):
+        machine_settings.MachineSettings(weak_decoder=pool, strong_decoder=pool)
+
+
+@pytest.mark.parametrize("empty_slot", ["weak_decoder", "strong_decoder"])
+def test_switching_with_an_empty_decoder_slot_still_stops(empty_slot):
+    """No weak tier stops the build; no strong tier, the first escalation."""
+    settings = shape_tests.gate_switching()
+    one_decoder = dataclasses.replace(settings, **{empty_slot: None})
+
+    with pytest.raises(AttributeError):
+        machine = machine_module.Machine.build(one_decoder, 0)
+        machine.run()

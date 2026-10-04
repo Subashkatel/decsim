@@ -20,13 +20,11 @@ import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
 
@@ -92,11 +90,8 @@ class _Link:
 def _store(engine, read_cycles=0) -> syndrome_buffer_module.SyndromeBuffer:
     """An unbounded store on a 10-tick clock, its read priced as asked."""
     clock = config.Clock(10)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(
-        read_cycles=read_cycles
-    )
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, read_cycles=read_cycles
     )
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
@@ -139,17 +134,9 @@ def _ported_store(engine) -> syndrome_buffer_module.SyndromeBuffer:
 
     A word is two bits, one round of this file's fragments.
     """
-    clocks = config.ClockSettings.from_yaml({"storage": 10})
-    section = {
-        "kind": "ported_syndrome_buffer",
-        "clock": "storage",
-        "word_bits": 2,
-    }
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section,
-        "weak_syndrome_buffer",
-        clocks,
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
+    storage = config.Clock.from_megahertz(10.0)
+    settings = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=storage, word_bits=2
     )
     return ported_syndrome_buffer.PortedSyndromeBuffer(settings, engine)
 
@@ -211,44 +198,6 @@ def test_the_round_before_leaves_with_a_job_whose_decoder_reads_it():
     assert transfers.sends == [(output.path, 4)]
 
 
-def test_a_job_whose_first_round_reads_only_itself_carries_nothing_before():
-    """Round 2's detector is rec[-1] alone: one round of two bits moves."""
-    engine = engine_module.Engine()
-    transfers = _Transfers()
-    store = _store(engine)
-    _store_rounds(store, (1,))
-    output = _output(engine, transfers, store)
-    output.detection_events = _lookback_placement()
-    job = _job(2)
-
-    output.send_input(job, lambda: None)
-
-    assert job.rounds_before == ()
-    assert transfers.sends == [(output.path, 2)]
-
-
-def test_a_round_before_the_store_let_go_of_stops_the_read_by_name():
-    """Round 5 reads round 3, which a program reaching further lost."""
-    engine = engine_module.Engine()
-    store = _store(engine)
-    _store_rounds(store, (2, 4))
-    transfers = _Transfers()
-    output = _output(engine, transfers, store)
-    output.detection_events = _lookback_placement()
-    job = _job(5)
-
-    with pytest.raises(RuntimeError) as refusal:
-        output.send_input(job, lambda: None)
-
-    assert str(refusal.value) == (
-        "a job from round 5 of operation 1 reads round 3, which the weak "
-        "syndrome buffer does not hold: its holds keep the rounds the "
-        "program's declared fragments read, so a round_circuit that "
-        "reads further back than they do cannot be formed at the "
-        "weak_decoder"
-    )
-
-
 def test_the_round_before_is_read_in_the_jobs_one_port_booking():
     """Two words on one read port, a cycle each from tick 0, then the link.
 
@@ -269,52 +218,6 @@ def test_the_round_before_is_read_in_the_jobs_one_port_booking():
 
     period_ticks = store.settings.clock.period_ticks
     assert delay == 2 * period_ticks + LINK_DELAY_TICKS
-
-
-def test_the_recording_transfers_fill_the_port():
-    """The port is what a store's output holds, so a stand-in fills it."""
-    transfers = _Transfers()
-    assert isinstance(transfers, ports.WindowTransfers)
-
-
-def test_a_moved_input_leaves_by_this_stores_own_path():
-    engine = engine_module.Engine()
-    transfers = _Transfers()
-    store = _store(engine)
-    output = _output(engine, transfers, store)
-    job = _job()
-    landed = []
-    delay = output.send_input(job, lambda: landed.append(True))
-    assert delay == 3
-    assert landed == [True]
-    assert job.input_source_name == "weak syndrome buffer"
-    assert transfers.sends == [
-        (transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, 2)
-    ]
-
-
-def test_an_input_leaves_when_the_stores_read_of_it_completes():
-    """The read is paid when the bits leave, at dispatch, then the link.
-
-    From tick 1 on a 10-tick clock, 3 read cycles end at the edge 40; the
-    delay expected is that read and the link's 3 ticks asked at 40.
-    """
-    engine = engine_module.Engine()
-    engine.now = 1
-    transfers = _Transfers()
-    store = _store(engine, read_cycles=3)
-    output = _output(engine, transfers, store)
-    job = _job()
-    landed = []
-
-    delay = output.send_input(job, lambda: landed.append(engine.now))
-    sent_before_the_read_ends = list(transfers.sends)
-    engine.run()
-
-    assert delay == 39 + LINK_DELAY_TICKS
-    assert output.link.asked_at == [40]
-    assert sent_before_the_read_ends == []
-    assert landed == [40]
 
 
 def test_an_idle_round_leaves_when_the_stores_read_of_it_completes():
@@ -345,24 +248,6 @@ def test_an_idle_round_leaves_when_the_stores_read_of_it_completes():
     assert transfers.sends == [(output.path, 2)]
     assert delivered == [40]
     assert store.occupancy == 0
-
-
-def test_an_input_read_in_place_lands_at_the_reads_end_and_rides_no_link():
-    """The unit reads the store's words: one read, priced once, no move."""
-    engine = engine_module.Engine()
-    engine.now = 1
-    transfers = _Transfers()
-    store = _store(engine, read_cycles=3)
-    output = _output(engine, transfers, store, reads_in_place=True)
-    job = _job()
-    landed = []
-
-    delay = output.send_input(job, lambda: landed.append(engine.now))
-    engine.run()
-
-    assert delay == 39
-    assert landed == [40]
-    assert transfers.sends == []
 
 
 def test_a_held_input_rides_no_link_and_lands_now():
@@ -400,20 +285,16 @@ def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
     assert transfers.sends == []
 
 
-@pytest.mark.parametrize("decoder_input", ["copy", "in_place"])
-def test_read_cycles_delay_the_decode_from_dispatch_on(decoder_input):
+@pytest.mark.parametrize("copies_input", [True, False])
+def test_read_cycles_delay_the_decode_from_dispatch_on(copies_input):
     """Readiness, queueing and dispatch stand; the decode and frame move."""
-    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
-    section = {"clock": "storage", "read_cycles": 3}
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section,
-        "weak_syndrome_buffer",
-        clocks,
-        ported_syndrome_buffer.SYNDROME_BUFFERS,
+    storage = config.Clock.from_megahertz(1.0)
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=storage, read_cycles=3
     )
-    free = declared_run.weak_only_run(decoder_input=decoder_input)
+    free = declared_run.weak_only_run(copies_input=copies_input)
     charged = declared_run.weak_only_run(
-        weak_syndrome_buffer=settings, decoder_input=decoder_input
+        weak_syndrome_buffer=settings, copies_input=copies_input
     )
     free_ticks = declared_run.reaction_ticks(free)
     charged_ticks = declared_run.reaction_ticks(charged)

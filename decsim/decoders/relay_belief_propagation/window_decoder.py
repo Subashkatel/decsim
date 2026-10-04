@@ -1,14 +1,12 @@
 """Relay-BP over one placed physical window model.
 
 The official relay-bp package (Maurer et al. 2510.21600, the qLDPC
-real-time baseline; the bb-decoders extra) is compiled once per
-distinct model with a fixed gamma table drawn from the run seed, and
-decode_detailed is called once per syndrome. The paper assumes
-0 < p < 1/2; this adapter also accepts exactly p = 1/2 as a tested
-software-profile extension with a zero prior log ratio. Decided,
-majority-one and non-finite priors are refused instead of silently
-transformed. Backend wall time is diagnostic only and never becomes
-simulated time.
+real-time baseline; the bb-decoders extra) is compiled once per distinct
+model with a fixed gamma table drawn from the run seed, and
+decode_detailed is called once per syndrome. The paper assumes 0 < p <
+1/2; this adapter also accepts p = 1/2, with a zero prior log ratio.
+Decided, majority-one and non-finite priors are refused rather than
+silently transformed. Backend wall time never becomes simulated time.
 """
 
 import dataclasses
@@ -24,8 +22,8 @@ import scipy.sparse
 
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.seeding as seeding
 
 if TYPE_CHECKING:
@@ -47,19 +45,20 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         self, settings: "relay_decoder.RelayBeliefPropagationDecoder.Settings"
     ) -> None:
         self.settings = settings
-        self._initialize_run_seed_binding(None)
+        seeding._AtomicRunSeedConsumer.__init__(self, None)
         self._effective_gamma_table_seed = None
         self._thread_state = threading.local()
 
     def decode(
-        self, window_model, syndrome
+        self,
+        window_model: fault_models.WindowErrorModel,
+        syndrome: numpy.ndarray,
     ) -> backend_outcome.BackendDecodeOutcome:
         """Call the official detailed API once and snapshot its evidence."""
         faults = window_model.require_faults(
             fault_models.FaultRepresentation.PHYSICAL
         )
-        detector_count = faults.check.shape[0]
-        syndrome = _validated_syndrome(syndrome, detector_count)
+        syndrome = _validated_syndrome(syndrome)
         compiled = self.compiled_model(faults)
         if faults.check.shape[1] == 0:
             return backend_outcome.empty_fault_model_outcome(syndrome)
@@ -73,13 +72,14 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
     def _install_run_seed_state(self, prepared_state) -> None:
         self._effective_gamma_table_seed = prepared_state
 
-    def compiled_model(self, faults) -> "_CompiledRelayModel":
+    def compiled_model(
+        self, faults: fault_models.PlacedFaultModel
+    ) -> "_CompiledRelayModel":
         """The backend for one check matrix and priors, built once.
 
-        A shot builds each window afresh, but its windows repeat a few
-        shapes, so the backend is kept by the model's content, not by
-        the object. With the fixed gamma table a kept backend answers
-        each syndrome as a fresh one does.
+        A shot's windows repeat a few shapes, so the backend is kept by
+        the model's content; with the fixed gamma table a kept backend
+        answers each syndrome as a fresh one does.
         """
         cache = self._thread_cache()
         key = _model_key(faults)
@@ -111,12 +111,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
 
     def _gamma_seed(self) -> int:
         with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    "RelayBeliefPropagationWindowDecoder cannot compile while "
-                    "a run-seed reservation is pending"
-                )
-            self._stochastic_use_started = True
+            self._begin_draw()
             if self._effective_gamma_table_seed is None:
                 self._effective_gamma_table_seed = secrets.randbits(64)
             return self._effective_gamma_table_seed
@@ -192,14 +187,8 @@ class _NonbinaryCorrectionError(ValueError):
 
 
 def _load_relay_decoder_type():
-    try:
-        import relay_bp
-    except ImportError as error:
-        raise ImportError(
-            "Relay-BP decoding requires the optional official "
-            "dependency `relay-bp`; install that package before selecting "
-            "RelayBeliefPropagationWindowDecoder"
-        ) from error
+    import relay_bp
+
     return relay_bp.RelayDecoderF32
 
 
@@ -255,15 +244,11 @@ def _validated_model(faults) -> tuple:
     """(check, priors) of a model the paper's assumptions hold for."""
     check = faults.check
     priors = numpy.asarray(faults.priors, dtype=float)
-    if len(check.shape) != 2:
-        raise ValueError("Relay check matrix must be two-dimensional")
     is_zero = check.data == 0
     is_one = check.data == 1
     is_bit = is_zero | is_one
     if not numpy.all(is_bit):
         raise ValueError("Relay check matrix must be binary")
-    if priors.ndim != 1 or priors.shape[0] != check.shape[1]:
-        raise ValueError("Relay priors must align with physical fault columns")
     for column_index, probability in enumerate(priors):
         if not math.isfinite(probability) or not 0 < probability <= 0.5:
             raise ValueError(
@@ -273,10 +258,8 @@ def _validated_model(faults) -> tuple:
     return check, priors.astype(numpy.float64)
 
 
-def _validated_syndrome(syndrome, detector_count: int):
+def _validated_syndrome(syndrome):
     syndrome = numpy.asarray(syndrome)
-    if syndrome.ndim != 1 or syndrome.shape[0] != detector_count:
-        raise ValueError("Relay syndrome arity does not match detector rows")
     is_zero = syndrome == 0
     is_one = syndrome == 1
     is_bit = is_zero | is_one

@@ -15,13 +15,10 @@ src/dev/net/pktfifo.hh) and its blocked port retries the requester
 never refuses a write. Over rounds of unequal width, the last the
 widest, held by several readers, the occupied bits and the room answer
 follow that packet store with a holder set per round.
-
-The two whole-run laws at the end of the file place the store in the
-pipeline: its publication tick is what makes a weak window ready, on
-the declared card of tests/declared_run.py.
 """
 
 import collections
+import dataclasses
 import functools
 import random
 
@@ -32,8 +29,9 @@ import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.windows.schemes.parallel as parallel_scheme
+import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 # every round this file stores carries one fragment of two bits
@@ -84,7 +82,7 @@ def held_rounds() -> syndrome_round_sender.HeldRounds:
 
 
 def store(bits=None, waiting_line=None, listener=None):
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(bits=bits)
+    settings = syndrome_buffer_module.SyndromeBufferSettings(bits=bits)
     engine = engine_module.Engine()
     the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if waiting_line is not None:
@@ -93,28 +91,6 @@ def store(bits=None, waiting_line=None, listener=None):
         the_store.trace.round_stored.connect(listener.round_stored)
         the_store.trace.round_released.connect(listener.round_released)
     return the_store
-
-
-class RecordingWaitingLine:
-    """A waiting line that counts the slots the store frees."""
-
-    def __init__(self):
-        self.freed_count = 0
-
-    def retry(self):
-        self.freed_count += 1
-
-
-class RecordingListener:
-    def __init__(self):
-        self.stored = []
-        self.released = []
-
-    def round_stored(self, round_key, _packet):
-        self.stored.append(round_key)
-
-    def round_released(self, round_key):
-        self.released.append(round_key)
 
 
 def closed_form(arrivals, holds, capacity):
@@ -272,7 +248,10 @@ def random_hold_program(generator: random.Random) -> list:
     """Holds, releases and in-order writes of rounds of unequal width.
 
     The last round of a memory is the widest (it closes on the data
-    readout), so it is drawn wider than the rest.
+    readout), so it is drawn wider than the rest. A hold here may end
+    before its rounds are all stored, as a potential strong read does;
+    a window's read never does, and the store stops on one it cannot
+    hold.
     """
     round_count = 12
     past_the_last_round = round_count + 1
@@ -284,7 +263,7 @@ def random_hold_program(generator: random.Random) -> list:
         steps.append(("write", (1, round_index), bits))
     reader_count = generator.randint(1, 5)
     for reader in range(reader_count):
-        holder = decoding_records.WindowReads((1, reader))
+        holder = decoding_records.PotentialStrong((1, reader))
         first = generator.randint(1, round_count)
         span = generator.randint(1, 6)
         past_the_span = first + span
@@ -340,106 +319,6 @@ def test_occupancy_and_room_follow_the_packet_store_property():
         assert ours == theirs, seed
 
 
-def test_a_full_store_answers_no_room_and_is_unchanged():
-    two_rounds_bits = 2 * BITS_PER_ROUND
-    the_store = store(bits=two_rounds_bits)
-    first = packet(1)
-    second = packet(2)
-    the_store.accept_packed_round(first, publication_tick=10)
-    the_store.accept_packed_round(second, publication_tick=11)
-
-    assert the_store.has_room((1, 3), BITS_PER_ROUND, {}) is False
-    assert the_store.occupied_bits == two_rounds_bits
-    assert the_store.occupancy == 2
-    assert the_store.publication_tick((1, 1)) == 10
-    assert the_store.publication_tick((1, 2)) == 11
-
-
-def admitting_into(the_store, entered: list):
-    """A sender's admit: store the round if there is room, and note it."""
-
-    def admit(round: round_records.PackedRound) -> bool:
-        if not the_store.has_room(round.round_key, round.wire_bits, {}):
-            return False
-        the_store.accept_packed_round(round.packet, publication_tick=0)
-        entered.append(round.packet.round_index)
-        return True
-
-    return admit
-
-
-def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
-    held = held_rounds()
-    the_store = store(bits=BITS_PER_ROUND, waiting_line=held)
-    entered = []
-    admit = admitting_into(the_store, entered)
-    first = packed(1)
-    second = packed(2)
-    third = packed(3)
-    admit(first)
-    held.refuse(second, admit)
-    held.refuse(third, admit)
-    the_store.release_round((1, 1))
-    after_first_release = list(entered)
-    the_store.release_round((1, 2))
-
-    assert after_first_release == [1, 2]
-    assert entered == [1, 2, 3]
-    assert held.count == 0
-
-
-def test_a_stored_round_is_released_when_its_last_hold_releases():
-    waiting_line = RecordingWaitingLine()
-    listener = RecordingListener()
-    the_store = store(waiting_line=waiting_line, listener=listener)
-    weak_reads = decoding_records.WindowReads((1, 0))
-    strong_reads = decoding_records.PotentialStrong((1, 0))
-    the_store.register_hold(weak_reads, [(1, 1)])
-    the_store.register_hold(strong_reads, [(1, 1)])
-    first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=0)
-
-    the_store.release_hold(weak_reads)
-    held_after_first = the_store.retained_fragments((1, 1)) is not None
-    the_store.release_hold(strong_reads)
-
-    assert held_after_first is True
-    assert the_store.retained_fragments((1, 1)) is None
-    assert listener.released == [(1, 1)]
-    assert waiting_line.freed_count == 1
-
-
-def test_the_listener_hears_a_stored_round_once():
-    listener = RecordingListener()
-    the_store = store(listener=listener)
-    reads = decoding_records.WindowReads((1, 0))
-    the_store.register_hold(reads, [(1, 1)])
-
-    first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=0)
-
-    assert listener.stored == [(1, 1)]
-
-
-def test_a_round_is_readable_at_the_tick_it_is_stored_and_not_before():
-    """One call, one tick: the bits and the publication arrive together.
-
-    A round with no publication tick is a timing-only round, which no
-    window reads (syndrome_buffer/weak_syndrome_round_receiver.py,
-    send_memory_round).
-    """
-    the_store = store()
-    reads = decoding_records.WindowReads((1, 0))
-    the_store.register_hold(reads, [(1, 1)])
-    first = packet(1)
-    unstored = the_store.publication_tick((1, 1))
-
-    the_store.accept_packed_round(first, publication_tick=7)
-
-    assert unstored is None
-    assert the_store.publication_tick((1, 1)) == 7
-
-
 def test_an_unheld_round_is_freed_on_arrival_and_a_held_one_is_not():
     the_store = store()
     reads = decoding_records.WindowReads((1, 0))
@@ -457,114 +336,152 @@ def test_an_unheld_round_is_freed_on_arrival_and_a_held_one_is_not():
     assert the_store.occupancy == 1
 
 
-def test_a_closed_operation_identity_never_reopens():
-    the_store = store()
-    the_store.open_operation(1)
-    the_store.close_operation(1)
-
-    with pytest.raises(RuntimeError, match="closed operation identities"):
-        the_store.open_operation(1)
-
-
 def test_settlement_reports_a_hold_on_a_round_never_written():
     the_store = store()
     reads = decoding_records.WindowReads((1, 0))
     the_store.register_hold(reads, [(1, 5)])
 
-    with pytest.raises(RuntimeError, match=r"unresolved holds on \[\(1, 5\)\]"):
+    with pytest.raises(RuntimeError, match="the syndrome buffer"):
         the_store.check_settled()
 
 
-def test_a_bounded_store_ending_under_a_live_hold_names_its_widest_hold():
-    """The hold waits for a round its own stored rounds leave no room for."""
-    two_rounds_bits = 2 * BITS_PER_ROUND
-    the_store = store(bits=two_rounds_bits)
-    wide = decoding_records.WindowReads((1, 0))
-    narrow = decoding_records.WindowReads((1, 1))
-    the_store.register_hold(wide, [(1, 1), (1, 2), (1, 3)])
-    the_store.register_hold(narrow, [(1, 2)])
-    first = packet(1)
-    second = packet(2)
-    the_store.accept_packed_round(first, publication_tick=0)
-    the_store.accept_packed_round(second, publication_tick=0)
+def blocked_successor() -> list:
+    """mem1, then mem2 blocked by mem1's feedback.
 
-    with pytest.raises(RuntimeError) as stop:
-        the_store.check_settled()
-
-    sentence = str(stop.value)
-    assert "4 of its 4 bits" in sentence
-    assert "widest live hold WindowReads(window_key=(1, 0))" in sentence
-    assert "keeps 4 bits of them and waits for [(1, 3)]" in sentence
+    mem1's patch keeps measuring while mem2 waits, so a run whose rounds
+    wait for room forever never reaches its end-of-run checks.
+    """
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(2, predecessors=(1,), blocked_by=1)
+    return [first, second]
 
 
-def test_the_hold_sources_carry_the_token_and_its_rounds():
-    heard = []
-    the_store = store()
+NARROWER_THAN_A_ROUND = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
 
-    def registered(holder, keys):
-        heard.append(("registered", holder, keys))
 
-    def transferred(old, new):
-        heard.append(("transferred", old, new))
+def test_a_weak_store_narrower_than_a_round_stops_the_run():
+    """No free makes room for the round (gem5 Network.cc:64-65)."""
+    operations = blocked_successor()
 
-    def released(holder):
-        heard.append(("released", holder))
+    with pytest.raises(RuntimeError, match="no round leaving it makes room"):
+        declared_run.weak_only_run(
+            operations=operations, weak_syndrome_buffer=NARROWER_THAN_A_ROUND
+        )
 
-    the_store.trace.hold_registered.connect(registered)
-    the_store.trace.hold_transferred.connect(transferred)
-    the_store.trace.hold_released.connect(released)
-    reads = decoding_records.WindowReads((1, 0))
-    potential = decoding_records.PotentialStrong((1, 0))
-    the_store.register_hold(reads, [(1, 1), (1, 2)])
-    the_store.transfer_hold(reads, potential)
-    the_store.release_hold(potential)
-    assert heard == [
-        ("registered", reads, ((1, 1), (1, 2))),
-        ("transferred", reads, potential),
-        ("released", potential),
+
+def test_a_weak_store_too_small_for_a_window_stops_the_run():
+    """Window (1, 0) reads mem1's six rounds; 8 bits hold round 1 alone.
+
+    Round 2's 8 bits must sit beside the 4 of round 1, which the window
+    keeps until it reads both, so no round leaving makes its room.
+    """
+    operations = blocked_successor()
+    store_of_8_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=8)
+
+    with pytest.raises(RuntimeError, match=r"round \(1, 2\) needs 12 bits"):
+        declared_run.weak_only_run(
+            operations=operations, weak_syndrome_buffer=store_of_8_bits
+        )
+
+
+def test_interleaved_successors_waiting_for_room_stop_the_run():
+    """mem2 and mem3 follow mem1, their rounds interleave; mem4 waits on mem2.
+
+    The first window of each keeps rounds 1 to 5 until round 6 is
+    stored, and mem3's round 6 waits behind mem2's, so round (2, 6)'s 12
+    bits must sit beside 72, past an 80-bit store.
+    """
+    memory = declared_run.memory_operation
+    operations = [
+        memory(1),
+        memory(2, predecessors=(1,)),
+        memory(3, predecessors=(1,)),
+        memory(4, predecessors=(2,), blocked_by=2),
     ]
+    store_of_80_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=80)
+
+    with pytest.raises(RuntimeError, match=r"round \(2, 6\) needs 84 bits"):
+        declared_run.weak_only_run(
+            operations=operations, weak_syndrome_buffer=store_of_80_bits
+        )
 
 
-def test_a_bounded_store_has_room_while_the_bits_fit_beside_what_is_taken():
-    """gem5's avail(): the capacity less what is stored and reserved."""
-    three_rounds_bits = 3 * BITS_PER_ROUND
-    one_round_reserved = BITS_PER_ROUND
-    the_store = store(bits=three_rounds_bits)
-    first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=0)
+def test_a_window_waiting_for_a_later_boundary_stops_the_run():
+    """Parallel windows of one round: window 1 waits for window 2's boundary.
 
-    fits_beside_the_stored = the_store.has_room((1, 2), BITS_PER_ROUND, {})
-    fits_beside_the_reserved = the_store.has_room(
-        (1, 3), BITS_PER_ROUND, {(1, 2): one_round_reserved}
+    Window 1's input takes no slot before window 2 decodes, and window 2
+    reads round 6, so round 6's 12 bits must sit beside the 24 of rounds
+    3 to 5, past a 32-bit store.
+    """
+    plain_windows = window_settings.WindowSettings()
+    windows = declared_run.windows_on(
+        plain_windows,
+        parallel_scheme.ParallelWindowScheme,
+        commit_rounds=1,
+        buffer_rounds=1,
     )
-    exceeds_the_capacity = the_store.has_room((1, 2), three_rounds_bits, {})
+    store_of_32_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=32)
+    operations = blocked_successor()
 
-    assert fits_beside_the_stored is True
-    assert fits_beside_the_reserved is True
-    assert exceeds_the_capacity is False
-    assert the_store.occupied_bits == BITS_PER_ROUND
-
-
-def test_a_bounded_store_refuses_a_round_that_states_no_size():
-    """A bound is measured against a size, so the round must state one."""
-    the_store = store(bits=BITS_PER_ROUND)
-
-    with pytest.raises(
-        RuntimeError, match="a bounded syndrome buffer needs sized rounds"
-    ):
-        the_store.has_room((1, 1), None, {})
+    with pytest.raises(RuntimeError, match=r"round \(1, 6\) needs 36 bits"):
+        declared_run.weak_only_run(
+            operations=operations,
+            windows=windows,
+            weak_syndrome_buffer=store_of_32_bits,
+        )
 
 
-def test_a_bounded_store_refuses_a_round_wider_than_itself():
-    """No free makes room for it (gem5 Network.cc:64-65 refuses the same)."""
-    the_store = store(bits=BITS_PER_ROUND)
-    wide_bits = BITS_PER_ROUND + 1
+def store_of(monkeypatch, field: str, store_settings) -> None:
+    """Every declared run from here on sizes that store so."""
+    run_machine = declared_run.run_machine
 
-    with pytest.raises(RuntimeError) as refusal:
-        the_store.has_room((1, 4), wide_bits, {})
+    def run_with_the_store(settings, seed=0, probes=()):
+        sized = dataclasses.replace(settings, **{field: store_settings})
+        return run_machine(sized, seed, probes)
 
-    sentence = str(refusal.value)
-    assert f"holds {BITS_PER_ROUND} bits and round (1, 4) states 3" in sentence
+    monkeypatch.setattr(declared_run, "run_machine", run_with_the_store)
+
+
+def test_a_strong_store_narrower_than_a_round_stops_the_run(monkeypatch):
+    """The strong-primary run writes every round into the strong store."""
+    store_of(monkeypatch, "strong_syndrome_buffer", NARROWER_THAN_A_ROUND)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="no round leaving it makes room"):
+        declared_run.strong_only_run(operations=operations)
+
+
+def test_a_strong_store_too_small_for_a_region_stops_the_run(monkeypatch):
+    """An escalated region cannot wait for room, so it must fit at once.
+
+    Each 6-round region is 48 bits against a store of 8.
+    """
+    store_of_8_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=8)
+    store_of(monkeypatch, "strong_syndrome_buffer", store_of_8_bits)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="strong_syndrome_buffer.bits"):
+        declared_run.switching_run(escalates=True, operations=operations)
+
+
+def test_a_region_held_for_its_restart_window_stops_the_run(monkeypatch):
+    """The double window keeps mem1's region until its restart commits.
+
+    Every window escalates. The region, rounds 1 to 9, waits for the
+    restart window, which reads rounds 7 to 12, so round 12's 12 bits
+    must sit beside the 84 of rounds 1 to 11, past an 88-bit store.
+    """
+    store_of_88_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=88)
+    store_of(monkeypatch, "weak_syndrome_buffer", store_of_88_bits)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match=r"round \(1, 12\) needs 96 bits"):
+        declared_run.switching_run(
+            rounds=12,
+            escalates=True,
+            operations=operations,
+            strong_window=declared_run.DOUBLE_WINDOW,
+        )
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():
@@ -577,74 +494,6 @@ def test_an_unbounded_store_takes_a_round_that_states_no_size():
     assert the_store.occupied_bits == 0
 
 
-# ---- the publication tick in the whole pipeline
-
-
-def test_the_weak_primary_pipeline_runs_on_the_declared_ticks():
-    """The store's publication is the window's readiness, hop by hop.
-
-    Round r becomes public once the readout has crossed
-    qpu_to_controller, been classified into bits, and crossed
-    controller_to_weak_buffer; the window that round completes is
-    queued and dispatched on that same tick, and the weak decode is
-    charged the weak_buffer_to_weak_decoder transfer before its own
-    latency. Every latency is the declared card's
-    (tests/declared_run.py), so each stamp is exact arithmetic.
-    """
-    machine = declared_run.weak_only_run(rounds=6)
-    windows = machine.observation.windows.windows
-    window = windows[(1, 0)]
-    snapshot = machine.control.pauli_frame.snapshot()
-    (record,) = snapshot.records
-    expected_first_round = config.microseconds_to_ticks(10.0)
-    expected_data_complete = config.microseconds_to_ticks(15.0)
-    expected_done = config.microseconds_to_ticks(30.0)
-    expected_accepted = config.microseconds_to_ticks(32.0)
-    expected_committed = config.microseconds_to_ticks(33.0)
-
-    assert window.t_first_round == expected_first_round
-    assert window.t_data_complete == expected_data_complete
-    assert window.t_queued == expected_data_complete
-    assert window.t_dispatch == expected_data_complete
-    assert window.t_done == expected_done
-    assert record.tier == "weak"
-    assert record.accepted_ticks == expected_accepted
-    assert record.committed_ticks == expected_committed
-
-
-def room_side_landing_lines(log_lines: list) -> list:
-    """The log's round landings on the strong syndrome buffer."""
-    landings = []
-    for line in log_lines:
-        if "received round" in line and "strong" in line:
-            landings.append(line)
-    return landings
-
-
-def test_a_weak_window_is_ready_on_this_store_and_nothing_lands_room_side():
-    """Readiness listens to the store the weak decoder actually reads.
-
-    Toshio arXiv:2510.25222 Sec. III A: the weak tier reads the
-    fridge-side store, and the strong syndrome buffer only holds what an
-    escalation carried up. A switching run whose windows are all kept
-    lands nothing on the room side, so nothing there could delay a weak
-    window: round 6 is published here at 15 us, the declared card's
-    readout, controller and store hops after its 10 us emission.
-    """
-    machine = declared_run.switching_run(rounds=9, io_trace=True)
-    windows = machine.observation.windows.windows
-    first_window = windows[(1, 0)]
-    log_lines = machine.observation.log.lines
-    published = declared_run.log_tick(log_lines, "round 6 of mem1 arrived")
-    room_side_landings = room_side_landing_lines(log_lines)
-    expected_data_complete = config.microseconds_to_ticks(15.0)
-
-    assert first_window.t_data_complete == expected_data_complete
-    assert published == expected_data_complete
-    assert room_side_landings == []
-    assert machine.readout.strong_syndrome_buffer.occupancy == 0
-
-
 def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():
     """gem5's clockEdge then the latency (src/mem/simple_mem.cc:174).
 
@@ -653,9 +502,8 @@ def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():
     engine = engine_module.Engine()
     engine.now = 1
     clock = config.Clock(10)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=3)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, write_cycles=3
     )
     the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
 

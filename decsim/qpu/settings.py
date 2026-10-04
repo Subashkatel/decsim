@@ -1,12 +1,7 @@
-"""The QPU's settings, and the magic state factory that feeds it.
-
-The QPU has a cycle, a code card and a syndrome source; the factory
-supplies its non-Clifford operations with states.
-"""
+"""The QPU's settings, and the magic state factory that feeds it."""
 
 import dataclasses
-from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Optional, Union
 
 import decsim.config as config
 import decsim.ports as ports
@@ -16,123 +11,59 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
-import decsim.tables as tables
 
-# qpu.kind names one of these rows: the device that emits the readout.
-SYNDROME_SOURCES = {
-    "stim_device": stim_device.StimDevice,
-    "timing_only": syndrome_devices.TimingOnlyDevice,
-    "syndrome_bits": syndrome_devices.SyndromeBitDevice,
-    "recorded_stim": stim_device.RecordedStimDevice,
-    "streaming_stim": streaming_stim_device.StreamingStimDevice,
-    "burst_stim": stim_device.BurstStimDevice,
-}
-# qpu.code_card names one of these rows: the code card the run prices.
-# CUDA-Q QEC builds a code by name the same way
-# (libs/qec/include/cudaq/qec/code.h:257, get_code(name, options)).
-CODE_CARDS = {
-    "rotated_surface": code_geometry.SurfaceCodeModel,
-    "bivariate_bicycle": code_geometry.BivariateBicycleCodeModel,
-}
-# The key the magic_state_factory section reads for itself; any other key
-# is the row's own (its Settings).
-FACTORY_KEYS = ("kind",)
-# The keys the qpu section reads for itself; any other key is the source
-# row's or the code card row's own (its Settings, decsim/tables.py
-# row_settings).
-QPU_KEYS = ("kind", "code_card", "distance", "round_period_microseconds")
-# The keys above that are the section's fields, each left at the field's
-# default when the yaml does not write it.
-QPU_VALUE_KEYS = ("distance", "round_period_microseconds")
-# magic_state_factory.kind names one of these rows: what supplies the T
-# states an operation consumes.
-MAGIC_STATE_FACTORIES = {
-    "infinite": magic_state_factories.InfiniteFactory,
-    "distillation": magic_state_factories.DistillationFactory,
-    "multi_level": magic_state_factories.MultiLevelDistillationFactory,
-}
+# the settings record of whichever factory the run has
+FactorySettings = Union[
+    magic_state_factories.InfiniteFactory.Settings,
+    magic_state_factories.DistillationFactory.Settings,
+    magic_state_factories.MultiLevelDistillationFactory.Settings,
+]
+# the settings record of whichever syndrome source the run has
+SourceSettings = Union[
+    stim_device.StimDevice.Settings,
+    syndrome_devices.TimingOnlyDevice.Settings,
+    syndrome_devices.SyndromeBitDevice.Settings,
+    stim_device.RecordedStimDevice.Settings,
+    streaming_stim_device.StreamingStimDevice.Settings,
+    stim_device.BurstStimDevice.Settings,
+]
+# the settings record of whichever code card the run prices
+CodeCardSettings = Union[
+    code_geometry.SurfaceCodeModel.Settings,
+    code_geometry.BivariateBicycleCodeModel.Settings,
+]
 
 
 @dataclasses.dataclass(frozen=True)
 class QpuSettings:
-    """The QPU: its round period, its code card and its syndrome source.
+    """The QPU's settings.
 
-    Table rows for the source (SYNDROME_SOURCES, above): stim_device (Stim
-    samples the operation's circuit), timing_only (payloads of the
-    code's size with no values), syndrome_bits (seeded random bits
-    shaped like the code's syndrome), recorded_stim (a released
-    experiment's measurements replayed), streaming_stim (repeated Stim
-    fragments executed as the controller requests rounds), burst_stim
-    (stim_device sampling each shot with one error burst the decoders are
-    not told of, its keys the row's own Settings). The round
-    period is the device's physical cadence, a quantum-device number,
-    not a classical clock's cycles: Google 921 ns (2207.06431) and
-    1.1 us (2408.13687), Krinner 1.1 us (2112.03708), Yang 1.25 us
-    (2605.04892). The code card is the row code_card names (CODE_CARDS,
-    above: rotated_surface, the default, after Stim's generated
-    surface_code:rotated_memory_z; bivariate_bicycle, Bravyi et al.
-    2308.07915) at the section's distance, with the windows section's
-    commit and buffer sizes; a Python-built code, layout, device or
-    error-model provider is used as it is. The card provisions the links
-    and sizes the circuit-less sources' rounds; a circuit source's
-    payloads carry the circuit's own widths, so a card and a circuit at
+    source is a source row's Settings record, which builds the device over
+    the run's card and the workload's circuits. code_card is a card row's
+    record, built at distance (None is the card's own) with the windows
+    record's commit and buffer sizes. layout maps patches to codes, uniform
+    by default. error_model_provider is a circuit source whose window
+    models the decoders read in place of the source's own; None is the
+    source's own.
+
+    The round period is the device's physical cadence, not a classical
+    clock's cycles: Google 921 ns (2207.06431) and 1.1 us (2408.13687),
+    Krinner 1.1 us (2112.03708), Yang 1.25 us (2605.04892). The card
+    provisions the links and sizes circuit-less rounds, while a circuit
+    source's payloads carry the circuit's widths, so a card and a circuit at
     different distances run links provisioned for the wrong code.
-    row_settings and code_card_settings are the source row's and the
-    card row's own Settings, read from the section's keys outside
-    QPU_KEYS, or None for a row that declares none.
     """
 
-    kind: str = "timing_only"
-    code_card: str = "rotated_surface"
+    source: SourceSettings = syndrome_devices.TimingOnlyDevice.Settings()
+    code_card: CodeCardSettings = code_geometry.SurfaceCodeModel.Settings()
     round_period_microseconds: float = 1.1
     distance: Optional[int] = None
-    code: Optional[ports.CodeModel] = None
-    layout: Optional[layouts.LayoutModel] = None
-    device: Optional[ports.SyndromeSource] = None
-    error_model_provider: Optional[Any] = None
-    # the source row's own Settings record, opaque to the section
-    row_settings: Optional[Any] = None
-    # the code card row's own Settings record, opaque to the section
-    code_card_settings: Optional[Any] = None
+    layout: layouts.UniformLayout.Settings = layouts.UniformLayout.Settings()
+    error_model_provider: Optional[SourceSettings] = None
 
     def __post_init__(self) -> None:
         config.check_duration(
             "round_period_microseconds", self.round_period_microseconds
-        )
-
-    @classmethod
-    def from_yaml(cls, section: Mapping) -> "QpuSettings":
-        """The `qpu` section: the source, the code card, distance and period.
-
-        A key the section and its rows do not declare is refused. The
-        kind is looked up here, where the yaml enters, so a misspelt
-        source is refused before `decsim show` prints it or a run folder
-        exists.
-        """
-        kind = section.get("kind")
-        source_row = tables.row(SYNDROME_SOURCES, "qpu.kind", kind)
-        code_card = section.get("code_card", "rotated_surface")
-        card_row = tables.row(CODE_CARDS, "qpu.code_card", code_card)
-        source_keys = tables.row_keys(source_row)
-        card_keys = tables.row_keys(card_row)
-        keys_beside_the_source = QPU_KEYS + card_keys
-        keys_beside_the_card = QPU_KEYS + source_keys
-        row_settings = tables.row_settings(
-            source_row, "qpu", section, keys_beside_the_source
-        )
-        code_card_settings = tables.row_settings(
-            card_row, "qpu", section, keys_beside_the_card
-        )
-        values = {}
-        for key in QPU_VALUE_KEYS:
-            if key in section:
-                values[key] = section[key]
-        return cls(
-            kind=kind,
-            code_card=code_card,
-            row_settings=row_settings,
-            code_card_settings=code_card_settings,
-            **values,
         )
 
     def build_code(
@@ -141,87 +72,20 @@ class QpuSettings:
         commit_rounds_override: Optional[int],
         buffer_rounds_override: Optional[int],
     ) -> tuple:
-        """The code card and its layout: the built ones, or the named card.
+        """The run's code and the layout over it.
 
-        At most one of distance, code and layout is given. The two
-        overrides are the window sizes the yaml declares, which size the
-        named card's commit and buffer regions; None leaves each at the
-        card's own. A distance of None is the card's own default.
+        The overrides are the windows record's commit and buffer sizes; None
+        leaves each at the card's own.
         """
-        self._check_one_code_source()
-        if self.layout is not None:
-            code = _the_layouts_one_code(self.layout)
-            return code, self.layout
-        code = self.code
-        if code is None:
-            code = self._named_card(
-                commit_rounds_override, buffer_rounds_override
-            )
-        return code, layouts.UniformLayout(code)
-
-    def _named_card(
-        self,
-        commit_rounds_override: Optional[int],
-        buffer_rounds_override: Optional[int],
-    ) -> ports.CodeModel:
-        """The code_card row, at the qpu's distance and the yaml's windows."""
-        card_row = tables.row(CODE_CARDS, "qpu.code_card", self.code_card)
-        arguments = {
-            "commit_rounds_override": commit_rounds_override,
-            "buffer_rounds_override": buffer_rounds_override,
-        }
-        if self.distance is not None:
-            arguments["distance"] = self.distance
-        if self.code_card_settings is not None:
-            arguments["settings"] = self.code_card_settings
-        return card_row(**arguments)
-
-    def _check_one_code_source(self) -> None:
-        """Refuse settings that name the code more than one way."""
-        given = []
-        if self.distance is not None:
-            given.append("distance")
-        if self.code is not None:
-            given.append("code")
-        if self.layout is not None:
-            given.append("layout")
-        if len(given) > 1:
-            listed = ", ".join(given)
-            raise ValueError(f"multiple code sources supplied: {listed}")
-
-
-@dataclasses.dataclass(frozen=True)
-class FactorySettings:
-    """The magic state factory: where non-Clifford operations get states.
-
-    Table rows (MAGIC_STATE_FACTORIES, above): infinite (a state is
-    always in stock), distillation (Litinski's 15-to-1 stage,
-    1905.06903),
-    multi_level (Silva's chain of levels, 2411.04270). row_settings is
-    the row's own Settings, read from the section's keys beside kind, or
-    None for a row that declares none; it rides to the row inside the
-    one FactoryCollaborators record, beside the engine and the round
-    ticks the root supplies (magic_state_factories.py).
-    """
-
-    kind: str = "infinite"
-    # the row's own Settings record, opaque to the section
-    row_settings: Optional[Any] = None
-
-    @classmethod
-    def from_yaml(cls, section: Mapping) -> "FactorySettings":
-        """The `magic_state_factory` section: a kind and the row's keys."""
-        kind = section.get("kind", "infinite")
-        row = tables.row(
-            MAGIC_STATE_FACTORIES, "magic_state_factory.kind", kind
+        card = self.code_card.build(
+            self.distance, commit_rounds_override, buffer_rounds_override
         )
-        row_settings = tables.row_settings(
-            row, "magic_state_factory", section, FACTORY_KEYS
-        )
-        return cls(kind=kind, row_settings=row_settings)
+        layout = self.layout.build(card)
+        code = _the_layouts_one_code(layout)
+        return code, layout
 
 
-def _the_layouts_one_code(layout: layouts.LayoutModel):
+def _the_layouts_one_code(layout: ports.LayoutModel):
     """The one code a layout declares; a layout of several is refused."""
     declared_codes = layout.codes()
     codes = list(declared_codes)

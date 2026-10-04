@@ -14,10 +14,10 @@ import decsim.config as config
 import decsim.decoders.dispatch_steps.decoder as dispatch_steps
 import decsim.decoders.dispatch_steps.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.links.channel as channel_module
 import decsim.links.link_profiles as link_profiles
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 from tests.decoders import windows
@@ -26,6 +26,8 @@ REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
 DISPATCHER = dispatch_steps.DISPATCHER
 WORKER = dispatch_steps.WORKER
 ECHO = dispatch_steps.ECHO
+ROCE_V2_GPU_CARD = link_profiles.RoceV2GpuFabric.base_card()
+NVQLINK_GPU_CARD = link_profiles.NvqlinkGpuFabric.base_card()
 
 
 def _bind_seed(component) -> None:
@@ -141,11 +143,14 @@ def _wire_ticks(channel, bits: int) -> int:
 
 
 @pytest.mark.parametrize(
-    "card_name, echo_bits, echo_microseconds",
-    [("roce_v2_gpu", 128, 4.5), ("nvqlink_gpu", 256, 3.839)],
+    "profile, echo_bits, echo_microseconds",
+    [
+        (ROCE_V2_GPU_CARD, 128, 4.5),
+        (NVQLINK_GPU_CARD, 256, 3.839),
+    ],
 )
 def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
-    card_name, echo_bits, echo_microseconds
+    profile, echo_bits, echo_microseconds
 ):
     """Backline 2609.09270 Table III, 4.5 us; NVQLink 2510.25213, 3.839 us.
 
@@ -155,8 +160,6 @@ def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
     nothing is counted twice.
     """
     pytest.importorskip("relay_bp")
-    card = link_profiles.LINK_FABRICS[card_name]
-    profile = card.base_card()
     settings = dispatch_steps.DispatchStepsSettings("gh200", "device")
     backend = dispatch_steps.DispatchSteps(settings)
     job = _region_job()
@@ -174,41 +177,31 @@ def test_the_fire_is_the_graph_round_trip_less_the_echo_it_holds():
     assert card.launch_microseconds + 4.576 == pytest.approx(10.112)
 
 
-def test_an_a100_device_path_is_refused_naming_the_cards():
-    section = {"device": "a100", "path": "device"}
-    with pytest.raises(ValueError) as refusal:
-        dispatch_steps.DispatchStepsSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
-    assert str(refusal.value) == (
-        "strong_decoder.device 'a100' with path 'device' has no card in "
-        "dispatch_steps; the measured ones are [('a100', 'host'), "
-        "('gh200', 'device'), ('gh200', 'host')] (the device path's graph "
-        "fire is compiled for compute capability 9.0 and up, "
-        "dispatch_kernel.cu v0.15.2 line 491)"
-    )
-
-
 def test_a_worker_count_of_true_is_refused_on_the_host_path():
     """A bool is refused though Python counts it an int."""
-    section = {"device": "gh200", "path": "host", "workers": True}
+    fields = {"device": "gh200", "path": "host", "workers": True}
     with pytest.raises(ValueError) as refusal:
-        dispatch_steps.DispatchStepsSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
+        dispatch_steps.DispatchStepsSettings(**fields)
     assert str(refusal.value) == (
-        "strong_decoder.workers must be a whole number of graph workers, "
-        "at least 1 (got True)"
+        "workers must be a whole number of graph workers, at least 1 (got True)"
     )
 
 
 def test_workers_on_the_device_path_are_refused():
-    section = {"device": "gh200", "path": "device", "workers": 4}
+    fields = {"device": "gh200", "path": "device", "workers": 4}
     with pytest.raises(ValueError) as refusal:
-        dispatch_steps.DispatchStepsSettings.from_yaml(
-            section, None, "strong_decoder"
-        )
+        dispatch_steps.DispatchStepsSettings(**fields)
     assert str(refusal.value) == (
-        "strong_decoder.workers is the host path's; the device path "
+        "workers is the host path's; the device path "
         "decodes on its one dispatcher"
     )
+
+
+def test_a_record_with_no_measured_card_still_stops_at_build():
+    """No card prices the a100's device path, so the build cannot."""
+    settings = dispatch_steps.DispatchStepsSettings(
+        device="a100", path="device"
+    )
+
+    with pytest.raises(KeyError, match="a100"):
+        settings.build()

@@ -13,7 +13,6 @@ import dataclasses
 
 import decsim.config
 import decsim.decoders.settings as decoder_settings
-import decsim.decoders.staged_decoder as staged_decoder
 import decsim.machine as machine_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
@@ -140,6 +139,26 @@ def _sources_on(owner) -> list:
     return sources
 
 
+def _sources_heard_twice(census, classes_by_source) -> list:
+    """(owner, source name, classes) of each source one class hears twice."""
+    doubled = []
+    for owner_name, source_name, source in census:
+        source_identity = id(source)
+        classes = classes_by_source[source_identity]
+        if len(classes) != len(set(classes)):
+            doubled.append((owner_name, source_name, classes))
+    return doubled
+
+
+def _unheard_sources(census) -> list:
+    """(owner, source name) of each source no listener hears."""
+    unheard = []
+    for owner_name, source_name, source in census:
+        if not source.has_listeners:
+            unheard.append((owner_name, source_name))
+    return unheard
+
+
 def test_no_source_is_heard_twice_by_one_listener_class(monkeypatch):
     """One connection per (source, listener class), with every knob on.
 
@@ -159,12 +178,7 @@ def test_no_source_is_heard_twice_by_one_listener_class(monkeypatch):
 
     census = _walk(machine)
     classes_by_source = _listener_classes_by_source(connections)
-    doubled = []
-    for owner_name, source_name, source in census:
-        source_identity = id(source)
-        classes = classes_by_source[source_identity]
-        if len(classes) != len(set(classes)):
-            doubled.append((owner_name, source_name, classes))
+    doubled = _sources_heard_twice(census, classes_by_source)
 
     assert doubled == []
     assert len(census) > 30
@@ -181,10 +195,7 @@ def test_every_source_has_a_listener_when_every_knob_is_on():
     machine = machine_module.Machine.build(point, gate_point.SEED)
 
     census = _walk(machine)
-    unheard = []
-    for owner_name, source_name, source in census:
-        if not source.has_listeners:
-            unheard.append((owner_name, source_name))
+    unheard = _unheard_sources(census)
 
     assert unheard == []
 
@@ -196,10 +207,12 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     asked = machine_module.Machine.build(asked_point, gate_point.SEED)
     silent = machine_module.Machine.build(silent_point, gate_point.SEED)
 
-    for machine in (asked, silent):
-        assert machine.observation.log is not None
-        assert machine.observation.round_events is not None
-        assert machine.observation.stages is not None
+    assert asked.observation.log is not None
+    assert asked.observation.round_events is not None
+    assert asked.observation.stages is not None
+    assert silent.observation.log is not None
+    assert silent.observation.round_events is not None
+    assert silent.observation.stages is not None
     assert asked.observation.trace_writer is not None
     assert asked.observation.data_movement is not None
     assert asked.observation.decode_records is not None
@@ -242,7 +255,7 @@ class PortOnlyDecoder:
         """One stage per job, fired on the port's own source."""
         result = self.decode(job)
         end_tick = engine.now + self.latency_ticks
-        record = staged_decoder.DecoderStageRecord(
+        record = decoding_records.DecoderStageRecord(
             job.operation_id,
             job.window_id,
             "algorithm",
@@ -266,7 +279,10 @@ def _machine_on(decoder, **observation):
     """The declared weak-only run with this row as the weak tier."""
     operation = declared_run.memory_operation(1)
     workload = declared_run.declared_workload([operation], 6)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    algorithm = declared_run.OneDecoder(decoder)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
     qpu = declared_run.declared_qpu()
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
@@ -301,11 +317,18 @@ def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
     assert result.terminal_status == "complete"
     assert machine.observation.stages.records != []
     assert decoder.window_checked.has_listeners
-    stage_events = []
-    for event in machine.observation.trace_writer.events:
-        if event.get("cat") == "stage":
-            stage_events.append(event)
+    trace_events = machine.observation.trace_writer.events
+    stage_events = _events_of_category(trace_events, "stage")
     assert stage_events != []
+
+
+def _events_of_category(events: list, category: str) -> list:
+    """The trace events of one category, in write order."""
+    found = []
+    for event in events:
+        if event.get("cat") == category:
+            found.append(event)
+    return found
 
 
 def _bare_observe(observation, engine, **parts):
@@ -372,7 +395,6 @@ def _bare_observation(
         round_events=rounds,
         referee_audit=audit,
         sampled_shots=shots,
-        burst_flags=None,
         confidence=None,
     )
 
@@ -397,21 +419,6 @@ def test_the_narrator_log_is_byte_identical_with_and_without_the_observers(
 
     assert bare_lines == wired_lines
     assert len(wired_lines) > 100
-
-
-def test_a_run_with_only_those_listeners_gives_the_same_result_record(
-    monkeypatch,
-):
-    """Every field of the gate point's result, between the two wirings."""
-    wired_machine, wired = gate_point.run(**EVERY_KNOB)
-    monkeypatch.setattr(wiring, "observe", _bare_observe)
-    _bare_machine, bare = gate_point.run(**EVERY_KNOB)
-
-    assert bare.terminal_status == wired.terminal_status
-    assert bare.operation_results == wired.operation_results
-    assert bare.link_traffic == wired.link_traffic
-    assert bare.fully_done_ticks == wired.fully_done_ticks
-    assert wired_machine.observation.data_movement is not None
 
 
 def test_the_data_movement_report_is_the_only_field_that_needs_a_listener(

@@ -43,21 +43,17 @@ with the crossing part of its commit (Toshio et al. 2510.25222 lines
 1248-1250).
 """
 
-import copy
-import dataclasses
-import pathlib
-
 import numpy
 import pytest
 import stim
 
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
-import decsim.settings as machine_settings
+import decsim.records.fault_model_contracts as fault_models
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_commits as window_commits
+import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
 
 qldpc_dems = pytest.importorskip("qldpc.decoders.dems")
@@ -68,26 +64,16 @@ qldpc_dems = pytest.importorskip("qldpc.decoders.dems")
 # them).
 NEAR_CASES = ((3, 14, 5), (5, 23, 3), (7, 32, 1))
 FORWARD_CASES = ((3, 14, 1), (5, 23, 2), (7, 32, 1))
+# each case on the row it was chosen for
+PINNED_ROW_CASES = tuple(
+    (declared_run.REDO_WINDOW, case) for case in NEAR_CASES
+) + tuple((declared_run.DOUBLE_WINDOW, case) for case in FORWARD_CASES)
 PHYSICAL_ERROR_PROBABILITY = 0.008
 
 
-def _machine(distance: int, rounds: int, seed: int, strong_window: str):
-    """The gate's switching card at that distance, on the named row."""
-    sections = copy.deepcopy(shape_tests.GATE_SWITCHING_CARD)
-    sections["escalation"]["strong_window"] = strong_window
-    sections["workload"]["arguments"]["rounds_per_shot"] = rounds
-    sections["qpu"]["distance"] = distance
-    sections["qpu"]["round_period_microseconds"] = 1.0
-    arguments = sections["workload"]["arguments"]
-    arguments["distance"] = distance
-    arguments["physical_error_probability"] = PHYSICAL_ERROR_PROBABILITY
-    base_directory = pathlib.Path(".")
-    section_folders = dict.fromkeys(sections, base_directory)
-    settings = machine_settings.MachineSettings.from_mapping(
-        sections, name="seam_pinned", section_folders=section_folders
-    )
-    workload = settings.workload.made()
-    settings = dataclasses.replace(settings, workload=workload)
+def _machine(distance: int, rounds: int, seed: int, strong_window):
+    """The gate's switching card at that distance, on the row given."""
+    settings = shape_tests.gate_switching(distance, rounds, strong_window)
     return machine_module.Machine.build(settings, seed)
 
 
@@ -331,7 +317,7 @@ def _flipped_detectors(flip, kappa) -> set:
 _CASE_RUNS: dict = {}
 
 
-def _run_case(monkeypatch, case: tuple, strong_window: str) -> tuple:
+def _run_case(monkeypatch, case: tuple, strong_window) -> tuple:
     """One shot of the row, with its capture and its external oracle."""
     kept = _CASE_RUNS.get((strong_window, case))
     if kept is not None:
@@ -382,7 +368,9 @@ def _differing(raw: dict, masked: dict) -> list:
     return changed
 
 
-def test_the_near_pinned_input_is_the_syndrome_bombin_defines(monkeypatch):
+def test_the_near_pinned_input_is_the_syndrome_bombin_defines_property(
+    monkeypatch,
+):
     """The raw input XOR (H kappa) on its own detectors, at d 3, 5, 7.
 
     The oracle's H is qLDPC's detector flip matrix of the same circuit's
@@ -393,7 +381,9 @@ def test_the_near_pinned_input_is_the_syndrome_bombin_defines(monkeypatch):
     """
     nonempty_jobs = 0
     for case in NEAR_CASES:
-        capture, flip, columns = _run_case(monkeypatch, case, "redo_window")
+        capture, flip, columns = _run_case(
+            monkeypatch, case, declared_run.REDO_WINDOW
+        )
         for job, raw_input, masked_input, sources in capture.pinned_jobs():
             raw = _detector_bits(job, raw_input)
             masked = _detector_bits(job, masked_input)
@@ -415,7 +405,9 @@ def _expected_input(raw: dict, flipped: set) -> dict:
     return expected
 
 
-def test_the_forward_pinned_input_differs_on_its_two_seam_layers(monkeypatch):
+def test_the_forward_pinned_input_differs_on_its_two_seam_layers_property(
+    monkeypatch,
+):
     """Both faces pinned: the oldest and the newest read layer, at d 3, 5, 7.
 
     The far face is the window that restarts the weak chain, whose
@@ -425,7 +417,9 @@ def test_the_forward_pinned_input_differs_on_its_two_seam_layers(monkeypatch):
     """
     nonempty_jobs = 0
     for case in FORWARD_CASES:
-        capture, flip, columns = _run_case(monkeypatch, case, "double_window")
+        capture, flip, columns = _run_case(
+            monkeypatch, case, declared_run.DOUBLE_WINDOW
+        )
         for job, raw_input, masked_input, sources in capture.pinned_jobs():
             raw = _detector_bits(job, raw_input)
             masked = _detector_bits(job, masked_input)
@@ -439,7 +433,8 @@ def test_the_forward_pinned_input_differs_on_its_two_seam_layers(monkeypatch):
     assert nonempty_jobs
 
 
-def test_a_pinned_pair_commits_no_fault_twice(monkeypatch):
+@pytest.mark.parametrize("case", NEAR_CASES)
+def test_a_pinned_pair_commits_no_fault_twice(monkeypatch, case):
     """Bombin 2303.04846 lines 703-704, on the run's own corrections.
 
     Only the restriction of a task's estimate to its commit region is
@@ -447,11 +442,8 @@ def test_a_pinned_pair_commits_no_fault_twice(monkeypatch):
     that reads it commit disjoint sets of faults: no detector is
     explained twice.
     """
-    shared = []
-    for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, "redo_window")
-        counts = _shared_fault_counts(run)
-        shared.extend(counts)
+    run = _run_case(monkeypatch, case, declared_run.REDO_WINDOW)
+    shared = _shared_fault_counts(run)
     assert shared
     assert set(shared) == {0}
 
@@ -471,7 +463,10 @@ def _shared_fault_counts(run: tuple) -> list:
     return counts
 
 
-def test_a_pinned_pair_leaves_its_seam_layer_clean(monkeypatch):
+@pytest.mark.parametrize("strong_window, case", PINNED_ROW_CASES)
+def test_a_pinned_pair_leaves_its_seam_layer_clean(
+    monkeypatch, strong_window, case
+):
     """Bombin's consistency condition on the layer two tasks share.
 
     d(kappa_i + kappa_j + e) = 0 on the shared checks (lines 748-749).
@@ -480,15 +475,8 @@ def test_a_pinned_pair_leaves_its_seam_layer_clean(monkeypatch):
     exactly when the model carries no column the neighbour owns. Both
     faces of both pinned rows are read, at d 3, 5 and 7.
     """
-    residuals = []
-    for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, "redo_window")
-        near = _seam_residuals(run)
-        residuals.extend(near)
-    for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, "double_window")
-        forward = _seam_residuals(run)
-        residuals.extend(forward)
+    run = _run_case(monkeypatch, case, strong_window)
+    residuals = _seam_residuals(run)
     assert residuals
     assert set(residuals) == {0}
 
@@ -552,7 +540,7 @@ def _self_pinned_counts_of_the_double_window_row(monkeypatch) -> list:
     """The self-pinned faces' counts, pooled over the double window's cases."""
     counts = []
     for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, "double_window")
+        run = _run_case(monkeypatch, case, declared_run.DOUBLE_WINDOW)
         found = _self_pinned_fault_counts(run)
         counts.extend(found)
     return counts
@@ -610,11 +598,11 @@ def _decided_column_counts(monkeypatch) -> list:
     """The decided faults still offered, pooled over both pinned rows."""
     counts = []
     for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, "redo_window")
+        run = _run_case(monkeypatch, case, declared_run.REDO_WINDOW)
         near = _decided_columns(run)
         counts.extend(near)
     for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, "double_window")
+        run = _run_case(monkeypatch, case, declared_run.DOUBLE_WINDOW)
         forward = _decided_columns(run)
         counts.extend(forward)
     return counts

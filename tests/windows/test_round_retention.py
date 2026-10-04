@@ -26,13 +26,12 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.round_retention as round_retention
 
 
 def _store() -> syndrome_buffer_module.SyndromeBuffer:
-    settings = syndrome_buffer_settings.SyndromeBufferSettings()
+    settings = syndrome_buffer_module.SyndromeBufferSettings()
     engine = engine_module.Engine()
     return syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
@@ -261,7 +260,7 @@ def test_a_context_round_still_crossing_is_told_apart_from_one_released():
     store.accept_packed_round(packet, publication_tick=1)
     crossing = retention.context_rounds_in_flight((1, 0), ((1, 1), (1, 2)))
     assert crossing == ((1, 2),)
-    with pytest.raises(RuntimeError, match="released while a strong window"):
+    with pytest.raises(RuntimeError, match="arrived at the weak syndrome"):
         retention.context_rounds_in_flight((1, 0), ((1, 3),))
 
 
@@ -438,5 +437,5 @@ def test_an_absorbed_read_past_the_first_round_that_nobody_holds_is_refused():
     retention, _store_under_test, request = _absorbing_retention(
         absorbed_rounds, request_rounds, restart_rounds
     )
-    with pytest.raises(RuntimeError, match=r"rounds \[\(1, 10\)\] are held"):
+    with pytest.raises(RuntimeError, match="are held by neither the strong"):
         retention.release_absorbed_strong_hold((1, 1), (1, 2), request)

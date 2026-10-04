@@ -1,4 +1,4 @@
-"""When a window has the rounds it reads.
+"""The rounds a window reads: how many a scheme names, and when they are in.
 
 Every scheme reads its window the same way: the commit rounds and the
 buffer rounds must be present, and a buffer that overflows past the
@@ -6,7 +6,24 @@ operation's end is satisfied by a successor's rounds, by memory rounds,
 by a closed tail, or by every successor being exhausted.
 """
 
+from typing import Optional
+
+import decsim.config as config
 import decsim.records.windows as window_records
+
+
+def check_window_sizes(
+    commit_rounds: Optional[int], buffer_rounds: Optional[int]
+) -> None:
+    """A scheme's commit and buffer sizes, each a whole count or None.
+
+    A window is a commit region of ncom rounds and a buffer region of
+    nbuf (Skoric et al. 2209.08552 lines 194-197, nW = ncom + nbuf). A
+    window that commits no round never moves the stream on, so ncom is
+    at least one; a buffer may be empty. None is the code distance.
+    """
+    _check_window_rounds("commit_rounds", commit_rounds, 1)
+    _check_window_rounds("buffer_rounds", buffer_rounds, 0)
 
 
 def sliding_data_complete(
@@ -19,13 +36,7 @@ def sliding_data_complete(
     overflow_rounds = window.buffer_hi - readiness.local_round_count
     if overflow_rounds <= 0 or readiness.tail_closed:
         return True
-    if not readiness.successors:
-        return True
-    if _successor_has_rounds(readiness, overflow_rounds):
-        return True
-    if readiness.memory_rounds_arrived >= overflow_rounds:
-        return True
-    return _every_successor_exhausted(readiness)
+    return _overflow_is_satisfied(readiness, overflow_rounds)
 
 
 def buffer_filled_by_memory_only(
@@ -33,13 +44,10 @@ def buffer_filled_by_memory_only(
 ) -> bool:
     """Whether memory rounds alone satisfy the buffer past the operation.
 
-    That is a trailing buffer with no successor content standing behind it.
-
     Such a release is time-only: the reference systems decode the buffer
-    region's content (Skoric and Tan windows, LATTE d^3+buffer blocks),
-    so a window released this way carries an approximate result. The
-    terminal no-successor release is the Tan
-    flush and is not flagged.
+    region's content (Skoric and Tan windows), so a window released this
+    way carries an approximate result. The terminal release with no
+    successor is the Tan flush and is not flagged.
     """
     overflow_rounds = window.buffer_hi - readiness.local_round_count
     if overflow_rounds <= 0 or readiness.tail_closed:
@@ -49,6 +57,19 @@ def buffer_filled_by_memory_only(
     if _successor_has_rounds(readiness, overflow_rounds):
         return False
     return readiness.memory_rounds_arrived >= overflow_rounds
+
+
+def _overflow_is_satisfied(
+    readiness: window_records.WindowReadiness, overflow_rounds: int
+) -> bool:
+    """Whether the buffer rounds past the operation are in or never will be."""
+    if not readiness.successors:
+        return True
+    if _successor_has_rounds(readiness, overflow_rounds):
+        return True
+    if readiness.memory_rounds_arrived >= overflow_rounds:
+        return True
+    return _every_successor_exhausted(readiness)
 
 
 def _successor_has_rounds(
@@ -67,3 +88,14 @@ def _every_successor_exhausted(
         if successor.rounds_arrived < successor.round_count:
             return False
     return True
+
+
+def _check_window_rounds(name: str, rounds, least: int) -> None:
+    if rounds is None:
+        return
+    if config.is_whole_count(rounds, least):
+        return
+    raise ValueError(
+        f"{name} is a whole number of rounds, at least {least}, or None for "
+        f"the code's own size (got {rounds!r})"
+    )

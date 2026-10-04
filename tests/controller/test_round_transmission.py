@@ -25,7 +25,6 @@ import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -35,7 +34,6 @@ import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 from decsim.syndrome_buffer import (
     weak_syndrome_round_receiver as weak_syndrome_round_receiver,
@@ -46,9 +44,7 @@ WBD_TICKS = config.microseconds_to_ticks(5.0)
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(7)
 WBD_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
-# 64 bits at 1000 bits per microsecond, one serialization on the wire
 ROUND_BITS = 64
-SERIALIZATION_TICKS = config.microseconds_to_ticks(0.064)
 # a pure-delay controller_to_weak_buffer, so a window round publishes
 # one fixed store hop after it is sent
 STORE_HOP_TICKS = config.microseconds_to_ticks(0.04)
@@ -125,7 +121,10 @@ def priced_cwb_profile():
         base.channel.name, CWB_TICKS, None, "test"
     )
     path = link_settings.PathSettings(
-        channel, base.default_payload, base.actual_payload_source
+        channel,
+        base.default_payload,
+        base.actual_payload_source,
+        excludes_receiver_processing=base.excludes_receiver_processing,
     )
     return dataclasses.replace(reference, controller_to_weak_buffer=path)
 
@@ -146,7 +145,10 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
         edge.channel.name, WBD_TICKS, capacity, "test"
     )
     path = link_settings.PathSettings(
-        channel, edge.default_payload, edge.actual_payload_source
+        channel,
+        edge.default_payload,
+        edge.actual_payload_source,
+        excludes_receiver_processing=edge.excludes_receiver_processing,
     )
     store_hop = reference.controller_to_weak_buffer
     store_channel = link_settings.ChannelSettings(
@@ -162,10 +164,10 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
 
 def transmitter_with(engine, profile, windows=None, settings=None):
     ledger = link_traffic.TrafficLedger(profile)
-    links = fabric_module.LinkFabric(profile, engine, channel_module.Channel)
+    links = fabric_module.LinkFabric(profile, engine)
     links.trace.transfer_delivered.connect(ledger.on_transfer)
     if settings is None:
-        settings = syndrome_buffer_settings.SyndromeBufferSettings()
+        settings = syndrome_buffer_module.SyndromeBufferSettings()
     store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     if windows is None:
         windows = RecordingWindows(engine)
@@ -208,22 +210,16 @@ def reserve_and_send(transmitter, packed) -> None:
     transmitter.send(packed)
 
 
-def test_a_priced_hop_publishes_at_delivery_and_stamps_the_store():
-    engine = engine_module.Engine()
-    profile = priced_cwb_profile()
-    transmitter, store, windows, recorder, _ledger = transmitter_with(
-        engine, profile
-    )
-    first = packed(1)
-
-    reserve_and_send(transmitter, first)
-    engine.run()
-
-    assert store.publication_tick((1, 1)) == CWB_TICKS
-    assert windows.published == [(CWB_TICKS, 1)]
-    kinds_and_ticks = [(event.kind, event.tick) for event in recorder.events]
-    assert kinds_and_ticks == [("CWB_SENT", 0), ("PUBLISHED", CWB_TICKS)]
-    assert transmitter.in_flight == 0
+def first_rounds_on(ledger, path: str) -> list:
+    """The first round each transfer on the path carried, in send order."""
+    traffic = ledger.traffic_json_value()
+    first_rounds = []
+    for transfer in traffic["transfers"]:
+        if transfer["path"] != path:
+            continue
+        (rounds,) = transfer["attribution"]["rounds_by_operation"]
+        first_rounds.append(rounds["round_lo"])
+    return first_rounds
 
 
 def test_a_round_that_leaves_its_route_lets_a_waiting_round_enter():
@@ -255,9 +251,8 @@ def test_a_window_round_is_in_flight_until_its_write_publishes_it():
     engine = engine_module.Engine()
     profile = priced_cwb_profile()
     clock = config.Clock(CYCLE_TICKS)
-    costs = syndrome_buffer_module.SyndromeBuffer.Settings(write_cycles=5)
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        clock=clock, row_settings=costs
+    settings = syndrome_buffer_module.SyndromeBufferSettings(
+        clock=clock, write_cycles=5
     )
     transmitter, _store, windows, _recorder, _ledger = transmitter_with(
         engine, profile, settings=settings
@@ -363,11 +358,5 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     assert windows.memory_rounds == [(memory_delivery, 7)]
     (decode_input,) = windows.decode_inputs_delivered
     assert decode_input.delivery_ticks == input_delivery
-    traffic = ledger.traffic_json_value()
-    rounds_on_the_wire = []
-    for transfer in traffic["transfers"]:
-        if transfer["path"] != "weak_buffer_to_weak_decoder":
-            continue
-        (rounds,) = transfer["attribution"]["rounds_by_operation"]
-        rounds_on_the_wire.append(rounds["round_lo"])
+    rounds_on_the_wire = first_rounds_on(ledger, "weak_buffer_to_weak_decoder")
     assert rounds_on_the_wire == wire_order

@@ -1,24 +1,23 @@
 """The jobs waiting for a unit of the manager's pool, in scheduler order.
 
-gem5's instruction queue holds ready work in priority order and hands
-it out through one scheduling rule (src/cpu/o3/inst_queue.hh:160-178,
-scheduleReadyInsts); here the scheduler's pop (schedulers.py) is that
-rule. Under the yaml's decoder_manager.bulk_strong the STRONG POOL alone
-is served as one merged batch: every queued strong job, timing-only,
-becomes one decode serving every member request. Toshio et al. 2510.25222
-lines 1253-1264 ask for bulk decoding of one escalation's own
-contiguous region once both its boundaries are determined; merging
-several independent escalated windows is decsim's own step past that,
-and it exists because it is the cheapest strong tier the study can
-price a run against, the floor of the tuning the paper explicitly
-leaves open at 1259-1262. The queue depth is sampled on every change
-for the switching study.
+As gem5's instruction queue hands out ready work through one scheduling
+rule (src/cpu/o3/inst_queue.hh:160-178, scheduleReadyInsts), the
+scheduler's pop is that rule here (schedulers.py). Under
+DecoderManagerSettings.bulk_strong the strong pool alone is served as
+one merged batch: every queued strong job, timing-only, becomes one
+decode serving every member request. Toshio et al. 2510.25222 lines
+1253-1264 ask for bulk decoding of one escalation's own region; merging
+several escalated windows goes past that, as the cheapest strong tier a
+run can be priced against, the floor of the tuning the paper leaves open
+(lines 1259-1262).
 """
 
 import dataclasses
 from typing import TYPE_CHECKING, Optional
 
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
 
@@ -31,18 +30,17 @@ STRONG_POOL = "strong"
 
 
 class WaitingJobs:
-    """The pool's ready queue, and the depth reported at every change.
+    """The pool's ready queue.
 
-    Trace sources: job_enqueued(job) as a job joins the queue, the job
-    naming the rounds it references in the store; job_withdrawn(job) as
-    one leaves it unserved; depth_changed(tick, depth) whenever the jobs
-    waiting change.
+    Trace sources: job_enqueued(job) as a job joins the queue;
+    job_withdrawn(job) as one leaves it unserved; depth_changed(tick,
+    depth) whenever the jobs waiting change.
     """
 
     def __init__(
         self,
-        engine,
-        scheduler,
+        engine: engine_module.Engine,
+        scheduler: schedulers.Scheduler,
         manager: "decoder_manager_module.DecoderManager",
         merges_strong: bool = False,
     ) -> None:
@@ -97,9 +95,9 @@ class WaitingJobs:
     def _merge_strong_batch(self, queue: list) -> decoding_records.DecodeJob:
         """Batch every queued strong job (timing-only) into one decode.
 
-        A batch that found no unit last time waits in the queue like any
-        job; it is opened back into its member requests here so the new
-        batch serves every request exactly once.
+        A batch that found no unit last time is opened back into its
+        member requests here, so the new batch serves every request
+        once.
         """
         jobs = self._open_queued_strong_jobs(queue)
         window_keys = []
@@ -165,13 +163,7 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the waiting jobs reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the waiting jobs reports, as one member."""
 
     job_enqueued: trace_source.TraceSource = trace_source.new_source()
     job_withdrawn: trace_source.TraceSource = trace_source.new_source()

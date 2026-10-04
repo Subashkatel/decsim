@@ -1,30 +1,27 @@
 """The Decoder port's defaults, and the template every window decoder shares.
 
-sinter's abstract class with defaults
-(sinter/_decoding/_decoding_decoder_class.py:58-102: `Decoder` raises
-NotImplementedError where a row has nothing to say, and
-`decode_via_files` is written once in terms of
-`compile_decoder_for_dem`). DecoderBase gives a row the port's timing
-methods from its latency; WindowDecoderBase gives a real decoder its
-frame (the model's faults, the payload syndrome, the size check, the
-result built from the selected faults), one compiled backend per live
-window model (sinter's CompiledDecoder), and the measured clock when it
-carries no latency model. The helpers after the classes are that frame:
-the payload syndrome, the size check, the result from the selected
-faults, and the status a best-effort result carries.
+As sinter's abstract Decoder has defaults
+(sinter/_decoding/_decoding_decoder_class.py:58-102), DecoderBase gives
+a row the port's timing methods from its latency, and WindowDecoderBase
+gives a real decoder its frame: the model's faults, the payload syndrome
+and its size check, one compiled backend per live window model (sinter's
+CompiledDecoder), the result built from the selected faults, and the
+measured clock when it has no latency model.
 """
 
 import abc
 import time
 import weakref
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional, Union
 
 import numpy
+import scipy.sparse
 
 import decsim.config as config
-import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
@@ -33,20 +30,16 @@ OnResult = Callable[[Optional[decoding_records.DecodeResult]], None]
 
 
 class DecoderBase(abc.ABC):
-    """A row of the decoder table: decode and latency, timing from those.
+    """The port's defaults for a row of the decoder table.
 
-    start prices the job with latency and decodes when that time ends;
-    a decoder whose occupancy is None is measured instead: decode_timed
-    runs now and the result is delivered after the ticks the decode
-    says, the host clock's by default (ticks_after_decode), or a row's
-    own cycle count of it. cancel does nothing, and occupancy is latency:
-    the unit holds compute for the whole decode. stage_recorded is the
-    port's stage source (data_path.md section 5's data-side callback): a
-    row with internal stages replaces it with one of its own and fires a
-    record per stage, and a row without leaves this silent one, so the
-    machine connects the stage listeners to every row by name.
-    window_checked is the same shape for a row that audits its own
-    answer against a referee.
+    start prices the job with latency and decodes when that time ends; a
+    decoder whose occupancy is None is measured instead, its result
+    delivered after the ticks the decode says (ticks_after_decode).
+    cancel does nothing, and occupancy is latency. stage_recorded is the
+    port's stage source: a row with internal stages replaces it and
+    fires a record per stage, and a row without leaves this silent one,
+    so the machine connects every row by name. window_checked is the
+    same shape for a row that audits its answer against a referee.
     """
 
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
@@ -57,10 +50,10 @@ class DecoderBase(abc.ABC):
     # forced solves hears the reason once instead of once per window
     forced_solve_unavailable = trace_source.SILENT
     # what this row's decode can show a confidence signal beyond the
-    # correction; the yaml refuses a signal whose requirement is not here
+    # correction; the build refuses a signal whose requirement is not here
     decoder_evidence = decoding_records.NO_DECODER_EVIDENCE
     # per evidence this row does not produce but a reader would expect
-    # of it, the sentence the yaml refusal quotes
+    # of it, the sentence the build's refusal quotes
     missing_evidence_reasons: dict = {}
 
     @abc.abstractmethod
@@ -74,7 +67,10 @@ class DecoderBase(abc.ABC):
         """The whole job's service time in ticks, known at dispatch."""
 
     def start(
-        self, job: decoding_records.DecodeJob, engine, on_result: OnResult
+        self,
+        job: decoding_records.DecodeJob,
+        engine: engine_module.Engine,
+        on_result: OnResult,
     ) -> None:
         """Run the job on the engine; on_result runs once at its output.
 
@@ -148,11 +144,10 @@ class WindowDecoderBase(DecoderBase):
 
     A row names its fault representation and implements compile(faults,
     model), the backend for one placed model, and decode_window(backend,
-    model, faults, syndrome), one call on it returning (selected faults,
-    decode status). With a latency model the manager prices the decode; with
-    none (latency_model=None, the table's rows) the decode is measured
-    on this host, timing the backend call only: the compile, the payload
-    syndrome and the result construction are setup the hardware does not
+    model, faults, syndrome), one call returning (selected faults,
+    decode status). With no latency model (the shipped rows) the decode
+    is measured on this host, timing the backend call only: the compile,
+    the payload syndrome and the result are setup the hardware does not
     pay per window.
     """
 
@@ -163,8 +158,9 @@ class WindowDecoderBase(DecoderBase):
     def __init__(self, latency_model: Optional[DecoderBase] = None):
         self.latency_model = latency_model
         self.compiled_by_model: dict = {}
-        # the row's kind and settings, set where the machine builds it;
-        # with the model they fix the backend
+        # the row's class and the settings its backend is compiled
+        # from, which each row declares; with the model they fix the
+        # backend, and None keeps the backend to this decoder alone
         self.compile_key = None
 
     def run_seed_children(self) -> tuple:
@@ -174,25 +170,37 @@ class WindowDecoderBase(DecoderBase):
         return (child,)
 
     @abc.abstractmethod
-    def compile(self, faults, model):
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> Any:  # an opaque identity only the row reads
         """The backend for one window model, built once while it lives."""
 
     @abc.abstractmethod
     def decode_window(
-        self, backend, model, faults, syndrome
+        self,
+        backend: Any,  # an opaque identity only the row reads
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
     ) -> decoding_records.WindowDecode:
         """One backend call's answer on one window."""
 
     def decode_forced_window(
-        self, backend, model, faults, syndrome, forced_logical_class: int
+        self,
+        backend: Any,  # an opaque identity only the row reads
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+        forced_logical_class: int,
     ) -> decoding_records.WindowDecode:
         """One solve pinned to one logical class, with that class's weight.
 
-        The minimum-weight correction inside one logical class, the
-        weight a complementary gap subtracts (Gidney et al. 2312.04522
-        Sec. "Complementary gap"). The weight is None when the window
-        pins no observable and the class cannot be forced. A row that
-        does not declare the forced-class solve never reaches this.
+        The weight a complementary gap subtracts (Gidney et al.
+        2312.04522 Sec. "Complementary gap"); None when the window pins
+        no observable. A row that does not declare the forced-class
+        solve never reaches this.
         """
         del backend, model, faults, syndrome, forced_logical_class
         row = type(self)
@@ -234,6 +242,8 @@ class WindowDecoderBase(DecoderBase):
         faults = model.require_faults(self.fault_representation)
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
+        # the result carries these events, so no backend may write them
+        syndrome.setflags(write=False)
         backend = self.compiled_for(faults, model)
         started_ns = time.perf_counter_ns()
         answer = self.window_answer(job, backend, model, faults, syndrome)
@@ -247,12 +257,18 @@ class WindowDecoderBase(DecoderBase):
         )
         result.forced_class_weight = answer.forced_class_weight
         result.cluster_evidence = answer.cluster_evidence
+        result.detection_events = syndrome
         result.iterations = answer.iterations
         result.no_correction_reason = answer.no_correction_reason
         return result, finished_ns - started_ns
 
     def window_answer(
-        self, job, backend, model, faults, syndrome
+        self,
+        job: decoding_records.DecodeJob,
+        backend: Any,  # an opaque identity only the row reads
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
     ) -> decoding_records.WindowDecode:
         """The backend call this job asks for: the window's, or one class's."""
         forced_class = job.forced_logical_class
@@ -262,15 +278,18 @@ class WindowDecoderBase(DecoderBase):
             backend, model, faults, syndrome, forced_class
         )
 
-    def compiled_for(self, faults, model):
+    def compiled_for(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> Any:  # an opaque identity only the row reads
         """The placed model's backend, compiled once and kept while it lives.
 
-        A task's shots share their window models (built_window_models.py)
-        but build their rows afresh, so a row with a compile key keeps its
-        backend for every row of that key, every shot. The cache entry
-        lives exactly as long as the placed model: id() values are
-        recycled by CPython, and a dead entry would otherwise accumulate
-        once per distinct window model of a long run.
+        A task's shots share their window models
+        (built_window_models.py) but build their rows afresh, so a row
+        with a compile key keeps its backend for every row of that key.
+        The entry lives exactly as long as the placed model, since
+        CPython recycles id() values.
         """
         cache = self.compiled_by_model
         if self.compile_key is not None and not self.backend_is_seeded:
@@ -298,7 +317,9 @@ class WindowDecoderBase(DecoderBase):
 _SHARED_BACKENDS: dict = {}
 
 
-def parity_product(matrix, vector):
+def parity_product(
+    matrix: scipy.sparse.csc_matrix, vector: numpy.ndarray
+) -> numpy.ndarray:
     """The matrix times the vector over GF(2), as a flat array."""
     matrix_integers = matrix.astype(numpy.int64)
     vector_integers = vector.astype(numpy.int64)
@@ -308,7 +329,7 @@ def parity_product(matrix, vector):
     return flat % 2
 
 
-def int_tuple(array) -> tuple:
+def int_tuple(array: numpy.ndarray) -> tuple:
     """The array's entries as a tuple of ints."""
     bits = []
     for bit in array:
@@ -316,7 +337,7 @@ def int_tuple(array) -> tuple:
     return tuple(bits)
 
 
-def payload_syndrome(job: decoding_records.DecodeJob):
+def payload_syndrome(job: decoding_records.DecodeJob) -> numpy.ndarray:
     """Concatenate payload bits into one syndrome vector."""
     if not job.payloads:
         return numpy.zeros(0, dtype=numpy.uint8)
@@ -330,7 +351,9 @@ def payload_syndrome(job: decoding_records.DecodeJob):
 
 
 def check_syndrome_size(
-    job: decoding_records.DecodeJob, syndrome, placed_faults
+    job: decoding_records.DecodeJob,
+    syndrome: numpy.ndarray,
+    placed_faults: fault_models.PlacedFaultModel,
 ) -> None:
     """Fail when payload bits and detector rows do not line up."""
     detector_count = placed_faults.check.shape[0]
@@ -345,10 +368,10 @@ def check_syndrome_size(
 
 def result_from_selected_faults(
     job: decoding_records.DecodeJob,
-    model,
-    placed_faults,
-    selected,
-    decode_status=None,
+    model: fault_models.WindowErrorModel,
+    placed_faults: fault_models.PlacedFaultModel,
+    selected: Union[tuple, numpy.ndarray],
+    decode_status: Optional[decoding_records.BackendDecodeStatus] = None,
 ) -> decoding_records.DecodeResult:
     """Keep the owned selected faults and convert them into a DecodeResult.
 
@@ -383,7 +406,7 @@ def result_from_selected_faults(
 
 
 def dependency_residual(
-    model, detector_ids: tuple
+    model: fault_models.WindowErrorModel, detector_ids: tuple
 ) -> window_records.DependencyResidual:
     """The detectors a commit flips, with their mask by round and position."""
     defects = _defects_from_detector_ids(model, detector_ids)

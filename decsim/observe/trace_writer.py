@@ -1,31 +1,25 @@
 """One shot's Chrome trace: where every round and window sat and moved.
 
-A listener on every component's trace sources, in one event model:
-one thread per
-component and one per wired link path, a residence or a service as an
-`X` complete event written at its end, a move as an `X` on its link's
-thread from send to delivery, a decision or a copy as an `i` instant,
-store and queue occupancy as a `C` counter, and one round's hops joined
-by `s`, `t` and `f` flow events. The Chrome Trace Event Format is the
-JSON Array Format of the spec (an array of event objects carrying name,
-cat, ph, ts, pid, tid and args); Perfetto and chrome://tracing read it.
-
-`ts` is the tick over TICKS_PER_MICROSECOND, so a viewer places the
-event; `args.tick` keeps the exact integer, and every reader uses that.
-The writer schedules nothing and calls no component, so a run with it
-connected has the same ticks, the same log and the same results as one
-without it; with no writer connected each source fires into an empty
-list.
+One thread per component and per link path: a residence or service is
+an X complete event written at its end, a move an X on its link's thread
+from send to delivery, a decision or copy an i instant, occupancy a C
+counter, and a round's hops are joined by s, t and f flow events, in the
+Chrome Trace Event Format's JSON Array Format (Perfetto and
+chrome://tracing read it). ts is the tick in microseconds; args.tick
+keeps the exact integer. The writer schedules nothing and calls no
+component, so a run with it has the same ticks, log and results.
 """
 
 import dataclasses
 import gzip
 import json
-from typing import Optional
+from typing import Any, Optional, Union
 
 import decsim.config as config
-import decsim.links.channel as channel_module
+import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -69,19 +63,21 @@ WAITING_ROUNDS_COUNTER = "controller rounds waiting for a packing place"
 HELD_ROUNDS_COUNTER = "controller rounds held for store room"
 
 
-def round_text(round_key) -> str:
+def round_text(round_key: tuple) -> str:
     """A round key as the args carry it: `op:index`."""
     operation_id, round_index = round_key
     return f"{operation_id}:{round_index}"
 
 
-def window_text(window_key) -> str:
+def window_text(window_key: tuple) -> str:
     """A window key as the args carry it: `op:index`."""
     operation_id, window_id = window_key
     return f"{operation_id}:{window_id}"
 
 
-def request_text(request_key) -> str:
+def request_text(
+    request_key: Optional[window_records.DecoderRequestKey],
+) -> str:
     """A request key as the args carry it: `op:window:tier:sequence`."""
     if request_key is None:
         return ""
@@ -94,7 +90,7 @@ def request_text(request_key) -> str:
 class TraceWriter:
     """Every event of one shot, in the Chrome trace event format."""
 
-    def __init__(self, engine, process_name: str) -> None:
+    def __init__(self, engine: engine_module.Engine, process_name: str) -> None:
         self.engine = engine
         self.process_name = process_name
         self.events: list[dict] = []
@@ -114,10 +110,8 @@ class TraceWriter:
     def document(self) -> list:
         """The metadata events, then every event, in one list.
 
-        A residence still open when the file is written ends at the
-        clock's tick with that reason, so every X the reader sees has a
-        length; the writer keeps it open, so a later call sees it again
-        with the longer one.
+        A residence still open ends at the clock's tick with that reason, so
+        every X has a length; it stays open for a later call.
         """
         process = self._process_name_event()
         rows = [process]
@@ -156,7 +150,13 @@ class TraceWriter:
         name = f"emitted round {readout.round_index}"
         self._instant("QPU", name, "round", args)
 
-    def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
+    def copy_made(
+        self,
+        key: Union[tuple, decoding_records.DecodeJob],
+        bits: Optional[int],
+        source_name: str,
+        target_name: str,
+    ) -> None:
         """Bits duplicated into a structure the receiver owns."""
         thread = _copy_thread(target_name)
         args = _copied_identity(key)
@@ -168,14 +168,14 @@ class TraceWriter:
         self._instant(thread, name, "copy", args)
         self._learn_bits(thread, key, bits)
 
-    def round_in_assembly(self, capacity, event) -> None:
+    def round_in_assembly(
+        self, capacity: int, event: round_records.RoundEvent
+    ) -> None:
         """The controller's packing workspace holds one more round, or one less.
 
-        The workspace is the one bounded controller-side structure
-        (controller.packing_rounds_in_flight, data_path.md's residence
-        table): the residence is the round's bits in the workspace, from its
-        first fragment, or from its release when it waited for a place, to
-        its packing. Its place in the bound is taken at its emission.
+        The residence is the round's bits in the workspace, from its first
+        fragment (or its release from the line) to its packing; its place in
+        the bound is taken at its emission.
         """
         round_key = (event.operation_id, event.round_index)
         if event.kind == "BINARY_AVAILABLE":
@@ -184,13 +184,13 @@ class TraceWriter:
         if event.kind == "PACKED":
             self._end_assembly(round_key, "packed")
 
-    def round_waiting_for_a_place(self, capacity, event) -> None:
+    def round_waiting_for_a_place(
+        self, capacity: int, event: round_records.RoundEvent
+    ) -> None:
         """A round waiting in front of a full packing stage, and its entry.
 
-        The wait opens when the QPU emits the round
-        (controller/round_assembly.py), so the fragments that arrive while
-        it waits find the round's key open and open no place in the stage.
-        Its place opens when the line lets it go.
+        The wait opens at the QPU's emission, so fragments arriving while it
+        waits find its key open and open no place.
         """
         round_key = (event.operation_id, event.round_index)
         if event.kind == "STALLED":
@@ -200,14 +200,11 @@ class TraceWriter:
             self._end_waiting_round(round_key)
             self._begin_assembly(capacity, round_key, event)
 
-    def round_held_for_room(self, event) -> None:
+    def round_held_for_room(self, event: round_records.RoundEvent) -> None:
         """A packed round waiting in front of a full store, and its release.
 
-        The workspace frees the round at the packing
-        (controller/round_assembly.py), so the wait for store room is a
-        residence of its own on the controller's lane, from the refusal
-        to the slot that admitted it; a round that found room opens
-        none.
+        The workspace frees the round at packing, so the wait for store room is
+        a residence of its own, from refusal to admission.
         """
         round_key = (event.operation_id, event.round_index)
         if event.kind == "STALLED":
@@ -216,7 +213,7 @@ class TraceWriter:
         if event.kind == "RELEASED":
             self._end_held_round(round_key)
 
-    def command_event(self, event) -> None:
+    def command_event(self, event: program_records.QPUCommandEvent) -> None:
         """A command arrived at the QPU or started on a boundary."""
         kind = event.kind.lower()
         name = f"command {kind}"
@@ -260,13 +257,8 @@ class TraceWriter:
             window_key = (attribution.operation_id, attribution.window_id)
             self._step_window_flow(thread, window_key, start)
 
-    def frame_landed(self, record: channel_module.FrameRecord) -> None:
-        """One frame on its channel's frame lane, from its start to its end.
-
-        The span is the wire's occupancy by the frame; its credit wait and
-        landing tick ride in args. A lost frame and a resent one are named
-        so, which shows a reliable hop's inside.
-        """
+    def frame_landed(self, record: transfer_records.FrameRecord) -> None:
+        """One frame on its channel's frame lane, from its start to its end."""
         timing = record.timing
         thread = f"{record.channel} frames"
         name = _frame_name(record)
@@ -284,7 +276,11 @@ class TraceWriter:
     # ---- the stores
 
     def round_stored(
-        self, store_name: str, capacity_bits, round_key, packet
+        self,
+        store_name: str,
+        capacity_bits: Optional[int],
+        round_key: tuple,
+        packet: round_records.SyndromeRoundPacket,
     ) -> None:
         """A round takes a slot in the store."""
         bits = _packet_bits(packet)
@@ -307,12 +303,14 @@ class TraceWriter:
         bits_counter = f"{store_name} bits"
         self._count(store_name, bits_counter, held_bits, series="bits")
 
-    def round_published(self, store_name: str, round_key, tick: int) -> None:
+    def round_published(
+        self, store_name: str, round_key: tuple, tick: int
+    ) -> None:
         """The round's bits are readable in the store."""
         readable = {"data_ready": tick}
         self._learn_on_residence(store_name, round_key, readable)
 
-    def round_released(self, store_name: str, round_key) -> None:
+    def round_released(self, store_name: str, round_key: tuple) -> None:
         """The round's last holder let go; the slot is free."""
         held_bits = self._residence_bits(store_name, round_key)
         closing = {
@@ -325,7 +323,12 @@ class TraceWriter:
         bits_counter = f"{store_name} bits"
         self._count(store_name, bits_counter, -held_bits, series="bits")
 
-    def hold_registered(self, store_name: str, holder, round_keys) -> None:
+    def hold_registered(
+        self,
+        store_name: str,
+        holder: Any,  # an opaque identity
+        round_keys: tuple,
+    ) -> None:
         """One consumer token keeps the listed rounds alive."""
         args = {
             "holder": _holder_text(holder),
@@ -334,7 +337,12 @@ class TraceWriter:
         }
         self._instant(store_name, "hold registered", "hold", args)
 
-    def hold_transferred(self, store_name: str, old_holder, new_holder) -> None:
+    def hold_transferred(
+        self,
+        store_name: str,
+        old_holder: Any,  # an opaque identity
+        new_holder: Any,  # an opaque identity
+    ) -> None:
         """A live hold moves to a new token, freeing nothing."""
         args = {
             "holder": _holder_text(old_holder),
@@ -343,7 +351,11 @@ class TraceWriter:
         }
         self._instant(store_name, "hold transferred", "hold", args)
 
-    def hold_released(self, store_name: str, holder) -> None:
+    def hold_released(
+        self,
+        store_name: str,
+        holder: Any,  # an opaque identity
+    ) -> None:
         """A hold ends; rounds with no other holder are freed next."""
         args = {"holder": _holder_text(holder)}
         self._instant(store_name, "hold released", "hold", args)
@@ -413,7 +425,7 @@ class TraceWriter:
         closing = {"freed_reason": "withdrawn"}
         self._end_residence("Window planner", job.request_key, closing)
 
-    def depth_changed(self, manager, tick: int, depth: int) -> None:
+    def depth_changed(self, manager: int, tick: int, depth: int) -> None:
         """One manager's waiting jobs changed; the counter is the sum."""
         self.queue_depth_by_manager[manager] = depth
         depths = self.queue_depth_by_manager.values()
@@ -421,7 +433,12 @@ class TraceWriter:
         values = {"jobs": total}
         self._counter("Window planner", "ready queue depth", values, tick)
 
-    def verdict_given(self, window_key, request_key, verdict) -> None:
+    def verdict_given(
+        self,
+        window_key: tuple,
+        request_key: window_records.DecoderRequestKey,
+        verdict: decoding_records.Verdict,
+    ) -> None:
         """The policy answered one weak result."""
         args = {
             "window": window_text(window_key),
@@ -431,14 +448,14 @@ class TraceWriter:
         self._instant("Window planner", "verdict", "window", args)
 
     def window_committed(
-        self, window: window_records.Window, contribution
+        self,
+        window: window_records.Window,
+        contribution: decoding_records.LogicalContribution,
     ) -> None:
         """A window committed under the contribution that owns its rounds.
 
-        An escalated window commits its weak result provisionally at the
-        verdict and the strong result finalizes it later, on the frame's
-        own committed instant (WindowCommitter.finish_strong), so the
-        instant says which of the two it marks.
+        An escalated window commits its weak result provisionally and the
+        strong result finalizes it later, so the instant says which it marks.
         """
         commit_lo = contribution.commit_lo
         commit_hi = contribution.commit_hi
@@ -456,7 +473,11 @@ class TraceWriter:
         self._instant("Window planner", name, "window", args)
 
     def strong_window_held(
-        self, request_key, window_key, waits_for: str, round_count: int
+        self,
+        request_key: window_records.DecoderRequestKey,
+        window_key: tuple,
+        waits_for: str,
+        round_count: int,
     ) -> None:
         """A strong window's job waits for the condition its row declared."""
         args = {
@@ -471,7 +492,11 @@ class TraceWriter:
         )
 
     def strong_window_left(
-        self, request_key, window_key, outcome: str, is_submitted: bool
+        self,
+        request_key: window_records.DecoderRequestKey,
+        window_key: tuple,
+        outcome: str,
+        is_submitted: bool,
     ) -> None:
         """The wait ended: the job was submitted, or it never runs.
 
@@ -490,12 +515,7 @@ class TraceWriter:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """One of a window's solves waits for that window's others.
-
-        A window whose confidence needs several forced-class solves is
-        answered only when the last one arrives, so the trace marks each
-        earlier one where it stops.
-        """
+        """One of a window's solves waits for that window's others."""
         del result
         window_key = (job.operation_id, job.window_id)
         args = {
@@ -505,7 +525,7 @@ class TraceWriter:
         }
         self._instant("Window planner", "solve held", "window,confidence", args)
 
-    def window_absorbed(self, key, owner_key) -> None:
+    def window_absorbed(self, key: tuple, owner_key: tuple) -> None:
         """A strong window covers the window; the weak chain skips it."""
         args = {
             "window": window_text(key),
@@ -515,12 +535,20 @@ class TraceWriter:
 
     # ---- the decoder units
 
-    def job_dispatched(self, job: decoding_records.DecodeJob, unit) -> None:
+    def job_dispatched(
+        self,
+        job: decoding_records.DecodeJob,
+        unit: ports.DecoderUnit,
+    ) -> None:
         """The job left the ready queue for a unit."""
         closing = {"unit": unit.name}
         self._end_residence("Window planner", job.request_key, closing)
 
-    def input_landed(self, job: decoding_records.DecodeJob, unit) -> None:
+    def input_landed(
+        self,
+        job: decoding_records.DecodeJob,
+        unit: ports.DecoderUnit,
+    ) -> None:
         """The job's input is in the unit's own memory."""
         thread = _unit_thread(unit.name)
         window_key = (job.operation_id, job.window_id)
@@ -541,7 +569,11 @@ class TraceWriter:
         self._end_flow(thread, job)
         self._step_window_flow(thread, window_key, self.engine.now)
 
-    def job_started(self, job: decoding_records.DecodeJob, unit) -> None:
+    def job_started(
+        self,
+        job: decoding_records.DecodeJob,
+        unit: ports.DecoderUnit,
+    ) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
         args = {
@@ -554,7 +586,11 @@ class TraceWriter:
             "args": args,
         }
 
-    def job_finished(self, job: decoding_records.DecodeJob, unit) -> None:
+    def job_finished(
+        self,
+        job: decoding_records.DecodeJob,
+        unit: ports.DecoderUnit,
+    ) -> None:
         """The unit's physical decode ended."""
         thread = _unit_thread(unit.name)
         key = ("service", job.request_key)
@@ -567,15 +603,14 @@ class TraceWriter:
         args = open_row["args"]
         self._complete(thread, name, "window,service", start, duration, args)
 
-    def stage_recorded(self, record) -> None:
+    def stage_recorded(
+        self, record: decoding_records.DecoderStageRecord
+    ) -> None:
         """One stage of one job on the lane of the unit that ran it.
 
-        The record names its unit, since two decodes of one window run
-        on two units at once (a complementary gap's forced-class pair, a
-        run_both_at_once speculative strong decode) and two decodes that
-        serve no request share every other identity. A stage the cancel
-        closed carries the mark, so the trace shows where the decode
-        stopped rather than where its card would have ended.
+        Two decodes of one window can run on two units at once (a forced-class
+        pair, a speculative strong decode), so the record names its unit. A
+        cancelled stage carries the mark, so the trace shows where it stopped.
         """
         window_key = (record.operation_id, record.window_id)
         thread = _unit_thread(record.unit_name)
@@ -590,7 +625,10 @@ class TraceWriter:
         self._complete(thread, record.stage, "stage", start, duration, args)
 
     def memory_deposited(
-        self, memory_name: str, _job: decoding_records.DecodeJob, decoder_input
+        self,
+        memory_name: str,
+        _job: decoding_records.DecodeJob,
+        decoder_input: decoding_records.DecoderInput,
     ) -> None:
         """One job's rounds landed in a unit's memory."""
         unit_name = _unit_of_memory(memory_name)
@@ -600,7 +638,10 @@ class TraceWriter:
         self._count(thread, counter, bits, series="bits")
 
     def memory_taken(
-        self, memory_name: str, job: decoding_records.DecodeJob, decoder_input
+        self,
+        memory_name: str,
+        job: decoding_records.DecodeJob,
+        decoder_input: decoding_records.DecoderInput,
     ) -> None:
         """The unit's memory freed the job's rounds."""
         unit_name = _unit_of_memory(memory_name)
@@ -614,7 +655,9 @@ class TraceWriter:
 
     # ---- the frame
 
-    def correction_accepted(self, record) -> None:
+    def correction_accepted(
+        self, record: decoding_records.PauliFrameCommitRecord
+    ) -> None:
         """The frame took one window's correction."""
         window = window_text(record.window_key)
         args = {
@@ -629,7 +672,9 @@ class TraceWriter:
         self._begin_residence("Frame", key, name, "window,residence", args)
         self._end_window_flow("Frame", record.window_key, self.engine.now)
 
-    def correction_committed(self, record) -> None:
+    def correction_committed(
+        self, record: decoding_records.PauliFrameCommitRecord
+    ) -> None:
         """The frame's write for one window has landed."""
         window = window_text(record.window_key)
         key = (record.window_key, record.run_sequence)
@@ -702,11 +747,9 @@ class TraceWriter:
     def _counter(self, thread: str, name: str, values: dict, tick: int) -> None:
         """One counter row: its args carry the series and nothing else.
 
-        catapult's importer makes one series per key of a counter's args
-        (trace_event_importer 402-431), so a tick alongside the value
-        would plot as a second series five orders of magnitude larger
-        and flatten the one the reader came for. The tick is in ts,
-        where every other phase carries it.
+        catapult makes one series per args key (trace_event_importer 402-431),
+        so a tick beside the value would plot as a second series and flatten
+        the first. The tick is in ts.
         """
         row = {
             "ph": "C",
@@ -809,11 +852,8 @@ class TraceWriter:
     def _learn_bits(self, thread: str, key, bits) -> None:
         """A copy names the bits of the residence it lands in, when it can.
 
-        A structure that knows its own payload keeps it; the controller's
-        packing workspace holds raw measurement fragments and learns
-        their size from the merge that packs them. Only a round names a
-        residence: a copy of a whole window names its job, and a job's
-        residence is keyed by its request.
+        The packing workspace learns its fragments' size from the merge. Only a
+        round names a residence; a window copy names its job, keyed by request.
         """
         if not isinstance(key, tuple):
             return
@@ -855,9 +895,8 @@ class TraceWriter:
     def _flow_over_move(self, thread, attribution, transfer) -> None:
         """Start or step the flow of every round the move carries.
 
-        A window's move steps the flows of the rounds it reads and never
-        starts one: a round's flow begins at its own hop out of the QPU
-        and ends when its bits land in a unit's memory.
+        A window's move only steps flows: a round's flow begins at its hop out
+        of the QPU and ends when its bits land in a unit's memory.
         """
         carries_window = attribution.window_id is not None
         for round_key in attribution.round_keys:
@@ -887,11 +926,8 @@ class TraceWriter:
     def _next_flow_id(self) -> int:
         """A new chain's id: a number, in the order the chains start.
 
-        The spec's ids are numbers (Trace Event Format, Async Events,
-        "id": 0x100, which flow events share), and Perfetto's trace
-        processor drops a flow whose id does not read as one, counting
-        it under flow_invalid_id, so the round or window a chain follows
-        is named in its args instead.
+        The spec's ids are numbers and Perfetto drops a flow whose id is not
+        (flow_invalid_id), so the round or window is named in args instead.
         """
         self._open.flows_started += 1
         return self._open.flows_started
@@ -941,9 +977,8 @@ class TraceWriter:
     def _start_window_flow(self, thread: str, window_key) -> None:
         """A window's chain begins where its request joins the queue.
 
-        An escalated window joins the queue again under the same key.
-        That is one more hop of the same chain: a Chrome flow has one
-        start and then steps, so the second enqueue writes a `t`.
+        An escalated window enqueues again under the same key; a Chrome flow
+        has one start, so the second enqueue writes a t.
         """
         if window_key in self._open.flowing_windows:
             self._step_window_flow(thread, window_key, self.engine.now)
@@ -1034,11 +1069,9 @@ def _copy_thread(target_name: str) -> str:
 def _input_key(job: decoding_records.DecodeJob):
     """The identity of the rounds a job reads, as the unit's memory keys them.
 
-    The forced-class solves of one window share one landed input
-    (DecoderMemory.rewrite), so the input's residence is one record
-    keyed by the request whose transfer landed it, the job's own
-    request otherwise; the memory frees it when the last reader takes
-    it and that is when the record closes.
+    The forced-class solves of one window share one landed input, keyed by
+    the request whose transfer landed it; the record closes when the memory
+    frees it.
     """
     if job.input_key is not None:
         return job.input_key
@@ -1066,9 +1099,8 @@ def _dispatch_tick(job: decoding_records.DecodeJob) -> Optional[int]:
 def _copied_identity(key) -> dict:
     """What a copy carried, named as every other event names it.
 
-    A round key is a round; a decode job is a window, and the rounds it
-    reads, so a round's own path can be followed through the copy into a
-    unit's memory. Every copy_made source fires one or the other.
+    A round key is a round; a decode job is a window and its rounds, so a
+    round can be followed into a unit's memory.
     """
     if isinstance(key, tuple):
         return {"round": round_text(key)}
@@ -1181,7 +1213,7 @@ def _job_round_keys(job: decoding_records.DecodeJob) -> tuple:
 
 @dataclasses.dataclass
 class _OpenSlices:
-    """Every slice the writer has begun and not yet closed, as one member.
+    """The slices the writer has open, as one member.
 
     A residence or a service that has begun and not ended sits under
     (thread, key) and writes one X event at its end; flowing_rounds and

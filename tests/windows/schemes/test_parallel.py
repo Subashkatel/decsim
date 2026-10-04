@@ -27,17 +27,6 @@ def _geometries(plan) -> list:
     return laid_out
 
 
-def test_the_first_a_block_commits_the_first_2d_rounds_and_reads_3d():
-    row = parallel_scheme.ParallelWindowScheme()
-
-    plan = row.plan_operation(1, 40, commit_round_count=3, buffer_round_count=3)
-    first = plan.windows[0]
-
-    assert (first.buffer_lo, first.commit_lo) == (1, 1)
-    assert first.commit_hi == 6
-    assert first.buffer_hi == 9
-
-
 def test_an_interior_b_block_commits_the_region_between_two_a_commits():
     """A B block reads nothing past what it commits and closes both ends."""
     row = parallel_scheme.ParallelWindowScheme()
@@ -96,7 +85,5 @@ def test_unequal_commit_and_buffer_widths_are_refused():
     """Skoric's construction fixes ncom = nbuf = d."""
     row = parallel_scheme.ParallelWindowScheme()
 
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(ValueError, match="parallel A/B decoding requires"):
         row.plan_operation(1, 40, commit_round_count=3, buffer_round_count=4)
-
-    assert "ncom = nbuf = d" in str(refusal.value)

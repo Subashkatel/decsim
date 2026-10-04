@@ -10,7 +10,7 @@ import numpy
 import pytest
 
 import decsim.decoders.belief_propagation_osd.decoder as adapter
-import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 qldpc_decoders = pytest.importorskip("qldpc.decoders")

@@ -10,7 +10,7 @@ window is final.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -24,11 +24,12 @@ import decsim.windows.window_planner as window_planner
 
 
 class OperationResults:
-    """Delivers each operation's and segment's result once it is final.
+    """Delivers each result once it is final.
 
-    Trace source: operation_result_delivered(operation_id,
-    logical_observables) at every delivery, and with None when a
-    delivery is withdrawn; the result ledger listens.
+    A result is an operation's or a stream segment's. Trace source:
+    operation_result_delivered(operation_id, logical_observables) at
+    every delivery, and with None when a delivery is withdrawn; the
+    result ledger listens.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -46,7 +47,9 @@ class OperationResults:
     # ---- what the committer tells
 
     def install_window_contribution(
-        self, window: window_records.Window, logical_observables
+        self,
+        window: window_records.Window,
+        logical_observables: Optional[tuple[int, ...]],
     ) -> decoding_records.LogicalContribution:
         """The window owns its commit range, unless a strong window does.
 
@@ -65,7 +68,9 @@ class OperationResults:
         self.ledger.install(contribution)
         return contribution
 
-    def replace_prediction(self, key: tuple, logical_observables) -> None:
+    def replace_prediction(
+        self, key: tuple, logical_observables: Optional[tuple[int, ...]]
+    ) -> None:
         """A strong result replaces the owner's prediction."""
         self.ledger.replace_prediction(key, logical_observables)
 
@@ -99,7 +104,8 @@ class OperationResults:
         self.deliveries.finished_operation_ids.add(operation.id)
         self._deliver_result(operation)
         weak_store = self.retention.weak_store
-        weak_store.close_operation(operation.id)
+        if weak_store is not None:
+            weak_store.close_operation(operation.id)
         self._close_strong_store_operation(operation.id)
         self.finish_workload_if_ready()
 
@@ -116,7 +122,10 @@ class OperationResults:
         self.deliveries.is_workload_done = True
         self.factory.shutdown()
 
-    def release_committed_segments(self, stream_id) -> None:
+    def release_committed_segments(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> None:
         """Deliver the segments the stream's committed prefix covers."""
         committed = self.deliveries.committed_round_count_by_stream.get(
             stream_id, 0
@@ -124,7 +133,9 @@ class OperationResults:
         self.release_stream_segments_at_commit(stream_id, committed)
 
     def release_stream_segments_at_commit(
-        self, stream_id, committed_round_count: int
+        self,
+        stream_id: Any,  # an opaque identity
+        committed_round_count: int,
     ) -> None:
         """Deliver the segment results whose full round range committed.
 
@@ -140,7 +151,10 @@ class OperationResults:
     # ---- the segment binds
 
     def bind_stream_segment(
-        self, operation_id: int, stream_id, stream_offset: int
+        self,
+        operation_id: int,
+        stream_id: Any,  # an opaque identity
+        stream_offset: int,
     ) -> None:
         """Note which stream and offset a segment's rounds fold into."""
         segment = self._segment(operation_id)
@@ -156,7 +170,10 @@ class OperationResults:
 
     # ---- the rounds backlog
 
-    def committed_prefix_round_count(self, operation_id) -> int:
+    def committed_prefix_round_count(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
         """Rounds decoded in an unbroken prefix from round 1."""
         committed_ranges = []
         for window in self._committed_windows_of(operation_id):
@@ -204,7 +221,9 @@ class OperationResults:
         if self._has_window_awaiting_strong(operation_id):
             return False
         weak_store = self.retention.weak_store
-        if weak_store.has_live_operation_reference(operation_id):
+        if weak_store is not None and weak_store.has_live_operation_reference(
+            operation_id
+        ):
             return False
         if self._strong_store_references(operation_id):
             return False
@@ -235,9 +254,10 @@ class OperationResults:
         segment_end = self._stream_segment_end(
             operation, segment, stream_offset
         )
-        if segment_end is None or segment_end > committed_round_count:
-            return
-        if self._segment_waits_for_strong(stream_id, segment_end):
+        is_final = self._is_segment_final(
+            stream_id, segment_end, committed_round_count
+        )
+        if not is_final:
             return
         segment_start = stream_offset + 1
         logical_observables = self.ledger.observables_for_interval(
@@ -259,6 +279,18 @@ class OperationResults:
             return None
         round_count = self.planner.round_count_of(operation.id)
         return stream_offset + round_count
+
+    def _is_segment_final(
+        self,
+        stream_id,
+        segment_end: Optional[int],
+        committed_round_count: int,
+    ) -> bool:
+        """Its end is known and committed, and no strong redo may change it."""
+        if segment_end is None or segment_end > committed_round_count:
+            return False
+        is_waiting = self._segment_waits_for_strong(stream_id, segment_end)
+        return not is_waiting
 
     def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
         for key, window in self.planner.windows_by_key.items():
@@ -327,7 +359,7 @@ def _stream_place(operation: program_records.Operation, segment) -> tuple:
 
 
 class _Deliveries:
-    """What has been delivered so far, and whether the workload is done."""
+    """The progress of the deliveries so far."""
 
     def __init__(self) -> None:
         self.is_workload_done = False
@@ -338,7 +370,10 @@ class _Deliveries:
 
 
 class _Segment:
-    """Where one operation's rounds fold into a stream, and its result's end."""
+    """Where one operation's rounds fold into a stream.
+
+    required_stream_end is the stream round its result waits for.
+    """
 
     def __init__(self) -> None:
         self.stream_id = None
@@ -348,13 +383,7 @@ class _Segment:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the operation results reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the operation results reports, as one member."""
 
     operation_result_delivered: trace_source.TraceSource = (
         trace_source.new_source()

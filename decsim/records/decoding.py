@@ -1,31 +1,30 @@
-"""One decode: the job, the result, and the holds that keep its rounds.
+"""One decode: its job, input, stages and result, and the holds on its rounds.
 
 A weak decode runs first and fast; an escalated strong decode re-decodes
-the same window (Toshio et al. 2510.25222 Sec. III A). The confidence a
-decoder reports, the outcome one request ended in, and the shape of the
-whole run that the root checks before planning are here too, because the
-escalation policy reads them together with the result.
+the same window (Toshio et al. 2510.25222 Sec. III A). The confidence,
+the request outcome and the run's shape live here too, because the
+escalation policy reads them with the result, and so does the frame's
+record of the correction it accepted, which closes the decode.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
+import numpy
+
+import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 
 @dataclass(frozen=True)
 class SoftOutputSource:
-    """Exact provenance required to interpret one confidence threshold."""
+    """The signal that computed a gap, by its method's name."""
 
     method: str
-    cluster_origin: str
-    growth_schedule: str
-    gap_units: str
-    correction: str
-    weight_step_natural_log: Optional[float]
-    references: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -40,13 +39,12 @@ class SoftOutput:
 
 @dataclass(frozen=True)
 class SoftOutputComputation:
-    """One window's soft output and what computing it cost.
+    """One window's soft output, as the signal computed it.
 
-    ticks are the weak tier's clock ticks the signal's own computation
-    took: zero for a subtraction, the measured or declared time of a
-    walk over the decode's growth (decision D8, Meister et al.
-    2405.07433 Algorithm 2). The unit that produced the evidence is
-    charged for them, because the evidence and its reader are the same
+    ticks are the weak tier's clock ticks the signal's own computation took:
+    zero for a subtraction, the time of a walk over the decode's growth
+    (Meister et al. 2405.07433 Algorithm 2). The unit that produced the
+    evidence is charged them, since the evidence and its reader are the same
     hardware (Toshio et al. 2510.25222 lines 152-160).
     """
 
@@ -58,15 +56,13 @@ class SoftOutputComputation:
 class WindowConfidence:
     """One window's confidence gap as the verdict read it.
 
-    gap_nats is None when the signal gave no gap, a window whose model
-    pins no observable or whose decode grew no cluster, and the policy
-    escalates such a window (decsim/escalation/policies.py).
+    gap_nats is None when the signal gave no gap (no observable pinned, no
+    cluster grown), and the policy escalates such a window.
     is_strong_revised says whether the strong decode predicted other
-    observables than the weak one it replaced, None for a window that
-    did not escalate or whose strong answer never came: a window has no
-    truth of its own, so this is the one per-window answer to whether
-    the weak decode was wrong (Toshio et al. 2510.25222 lines 807-841
-    sign the gap by exactly that).
+    observables than the weak one, None when it did not escalate or no
+    strong answer came: a window has no truth of its own, so this is the
+    per-window answer to whether the weak decode was wrong (Toshio et al.
+    2510.25222 lines 807-841).
     """
 
     window_key: tuple
@@ -81,6 +77,12 @@ class WindowConfidence:
 # open beyond the ones the rounds it names belong to. A store asks the
 # token rather than reading its type, so a token added later is counted
 # by the liveness check like every other one.
+#
+# Every token also answers operation_ids_read_at_once: the operations
+# whose rounds, among those it names, the window side waits to see all
+# stored at once before it ends. Every token also answers
+# holders_waited_for: the holds that end before it can. A bounded store
+# asks both while a round waits for room (syndrome_buffer.py).
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,20 @@ class WindowReads:
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the reading window's own."""
+        return ()
+
+    def operation_ids_read_at_once(self) -> tuple:
+        """The window's operation: its decode waits for every round of it.
+
+        A buffer past the operation's end is filled by memory rounds or
+        by any one successor (windows/schemes/window_data.py), so the
+        rounds of other operations it names are not waited for at once.
+        """
+        operation_id = self.window_key[0]
+        return (operation_id,)
+
+    def holders_waited_for(self) -> tuple:
+        """None: its decode waits for rounds, not for another hold."""
         return ()
 
 
@@ -104,16 +120,24 @@ class PotentialStrong:
         """None: the rounds held are the held window's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold ends at a weak verdict that keeps the window."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """None: an absorbing strong window may end it unread."""
+        return ()
+
 
 @dataclass(frozen=True)
 class PotentialRestart:
-    """A hold in the weak syndrome buffer: a window's reads and one before them.
+    """A hold in the weak syndrome buffer for a window that may restart.
 
-    Under the double window an earlier escalation may re-slice
-    this window as its restart window, whose weak decode re-reads one
-    buffer into the strong region (Toshio 2510.25222 Sec. III C); the
-    rounds stay past the window's own request and landing, until the
-    window before it commits.
+    It keeps the window's reads and the rounds before them that a restart
+    re-reads. Under the double window an earlier escalation may re-slice
+    this window as its restart window, which re-reads one buffer into the
+    strong region (Toshio 2510.25222 Sec. III C); the rounds stay until
+    the window before it commits.
     """
 
     window_key: tuple
@@ -122,32 +146,63 @@ class PotentialRestart:
         """None: the rounds held are the held window's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold ends when the window before it commits."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """None: the window before it may be absorbed rather than read."""
+        return ()
+
 
 @dataclass(frozen=True)
 class LaterStreamReads:
     """A hold: the raw rounds a stream's windows still to come read early.
 
-    A strong read of a window carries the raw rounds before its first
-    that its recipes read, and a stream's window registers only as its
-    rounds arrive, so the stream keeps them for it until then.
+    A stream's window registers only as its rounds arrive, so the stream
+    keeps the raw rounds its strong read will need until then.
     """
 
-    stream_id: Any
+    stream_id: Any  # an opaque identity
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the stream's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold moves on as the stream's windows register."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """None: the hold moves on as the stream's windows register."""
+        return ()
+
 
 @dataclass(frozen=True)
 class PendingStrong:
-    """A hold: rounds for an admitted, not yet served strong request."""
+    """A hold: rounds for an admitted, not yet served strong request.
+
+    restart_key is the window whose weak commit releases the request, or
+    None at the operation's end (escalation/strong_window_shapes.py,
+    _far_face_conditions); the request key alone names the hold.
+    """
 
     request_key: window_records.DecoderRequestKey
+    restart_key: Optional[tuple] = field(default=None, compare=False)
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the requested window's own."""
         return ()
+
+    def operation_ids_read_at_once(self) -> tuple:
+        """The request's operation: its job waits for every round stored."""
+        return (self.request_key.operation_id,)
+
+    def holders_waited_for(self) -> tuple:
+        """The restart window's read, which ends before its weak commit."""
+        if self.restart_key is None:
+            return ()
+        return (WindowReads(self.restart_key),)
 
 
 @dataclass(frozen=True)
@@ -160,16 +215,42 @@ class StrongInputInFlight:
         """None: the rounds held are the requested window's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: its decode has started on rounds already stored."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """None: it ends when its rounds land in unit memory."""
+        return ()
+
 
 @dataclass(frozen=True)
 class DecoderInputHold:
-    """A hold: a decode job's rounds until they land in unit memory."""
+    """A hold: a decode job's rounds until they land in unit memory.
+
+    boundary_window_keys are the windows whose boundaries the job waits
+    for before its input takes a slot (decode_requests.py, may_stage);
+    the request key alone names the hold.
+    """
 
     request_key: window_records.DecoderRequestKey
+    boundary_window_keys: tuple = field(default=(), compare=False)
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the job's own."""
         return ()
+
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: its decode has started on rounds already stored."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """The reads of the windows whose boundaries it waits for."""
+        waited = []
+        for window_key in self.boundary_window_keys:
+            reads = WindowReads(window_key)
+            waited.append(reads)
+        return tuple(waited)
 
 
 @dataclass(frozen=True)
@@ -182,6 +263,39 @@ class RephaseGuard:
         """The guarded request's operation, which the suffix may outlive."""
         return (self.request_key.operation_id,)
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold ends when the strong plan lands."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """None: the hold ends when the strong plan lands."""
+        return ()
+
+
+# Every hold a syndrome buffer keeps rounds for; the store asks it the
+# three questions above and never reads which one it is.
+Hold = Union[
+    WindowReads,
+    PotentialStrong,
+    PotentialRestart,
+    LaterStreamReads,
+    PendingStrong,
+    StrongInputInFlight,
+    DecoderInputHold,
+    RephaseGuard,
+]
+
+
+@dataclass(frozen=True)
+class SyndromeBufferingPlan:
+    """The holds every window places on the stores.
+
+    A hold names the rounds a consumer keeps alive.
+    """
+
+    weak_holds: tuple
+    potential_holds: tuple
+
 
 @dataclass(frozen=True)
 class DecoderServiceKey:
@@ -191,18 +305,13 @@ class DecoderServiceKey:
 
 
 class DecodeJobKind(Enum):
-    """What one decode job is, declared once and read by everyone.
+    """The kind of one decode job, declared once.
 
-    The manager, the queue and the request ledger all need to know what
-    a job is before they read it, and a declared kind is how a
-    heterogeneous runtime says so: StarPU declares one codelet per
-    architecture and Legion one processor kind per task, and the
-    scheduler reads the declaration rather than inferring it. WINDOW is
-    one window's decode on the tier that owns it, forced-class solves
-    included; STRONG_REDECODE is one escalated window on the strong
-    tier; STRONG_BATCH is the merged timing-only decode that serves
-    several of those under bulk_strong; SELF_CONTAINED is a decode with
-    no window and no syndrome, a factory correction or an idle region.
+    A heterogeneous runtime declares a task's kind rather than inferring it,
+    as StarPU declares a codelet per architecture and Legion a processor
+    kind per task. STRONG_BATCH is the merged timing-only decode of several
+    re-decodes under bulk_strong; SELF_CONTAINED has no window and no
+    syndrome (a factory correction or an idle region).
     """
 
     WINDOW = "window"
@@ -228,16 +337,59 @@ class RequestProcessingOutcome(Enum):
     WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
 
 
-def distinct_round_count(payloads) -> int:
-    """The distinct syndrome rounds a set of payloads carries.
+@dataclass(frozen=True)
+class MaterializedSyndromeRound:
+    """One immutable syndrome round owned by the decoder side."""
 
-    The number of (operation_id, round_index) identities, the rounds a
-    decode job is priced and admitted for, the rounds the decoder reads:
-    a sliding-window decoder's work scales with the rounds in its window
-    (Skoric et al. 2209.08552, tau_W over n_W), a final window can be
-    smaller than a regular one with the whole window as core (Tan et al.
-    2209.09219), and no window implementation feeds rounds beyond the
-    data (Gong et al. sliding-window decoder; cudaq-qec sliding_window).
+    operation_id: Any  # an opaque identity
+    round_index: int
+    fragments: tuple[round_records.RetainedSyndromeFragment, ...]
+
+
+@dataclass(frozen=True)
+class DecoderInput:
+    """Immutable local input for one decoder request.
+
+    Rounds are ordered by operation identity and round index.
+    """
+
+    operation_id: int
+    window_id: int
+    request_key: Optional[window_records.DecoderRequestKey]
+    rounds: tuple[MaterializedSyndromeRound, ...]
+
+    def fragments(self) -> list:
+        """The landed fragments, round by round."""
+        fragments = []
+        for round_input in self.rounds:
+            fragments.extend(round_input.fragments)
+        return fragments
+
+    def size_bits(self) -> Optional[int]:
+        """The bits this input occupies; None when a fragment states none.
+
+        An input with no rounds is no bits at all.
+        """
+        fragments = self.fragments()
+        return round_records.fragment_wire_bits(fragments)
+
+    def held_bits(self) -> int:
+        """The bits this input holds in a memory.
+
+        Rounds that state no size hold none; only a bounded memory needs
+        a size, and it refuses such an input before it lands.
+        """
+        bits = self.size_bits()
+        return round_records.stated_bits(bits)
+
+
+def distinct_round_count(payloads: list) -> int:
+    """The distinct (operation_id, round_index) rounds of the payloads.
+
+    A decode job is priced and admitted for these: a sliding-window
+    decoder's work scales with its window's rounds (Skoric et al.
+    2209.08552), a final window may be smaller (Tan et al. 2209.09219), and
+    no window implementation feeds rounds beyond the data.
     """
     round_identities = set()
     for payload in payloads:
@@ -247,13 +399,12 @@ def distinct_round_count(payloads) -> int:
 
 @dataclass
 class DecodeJob:
-    """One unit of decoder work: a window's rounds and its life.
+    """One unit of decoder work.
 
-    The window's rounds, its detector error model, its identity in the
-    decoder queues, and the timestamps of its life. ``payloads`` is the
-    weak syndrome buffer's view of the rounds until the transfer lands them
-    in a unit's memory (``decoder_input``); a decoder reads only its unit's
-    memory.
+    It carries a window's rounds through the job's life. payloads is the
+    weak syndrome buffer's view of the rounds until the transfer lands
+    them in a unit's memory (decoder_input); a decoder reads only its
+    unit's memory.
     """
 
     operation_id: int  # operation the window belongs to
@@ -261,25 +412,26 @@ class DecodeJob:
     # rounds the decoder processes: the distinct rounds landed in its
     # input, plus batched idle rounds
     round_count: int
-    detector_error_model: Optional[Any] = (
-        None  # window detector error model (data-path decoders)
-    )
+    # the window's error model, which a data-path decoder reads
+    detector_error_model: Optional[fault_models.WindowErrorModel] = None
     payloads: list = field(
         default_factory=list
     )  # transfer-source view; cleared after materialization
-    decoder_input: Optional[Any] = None  # materialized decoder memory value
+    # the rounds as they sit in the unit's memory, once they have landed
+    decoder_input: Optional[DecoderInput] = None
     # the raw rounds before the first payload, in round order, read out
     # of the store with them when the tier's decoder forms the events
     # and has not formed that first round (detection_events,
     # rounds_needed_before); held by the former and never decoded,
     # cleared with the payloads
     rounds_before: tuple = ()
-    input_hold: Optional[Any] = (
+    input_hold: Optional[Callable[[], None]] = (
         None  # upstream hold released at transfer completion
     )
     # the WindowInputGate the decoder manager asks before staging, before
-    # starting and when masking the landed input; None for a windowless job
-    gate: Optional[Any] = None
+    # starting and when masking the landed input; None for a windowless job.
+    # Opaque to the record, which cannot import the ports that name it
+    gate: Optional[object] = None
     # where the result goes: on_decoded(job, result), set at enqueue
     on_decoded: Optional[Callable] = None
     # called at dispatch: send the input link, call back at the landing,
@@ -287,7 +439,8 @@ class DecodeJob:
     send_input: Optional[Callable[[Callable[[], None]], int]] = None
     # the store the input leaves from, stamped by that store's own port
     input_source_name: Optional[str] = None
-    unit: Optional[Any] = None  # the DecoderUnit assigned at dispatch
+    # the ports.DecoderUnit assigned at dispatch, opaque to the record
+    unit: Optional[object] = None
     # tick a unit took this decode, the end of its own queue wait; the
     # window record keeps the last one, this keeps each decode's own
     dispatch_ticks: Optional[int] = None
@@ -300,9 +453,13 @@ class DecodeJob:
     # carries its own stage ticks (src/cpu/o3/dyn_inst.hh:1017-1028);
     # zero on a decoder with no queue of its own
     backend_queue_wait_ticks: int = 0
-    memory: Optional[Any] = (
-        None  # that unit's DecoderMemory while it holds this job's input
-    )
+    # the ticks this decode's input read took in its tier's store, from
+    # the dispatch that asked for it to the read's end, its port waits
+    # included; zero on a store that prices no read
+    store_read_ticks: int = 0
+    # that unit's ports.DecoderMemory while it holds this job's input,
+    # opaque to the record
+    memory: Optional[object] = None
     ready_time: int = 0  # tick the job was enqueued (queue-wait accounting)
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
@@ -313,7 +470,6 @@ class DecodeJob:
         None  # decoding-graph nodes per round (latency models)
     )
     code: Optional[str] = None  # code name, a latency function may read it
-    attempt: int = 0  # 0 = first (weak) decode, 1 = strong redo
     kind: DecodeJobKind = DecodeJobKind.WINDOW  # what this job is
     # the logical class this decode is pinned to, or None to decode
     # normally; a forced solve reports that class's minimum weight
@@ -356,7 +512,7 @@ class DecodeJob:
     # its slot so the confidence its evidence feeds is attributed to it
     decoding_unit_name: Optional[str] = None
     # ticks of confidence computation charged on that unit after the
-    # decode, so the unit stays busy for the signal's own work (D8)
+    # decode, so the unit stays busy for the signal's own work
     soft_output_ticks: int = 0
     # the rounds this job's tier turns into detection events for it,
     # frozen at the first ask so the formation stage and the dispatcher
@@ -395,17 +551,73 @@ class LogicalContribution:
     logical_observables: Optional[tuple[int, ...]]
 
 
+@dataclass(frozen=True)
+class PauliFrameCommitRecord:
+    """One accepted correction, kept in the order the frame accepted it."""
+
+    window_key: tuple
+    tier: str
+    run_sequence: int
+    accepted_ticks: int
+    committed_ticks: int
+    logical_observables: Optional[tuple[int, ...]]
+
+
+@dataclass(frozen=True)
+class DecoderStageRecord:
+    """One timed stage of one job."""
+
+    operation_id: int
+    window_id: int
+    stage: str
+    cycles: Optional[int]  # None for the algorithm, priced in time
+    start_ticks: int
+    end_ticks: int
+    # the unit the decode ran on, the lane it belongs to, as each LLVM
+    # XRay record carries the thread it ran on
+    # (tools/llvm-xray/xray-converter.cc:232-245)
+    unit_name: str
+    # the (operation, round) identities a formation stage turned into
+    # detection events here; empty for every stage that forms none
+    round_keys: tuple = ()
+    # the run ordinals of the requests this decode serves, so a reader
+    # can tell one window's decodes apart: its two forced-class solves,
+    # its strong re-decode, and the members of a merged batch all carry
+    # the same window key and different ordinals
+    run_sequences: tuple = ()
+    # the decode was cancelled while this stage was open: the stage ends
+    # at the cancel, and no latency point reads it
+    cancelled: bool = False
+    # the tick a unit took this decode. The window record keeps the last
+    # decode's, so a window decoded more than once needs each decode's
+    # own here, beside the run ordinals that name them
+    dispatch_ticks: Optional[int] = None
+    # the tick this decode first may compute: its input landed and its
+    # window owed no boundary. What it waited for after this tick is the
+    # unit's compute, which is a wait of a different kind
+    ready_ticks: Optional[int] = None
+    # the rounds the decode read, the job's own count: a strong decode's
+    # r_strong is what Toshio's backlog bound divides by (2510.25222
+    # lines 1270-1300), and the window record keeps only the last decode
+    round_count: int = 0
+    # the ticks the decode had waited inside a strong backend when this
+    # stage closed (DecodeJob.backend_queue_wait_ticks), all of it by the
+    # algorithm stage's end
+    backend_queue_wait_ticks: int = 0
+    # the ticks the decode's input read took in its store
+    # (DecodeJob.store_read_ticks)
+    store_read_ticks: int = 0
+
+
 class DecoderEvidence(Enum):
     """What a decode can show about itself, beyond its correction.
 
-    A confidence signal reads one of these off the decode that produced
-    the correction, so each signal declares what it needs and each
-    decoder row declares what it produces, the way a decoder declares
-    its fault representation. FORCED_CLASS_WEIGHT is the minimum weight
-    inside a logical class the solve was pinned to, which only a decoder
-    that minimises weight inside the class reports honestly (Lee et al.
-    2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and the radii a
-    cluster-based decode grew (Meister et al. 2405.07433 Algorithm 2).
+    Each signal declares what it needs and each decoder row what it
+    produces, as a decoder declares its fault representation.
+    FORCED_CLASS_WEIGHT is the minimum weight inside a pinned logical
+    class, honest only from a decoder that minimises weight inside it (Lee
+    et al. 2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and radii a
+    cluster decode grew (Meister et al. 2405.07433 Algorithm 2).
     """
 
     FORCED_CLASS_WEIGHT = "forced_class_weight"
@@ -446,26 +658,12 @@ class BackendFailureReason(Enum):
 
 @dataclass(frozen=True)
 class WindowDecode:
-    """What one backend call on one window answers.
+    """What one backend call on one window answers; unproduced fields None."""
 
-    ``selected_faults`` is the correction and ``decode_status`` a
-    best-effort disposition (None when the decode succeeded).
-    ``no_correction_reason`` is the backend's BackendFailureReason when
-    it produced no correction and ``selected_faults`` is the empty one
-    committed in its place; None when the backend produced one. The two
-    evidence fields are what a confidence signal reads off the decode
-    that produced the correction: the minimum weight inside the class a
-    forced solve was pinned to, and the growth a cluster-based decode
-    did (Meister et al. 2405.07433 Algorithm 2 lines 518-525 reads the
-    graph and the radii). ``iterations`` is the message-passing
-    iterations an iterative decode ran, which is what its time on a
-    device scales with. A row leaves what it does not produce None.
-    """
-
-    selected_faults: Any
+    selected_faults: Union[numpy.ndarray, tuple[int, ...]]
     decode_status: Optional[BackendDecodeStatus] = None
     forced_class_weight: Optional[float] = None
-    cluster_evidence: Optional[Any] = None
+    cluster_evidence: Optional[evidence_records.UnionFindHardEvidence] = None
     iterations: Optional[int] = None
     no_correction_reason: Optional[BackendFailureReason] = None
 
@@ -474,11 +672,9 @@ class WindowDecode:
 class Step:
     """One step of a strong decode on its device, as the device states it.
 
-    name says what the step is (notice, launch, copy_in, decode); ticks
-    is its time; resource is the one it holds, dispatcher or worker, or
-    None for none. priced_on names where a zero-tick step's time is
-    counted instead, such as the link card's echo round trip, so a trace
-    shows every step and counts each tick once.
+    priced_on names where a zero-tick step's time is counted instead, such
+    as the link card's echo round trip, so a trace shows every step and
+    counts each tick once.
     """
 
     name: str
@@ -493,7 +689,8 @@ class DecodeResult:
 
     operation_id: int
     window_id: int
-    correction: Optional[Any] = None  # correction operator (None = timing-only)
+    # correction operator (None = timing-only)
+    correction: Optional[numpy.ndarray] = None
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction
     soft_output: Optional[SoftOutput] = None  # source-compatible confidence
     # the minimum weight inside the class the job was forced to; None
@@ -501,14 +698,18 @@ class DecodeResult:
     forced_class_weight: Optional[float] = None
     # the growth a cluster-based decode did, what a cluster gap reads;
     # None from a row that grows no clusters
-    cluster_evidence: Optional[Any] = None
+    cluster_evidence: Optional[evidence_records.UnionFindHardEvidence] = None
+    # the window's detection events the decode read, in its detector
+    # rows' order and read-only; None from a row that reads none
+    detection_events: Optional[numpy.ndarray] = None
     # the message-passing iterations the decode ran, what a measured
     # device time law reads; None from a row that runs no iterations
     iterations: Optional[int] = None
-    # round-keyed seam defects (synthetic decoders, recovery lock
-    # scenarios)
+    # round-keyed seam defects a decoder may report in place of a
+    # residual in boundary_data
     boundary_defects: Optional[dict] = None
-    boundary_data: Optional[Any] = None  # optional richer interaction payload
+    # optional richer interaction payload
+    boundary_data: Optional[window_records.DependencyResidual] = None
     # CrossingCommit: the part of the correction that commits faults
     # touching a round before the window's commit region, which the
     # residual's XOR cannot be split into afterwards
@@ -525,12 +726,7 @@ class DecodeResult:
 
 @dataclass(frozen=True)
 class Ticket:
-    """One submitted strong decode: decsim's answer and its priced ticks.
-
-    The strong backends that decode with decsim's own Relay-BP and price
-    the decode from a measured device (measured_table, dispatch_steps)
-    issue it.
-    """
+    """One submitted strong decode's outcome, priced in ticks."""
 
     result: DecodeResult
     decode_ticks: int
@@ -551,9 +747,8 @@ class Submission:
 class Verdict(Enum):
     """The escalation policy's answer to one weak result.
 
-    KEEP commits the weak result as final; ESCALATE commits it
-    provisionally and asks the strong tier to re-decode the window
-    (Toshio et al. 2510.25222 Sec. III A, steps 3 and 4).
+    ESCALATE commits the weak result provisionally and asks the strong tier
+    to re-decode (Toshio et al. 2510.25222 Sec. III A, steps 3 and 4).
     """
 
     KEEP = auto()
@@ -564,22 +759,17 @@ class Verdict(Enum):
 class RunShape:
     """What a run is made of, as the root checks it before planning.
 
-    The escalation policy refuses a run it cannot serve from this
-    record, once, in Machine.build. strong_window is the row of
-    STRONG_WINDOW_SHAPES the escalation section named, so a refusal
-    names the shape the yaml chose; is_absorbing_strong_window is that
-    row's own declaration that its region replaces the weak windows it
-    covers (the double window of Toshio et al. 2510.25222 Sec. III C;
-    the redo window absorbs nothing); is_bulk_strong is the
-    decoder manager's merging of queued strong re-decodes; operations
-    are the workload's planning views; commit_round_count and
-    buffer_round_count size every window (windows.commit_rounds and
-    windows.buffer_rounds, the code distance when the yaml leaves them
-    null).
+    The escalation policy refuses a run it cannot serve from this, once, in
+    Machine.build. is_absorbing_strong_window is the strong window row's
+    declaration that its region replaces the weak windows it covers (the
+    double window, Toshio et al. 2510.25222 Sec. III C). commit_round_count
+    and buffer_round_count size every window.
     """
 
-    scheme: Any
-    boundary_policy: Any
+    # the ports.WindowingScheme and ports.BoundaryPolicy, opaque to the
+    # record, which only hands them to the policy that reads them
+    scheme: object
+    boundary_policy: object
     operations: tuple
     commit_round_count: int
     buffer_round_count: int

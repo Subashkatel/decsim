@@ -11,6 +11,7 @@ tests/controller/test_round_assembly.py).
 
 import dataclasses
 import functools
+from collections.abc import Callable
 from typing import Optional
 
 import decsim.config as config
@@ -18,8 +19,8 @@ import decsim.controller.settings as controller_settings
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -31,10 +32,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
-import decsim.windows.boundary_policies as boundary_policies
-import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 
 # every declared stage of the fabric, in microseconds
@@ -62,6 +60,31 @@ DECLARED_MICROSECONDS = {
 DECLARED_CLOCK = config.Clock(500_000)
 
 
+# the unit's fetch and release are free, so a decode holds its unit for
+# its declared latency alone
+DECLARED_ENGINE = decoder_settings.EngineSettings(
+    clock=DECLARED_CLOCK,
+    fetch_cycles_per_round=0,
+    fetch_cycles_per_job=0,
+    release_cycles_per_job=0,
+    release_cycles_per_round=0,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class OneDecoder:
+    """A test's own decoder instance, as the record a tier builds it from.
+
+    It hands back the same instance, so it builds one machine only.
+    """
+
+    decoder: object
+    name = "test_decoder"
+
+    def build(self):
+        return self.decoder
+
+
 def declared_cycles(name):
     """One declared stage's microseconds, as cycles of the declared clock."""
     ticks = config.microseconds_to_ticks(DECLARED_MICROSECONDS[name])
@@ -84,22 +107,75 @@ DECLARED_EDGE_NAMES = (
     "frame_to_controller",
     "controller_to_qpu",
 )
-ESCALATION_THRESHOLD = 0.5
+# 0.5 nats, which decibels_to_nats gives back exactly
+ESCALATION_THRESHOLD_DECIBELS = threshold_sources.nats_to_decibels(0.5)
 DECLARED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
-    method="declared_confidence",
-    cluster_origin="declared",
-    growth_schedule="declared_per_window",
-    gap_units="branch_marker",
-    correction="none",
-    weight_step_natural_log=None,
-    references=("declared by the test",),
+    method="declared_confidence"
 )
 
 
-def lookahead_sliding_scheme():
-    """The sliding windows with the lookahead tail every run here uses."""
-    lookahead = window_records.WindowingSchemeCard(terminal_policy="lookahead")
-    return sliding_scheme.SlidingWindowScheme(lookahead)
+class DeclaredConfidence:
+    """The confidence of a weak decoder that declares its own gap.
+
+    The window's one decode carries its soft output already, so the
+    signal hands it on at no cost and needs no evidence of the decode.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The declared signal, as the switching slot names it."""
+
+        name = "declared_confidence"
+
+        def build(self, weak_algorithm, threshold_nats):
+            """The signal; it reads neither the decoder nor the threshold."""
+            del weak_algorithm
+            del threshold_nats
+            return DeclaredConfidence()
+
+    source = DECLARED_CONFIDENCE_SOURCE
+    fault_model_requirement = None
+    decoder_evidence_requirement = frozenset()
+    evidence_refusal = "the declared confidence needs no evidence"
+    forced_logical_classes = ()
+
+    def compute(self, solves):
+        """The one solve's declared soft output, computed in no time."""
+        soft_output = solves[0].soft_output
+        return decoding_records.SoftOutputComputation(soft_output)
+
+
+def declared_switching(**changes):
+    """The switching slot over the declared confidence and threshold."""
+    confidence = DeclaredConfidence.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=ESCALATION_THRESHOLD_DECIBELS
+    )
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold
+    )
+    return dataclasses.replace(switching, **changes)
+
+
+# the two strong window rows decsim ships, at their own settings
+REDO_WINDOW = strong_window_shapes.RedoWindow.Settings()
+DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
+
+
+def windows_on(windows, scheme_row=None, **sizes):
+    """The windows with another scheme row, other sizes, or both.
+
+    scheme_row is a windowing scheme class; None keeps the windows' own
+    row. A size left out keeps the scheme's own.
+    """
+    scheme = windows.scheme
+    if scheme_row is not None:
+        scheme = scheme_row.Settings(
+            commit_rounds=scheme.commit_rounds,
+            buffer_rounds=scheme.buffer_rounds,
+        )
+    scheme = dataclasses.replace(scheme, **sizes)
+    return dataclasses.replace(windows, scheme=scheme)
 
 
 def declared_edge(base_edge, latency_microseconds):
@@ -112,7 +188,10 @@ def declared_edge(base_edge, latency_microseconds):
         "declared tick",
     )
     return link_settings.PathSettings(
-        channel, base_edge.default_payload, base_edge.actual_payload_source
+        channel,
+        base_edge.default_payload,
+        base_edge.actual_payload_source,
+        excludes_receiver_processing=base_edge.excludes_receiver_processing,
     )
 
 
@@ -149,6 +228,39 @@ def declared_qpu(round_microseconds=ROUND_MICROSECONDS):
     return qpu_settings.QpuSettings(
         distance=3, round_period_microseconds=round_microseconds
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class GivenSource:
+    """A source record whose build returns the source the test made."""
+
+    source: object
+
+    def build(self, code, circuit_arguments):
+        del code, circuit_arguments
+        return self.source
+
+
+@dataclasses.dataclass(frozen=True)
+class GivenCard:
+    """A code card record whose build returns the card the test made."""
+
+    card: object
+
+    def build(self, distance, commit_rounds_override, buffer_rounds_override):
+        del distance, commit_rounds_override, buffer_rounds_override
+        return self.card
+
+
+@dataclasses.dataclass(frozen=True)
+class GivenLayout:
+    """A layout record whose build returns the layout the test made."""
+
+    layout: object
+
+    def build(self, code):
+        del code
+        return self.layout
 
 
 def declared_frame():
@@ -337,11 +449,12 @@ def weak_only_run(
     seed=0,
     io_trace=False,
     weak_syndrome_buffer=None,
-    decoder_input="copy",
+    copies_input=True,
     windows=None,
     controller=None,
     observation=None,
     probes=(),
+    clock=None,
 ):
     """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
 
@@ -349,9 +462,10 @@ def weak_only_run(
     only the component card whose reaction-time shift it measures.
     """
     workload = declared_workload(operations, rounds)
-    decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
-    weak_decoder = decoder_settings.DecoderSettings(
-        decoder=decoder, input=decoder_input
+    weak_microseconds = DECLARED_MICROSECONDS["weak"]
+    algorithm = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, copies_input=copies_input, engine=DECLARED_ENGINE
     )
     links = declared_profile()
     if controller is None:
@@ -363,6 +477,7 @@ def weak_only_run(
     qpu = declared_qpu()
     frame = declared_frame()
     settings = machine_settings.MachineSettings(
+        clock=clock,
         workload=workload,
         qpu=qpu,
         weak_decoder=weak_decoder,
@@ -385,10 +500,11 @@ def strong_only_run(
 ):
     """The strong-primary baseline listens to the strong syndrome buffer."""
     workload = declared_workload(operations, rounds)
-    decoder = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    strong_decoder = decoder_settings.DecoderSettings(decoder=decoder)
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    escalation = escalation_settings.EscalationSettings(policy=policy)
+    strong_microseconds = DECLARED_MICROSECONDS["strong"]
+    algorithm = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=DECLARED_ENGINE
+    )
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace, record_switching_windows=record
     )
@@ -400,7 +516,6 @@ def strong_only_run(
         workload=workload,
         qpu=qpu,
         strong_decoder=strong_decoder,
-        escalation=escalation,
         links=links,
         controller=controller,
         pauli_frame=frame,
@@ -417,6 +532,20 @@ class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
     set, for a window is_escalated(job) names, so Switching escalates
     it; gap 1.0 elsewhere, so the weak result is kept.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The latency and which windows declare a gap under the threshold."""
+
+        latency_microseconds: float
+        is_escalated: Callable
+        name = "declared_confidence"
+
+        def build(self):
+            """A fresh decoder of these settings."""
+            return DeclaredConfidenceDecoder(
+                self.latency_microseconds, self.is_escalated
+            )
 
     def __init__(self, latency_microseconds, is_escalated):
         self.latency_microseconds = latency_microseconds
@@ -446,8 +575,9 @@ def switching_decoders(escalates):
         return escalates
 
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
-    weak = DeclaredConfidenceDecoder(weak_microseconds, is_escalated)
-    strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
+    weak = DeclaredConfidenceDecoder.Settings(weak_microseconds, is_escalated)
+    strong_microseconds = DECLARED_MICROSECONDS["strong"]
+    strong = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
     return weak, strong
 
 
@@ -457,7 +587,7 @@ def switching_run(
     escalates=False,
     operations=None,
     run_both_at_once=False,
-    strong_window="redo_window",
+    strong_window=REDO_WINDOW,
     weak_units=1,
     seed=0,
     io_trace=False,
@@ -469,7 +599,7 @@ def switching_run(
     clock=None,
     threshold_cycles=0,
     switch_cycles=0,
-    strong_input="copy",
+    strong_copies_input=True,
 ):
     """Weak-primary switching on the declared fabric.
 
@@ -478,34 +608,25 @@ def switching_run(
     """
     weak, strong = switching_decoders(escalates)
     weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
-    weak_decoder = decoder_settings.DecoderSettings(
-        decoder=weak, units=weak_units, unit_memory=weak_memory
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak,
+        unit_count=weak_units,
+        unit_memory=weak_memory,
+        engine=DECLARED_ENGINE,
     )
-    strong_decoder = decoder_settings.DecoderSettings(
-        decoder=strong, input=strong_input
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=strong,
+        copies_input=strong_copies_input,
+        engine=DECLARED_ENGINE,
     )
-    threshold = threshold_sources.FixedThreshold(ESCALATION_THRESHOLD)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=DECLARED_CONFIDENCE_SOURCE,
-        run_both_at_once=run_both_at_once,
-    )
-    policy = escalation_policies.Switching(collaborators)
     workload = declared_workload(operations, rounds)
-    # serial switching needs Held boundaries; the double window refuses
-    # them (escalation.policies.Switching.check_plan)
-    boundary_policy = boundary_policies.Held()
-    if strong_window == "double_window":
-        boundary_policy = None
-    scheme = lookahead_sliding_scheme()
-    windows = window_settings.WindowSettings(
-        scheme=scheme, boundary_policy=boundary_policy
-    )
+    plain_windows = window_settings.WindowSettings()
+    windows = window_settings.switching_windows(plain_windows, strong_window)
     decoder_manager = decoder_settings.DecoderManagerSettings(
         bulk_strong=bulk_strong
     )
-    escalation = escalation_settings.EscalationSettings(
-        policy=policy,
+    switching = declared_switching(
+        run_both_at_once=run_both_at_once,
         strong_window=strong_window,
         clock=clock,
         threshold_cycles=threshold_cycles,
@@ -526,7 +647,7 @@ def switching_run(
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
         decoder_manager=decoder_manager,
-        escalation=escalation,
+        switching=switching,
         links=links,
         controller=controller,
         pauli_frame=frame,
@@ -548,14 +669,6 @@ def log_tick(log_lines, needle):
         digits = stamp[:-2]
         microseconds = float(digits)
         return config.microseconds_to_ticks(microseconds)
-    raise AssertionError(f"no log line contains {needle!r}")
-
-
-def log_index(log_lines, needle):
-    """The position of the first log line containing the needle."""
-    for index, line in enumerate(log_lines):
-        if needle in line:
-            return index
     raise AssertionError(f"no log line contains {needle!r}")
 
 

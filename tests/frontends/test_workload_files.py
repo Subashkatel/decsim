@@ -45,6 +45,7 @@ def test_a_finite_workload_reads_back_what_was_written(tmp_path):
         "readout",
         (0,),
         patches=(0,),
+        predecessors=(1,),
         emits_detector_data=False,
         scheduled_start_round=2,
     )
@@ -74,6 +75,20 @@ def test_live_fragments_read_back_what_was_written(tmp_path):
     )
 
     assert read == workload
+
+
+def test_a_circuit_beside_fragments_is_refused(tmp_path):
+    """A workload carries one physical circuit; the other would go unread."""
+    operations_path = tmp_path / "operations.json"
+    circuit_path = tmp_path / "history.stim"
+    fragments_path = tmp_path / "live"
+
+    with pytest.raises(ValueError, match="carries one physical circuit"):
+        workload_files.read_workload(
+            operations_path,
+            circuit_path=circuit_path,
+            fragments_path=fragments_path,
+        )
 
 
 def test_an_operation_field_the_file_form_does_not_carry_is_refused(tmp_path):

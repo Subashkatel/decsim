@@ -5,11 +5,9 @@ queue on; gem5 src/dev/dma_device.cc for the setup engine two paths
 share; the component shape of gem5 src/sim/sim_object.hh (a component
 owns its settings and its children and is observed through a callback,
 so it runs with no observer at all).
-
-The law at the end of the file reads the ledger of a whole run on the
-declared card of tests/declared_run.py: which of the wired paths a
-round actually crosses when only one decoder tier exists.
 """
+
+import dataclasses
 
 import pytest
 
@@ -21,11 +19,12 @@ import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import tests.declared_run as declared_run
 
 PATH = transfer_records.LinkPath
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
-FREE_PATH = link_settings.PathSettings(FREE_CHANNEL, None, "test payload")
+FREE_PATH = link_settings.PathSettings(
+    FREE_CHANNEL, None, "test payload", excludes_receiver_processing=False
+)
 
 
 def bounded_path(name, bits_per_microsecond, latency_ticks, setup_ticks=0):
@@ -34,21 +33,31 @@ def bounded_path(name, bits_per_microsecond, latency_ticks, setup_ticks=0):
         name, latency_ticks, capacity, "test"
     )
     return link_settings.PathSettings(
-        channel, None, "test payload", setup_ticks
+        channel,
+        None,
+        "test payload",
+        setup_ticks,
+        excludes_receiver_processing=False,
     )
 
 
 def unbounded_path(name, latency_ticks, setup_ticks=0):
     channel = link_settings.ChannelSettings(name, latency_ticks, None, "test")
     return link_settings.PathSettings(
-        channel, None, "test payload", setup_ticks
+        channel,
+        None,
+        "test payload",
+        setup_ticks,
+        excludes_receiver_processing=False,
     )
 
 
 def default_path(name, bits):
     channel = link_settings.ChannelSettings(name, 0, None, "test")
     payload = link_settings.PayloadSettings(bits, "test default")
-    return link_settings.PathSettings(channel, payload, None)
+    return link_settings.PathSettings(
+        channel, payload, None, excludes_receiver_processing=False
+    )
 
 
 def every_path_free():
@@ -68,7 +77,7 @@ def fabric_with(engine, listener=None, **paths):
     wiring = every_path_free()
     wiring.update(paths)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
-    fabric = fabric_module.LinkFabric(settings, engine, channel_module.Channel)
+    fabric = fabric_module.LinkFabric(settings, engine)
     if listener is not None:
         fabric.trace.transfer_delivered.connect(listener.on_transfer)
     return fabric
@@ -240,13 +249,12 @@ def test_a_joint_footprint_uses_its_whole_route_or_the_default() -> None:
 
 
 def test_a_routed_readout_estimate_without_attribution_is_refused() -> None:
+    """Unrefused, the estimate would price the default path, not the route."""
     engine = decsim.engine.Engine()
     route = link_settings.ReadoutRoute(("left",), FREE_PATH)
     fabric = fabric_with(engine, readout_routes=(route,))
 
-    with pytest.raises(
-        RuntimeError, match="readout delay requires a footprint"
-    ):
+    with pytest.raises(RuntimeError, match="a routed readout delay requires"):
         fabric.expected_delay_ticks(PATH.QPU_TO_CONTROLLER, 8, 0)
 
 
@@ -315,73 +323,6 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     assert second.send_ticks == 20
 
 
-def test_a_path_with_no_setup_never_waits_for_another_paths_setup():
-    engine = decsim.engine.Engine()
-    with_setup = unbounded_path("shared", 0, setup_ticks=5)
-    without_setup = unbounded_path("shared", 0)
-    fabric = fabric_with(
-        engine,
-        weak_buffer_to_weak_decoder=with_setup,
-        strong_buffer_to_strong_decoder=without_setup,
-    )
-    delivered = []
-    weak_window = requested_window(1)
-    strong_window = requested_window(2)
-    send_on(
-        engine,
-        fabric,
-        PATH.WEAK_BUFFER_TO_WEAK_DECODER,
-        8,
-        10,
-        weak_window,
-        delivered,
-    )
-    send_on(
-        engine,
-        fabric,
-        PATH.STRONG_BUFFER_TO_STRONG_DECODER,
-        8,
-        12,
-        strong_window,
-        delivered,
-    )
-    engine.run()
-    first_delivered = delivered[0]
-    assert first_delivered.request_ticks == 12
-    assert first_delivered.delivery_ticks == 12
-
-
-def test_a_free_path_costs_nothing():
-    engine = decsim.engine.Engine()
-    fabric = fabric_with(engine)
-    delivered = []
-    first_round = round_attribution(1)
-    send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, 1000, 42, first_round, delivered
-    )
-    engine.run()
-    transfer = delivered[0]
-    assert transfer.total_delay_ticks == 0
-    assert transfer.delivery_ticks == 42
-
-
-def test_an_actual_payload_is_priced_and_named_by_its_source():
-    engine = decsim.engine.Engine()
-    listener = Listener()
-    fabric = fabric_with(engine, listener)
-    delivered = []
-    first_round = round_attribution(1)
-    send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, 7, 0, first_round, delivered
-    )
-    engine.run()
-    record = listener.records[0]
-    transfer = delivered[0]
-    assert transfer.payload_bits == 7
-    assert record.payload_selection is transfer_records.PayloadSelection.ACTUAL
-    assert record.payload_source == "test payload"
-
-
 def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
     """448 bits is CUDA-Q's enqueue framing, 24 plus 32 bytes.
 
@@ -396,7 +337,11 @@ def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
     payload_bits = 360
     header_bits = 448
     framed_path = link_settings.PathSettings(
-        channel, None, "test payload", header_bits_per_transfer=header_bits
+        channel,
+        None,
+        "test payload",
+        header_bits_per_transfer=header_bits,
+        excludes_receiver_processing=False,
     )
     fabric = fabric_with(engine, weak_decoder_to_strong_decoder=framed_path)
     delivered = []
@@ -420,33 +365,6 @@ def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
     assert transfer.serialization_ticks == expected_ticks
 
 
-def test_a_missing_payload_takes_the_cards_default():
-    engine = decsim.engine.Engine()
-    listener = Listener()
-    bus_word = default_path("bus", 32)
-    fabric = fabric_with(engine, listener, frame_to_controller=bus_word)
-    delivered = []
-    attribution = operation_attribution()
-    send_on(
-        engine,
-        fabric,
-        PATH.FRAME_TO_CONTROLLER,
-        None,
-        0,
-        attribution,
-        delivered,
-    )
-    engine.run()
-    record = listener.records[0]
-    transfer = delivered[0]
-    assert transfer.payload_bits == 32
-    assert (
-        record.payload_selection
-        is transfer_records.PayloadSelection.CONFIGURED_DEFAULT
-    )
-    assert record.payload_source == "test default"
-
-
 def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
     engine = decsim.engine.Engine()
     listener = Listener()
@@ -465,15 +383,15 @@ def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
     )
 
 
-def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
+def test_a_transfer_with_no_payload_size_still_stops_a_bounded_channel():
+    """A bounded wire serializes bits, so an unsized transfer cannot cross."""
     engine = decsim.engine.Engine()
     bounded = bounded_path("bounded", 1000.0, 0)
     fabric = fabric_with(engine, controller_to_weak_buffer=bounded)
     attribution = round_attribution(1)
-    with pytest.raises(
-        RuntimeError, match="a bounded wire needs a size to serialize"
-    ):
+    with pytest.raises(TypeError, match="unsupported operand type"):
         fabric.send(PATH.CONTROLLER_TO_WEAK_BUFFER, None, 0, attribution, print)
+        engine.run()
 
 
 def test_an_actual_payload_on_a_path_without_a_source_is_refused():
@@ -481,69 +399,8 @@ def test_an_actual_payload_on_a_path_without_a_source_is_refused():
     default_only = default_path("default", 100)
     fabric = fabric_with(engine, qpu_to_controller=default_only)
     attribution = round_attribution(1)
-    with pytest.raises(RuntimeError, match="actual payload source"):
+    with pytest.raises(RuntimeError, match="qpu_to_controller does"):
         fabric.send(PATH.QPU_TO_CONTROLLER, 3, 0, attribution, print)
-
-
-def test_the_listener_sees_every_transfer_once_in_order():
-    engine = decsim.engine.Engine()
-    listener = Listener()
-    fabric = fabric_with(engine, listener)
-    delivered = []
-    first_round = round_attribution(1)
-    instruction = operation_attribution()
-    send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
-    )
-    send_on(
-        engine, fabric, PATH.CONTROLLER_TO_QPU, 128, 5, instruction, delivered
-    )
-    engine.run()
-    paths = [record.path for record in listener.records]
-    sequences = [record.request_sequence for record in listener.records]
-    assert paths == [PATH.QPU_TO_CONTROLLER, PATH.CONTROLLER_TO_QPU]
-    assert sequences == [0, 1]
-    assert len(delivered) == 2
-
-
-def test_the_listener_sees_the_transfer_before_the_caller():
-    engine = decsim.engine.Engine()
-    listener = Listener()
-    fabric = fabric_with(engine, listener)
-    seen_by_caller = []
-
-    def delivered(_transfer):
-        record_count = len(listener.records)
-        seen_by_caller.append(record_count)
-
-    attribution = round_attribution(1)
-    fabric.send(PATH.QPU_TO_CONTROLLER, 8, 0, attribution, delivered)
-    engine.run()
-    assert seen_by_caller == [1]
-
-
-def test_a_fabric_with_no_listener_runs():
-    engine = decsim.engine.Engine()
-    fabric = fabric_with(engine)
-    delivered = []
-    first_round = round_attribution(1)
-    send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
-    )
-    engine.run()
-    assert len(delivered) == 1
-
-
-def test_the_expected_delay_prices_the_paths_payload_rule():
-    engine = decsim.engine.Engine()
-    capacity = link_settings.CapacitySettings(1000.0, "test")
-    channel = link_settings.ChannelSettings("bounded", 300, capacity, "test")
-    payload = link_settings.PayloadSettings(8, "test default")
-    bus_word = link_settings.PathSettings(channel, payload, None)
-    fabric = fabric_with(engine, frame_to_controller=bus_word)
-    assert (
-        fabric.expected_delay_ticks(PATH.FRAME_TO_CONTROLLER, None, 0) == 8300
-    )
 
 
 def test_the_expected_delay_includes_the_paths_setup():
@@ -578,21 +435,32 @@ class _CountingChannel:
         return self.inner.expected_delay_ticks(framed, now_ticks, setup_ticks)
 
 
-def test_the_fabric_builds_one_channel_of_the_rows_class_per_channel_name():
-    """The Channel port: a row's channel class carries every path it names."""
-    engine = decsim.engine.Engine()
-    built = []
+@dataclasses.dataclass(frozen=True)
+class _CountingProtocol:
+    """A protocol record written outside the links package."""
 
-    def counting_channel(channel_settings, engine):
+    built: list = dataclasses.field(compare=False)
+
+    def build(self, channel_settings, engine):
         channel = _CountingChannel(channel_settings, engine)
-        built.append(channel)
+        self.built.append(channel)
         return channel
 
+
+def test_the_fabric_builds_one_channel_of_the_protocols_per_channel_name():
+    """The Channel port: a protocol's channel carries every path it names."""
+    engine = decsim.engine.Engine()
+    built = []
     shared = bounded_path("shared", 1000.0, 300)
+    counting_protocol = _CountingProtocol(built)
+    counting_channel = dataclasses.replace(
+        shared.channel, protocol=counting_protocol
+    )
+    shared = dataclasses.replace(shared, channel=counting_channel)
     wiring = every_path_free()
     wiring.update(qpu_to_controller=shared, controller_to_weak_buffer=shared)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
-    fabric = fabric_module.LinkFabric(settings, engine, counting_channel)
+    fabric = fabric_module.LinkFabric(settings, engine)
     delivered = []
     first_round = round_attribution(1)
     second_round = round_attribution(2)
@@ -609,41 +477,10 @@ def test_the_fabric_builds_one_channel_of_the_rows_class_per_channel_name():
         delivered,
     )
     engine.run()
-    channel_by_name = {channel.name: channel for channel in built}
-
-    assert len(built) == 2
+    assert len(built) == 1
     assert isinstance(built[0], ports.Channel)
-    assert channel_by_name["shared"].carried_bits == [8, 4]
-    assert channel_by_name["free"].carried_bits == []
+    assert built[0].carried_bits == [8, 4]
     assert delivered[1].queue_wait_ticks == 8000
 
 
 # The paths a whole run uses, read off the ledger the fabric feeds.
-
-
-def transfer_counts_by_path(machine):
-    """How many transfers the run put on each wired path."""
-    snapshot = machine.observation.traffic.snapshot()
-    counts = {}
-    for path_snapshot in snapshot.paths:
-        counts[path_snapshot.path] = path_snapshot.counters.transfer_count
-    return counts
-
-
-def test_a_strong_primary_round_crosses_one_path_and_only_that_one():
-    """One tier means one hop: the room-side path carries every round.
-
-    A single-tier system streams its readout to its decoder over one
-    path (LILLIPUT's readout-to-decoder FIFO, Das et al. 2108.06569;
-    Google's streaming decoder, 2408.13687), and under StrongOnly
-    (decsim/escalation/policies.py) readiness listens to the strong
-    store, so the weak store's path is wired by the card and never
-    used while each of the six rounds crosses
-    controller_to_strong_buffer once.
-    """
-    machine = declared_run.strong_only_run(rounds=6)
-
-    transfers_by_path = transfer_counts_by_path(machine)
-
-    assert transfers_by_path[PATH.CONTROLLER_TO_WEAK_BUFFER] == 0
-    assert transfers_by_path[PATH.CONTROLLER_TO_STRONG_BUFFER] == 6

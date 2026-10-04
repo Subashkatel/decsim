@@ -13,10 +13,10 @@ import stim
 
 import decsim.records.windows as window_records
 from decsim.detector_error_model import (
-    fault_model_contracts,
     window_model_builders,
     window_ownership_dag,
 )
+from decsim.records import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -53,35 +53,18 @@ def test_a_chain_of_dependencies_deepens_one_step_per_edge():
 
 
 def test_a_cycle_is_refused():
-    with pytest.raises(ValueError, match="acyclic"):
+    with pytest.raises(ValueError, match="window dependencies must form"):
         window_ownership_dag.dependency_depths(2, ((0, 1), (1, 0)))
 
 
 def test_a_negative_window_index_is_refused():
-    with pytest.raises(ValueError, match="nonnegative"):
+    with pytest.raises(ValueError, match="window dependency indices"):
         window_ownership_dag.dependency_depths(2, ((-1, 0),))
 
 
 def test_an_edge_to_a_window_outside_the_plan_is_refused():
-    with pytest.raises(
-        ValueError, match=r"edge \(0, 7\) names a window outside"
-    ):
+    with pytest.raises(ValueError, match="names a window outside the plan"):
         window_ownership_dag.dependency_depths(2, ((0, 7),))
-
-
-def test_a_plan_whose_edge_names_a_missing_window_is_refused():
-    circuit = surface_code_circuit(4)
-    with pytest.raises(
-        ValueError, match=r"edge \(5, 1\) names a window outside"
-    ):
-        window_model_builders.build_window_error_models(
-            circuit,
-            [(1, 1, 2, 2), (3, 3, 4, 4)],
-            round_count=4,
-            fault_model_requirement=GRAPHLIKE_REQUIRED,
-            fault_exclusion_ranges=(),
-            dependency_edges=((5, 1),),
-        )
 
 
 def test_ancestors_include_indirect_predecessors():
@@ -150,9 +133,7 @@ def test_the_seam_leaves_out_what_its_neighbours_own():
 
 def test_a_fault_between_two_windows_of_the_same_depth_has_no_owner():
     circuit = surface_code_circuit(4)
-    with pytest.raises(
-        ValueError, match="straddles independent commit regions"
-    ):
+    with pytest.raises(ValueError, match="graphlike fault 22 straddles"):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 1, 2, 2), (3, 3, 4, 4)],

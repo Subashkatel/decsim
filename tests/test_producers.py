@@ -1,11 +1,12 @@
-"""The makers decsim ships, against Stim's generator and the example tools.
+"""The makers decsim ships, against Stim's generator and the examples.
 
 memory_circuit is stim.Circuit.generated with one probability on all
 four of its noise channels (Stim src/stim/gen/circuit_gen_params.cc);
 memory_patches places copies of it with SHIFT_COORDS (Stim
-doc/file_format_stim_circuit.md, SHIFT_COORDS). The Deltakit makers run
-from a yaml what tools/deltakit_example.py and tools/live_memory_example.py
-build by hand in Python, and the runs are compared field by field.
+doc/file_format_stim_circuit.md, SHIFT_COORDS). The Deltakit makers
+make the workloads examples/deltakit_example.py and
+examples/live_memory_example.py build by hand, and the runs on the
+tools' machines are compared field by field.
 """
 
 import dataclasses
@@ -13,19 +14,19 @@ import dataclasses
 import pytest
 import stim
 
-import decsim.experiments.experiment as experiment
 import decsim.frontends.deltakit as deltakit
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.producers as producers
-import tests.experiments.yaml_configs as yaml_configs
-import tools.deltakit_example as deltakit_example
-import tools.live_memory_example as live_memory_example
+import decsim.settings as machine_settings
+import examples.deltakit_example as deltakit_example
+import examples.live_memory_example as live_memory_example
 
 
 def test_the_memory_circuit_is_stims_generated_circuit():
     workload = producers.memory_circuit(
         "surface_code:rotated_memory_z",
-        "2d",
+        6,
         distance=3,
         physical_error_probability=0.002,
     )
@@ -41,7 +42,7 @@ def test_the_memory_circuit_is_stims_generated_circuit():
     operation = workload.operations[0]
 
     assert operation.circuit == generated
-    assert workload.round_counts == {1: 6}
+    assert workload.round_counts == ((1, 6),)
 
 
 def test_memory_patches_sit_side_by_side_two_d_plus_two_apart():
@@ -64,35 +65,25 @@ def test_memory_patches_sit_side_by_side_two_d_plus_two_apart():
     first_detectors = first_circuit.get_detector_coordinates()
     second_detectors = second_circuit.get_detector_coordinates()
 
-    assert workload.round_counts == {1: 4, 2: 4}
+    assert workload.round_counts == ((1, 4), (2, 4))
     assert first[10] == [3.0, 3.0]
     assert second[10] == [11.0, 3.0]
     assert first_detectors[30] == [4.0, 4.0, 4.0]
     assert second_detectors[30] == [12.0, 4.0, 4.0]
 
 
-def test_memory_patches_runs_one_memory_per_patch_at_once(tmp_path):
+def test_memory_patches_runs_one_memory_per_patch_at_once():
     """Three patches, three operations, a shot drawn for each."""
-    workload = {
-        "kind": "producer",
-        "function": "decsim.producers:memory_patches",
-        "arguments": {
-            "code_task": "surface_code:rotated_memory_z",
-            "rounds_per_shot": 6,
-            "patch_count": 3,
-            "distance": "${qpu.distance}",
-        },
-    }
-    config_path = yaml_configs.write_config(tmp_path, {"workload": workload})
-    config = experiment.load_experiment(config_path)
-    point = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
+    patches = producers.memory_patches(
+        "surface_code:rotated_memory_z",
+        6,
+        3,
+        distance=3,
+        physical_error_probability=0.001,
     )
-    settings = point.settings
+    base = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    workload = workload_settings.WorkloadSettings.running(patches)
+    settings = dataclasses.replace(base, workload=workload)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     shots = machine.observation.sampled_shots.shots_by_operation
@@ -109,7 +100,11 @@ def test_memory_patches_runs_one_memory_per_patch_at_once(tmp_path):
 
 def test_no_patches_is_refused():
     """With no patch the run would finish having run nothing."""
-    with pytest.raises(ValueError, match="patch_count is at least 1"):
+    sentence = (
+        "workload.patch_count is at least 1, got 0; with no patch the run "
+        "would finish having run nothing"
+    )
+    with pytest.raises(ValueError, match=sentence):
         producers.memory_patches(
             "surface_code:rotated_memory_z",
             4,
@@ -119,14 +114,15 @@ def test_no_patches_is_refused():
         )
 
 
-def _yaml_run(config_path, seed):
-    config = experiment.load_experiment(config_path)
-    values = {"qpu.distance": 3, "qpu.round_period_microseconds": 1.1}
-    point = config.point_task(values)
-    settings = point.settings
+def _run(settings, seed):
     machine = machine_module.Machine.build(settings, seed)
     result = machine.run()
     return machine, result
+
+
+def _with_workload(settings, workload):
+    running = workload_settings.WorkloadSettings.running(workload)
+    return dataclasses.replace(settings, workload=running)
 
 
 def _commands(machine) -> list:
@@ -138,22 +134,9 @@ def _commands(machine) -> list:
     return commands
 
 
-def _producer(function: str, arguments: dict) -> dict:
-    return {"kind": "producer", "function": function, "arguments": arguments}
-
-
-def test_the_yaml_deltakit_memory_runs_what_the_example_tool_runs(tmp_path):
+def test_the_deltakit_memory_maker_runs_what_the_example_tool_runs():
     pytest.importorskip("deltakit_explorer")
-    arguments = {
-        "rounds": 24,
-        "distance": "${qpu.distance}",
-        "physical_error_probability": 0.001,
-    }
-    workload = _producer("decsim.producers:deltakit_memory", arguments)
-    config_path = yaml_configs.example_tool_config(
-        tmp_path, "stim_device", workload
-    )
-    machine, result = _yaml_run(config_path, 0)
+    made = producers.deltakit_memory(24, 3, 0.001)
     circuit, rounds = deltakit.memory_circuit(
         "rotated_surface", 3, 24, "Z", 0.001
     )
@@ -167,27 +150,20 @@ def test_the_yaml_deltakit_memory_runs_what_the_example_tool_runs(tmp_path):
         period_microseconds=1.1,
         feedback_microseconds=4.0,
     )
-    tool_machine = machine_module.Machine.build(tool_settings, 0)
-    tool_result = tool_machine.run()
+    made_settings = _with_workload(tool_settings, made)
+    machine, result = _run(made_settings, 0)
+    tool_machine, tool_result = _run(tool_settings, 0)
 
     assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)
     assert _commands(machine) == _commands(tool_machine)
 
 
-def test_the_yaml_live_deltakit_memory_runs_what_the_live_tool_runs(tmp_path):
+def test_the_live_deltakit_memory_maker_runs_what_the_live_tool_runs():
     """The owner, region and rounds the tool writes by hand are derived."""
     pytest.importorskip("deltakit_explorer")
-    arguments = {
-        "decode_after_rounds": 3,
-        "distance": "${qpu.distance}",
-        "physical_error_probability": 0.001,
-        "round_period_microseconds": "${qpu.round_period_microseconds}",
-    }
-    workload = _producer("decsim.producers:deltakit_live_memory", arguments)
-    config_path = yaml_configs.example_tool_config(
-        tmp_path, "streaming_stim", workload
+    made = producers.deltakit_live_memory(
+        3, 0.001, round_period_microseconds=1.1, decode_after_rounds=3
     )
-    machine, result = _yaml_run(config_path, 17)
     program = deltakit.memory_rounds(
         "rotated_surface", 3, "Z", 0.001, round_period_microseconds=1.1
     )
@@ -201,8 +177,9 @@ def test_the_yaml_live_deltakit_memory_runs_what_the_live_tool_runs(tmp_path):
         feedback_microseconds=4.0,
         decoder_microseconds=0.1,
     )
-    tool_machine = machine_module.Machine.build(tool_settings, 17)
-    tool_result = tool_machine.run()
+    made_settings = _with_workload(tool_settings, made)
+    machine, result = _run(made_settings, 17)
+    tool_machine, tool_result = _run(tool_settings, 17)
     measurements = machine.qpu.syndrome_source.sampled_measurements(stream_id)
     tool_source = tool_machine.qpu.syndrome_source
     tool_measurements = tool_source.sampled_measurements(stream_id)

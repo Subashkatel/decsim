@@ -9,9 +9,25 @@ the sanitized build starts the sanitizer runtime, which ends the process.
 
 import importlib
 import importlib.util
+import os
+import pathlib
 import pkgutil
+import subprocess
+import sys
+
+import pytest
 
 import decsim
+
+# Each name the root exports, and the module a run file reads it from.
+ROOT_EXPORTS = (
+    ("Experiment", "decsim.experiments.experiment"),
+    ("Point", "decsim.experiments.experiment"),
+    ("grid", "decsim.experiments.experiment"),
+    ("CollectionSettings", "decsim.experiments.collection"),
+    ("MachineSettings", "decsim.settings"),
+    ("Machine", "decsim.machine"),
+)
 
 
 def import_failure(module_name):
@@ -57,3 +73,26 @@ def import_failures() -> list:
 def test_every_module_imports():
     failures = import_failures()
     assert failures == []
+
+
+@pytest.mark.parametrize("name, module_name", ROOT_EXPORTS)
+def test_the_root_exports_the_object_its_module_defines(name, module_name):
+    module = importlib.import_module(module_name)
+    exported = getattr(decsim, name)
+
+    assert exported is getattr(module, name)
+
+
+def test_importing_the_root_leaves_the_machine_unimported():
+    """The command line starts light: an export loads on first use."""
+    package_file = pathlib.Path(decsim.__file__)
+    tree = package_file.parent.parent
+    environment = dict(os.environ, PYTHONPATH=str(tree))
+    code = "import sys, decsim; print('decsim.machine' in sys.modules)"
+    command = [sys.executable, "-c", code]
+
+    completed = subprocess.run(
+        command, capture_output=True, text=True, check=True, env=environment
+    )
+
+    assert completed.stdout.strip() == "False"

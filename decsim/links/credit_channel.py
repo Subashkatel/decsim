@@ -1,57 +1,41 @@
 """A channel whose frames need a credit from a finite receive buffer.
 
-The protocol row `credit`. A message is cut into frames by its framing
-row; each frame takes the wire when the wire is free and the sender
-holds a credit, one frame at a time in order; the receive buffer holds
-receive_buffer_frames frames, the receiver takes each frame as it
-lands, and the frame's credit is back at the sender credit_latency
-later. So frame k starts at
+The packet protocol `credit`. A message is cut into frames; each takes
+the wire when the wire is free and the sender holds a credit; the
+receive buffer holds C frames, and a frame's credit is back L_c after
+it lands. So frame k starts at
 
     s_k = max(ready, e_(k-1), c_(k-C)),   e_k = s_k + ceil(w_k / R),
     c_k = e_k + L + L_c,
 
-and the message is delivered when its last frame lands, e_n + L. This
-is Garnet's credit loop: an output virtual channel starts with
-buffers_per_data_vc credits (gem5 src/mem/ruby/network/garnet/
-OutVcState.cc:56-63), a flit is sent only while it has one and takes one
-(NetworkInterface.cc:506, 530), and the receiver returns the credit when
-the flit leaves its buffer (InputUnit.cc:140-150, and at once in a
-network interface, NetworkInterface.cc:236-274), over a credit link of
-its own latency (NetworkLink.cc:92-102). The credits travel on backward
-flow-control links of their own, a CreditLink beside each forward link
-(GarnetLink.py:60-63, 84-88, 126-142), so a credit takes no time on the
-data wire and is never lost, which is how this row returns it.
-Aurora's native flow control, where a receiver asks its partner to send
-idles within the time of 256 blocks (Xilinx SP011 sections 3.1 and 3.3,
-pages 29-30), is this row with that bound as its credit latency: an
-equivalence, not Aurora's own mechanism. PCIe's flow-control credits
-and NVIDIA's real-time ring, whose producer reuses a slot only when its
-flags are clear (cuda-quantum realtime/lib/daemon/dispatcher/
-cudaq_realtime_api.cpp:360-364), have the same shape. With unbounded
-credits and the whole framing the law is the ideal row's.
+and the message is delivered at e_n + L. This is Garnet's credit loop
+(gem5 src/mem/ruby/network/garnet/OutVcState.cc:56-63,
+NetworkInterface.cc:506, 530, InputUnit.cc:140-150), with credits on
+CreditLinks of their own (GarnetLink.py), so a credit takes no time on
+the data wire and is never lost. Aurora's native flow control, idles
+within 256 blocks (Xilinx SP011 sections 3.1 and 3.3), is this row with
+that bound as its credit latency, an equivalence. PCIe's flow-control
+credits and NVIDIA's real-time ring (cuda-quantum
+cudaq_realtime_api.cpp:360-364) have the same shape. With unbounded
+credits and the whole framing it is the ideal row.
 
-Garnet's own loop is this one with two cycles more than its link
-latency, which a card that means Garnet writes into
-credit_latency_cycles: the input unit schedules the credit link a cycle
-after the flit leaves (InputUnit.cc:151), and a network interface
-spends a credit the cycle after it lands, reading credits after it has
-scheduled its output (NetworkInterface.cc:221 and 286-298). Garnet also
-holds a virtual channel for a whole packet, freed only by the tail's
-credit (NetworkInterface.cc:293-296 and 477); frames here share the
-buffer's credits, so a message does not wait for the one before it to
-drain.
+Garnet's loop is two cycles longer than its link latency, which a card
+meaning Garnet writes into credit_latency_cycles (InputUnit.cc:151;
+NetworkInterface.cc:221, 286-298). Garnet also holds a virtual channel
+per packet (NetworkInterface.cc:293-296); frames here share the
+buffer's credits, so a message does not wait for the one before it.
 """
 
 import collections
 import copy
 import dataclasses
-from collections.abc import Mapping
 
 import decsim.config as config
+import decsim.engine
 import decsim.links.channel as channel_module
-import decsim.links.framings as framings
 import decsim.links.settings as link_settings
 import decsim.ports as ports
+import decsim.records.transfers as transfer_records
 
 
 class CreditChannel(channel_module.Channel):
@@ -62,31 +46,32 @@ class CreditChannel(channel_module.Channel):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The credit row's keys: the framing, the buffer, the credit's return.
+        """The credit protocol's settings.
 
-        receive_buffer_frames is C, the frames the receiver can hold;
-        credit_latency_cycles is L_c on the card's clock, from the
-        receiver taking a frame to its credit being usable at the
-        sender. Every key is written, because each is a number of the
-        hardware the card describes and carries its source.
+        receive_buffer_frames is C; credit_latency_cycles is L_c on clock, the
+        card's domain, from the receiver taking a frame to its credit being
+        usable. Every field is written, since each is a sourced hardware number.
         """
 
         framing: link_settings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
+        clock: config.Clock
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, path_name: str
-        ) -> "CreditChannel.Settings":
-            """The keys of a card's protocol mapping."""
-            credit_keys = read_credit_keys(section, path_name)
-            return cls(*credit_keys)
+        def __post_init__(self) -> None:
+            check_credit_fields(self)
+
+        def build(
+            self,
+            channel_settings: link_settings.ChannelSettings,
+            engine: decsim.engine.Engine,
+        ) -> "CreditChannel":
+            """A fresh channel whose protocol is these settings."""
+            return CreditChannel(channel_settings, engine)
 
     def _new_wire(self) -> "CreditWire":
-        """The wire this row serializes on."""
-        protocol = self._settings.protocol.row_settings
-        return CreditWire(self._settings, protocol)
+        """The wire this protocol serializes on."""
+        return CreditWire(self._settings, self._settings.protocol)
 
 
 class CreditWire:
@@ -95,10 +80,10 @@ class CreditWire:
     def __init__(
         self,
         channel_settings: link_settings.ChannelSettings,
-        protocol_settings,
+        protocol_settings: link_settings.PacketProtocolSettings,
     ):
         self._channel_settings = channel_settings
-        self._framing = framings.build(protocol_settings.framing)
+        self._framing = protocol_settings.framing.build()
         self._credit_latency_ticks = credit_latency_ticks(channel_settings)
         # the credit-return tick of each of the last C frames sent; the
         # oldest is the credit the next frame waits for
@@ -123,8 +108,8 @@ class CreditWire:
         return copied
 
     def cross(
-        self, framed: channel_module.FramedPayload, ready_ticks: int
-    ) -> tuple[channel_module.FrameTiming, ...]:
+        self, framed: transfer_records.FramedPayload, ready_ticks: int
+    ) -> tuple[transfer_records.FrameTiming, ...]:
         """Send the message's frames in order, each when it has a credit."""
         self.crossing_count += 1
         frame_bits = self._framing.frames(
@@ -144,7 +129,7 @@ class CreditWire:
 
     def cross_frame(
         self, bits: int, ready_ticks: int
-    ) -> channel_module.FrameTiming:
+    ) -> transfer_records.FrameTiming:
         """Send one frame: wait for the wire and a credit, then serialize."""
         queue_ticks = max(ready_ticks, self._free_ticks)
         start_ticks = self.next_start_ticks(ready_ticks)
@@ -157,9 +142,8 @@ class CreditWire:
         self._credit_returns.append(credit_return_ticks)
         self._free_ticks = end_ticks
         credit_wait_ticks = start_ticks - queue_ticks
-        return channel_module.FrameTiming(
+        return transfer_records.FrameTiming(
             bits,
-            queue_ticks,
             credit_wait_ticks,
             start_ticks,
             end_ticks,
@@ -169,9 +153,8 @@ class CreditWire:
     def _credit_ticks(self) -> int:
         """When the sender holds a credit: at once, or when the oldest returns.
 
-        Credits return in the order their frames were sent, because every
-        frame lands one propagation after its end and its credit one
-        credit latency after that.
+        Credits return in send order: each lands one propagation after its
+        frame's end and returns one credit latency later.
         """
         credits_out = len(self._credit_returns)
         if credits_out < self._credit_returns.maxlen:
@@ -179,23 +162,17 @@ class CreditWire:
         return self._credit_returns[0]
 
 
-def read_credit_keys(section: Mapping, path_name: str) -> tuple:
-    """(framing, receive_buffer_frames, credit_latency_cycles) of a card."""
-    section_name = f"links.{path_name}.protocol"
-    framing_section = link_settings.required_key(
-        section, "framing", section_name
-    )
-    framing = framings.framing_settings_from_yaml(framing_section, path_name)
-    receive_buffer_frames = link_settings.positive_count_key(
-        section, "receive_buffer_frames", section_name
-    )
-    credit_latency_cycles = link_settings.required_key(
-        section, "credit_latency_cycles", section_name
-    )
+def check_credit_fields(
+    protocol_settings: link_settings.PacketProtocolSettings,
+) -> None:
+    """The credit loop's latency, which the reliable protocol shares.
+
+    A credit back before its frame lands would let more than C frames
+    fly.
+    """
     config.check_cycles(
-        f"{section_name}.credit_latency_cycles", credit_latency_cycles
+        "credit_latency_cycles", protocol_settings.credit_latency_cycles
     )
-    return framing, receive_buffer_frames, credit_latency_cycles
 
 
 def credit_latency_ticks(
@@ -203,5 +180,5 @@ def credit_latency_ticks(
 ) -> int:
     """L_c in ticks: the protocol's cycles on the card's clock."""
     protocol = channel_settings.protocol
-    cycles = protocol.row_settings.credit_latency_cycles
+    cycles = protocol.credit_latency_cycles
     return cycles * protocol.clock.period_ticks

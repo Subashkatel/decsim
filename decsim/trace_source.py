@@ -1,16 +1,11 @@
 """A trace source: one named event a component fires and listeners hear.
 
-A component owns one TraceSource per event it reports, fires it where
-the event happens, and knows nothing of who listens; a listener
-connects at build. That is ns-3's TracedCallback (the device declares
-m_macTxTrace at point-to-point-net-device.h:309 and fires it at
-transmit, .cc:530; with no sink connected it fires into an empty list)
-and SimPy's per-event callback list (simpy/core.py step()). A source
-with no listener costs one empty loop per fire.
-
-SilentSource is the same surface for an event one row of a table never
-has, so every row of that table carries every source the port declares
-and a listener connects to all of them by name.
+A component owns one TraceSource per event it reports and knows nothing
+of who listens; a listener connects at build. That is ns-3's
+TracedCallback (point-to-point-net-device.h:309, fired at .cc:530) and
+SimPy's per-event callback list (simpy/core.py step()). SilentSource is
+the same surface for an event an implementation never has, so a
+listener connects to every implementation by name.
 """
 
 import dataclasses
@@ -27,7 +22,7 @@ class TraceSource:
         """Hear every fire from now on, after the listeners already there."""
         self._listeners.append(listener)
 
-    def fire(self, *values) -> None:
+    def fire(self, *values: object) -> None:
         """Tell every listener, in connection order."""
         for listener in self._listeners:
             listener(*values)
@@ -41,11 +36,8 @@ class TraceSource:
 class SilentSource:
     """A declared event that this implementation never has.
 
-    A port declares the sources every row carries; a row with nothing to
-    report exposes one of these instead of leaving the name off, so a
-    listener connects by name without asking what the row is. It never
-    fires, so it keeps no listener and holds no state, and one instance
-    serves every row that is silent.
+    It never fires, so it keeps no listener, and one instance serves
+    every silent implementation.
     """
 
     def connect(self, listener: Callable) -> None:
@@ -58,16 +50,14 @@ class SilentSource:
         return False
 
 
-def new_source():
+def new_source() -> TraceSource:
     """A dataclass field default that gives each record its own source.
 
-    A component's events are one member, the way gem5 groups a
-    component's statistics into one nested Group rather than one member
-    per counter (gem5 src/base/stats/group.hh:60-92); the
-    group is a frozen record whose fields are declared with this.
+    A component's events are one frozen record, as gem5 groups a
+    component's statistics (src/base/stats/group.hh:60-92).
     """
     return dataclasses.field(default_factory=TraceSource)
 
 
-# the one silent source every row that reports nothing exposes
+# the one silent source every implementation that reports nothing exposes
 SILENT = SilentSource()

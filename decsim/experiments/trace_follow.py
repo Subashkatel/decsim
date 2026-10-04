@@ -1,26 +1,21 @@
 """`decsim trace follow`: one round's or one window's path, hop by hop.
 
-The reader of one round's or one window's path through a trace: it
-indexes a shot's Chrome trace by the identity keys in `args`, orders the
-hops by `args.tick` and then by the lane the pipeline puts each thread
-on, and prints where the thing sat, for how long, whether the hop copied
-the bits or referenced them, and how many bits crossed. Below the table
-come the counts (copies, references as jobs and holds, moves, the
-longest residence and the longest queue wait), which is sinter's one
-flat row per thing counted (_data/_task_stats.py) applied per hop.
-
-Perfetto draws the timeline; this is the per-round path Perfetto would
-make the reader assemble by clicking through flow arrows, and `--html`
-writes it as one self-contained page with a lane per component.
+Hops are ordered by args.tick, then by pipeline lane, and printed with
+where the thing sat, how long, whether the hop copied or referenced the
+bits, and how many bits crossed; the counts follow, sinter's one flat
+row per thing counted (_data/_task_stats.py) applied per hop. Perfetto
+draws the timeline; this is the path it would make the reader assemble
+by clicking through flow arrows.
 """
 
 import argparse
 import dataclasses
-import html
+import pathlib
 from typing import Optional
 
 import decsim.config as config
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.experiments.trace_file as trace_file
 
 ROUND = "round"
@@ -58,7 +53,7 @@ class Counts:
 
 @dataclasses.dataclass(frozen=True)
 class FollowedPath:
-    """One round's or one window's hops and counts, in tick order."""
+    """One round's or one window's path through a shot, in tick order."""
 
     kind: str
     key: str
@@ -67,7 +62,9 @@ class FollowedPath:
     counts: Counts
 
 
-def follow(document, kind: str, key: str) -> FollowedPath:
+def follow(
+    document: trace_file.TraceDocument, kind: str, key: str
+) -> FollowedPath:
     """Every hop of one round or window in one traced shot."""
     events = _events_of(document, kind, key)
     hops = []
@@ -84,7 +81,7 @@ def follow(document, kind: str, key: str) -> FollowedPath:
     )
 
 
-def table_lines(hops) -> list:
+def table_lines(hops: tuple) -> list:
     """One header line and one line per hop, columns aligned."""
     rows = [("tick (us)", "where", "what", "dur (us)", "transfer", "bits")]
     for hop in hops:
@@ -117,21 +114,6 @@ def count_lines(counts: Counts) -> list:
     return lines
 
 
-def page(path: FollowedPath) -> str:
-    """One self-contained page: a lane per component, then the table.
-
-    No external resource: the lanes are divs placed by tick, so the page
-    opens from a file with no network and no viewer.
-    """
-    title = f"{path.kind} {path.key}"
-    header = _page_header(path, title)
-    lanes = _lane_section(path.hops)
-    table = _page_table(path.hops)
-    body = "\n".join([header, lanes, table])
-    named = html.escape(title)
-    return _PAGE.format(title=named, style=_STYLE, body=body)
-
-
 def main(argv: list) -> None:
     """`decsim trace follow <file> --round k:n | --window k:n`."""
     parser = argparse.ArgumentParser(prog="decsim trace")
@@ -139,27 +121,40 @@ def main(argv: list) -> None:
     parser.add_argument("file", help="the trace file one shot wrote")
     parser.add_argument("--round", default=None, help="the round, as op:index")
     parser.add_argument("--window", default=None, help="the window, as op:id")
-    parser.add_argument("--html", default=None, help="write the page here")
     parsed = parser.parse_args(argv)
     _refuse_an_unknown_action(parsed.action)
     kind, key = _followed(parsed.round, parsed.window)
     document = trace_file.load(parsed.file)
     _refuse_a_key_the_trace_does_not_carry(document, kind, key)
     path = follow(document, kind, key)
-    lines = _report_lines(path)
+    trace_path = pathlib.Path(parsed.file)
+    point_name = point_named_by(trace_path)
+    lines = _report_lines(path, point_name)
     text = "\n".join(lines)
     print(text)
-    if parsed.html is None:
-        return
-    written = page(path)
-    with open(parsed.html, "w") as handle:
-        handle.write(written)
-    print(f"\npage: {parsed.html}")
 
 
-def _report_lines(path: FollowedPath) -> list:
+def point_named_by(trace_path: pathlib.Path) -> Optional[str]:
+    """The name of the point a run folder's trace is of; None outside one.
+
+    A run folder names a trace by its point's id and seed
+    (measure.shot_label) and keeps each point's record under points/,
+    so two points of one experiment are told apart by name.
+    """
+    run_dir = trace_path.parent.parent
+    records = run_folder.point_records(run_dir)
+    for point_id, record in records.items():
+        if trace_path.name.startswith(f"{point_id}_seed"):
+            return record["name"]
+    return None
+
+
+def _report_lines(path: FollowedPath, point_name: Optional[str]) -> list:
     """The table and the counts, as the command prints them."""
-    lines = [f"{path.kind} {path.key} of {path.process_name}", ""]
+    machine = path.process_name
+    if point_name is not None:
+        machine = f"point {point_name}, {machine}"
+    lines = [f"{path.kind} {path.key} of {machine}", ""]
     table = table_lines(path.hops)
     lines.extend(table)
     lines.append("")
@@ -248,11 +243,7 @@ def _events_of(document, kind: str, key: str) -> list:
     landed = _input_landed_ticks(document)
     ordered = []
     for position, event in enumerate(document.events):
-        if event["ph"] not in HOP_PHASES:
-            continue
-        if not _belongs(event, kind, key):
-            continue
-        if kind == ROUND and _is_after_the_decode(event, landed):
+        if not _is_a_hop_of(event, kind, key, landed):
             continue
         tick = trace_file.tick_of(event)
         ordered.append((tick, event["tid"], position, event))
@@ -261,6 +252,17 @@ def _events_of(document, kind: str, key: str) -> list:
     for _tick, _tid, _position, event in ordered:
         events.append(event)
     return events
+
+
+def _is_a_hop_of(event: dict, kind: str, key: str, landed: dict) -> bool:
+    """Whether an event is a hop of the thing; a round's ends at its decode."""
+    if event["ph"] not in HOP_PHASES:
+        return False
+    if not _belongs(event, kind, key):
+        return False
+    if kind != ROUND:
+        return True
+    return not _is_after_the_decode(event, landed)
 
 
 def _input_landed_ticks(document) -> dict:
@@ -457,16 +459,11 @@ def _queue_phrase(args: dict) -> str:
 
 def _counts_of(events) -> Counts:
     """The copies, references, moves and longest waits over the hops."""
-    copies = 0
-    moves = 0
+    copies = _hop_count(events, "i", "copy")
+    moves = _hop_count(events, "X", "link")
     holds = 0
     requests = set()
     for event in events:
-        category = event["cat"]
-        if event["ph"] == "i" and "copy" in category:
-            copies += 1
-        if event["ph"] == "X" and "link" in category:
-            moves += 1
         if event["name"] == "hold registered":
             holds += 1
         _note_request(requests, event)
@@ -480,6 +477,15 @@ def _counts_of(events) -> Counts:
         longest_residence=residence,
         longest_queue_wait=queue_wait,
     )
+
+
+def _hop_count(events, phase: str, category: str) -> int:
+    """How many hops of one phase carry the category."""
+    count = 0
+    for event in events:
+        if event["ph"] == phase and category in event["cat"]:
+            count += 1
+    return count
 
 
 def _note_request(requests: set, event: dict) -> None:
@@ -570,138 +576,3 @@ def _window_index(window: str) -> str:
     """The window's own number, as the log and the trace name it: W3."""
     words = window.split(":")
     return words[1]
-
-
-def _page_header(path: FollowedPath, title: str) -> str:
-    """The page's heading: what is followed, in which shot, and the counts."""
-    lines = count_lines(path.counts)
-    counts = []
-    for line in lines:
-        escaped = html.escape(line)
-        counts.append(f"<p class='count'>{escaped}</p>")
-    text = "\n".join(counts)
-    shot = html.escape(path.process_name)
-    heading = html.escape(title)
-    return f"<h1>{heading}</h1>\n<p class='shot'>{shot}</p>\n{text}"
-
-
-def _lane_section(hops) -> str:
-    """One lane per component, the hops as boxes and the waits as gaps."""
-    if not hops:
-        return "<p class='count'>no hop carries this key</p>"
-    first, span = _span_of(hops)
-    lanes = []
-    for where in _lane_order(hops):
-        boxes = _lane_boxes(hops, where, first, span)
-        name = html.escape(where)
-        lanes.append(
-            f"<div class='lane'><div class='name'>{name}</div>"
-            f"<div class='track'>{boxes}</div></div>"
-        )
-    return "<div class='lanes'>\n" + "\n".join(lanes) + "\n</div>"
-
-
-def _span_of(hops) -> tuple:
-    """The first tick of the path and how many ticks it lasts."""
-    first = hops[0].tick
-    last = first
-    for hop in hops:
-        end = hop.tick
-        if hop.duration_ticks is not None:
-            end = hop.tick + hop.duration_ticks
-        last = max(last, end)
-    span = last - first
-    return first, max(span, 1)
-
-
-def _lane_order(hops) -> list:
-    """Every component the path touched, in the order it touched them."""
-    order = []
-    for hop in hops:
-        if hop.where in order:
-            continue
-        order.append(hop.where)
-    return order
-
-
-def _lane_boxes(hops, where: str, first: int, span: int) -> str:
-    """The boxes of one lane, placed by tick and sized by duration."""
-    boxes = []
-    for hop in hops:
-        if hop.where != where:
-            continue
-        box = _box_of(hop, first, span)
-        boxes.append(box)
-    return "".join(boxes)
-
-
-def _box_of(hop: Hop, first: int, span: int) -> str:
-    """One hop as a placed box, titled with its own row."""
-    left = (hop.tick - first) / span * 100.0
-    width = 0.0
-    if hop.duration_ticks is not None:
-        width = hop.duration_ticks / span * 100.0
-    width = max(width, 0.6)
-    cells = _cells_of(hop)
-    label = " ".join(cells)
-    titled = html.escape(label)
-    style = f"left:{left:.3f}%;width:{width:.3f}%"
-    kind = hop.transfer or "none"
-    return f"<span class='box {kind}' style='{style}' title='{titled}'></span>"
-
-
-def _page_table(hops) -> str:
-    """Every row of the printed table, as the page's table."""
-    header = ("tick (us)", "where", "what", "dur (us)", "transfer", "bits")
-    rows = [_page_row(header, "th")]
-    for hop in hops:
-        cells = _cells_of(hop)
-        row = _page_row(cells, "td")
-        rows.append(row)
-    body = "\n".join(rows)
-    return f"<table>\n{body}\n</table>"
-
-
-def _page_row(cells, tag: str) -> str:
-    """One table row of the page."""
-    written = []
-    for cell in cells:
-        escaped = html.escape(cell)
-        written.append(f"<{tag}>{escaped}</{tag}>")
-    joined = "".join(written)
-    return f"<tr>{joined}</tr>"
-
-
-_STYLE = """
-body { font: 13px/1.5 monospace; margin: 2rem; color: #111; }
-h1 { font-size: 1.2rem; margin: 0 0 .2rem 0; }
-.shot { color: #555; margin: 0 0 1rem 0; }
-.count { margin: .1rem 0; }
-.lanes { margin: 1.5rem 0; }
-.lane { display: flex; align-items: center; margin: 2px 0; }
-.name { width: 22rem; text-align: right; padding-right: .8rem; color: #333; }
-.track { position: relative; height: 16px; flex: 1;
-         background: #f2f2f2; border-radius: 2px; }
-.box { position: absolute; top: 2px; height: 12px; border-radius: 2px;
-       background: #7a7a7a; }
-.box.copy { background: #2f6fb0; }
-.box.move { background: #b06a2f; }
-.box.reference { background: #4a8f4a; }
-table { border-collapse: collapse; margin-top: 1.5rem; }
-th, td { border-bottom: 1px solid #ddd; padding: 2px 12px 2px 0;
-         text-align: left; vertical-align: top; }
-th { color: #555; }
-"""
-
-_PAGE = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{title}</title>
-<style>{style}</style>
-</head>
-<body>
-{body}
-</body>
-</html>
-"""

@@ -5,7 +5,7 @@ check readout and destructive data measurement in one physical instruction.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import stim
@@ -13,23 +13,27 @@ import stim
 
 @dataclass(frozen=True)
 class RepeatedStimCircuit:
-    """One preparation, repeatable protection, and actual final readout.
+    """A physical measurement program whose protection round repeats.
 
-    The first and repeated fragments leave the data live. The final
-    fragment contains a complete last round and destructive readout;
-    single_round contains preparation and readout for a one-round run.
-    All fragments use the same physical qubit and logical observable ids.
-    A declared period binds duration-dependent physics to the QPU cadence,
-    and the live source checks it against the run's period before it
-    executes. None leaves cadence independent of the circuit's noise
-    probabilities and skips that check: every fragment, preparation and
-    the terminal readout included, is then charged one round period.
+    It holds one preparation, the repeatable protection and the actual
+    final readout. The first and repeated fragments leave the data live.
+    The final fragment contains a complete last round and destructive
+    readout; single_round contains preparation and readout for a
+    one-round run. All fragments use the same physical qubit and logical
+    observable ids. A declared period binds duration-dependent physics to
+    the QPU cadence, and the live source checks it against the run's
+    period before it executes. None leaves cadence independent of the
+    circuit's noise probabilities and skips that check: every fragment,
+    preparation and the terminal readout included, is then charged one
+    round period.
     """
 
-    first_round: stim.Circuit
-    repeated_round: stim.Circuit
-    final_round: stim.Circuit
-    single_round: stim.Circuit
+    # Stim's circuits have no hash; equal records hold equal circuits, so
+    # the hash leaves them out and still agrees with equality.
+    first_round: stim.Circuit = field(hash=False)
+    repeated_round: stim.Circuit = field(hash=False)
+    final_round: stim.Circuit = field(hash=False)
+    single_round: stim.Circuit = field(hash=False)
     round_period_microseconds: Optional[float] = None
 
     def __post_init__(self) -> None:
@@ -57,8 +61,6 @@ class RepeatedStimCircuit:
 
     def assemble(self, round_count: int) -> tuple[stim.Circuit, dict[int, int]]:
         """Describe a complete physical history and its measurement schedule."""
-        if round_count < 1:
-            raise ValueError("round_count must be positive")
         circuit = stim.Circuit()
         measurement_rounds = {}
         after_last_round = round_count + 1
@@ -74,8 +76,6 @@ class RepeatedStimCircuit:
 
 
 def _round_name(round_index: int, is_final: bool) -> str:
-    if round_index < 1:
-        raise ValueError("round_index must be positive")
     if round_index == 1:
         if is_final:
             return "single_round"

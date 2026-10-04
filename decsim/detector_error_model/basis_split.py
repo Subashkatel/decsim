@@ -25,9 +25,9 @@ import scipy.sparse
 import stim
 
 from decsim.detector_error_model import (
-    fault_model_contracts,
     stim_fault_catalog,
 )
+from decsim.records import fault_model_contracts
 
 BASES = ("X", "Z")
 # the Stim instructions that measure a qubit; the last one in a memory
@@ -79,7 +79,7 @@ def rows_of_basis(
     return rows
 
 
-def column_rows(matrix, column: int) -> tuple:
+def column_rows(matrix: scipy.sparse.csc_matrix, column: int) -> tuple:
     """The rows one column of a csc matrix flips, as Python ints.
 
     A check or an observable matrix of a placed fault model is csc, so a

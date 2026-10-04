@@ -1,10 +1,6 @@
 """The issuer: an admitted operation becomes one QPU command.
 
-The execution runtime admits an operation when its predecessors are done
-and its release has arrived; the issuer then opens its protected
-regions and hands the command to the output. The operation claims its
-patches' idle rounds when it starts (controller/idle_rounds.py). A
-program root or an ordinary successor is preloaded and starts at the
+A program root or an ordinary successor is preloaded and starts at the
 next boundary; a feedback-blocked operation is dynamic and pays the
 output path first. The runtime hears the start boundary through
 on_started, so the issuer never calls the runtime.
@@ -13,7 +9,7 @@ on_started, so the issuer never calls the runtime.
 import dataclasses
 import types
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.idle_rounds as idle_rounds_module
@@ -31,7 +27,11 @@ class OperationIssuer:
     output = ports.Port(ports.InstructionReceiver)
 
     def __init__(
-        self, engine: engine_module.Engine, resolved_operations
+        self,
+        engine: engine_module.Engine,
+        resolved_operations: tuple[
+            program_records.ResolvedOperationPlanning, ...
+        ],
     ) -> None:
         self.engine = engine
         operation_by_id = {
@@ -77,11 +77,7 @@ class OperationIssuer:
         operation: program_records.Operation,
         is_workload_complete: bool,
     ) -> None:
-        """Successors released: close boundaries, seal streams, stop the QPU.
-
-        At the workload's end the idle rounds no operation claimed are
-        settled too.
-        """
+        """Successors released: close boundaries; at the end, seal and stop."""
         self.streams.close_feedback_boundary(operation)
         if is_workload_complete:
             self.streams.seal_finished_streams()
@@ -89,7 +85,8 @@ class OperationIssuer:
             self.output.finish()
 
     def stream_binding_for(
-        self, operation_id
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> Optional[program_records.StreamBinding]:
         """The stream binding an operation was given, or None."""
         return self.streams.binding_for(operation_id)

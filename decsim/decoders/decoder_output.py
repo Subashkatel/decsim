@@ -1,26 +1,17 @@
 """The decoder side's outgoing sends: the frame, the strong tier, a peer.
 
-Whoever executes a send is an end of that hop. OMNeT++ enforces the same
-rule at runtime, that a module may only send a message it owns:
-cSimpleModule::send refuses one whose owner is another module
-(omnetpp-6.1.0 `src/sim/csimplemodule.cc:333-334`,
-the diagnostic at 506-508). And gem5 bills a transfer to the ports it
-crossed and never to a proxy that arranged it: the crossbar counts a
-packet against the CPU-side and memory-side port ids it went between,
-and only once it was successfully sent (`coherent_xbar.cc:354-357`,
-`xbar.hh:400-411`), and it hands its forwarding latency to "the
-neighbouring object that actually makes the packet wait"
-(`packet.hh:424-431`). Two hops leave a decoder: the correction to the
-Pauli frame, and the escalation to the strong decoder, which is the
-selection of the strong request and then the rounds of its window,
-read out of the weak syndrome buffer (Toshio et al. 2510.25222 lines
-1247 to 1250 assign the region's syndrome data to the strong decoder
-at the switch). The correction and the selection carry a result the
-decoder produced, which is also how the reaction path is booked: Yang
-et al. 2605.04892 Table I counts the frame update inside the decoder's
-own subtotal. A window's boundary does not leave here: it is the window
-side's record and leaves by the object that holds it
-(windows/window_boundaries.py, decisions.md D12).
+Whoever executes a send is an end of that hop: OMNeT++ refuses a send of
+a message another module owns (omnetpp-6.1.0
+src/sim/csimplemodule.cc:333-334), and gem5 bills a transfer to the
+ports it crossed, never to a proxy that arranged it
+(coherent_xbar.cc:354-357, xbar.hh:400-411, packet.hh:424-431). Two hops
+leave a decoder: the correction to the Pauli frame, and the escalation
+to the strong decoder, the selection of the strong request and then the
+rounds of its window read out of the weak syndrome buffer (Toshio et al.
+2510.25222 lines 1247-1250). Yang et al. 2605.04892 Table I counts the
+frame update inside the decoder's own subtotal. A window's boundary is
+the window side's record and leaves from there
+(windows/window_boundaries.py).
 """
 
 import functools
@@ -62,7 +53,10 @@ FRAME_PATH_BY_TIER = {
 
 
 class DecoderOutput:
-    """Sends one decoder's answers where they go, and charges the frame."""
+    """Sends one decoder's answers where they go.
+
+    A correction commits into the frame as a priced write.
+    """
 
     transfers = ports.Port(ports.WindowTransfers)
     # a run with no frame commits its corrections nowhere
@@ -109,11 +103,10 @@ class DecoderOutput:
         """Send one window's escalation to the strong decoder.
 
         The send is in the weak job's name for the strong request it
-        selects; returns the delay the link expects. A selection is
-        the request's name and nothing else
-        (records/windows.py REQUEST_KEY_WIRE_BITS), so a bounded hop
-        serializes that word and its header, and a hop with a default
-        payload does not price it as a region.
+        selects; returns the delay the link expects. A selection is the
+        request's name and nothing else (records/windows.py
+        REQUEST_KEY_WIRE_BITS), so a bounded hop serializes that word
+        and its header.
         """
         return self.transfers.send_for_job(
             transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
@@ -130,13 +123,11 @@ class DecoderOutput:
     ) -> int:
         """Read a strong window's rounds, then send them to the strong store.
 
-        The rounds leave the weak syndrome buffer here, so the read is
-        priced here, once, by that store (book_read), and the send starts
-        at its end; a bit is priced by the memory it leaves, at the tick
-        it leaves. The send is in the strong request's name and carries
-        that name and the rounds (EscalatedRegion.message_bits); returns
-        the delay expected, the read then the link's estimate
-        (links/channel.py expected_delay_ticks).
+        The rounds leave the weak syndrome buffer here, so that store
+        prices the read once (book_read) and the send starts at its end.
+        The send carries the request's name and the rounds
+        (EscalatedRegion.message_bits); returns the read's time plus the
+        link's estimate (links/channel.py expected_delay_ticks).
         """
         round_keys = region.round_keys
         read_tick = self.weak_store.book_read(round_keys)

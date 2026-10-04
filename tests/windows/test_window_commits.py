@@ -129,8 +129,7 @@ class _Fixture:
         self.verdicts = {}
         self.verdict_ticks = []
         self.policy = types.SimpleNamespace(
-            verdict_for_weak_result=self._verdict_for,
-            decides_on_a_confidence=True,
+            verdict_for_weak_result=self._verdict_for
         )
         self.reads = []
         self.decode_queue = types.SimpleNamespace(
@@ -340,10 +339,15 @@ def test_a_frameless_run_commits_at_the_delivery():
     assert committed == [4]
 
 
+def test_a_charged_verdict_with_no_clock_still_stops():
+    """The declared run names no clock, so the first charge cannot land."""
+    with pytest.raises(AttributeError, match="has no attribute 'edge'"):
+        declared_run.switching_run(rounds=3, escalates=True, threshold_cycles=3)
+
+
 @pytest.mark.parametrize("escalates", [False, True])
 def test_threshold_cycles_delay_kept_and_escalated_frame_points(escalates):
-    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
-    clock = clocks.clock("decisions")
+    clock = config.Clock.from_megahertz(1.0)
     free = declared_run.switching_run(rounds=3, escalates=escalates)
     charged = declared_run.switching_run(
         rounds=3,
@@ -360,8 +364,7 @@ def test_threshold_cycles_delay_kept_and_escalated_frame_points(escalates):
 
 
 def test_switch_cycles_delay_the_strong_request_and_frame_points():
-    clocks = config.ClockSettings.from_yaml({"decisions": 1.0})
-    clock = clocks.clock("decisions")
+    clock = config.Clock.from_megahertz(1.0)
     free_requests = declared_run.EndedRequests()
     charged_requests = declared_run.EndedRequests()
     free = declared_run.switching_run(

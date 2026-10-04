@@ -1,7 +1,10 @@
 """The experiments layer's referents: sinter's collect, and a recorded sweep.
 
-Referent one is a sweep of reference.yaml recorded before decsim.collect
-existed, its sweep.csv and links.csv kept in data/. Ten of its numbers
+Referent one is a sweep of the reference machine recorded before
+decsim.collect existed, rerun on its machine (run_files.REFERENCE), its
+sweep.csv and its per-link means kept in data/, each mean
+the one shot_links.csv gives a link over the point's shots. Ten of its
+numbers
 were amended when the controller-to-store hop stopped being priced at
 the raw readout width: the recorded run's own buffer fill, its
 per-syndrome buffer hop and that hop's link row. Eight zero columns were
@@ -24,7 +27,8 @@ scored, none unscored and a zero rate counting them as failures, and
 one zero count of replaced provisional decodes
 without a correction, which a weak-only sweep never makes. The weak
 decoder of
-reference.yaml is pymatching, which prices its measured wall clock, so the
+the reference machine is pymatching, which prices its measured wall clock,
+so the
 columns that carry decode time (algorithm, service, queue wait, the park
 before the compute, the four totals, load, throughput, the queue peak and
 the wall seconds) vary between two runs of the same code; they are left
@@ -32,7 +36,8 @@ out of the comparison, and the columns kept are exactly the ones two
 recorded runs agreed on. Its two columns of the per-shot whole-circuit
 PyMatching reference went when that reference did. Referent two
 is sinter (sinter/_collection/_collection.py collect, sinter/_data/_task.py
-strong_id): a task named twice runs once, and a decoder off the table is
+strong_id): two tasks that run differently have two ids, a decoder
+off the table is
 refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder"),
 and a shot its decoder could not answer is a discard, counted apart and
 never an error (sinter/_decoding/_decoding.py:123-125). Referent three
@@ -48,41 +53,32 @@ import functools
 import json
 import pathlib
 import re
-import shutil
+import statistics
 import time
 
 import numpy
 import pytest
 import stim
-import yaml
 
 import decsim.collect as collect
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
-import decsim.decoders.settings as decoder_settings
-import decsim.escalation.policies as escalation_policies
-import decsim.escalation.settings as escalation_settings
 import decsim.experiments.collect_command as run
-import decsim.experiments.experiment as experiment
-import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
+import decsim.machine as machine_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.built_window_models as built_window_models
-import tests.experiments.yaml_configs as yaml_configs
+import tests.declared_run as declared_run
+import tests.experiments.run_files as run_files
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
-CONFIGS = THIS_FILE.parents[2] / "configs"
-REFERENCE_YAML = CONFIGS / "reference.yaml"
-# the data-movement grid's fourth block, the one with the strong tier
-DATA_MOVEMENT_SWITCHING_BLOCK = 3
 # The sweep.csv columns that carry the decoder's measured wall clock, and
 # the release stage that starts from it and waits for a clock edge.
 WALL_CLOCK_POINTS = (
@@ -117,33 +113,39 @@ WALL_CLOCK_COLUMNS = (
 DIRECT_REFERENCE = DATA / "direct_reference.csv"
 
 FULL_HISTORY_PAIR = {
-    "weak_decoder": {
-        **yaml_configs.MINIMAL_CONFIG["weak_decoder"],
-        "kind": "pymatching",
+    "axes": {
+        run_files.DISTANCE_PATH: (3,),
+        run_files.ROUND_PERIOD_PATH: (1.0,),
+        run_files.COMMIT_ROUNDS_PATH: (None, 16),
+        run_files.ERROR_RATE_PATH: (0.015,),
     },
-    "sweep": [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.015],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-                "windows.commit_rounds": [None, 16],
-            },
-            "collection": {"max_shots": 240},
-        }
-    ],
+    "machine_arguments": {"weak_decoder": "pymatching"},
+    "collection": {"max_shots": 240},
 }
 
 # how long the first unit waits for its release before it gives up
 RELEASE_WAIT_SECONDS = 20
 
-# the observation keys that record a run without changing a shot's row
-RECORDING_ONLY_OBSERVATION = {
-    "trace": "chrome",
-    "trace_shots": [0, 1],
-    "log": "print",
-    "log_component_io": True,
-    "confidence_shot_count": 7,
+# the ledger counters shot_links.csv carries per shot per link
+LINK_COUNTERS = (
+    "transfers",
+    "payload_bits",
+    "unknown_payload_transfers",
+    "queue_wait_us",
+    "serialization_us",
+    "propagation_us",
+)
+
+# the observation fields and record options that record a run without
+# changing a shot's row
+RECORDING_ONLY = {
+    "observation": {
+        "trace": "chrome",
+        "trace_shots": (0, 1),
+        "log": "print",
+        "log_component_io": True,
+    },
+    "record_options": {"confidence_shot_count": 7},
 }
 
 # Each number beside the json value it enters the strong id as.
@@ -160,25 +162,24 @@ EXACT_NUMBERS = [
 ]
 
 
-def test_reference_yaml_rows_equal_the_recorded_sweep_and_links(tmp_path):
-    config = experiment.load_experiment(REFERENCE_YAML)
-    tasks = config.tasks()
-    measurements = yaml_configs.run_sweep(tasks, 2)
-    _rows, run_dir = yaml_configs.folded_run(tmp_path, measurements)
+def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):
+    study = run_files.sweep(**run_files.REFERENCE)
+    tasks = run_files.tasks_of(study)
+    measurements = run_files.run_sweep(tasks, 2)
+    _rows, run_dir = run_files.folded_run(tmp_path, measurements)
     folded_sweep_path = run_dir / "sweep.csv"
-    folded_links_path = run_dir / "links.csv"
+    shot_links_path = run_dir / "shot_links.csv"
     sweep_now = _csv_rows(folded_sweep_path)
-    links_now = _csv_rows(folded_links_path)
+    shot_links = _csv_rows(shot_links_path)
     sweep_path = DATA / "reference_sweep.csv"
     links_path = DATA / "reference_links.csv"
     sweep_before = _csv_rows(sweep_path)
     links_before = _csv_rows(links_path)
     sweep_measured = _without_point_id(sweep_now)
-    links_measured = _without_point_id(links_now)
     assert len(sweep_measured) == 1
     stable_now = _stable_columns(sweep_measured[0])
     assert stable_now == _stable_columns(sweep_before[0])
-    assert links_measured == links_before
+    assert _link_means(shot_links) == links_before
 
 
 def test_a_full_history_point_reproduces_the_retired_direct_columns(
@@ -196,130 +197,43 @@ def test_a_full_history_point_reproduces_the_retired_direct_columns(
     failures can be two different answers, which is why the pair is
     compared by predictions.
     """
-    config_path = yaml_configs.write_config(tmp_path, FULL_HISTORY_PAIR)
+    run_file = run_files.write_run_file(tmp_path, **FULL_HISTORY_PAIR)
     out_dir = tmp_path / "out"
 
-    run_dir, _rows = run.run_experiment(config_path, out_dir)
+    run_dir, _rows = run.run_experiment(run_file, out_dir)
 
     shots_path = run_dir / "shots.csv"
     shots = _csv_rows(shots_path)
     sliding = _shots_by_seed(shots, "null")
     full_history = _shots_by_seed(shots, "16")
     reference = _csv_rows(DIRECT_REFERENCE)
-    seeds = [int(row["seed"]) for row in reference]
-    expected = [_frozen_columns(row) for row in reference]
-    reproduced = [
-        _retired_columns(sliding[seed], full_history[seed]) for seed in seeds
-    ]
-    sliding_digests = [sliding[seed]["sample_digest"] for seed in seeds]
-    full_digests = [full_history[seed]["sample_digest"] for seed in seeds]
-    mismatches = [columns[2] for columns in expected]
+    seeds = _integer_column(reference, "seed")
+    expected = _frozen_columns(reference)
+    reproduced = _retired_columns_by_seed(sliding, full_history, seeds)
+    sliding_digests = _sample_digests(sliding, seeds)
+    full_digests = _sample_digests(full_history, seeds)
+    mismatches = _integer_column(reference, "direct_mismatch")
     assert reproduced == expected
     assert sliding_digests == full_digests
     assert sum(mismatches) == 2
 
 
-def test_a_swept_section_keeps_its_column_beside_every_measured_one(
-    tmp_path,
-):
-    """A whole yaml section is an axis, and no measured column shares it.
-
-    A row takes its swept values first and its measured values after
-    (report._with_swept_values), so a measured column named as a section
-    would overwrite the swept value in its cell. The swept windows cell
-    is the section's compact json (run_folder.swept_values), and no csv
-    column the run wrote is named as another yaml section.
-    """
-    windows = yaml_configs.MINIMAL_CONFIG["windows"]
-    block = dict(yaml_configs.MINIMAL_CONFIG["sweep"][0])
-    block["axes"] = dict(block["axes"], windows=[windows])
-    config_path = yaml_configs.write_config(tmp_path, {"sweep": [block]})
-    out_dir = tmp_path / "out"
-    run_dir, _ = run.run_experiment(config_path, out_dir)
-    shots_path = run_dir / "shots.csv"
-    shot, *_ = _csv_rows(shots_path)
-    columns = _columns_of_every_csv(run_dir)
-    sections_written = columns & set(machine_settings.SECTIONS)
-
-    assert json.loads(shot["windows"]) == windows
-    assert int(shot["decoded_windows"]) > 0
-    assert sections_written == {"windows"}
-
-
-def test_a_task_named_by_two_blocks_runs_once(tmp_path):
-    raw = _reference_yaml()
-    raw["sweep"] = [raw["sweep"][0], dict(raw["sweep"][0])]
-    raw["collection"]["max_shots"] = 2
-    twice_path = tmp_path / "twice.yaml"
-    twice = _written_yaml(raw, twice_path)
-    config = experiment.load_experiment(twice)
-    tasks = config.tasks()
-    out_dir = tmp_path / "out"
-
-    run_dir, _ = run.run_experiment(twice, out_dir)
-
-    shots_path = run_dir / "shots.csv"
-    shots = _csv_rows(shots_path)
-    seeds = [shot["seed"] for shot in shots]
-    assert len(tasks) == 2
-    assert seeds == ["0", "1"]
-
-
-def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
+def test_every_shot_of_a_point_decides_on_the_tasks_calibrator():
+    """An online threshold: one calibrator per point, on the task."""
+    task = run_files.first_task(
+        machine="switching", machine_arguments={"online": {}}
     )
-    weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
-    settings = dataclasses.replace(task.settings, weak_decoder=weak_decoder)
-    unknown = dataclasses.replace(task, settings=settings)
-    rows = sorted(decoder_settings.DECODERS)
-    sentence = (
-        "weak_decoder.kind 'lookup_table' is not a row of its table; "
-        "the rows are " + re.escape(repr(rows))
-    )
-    with pytest.raises(ValueError, match=sentence):
-        collect.run_shot(unknown, 0)
+    first = collect.run_shot(task, 0)
+    second = collect.run_shot(task, 1)
 
-
-def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
-    """threshold_source online: one calibrator per point, on the task."""
-    raw = _reference_yaml()
-    raw["escalation"] = {
-        "kind": "switching",
-        "gap_threshold_db": 15.0,
-        "threshold_source": "online",
-    }
-    online_path = tmp_path / "online.yaml"
-    online = _written_yaml(raw, online_path)
-    config = experiment.load_experiment(online)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
     assert task.online_threshold is not None
-    shot_settings = task.shot_settings()
-    escalation = shot_settings.escalation
-    assert escalation.online_threshold is task.online_threshold
+    assert first.machine.switching.policy.threshold is task.online_threshold
+    assert second.machine.switching.policy.threshold is task.online_threshold
 
 
 def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
     """The task's own referent: sinter compiles once per task."""
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    task = _reference_task()
 
     whole_task = collect.Unit(task, 0, 4)
     shared_outcome = collect.run_unit(whole_task, _decoded)
@@ -330,14 +244,7 @@ def test_a_tasks_shots_decode_the_same_with_the_models_built_once():
 
 
 def test_the_first_shot_builds_the_models_and_the_rest_read_them():
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    task = _reference_task()
     built = built_window_models.BuiltWindowModels()
 
     _run_every_shot(task, 3, built)
@@ -347,17 +254,15 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
 
 
 def test_a_machine_built_alone_builds_its_own_models():
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = task.shot_settings()
+    task = _reference_task()
+    settings = task.settings
 
-    assert settings.workload.built_models is None
+    first = machine_module.Machine.build(settings, 0)
+    second = machine_module.Machine.build(settings, 1)
+
+    first_models = first.windows.models.built_models
+    second_models = second.windows.models.built_models
+    assert first_models is not second_models
 
 
 def test_two_points_under_one_cache_do_not_share_models():
@@ -366,29 +271,10 @@ def test_two_points_under_one_cache_do_not_share_models():
     Two distances also differ in their window spans, so the noisier
     point at one distance is what pins the circuit text itself.
     """
-    config = experiment.load_experiment(REFERENCE_YAML)
     built = built_window_models.BuiltWindowModels()
-    at_three = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    at_five = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 5,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    noisier_at_three = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.003,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    at_three = _reference_task()
+    at_five = _reference_task(distance=5)
+    noisier_at_three = _reference_task(probability=0.003)
 
     collect.run_shot(at_three, 0, built_models=built)
     collect.run_shot(at_five, 0, built_models=built)
@@ -396,34 +282,6 @@ def test_two_points_under_one_cache_do_not_share_models():
 
     assert built.builds == 3
     assert built.reuses == 0
-
-
-# ---- an escalation row written outside decsim
-
-
-def test_an_outside_escalation_row_is_measured_over_its_tiers_links(
-    tmp_path, monkeypatch
-):
-    """The tier is read off the row, so a row off the table measures.
-
-    The experiments layer reads the tier the row declares, never the
-    escalation's name, so `decsim collect` measures any row the machine
-    runs.
-    """
-    shipped_directory = tmp_path / "shipped"
-    shipped_directory.mkdir()
-    shipped = _measured_shot(shipped_directory, "weak_baseline")
-    monkeypatch.setitem(
-        escalation_settings.ESCALATIONS, "outside_baseline", _OutsideEscalation
-    )
-    outside_directory = tmp_path / "outside"
-    outside_directory.mkdir()
-
-    outside = _measured_shot(outside_directory, "outside_baseline")
-
-    assert outside.samples == shipped.samples
-    assert outside.means == shipped.means
-    assert outside.logical_failure == shipped.logical_failure
 
 
 def test_a_unit_that_ended_is_handed_on_while_one_before_it_runs(tmp_path):
@@ -434,14 +292,7 @@ def test_a_unit_that_ended_is_handed_on_while_one_before_it_runs(tmp_path):
     short ones would wait behind it unsaved, and a job killed at its
     time limit would lose them.
     """
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
+    task = _reference_task()
     units = [
         collect.Unit(task, 0, 1),
         collect.Unit(task, 1, 1),
@@ -462,9 +313,7 @@ def test_two_tasks_that_run_different_circuits_are_two_tasks():
     three_rounds = _memory_task(3)
     five_rounds = _memory_task(5)
 
-    unique = collect.unique_tasks([three_rounds, five_rounds])
-
-    assert len(unique) == 2
+    assert three_rounds.strong_id() != five_rounds.strong_id()
 
 
 def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
@@ -480,9 +329,7 @@ def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
     memory_task = collect.Task(memory_settings, {"point": 1})
     merge_task = collect.Task(merge_settings, {"point": 1})
 
-    unique = collect.unique_tasks([memory_task, merge_task])
-
-    assert len(unique) == 2
+    assert memory_task.strong_id() != merge_task.strong_id()
 
 
 def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
@@ -500,9 +347,31 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     three_task = collect.Task(three_settings, {"point": 1})
     five_task = collect.Task(five_settings, {"point": 1})
 
-    unique = collect.unique_tasks([three_task, five_task])
+    assert three_task.strong_id() != five_task.strong_id()
 
-    assert len(unique) == 2
+
+def test_two_records_with_the_same_fields_are_two_tasks():
+    """A record enters the id by its class beside its fields.
+
+    Two rows that take no settings have records with no fields, so only
+    their classes tell the points apart, as gem5's config.json writes
+    each object's type.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class EveryRound:
+        pass
+
+    @dataclasses.dataclass(frozen=True)
+    class NoRound:
+        pass
+
+    every_round = EveryRound()
+    no_round = NoRound()
+    every_round_task = _rounds_task(every_round)
+    no_round_task = _rounds_task(no_round)
+
+    assert every_round_task.strong_id() != no_round_task.strong_id()
 
 
 def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
@@ -510,9 +379,7 @@ def test_two_slotted_round_policies_that_differ_in_count_are_two_tasks():
     three_rounds = _slotted_rounds_task(3)
     six_rounds = _slotted_rounds_task(6)
 
-    unique = collect.unique_tasks([three_rounds, six_rounds])
-
-    assert len(unique) == 2
+    assert three_rounds.strong_id() != six_rounds.strong_id()
 
 
 def test_two_python_built_sources_that_hold_different_values_are_two_tasks():
@@ -520,9 +387,7 @@ def test_two_python_built_sources_that_hold_different_values_are_two_tasks():
     first = _device_task(1)
     second = _device_task(2)
 
-    unique = collect.unique_tasks([first, second])
-
-    assert len(unique) == 2
+    assert first.strong_id() != second.strong_id()
 
 
 def test_two_recorded_sources_that_replay_different_shots_are_two_tasks():
@@ -530,18 +395,14 @@ def test_two_recorded_sources_that_replay_different_shots_are_two_tasks():
     first = _recorded_device_task(0)
     second = _recorded_device_task(1)
 
-    unique = collect.unique_tasks([first, second])
-
-    assert len(unique) == 2
+    assert first.strong_id() != second.strong_id()
 
 
 def test_two_python_built_sources_that_hold_the_same_values_are_one_task():
     first = _device_task(1)
     same = _device_task(1)
 
-    unique = collect.unique_tasks([first, same])
-
-    assert len(unique) == 1
+    assert first.strong_id() == same.strong_id()
 
 
 def test_a_class_enters_the_id_by_its_name_whatever_it_holds():
@@ -563,72 +424,26 @@ def test_a_class_enters_the_id_by_its_name_whatever_it_holds():
     assert after == before
 
 
-def test_two_tasks_that_differ_only_in_bandwidth_are_two_tasks(tmp_path):
-    """A yaml link rate is an exact Fraction and enters the id as its text.
-
-    sinter's strong id is the sha256 of every value's json text
-    (sinter/_data/_task.py strong_id_value), so two values give two ids.
-    """
-    narrow, wide = _bandwidth_tasks(tmp_path, (8, 64))
-
-    unique = collect.unique_tasks([narrow, wide])
-    narrow_shot = collect.run_shot(narrow, 0)
-    wide_shot = collect.run_shot(wide, 0)
-
-    assert narrow.strong_id() != wide.strong_id()
-    assert len(unique) == 2
-    assert _readout_rate(narrow_shot) == "2000"
-    assert _readout_rate(wide_shot) == "16000"
-    assert collect.json_value(narrow.settings) != collect.json_value(
-        wide.settings
-    )
-
-
-def test_one_yaml_saved_under_two_names_names_its_points_alike(tmp_path):
-    """A point is named by what it runs, not by the file that says it.
-
-    sinter keeps a task's circuit_path out of its strong id and hashes
-    the circuit's text (sinter/_data/_task.py:157, 167-204). The
-    reference yaml saved as t2.yaml and as t6.yaml runs the same points,
-    so its points' ids are equal, though the links card's labels name
-    the two files.
-    """
-    first_path = tmp_path / "t2.yaml"
-    second_path = tmp_path / "t6.yaml"
-    shutil.copyfile(REFERENCE_YAML, first_path)
-    shutil.copyfile(REFERENCE_YAML, second_path)
-
-    first_ids = _point_ids_of(first_path)
-    second_ids = _point_ids_of(second_path)
-
-    assert first_ids
-    assert first_ids == second_ids
-
-
 def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
-    """resolved/<id>.json is where a label is read, so it keeps them all."""
-    config_path = tmp_path / "t6.yaml"
-    shutil.copyfile(REFERENCE_YAML, config_path)
-    config = experiment.load_experiment(config_path)
-    task = config.first_point_task()
+    """machine.json is where a label is read, so it keeps them all."""
+    task = _reference_task()
 
-    point_id = run_folder.record_point(tmp_path, task)
+    run_folder.record_point(tmp_path, "point", task)
 
-    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_path = tmp_path / "points" / "point" / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     links = record["settings"]["links"]
     channel = links["qpu_to_controller"]["channel"]
-    assert links["profile_name"] == "t6.yaml"
-    assert channel["configuration_source"] == "configs/t6.yaml links"
+    assert links["profile_name"] == "logical_reference"
+    assert channel["configuration_source"] == run_files.REFERENCE_SOURCE
 
 
 def test_settings_that_differ_only_in_labels_are_one_point():
     """A label changes no id; a latency, which changes the run, does."""
-    config = experiment.load_experiment(REFERENCE_YAML)
-    task = config.first_point_task()
+    task = _reference_task()
     links = task.settings.links
-    relabelled = dataclasses.replace(links, profile_name="other.yaml")
+    relabelled = dataclasses.replace(links, profile_name="other")
     channel = links.qpu_to_controller.channel
     slower_ticks = channel.propagation_latency_ticks + 1
     slower_channel = dataclasses.replace(
@@ -656,23 +471,15 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
     rows but for the wall clock, and its resolved record says what it
     recorded.
     """
-    plain_path = yaml_configs.write_config(tmp_path, {})
-    plain_config = experiment.load_experiment(plain_path)
-    plain = plain_config.first_point_task()
-    recorded_folder = tmp_path / "recorded"
-    recorded_folder.mkdir()
-    recorded_path = yaml_configs.write_config(
-        recorded_folder, {"observation": RECORDING_ONLY_OBSERVATION}
-    )
-    recorded_config = experiment.load_experiment(recorded_path)
-    recorded = recorded_config.first_point_task()
+    plain = run_files.first_task()
+    recorded = run_files.first_task(**RECORDING_ONLY)
 
     plain_rows = _shot_rows_without_wall_clock(plain)
     recorded_rows = _shot_rows_without_wall_clock(recorded)
     printed = capsys.readouterr()
-    point_id = run_folder.record_point(tmp_path, recorded)
+    run_folder.record_point(tmp_path, "point", recorded)
 
-    record_path = tmp_path / "resolved" / f"{point_id}.json"
+    record_path = tmp_path / "points" / "point" / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     recorded_observation = record["settings"]["observation"]
@@ -694,9 +501,8 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
 def test_a_metadata_key_that_is_not_text_is_refused_at_any_depth(
     metadata, sentence_start
 ):
-    """A Python caller's metadata, where a yaml reader cannot refuse it."""
-    config = experiment.load_experiment(REFERENCE_YAML)
-    first_point = config.first_point_task()
+    """A point's metadata is checked where its id is made."""
+    first_point = run_files.first_task()
     sentence = (
         f"{sentence_start} which is not text; a point's id is the json of "
         "its metadata, whose keys are text, so 1 and '1' would name one point"
@@ -742,20 +548,13 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     monkeypatch.setattr(
         relay_window, "_load_relay_decoder_type", _crashing_relay_type
     )
-    weak_decoder = dict(
-        yaml_configs.MINIMAL_CONFIG["weak_decoder"], kind="relay_bp"
-    )
-    sweep = [
-        dict(
-            yaml_configs.MINIMAL_CONFIG["sweep"][0], collection={"max_shots": 2}
-        )
-    ]
-    config_path = yaml_configs.write_config(
-        tmp_path, {"weak_decoder": weak_decoder, "sweep": sweep}
+    run_file = run_files.write_run_file(
+        tmp_path,
+        machine_arguments={"weak_decoder": "relay_bp"},
+        collection={"max_shots": 2},
     )
     out_dir = tmp_path / "out"
-    run_dir, rows = run.run_experiment(config_path, out_dir)
-    lines = sweep_report.terminal_lines(rows, run_dir)
+    run_dir, rows = run.run_experiment(run_file, out_dir)
     shots_path = run_dir / "shots.csv"
     first, second = _csv_rows(shots_path)
 
@@ -774,9 +573,6 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     assert rows[0]["logical_error_rate_low"] is None
     assert rows[0]["logical_error_rate_high"] is None
     assert rows[0]["logical_error_rate_unscored_as_failures"] == 1.0
-    assert "logical failures: 0 of 0 scored shots" in lines
-    assert "logical error rate among scored shots: none (cap)" in lines
-    assert "unscored shots: 2 of 2 (1)" in lines
 
 
 def _is_wall_clock_column(column: str) -> bool:
@@ -788,21 +584,22 @@ def _is_wall_clock_column(column: str) -> bool:
     return False
 
 
+def _reference_task(
+    distance: int = 3, probability: float = 0.001
+) -> collect.Task:
+    """The reference machine's task at one distance and error probability."""
+    axes = {
+        run_files.ERROR_RATE_PATH: (probability,),
+        run_files.DISTANCE_PATH: (distance,),
+        run_files.ROUND_PERIOD_PATH: (1.0,),
+    }
+    return run_files.first_task(axes=axes, machine="reference")
+
+
 def _csv_rows(path: pathlib.Path) -> list:
     with open(path, newline="") as handle:
         reader = csv.DictReader(handle)
         return list(reader)
-
-
-def _reference_yaml() -> dict:
-    text = REFERENCE_YAML.read_text()
-    return yaml.safe_load(text)
-
-
-def _written_yaml(raw: dict, path: pathlib.Path) -> pathlib.Path:
-    text = yaml.safe_dump(raw)
-    path.write_text(text)
-    return path
 
 
 def _stable_columns(row: dict) -> dict:
@@ -813,6 +610,40 @@ def _stable_columns(row: dict) -> dict:
     return stable
 
 
+def _link_means(shot_link_rows: list) -> list:
+    """Each link's counters averaged over one point's shots, as text."""
+    rows_by_link = {}
+    for row in shot_link_rows:
+        link_rows = rows_by_link.setdefault(row["link"], [])
+        link_rows.append(row)
+    mean_rows = []
+    for link in sorted(rows_by_link):
+        rows = rows_by_link[link]
+        mean_row = _means_of_one_link(link, rows)
+        mean_rows.append(mean_row)
+    return mean_rows
+
+
+def _means_of_one_link(link: str, rows: list) -> dict:
+    """One link's counters averaged over its shots' rows, as text.
+
+    A mean is statistics.fmean, and bits_per_transfer is the mean
+    payload over the mean transfers, zero on a link that sent nothing.
+    """
+    means = {}
+    for counter in LINK_COUNTERS:
+        values = [float(row[counter]) for row in rows]
+        means[counter] = statistics.fmean(values)
+    bits_per_transfer = 0.0
+    if means["transfers"]:
+        bits_per_transfer = means["payload_bits"] / means["transfers"]
+    mean_row = {"algorithm": rows[0]["algorithm"], "link": link}
+    for counter in LINK_COUNTERS:
+        mean_row[f"{counter}_per_shot"] = str(means[counter])
+    mean_row["bits_per_transfer"] = str(bits_per_transfer)
+    return mean_row
+
+
 def _without_point_id(rows: list) -> list:
     kept = []
     for row in rows:
@@ -820,15 +651,6 @@ def _without_point_id(rows: list) -> list:
         del without["point_id"]
         kept.append(without)
     return kept
-
-
-def _columns_of_every_csv(run_dir) -> set:
-    """Every column name any csv file under the folder holds."""
-    columns = set()
-    for path in run_dir.rglob("*.csv"):
-        header = fold.header_of(path)
-        columns.update(header)
-    return columns
 
 
 def _decoded(shot: collect.Shot) -> tuple:
@@ -842,8 +664,8 @@ def _decoded(shot: collect.Shot) -> tuple:
         shot.seed,
         measurement.decoded_windows,
         _drawn(shot),
-        yaml_configs.loop_predictions(shot),
-        yaml_configs.whole_circuit_predictions(shot),
+        run_files.loop_predictions(shot),
+        run_files.whole_circuit_predictions(shot),
     )
 
 
@@ -868,50 +690,6 @@ def _decoded_alone(task, seed: int) -> tuple:
 def _run_every_shot(task, shots: int, built_models) -> None:
     for seed in range(shots):
         collect.run_shot(task, seed, built_models=built_models)
-
-
-class _OutsideEscalation:
-    """An escalation row written outside decsim, delegating to Baseline.
-
-    It subclasses no shipped row: every fact the experiments layer and
-    the machine read off a row is declared here and every call is
-    forwarded, which is the shape the P8 plug-in probe used. What the
-    experiments layer reads to measure a shot is primary_tier.
-    """
-
-    decides_on_a_confidence = False
-    requires_strong_context = False
-    primary_tier = window_records.DecoderTier.WEAK
-    default_boundary_policy = "eager"
-
-    def __init__(self, collaborators) -> None:
-        self.delegate = escalation_policies.Baseline(collaborators)
-
-    def check_plan(self, plan) -> None:
-        self.delegate.check_plan(plan)
-
-    def tiers_for_ready_window(self, window) -> tuple:
-        return self.delegate.tiers_for_ready_window(window)
-
-    def verdict_for_weak_result(self, job, result):
-        return self.delegate.verdict_for_weak_result(job, result)
-
-    def learn_from_strong_result(self, window_key, result) -> None:
-        self.delegate.learn_from_strong_result(window_key, result)
-
-
-def _measured_shot(tmp_path, escalation_kind: str):
-    """One seeded shot of the minimal config under that escalation row."""
-    card = {"escalation": {"kind": escalation_kind}}
-    config_path = yaml_configs.write_config(tmp_path, card)
-    config = experiment.load_experiment(config_path)
-    return yaml_configs.measure_point_shot(
-        config,
-        physical_error_probability=0.001,
-        distance=3,
-        round_period_microseconds=1.0,
-        seed=0,
-    )
 
 
 def _memory_task(rounds: int) -> collect.Task:
@@ -959,6 +737,10 @@ class _SlottedRounds:
 
 def _slotted_rounds_task(round_count: int) -> collect.Task:
     rounds_policy = _SlottedRounds(round_count)
+    return _rounds_task(rounds_policy)
+
+
+def _rounds_task(rounds_policy) -> collect.Task:
     workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
     settings = machine_settings.MachineSettings(workload=workload)
     return collect.Task(settings, {"point": 1})
@@ -967,7 +749,8 @@ def _slotted_rounds_task(round_count: int) -> collect.Task:
 def _device_task(round_count: int) -> collect.Task:
     """A task whose settings hold a Python-built finite source."""
     device = stim_device.StimDevice(measurement_rounds={1: {0: round_count}})
-    qpu = qpu_settings.QpuSettings(device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
     return collect.Task(settings, {"point": 1})
 
@@ -976,51 +759,10 @@ def _recorded_device_task(flip: int) -> collect.Task:
     """A task whose settings hold a recorded shot, its last bit flip."""
     measurements = numpy.array([[0, flip]], dtype=bool)
     device = stim_device.RecordedStimDevice(measurements, 0)
-    qpu = qpu_settings.QpuSettings(device=device)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
     return collect.Task(settings, {"point": 1})
-
-
-def _bandwidth_tasks(tmp_path, widths: tuple) -> list:
-    """The data-movement grid's switching task, its readout hop at each width.
-
-    The weak base the grid extends holds the hop, and that one file is
-    edited in place between loads, so the tasks differ in the hop's rate
-    and in nothing else, the path included.
-    """
-    configs = tmp_path / "configs"
-    shutil.copytree(CONFIGS, configs)
-    path = configs / "bases" / "weak_decoder_baseline.yaml"
-    grid = configs / "experiments" / "data_movement" / "data_movement.yaml"
-    text = path.read_text()
-    unpriced = "clock: fridge, bits_per_cycle: null}"
-    readout_hop = f"qpu_to_controller:  {{latency_cycles: 1, {unpriced}"
-    assert readout_hop in text
-    tasks = []
-    for bits_per_cycle in widths:
-        priced = f"clock: fridge, bits_per_cycle: {bits_per_cycle}}}"
-        priced_hop = readout_hop.replace(unpriced, priced)
-        priced_text = text.replace(readout_hop, priced_hop)
-        path.write_text(priced_text)
-        config = experiment.load_experiment(grid)
-        task = _switching_task(config)
-        tasks.append(task)
-    return tasks
-
-
-def _switching_task(config: experiment.ExperimentConfig):
-    """The grid's switching block, its first point at p = 0.001."""
-    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
-    points = switching_block.points()
-    values = dict(points[0])
-    values[yaml_configs.ERROR_RATE_PATH] = 0.001
-    return config.point_task(values)
-
-
-def _readout_rate(shot) -> str:
-    """The readout hop's rate, the one setting two bandwidth tasks differ in."""
-    capacity = shot.task.settings.links.qpu_to_controller.channel.capacity
-    return str(capacity.input_bits_per_microsecond)
 
 
 def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
@@ -1032,12 +774,34 @@ def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
     return by_seed
 
 
-def _frozen_columns(row: dict) -> tuple:
-    """A frozen row's logical_failure, direct_failure, direct_mismatch."""
-    logical_failure = int(row["logical_failure"])
-    direct_failure = int(row["direct_failure"])
-    direct_mismatch = int(row["direct_mismatch"])
-    return (logical_failure, direct_failure, direct_mismatch)
+def _integer_column(rows: list, name: str) -> list:
+    """One column of csv rows, each cell read as an integer."""
+    return [int(row[name]) for row in rows]
+
+
+def _frozen_columns(reference: list) -> list:
+    """Each frozen row's logical_failure, direct_failure, direct_mismatch."""
+    logical_failures = _integer_column(reference, "logical_failure")
+    direct_failures = _integer_column(reference, "direct_failure")
+    direct_mismatches = _integer_column(reference, "direct_mismatch")
+    columns = zip(
+        logical_failures, direct_failures, direct_mismatches, strict=True
+    )
+    return list(columns)
+
+
+def _sample_digests(shots_by_seed: dict, seeds: list) -> list:
+    """One point's sample digests, seed by seed."""
+    return [shots_by_seed[seed]["sample_digest"] for seed in seeds]
+
+
+def _retired_columns_by_seed(
+    sliding: dict, full_history: dict, seeds: list
+) -> list:
+    """The three columns as the pair of points gives them, seed by seed."""
+    return [
+        _retired_columns(sliding[seed], full_history[seed]) for seed in seeds
+    ]
 
 
 def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:
@@ -1054,7 +818,7 @@ def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:
 
 def _shot_rows_without_wall_clock(task: collect.Task) -> list:
     """Two shots' rows, the host's time to simulate each left out."""
-    measurements = yaml_configs.run_sweep([task], 2)
+    measurements = run_files.run_sweep([task], 2)
     record = sweep_report.record_of(measurements)
     rows = []
     for row in record.shots:
@@ -1064,18 +828,9 @@ def _shot_rows_without_wall_clock(task: collect.Task) -> list:
     return rows
 
 
-def _point_ids_of(config_path: pathlib.Path) -> list:
-    config = experiment.load_experiment(config_path)
-    point_ids = []
-    for task, _collection in config.point_tasks():
-        point_id = task.strong_id()
-        point_ids.append(point_id)
-    return point_ids
-
-
 def _task_with_links(task: collect.Task, links) -> collect.Task:
     settings = dataclasses.replace(task.settings, links=links)
-    return collect.Task(settings, task.metadata, task.online_threshold)
+    return collect.Task(settings, task.metadata)
 
 
 class _CrashingRelayDecoder:

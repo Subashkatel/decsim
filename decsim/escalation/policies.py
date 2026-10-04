@@ -1,154 +1,32 @@
-"""The escalation policies: Baseline, StrongOnly and Switching.
+"""The switching policy: weak first, escalate on low confidence.
 
-Baseline decodes every window on the weak tier and keeps every result;
-StrongOnly decodes every window once on the strong tier; Switching
-decodes weak first and escalates a window whose confidence falls below
-its threshold (Toshio et al. 2510.25222 Sec. III A). A policy decides
-and is told (gem5's conditional predictor, src/cpu/pred/conditional.hh):
-it builds no job; the window side plans and submits the strong re-decode
-(strong_redecode.py, strong_window_shapes.py) and the decoder manager
-owns the units, hold-or-deliver and cancellation. Where Switching's
-threshold comes from is its ThresholdSource (threshold_sources.py).
+Toshio et al. 2510.25222 Sec. III A. A run with no switching slot has no
+policy: every window is decoded once and kept. A policy decides and is
+told, as gem5's conditional predictor is (src/cpu/pred/conditional.hh):
+it builds no job; the window side plans and submits the strong
+re-decode, and the decoder manager owns the units and cancellation.
 """
-
-import dataclasses
-from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
-@dataclasses.dataclass(frozen=True)
-class EscalationCollaborators:
-    """What the root supplies every escalation policy row.
-
-    One record so every row of ESCALATIONS has one constructor signature
-    and the root builds a row without asking which policy it is; a row
-    that decides on a confidence reads all three fields, a row that
-    decides on none reads nothing. This is the shape the rows of
-    STRONG_WINDOW_SHAPES have, and gem5's params object, where a SimObject's
-    collaborators arrive as one structure rather than as a signature per
-    subclass (gem5 src/python/m5/SimObject.py:204-205).
-
-    threshold is the ThresholdSource the row decides keep on, expected_source is
-    the soft output source the run's confidence signal reports, and
-    run_both_at_once starts the speculative strong decode with the weak job.
-    """
-
-    threshold: Any = None
-    expected_source: Optional[decoding_records.SoftOutputSource] = None
-    run_both_at_once: bool = False
-
-
-# The record a row that decides on no confidence is built from: it reads
-# none of the three fields, so every such row shares this one value.
-NO_CONFIDENCE = EscalationCollaborators()
-
-
-class EscalationPolicyBase:
-    """The defaults a policy row inherits (sinter's Decoder shape).
-
-    A row declares primary_tier and requires_strong_context and answers
-    verdict_for_weak_result; the rest has a default here: the row reads
-    no confidence, every run shape is served, the primary tier alone
-    decodes a ready window, and nothing is learned from a strong result.
-    """
-
-    decides_on_a_confidence = False
-    # The row of BOUNDARY_POLICIES a run gets when windows.boundaries is
-    # null. A policy that never revises a committed window ships every
-    # boundary at its commit; a row whose requires_strong_context is true
-    # leaves the default to its strong window shape, whose own
-    # default_boundary_policy answers, since whether the shape absorbs
-    # the weak windows it covers is what decides
-    # (strong_window_shapes.py).
-    default_boundary_policy = "eager"
-
-    def __init__(self, collaborators: EscalationCollaborators) -> None:
-        """A row that decides on no confidence reads none of the record."""
-        del collaborators
-
-    def check_plan(self, plan: decoding_records.RunShape) -> None:
-        """Every run shape is served."""
-        del plan
-
-    def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
-        """The primary tier alone."""
-        del window
-        return (self.primary_tier,)
-
-    def learn_from_strong_result(self, window_key: tuple, result) -> None:
-        """Nothing is learned."""
-        del window_key
-        del result
-
-
-class Baseline(EscalationPolicyBase):
-    """Plain windowed decoding: every window once on the weak tier, kept."""
-
-    requires_strong_context = False
-    primary_tier = window_records.DecoderTier.WEAK
-
-    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
-        """Every result is final."""
-        del job
-        del result
-        return decoding_records.Verdict.KEEP
-
-
-class StrongOnly(EscalationPolicyBase):
-    """The strong tier decodes the plan's windows directly.
-
-    No weak decode, no escalation. The machine is data-woken: the
-    strong syndrome buffer stores a round and its signal drives window
-    readiness, the shape of LILLIPUT's FIFO-fed decoder and Google's streaming
-    decoder. Every window job carries tier STRONG, reads its rounds from the
-    strong syndrome buffer over strong_buffer_to_strong_decoder, and rides
-    strong_decoder_to_frame home; the escalation machinery (the
-    selection link, the ledger, the context windows, the strong windows)
-    is never engaged.
-    """
-
-    requires_strong_context = False
-    primary_tier = window_records.DecoderTier.STRONG
-
-    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
-        """Every result is final: the strong tier decoded it."""
-        del job
-        del result
-        return decoding_records.Verdict.KEEP
-
-
-class Switching(EscalationPolicyBase):
+class Switching:
     """Weak decoder first; escalate to a strong decoder on low confidence.
 
-    The threshold source decides keep from the weak result's soft output, whose
-    source must be the one the policy expects; a result without a soft output
-    escalates. run_both_at_once starts a speculative strong decode with the weak
-    job and cancels it on confidence (the paper's Step 1, Toshio et al.
-    2510.25222 Sec. III A); otherwise the strong re-decode starts at the
-    verdict, after the weak_decoder_to_strong_decoder hop (the serial
-    modification of the same section). How the strong window is laid out is the
-    run's shape (the row escalation.strong_window names in STRONG_WINDOW_SHAPES,
-    strong_window_shapes.py, which every refusal here names back), and whether
-    queued re-decodes are batched is the decoder manager's (bulk_strong);
-    check_plan holds the policy's knobs and its threshold source against both
-    once, at build.
+    A result without a soft output escalates. run_both_at_once starts a
+    speculative strong decode with the weak job and cancels it on
+    confidence (Step 1); otherwise the strong re-decode starts at the
+    verdict, after the weak_decoder_to_strong_decoder hop. check_plan
+    refuses, once at build, a run shape the escalation cannot serve.
     """
 
-    decides_on_a_confidence = True
-    requires_strong_context = True
-    primary_tier = window_records.DecoderTier.WEAK
-    # The burst detector: while one of its flags meets a window, the
-    # machine is in burst mode and the window escalates whatever its
-    # confidence. Unbound when burst_detector.kind is none, the machine
-    # in normal mode throughout.
-    burst_detector = ports.Port(ports.BurstDetector, optional=True)
-
-    def __init__(self, collaborators: EscalationCollaborators) -> None:
-        threshold = collaborators.threshold
-        run_both_at_once = collaborators.run_both_at_once
+    def __init__(
+        self,
+        threshold: ports.ThresholdSource,
+        run_both_at_once: bool = False,
+    ) -> None:
         if run_both_at_once and threshold.audits_by_escalating:
             raise ValueError(
                 "online threshold calibration is meaningless with "
@@ -156,7 +34,6 @@ class Switching(EscalationPolicyBase):
                 "for every window, so there is nothing to audit"
             )
         self.threshold = threshold
-        self.expected_source = collaborators.expected_source
         self.run_both_at_once = run_both_at_once
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
@@ -174,7 +51,6 @@ class Switching(EscalationPolicyBase):
         _refuse_absorbing_window_scheme(
             plan.strong_window, plan.scheme, plan.boundary_policy
         )
-        _refuse_crossing_strong_region(plan)
         _refuse_absorbing_window_run(plan)
 
     def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
@@ -187,39 +63,29 @@ class Switching(EscalationPolicyBase):
             )
         return (window_records.DecoderTier.WEAK,)
 
-    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
+    def verdict_for_weak_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
         """Keep a confident weak result; otherwise escalate its window.
 
-        A window a published burst flag meets escalates first, without
-        asking the threshold: Q3DE decodes the anomalous span again once
-        the anomaly is detected (Suzuki et al. 2501.00331 lines
-        966-981), and the strong tier is that decode here. The decision
-        is made exactly once per window, since an online source learns
-        from every call it is asked.
+        The decision is made exactly once per window, since an online
+        source learns from every call.
         """
-        if self._is_in_a_burst(job.window):
-            return decoding_records.Verdict.ESCALATE
         soft_output = result.soft_output
         if soft_output is None:
             return decoding_records.Verdict.ESCALATE
-        if soft_output.source != self.expected_source:
-            raise ValueError(
-                "decoder confidence source does not match the switching "
-                "threshold source"
-            )
         if self.threshold.decide_keep(job, result):
             # a kept result cancels the speculative strong decode
             return decoding_records.Verdict.KEEP
         return decoding_records.Verdict.ESCALATE
 
-    def learn_from_strong_result(self, window_key: tuple, result) -> None:
+    def learn_from_strong_result(
+        self, window_key: tuple, result: decoding_records.DecodeResult
+    ) -> None:
         """The threshold source hears the strong tier's answer."""
         self.threshold.learn_from_strong_result(window_key, result)
-
-    def _is_in_a_burst(self, window: window_records.Window) -> bool:
-        if self.burst_detector is None:
-            return False
-        return self.burst_detector.is_burst_window(window)
 
     def _refuse_absorbing_window_contradictions(
         self, plan: decoding_records.RunShape
@@ -228,14 +94,14 @@ class Switching(EscalationPolicyBase):
         row_name = plan.strong_window
         if self.run_both_at_once:
             raise ValueError(
-                f"escalation.strong_window {row_name} defers the strong "
+                f"switching.strong_window {row_name} defers the strong "
                 "start until the far weak boundary exists; "
                 "run_both_at_once starts it immediately (the two "
                 "policies contradict; pick one)"
             )
         if plan.is_bulk_strong:
             raise ValueError(
-                f"escalation.strong_window {row_name} with bulk_strong is "
+                f"switching.strong_window {row_name} with bulk_strong is "
                 "not supported: deferred strong windows are submitted "
                 "one per escalation"
             )
@@ -273,14 +139,14 @@ def _refuse_absorbing_window_scheme(
 ) -> None:
     if not scheme.commits_in_one_serial_chain:
         raise ValueError(
-            f"escalation.strong_window {row_name} requires a windowing "
+            f"switching.strong_window {row_name} requires a windowing "
             "scheme whose windows commit in one serial chain, since an "
             "absorbing strong window takes over the weak windows its "
             "region covers"
         )
     if not boundary_policy.ships_provisional_boundaries:
         raise ValueError(
-            f"escalation.strong_window {row_name} requires the weak chain "
+            f"switching.strong_window {row_name} requires the weak chain "
             "to keep committing "
             "(the far boundary IS the restart window's weak commit); "
             "a boundary policy that holds provisional boundaries would "
@@ -289,42 +155,12 @@ def _refuse_absorbing_window_scheme(
         )
 
 
-def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
-    """An absorbing strong region must end where a weak commit region ends.
-
-    The shipped interaction's strong region is commit plus two buffers
-    from the escalated window's commit start (window_interactions.py),
-    and the sliding scheme commits in strides of commit_rounds, so the
-    region ends on a stride edge exactly when twice buffer_rounds is a
-    multiple of commit_rounds. Otherwise a later window commits across
-    the region's end and has no owner; the shape stops the run there
-    (strong_window_shapes.py), and the settings say so at build.
-    """
-    row_name = plan.strong_window
-    commit_round_count = plan.commit_round_count
-    buffer_round_count = plan.buffer_round_count
-    strong_round_count = window_records.strong_region_round_count(
-        commit_round_count, buffer_round_count
-    )
-    if strong_round_count % commit_round_count == 0:
-        return
-    raise ValueError(
-        f"windows.commit_rounds {commit_round_count} with "
-        f"windows.buffer_rounds {buffer_round_count} gives "
-        f"escalation.strong_window {row_name} a strong region of "
-        f"{strong_round_count} rounds that ends inside a later window's "
-        f"commit region; the strong region of {row_name}, commit plus two "
-        "buffers, must end inside its own commit region, so twice "
-        "buffer_rounds must be a multiple of commit_rounds"
-    )
-
-
 def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
     """An absorbing window needs static, explicit, single-patch operations."""
     row_name = plan.strong_window
     if plan.has_dynamic_streams or plan.has_static_decode_plan:
         raise ValueError(
-            f"escalation.strong_window {row_name} skips statically planned "
+            f"switching.strong_window {row_name} skips statically planned "
             "windows when a "
             "strong window is assigned; stream windows created or "
             "folded at runtime (dynamic_streams/decode_ops) are not "
@@ -333,7 +169,7 @@ def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
     for operation in plan.operations:
         if operation.decoder_boundary_predecessors:
             raise ValueError(
-                f"escalation.strong_window {row_name} supports one "
+                f"switching.strong_window {row_name} supports one "
                 "single-patch stream per "
                 "operation; decoder-boundary chains would let a strong "
                 "window cross an operation seam before its far "

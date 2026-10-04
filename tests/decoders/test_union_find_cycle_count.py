@@ -22,9 +22,9 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
 import tests.decoders.test_union_find_decoder as hand_graph
 
 MEGAHERTZ = 100.0
@@ -32,12 +32,21 @@ PERIOD_MICROSECONDS = 1 / MEGAHERTZ
 CYCLE_TICKS = config.microseconds_to_ticks(PERIOD_MICROSECONDS)
 CLOCK = config.Clock(CYCLE_TICKS)
 WEIGHT_STEP = 0.1
-# Helios's row: three registers between an element's change and the
-# controller's check (Helios_single_FPGA_core.v line 76)
-HELIOS = cycle_count_module.CycleCount(CLOCK, delay_cycles=3)
 # every edge of the twelve-detector graph is this long in half ticks,
 # and both ends of the one between two defects grow
 HAND_GRAPH_TICKS = 22
+# The law traced from Helios's core on its 100 MHz target: a delay of 3
+# cycles (MAXIMUM_DELAY, Helios_single_FPGA_core.v:76), an element per
+# vertex (2301.08419 lines 764-767) and its graph in registers (lines
+# 912-913), so no cycle per edge and no setup.
+TRACED_CYCLE_COUNT = cycle_count_module.CycleCount(
+    clock=CLOCK,
+    delay_cycles=3,
+    cycles_per_edge=0.0,
+    setup_cycles=0,
+    setup_cycles_per_vertex=0,
+    setup_cycles_per_edge=0,
+)
 
 GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 # detector 0 carries the defect; faults 0 and 1 reach the quiet
@@ -124,7 +133,7 @@ def test_an_empty_syndrome_costs_the_quiet_machines_eleven_cycles():
 
     assert evidence.growth_steps == ()
     assert evidence.forest_depth == 0
-    assert HELIOS.cycles(evidence) == 11
+    assert TRACED_CYCLE_COUNT.cycles(evidence) == 11
 
 
 def test_two_adjacent_defects_cost_sixteen_cycles():
@@ -144,7 +153,7 @@ def test_two_adjacent_defects_cost_sixteen_cycles():
     )
     assert evidence.growth_steps == (step,)
     assert evidence.forest_depth == 1
-    assert HELIOS.cycles(evidence) == 16
+    assert TRACED_CYCLE_COUNT.cycles(evidence) == 16
 
 
 def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
@@ -163,7 +172,7 @@ def test_a_lone_defect_beside_the_boundary_costs_nineteen_cycles():
     lengths = {edge.length_half_ticks for edge in graph.edges}
     assert lengths == {2}
     assert evidence.forest_depth == 1
-    assert HELIOS.cycles(evidence) == 19
+    assert TRACED_CYCLE_COUNT.cycles(evidence) == 19
 
 
 def test_a_steps_changes_are_its_fusion_kind_over_its_deepest_flood():
@@ -188,9 +197,9 @@ def test_a_steps_changes_are_its_fusion_kind_over_its_deepest_flood():
     roots_evidence = evidence_with([roots])
     parity_evidence = evidence_with([parity])
 
-    assert HELIOS.cycles(quiet_evidence) == floor
-    assert HELIOS.cycles(roots_evidence) == floor + 4
-    assert HELIOS.cycles(parity_evidence) == floor + 9
+    assert TRACED_CYCLE_COUNT.cycles(quiet_evidence) == floor
+    assert TRACED_CYCLE_COUNT.cycles(roots_evidence) == floor + 4
+    assert TRACED_CYCLE_COUNT.cycles(parity_evidence) == floor + 9
 
 
 def test_a_unit_that_walks_its_edges_pays_its_port_instead_of_its_changes():
@@ -232,7 +241,7 @@ def test_a_decode_with_no_steps_pays_its_setup_and_one_quiet_iteration():
     )
     setup = 1 + 2 * 5 + 3 * 4
     assert laid_out.cycles(evidence) == 1 + 2 + 2 + setup
-    assert HELIOS.cycles(None) == 0
+    assert TRACED_CYCLE_COUNT.cycles(None) == 0
 
 
 def test_the_count_ends_on_the_edge_of_its_own_clock():
@@ -246,10 +255,11 @@ def test_the_count_ends_on_the_edge_of_its_own_clock():
     )
     evidence = evidence_with([one_step], forest_depth=1)
     no_step = evidence_with([])
-    assert HELIOS.ticks(evidence, 0) == 16 * CYCLE_TICKS
-    assert HELIOS.ticks(evidence, 1) == 17 * CYCLE_TICKS - 1
-    assert HELIOS.ticks(no_step, 1) == 12 * CYCLE_TICKS - 1
-    assert HELIOS.ticks(None, 7) == 0
+    traced = TRACED_CYCLE_COUNT
+    assert traced.decode_ticks(evidence, 0, 0) == 16 * CYCLE_TICKS
+    assert traced.decode_ticks(evidence, 0, 1) == 17 * CYCLE_TICKS - 1
+    assert traced.decode_ticks(no_step, 0, 1) == 12 * CYCLE_TICKS - 1
+    assert traced.decode_ticks(None, 0, 7) == 0
 
 
 def test_a_counted_unit_is_held_for_the_counted_cycles():
@@ -261,7 +271,7 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
     cannot say so in advance, as a measured unit cannot.
     """
     engine = engine_module.Engine()
-    settings = union_find.UnionFindDecoder.Settings(cycle_count=HELIOS)
+    settings = union_find.UnionFindDecoder.Settings(timing=TRACED_CYCLE_COUNT)
     decoder = union_find.UnionFindDecoder(settings=settings)
     timing = staged_decoder.UnitTiming((), (), CLOCK)
     unit = staged_decoder.StagedDecoder(decoder, timing)
@@ -286,6 +296,21 @@ def test_a_counted_unit_is_held_for_the_counted_cycles():
     assert unit.occupancy(job) is None
 
 
+def test_a_union_find_row_that_names_no_timing_is_refused_by_name():
+    """The host's time is no hardware's, so a run names it or a count."""
+    with pytest.raises(ValueError, match="^timing must be a cycle count"):
+        union_find.UnionFindDecoder.Settings(weight_step=0.5)
+
+
+def test_the_host_measured_time_holds_the_unit_for_what_the_call_took():
+    """Two microseconds measured on the host are two microseconds held."""
+    host_time = cycle_count_module.HostMeasuredTime()
+    two_microseconds = config.microseconds_to_ticks(2.0)
+
+    assert host_time.decode_ticks(None, 2000, 7) == two_microseconds
+    assert host_time.extra_growth_ticks((), 2000) == two_microseconds
+
+
 def test_a_negative_field_is_refused_by_name():
     with pytest.raises(ValueError, match="cycle_count.setup_cycles"):
         cycle_count_module.CycleCount(CLOCK, setup_cycles=-1)
@@ -295,24 +320,3 @@ def test_a_negative_field_is_refused_by_name():
         cycle_count_module.CycleCount(CLOCK, cycles_per_edge=-0.5)
     with pytest.raises(ValueError, match="finite"):
         cycle_count_module.CycleCount(CLOCK, cycles_per_edge=math.nan)
-
-
-def test_a_key_the_block_does_not_have_is_refused_by_name():
-    clocks = config.ClockSettings({"helios": MEGAHERTZ})
-    block = {"clock": "helios", "cycles_per_edeg": 4}
-    with pytest.raises(ValueError, match="cycles_per_edeg"):
-        cycle_count_module.CycleCount.from_yaml(block, clocks, "weak_decoder")
-
-
-def test_the_yaml_block_resolves_its_clock_and_defaults_the_rest_to_zero():
-    clocks = config.ClockSettings({"helios": MEGAHERTZ})
-    block = {"clock": "helios", "delay_cycles": 3, "setup_cycles": 4}
-    count = cycle_count_module.CycleCount.from_yaml(
-        block, clocks, "weak_decoder"
-    )
-    assert count.clock == CLOCK
-    assert count.delay_cycles == 3
-    assert count.setup_cycles == 4
-    assert count.setup_cycles_per_edge == 0
-    assert count.cycles_per_edge == 0.0
-    assert count.setup_cycles_per_vertex == 0

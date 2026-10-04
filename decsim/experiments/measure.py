@@ -1,15 +1,9 @@
 """One collected shot -> one shot's numbers. Nothing is built here.
 
-A shot is one circuit through the whole reaction path. `measure_shot`
-reads the run's listeners (`machine.observation`), its RunResult, and
-the code card and cadence its QPU ran, and no other component: the
-window ledger, the stage ledger, the frame's corrections, the queue
-depth log, the referee's audit, the sampled shot and the link traffic
-of the result. The input and output transfers are
-named by role, not by wire, and which wire carries each role follows
-from the escalation row's declared primary_tier (ports.py
-EscalationPolicy), so a row written outside decsim is measured like any
-other.
+measure_shot reads the run's listeners, its RunResult, and the code card
+and cadence its QPU ran, and no other component. Transfers are named by
+role, not by wire; the tier that decodes the plan's windows decides
+which wire carries each role (MachineSettings.window_tier).
 """
 
 import collections
@@ -19,14 +13,14 @@ import json
 import math
 import pathlib
 import statistics
-from typing import Optional
+from typing import Optional, Union
 
-import decsim.build.escalation as escalation_build
 import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -58,13 +52,17 @@ POINTS = (
     # visit that left the queue unserved as its own record (ciw
     # data_record.py lines 3-21, node.py write_reneging_record)
     "admission_wait",
+    # the committing decode's input read in its tier's store: the
+    # dispatch that asked for it -> the read's end, its port waits
+    # included, before the input hop
+    "store_read",
     # the dependency wait around the committing decode's own hop: from
     # where its path started, the dispatch or the verdict that escalated
     # the window, to the first tick it may compute, less the input hop
-    # itself. It is the wait for the escalated rounds to land in the
-    # strong store before the input hop, the predecessor's boundary and
-    # the escalation's selection after it, and zero when nothing was
-    # owed
+    # and the store's read. It is the wait for the escalated rounds to
+    # land in the strong store before the input hop, the predecessor's
+    # boundary and the escalation's selection after it, and zero when
+    # nothing was owed
     "dep_block",
     # that first startable tick -> the compute started: the wait for the
     # unit's own compute, busy with another decode (gem5's fuBusy)
@@ -121,11 +119,12 @@ POINTS = (
     # the decode's end -> the correction at the Pauli frame
     "output_link_per_window",
     "frame_commit",  # the frame accepted the correction -> committed
-    # Totals. The buffer0 pair starts the clock at the weak syndrome buffer
-    # publication; the qpu pair starts it when the round leaves the QPU (the QC
-    # send), so it includes QC, controller processing, packing and CWB.
-    "buffer0_ready_to_frame",  # window complete in the weak buffer -> frame
-    "buffer0_first_round_to_frame",  # first round in the weak buffer -> frame
+    # Totals. The buffer0 pair starts the clock at the publication in the
+    # syndrome buffer the first decode reads; the qpu pair starts it when
+    # the round leaves the QPU (the QC send), so it includes QC,
+    # controller processing, packing and CWB.
+    "buffer0_ready_to_frame",  # window complete in the buffer -> frame
+    "buffer0_first_round_to_frame",  # first round in the buffer -> frame
     "qpu_last_round_to_frame",  # last required round off QPU -> frame
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
 )
@@ -162,14 +161,11 @@ INPUT_LINK_BY_TIER = {
 class ShotConfidence:
     """A shot's windows' confidence gaps, when a signal decided escalation.
 
-    signal names the confidence the escalation read
-    (escalation.confidence); windows are the ledger's WindowConfidence
-    records (records/decoding.py) in window order; is_sampled says
-    whether the shot is one of the first observation.confidence_shot_count
-    shots, whose windows window_confidence.csv lists, while the histogram
-    counts every scored shot. sampled_shot_count is that count, None for every
-    shot, which piece.json records so a fold can tell pieces that
-    sampled different shots apart.
+    is_sampled says whether the shot is among the first
+    observation.confidence_shot_count, whose windows window_confidence.csv
+    lists, while the histogram counts every scored shot. piece.json records
+    sampled_shot_count so a fold can tell pieces that sampled different
+    shots apart.
     """
 
     signal: str
@@ -235,10 +231,10 @@ class ShotMeasurement:
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
-    # what tells harder windows from an overloaded strong side (the
-    # paired run of docs/how-to/compare_two_runs.md): the set bits of each
-    # weak decode's input, its detection events when they are formed
-    # ahead of the decoder; each weak decode's compute, its stages' span;
+    # what tells harder windows from an overloaded strong side in a
+    # paired run: the set bits of each weak decode's input, its
+    # detection events when they are formed ahead of the decoder; each
+    # weak decode's compute, its stages' span;
     # each strong decode's wait from its enqueue to its compute start,
     # the queueing delay a queue splits from service; the most strong
     # decodes held in the units' memory at once, landed and free to
@@ -260,23 +256,13 @@ class ShotMeasurement:
     # referee reached a different owned observable contribution
     referee_window_disagreements: int
     # path -> the run's own ledger counters plus rounds/windows context,
-    # for links.csv; the totals come straight off the ledger's counters
+    # for shot_links.csv; the totals come straight off the ledger's counters
     link_totals: dict
     sim_wall_seconds: float
     # the shot's copies, references and moves as the RunResult carries
     # them, None when observation.data_movement is off, so a run that
     # counted none writes no data-movement row rather than a row of zeros
     data_movement: Optional[dict]
-    # where this shot's Chrome trace was written, None when the shot was
-    # not one of observation.trace_shots; the residence table reads it
-    trace_path: Optional[str]
-    # the burst detector's first flagged round at or after the burst's
-    # onset, from round 1 on a shot with no burst, 0 when it flagged none;
-    # and whether that flag came within burst_detector.catch_deadline_rounds
-    # of the onset. None, and no column, without a detector; the second
-    # is None on a shot with no burst
-    burst_first_flag_round: Optional[int]
-    burst_caught_in_time: Optional[bool]
     # WINDOW_STATUS_COLUMNS -> the committed windows whose decode carried
     # that status; shots.csv holds one column per entry
     window_statuses: dict
@@ -303,25 +289,24 @@ class ShotMeasurement:
 
 
 def measure_shot(
-    shot: collect.Shot, run_dir=None, *, only_traced_shot: bool = False
+    shot: collect.Shot,
+    run_dir: Optional[pathlib.Path] = None,
+    *,
+    only_traced_shot: bool = False,
 ) -> ShotMeasurement:
     """Read one collected shot's numbers off its machine and result.
 
-    run_dir receives the log file when log: file|both is on and the
-    Chrome trace when trace names one and the shot is in trace_shots;
-    None writes nothing beyond the returned measurement.
-    only_traced_shot says the run traces this shot alone, so a trace
-    path the yaml names is written as it stands.
+    run_dir receives the log file and the Chrome trace when asked; None
+    writes nothing. only_traced_shot writes a named trace path as it stands.
     """
     settings = shot.task.settings
     point_id = shot.task.strong_id()
     label = shot_label(point_id, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
-        _write_log(observation, run_dir, label)
-    trace_path = None
+        run_folder.write_log(observation, run_dir, label)
     if run_dir is not None:
-        trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
+        _write_trace(shot, run_dir, label, only_traced_shot)
     device = shot.machine.qpu.device
     round_period_microseconds = config_module.ticks_to_microseconds(
         device.clock.period_ticks
@@ -330,12 +315,12 @@ def measure_shot(
         settings,
         observation,
         shot.result,
+        record_options=shot.task.record_options,
         code=device.code,
         round_period_microseconds=round_period_microseconds,
         point_id=point_id,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
-        trace_path=trace_path,
     )
 
 
@@ -370,21 +355,12 @@ def link_totals(traffic: dict) -> dict:
 def link_delay_by_window(transfers: list) -> dict:
     """Ticks from the first request to the last delivery by (path, window key).
 
-    A hop's transfers for one window can overlap, as the escalation's
-    selection and its rounds do, so the span is what the window waited
-    on the hop and a sum would count the overlap twice. A window is
-    named by its operation and its index, never by its index alone: the
-    window record's own key is (operation_id, window_index)
-    (records/windows.py:79-82 and 144-146), so a workload of several
-    streams holds one window 3 per stream and a key without the
-    operation would sum every stream's window 3 into one entry. gem5
-    names a per-instruction fact the same way: the reorder buffer finds
-    an instruction by its thread and its sequence number, findInst(
-    ThreadID tid, InstSeqNum squash_inst) walking instList[tid]
-    (gem5 src/cpu/o3/rob.hh:131-134 and rob.cc:515-523), and a retired
-    instruction's counters land in that thread's own bucket,
-    commitStats[tid] and thread[tid]->threadStats (gem5
-    src/cpu/o3/cpu.cc:1156-1174).
+    A hop's transfers for one window can overlap (the selection and its
+    rounds), so the span is what the window waited and a sum would count
+    the overlap twice. A window is keyed by (operation_id, window_index),
+    since several streams each have a window 3, as gem5's reorder buffer
+    finds an instruction by thread and sequence number
+    (src/cpu/o3/rob.hh:131-134).
     """
     first_request = {}
     last_delivery = {}
@@ -410,12 +386,9 @@ def link_delay_by_window(transfers: list) -> dict:
 def input_hop_by_request(transfers: list) -> dict:
     """(path, window id, run ordinal) -> (delay ticks, last delivery tick).
 
-    Every transfer that serves a decoder request names it
-    (records/transfers.py, RequestTransferRelation), so a window decoded
-    more than once has one entry per decode and a point reads the hop of
-    the decode it describes rather than the window's last. The delay is
-    summed and the landing is the latest delivery, because a decode
-    starts once every transfer of its input has landed.
+    A window decoded more than once has one entry per decode, so a point
+    reads the hop of the decode it describes. The landing is the latest
+    delivery, since a decode starts once every input transfer landed.
     """
     hops = {}
     for row in transfers:
@@ -428,21 +401,6 @@ def input_hop_by_request(transfers: list) -> dict:
         landing = max(landing, row["delivery_ticks"])
         hops[key] = (delay, landing)
     return hops
-
-
-def _request_run_sequence(row: dict):
-    """The run ordinal of the request a transfer serves, None when it has none.
-
-    A boundary hand-off names its source request instead, and a round's
-    transfer names no request at all.
-    """
-    relation = row["attribution"].get("relation")
-    if not relation:
-        return None
-    request_key = relation.get("request_key")
-    if request_key is None:
-        return None
-    return request_key["run_sequence"]
 
 
 def controller_to_weak_buffer_delays_us(transfers: list) -> list:
@@ -514,12 +472,9 @@ def strong_store_round_keys(stored_rounds: list) -> list:
 def qpu_send_ticks(transfers: list) -> dict:
     """The tick each round left the QPU, by (operation, round).
 
-    A round's index counts within its operation's stream (records/
-    windows.py Window), so two operations share every index and a round
-    is found by both, as gem5 finds an instruction by its thread and its
-    sequence number (src/cpu/o3/rob.hh:131-134). A readout carries one
-    round of one operation, and a round's send is its earliest QC
-    request.
+    A round index counts within its operation's stream, so a round is found
+    by both, as gem5 finds an instruction (src/cpu/o3/rob.hh:131-134); its
+    send is its earliest QC request.
     """
     send = {}
     for row in transfers:
@@ -537,9 +492,9 @@ def qpu_send_ticks(transfers: list) -> dict:
 
 
 def window_points_us(
-    window,
-    frame_record,
-    decode,
+    window: window_records.Window,
+    frame_record: decoding_records.PauliFrameCommitRecord,
+    decode: "_CommittedDecode",
     first_dispatch: int,
     stage_us: dict,
     link_delay: dict,
@@ -550,37 +505,23 @@ def window_points_us(
 ) -> dict:
     """The per-window latency points, in us, for one decoded window.
 
-    Every tick here belongs to one decode. The window waits in the ready
-    queue until a unit takes its first decode; a window the strong tier
-    recovered then spends its weak attempt, which ends at the verdict
-    (Toshio et al. 2510.25222 Sec. III A steps 2 to 4, lines 602-617);
-    and the input hop, the park, the compute and the way home are the
-    committing decode's own, named by the frame record's tier and run
-    ordinal. Mixing them is what a window decoded more than once
-    punishes: its two forced-class solves (decision D2) are two decodes
-    with two dispatches, and the window record keeps only the last.
+    Every tick belongs to one decode. The window waits in the ready queue
+    until a unit takes its first decode; a window the strong tier recovered
+    then spends its weak attempt, ending at the verdict (Toshio et al.
+    2510.25222 Sec. III A steps 2 to 4); the input hop, the park, the compute
+    and the way home are the committing decode's own. A window decoded more
+    than once (two forced-class solves) has several dispatches, and the
+    window record keeps only the last, so they must not be mixed.
 
-    The decode's own time and the time it waited are two points, not
-    one: a window's service is what its compute took on the unit, and
-    the park before that compute is two points by cause. dep_block is
-    the dependency wait: from the verdict to the input hop's request, which
-    is a strong decode waiting for its escalated rounds to land in the
-    strong store, and from the input landing in the unit's memory to
-    the first tick the decode may start, which is where the
-    predecessor's boundary arrived and is the landing itself when
-    nothing was owed. compute_wait is the rest, from that tick to the
-    compute starting, which is the unit's own compute busy with another
-    decode. Skoric et al. 2209.08552 keep decode and wait apart, tau_W
-    the window's decoding time against which the backlog condition is
-    read (2209.08552.txt lines 429-435) and tau_0 the time to send a
-    window to a worker and start it (lines 1004-1008); gem5 keeps the
-    two waits apart, an instruction reaching the ready list only when
-    its operands are there (inst_queue.cc addIfReady 1536-1562,
-    wakeDependents 1074) and a ready instruction that finds no
-    functional unit counted on its own (NoFreeFU and statFuBusy,
-    inst_queue.cc:1009-1014, the stats at 306-316); and Ciw's per
-    customer record keeps the whole pre-service wait as named parts
-    rather than one number (Ciw ciw/data_record.py lines 3-21).
+    The decode's time and its wait are separate points, and the wait is two
+    by cause. dep_block runs from the verdict to the input hop's request
+    (escalated rounds landing in the strong store) and from the input
+    landing to the first tick the decode may start (the predecessor's
+    boundary). compute_wait is the rest, the unit busy with another decode.
+    Skoric et al. 2209.08552 keep tau_W and tau_0 apart (lines 429-435,
+    1004-1008); gem5 counts a ready instruction with no free unit apart
+    (inst_queue.cc:1009-1014); Ciw keeps the pre-service wait in named parts
+    (ciw/data_record.py lines 3-21).
     """
     operation_id, window_id = window.key
     last_emitted_round = _last_emitted_round(qpu_send, operation_id)
@@ -600,6 +541,8 @@ def window_points_us(
     startable = _startable_ticks(decode, input_landed)
     park = _span_microseconds(startable, input_landed)
     rounds_wait = _span_microseconds(input_sent, attempt_end)
+    store_read = config_module.ticks_to_microseconds(decode.store_read_ticks)
+    dependency_block_with_read = rounds_wait + park
     confidence_ticks = _confidence_ticks(window, decode)
     output_sent = frame_record.accepted_ticks - output_ticks
     answered = max(window.t_done, decode.done_ticks)
@@ -612,7 +555,8 @@ def window_points_us(
         "admission_wait": _span_microseconds(
             window.t_queued, window.t_data_complete
         ),
-        "dep_block": rounds_wait + park,
+        "store_read": store_read,
+        "dep_block": dependency_block_with_read - store_read,
         "compute_wait": _span_microseconds(
             decode.compute_start_ticks, startable
         ),
@@ -660,18 +604,10 @@ def window_points_us(
 def frame_records_by_window(
     observation: observation_module.Observation,
 ) -> dict:
-    """The frame's committed corrections, by the window each one wrote.
+    """The frame's committed corrections, by (operation_id, window_index).
 
-    A window is named by its operation and its index, never by its index
-    alone: the window record's own key is (operation_id, window_index)
-    (records/windows.py:79-82 and 144-146), and a frame record carries
-    that whole key. Keyed by the index alone, a workload of several
-    streams would keep one stream's correction per index and drop the
-    rest, and the windows that lost theirs would be measured against
-    another stream's decode. gem5 asks the same way: an instruction in
-    the reorder buffer is found by its thread and its sequence number,
-    findInst(ThreadID tid, InstSeqNum squash_inst) (gem5
-    src/cpu/o3/rob.hh:131-134).
+    Keyed by the index alone, several streams would keep one stream's
+    correction per index and measure the others against the wrong decode.
     """
     records = {}
     for record in observation.frame_corrections.committed:
@@ -685,13 +621,9 @@ def collect_samples(
 ) -> tuple:
     """Every point's microsecond samples, and each window's committing tier.
 
-    Every point of a window describes the decode whose result the frame
-    committed: the two links it rode, in from its tier's store and home
-    to the frame, its own stages, and the wait in front of it. The
-    frame's record names that decode, by the tier it ran on and by the
-    run ordinal of its request. The function stays whole past the size
-    prompt: it is one walk over the windows in key order, each window's
-    points appended to the same lists, read top to bottom.
+    Every point describes the decode the frame committed, named by the
+    frame record's tier and run ordinal. It stays whole past the size
+    prompt: one walk over the windows in key order, read top to bottom.
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
@@ -744,19 +676,12 @@ def collect_samples(
 def chain_load(samples: dict, window_period_us: float) -> float:
     """rho: the serial chain's service per window over the window period.
 
-    Service is the unit's occupancy per window plus the DD boundary
-    handoff that serialises the chain; the window inter-arrival time is
-    commit rounds times the round period. Above 1 the chain cannot keep
-    up, which is Skoric et al. 2209.08552's backlog condition read as a
-    ratio (2209.08552.txt lines 429-435).
-
-    The occupancy is the committing decode's compute and the confidence
-    step after it, because that step is the same unit's time: the walk
-    is charged on the weak unit that produced the evidence (decision
-    D8), and under complementary_gap the window's second forced-class
-    solve is its own job's service on that unit (decision D2). A window
-    whose signal costs nothing adds nothing, so a run without a gap
-    reads as it always did.
+    Service is the unit's occupancy per window plus the boundary handoff
+    that serialises the chain; the period is commit rounds times the round
+    period. Above 1 the chain cannot keep up: Skoric et al. 2209.08552's
+    backlog condition as a ratio (lines 429-435). The occupancy includes
+    the confidence step, charged on the same weak unit, and under
+    complementary_gap the second forced-class solve.
     """
     service_us = _mean_or_zero(samples["service"])
     confidence_us = _mean_or_zero(samples["confidence"])
@@ -765,24 +690,24 @@ def chain_load(samples: dict, window_period_us: float) -> float:
     return chain_us / window_period_us
 
 
-def active_decoder_kind(settings: machine_settings.MachineSettings):
+def active_decoder_kind(
+    settings: machine_settings.MachineSettings,
+) -> Optional[Union[str, float]]:
     """The kind of the tier that decodes the plan's windows."""
-    tier = escalation_build.primary_tier(settings.escalation)
+    tier = settings.window_tier.value
     tier_settings = settings.decoder_settings_for(tier)
-    return tier_settings.kind
+    if tier_settings is None:
+        return None
+    return tier_settings.algorithm.name
 
 
-def trace_path_for_shot(path: str, label: str) -> str:
-    """The path a swept shot writes to: the label joins the yaml's path.
+def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
+    """The path a swept shot writes to: the label joins the given path.
 
-    A sweep traces the shots trace_shots names at every point, so each
-    file takes the shot's label, its point id and seed, before its
-    suffixes: run.trace.json becomes run_<label>.trace.json, and
-    run.trace.json.gz becomes run_<label>.trace.json.gz. Two points
-    that differ only in a setting no file name spells, a basis or a
-    window size, then never write one file (gem5's multisim names each
-    simulation's output folder by its id,
-    src/python/gem5/utils/multisim/multisim.py).
+    run.trace.json becomes run_<label>.trace.json, the label holding the
+    point id and seed, so two points that differ only in a setting no file
+    name spells never write one file (gem5's multisim names each output
+    folder by its id).
     """
     name = pathlib.Path(path)
     directory = name.parent
@@ -802,26 +727,59 @@ def shot_label(point_id: str, seed: int) -> str:
     return f"{point_id}_seed{seed}"
 
 
+def parallel_processes_needed(
+    samples: dict, code: ports.CodeModel, round_period_microseconds: float
+) -> int:
+    """Skoric's least count of parallel decoding processes for no backlog.
+
+    N_par >= 2 tau_W / ((n_com + n_W) tau_rd) (2209.08552 lines 429-438;
+    NVQLink equation 2, 2510.25213), with n_W = n_com + 2 n_buf ("nW = 3w",
+    lines 388-390), tau_W this shot's mean service and the sizes the code
+    card's. The serial chain's own condition is chain_load.
+    """
+    service_us = _mean_or_zero(samples["service"])
+    commit_rounds = code.commit_rounds()
+    buffer_rounds = code.buffer_rounds()
+    both_buffers_round_count = 2 * buffer_rounds
+    window_round_count = commit_rounds + both_buffers_round_count
+    committed_round_count = commit_rounds + window_round_count
+    committed_rounds_us = committed_round_count * round_period_microseconds
+    both_layers_service_us = 2 * service_us
+    processes = both_layers_service_us / committed_rounds_us
+    return math.ceil(processes)
+
+
+def _request_run_sequence(row: dict):
+    """The run ordinal of the request a transfer serves, None when it has none.
+
+    A boundary hand-off names its source request instead, and a round's
+    transfer names no request at all.
+    """
+    relation = row["attribution"].get("relation")
+    if not relation:
+        return None
+    request_key = relation.get("request_key")
+    if request_key is None:
+        return None
+    return request_key["run_sequence"]
+
+
 def _measurement(
     settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
+    record_options: collect.RecordOptions,
     code: ports.CodeModel,
     round_period_microseconds: float,
     point_id: str,
     seed: int,
     wall_seconds: float,
-    trace_path: Optional[str],
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records.
 
-    code and round_period_microseconds are the card and the cadence the
-    QPU ran, so a window's sizes are the ones the plan laid out.
-
-    It stays whole past the size prompt: each number is read once, named,
-    and placed in the record, top to bottom, and a split would put the
-    reading and the placing of one number in two places.
+    It stays whole past the size prompt: each number is read once, named
+    and placed, and a split would put reading and placing in two places.
     """
     owners = _scored_owners(result)
     sample_digest = _sample_digest(observation, owners)
@@ -840,7 +798,7 @@ def _measurement(
     load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
-    primary_tier = escalation_build.primary_tier(settings.escalation)
+    primary_tier = settings.window_tier.value
     pools = _pool_measures(observation, primary_tier)
     strong = _strong_decodes(observation)
     tiers = _tier_records(observation)
@@ -851,13 +809,12 @@ def _measurement(
     totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
-    first_flag_round, is_caught = _burst_catch(settings, observation)
     window_statuses = _window_statuses(observation)
     unscored_reason = _unscored_reason(observation)
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
-    confidence = _shot_confidence(settings, observation, seed)
+    confidence = _shot_confidence(settings, observation, seed, record_options)
     return ShotMeasurement(
         point_id=point_id,
         algorithm=algorithm,
@@ -897,9 +854,6 @@ def _measurement(
         link_totals=totals,
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,
-        trace_path=trace_path,
-        burst_first_flag_round=first_flag_round,
-        burst_caught_in_time=is_caught,
         window_statuses=window_statuses,
         is_scored=is_scored,
         unscored_reason=unscored_reason,
@@ -914,45 +868,17 @@ def _shot_confidence(
     settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
     seed: int,
+    record_options: collect.RecordOptions,
 ) -> Optional[ShotConfidence]:
     """The confidence ledger's windows, None when no signal ran."""
     ledger = observation.confidence
     if ledger is None:
         return None
     windows = ledger.windows()
-    is_sampled = settings.observation.samples_confidence_of(seed)
-    signal = settings.escalation.confidence
-    sampled_shot_count = settings.observation.confidence_shot_count
+    is_sampled = record_options.samples_confidence_of(seed)
+    signal = settings.switching.confidence.name
+    sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
-
-
-def _burst_catch(
-    settings: machine_settings.MachineSettings,
-    observation: observation_module.Observation,
-) -> tuple:
-    """The first flag at or after the burst's onset, and whether in time.
-
-    A detector's delay is its first alarm at or after the onset less the
-    onset, and it catches the burst within k rounds when that delay is
-    at most k, as detection delay is scored for change-point detectors
-    (Xie et al. 2104.04186 lines 161-171). The delay counts the rounds
-    the detector read, not the tick its flag was published, which its
-    pipeline puts later and the switching waits for. A shot with no
-    burst counts from round 1, so any flag on it is a false alarm.
-    (None, None) without a detector.
-    """
-    flags = observation.burst_flags
-    if flags is None:
-        return None, None
-    onset_round = _burst_onset_round(settings.qpu.row_settings)
-    if onset_round is None:
-        first_flag_round = flags.first_flag_from(1)
-        return first_flag_round, None
-    first_flag_round = flags.first_flag_from(onset_round)
-    delay = first_flag_round - onset_round
-    deadline = settings.burst_detector.catch_deadline_rounds
-    is_caught = first_flag_round > 0 and delay <= deadline
-    return first_flag_round, is_caught
 
 
 def _window_statuses(observation: observation_module.Observation) -> dict:
@@ -974,17 +900,11 @@ def _window_statuses(observation: observation_module.Observation) -> dict:
 def _unscored_reason(observation: observation_module.Observation) -> str:
     """The backends' reasons for every decode committed with no correction.
 
-    A final decode's and a replaced provisional one's alike: the strong
-    answer replaces the window's own correction, its prediction and its
-    held boundary, but not what the provisional commit already fed
-    forward, its boundary under eager shipping (ports.py BoundaryPolicy:
-    a shipped provisional boundary is never revised) and its crossing
-    commit, which the strong result keeps (window_commits.py
-    _with_the_crossing_commit). decsim does not trace which of those a
-    given window's commit reached, so any of them unscores the shot. A
-    provisional result never reaches the Pauli frame (commit_or_publish
-    publishes only a final one). Each distinct reason once, sorted and
-    joined by ';'; empty when every commit got a correction.
+    A replaced provisional decode counts too: the strong answer replaces its
+    correction but not what it already fed forward (a shipped boundary is
+    never revised; its crossing commit is kept), and decsim does not trace
+    which a commit reached, so any unscores the shot. Distinct reasons,
+    sorted, joined by ';'; empty when every commit got a correction.
     """
     reasons = set()
     for window in observation.windows.windows.values():
@@ -1011,12 +931,8 @@ def _sample_digest(
 ) -> str:
     """sha256 of each scored owner's sampled detection events and truth.
 
-    The events are the ones the source fired on shot_sampled
-    (qpu/stim_device.py) and the truth is the observable flips it drew
-    with them, one byte a bit, owner by owner in the result's order.
-    Two points that differ only in their decoder draw the same shot at
-    the same seed, so pairing their shots can be checked rather than
-    assumed.
+    Two points that differ only in their decoder draw the same shot at the
+    same seed, so pairing their shots can be checked rather than assumed.
     """
     shots_by_operation = observation.sampled_shots.shots_by_operation
     digest = hashlib.sha256()
@@ -1032,14 +948,10 @@ def _sample_digest(
 def _scored_owners(result: result_records.RunResult) -> tuple:
     """The operations whose logical output the source sampled a truth for.
 
-    A live stream's segments and the operations that only hold or
-    resume its patch drive its timing and have no truth of their own:
-    their rounds reach the stream owner's one circuit, which is scored
-    once, as sinter scores a complete circuit's predictions against its
-    observables (sinter/_decoding/_stim_then_decode_sampler.py:76). A
-    source that draws no shot (qpu.kind timing_only and syndrome_bits)
-    leaves no owner, and the shot is refused rather than counted as
-    right or wrong.
+    A live stream's segments and patch holders have no truth of their own:
+    the owner's one circuit is scored once, as sinter scores a complete
+    circuit (sinter/_decoding/_stim_then_decode_sampler.py:76). A source
+    that draws no shot leaves no owner, and the shot is refused.
     """
     owners = []
     for operation_result in result.operation_results:
@@ -1047,7 +959,7 @@ def _scored_owners(result: result_records.RunResult) -> tuple:
             owners.append(operation_result)
     if not owners:
         raise refusal.RefusalError(
-            "decsim collect scores every shot against the logical "
+            "decsim run scores every shot against the logical "
             "observables its syndrome source sampled, and the source "
             "sampled none; name a qpu.kind that samples the circuit, such "
             "as stim_device"
@@ -1093,30 +1005,13 @@ def _one_length(owner_rounds) -> int:
     return length
 
 
-def _burst_onset_round(qpu_row_settings) -> Optional[int]:
-    """The burst's first round; None when the shot draws no burst.
-
-    Read by the keys' names rather than the row's class, so any qpu row
-    whose settings carry a burst probability and onset, as burst_stim's
-    do, is measured alike; a probability of 0 is no burst.
-    """
-    probability = getattr(qpu_row_settings, "burst_error_probability", 0)
-    if probability == 0:
-        return None
-    return qpu_row_settings.burst_onset_round
-
-
 @dataclasses.dataclass(frozen=True)
 class _CommittedDecode:
     """The decode whose result the frame committed, as the points read it.
 
-    One window can be decoded several times: the two forced-class solves of a
-    complementary gap (decision D2), a strong re-decode after an escalation
-    (Toshio et al. 2510.25222 Sec. III A), and under run_both_at_once a
-    speculative strong decode that is cancelled. Every stage record of all of
-    them carries the same window key, so the decode that committed is named by
-    the frame's own record: the tier it ran on and the run ordinal of its
-    request.
+    One window can be decoded several times (forced-class solves, a strong
+    re-decode, a cancelled speculative one), all under one window key, so
+    the frame record's tier and run ordinal name the one that committed.
     """
 
     tier: window_records.DecoderTier
@@ -1126,11 +1021,12 @@ class _CommittedDecode:
     run_sequence: int  # the run ordinal of the request it committed
     round_count: int  # the rounds it read, its job's own count
     backend_queue_wait_ticks: int  # its waits inside a strong backend
+    store_read_ticks: int  # its input's read in its tier's store
 
 
 @dataclasses.dataclass(frozen=True)
 class _Throughput:
-    """Decoded windows and QEC rounds per microsecond of the shot's span."""
+    """The shot's throughput, per microsecond of its span."""
 
     windows_per_microsecond: float
     rounds_per_microsecond: float
@@ -1138,7 +1034,7 @@ class _Throughput:
 
 @dataclasses.dataclass(frozen=True)
 class _RefereeCounts:
-    """What the window referee re-decoded and where it disagreed."""
+    """The window referee's tally over the shot."""
 
     windows_checked: int
     window_disagreements: int
@@ -1146,7 +1042,7 @@ class _RefereeCounts:
 
 @dataclasses.dataclass(frozen=True)
 class _PoolMeasures:
-    """Each tier's deepest ready queue and busy fraction over the shot."""
+    """Each tier's pool load over the shot."""
 
     weak_queue_max: int
     strong_queue_max: int
@@ -1175,7 +1071,7 @@ class _DecodeLife:
 
 @dataclasses.dataclass(frozen=True)
 class _TierRecords:
-    """The switching records' weak inputs and services and strong waits."""
+    """Each tier's summary from the switching records."""
 
     weak_syndrome_weight_mean: Optional[float] = None
     weak_syndrome_weight_max: Optional[int] = None
@@ -1203,11 +1099,9 @@ def _logical_failure(owners: tuple) -> bool:
 def _predictions(result: result_records.RunResult) -> str:
     """Each operation's predicted observables, keyed by operation id.
 
-    Each value is one character a bit in observable order, Stim's 01
-    format (sample_detectors obs_out_format), and null for an operation
-    the loop left unanswered. The cell is compact sorted json, the form
-    sinter writes a json cell in (sinter/_data/_csv_out.py:35-37), and a
-    csv reader that types a number would read the bits 01 as 1.
+    One character a bit, Stim's 01 format, null when unanswered; compact
+    sorted json, as sinter writes a json cell (sinter/_data/_csv_out.py:35-37),
+    since a csv reader that types numbers would read 01 as 1.
     """
     predicted = {}
     for operation_result in result.operation_results:
@@ -1230,16 +1124,10 @@ def _throughput_per_microsecond(
 ) -> _Throughput:
     """Windows and rounds over the span from first round to last commit.
 
-    The rounds are the ones the QPU read out, each (operation, round)
-    once (the EMITTED rows, qpu/cycle_clock.py), so the number holds for
-    any workload, not only the maker that declares rounds_per_shot.
-    Operations that run at once add their rounds: the rate is the load
-    the shared decoders serve, which the backlog condition weighs against
-    their service rate (Holmes 2004.04794 section III), not the QEC
-    cycle rate, which is one over the round period by construction. A
-    shot that commits nothing into a frame, a machine built with no
-    pauli_frame, got nothing through, and both rates are zero, as a
-    tier the run does not have measures zero.
+    Rounds are those the QPU read out, each once, so it holds for any
+    workload. Concurrent operations add up: the rate is the load the shared
+    decoders serve, weighed against their service rate (Holmes 2004.04794
+    section III). A shot that commits nothing measures zero.
     """
     if not observation.frame_corrections.committed:
         return _Throughput(
@@ -1282,11 +1170,8 @@ def _pool_measures(
 ) -> _PoolMeasures:
     """Each pool's own queue peak and busy fraction, by the tier's name.
 
-    The plan's windows queue in the chip's default pool and a strong
-    re-decode in the host's strong pool (build/decoders.py), so the default
-    pool's numbers are the primary tier's: the weak tier's on a
-    weak-primary run, the strong tier's under strong_only, where the
-    weak columns read zero; a run without a pool reads zero for it.
+    The plan's windows queue in the default pool, so its numbers are the
+    primary tier's; a run without a pool reads zero for it.
     """
     peaks = observation.queue_depth.peak_by_pool
     utilization = observation.decoder_utilization.result()
@@ -1317,11 +1202,8 @@ def _strong_decodes(
 ) -> _StrongDecodes:
     """The windows the strong tier committed, their rounds, their service.
 
-    Toshio's Theorem 1 bounds one strong decode's time by the round
-    time times d over the switching rate (2510.25222 eq. (6)); the
-    report forms that bound per sweep point from the escalated windows,
-    and the point's summed service over its windows is the time it
-    bounds. The sum is taken in ticks, so it is exact.
+    The report forms Toshio's Theorem 1 bound (2510.25222 eq. (6)) per point
+    from these; the summed service is taken in ticks, so it is exact.
     """
     stages = observation.stages
     windows = 0
@@ -1346,15 +1228,10 @@ def _tier_records(
 ) -> _TierRecords:
     """Each tier's inputs, computes and waits off the switching records.
 
-    Every request record names its tier and run ordinal in its request
-    key (records/windows.py DecoderRequestKey), and the stage ledger
-    names the decode each stage served by the same ordinal, so a
-    decode's compute is its own stages, first start to last end, the
-    service point's span. A strong decode's wait is the two waits the
-    latency points split, queue_wait (enqueue to a unit taking it) and
-    compute_wait (its input landed to its compute start, the unit busy
-    with another decode, gem5's fuBusy), and not the input hop between
-    them, which a free unit pays too.
+    A request key's run ordinal names the stages it served, so a decode's
+    compute is its own stages' span. A strong decode's wait is queue_wait
+    plus compute_wait (gem5's fuBusy), not the input hop between them, which
+    a free unit pays too.
     """
     records = observation.decode_records
     if records is None:
@@ -1443,14 +1320,9 @@ def _strong_wait_microseconds(requests: list, lives: dict) -> list:
 def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
     """The most strong decodes held in unit memory at once, on compute.
 
-    A strong decode is held from the tick it may compute, its input
-    landed and no boundary owed, to its compute start: the compute_wait
-    of the latency points, the wait gem5 counts apart as fuBusy when a
-    ready instruction finds no free functional unit (gem5
-    src/cpu/o3/inst_queue.cc:1009-1014). A merged batch is one decode
-    in one unit and counts once. A depth counts only when time passes
-    at it, the rule of the ready queue's peak (observe/queue_depth.py),
-    so a decode that starts on the tick it may start was never held.
+    Held from the tick it may compute to its compute start, gem5's fuBusy
+    wait (src/cpu/o3/inst_queue.cc:1009-1014). A merged batch counts once,
+    and a depth counts only when time passes at it (observe/queue_depth.py).
     """
     change_by_tick = collections.defaultdict(int)
     held_decodes = set()
@@ -1490,34 +1362,6 @@ def _backlog_peak_rounds(
     return backlog.peak
 
 
-def parallel_processes_needed(
-    samples: dict, code: ports.CodeModel, round_period_microseconds: float
-) -> int:
-    """Skoric's least count of parallel decoding processes for no backlog.
-
-    N_par >= 2 tau_W / ((n_com + n_W) tau_rd): a window's decoding time
-    twice, over the rounds its two layers commit (2209.08552 lines
-    429-438; NVQLink states the same as its equation 2, 2510.25213
-    lines 1625-1631). Layer A commits n_com rounds and layer B its
-    whole window, and n_W is the window with a buffer on each side,
-    n_com + 2 n_buf, "nW = 3w" at the paper's sizes (lines 388-390).
-    tau_W is this shot's mean service and the sizes are the code card's,
-    the ones the plan laid its windows out by. It is the count the
-    parallel window scheme needs; the serial chain's own condition is
-    chain_load.
-    """
-    service_us = _mean_or_zero(samples["service"])
-    commit_rounds = code.commit_rounds()
-    buffer_rounds = code.buffer_rounds()
-    both_buffers_round_count = 2 * buffer_rounds
-    window_round_count = commit_rounds + both_buffers_round_count
-    committed_round_count = commit_rounds + window_round_count
-    committed_rounds_us = committed_round_count * round_period_microseconds
-    both_layers_service_us = 2 * service_us
-    processes = both_layers_service_us / committed_rounds_us
-    return math.ceil(processes)
-
-
 def _window_order(window_item: tuple) -> bytes:
     """A (window key, window) pair's place: the key's canonical bytes.
 
@@ -1544,13 +1388,9 @@ def _last_emitted_round(qpu_send: dict, operation_id) -> int:
 def _hop_start_ticks(row: dict) -> int:
     """The tick a transfer was asked for, which is where its hop starts.
 
-    A transfer's send_ticks follows its wait for the channel's setup
-    engine and its own setup, and total_delay_ticks counts from the
-    request (records/transfers.py, Transfer), so the request is the
-    delivery less the total. The setup is the hop's own cost: gem5 adds
-    a DMA's fixed delay to the completion its requester sees
-    (src/dev/dma_device.cc:116-118), and a point that started at the
-    send would charge it to whatever wait comes before the hop.
+    The request is the delivery less total_delay_ticks. The setup is the
+    hop's own cost, as gem5 adds a DMA's fixed delay to the completion
+    (src/dev/dma_device.cc:116-118).
     """
     return row["delivery_ticks"] - row["total_delay_ticks"]
 
@@ -1558,14 +1398,9 @@ def _hop_start_ticks(row: dict) -> int:
 def _committed_decode(stages, frame_record) -> _CommittedDecode:
     """The committing decode's tier and the ticks of its own life.
 
-    Its stage records are the ones whose request ordinals hold the
-    frame record's, so a merged batch answers for every window it
-    served. The compute began at its first stage and ended at its last,
-    and the records carry the two ticks before that compute: the tick a
-    unit took this decode and the tick its input was readable in that
-    unit's memory. Every one of them belongs to this decode, so a window
-    decoded more than once never mixes one decode's dispatch with
-    another's compute.
+    Its stage records are those whose request ordinals hold the frame
+    record's, so a merged batch answers for every window it served and a
+    window decoded more than once never mixes two decodes.
     """
     tier = window_records.DecoderTier(frame_record.tier)
     operation_id, window_id = frame_record.window_key
@@ -1587,8 +1422,9 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     run_sequence = frame_record.run_sequence
     rounds = _rounds_read(records)
     waited = _backend_queue_wait_ticks(records)
+    read = _store_read_ticks(records)
     return _CommittedDecode(
-        tier, first, last, ready, run_sequence, rounds, waited
+        tier, first, last, ready, run_sequence, rounds, waited, read
     )
 
 
@@ -1598,6 +1434,14 @@ def _backend_queue_wait_ticks(records: list) -> int:
     for record in records:
         waits.append(record.backend_queue_wait_ticks)
     return max(waits, default=0)
+
+
+def _store_read_ticks(records: list) -> int:
+    """The decode's input read in its store, carried on every stage."""
+    reads = []
+    for record in records:
+        reads.append(record.store_read_ticks)
+    return max(reads, default=0)
 
 
 def _rounds_read(records: list) -> int:
@@ -1644,15 +1488,9 @@ def _ready_ticks(records: list):
 def _first_dispatch_ticks(stages, window, frame_record) -> int:
     """The tick a unit took the first decode of this window.
 
-    The window's queue wait ends there, and the weak attempt of an
-    escalated window starts there (Toshio et al. 2510.25222 Sec. III A
-    steps 2 to 4, lines 602-617: the weak decoder answers, the verdict
-    is read, and only then does the strong decode that commits begin).
-    A window decoded once has one dispatch and this is it; a window that
-    ran its two forced-class solves (decision D2) or escalated has
-    several, and the first is the one its wait in the ready queue ended
-    at. A decode the cancel closed is not on the window's path at all
-    (Toshio Sec. III A step 1), so it is left out.
+    The ready-queue wait ends there and an escalated window's weak attempt
+    starts there (Toshio et al. 2510.25222 Sec. III A steps 2 to 4). A
+    cancelled decode is not on the window's path, so it is left out.
     """
     operation_id, window_id = frame_record.window_key
     records = stages.records_for(operation_id, window_id)
@@ -1693,18 +1531,11 @@ def _committing_stage_records(
 def _confidence_ticks(window, decode: _CommittedDecode) -> int:
     """The confidence step: the committing decode's end to the verdict.
 
-    The weak tier reports a soft output for each window and the window
-    is answered on it, so the signal's own computation is on the
-    window's path (Toshio et al. 2510.25222 lines 657-663, the weak
+    The signal's computation is on the window's path, since the weak
     decoder "simultaneously generates a soft output g for each decoding
-    window", and lines 360-363, the response time running to the
-    correction). What that computation is depends on the row: the walk
-    under cluster_gap, charged on the weak unit (decision D8), and the
-    other forced-class solve's remaining time under complementary_gap,
-    which is that solve's own service on the same unit (decision D2).
-    An escalated window has none: its committing decode is the strong
-    one, which answers after the verdict, and weak_attempt already runs
-    from the window's first dispatch to that verdict.
+    window" (Toshio et al. 2510.25222 lines 657-663): the walk under
+    cluster_gap, the other forced-class solve under complementary_gap. An
+    escalated window has none: weak_attempt already runs to its verdict.
     """
     if window.t_done <= decode.done_ticks:
         return 0
@@ -1729,14 +1560,10 @@ def _startable_ticks(decode: _CommittedDecode, input_landed: int) -> int:
 def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:
     """Where the window's weak attempt ended and the committing decode began.
 
-    An escalated window answers once on the weak tier and the strong
-    decode starts from that verdict (Toshio et al. 2510.25222 Sec. III A
-    steps 2 to 4, lines 602-617), so the span from the unit assignment
-    to the verdict is the weak_attempt point and the committing decode's
-    own hop starts there. When the committing decode was already
-    computing at that answer, which is a kept weak result and which is
-    run_both_at_once's speculative strong decode, the attempt cost the window
-    nothing and both start at the dispatch.
+    An escalated window's strong decode starts from the verdict (Toshio et
+    al. 2510.25222 Sec. III A). A committing decode already computing then
+    (a kept weak result, a speculative strong decode) cost the window no
+    attempt, and both start at the dispatch.
     """
     if window.t_done >= decode.compute_start_ticks:
         return first_dispatch
@@ -1746,13 +1573,8 @@ def _attempt_end_ticks(window, decode: _CommittedDecode, first_dispatch) -> int:
 def _stage_microseconds(stages, frame_record) -> dict:
     """The committing decode's stages, in microseconds, by stage name.
 
-    Every decode of a window records its stages under the window's key: the two
-    forced-class solves of a complementary gap, which are two jobs of one window
-    and are charged one card each (decisions D2 and D7), the strong re-decode of
-    an escalated window, and a speculative strong decode that was cancelled.
-    Keeping the last record of each name mixes them, so the stages are the
-    committing request's, which is the rule every other point of the window
-    follows.
+    Every decode of a window records under its key, so the stages are the
+    committing request's, as for every other point.
     """
     operation_id, window_id = frame_record.window_key
     records = _committing_stage_records(
@@ -1808,50 +1630,19 @@ def _maxes(samples: dict) -> dict:
     return maxes
 
 
-def _write_trace(
-    shot, run_dir, label: str, only_traced_shot: bool
-) -> Optional[str]:
+def _write_trace(shot, run_dir, label: str, only_traced_shot: bool) -> None:
     """The shot's Chrome trace, when the section asked and named it.
 
-    trace: chrome names the file by the shot's label, its point id and
-    seed, under trace/; a path of its own is written where it says with
-    that label in the name, so no shot overwrites another's file, unless
-    the run traces this shot alone and no other can take the path. Only
-    the shots trace_shots names are written, so a sweep point of two
-    thousand shots writes one file. The file it wrote
-    comes back, so the shot's measurement can say where its trace is; a
-    shot that was not traced returns None.
+    Each file carries the shot's label, so no shot overwrites another's;
+    only trace_shots are written.
     """
     observation = shot.task.settings.observation
     if not observation.writes_trace:
-        return None
+        return
     if shot.seed not in observation.trace_shots:
-        return None
+        return
     writer = shot.machine.observation.trace_writer
-    path = observation.trace_path
-    if path is None:
-        trace_dir = run_dir / "trace"
-        trace_dir.mkdir(parents=True, exist_ok=True)
-        path = trace_dir / f"{label}.trace.json"
-    elif not only_traced_shot:
+    path = run_folder.trace_path_of(observation, run_dir, label)
+    if observation.trace_path is not None and not only_traced_shot:
         path = trace_path_for_shot(path, label)
-    written = str(path)
-    writer.write(written)
-    return written
-
-
-def _write_log(
-    observation: observation_module.Observation, run_dir, label: str
-) -> None:
-    """One file per shot with the engine narrator's full line record.
-
-    The same lines log: print shows live. The Chrome trace of the data
-    path is a separate file under trace/, written for the shots
-    observation.trace_shots names.
-    """
-    log_dir = run_dir / "log"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    text = "\n".join(observation.log.lines)
-    log_path = log_dir / f"{label}.log"
-    contents = text + "\n"
-    log_path.write_text(contents)
+    writer.write(str(path))

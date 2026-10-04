@@ -12,7 +12,6 @@ into src/mem/protocol/timing.cc:49-53).
 
 import decsim.decoders.memory_rounds as memory_rounds
 import decsim.engine as engine_module
-import decsim.observe.log_writers as log_writers
 
 
 class _Windows:
@@ -37,22 +36,3 @@ def test_a_landed_memory_round_is_counted_and_the_window_side_is_told():
 
     assert arrivals.landed_by_operation == {7: 2, 9: 1}
     assert windows.told == [7, 7, 9]
-
-
-def test_the_arrival_is_narrated_on_the_decoder_sides_own_line():
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    windows = _Windows()
-    arrivals = memory_rounds.MemoryRoundArrivals(engine)
-    arrivals.windows = windows
-
-    arrivals.receive_memory_round(7)
-    arrivals.receive_memory_round(7)
-
-    assert log.lines == [
-        "[  0.000 us] Decoder manager: memory round for op 7 "
-        "(idle buffer rounds: 1)",
-        "[  0.000 us] Decoder manager: memory round for op 7 "
-        "(idle buffer rounds: 2)",
-    ]

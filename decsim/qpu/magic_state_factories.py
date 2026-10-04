@@ -1,79 +1,58 @@
 """The magic-state factories: where a non-Clifford operation gets its state.
 
-A factory fills the MagicStateFactory port (decsim/ports.py): an
-operation that needs a magic state calls request and is called back when
-one is ready; an empty store stalls the requester, and that supply stall
-is the quantity the factories exist to measure. Trace source:
-state_delivered(operation_id, waited_ticks) at every delivery, which the
-run result sums.
+An empty store stalls the requester, and that supply stall is the
+quantity the factories exist to measure. InfiniteFactory never stalls.
 
-InfiniteFactory is the idealized supply with no stall. DistillationFactory
-is one 15-to-1 distillation stage: every unit attempts a distillation
-every attempt_ticks, a success submits one correction decode per
-multi-qubit pi/8 rotation of the 15-to-1 circuit, 11 of them (rotations
-5 to 15 of Fig. 3; the first four are single-qubit rotations whose
-Clifford corrections are Pauli corrections and need no ancilla: Litinski,
-Magic state distillation: not as costly as you think, arXiv 1905.06903,
-Sec. 4, text lines 1038-1043; Silva 2411.04270 line 381 counts the same
-11 logical cycles for the T gates) to the run's decoder pool, where they
-compete with the core's windows, and the state reaches the store one
-return trip after the last decode. MultiLevelDistillationFactory
-is the pull-driven supply chain of Silva et al., Optimizing multi-level
-magic state factories for fault-tolerant quantum architectures (arXiv
-2411.04270, Sec. II B): level 0 prepares physical states, each level
-above consumes inputs_per_round states from the buffer below and, after
+DistillationFactory is one 15-to-1 stage: each unit attempts every
+attempt_ticks, and a success submits one correction decode per
+multi-qubit pi/8 rotation, 11 of them (rotations 5 to 15 of Fig. 3; the
+first four are single-qubit and need no ancilla: Litinski 1905.06903,
+Sec. 4; Silva 2411.04270 line 381 counts the same 11 cycles), to the
+run's decoder pool, where they compete with the core's windows. The
+state reaches the store one return trip after the last decode.
+
+MultiLevelDistillationFactory is the pull-driven chain of Silva et al.
+(2411.04270, Sec. II B): level 0 prepares physical states, each level
+above consumes inputs_per_round states and, after
 logical_cycles_per_round * distance rounds, yields outputs_per_round
-states with its success probability; a failure discards the inputs. A
-request at the top propagates demand down the chain, so no level
-free-runs unless production_mode is "continuous".
+with its success probability; a failure discards the inputs. A request
+at the top pulls demand down, so no level free-runs unless
+production_mode is "continuous".
 """
 
 import dataclasses
 import functools
 import math
-from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import decsim.config as config
 import decsim.engine
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
-import decsim.tables as tables
 import decsim.trace_source as trace_source
-
-
-@dataclasses.dataclass(frozen=True)
-class FactoryCollaborators:
-    """What the root supplies every magic state factory row.
-
-    One record so every row of MAGIC_STATE_FACTORIES has one constructor
-    signature and the root builds a row without asking which supply
-    model it is; a row reads the collaborators its own model needs,
-    ignores the rest, and reads its own card out of settings, its own
-    Settings record of the magic_state_factory section's keys (decsim/
-    tables.py row_settings), None for a row with no keys. This is gem5's params
-    object, where a SimObject's collaborators arrive as one structure
-    rather than as a signature per subclass
-    (gem5 src/python/m5/SimObject.py:204-205). The decode
-    queue a row submits its correction decodes to is not here: it is a
-    port, decode_queue, which the machine binds once every part exists.
-    """
-
-    engine: decsim.engine.Engine
-    round_ticks: int
-    # the row's own Settings record, opaque to the root
-    settings: Optional[Any] = None
 
 
 class InfiniteFactory:
     """The idealized factory: a magic state is always in stock."""
 
-    # bound by the root as on every row; this row corrects nothing
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The infinite factory has no keys of its own."""
+
+        def build(
+            self, engine: decsim.engine.Engine, round_ticks: int
+        ) -> "InfiniteFactory":
+            """A fresh factory; it paces nothing on the round."""
+            del round_ticks
+            return InfiniteFactory(engine)
+
+    # bound by the part as on every factory; this one corrects nothing
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators: FactoryCollaborators):
-        self.engine = collaborators.engine
+    def __init__(self, engine: decsim.engine.Engine):
+        self.engine = engine
         # a state is always in stock, so no request waits and none fires
         self.trace = _TraceSources()
 
@@ -92,20 +71,13 @@ class InfiniteFactory:
 class DistillationFactory(seeding._RandomSeedConsumer):
     """One 15-to-1 distillation stage with optional continuous production.
 
-    Demand mode starts an attempt only for an unmet request; continuous
-    mode also keeps buffer_capacity states in the pipeline. A state with
-    no correction decodes to wait on is released one return trip after
-    the physical attempt. initial_store warm-starts the store.
+    Continuous mode also keeps buffer_capacity states in the pipeline.
+    initial_store warm-starts the store.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own magic_state_factory keys, checked where they enter.
-
-        attempt_ticks and return_ticks are engine ticks. The eleven
-        correction decodes are Litinski's multi-qubit rotations (module
-        docstring).
-        """
+        """The 15-to-1 stage's card, in engine ticks, checked at entry."""
 
         unit_count: int
         attempt_ticks: int
@@ -136,26 +108,28 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             _check_count("initial_store", self.initial_store, minimum=0)
             _check_probability("success_probability", self.success_probability)
 
-        @classmethod
-        def from_yaml(cls, section: Mapping) -> "DistillationFactory.Settings":
-            """The keys the yaml wrote; the three with no default must be."""
-            required = ("unit_count", "attempt_ticks", "correction_round_count")
-            _check_required_keys("distillation", section, required)
-            fields = _with_numbers(
-                section, "magic_state_factory", ("success_probability",)
-            )
-            return cls(**fields)
+        def build(
+            self, engine: decsim.engine.Engine, round_ticks: int
+        ) -> "DistillationFactory":
+            """A fresh factory; its attempts are priced in ticks, not rounds."""
+            del round_ticks
+            return DistillationFactory(engine, self)
 
     # the run's decoder manager, where the correction decodes compete
     # with the core's windows
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators: FactoryCollaborators):
-        self.engine = collaborators.engine
-        self.card = collaborators.settings
+    def __init__(
+        self,
+        engine: decsim.engine.Engine,
+        card: "DistillationFactory.Settings",
+    ):
+        self.engine = engine
+        self.card = card
         self.trace = _TraceSources()
-        self._initialize_run_seed_state(self.card.seed)
-        self._reset_state(self.card.initial_store)
+        seeding._RandomSeedConsumer.__init__(self, self.card.seed)
+        waiting = _WaitingRequests(self.engine)
+        self.state = _StageState(waiting, self.card.initial_store)
 
     def start(self) -> None:
         """Continuous production fills the pipeline before any request."""
@@ -165,34 +139,24 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
     def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Deliver a state now if one is in stock, else when one is ready."""
-        self.waiting.add(operation_id, callback)
-        waiting_count = len(self.waiting)
+        self.state.waiting.add(operation_id, callback)
+        waiting_count = len(self.state.waiting)
         self.engine.log(
             log_sources.MAGIC_STATE_FACTORY,
             f"op#{operation_id} requests a magic state "
-            f"(store {self.stored_state_count}, waiting {waiting_count})",
+            f"(store {self.state.stored_state_count}, waiting {waiting_count})",
         )
         self._deliver_to_waiting()
         self._start_attempts()
 
     def shutdown(self) -> None:
         """Stop launching attempts; the program is complete."""
-        self._is_shut_down = True
-
-    def _reset_state(self, initial_store: int) -> None:
-        self.stored_state_count = initial_store
-        self.waiting = _WaitingRequests(self.engine)
-        self.produced_count = 0
-        self.in_flight_count = 0
-        self.busy_unit_count = 0
-        self.peak_in_flight_count = 0
-        self.total_stall_ticks = 0
-        self._is_shut_down = False
+        self.state.is_shut_down = True
 
     def _start_attempts(self) -> None:
         """Launch attempts while demand is unmet or the pipeline is short."""
         while self._can_start_attempt():
-            self.busy_unit_count += 1
+            self.state.busy_unit_count += 1
             self.engine.schedule(
                 self.card.attempt_ticks,
                 self._finish_attempt,
@@ -200,23 +164,25 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             )
 
     def _can_start_attempt(self) -> bool:
-        if self._is_shut_down:
+        if self.state.is_shut_down:
             return False
-        if self.busy_unit_count >= self.card.unit_count:
+        if self.state.busy_unit_count >= self.card.unit_count:
             return False
-        committed_count = self.busy_unit_count + self.in_flight_count
-        has_unmet_demand = len(self.waiting) > committed_count
+        committed_count = (
+            self.state.busy_unit_count + self.state.in_flight_count
+        )
+        has_unmet_demand = len(self.state.waiting) > committed_count
         if has_unmet_demand:
             return True
         if self.card.production_mode != "continuous":
             return False
-        pipeline_count = self.stored_state_count + committed_count
-        wanted_count = self.card.buffer_capacity + len(self.waiting)
+        pipeline_count = self.state.stored_state_count + committed_count
+        wanted_count = self.card.buffer_capacity + len(self.state.waiting)
         return pipeline_count < wanted_count
 
     def _finish_attempt(self) -> None:
         """A success waits for its corrections; a failure retries."""
-        self.busy_unit_count -= 1
+        self.state.busy_unit_count -= 1
         self._mark_stochastic_use()
         is_success = self._rng.random() < self.card.success_probability
         if is_success:
@@ -229,9 +195,9 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self._start_attempts()
 
     def _submit_corrections(self) -> None:
-        self.in_flight_count += 1
-        self.peak_in_flight_count = max(
-            self.peak_in_flight_count, self.in_flight_count
+        self.state.in_flight_count += 1
+        self.state.peak_in_flight_count = max(
+            self.state.peak_in_flight_count, self.state.in_flight_count
         )
         if not self.card.correction_decode_count:
             # Nothing to wait on: the state returns after the physical
@@ -269,34 +235,36 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
     def _release(self) -> None:
         """A corrected state reaches the store and serves the oldest request."""
-        self.in_flight_count -= 1
-        self.stored_state_count += 1
-        self.produced_count += 1
+        self.state.in_flight_count -= 1
+        self.state.stored_state_count += 1
+        self.state.produced_count += 1
         self.engine.log(
             log_sources.MAGIC_STATE_FACTORY,
-            f"magic state ready (store now {self.stored_state_count})",
+            f"magic state ready (store now {self.state.stored_state_count})",
         )
         self._deliver_to_waiting()
         self._start_attempts()
 
     def _deliver_to_waiting(self) -> None:
-        while self.stored_state_count > 0 and self.waiting:
-            self.stored_state_count -= 1
-            operation_id, callback, waited_ticks = self.waiting.serve_oldest()
-            self.total_stall_ticks += waited_ticks
+        while self.state.stored_state_count > 0 and self.state.waiting:
+            self.state.stored_state_count -= 1
+            operation_id, callback, waited_ticks = (
+                self.state.waiting.serve_oldest()
+            )
+            self.state.total_stall_ticks += waited_ticks
             self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
             self.engine.log(
                 log_sources.MAGIC_STATE_FACTORY,
                 f"  -> delivered to op#{operation_id} "
-                f"(store now {self.stored_state_count}){tag}",
+                f"(store now {self.state.stored_state_count}){tag}",
             )
             callback()
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DistillLevel:
-    """One level of the multi-level factory: its units and its protocol."""
+    """One level of the multi-level factory."""
 
     unit_count: int
     distance: int
@@ -307,28 +275,35 @@ class DistillLevel:
     logical_cycles_per_round: Optional[int] = None
     success_probability: float = 1.0
 
+    def __post_init__(self) -> None:
+        _check_count("level.unit_count", self.unit_count, minimum=1)
+        _check_count("level.distance", self.distance, minimum=1)
+        _check_probability(
+            "level.success_probability", self.success_probability
+        )
+        if self.logical_cycles_per_round is None:
+            return
+        config.check_cycles(
+            "level.logical_cycles_per_round", self.logical_cycles_per_round
+        )
+
 
 class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     """A pull-driven chain of distillation levels feeding one store.
 
-    Level 0 holds preparation_unit_count units that each inject a physical
-    state into a distance preparation_distance patch, one prepared state
-    every preparation_logical_cycles * preparation_distance rounds. Level l
-    consumes inputs_per_round states of level l - 1 per round and yields
-    outputs_per_round. A request at the top level pulls demand down the
-    chain; continuous mode also keeps buffer_capacity states at the top.
+    Level 0 holds preparation_unit_count units, each injecting a physical
+    state into a distance preparation_distance patch every
+    preparation_logical_cycles * preparation_distance rounds.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own magic_state_factory keys, checked where they enter.
+        """The level chain's card, checked where it enters.
 
-        levels runs from the first level up. The preparation_logical_cycles
-        of two and preparation_distance of three are project coefficients:
-        Silva et al. 2411.04270 Sec. II B prices a level in logical cycles
-        of its own distance but fixes neither number for the physical
-        injection stage. No correction decode by default: Silva line 249
-        counts the correction inside a level's 13 logical cycles.
+        levels runs from the first level up. preparation_logical_cycles 2 and
+        preparation_distance 3 are project coefficients: Silva et al. 2411.04270
+        Sec. II B fixes neither for the injection stage. No correction decode by
+        default: Silva line 249 counts it inside a level's 13 logical cycles.
         """
 
         levels: tuple
@@ -345,7 +320,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         buffer_capacity: Optional[int] = None
 
         def __post_init__(self) -> None:
-            _check_levels(self.levels)
             _check_production_mode(self.production_mode, self.buffer_capacity)
             _check_count(
                 "correction_decode_count",
@@ -375,33 +349,28 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
                 self.preparation_success_probability,
             )
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping
-        ) -> "MultiLevelDistillationFactory.Settings":
-            """The keys the yaml wrote; levels is a list of level mappings."""
-            _check_required_keys("multi_level", section, ("levels",))
-            levels = _levels_from_yaml(section["levels"])
-            probability_keys = ("preparation_success_probability",)
-            fields = _with_numbers(
-                section, "magic_state_factory", probability_keys
-            )
-            fields["levels"] = levels
-            return cls(**fields)
+        def build(
+            self, engine: decsim.engine.Engine, round_ticks: int
+        ) -> "MultiLevelDistillationFactory":
+            """A fresh factory whose levels run on the run's round."""
+            return MultiLevelDistillationFactory(engine, self, round_ticks)
 
     # the run's decoder manager, where a card's correction decodes go
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, collaborators: FactoryCollaborators):
-        self.engine = collaborators.engine
-        self.card = collaborators.settings
+    def __init__(
+        self,
+        engine: decsim.engine.Engine,
+        card: "MultiLevelDistillationFactory.Settings",
+        round_ticks: int,
+    ):
+        self.engine = engine
+        self.card = card
         self.levels = _with_the_papers_cycles(self.card.levels)
-        self.preparation_ticks = _preparation_ticks(
-            self.card, collaborators.round_ticks
-        )
+        self.preparation_ticks = _preparation_ticks(self.card, round_ticks)
         self.trace = _TraceSources()
-        self._initialize_run_seed_state(self.card.seed)
-        self._reset_state(collaborators.round_ticks)
+        seeding._RandomSeedConsumer.__init__(self, self.card.seed)
+        self.state = _chain_state(self.levels, round_ticks, self.engine)
 
     def start(self) -> None:
         """Continuous production fills the top buffer before any request."""
@@ -411,10 +380,10 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def request(self, operation_id: int, callback: Callable[[], None]) -> None:
         """Record the demand for a final state and pull the chain."""
-        self.waiting.add(operation_id, callback)
-        top_counters = self.counters_by_level[len(self.levels)]
+        self.state.waiting.add(operation_id, callback)
+        top_counters = self.state.counters_by_level[len(self.levels)]
         top_store = top_counters.stored_state_count
-        waiting_count = len(self.waiting)
+        waiting_count = len(self.state.waiting)
         self.engine.log(
             log_sources.MAGIC_STATE_FACTORY,
             f"op#{operation_id} requests a magic state "
@@ -424,33 +393,16 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def shutdown(self) -> None:
         """Stop the production loop; the program is complete."""
-        self._is_shut_down = True
-
-    def _reset_state(self, round_ticks: int) -> None:
-        self.round_ticks_by_level = {}
-        above_top_level = len(self.levels) + 1
-        for level in range(1, above_top_level):
-            settings = self.levels[level - 1]
-            self.round_ticks_by_level[level] = _round_ticks(
-                settings.logical_cycles_per_round,
-                settings.distance,
-                round_ticks,
-            )
-        # Level 0 is preparation; level l is self.levels[l - 1].
-        self.counters_by_level = {}
-        for level in range(0, above_top_level):
-            self.counters_by_level[level] = _LevelCounters()
-        self.waiting = _WaitingRequests(self.engine)
-        self.total_stall_ticks = 0
-        self.peak_in_flight_count = 0
-        self._is_shut_down = False
+        self.state.is_shut_down = True
 
     def _deliver_to_waiting(self) -> None:
-        top_counters = self.counters_by_level[len(self.levels)]
-        while top_counters.stored_state_count > 0 and self.waiting:
+        top_counters = self.state.counters_by_level[len(self.levels)]
+        while top_counters.stored_state_count > 0 and self.state.waiting:
             top_counters.stored_state_count -= 1
-            operation_id, callback, waited_ticks = self.waiting.serve_oldest()
-            self.total_stall_ticks += waited_ticks
+            operation_id, callback, waited_ticks = (
+                self.state.waiting.serve_oldest()
+            )
+            self.state.total_stall_ticks += waited_ticks
             self.trace.state_delivered.fire(operation_id, waited_ticks)
             tag = _stall_tag(waited_ticks)
             self.engine.log(
@@ -461,7 +413,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def _start_work(self) -> None:
         """Deliver what is ready, then start every round the demand allows."""
-        if self._is_shut_down:
+        if self.state.is_shut_down:
             return
         self._deliver_to_waiting()
         has_progress = True
@@ -471,16 +423,16 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             has_started_distillation = self._start_distillation(demand_by_level)
             has_progress = has_started_preparation or has_started_distillation
         total_busy_unit_count = 0
-        for counters in self.counters_by_level.values():
+        for counters in self.state.counters_by_level.values():
             total_busy_unit_count += counters.busy_unit_count
-        self.peak_in_flight_count = max(
-            self.peak_in_flight_count, total_busy_unit_count
+        self.state.peak_in_flight_count = max(
+            self.state.peak_in_flight_count, total_busy_unit_count
         )
 
     def _demand_by_level(self) -> dict:
         """How many states each level must supply, top down."""
         top_level = len(self.levels)
-        demand_by_level = {top_level: len(self.waiting)}
+        demand_by_level = {top_level: len(self.state.waiting)}
         if self.card.production_mode == "continuous":
             demand_by_level[top_level] += self.card.buffer_capacity
         for level in range(top_level, 0, -1):
@@ -495,7 +447,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def _wanted_round_count(self, level: int, demand: int) -> int:
         """Rounds a level must run to cover a demand for its outputs."""
-        counters = self.counters_by_level[level]
+        counters = self.state.counters_by_level[level]
         in_progress_count = (
             counters.busy_unit_count * self.card.outputs_per_round
         )
@@ -508,7 +460,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def _start_preparation(self, demand_by_level: dict) -> bool:
         has_progress = False
-        counters = self.counters_by_level[0]
+        counters = self.state.counters_by_level[0]
         idle_unit_count = (
             self.card.preparation_unit_count - counters.busy_unit_count
         )
@@ -542,9 +494,9 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         has_progress = False
         wanted_round_count = self._wanted_round_count(level, demand)
         settings = self.levels[level - 1]
-        counters = self.counters_by_level[level]
+        counters = self.state.counters_by_level[level]
         idle_unit_count = settings.unit_count - counters.busy_unit_count
-        input_counters = self.counters_by_level[level - 1]
+        input_counters = self.state.counters_by_level[level - 1]
         while wanted_round_count > 0 and idle_unit_count > 0:
             if input_counters.stored_state_count < self.card.inputs_per_round:
                 break
@@ -559,7 +511,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     def _start_round(self, level: int) -> None:
         distillation_round = _DistillationRound(level)
         self.engine.schedule(
-            self.round_ticks_by_level[level],
+            self.state.round_ticks_by_level[level],
             lambda: self._finish_physical_round(distillation_round),
             label=f"distill_L{level}",
         )
@@ -601,7 +553,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             return
         distillation_round.is_done = True
         level = distillation_round.level
-        counters = self.counters_by_level[level]
+        counters = self.state.counters_by_level[level]
         counters.busy_unit_count -= 1
         self._mark_stochastic_use()
         settings = self.levels[level - 1]
@@ -618,7 +570,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self._start_work()
 
     def _add_outputs(self, level: int) -> None:
-        counters = self.counters_by_level[level]
+        counters = self.state.counters_by_level[level]
         counters.stored_state_count += self.card.outputs_per_round
         counters.produced_count += self.card.outputs_per_round
         destination = f"level-{level} state to buffer"
@@ -633,7 +585,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         )
 
     def _finish_preparation(self) -> None:
-        counters = self.counters_by_level[0]
+        counters = self.state.counters_by_level[0]
         counters.busy_unit_count -= 1
         self._mark_stochastic_use()
         is_success = (
@@ -650,8 +602,8 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 class _WaitingRequests:
     """The requests waiting for a magic state, served oldest first.
 
-    A request's stall runs from the tick it asked to the tick it is
-    served, so a request served at once waited nothing.
+    A stall runs from the request to its service, so one served at once
+    waited nothing.
     """
 
     def __init__(self, engine: decsim.engine.Engine) -> None:
@@ -679,7 +631,7 @@ class _WaitingRequests:
 
 @dataclasses.dataclass
 class _LevelCounters:
-    """The states in store, units busy, states made and rounds failed."""
+    """One distillation level's counters."""
 
     stored_state_count: int = 0
     busy_unit_count: int = 0
@@ -702,6 +654,33 @@ class _DistillationRound:
     is_physically_done: bool = False
     remaining_decode_count: int = 0
     is_done: bool = False
+
+
+@dataclasses.dataclass
+class _StageState:
+    """What a 15-to-1 stage holds while it runs, its requests included."""
+
+    waiting: _WaitingRequests
+    stored_state_count: int
+    produced_count: int = 0
+    in_flight_count: int = 0
+    busy_unit_count: int = 0
+    peak_in_flight_count: int = 0
+    total_stall_ticks: int = 0
+    is_shut_down: bool = False
+
+
+@dataclasses.dataclass
+class _ChainState:
+    """What a level chain holds while it runs, its requests included."""
+
+    round_ticks_by_level: dict
+    # level 0 is preparation; level l is the factory's levels[l - 1]
+    counters_by_level: dict
+    waiting: _WaitingRequests
+    total_stall_ticks: int = 0
+    peak_in_flight_count: int = 0
+    is_shut_down: bool = False
 
 
 def _check_production_mode(
@@ -730,66 +709,6 @@ def _check_probability(name: str, value) -> None:
     probability = float(value)
     if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
         raise ValueError(f"{name} must be finite and in [0, 1]")
-
-
-def _with_numbers(section: Mapping, section_name: str, keys: tuple) -> dict:
-    """YAML 1.1 loads 1e-3 as text, so each number is read before use."""
-    fields = dict(section)
-    for key in keys:
-        if key in fields:
-            fields[key] = config.finite_number(
-                section, section_name, key, fields[key]
-            )
-    return fields
-
-
-def _check_required_keys(kind: str, section: Mapping, required: tuple) -> None:
-    """A row's keys with no default are written, or named as missing."""
-    missing = []
-    for key in required:
-        if key not in section:
-            missing.append(key)
-    if missing:
-        raise ValueError(
-            f"magic_state_factory kind {kind} needs {missing}; "
-            "configs/reference.yaml lists every key"
-        )
-
-
-def _levels_from_yaml(level_sections) -> tuple:
-    """The yaml's list of level mappings as DistillLevel records."""
-    level_keys = _distill_level_keys()
-    levels = []
-    for index, level_section in enumerate(level_sections):
-        level_name = f"magic_state_factory.levels[{index}]"
-        tables.refuse_unknown_keys(level_name, level_section, level_keys)
-        level_fields = _with_numbers(
-            level_section, level_name, ("success_probability",)
-        )
-        level = DistillLevel(**level_fields)
-        levels.append(level)
-    return tuple(levels)
-
-
-def _distill_level_keys() -> tuple:
-    names = []
-    for field in dataclasses.fields(DistillLevel):
-        names.append(field.name)
-    return tuple(names)
-
-
-def _check_levels(levels: tuple) -> None:
-    for index, level in enumerate(levels):
-        _check_count(f"levels[{index}].unit_count", level.unit_count, minimum=1)
-        _check_count(f"levels[{index}].distance", level.distance, minimum=1)
-        _check_probability(
-            f"levels[{index}].success_probability", level.success_probability
-        )
-        logical_cycles = level.logical_cycles_per_round
-        if logical_cycles is not None:
-            config.check_cycles(
-                f"levels[{index}].logical_cycles_per_round", logical_cycles
-            )
 
 
 def _with_the_papers_cycles(levels: tuple) -> tuple:
@@ -829,6 +748,26 @@ def _round_ticks(logical_cycles: int, distance: int, round_ticks: int) -> int:
     return round_count * round_ticks
 
 
+def _chain_state(
+    levels: tuple, round_ticks: int, engine: decsim.engine.Engine
+) -> _ChainState:
+    """A chain at rest: each level's round length, every count at zero."""
+    round_ticks_by_level = {}
+    above_top_level = len(levels) + 1
+    for level in range(1, above_top_level):
+        settings = levels[level - 1]
+        round_ticks_by_level[level] = _round_ticks(
+            settings.logical_cycles_per_round,
+            settings.distance,
+            round_ticks,
+        )
+    counters_by_level = {}
+    for level in range(0, above_top_level):
+        counters_by_level[level] = _LevelCounters()
+    waiting = _WaitingRequests(engine)
+    return _ChainState(round_ticks_by_level, counters_by_level, waiting)
+
+
 def _stall_tag(waited_ticks: int) -> str:
     if waited_ticks == 0:
         return ""
@@ -839,12 +778,6 @@ def _stall_tag(waited_ticks: int) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event a factory reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one member per
-    counter; a component's events are the same shape, so a listener
-    reaches all of them through one name.
-    """
+    """Every event a factory reports, as one member."""
 
     state_delivered: trace_source.TraceSource = trace_source.new_source()

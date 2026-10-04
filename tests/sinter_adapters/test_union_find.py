@@ -10,26 +10,25 @@ _collection_worker_state.py:28), so the two agree shot for shot only if
 the adapter builds the row's graph.
 """
 
-import math
+import dataclasses
 
 import numpy
 import pytest
 import sinter
 import stim
-import yaml
 
 import decsim.collect as collect
-import decsim.experiments.experiment as experiment
+import decsim.decoders.union_find.cycle_count as cycle_count
+import decsim.decoders.union_find.decoder as union_find
+import decsim.frontends.settings as workload_settings
+import decsim.producers as producers
+import decsim.settings as machine_settings
 import decsim.sinter_adapters.union_find as union_find_adapter
 import decsim.windows.built_window_models as built_window_models
-import tests.experiments.yaml_configs as yaml_configs
+import decsim.windows.schemes.naive_online as naive_online
 
-BASELINE = (
-    yaml_configs.CONFIGS_DIR
-    / "experiments"
-    / "decoder_baseline"
-    / "decoder_baseline.yaml"
-)
+# the round period of the machine point the adapters answer against
+ROUND_PERIOD_MICROSECONDS = 1.1
 CODE_TASKS = ["surface_code:rotated_memory_x", "surface_code:rotated_memory_z"]
 # At this rate a shot holds enough defects that the graph's weights
 # decide many answers: the adapter on a coarser weight_step (2.0) answers
@@ -37,27 +36,17 @@ CODE_TASKS = ["surface_code:rotated_memory_x", "surface_code:rotated_memory_z"]
 SHOT_COUNT = 150
 ROUNDS = 5
 ERROR_RATE = 0.02
-# the baseline's union_find row (decoder_baseline.yaml)
-UNION_FIND_ROW = {
-    "kind": "union_find",
-    "units": 1,
-    "unit_memory": {"bits": None},
-    "engine": {
-        "clock": "fridge",
-        "fetch_cycles_per_round": 1,
-        "fetch_cycles_per_job": 0,
-        "release_cycles_per_job": 10,
-        "release_cycles_per_round": 0,
-    },
-}
+# the baseline's union_find row, charged the host's time
+HOST_TIME = cycle_count.HostMeasuredTime()
+UNION_FIND = union_find.UnionFindDecoder.Settings(timing=HOST_TIME)
 
 
 @pytest.mark.parametrize("distance", [3, 5])
 @pytest.mark.parametrize("code_task", CODE_TASKS)
 def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
-    tmp_path, distance, code_task
+    distance, code_task
 ):
-    task = union_find_task(tmp_path, distance, code_task)
+    task = baseline_task(distance, code_task, ERROR_RATE, UNION_FIND)
     seeds = range(SHOT_COUNT)
     events, machine_answers = machine_shots(task, seeds)
     (operation,) = task.settings.workload.operations
@@ -79,22 +68,9 @@ def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
     numpy.testing.assert_array_equal(adapter_answers, machine_answers)
 
 
-def test_the_adapter_is_a_sinter_decoder():
-    decoder = union_find_adapter.UnionFindDecoder()
-
-    assert isinstance(decoder, sinter.Decoder)
-
-
-@pytest.mark.parametrize("weight_step", [-1.0, 0.0, math.inf])
-def test_a_weight_step_that_is_not_finite_and_positive_is_refused(
-    weight_step,
-):
-    with pytest.raises(ValueError) as refused:
-        union_find_adapter.UnionFindDecoder(weight_step=weight_step)
-
-    assert str(refused.value) == (
-        "Union-Find weight_step must be finite and positive"
-    )
+def test_a_weight_step_that_is_not_finite_and_positive_is_refused():
+    with pytest.raises(ValueError, match="Union-Find weight_step"):
+        union_find_adapter.UnionFindDecoder(weight_step=0.0)
 
 
 def test_a_model_with_a_detector_hyperedge_is_refused():
@@ -102,27 +78,16 @@ def test_a_model_with_a_detector_hyperedge_is_refused():
     model = stim.DetectorErrorModel("error(0.1) D0 D1 D2 L0")
     decoder = union_find_adapter.UnionFindDecoder()
 
-    with pytest.raises(ValueError) as refused:
+    with pytest.raises(ValueError, match="fault 0 of sinter's detector error"):
         decoder.compile_decoder_for_dem(dem=model)
-
-    assert str(refused.value) == (
-        "fault 0 of sinter's detector error model is a detector hyperedge "
-        "with detectors (0, 1, 2); this graphlike decoder supports one or "
-        "two detectors per fault"
-    )
 
 
 def test_a_logical_error_that_flips_no_detector_is_refused():
     model = stim.DetectorErrorModel("error(0.1) D0 D1\nerror(0.1) L0")
     decoder = union_find_adapter.UnionFindDecoder()
 
-    with pytest.raises(ValueError) as refused:
+    with pytest.raises(ValueError, match="error 1 is a detectorless logical"):
         decoder.compile_decoder_for_dem(dem=model)
-
-    assert str(refused.value) == (
-        "error 1 is a detectorless logical mechanism after instruction-wide "
-        "XOR reduction: logical observables (0,)"
-    )
 
 
 def test_sinter_collects_through_the_adapter():
@@ -146,35 +111,26 @@ def test_sinter_collects_through_the_adapter():
     assert stats.errors < 200
 
 
-def union_find_task(tmp_path, distance: int, code_task: str):
-    """The one machine point of a union_find row, short shots."""
-    raw = {
-        "extends": str(BASELINE),
-        "workload": {
-            "kind": "producer",
-            "function": "decsim.producers:memory_circuit",
-            "arguments": {
-                "code_task": code_task,
-                "rounds_per_shot": ROUNDS,
-                "distance": "${qpu.distance}",
-                "physical_error_probability": ERROR_RATE,
-            },
-        },
-        "sweep": [
-            {
-                "axes": {
-                    "qpu.distance": [distance],
-                    "weak_decoder": [UNION_FIND_ROW],
-                },
-            }
-        ],
-        "collection": {"max_shots": 1},
-    }
-    config_path = tmp_path / "union_find.yaml"
-    text = yaml.safe_dump(raw, sort_keys=False)
-    config_path.write_text(text)
-    config = experiment.load_experiment(config_path)
-    return config.first_point_task()
+def baseline_task(distance: int, code_task: str, error_rate, algorithm):
+    """The decoder baseline's machine point on one weak row, short shots.
+
+    The weak base whose naive_online scheme decodes the operation as one
+    window, on one memory shot of the code task.
+    """
+    base = machine_settings.weak_decoder_baseline(
+        distance, error_rate, ROUND_PERIOD_MICROSECONDS
+    )
+    circuit_workload = producers.memory_circuit(
+        code_task, ROUNDS, distance, error_rate
+    )
+    workload = workload_settings.WorkloadSettings.running(circuit_workload)
+    scheme = naive_online.NaiveOnlineScheme.Settings()
+    windows = dataclasses.replace(base.windows, scheme=scheme)
+    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=algorithm)
+    settings = dataclasses.replace(
+        base, workload=workload, windows=windows, weak_decoder=weak_decoder
+    )
+    return collect.Task(settings, {})
 
 
 def machine_shots(task, seeds) -> tuple:

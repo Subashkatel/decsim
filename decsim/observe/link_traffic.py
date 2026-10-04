@@ -1,11 +1,8 @@
 """The traffic ledger: what the links carried, and the JSON the run exports.
 
-The ledger listens to the fabric (LinkFabric hands it every finished
-transfer once) and keeps counters per path/channel binding and the list
-of every transfer in request order; a channel's counters are the sum of
-its paths' counters by construction. traffic_json_value is
-result.link_traffic, and every key and value in it is pinned by the gate.
-The fabric runs without a ledger; nothing in the machine reads one.
+A channel's counters are the sum of its paths' by construction.
+traffic_json_value is result.link_traffic, every key pinned by the gate.
+Nothing in the machine reads the ledger.
 """
 
 import dataclasses
@@ -18,14 +15,11 @@ import decsim.records.transfers as transfer_records
 
 @dataclasses.dataclass(frozen=True)
 class TrafficCounters:
-    """Additive counters kept per path and per channel.
+    """The additive traffic counters of one path or one channel.
 
-    header_bits is the framing the wire serialized beside the payload:
-    ns-3's point-to-point device adds its header in Send and times the
-    whole packet in TransmitStart
-    (src/point-to-point/model/point-to-point-net-device.cc lines 528 and
-    243), so a path's serialization ticks follow from its payload bits,
-    its header bits and its channel's rate.
+    header_bits is the framing the wire serialized beside the payload (ns-3
+    point-to-point-net-device.cc lines 528, 243), so a path's serialization
+    follows from its payload, its header and its channel's rate.
     """
 
     transfer_count: int = 0
@@ -103,7 +97,7 @@ class TrafficCounters:
 
 @dataclasses.dataclass(frozen=True)
 class PathSnapshot:
-    """One path/channel binding, its channel alias, and its counters."""
+    """One path/channel binding, frozen for reports."""
 
     path: transfer_records.LinkPath
     physical_alias: str
@@ -122,7 +116,7 @@ class ChannelSnapshot:
 
 @dataclasses.dataclass(frozen=True)
 class FabricSnapshot:
-    """What a run's fabric looked like and carried, frozen for reports."""
+    """A run's fabric, frozen for reports."""
 
     paths: tuple
     channels: tuple
@@ -130,10 +124,11 @@ class FabricSnapshot:
 
 
 class TrafficLedger:
-    """The fabric's observer: every transfer counted per path and per channel.
+    """The fabric's observer, which counts every transfer.
 
-    A channel's alias is "channel-<n>", numbered in the order the paths
-    first meet it; the reports name channels by alias.
+    It counts per path and per channel. A channel's alias is "channel-<n>",
+    numbered in the order the paths first meet it; the reports name
+    channels by alias.
     """
 
     def __init__(self, fabric_settings: link_settings.FabricSettings) -> None:
@@ -186,11 +181,8 @@ class TrafficLedger:
     def traffic_json_value(self) -> dict:
         """What the links carried, as result.link_traffic.
 
-        Counters per path with the setup and the wait for the setup
-        engine itemized (both are engine-side work before the wire and
-        never enter a channel's counters), counters per channel, every
-        transfer, and the reconciliation of each channel against its
-        member paths.
+        The setup and the wait for the setup engine are itemized per path: both
+        are engine-side work and never enter a channel's counters.
         """
         snapshot = self.snapshot()
         setup_by_binding = self._setup_by_binding(snapshot)

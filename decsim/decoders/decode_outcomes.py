@@ -1,23 +1,20 @@
 """What a finished decode means and where its result goes.
 
-gem5's commit stage retires what executed (src/cpu/o3/commit.hh:286);
-here a weak result reaches its destination through the job's own
-on_decoded (SimPy's callback on the event), and the window side answers
-with the verdict once it holds the window's whole answer: it applies
-the confidence threshold, commits the result as final or provisionally,
-asks the strong tier itself, and tells this ledger the request is
-resolved. A strong result teaches the policy and becomes one completion
-per member request, delivered to each destination that waits for it now
-and left in the output slot of the unit that produced it when the
-destination's selection is still crossing the weak-to-strong link
-(decoders/decoder_unit.py). Every request's terminal outcome goes out
-on request_ended; the record ledger listens.
+As gem5's commit stage retires what executed (src/cpu/o3/commit.hh:286),
+a weak result reaches its destination through the job's own on_decoded,
+and the window side answers with the verdict once it holds the window's
+whole answer, telling this ledger the request is resolved. A strong
+result teaches the policy and becomes one completion per member request,
+delivered to each destination waiting for it now and otherwise left in
+the output slot of the unit that produced it (decoder_unit.py). Every
+request's terminal outcome goes out on request_ended.
 """
 
 import dataclasses
 from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
 
@@ -28,10 +25,6 @@ if TYPE_CHECKING:
 class DecodeOutcomes:
     """Delivers weak results, concludes strong ones, reports every end.
 
-    A weak result goes to the destination the job carries and the
-    window side answers with the verdict; a strong result teaches the
-    policy and becomes one completion per member request.
-
     Trace sources: verdict_given(window_key, request_key, verdict) as
     the window side answers each weak request; request_ended(job,
     result, outcome, decode_output_ticks) at every terminal outcome.
@@ -39,7 +32,7 @@ class DecodeOutcomes:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         manager: "decoder_manager_module.DecoderManager",
     ) -> None:
         self.engine = engine
@@ -53,10 +46,10 @@ class DecodeOutcomes:
     ) -> None:
         """Hand one finished weak decode to the destination that asked.
 
-        The destination is the job's own on_decoded: the window
-        committer, or the confidence join in front of it when the
-        window's answer takes two forced-class solves. The verdict on
-        the window comes back later, through resolve_weak_request.
+        The destination is the job's on_decoded: the window committer,
+        or the confidence join in front of it when the answer takes two
+        forced-class solves. The verdict comes back later, through
+        resolve_weak_request.
         """
         job.on_decoded(job, result)
 
@@ -66,12 +59,7 @@ class DecodeOutcomes:
         result: decoding_records.DecodeResult,
         verdict: decoding_records.Verdict,
     ) -> None:
-        """The window side decided this weak request: close the attempt.
-
-        Either way the window side has already told the strong side: a
-        kept result cancelled its strong request there, an escalated one
-        asked for the strong result.
-        """
+        """The window side decided this weak request: close the attempt."""
         key = (job.operation_id, job.window_id)
         self.trace.verdict_given.fire(key, job.request_key, verdict)
         self.manager.strong_requests.resolve_weak(key)
@@ -109,9 +97,9 @@ class DecodeOutcomes:
         in the output slot of the unit that produced it.
         """
         self.manager.strong_requests.finish_service(job)
-        self.manager.escalation_policy.learn_from_strong_result(
-            job.strong_decode_for, result
-        )
+        policy = self.manager.escalation_policy
+        if policy is not None:
+            policy.learn_from_strong_result(job.strong_decode_for, result)
         for held in deliveries:
             self.complete_strong(held)
 
@@ -121,8 +109,8 @@ class DecodeOutcomes:
         """Deliver a strong result to the destination that waits for it.
 
         A destination whose selection is still on its way leaves the
-        result in the output slot of the unit that produced it, the way
-        a sender keeps the packet until the far side accepts it (gem5
+        result in the output slot of the unit that produced it, as a
+        sender keeps a packet until the far side accepts it (gem5
         port.hh:244-255).
         """
         if not self.manager.strong_requests.complete(completion):
@@ -146,7 +134,6 @@ class DecodeOutcomes:
         window_key = (request_key.operation_id, request_key.window_id)
         # every finished strong result was produced by a unit, and the
         # unit is read at the decode's end, before its slot frees
-        assert unit is not None, f"strong result for {window_key} has no unit"
         unit.hold_output(window_key, completion)
 
     def report_request(
@@ -162,13 +149,7 @@ class DecodeOutcomes:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the decode outcomes reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the decode outcomes reports, as one member."""
 
     verdict_given: trace_source.TraceSource = trace_source.new_source()
     request_ended: trace_source.TraceSource = trace_source.new_source()

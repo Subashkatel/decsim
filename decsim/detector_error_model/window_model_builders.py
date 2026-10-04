@@ -2,13 +2,11 @@
 
 build_window_error_models checks a plan against its protocol and for
 contiguous commit rounds, compiles fault ownership from the dependency
-graph when the plan has one (ownership advances in plan order otherwise),
-and slices every window (Skoric et al. 2209.08552, section I.B and the
-last paragraph of section III; qLDPC's SlidingWindowDecoder). The two
-single-window builders serve the strong re-decode of one window
-(decsim/escalation/strong_window_shapes), whose exclusion ranges are decsim's
-own device: the faults the weak decoder already committed stay
-uncommitted. Nothing inside the package imports this module.
+graph when the plan has one, and slices every window (Skoric et al.
+2209.08552, section I.B and section III; qLDPC's SlidingWindowDecoder).
+The single-window builders serve the strong re-decode of one window,
+whose exclusion ranges keep the faults the weak decoder committed
+uncommitted.
 """
 
 from collections.abc import Container, Mapping, Sequence
@@ -18,12 +16,12 @@ import stim
 
 import decsim.records.windows as window_records
 from decsim.detector_error_model import (
-    fault_model_contracts,
     window_ownership_dag,
     window_placement,
     window_protocol_policy,
     window_slicer,
 )
+from decsim.records import fault_model_contracts
 
 # What a neighbour of a single window has already committed; None when
 # no neighbour has, and the window's columns are every candidate fault.

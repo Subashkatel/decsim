@@ -1,18 +1,13 @@
 """The controller's output: commands and decisions to the QPU.
 
-A decision from the Pauli frame lands here over frame_to_controller,
-which the frame side executes, and is available at the controller the
-instant it lands; a release starts its operation's command,
-a result return is reported to the QPU. Either payload then pays the
-decision-to-pulse cost, the control processor's issue pipeline from
-the decision at the core to the pulse trigger (traced on QubiC's core,
-Fruitwala 2404.15260 Sec. III and IV, in configs/reference.yaml; QICK
-measures 16 clocks for the conditional evaluation and the jump and 20
-for the next pulse, 2110.00557 lines 893-900) and crosses
-controller_to_qpu, and the QPU starts a command on its next cycle
-boundary. A preloaded command (a program root, an ordinary successor)
-skips the output path: its controller preparation happened before the
-simulated interval.
+A decision lands here over frame_to_controller. A release starts its
+operation's command; a result return is reported to the QPU. Either then
+pays the decision-to-pulse cost of the control processor's issue
+pipeline (QubiC, Fruitwala 2404.15260 Sec. III and IV; QICK 2110.00557
+measures 16 clocks for the conditional and jump and 20 for the next
+pulse), crosses controller_to_qpu, and starts on the QPU's next cycle
+boundary. A preloaded command skips the output path: it was prepared
+before the simulated interval.
 """
 
 import dataclasses
@@ -79,17 +74,11 @@ class InstructionOutput:
     ) -> None:
         """Take a Pauli-frame decision at the landing of frame_to_controller.
 
-        The frame side executes that crossing
-        (pauli_frame/decision_dispatch.py); the decision is available at
-        the controller the instant this runs. A release is consumed
-        here, and the command it releases crosses the output path in
-        send_command. A result return crosses the output path before it
-        is available at the QPU, and what receives it there is the
-        execution runtime, the classical program that branches on the
-        outcome, because the QPU device models the cycle cadence and the
-        pulses and holds no register an outcome lands in (QubiC runs the
-        branch on the control processor beside the qubit, Fruitwala et
-        al. 2404.15260 Sec. III and IV).
+        A release is consumed here and its command crosses the output path in
+        send_command. A result return crosses the output path to the execution
+        runtime, the classical program that branches on the outcome, since the
+        QPU device holds no register an outcome lands in (QubiC branches on the
+        control processor, Fruitwala et al. 2404.15260).
         """
         self._fire("DECISION_AVAILABLE", decision.target_operation_id, decision)
         if decision.releases_operation:
@@ -117,11 +106,7 @@ class InstructionOutput:
         on_started(boundary)
 
     def _send(self, payload, operation_id, event_kind: str, deliver) -> None:
-        """Pay the pulse cost, then cross controller_to_qpu.
-
-        The send is made at the output tick, when the pulse processing is
-        done; deliver(payload) runs when the QPU has it.
-        """
+        """Pay the pulse cost, then cross controller_to_qpu to deliver."""
         attribution = transfer_records.TransferAttribution(
             operation_id=operation_id,
             patch_ids=(),
@@ -165,12 +150,6 @@ class InstructionOutput:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the instruction output reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the instruction output reports, as one member."""
 
     output_event: trace_source.TraceSource = trace_source.new_source()

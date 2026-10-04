@@ -11,6 +11,7 @@ import dataclasses
 from typing import Optional, Union
 
 import decsim.build.plan as plan_build
+import decsim.config as config
 import decsim.controller.conditional_release as conditional_release_module
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.idle_rounds as idle_rounds_module
@@ -26,11 +27,9 @@ import decsim.ports as ports
 
 @dataclasses.dataclass(frozen=True)
 class Control:
-    """What issues the program to the QPU and closes the feedback loop.
+    """The components that run the program's feedback loop with the QPU.
 
-    pauli_frame is None when the run commits into no frame. streams is
-    the no-feedback row when no operation shares a stream or declares a
-    protected region.
+    pauli_frame is None when the run commits into no frame.
     """
 
     execution_runtime: execution_runtime_module.ExecutionRuntime
@@ -49,15 +48,15 @@ class Control:
         cls,
         controller: controller_settings.ControllerSettings,
         frame: Optional[pauli_frame_module.PauliFrameConfig],
+        machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         plan: plan_build.Plan,
         links: ports.Link,
     ) -> "Control":
-        """Every component of the control side, wired to one another.
-
-        One line per component, in the order an operation meets them,
-        then the wires inside the part.
-        """
+        """Every component of the control side, wired to one another."""
+        clocked_controller = config.with_machine_clock(
+            controller, machine_clock
+        )
         run_plan = plan.run_plan
         execution_runtime = execution_runtime_module.ExecutionRuntime(
             engine, plan.resource_claims
@@ -71,12 +70,15 @@ class Control:
             plan.idle_policy, patch_by_identity
         )
         instruction_output = instruction_output_module.InstructionOutput(
-            engine, controller.clock, controller.decision_to_pulse_cycles
+            engine,
+            clocked_controller.clock,
+            clocked_controller.decision_to_pulse_cycles,
         )
         conditional_release = conditional_release_module.ConditionalRelease()
         pauli_frame = None
         if frame is not None:
-            pauli_frame = frame.resolve(engine)
+            clocked_frame = config.with_machine_clock(frame, machine_clock)
+            pauli_frame = clocked_frame.build(engine)
         decision_dispatch = decision_dispatch_module.DecisionDispatch(engine)
         control = cls(
             execution_runtime=execution_runtime,

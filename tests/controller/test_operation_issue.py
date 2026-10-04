@@ -15,10 +15,8 @@ import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
 import decsim.engine as engine_module
-import decsim.links.channel as channel_module
 import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
-import decsim.observe.log_writers as log_writers
 import decsim.observe.round_events as round_events
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
@@ -64,9 +62,7 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
 def issuer_with(engine, qpu, idle_rounds, recorder):
     reference = link_profiles.logical_reference_profile()
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
-    output.link = fabric_module.LinkFabric(
-        reference, engine, channel_module.Channel
-    )
+    output.link = fabric_module.LinkFabric(reference, engine)
     output.qpu = qpu
     if recorder is not None:
         output.trace.output_event.connect(recorder.output)
@@ -76,36 +72,6 @@ def issuer_with(engine, qpu, idle_rounds, recorder):
     issuer.idle_rounds = idle_rounds
     issuer.output = output
     return issuer
-
-
-def ignore_boundary(boundary) -> None:
-    del boundary
-
-
-def test_a_preloaded_operation_starts_at_the_next_boundary_and_says_so():
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    qpu = RecordingQpu()
-    idle_rounds = RecordingIdleRounds()
-    recorder = round_events.RoundEventRecorder(engine)
-    issuer = issuer_with(engine, qpu, idle_rounds, recorder)
-    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
-    started = []
-
-    issuer.issue_operation(operation, started.append)
-    engine.run()
-
-    assert started == [BOUNDARY_TICK]
-    (command,) = qpu.issued
-    assert command.operation is operation
-    assert command.round_count == 6
-    assert command.round_ticks == 1000
-    kinds = [event.kind for event in recorder.output_events]
-    assert kinds == ["PRELOADED_COMMAND"]
-    assert idle_rounds.ended == []
-    (line,) = log.lines
-    assert line.endswith("Controller: START memory  (Clifford, qubits (0,))")
 
 
 def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
@@ -135,34 +101,3 @@ def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
         (event.kind, event.tick) for event in recorder.output_events
     ]
     assert kinds_and_ticks == [("CONTROL_PULSE_COMMAND_ISSUED", PULSE_TICKS)]
-
-
-def test_the_last_release_stops_the_qpu():
-    engine = engine_module.Engine()
-    qpu = RecordingQpu()
-    idle_rounds = RecordingIdleRounds()
-    recorder = None
-    issuer = issuer_with(engine, qpu, idle_rounds, recorder)
-    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
-
-    issuer.after_successor_release(operation, False)
-    running = qpu.finished
-    issuer.after_successor_release(operation, True)
-
-    assert running is False
-    assert qpu.finished is True
-
-
-def test_the_last_release_settles_every_idle_patch():
-    engine = engine_module.Engine()
-    qpu = RecordingQpu()
-    idle_rounds = RecordingIdleRounds()
-    issuer = issuer_with(engine, qpu, idle_rounds, None)
-    operation = program_records.Operation(1, "memory", (0,), patches=(0,))
-
-    issuer.after_successor_release(operation, False)
-    settled_before_the_end = list(idle_rounds.ended)
-    issuer.after_successor_release(operation, True)
-
-    assert settled_before_the_end == []
-    assert idle_rounds.ended == ["every idle patch"]

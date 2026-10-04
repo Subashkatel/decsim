@@ -6,51 +6,45 @@ the same: configs/deprecated/example/se.py resolves the workload and the
 system before it wires a single port.
 """
 
-import copy
 import dataclasses
 from collections.abc import Mapping
-from typing import Any
+from typing import Optional, Union
 
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.controller.settings as controller_settings
+import decsim.controller.policies as idle_policies
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
+import decsim.qpu.layouts as layouts
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
+import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
-import decsim.settings as machine_settings
-import decsim.tables as tables
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
-
-# What every windowing scheme row declares, so the escalation policy and
-# the plan read a fact rather than the row's class (ports.py,
-# WindowingScheme).
-_SCHEME_DECLARATIONS = (
-    "has_trailing_tail_context",
-    "commits_in_one_serial_chain",
-    "supports_dynamic_streams",
-)
 
 
 @dataclasses.dataclass(frozen=True)
 class Plan:
-    """Everything the wiring reads that the planner and the workload fix."""
+    """Everything the wiring reads from the planned run.
 
-    code: Any
-    layout: Any
-    scheme: Any
-    boundary_policy: Any
-    window_interaction: Any
-    idle_policy: Any
+    The planner and the workload fix it.
+    """
+
+    code: ports.CodeModel
+    layout: layouts.UniformLayout
+    scheme: ports.WindowingScheme
+    boundary_policy: ports.BoundaryPolicy
+    window_interaction: window_interactions.DefaultWindowInteraction
+    idle_policy: ports.IdlePolicy
     operations: tuple
     decode_operations: tuple
     dynamic_streams: tuple
@@ -59,8 +53,8 @@ class Plan:
     planned_operations: tuple
     run_plan: planner.RunPlan
     resource_claims: dict
-    device: Any
-    error_model_provider: Any
+    device: ports.SyndromeSource
+    error_model_provider: ports.WindowModelSource
     formation_reads: window_records.FormationReads
 
     @property
@@ -70,19 +64,29 @@ class Plan:
 
 
 def build_plan(
-    settings: machine_settings.MachineSettings, escalation_policy
+    qpu: qpu_settings.QpuSettings,
+    workload: workload_settings.WorkloadSettings,
+    windows: window_settings.WindowSettings,
+    idle_policy_settings: Union[
+        idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings
+    ],
+    detection_events: detection_event_settings.DetectionEventSettings,
+    switching_settings: Optional[escalation_settings.SwitchingSettings],
+    is_bulk_strong: bool,
+    switching: Optional[escalation_build.Switching],
 ) -> Plan:
     """The code, the workload's operations and the window plan.
 
-    Keep the root's run-shape and plan records together so their shared
-    inputs remain visible; named helpers resolve individual collaborators.
+    A switching run's policy refuses a run shape it cannot serve.
     """
-    code, layout = settings.qpu.build_code(
-        commit_rounds_override=settings.windows.commit_rounds,
-        buffer_rounds_override=settings.windows.buffer_rounds,
+    is_switching = switching_settings is not None
+    window_sizes = windows.scheme
+    code, layout = qpu.build_code(
+        commit_rounds_override=window_sizes.commit_rounds,
+        buffer_rounds_override=window_sizes.buffer_rounds,
     )
     operations, decode_operations, dynamic_streams, rounds_policy = _operations(
-        settings.workload
+        workload
     )
     external_decode_operations = decode_operations + dynamic_streams
     every_operation = operations + external_decode_operations
@@ -96,20 +100,21 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
-    scheme = _scheme(settings.windows, escalation_policy)
-    boundary_policy = _boundary_policy(
-        settings.windows, settings.escalation, escalation_policy
-    )
-    absorbs_weak_windows = escalation_build.absorbs_weak_windows(
-        settings.escalation
-    )
-    reread_regions = settings.escalation.restart_reread_buffer_regions
-    window_interaction = _window_interaction(settings.windows, reread_regions)
+    scheme = _scheme(windows)
+    boundary_policy = _boundary_policy(windows)
+    # the refusals print the strong window's row name, and only a window
+    # that absorbs the weak windows restarts any, so a run with no
+    # switching carries the default record, which absorbs none, unread
+    strong_window = _strong_window_settings(switching_settings)
+    absorbs_weak_windows = strong_window.absorbs_weak_windows
+    strong_window_name = strong_window.name
+    reread_regions = strong_window.restart_reread_buffer_regions
+    window_interaction = _window_interaction(windows, reread_regions)
     if dynamic_streams and not scheme.supports_dynamic_streams:
         raise ValueError(
             "dynamic streams require a windowing scheme that supports them"
         )
-    has_static_decode_plan = settings.workload.decode_operations is not None
+    has_static_decode_plan = workload.decode_operations is not None
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     run_shape = decoding_records.RunShape(
@@ -118,13 +123,14 @@ def build_plan(
         operations=views,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        strong_window=settings.escalation.strong_window,
+        strong_window=strong_window_name,
         is_absorbing_strong_window=absorbs_weak_windows,
-        is_bulk_strong=settings.decoder_manager.bulk_strong,
+        is_bulk_strong=is_bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
     )
-    escalation_policy.check_plan(run_shape)
+    if switching is not None:
+        switching.policy.check_plan(run_shape)
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,
@@ -134,15 +140,19 @@ def build_plan(
     planned_ids = []
     for operation in planned_operations:
         planned_ids.append(operation.id)
-    physical_circuits = settings.workload.physical_circuits
+    physical_circuits = workload.physical_circuits
     physical_tables = _physical_formation_tables(physical_circuits)
-    device = _syndrome_source(
-        settings.qpu, code, physical_circuits, physical_tables
-    )
+    circuit_arguments = _circuit_arguments(physical_circuits, physical_tables)
+    device = qpu.source.build(code, circuit_arguments)
     formation_tables = _formation_tables(
         device, planned_operations, physical_tables, rounds_policy, code
     )
-    formation_reads = _formation_reads(settings, formation_tables)
+    # a strong read also holds the raw rounds its first round reads when
+    # a seat past the weak syndrome buffer forms the events
+    strong_side_seat = detection_events.strong_side_seat()
+    formation_reads = window_records.FormationReads(
+        strong_side_seat=strong_side_seat, tables=formation_tables
+    )
     run_plan = planner.plan_execution(
         operations=views,
         planned_operation_ids=tuple(planned_ids),
@@ -150,22 +160,28 @@ def build_plan(
         layout=layout,
         scheme=scheme,
         rounds_policy=rounds_policy,
-        fallback_round_microseconds=settings.qpu.round_period_microseconds,
-        retain_strong_context=escalation_policy.requires_strong_context,
+        fallback_round_microseconds=qpu.round_period_microseconds,
+        retain_strong_context=is_switching,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
-        has_open_ended_dynamic_streams=bool(dynamic_streams),
         formation_reads=formation_reads,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
-    error_model_provider = settings.qpu.error_model_provider
-    if error_model_provider is None:
-        error_model_provider = device.window_model_source()
-    _refuse_bulk_strong_without_a_merge(
-        settings, escalation_policy, device, error_model_provider
+    error_model_provider = _error_model_provider(
+        qpu, device, code, circuit_arguments
     )
-    _install_operation_circuits(device, error_model_provider, all_operations)
-    idle_policy = _idle_policy(settings.idle_policy)
+    _refuse_bulk_strong_without_a_merge(
+        is_bulk_strong, is_switching, qpu.source, device, error_model_provider
+    )
+    installed_by_id = _installed_circuits(
+        device, error_model_provider, all_operations
+    )
+    operations = _installed(operations, installed_by_id)
+    decode_operations = _installed(decode_operations, installed_by_id)
+    dynamic_streams = _installed(dynamic_streams, installed_by_id)
+    all_operations = _installed(all_operations, installed_by_id)
+    planned_operations = _installed(planned_operations, installed_by_id)
+    idle_policy = idle_policy_settings.build()
     return Plan(
         code=code,
         layout=layout,
@@ -176,9 +192,9 @@ def build_plan(
         operations=operations,
         decode_operations=decode_operations,
         dynamic_streams=dynamic_streams,
-        protected_regions=tuple(settings.workload.protected_regions),
+        protected_regions=tuple(workload.protected_regions),
         all_operations=all_operations,
-        planned_operations=tuple(planned_operations),
+        planned_operations=planned_operations,
         run_plan=run_plan,
         resource_claims=resource_claims,
         device=device,
@@ -207,22 +223,17 @@ def _resource_claims(operations, view_by_id, layout):
 
 
 def _window_interaction(settings, reread_regions):
-    payload_row = tables.row(
-        window_settings.BOUNDARY_PAYLOADS,
-        "windows.boundary_payload",
-        settings.boundary_payload,
-    )
-    boundary_payload = payload_row()
+    boundary_payload = settings.boundary_payload.build()
     return window_interactions.DefaultWindowInteraction(
         reread_regions, boundary_payload
     )
 
 
 def _operations(settings: workload_settings.WorkloadSettings) -> tuple:
-    """The workload's private operation copies and its rounds policy.
+    """The workload's operations, each with its mode, and its rounds policy.
 
-    The run never mutates the caller's operations; an operation without
-    its own feedback boundary mode takes the workload's.
+    An operation without its own feedback boundary mode takes the
+    workload's; one operation named in two roles stays one record.
     """
     rounds_policy = settings.rounds_policy
     if rounds_policy is None:
@@ -239,21 +250,24 @@ def _operations(settings: workload_settings.WorkloadSettings) -> tuple:
 def _copies(
     operations, copies: dict, settings: workload_settings.WorkloadSettings
 ) -> tuple:
-    """Private copies of the operations, one per object identity."""
+    """The operations with their modes, one record per object identity."""
     copied = []
     for operation in operations:
         identity = id(operation)
         if identity not in copies:
-            copies[identity] = _private_copy(operation, settings)
+            copies[identity] = _with_boundary_mode(operation, settings)
         copied.append(copies[identity])
     return tuple(copied)
 
 
-def _private_copy(operation, settings: workload_settings.WorkloadSettings):
-    private = copy.copy(operation)
-    if private.feedback_boundary_mode is None:
-        private.feedback_boundary_mode = settings.feedback_boundary_mode
-    return private
+def _with_boundary_mode(
+    operation: program_records.Operation,
+    settings: workload_settings.WorkloadSettings,
+) -> program_records.Operation:
+    mode = operation.feedback_boundary_mode
+    if mode is None:
+        mode = settings.feedback_boundary_mode
+    return dataclasses.replace(operation, feedback_boundary_mode=mode)
 
 
 def _unique_operations(operations) -> tuple:
@@ -283,185 +297,51 @@ def _decode_plan_operations(
     return tuple(planned)
 
 
-def _scheme(windows: window_settings.WindowSettings, escalation_policy):
-    """The windowing scheme of the kind, or the Python-built one.
-
-    A policy that may escalate needs the lookahead terminal policy on
-    sliding windows: the literature-exact flush has no trailing tail
-    context, which is the fact the policy's own refusal reads.
-    """
-    scheme = _chosen_scheme(windows, escalation_policy)
-    _refuse_undeclared_scheme(scheme)
-    return scheme
-
-
-def _chosen_scheme(windows: window_settings.WindowSettings, escalation_policy):
-    """The Python-built scheme, or the kind's row on the section's card.
-
-    A row with keys of its own is built with its Settings record too.
-    """
-    if windows.scheme is not None:
-        return windows.scheme
-    row = tables.row(
-        window_settings.WINDOWING_SCHEMES, "windows.kind", windows.kind
-    )
-    terminal_policy = _terminal_policy(windows, escalation_policy)
-    card = window_records.WindowingSchemeCard(terminal_policy=terminal_policy)
-    if windows.row_settings is None:
-        return row(card)
-    return row(card, settings=windows.row_settings)
-
-
-def _terminal_policy(
-    windows: window_settings.WindowSettings, escalation_policy
-) -> str:
-    """The section's terminal policy, or the one the escalation needs.
-
-    A policy that may escalate reads context past the last window's
-    commit, so a silent section gets the lookahead tail; the policy's own
-    refusal (escalation/policies.py) is what stops a scheme whose last
-    window carries no trailing tail.
-    """
-    if windows.terminal_policy is not None:
-        return windows.terminal_policy
-    if escalation_policy.requires_strong_context:
-        return "lookahead"
-    return "flush"
-
-
-def _refuse_undeclared_scheme(scheme) -> None:
-    """A windowing scheme row declares the facts its callers read."""
-    row = type(scheme)
-    row_name = row.__name__
-    declarations = ", ".join(_SCHEME_DECLARATIONS)
-    for declaration in _SCHEME_DECLARATIONS:
-        if hasattr(scheme, declaration):
-            continue
-        raise ValueError(
-            f"windowing scheme {row_name} does not declare "
-            f"{declaration}; every row of windows.kind declares "
-            f"{declarations}"
-        )
-
-
-def _refuse_undeclared_boundary_policy(boundary_policy) -> None:
-    """A boundary policy row declares whether it ships provisionally."""
-    if hasattr(boundary_policy, "ships_provisional_boundaries"):
-        return
-    row = type(boundary_policy)
-    row_name = row.__name__
-    raise ValueError(
-        f"boundary policy {row_name} does not declare "
-        "ships_provisional_boundaries; every boundary policy row declares "
-        "whether it ships a boundary before the result is final"
-    )
-
-
-def _boundary_policy(
-    windows: window_settings.WindowSettings,
-    escalation: escalation_settings.EscalationSettings,
-    escalation_policy,
+def _strong_window_settings(
+    switching: Optional[escalation_settings.SwitchingSettings],
 ):
-    """The row windows.boundaries names, or the one the escalation needs.
-
-    A policy that may escalate holds boundaries until results are final
-    (descendants wait out an escalation); a strong window that absorbs
-    the weak windows it covers keeps the weak chain committing eagerly.
-    The boundary policy's own check_plan refuses the wrong pairing when a
-    yaml names it against the escalation.
-    """
-    if windows.boundary_policy is not None:
-        _refuse_undeclared_boundary_policy(windows.boundary_policy)
-        return windows.boundary_policy
-    boundaries = _boundaries_name(windows, escalation, escalation_policy)
-    row = tables.row(
-        window_settings.BOUNDARY_POLICIES, "windows.boundaries", boundaries
-    )
-    return row()
+    """The strong window's record; the default on a run with no switching."""
+    if switching is None:
+        return escalation_settings.SwitchingSettings.strong_window
+    return switching.strong_window
 
 
-def _boundaries_name(
-    windows: window_settings.WindowSettings,
-    escalation: escalation_settings.EscalationSettings,
-    escalation_policy,
-) -> str:
-    """The section's boundaries row, or the one the rows declare.
-
-    A default lives on the class that owns the parameter, gem5's rule for
-    a SimObject's params (gem5 src/python/m5/SimObject.py
-    :313-318, _new_param setting the ParamDesc's default on the class it
-    is declared in, inherited through the _values parent chain set at
-    :240-254). The escalation policy row owns this one, and a row that
-    may escalate hands it to its strong window shape, whose absorption is
-    what decides.
-    """
-    if windows.boundaries is not None:
-        return windows.boundaries
-    if not escalation_policy.requires_strong_context:
-        return escalation_policy.default_boundary_policy
-    shape = escalation_build.strong_window_row(escalation)
-    return shape.default_boundary_policy
+def _scheme(windows: window_settings.WindowSettings):
+    """The windowing scheme the windows' record builds, with its tail."""
+    return windows.scheme.build(windows.terminal_policy)
 
 
-def _idle_policy(settings: controller_settings.IdlePolicySettings):
-    """The Python-built policy, or the kind's row.
-
-    A row with keys of its own is built with its Settings record.
-    """
-    if settings.policy is not None:
-        return settings.policy
-    row = tables.row(
-        controller_settings.IDLE_POLICIES, "idle_policy.kind", settings.kind
-    )
-    if settings.row_settings is None:
-        return row()
-    return row(settings=settings.row_settings)
+def _boundary_policy(windows: window_settings.WindowSettings):
+    """The windows' boundary policy."""
+    return windows.boundary_policy.build()
 
 
-def _syndrome_source(
+def _error_model_provider(
     settings: qpu_settings.QpuSettings,
-    code,
-    physical_circuits: Mapping,
-    physical_tables: Mapping,
-):
-    """The device of the qpu kind, or the Python-built one.
-
-    A row that shapes its payloads by the code card is built with the
-    run's card, so a yaml that names it needs no argument of its own; a
-    row that reads its widths off a circuit is built with the
-    workload's physical circuits instead; a row with keys of its own is
-    built with its Settings record too.
-    """
-    if settings.device is not None:
-        return settings.device
-    row = tables.row(qpu_settings.SYNDROME_SOURCES, "qpu.kind", settings.kind)
-    arguments = {}
-    if row.takes_code_card:
-        arguments["code"] = code
-    else:
-        circuit_arguments = _circuit_arguments(
-            physical_circuits, physical_tables
-        )
-        arguments.update(circuit_arguments)
-    if settings.row_settings is not None:
-        arguments["settings"] = settings.row_settings
-    return row(**arguments)
+    device: ports.SyndromeSource,
+    code: ports.CodeModel,
+    circuit_arguments: Mapping,
+) -> ports.WindowModelSource:
+    """The window models' source: the run's own, or the one the qpu names."""
+    model_record = settings.error_model_provider
+    if model_record is None:
+        return device.window_model_source()
+    return model_record.build(code, circuit_arguments)
 
 
 def _circuit_arguments(
-    physical_circuits: Mapping, physical_tables: Mapping
+    physical_circuits: tuple, physical_tables: Mapping
 ) -> dict:
     """The source's constructor arguments for the workload's circuits.
 
-    A finite circuit is its measurement schedule and the round each
-    detector completes in, keyed by the stream that runs it, which is
-    StimDevice's declaration (qpu/stim_device.py); live fragments are
-    the programs StreamingStimDevice executes.
+    A finite circuit gives StimDevice its measurement schedule and each
+    detector's round, keyed by the stream that runs it; live fragments
+    are the programs StreamingStimDevice executes.
     """
     measurement_rounds = {}
     detector_rounds = {}
     programs = {}
-    for key, physical in physical_circuits.items():
+    for key, physical in physical_circuits:
         if isinstance(physical, workload_records.FiniteCircuit):
             measurement_rounds[key] = dict(physical.measurement_rounds)
             table = physical_tables[key]
@@ -477,15 +357,10 @@ def _circuit_arguments(
     return arguments
 
 
-def _physical_formation_tables(physical_circuits: Mapping) -> dict:
-    """Each finite circuit's recipes, by the stream key that runs it.
-
-    The source is declared each detector's round from this table, and
-    the plan reads from it how many rounds before a read its first
-    round's recipes reach.
-    """
+def _physical_formation_tables(physical_circuits: tuple) -> dict:
+    """Each finite circuit's recipes, by the stream key that runs it."""
     tables = {}
-    for key, physical in physical_circuits.items():
+    for key, physical in physical_circuits:
         if not isinstance(physical, workload_records.FiniteCircuit):
             continue
         tables[key] = _physical_formation_table(physical)
@@ -494,9 +369,9 @@ def _physical_formation_tables(physical_circuits: Mapping) -> dict:
 
 def _physical_formation_table(
     physical: workload_records.FiniteCircuit,
-) -> detector_formation.FormationTable:
+) -> formation_records.FormationTable:
     """The recipes, formed off the declared measurement schedule."""
-    schedule = physical.measurement_rounds
+    schedule = dict(physical.measurement_rounds)
     rounds = schedule.values()
     round_count = max(rounds)
     return detector_formation.build_formation_table(
@@ -509,11 +384,10 @@ def _formation_tables(
 ) -> dict:
     """The recipes of every planned operation the source forms from.
 
-    The source reads an operation's recipes off its circuit when the
-    operation begins (qpu/stim_device.py, _sample_shot), after the plan
-    has placed the holds, so the plan reads the same circuit here. A
-    source that answers no recipes forms nothing, and a stream's
-    segments are planned while their stream runs, so neither has one.
+    The source reads them off the circuit only when the operation
+    begins, after the plan has placed the holds, so the plan reads the
+    same circuit here. A stream's segments are planned while their
+    stream runs, so they have none.
     """
     if not isinstance(device, ports.DetectionEventFormer):
         return {}
@@ -538,67 +412,65 @@ def _operation_formation_table(operation, rounds_policy, code):
     )
 
 
-def _formation_reads(
-    settings: machine_settings.MachineSettings, tables: Mapping
-) -> window_records.FormationReads:
-    """Which reads also hold the raw rounds their first round reads.
-
-    A strong read does, when a seat past the weak syndrome buffer forms.
-    """
-    strong_side_seat = settings.detection_events.strong_side_seat()
-    return window_records.FormationReads(
-        strong_side_seat=strong_side_seat, tables=tables
-    )
-
-
 def _refuse_bulk_strong_without_a_merge(
-    settings: machine_settings.MachineSettings,
-    escalation_policy,
-    device,
-    error_model_provider,
+    is_bulk_strong: bool,
+    is_switching: bool,
+    source_settings: qpu_settings.SourceSettings,
+    device: ports.SyndromeSource,
+    error_model_provider: ports.WindowModelSource,
 ) -> None:
     """bulk_strong merges strong re-decodes that carry timing alone.
 
-    Only the strong pool of a switching run merges, so the key beside
-    any other escalation is read by nothing. The merged decode reads no
-    bits and returns no correction (decoder_manager.bulk_strong in
-    configs/reference.yaml), so rounds that carry values, or windows
-    whose models come from a provider other than the source's own,
-    would be lost.
+    Without switching nothing reads the flag; and the merged decode
+    reads no bits and returns no correction, so rounds that carry values
+    or models from another provider would be lost.
     """
-    if not settings.decoder_manager.bulk_strong:
+    if not is_bulk_strong:
         return
-    if not escalation_policy.requires_strong_context:
+    if not is_switching:
         raise ValueError(
             "decoder_manager.bulk_strong merges the strong pool's queued "
-            f"re-decodes, and escalation.kind {settings.escalation.kind} "
-            "has no strong pool; remove the key or run switching"
+            "re-decodes, and a run with no switching has no strong pool; "
+            "remove the key or run switching"
         )
     own_models = device.window_model_source()
     builds_models = error_model_provider is not own_models
     if not device.emits_bit_values and not builds_models:
         return
+    source_name = source_settings.name
     raise ValueError(
         "decoder_manager.bulk_strong merges timing-only strong re-decodes, "
-        f"and qpu.kind {settings.qpu.kind} gives the decoders bits and "
-        "models the merged decode would drop; set bulk_strong false or "
-        "qpu.kind timing_only"
+        f"and the qpu source {source_name} gives the decoders bits and "
+        "models the merged decode would drop; set bulk_strong False or "
+        "use the timing_only source"
     )
 
 
-def _install_operation_circuits(device, model_provider, operations) -> None:
-    """Copy the root-owned circuit once when either consumer requires it."""
+def _installed_circuits(device, model_provider, operations) -> dict:
+    """Each operation by id, its circuit a copy when either consumer reads it.
+
+    The copy keeps a shot from holding a circuit another shot shares.
+    """
     source_scope = _operation_circuit_scope(device, "syndrome source")
     model_scope = _operation_circuit_scope(model_provider, "model provider")
     needs_circuit = "per_operation" in (source_scope, model_scope)
+    installed_by_id = {}
     for operation in operations:
-        if not needs_circuit:
-            operation.circuit = None
-            continue
-        if operation.circuit is None:
-            continue
-        circuit_text = str(operation.circuit)
-        operation.circuit = stim.Circuit(circuit_text)
+        circuit = None
+        if needs_circuit and operation.circuit is not None:
+            circuit_text = str(operation.circuit)
+            circuit = stim.Circuit(circuit_text)
+        installed = dataclasses.replace(operation, circuit=circuit)
+        installed_by_id[operation.id] = installed
+    return installed_by_id
+
+
+def _installed(operations: tuple, installed_by_id: dict) -> tuple:
+    installed = []
+    for operation in operations:
+        installed_operation = installed_by_id[operation.id]
+        installed.append(installed_operation)
+    return tuple(installed)
 
 
 def _operation_circuit_scope(component, role):

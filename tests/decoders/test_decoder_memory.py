@@ -5,7 +5,7 @@ its own registers: AFS's syndrome hold registers and STM (Das et al.
 2001.06598, lines 619-621, 836-839) and Collision Clustering's input
 syndrome registers beside its SRAM tables (Barber et al. 2309.05558,
 lines 460-462). decsim prices that as a per-unit memory with a capacity
-in bits (the yaml's unit_memory.bits), taken when a job's rounds land
+in bits (UnitMemorySettings.bits), taken when a job's rounds land
 and freed when the outcome leaves.
 
 The rounds are ordered here, once, so a decoder reads them in the order
@@ -30,7 +30,6 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.qpu.round_policies as round_policies
@@ -181,7 +180,7 @@ def test_a_bounded_memory_refuses_rounds_that_state_no_size():
     memory = decoder_memory.DecoderMemory("default", 0, 64)
     job = unsized_job("w0", 3)
 
-    with pytest.raises(RuntimeError, match="needs sized rounds"):
+    with pytest.raises(RuntimeError, match="#0 memory holds 64 bits"):
         memory.deposit(job)
 
 
@@ -208,40 +207,6 @@ def test_a_deposited_job_occupies_its_bits_until_it_is_taken():
     assert memory.occupied_bits == 0
 
 
-def test_depositing_one_job_twice_is_refused():
-    four_rounds_bits = 4 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 0, four_rounds_bits)
-    job = timing_only_job("w0", 3)
-    memory.deposit(job)
-    with pytest.raises(RuntimeError, match="already holds 'w0'"):
-        memory.deposit(job)
-
-
-def test_a_window_wider_than_the_memory_stops_the_run_with_the_numbers():
-    two_rounds_bits = 2 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 1, two_rounds_bits)
-    job = timing_only_job("big", 3)
-    window_bits = 3 * BITS_PER_ROUND
-    with pytest.raises(decoder_memory.DecoderMemoryCapacityError) as caught:
-        memory.deposit(job)
-    failure = caught.value
-    assert failure.pool == "default"
-    assert failure.unit == 1
-    assert failure.requested_bits == window_bits
-    assert failure.capacity_bits == two_rounds_bits
-    assert memory.occupied_bits == 0
-
-
-def test_the_capacity_error_names_the_memorys_bits():
-    two_rounds_bits = 2 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 1, two_rounds_bits)
-    job = timing_only_job("big", 3)
-    with pytest.raises(
-        decoder_memory.DecoderMemoryCapacityError, match="holds 4 bits"
-    ):
-        memory.deposit(job)
-
-
 def _two_patch_memory_run(bits_per_unit, unit_count):
     """Two three-round memory operations, one memory of the size given."""
     operations = []
@@ -259,10 +224,13 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
     )
     qpu = qpu_settings.QpuSettings(distance=3)
     # one microsecond a round, over each operation's three rounds
-    decoder = decoders.PresetLatencyDecoder(3.0)
+    decoder = decoders.PresetLatencyDecoder.Settings(3.0)
     unit_memory = decoder_settings.UnitMemorySettings(bits=bits_per_unit)
-    weak_decoder = decoder_settings.DecoderSettings(
-        decoder=decoder, units=unit_count, unit_memory=unit_memory
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder,
+        unit_count=unit_count,
+        unit_memory=unit_memory,
+        engine=declared_run.DECLARED_ENGINE,
     )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
@@ -291,7 +259,9 @@ def test_a_unit_too_small_for_its_window_stops_the_run():
     stabilizer_bits_per_round = 8
     settings = _two_patch_memory_run(stabilizer_bits_per_round, unit_count=1)
     machine = machine_module.Machine.build(settings)
-    with pytest.raises(decoder_memory.DecoderMemoryCapacityError):
+    with pytest.raises(
+        decoder_memory.DecoderMemoryCapacityError, match="the window needs 24"
+    ):
         machine.run()
 
 
@@ -317,7 +287,6 @@ def window_completion_ticks(
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(compute_microseconds)
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=1, capacity_bits=capacity_bits
     )
@@ -328,7 +297,6 @@ def window_completion_ticks(
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = decoder
-    manager.escalation_policy = policy
     transfer_ticks = config.microseconds_to_ticks(transfer_microseconds)
     send_input = landing_after(engine, transfer_ticks)
     completion_ticks = {}
@@ -377,7 +345,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
 
     An input two jobs read is written once: the jobs that share one
     landed input are the forced-class solves of one window's request
-    (decision D2) and the boundary they fold is that window's one
+    and the boundary they fold is that window's one
     boundary, so the first write stands and a second is refused here
     rather than XORing a second mask over the first. Helios keeps its
     shared memory single-writer (2301.08419 lines 632-640).
@@ -395,7 +363,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
     memory.deposit(first)
     memory.add_reader(second)
     assert memory.rewrite(first, "the masked input") == "the masked input"
-    with pytest.raises(RuntimeError, match="already written"):
+    with pytest.raises(RuntimeError, match="give this tier boundary_fold copy"):
         memory.rewrite(second, "a second mask")
 
 

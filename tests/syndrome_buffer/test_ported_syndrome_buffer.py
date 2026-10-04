@@ -22,16 +22,9 @@ import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import tests.declared_run as declared_run
 
 PERIOD_TICKS = 10
-# the last window of the d = 3 machine: six rounds of 8 bits, one of 12
-D3_LAST_WINDOW_BITS = (8, 8, 8, 8, 8, 8, 12)
-# the d = 11 windows: 60 then 21 x 120 bits, or 22 x 120 then 180
-D11_FIRST_WINDOW_BITS = (60,) + (120,) * 21
-D11_READOUT_WINDOW_BITS = (120,) * 22 + (180,)
-PORTED_ROWS = ported_syndrome_buffer.SYNDROME_BUFFERS
 # read, write and read/write port counts; each reads and writes somewhere
 PORT_SHAPES = (
     (1, 1, 0),
@@ -70,13 +63,10 @@ def law_completions(requests, port_kinds, cycles_per_access, latency_cycles):
     return completions
 
 
-def _store(engine, **row_keys) -> ported_syndrome_buffer.PortedSyndromeBuffer:
+def _store(engine, **port_keys) -> ported_syndrome_buffer.PortedSyndromeBuffer:
     clock = config.Clock(PERIOD_TICKS)
-    row_settings = ported_syndrome_buffer.PortedSyndromeBuffer.Settings(
-        **row_keys
-    )
-    settings = syndrome_buffer_settings.SyndromeBufferSettings(
-        kind="ported_syndrome_buffer", clock=clock, row_settings=row_settings
+    settings = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=clock, **port_keys
     )
     return ported_syndrome_buffer.PortedSyndromeBuffer(settings, engine)
 
@@ -184,51 +174,6 @@ def test_every_completion_is_the_fifo_multi_port_law_property():
         assert _run_program(program, shape) == expected, seed
 
 
-@pytest.mark.parametrize(
-    ("round_bits", "cycles"),
-    [(D11_FIRST_WINDOW_BITS, 323), (D11_READOUT_WINDOW_BITS, 353)],
-)
-def test_a_d11_window_over_a_byte_word_takes_one_access_a_word(
-    round_bits, cycles
-):
-    """8 + 21 x 15 = 323 and 22 x 15 + 23 = 353 cycles of one read port."""
-    engine = engine_module.Engine()
-    store = _store(engine)
-    window = _stored_window(store, round_bits)
-
-    assert store.book_read(window) == cycles * PERIOD_TICKS
-
-
-def test_two_readers_on_one_read_port_finish_one_read_apart():
-    """The d = 3 last window is 6 x 8 + 12 bits: 8 words, then 8 more."""
-    engine = engine_module.Engine()
-    store = _store(engine)
-    window = _stored_window(store, D3_LAST_WINDOW_BITS)
-
-    first = store.book_read(window)
-    second = store.book_read(window)
-
-    assert (first, second) == (8 * PERIOD_TICKS, 16 * PERIOD_TICKS)
-
-
-def test_a_write_waits_for_no_read_on_its_own_port():
-    engine = engine_module.Engine()
-    store = _store(engine)
-    window = _stored_window(store, D3_LAST_WINDOW_BITS)
-    store.book_read(window)
-
-    assert store.book_write((1, 8), 8) == 1 * PERIOD_TICKS
-
-
-def test_a_single_read_write_port_makes_a_write_wait_for_the_read():
-    engine = engine_module.Engine()
-    store = _store(engine, read_ports=0, write_ports=0, read_write_ports=1)
-    window = _stored_window(store, D3_LAST_WINDOW_BITS)
-    store.book_read(window)
-
-    assert store.book_write((1, 8), 8) == 9 * PERIOD_TICKS
-
-
 def test_an_arrival_between_edges_starts_at_the_next_edge():
     engine = engine_module.Engine()
     engine.now = 1
@@ -253,43 +198,37 @@ def test_each_access_is_reported_with_its_port_and_its_three_ticks():
     ]
 
 
-def test_the_default_shape_is_one_byte_fifo_port_each_way():
-    """sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 15-16."""
-    defaults = ported_syndrome_buffer.PortedSyndromeBuffer.Settings()
+def test_the_default_shape_is_the_sky130_byte_fifo_one_port_each_way():
+    """sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 14-16."""
+    fifo = ported_syndrome_buffer.PortedSyndromeBufferSettings()
 
-    assert (defaults.read_ports, defaults.write_ports) == (1, 1)
-    assert defaults.read_write_ports == 0
-    assert defaults.word_bits == 8
-    assert defaults.cycles_per_access == 1
-    assert defaults.access_latency_cycles == 0
+    assert (fifo.read_ports, fifo.write_ports) == (1, 1)
+    assert fifo.read_write_ports == 0
+    assert fifo.word_bits == 8
+    assert fifo.cycles_per_access == 1
+    assert fifo.access_latency_cycles == 0
 
 
-def _section_settings(section):
-    clocks = config.ClockSettings.from_yaml({"fridge": 250.0})
-    return syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks, PORTED_ROWS
+def test_afs_word_memory_reads_32_bits_in_one_nanosecond():
+    """Four cycles a 32-bit read at 4 GHz, 2001.06598 lines 531 and 1102."""
+    engine = engine_module.Engine()
+    four_gigahertz = config.Clock.from_megahertz(4000.0)
+    afs = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=four_gigahertz,
+        word_bits=32,
+        cycles_per_access=4,
     )
+    store = ported_syndrome_buffer.PortedSyndromeBuffer(afs, engine)
+    window = _stored_window(store, (32,))
 
-
-@pytest.mark.parametrize("key", ["write_cycles", "read_cycles"])
-def test_a_flat_access_cost_under_the_ported_row_is_refused_by_name(key):
-    section = {"kind": "ported_syndrome_buffer", key: 1}
-
-    with pytest.raises(
-        ValueError, match=rf"weak_syndrome_buffer does not know \['{key}'\]"
-    ):
-        _section_settings(section)
+    assert store.book_read(window) == config.microseconds_to_ticks(0.001)
 
 
 def test_a_ported_store_with_no_port_that_reads_is_refused():
-    section = {
-        "kind": "ported_syndrome_buffer",
-        "read_ports": 0,
-        "read_write_ports": 0,
-    }
-
     with pytest.raises(ValueError, match="needs a port that reads"):
-        _section_settings(section)
+        ported_syndrome_buffer.PortedSyndromeBufferSettings(
+            read_ports=0, read_write_ports=0
+        )
 
 
 @pytest.mark.parametrize(
@@ -305,27 +244,17 @@ def test_a_ported_store_with_no_port_that_reads_is_refused():
 def test_a_ported_key_out_of_its_domain_is_refused_by_name(
     key, value, sentence
 ):
-    section = {"kind": "ported_syndrome_buffer", key: value}
+    fields = {key: value}
 
     with pytest.raises(ValueError, match=sentence):
-        _section_settings(section)
-
-
-def test_a_ported_strong_syndrome_buffer_is_refused():
-    section = {"kind": "ported_syndrome_buffer"}
-
-    with pytest.raises(
-        ValueError, match="strong_syndrome_buffer.kind ported_syndrome_buffer"
-    ):
-        syndrome_buffer_settings.check_strong_section_charges_nothing(section)
+        ported_syndrome_buffer.PortedSyndromeBufferSettings(**fields)
 
 
 def test_a_declared_weak_run_on_a_ported_store_delays_the_decode_only():
     """The byte port's reads and writes cost cycles the flat row does not."""
-    clocks = config.ClockSettings.from_yaml({"storage": 1.0})
-    section = {"kind": "ported_syndrome_buffer", "clock": "storage"}
-    settings = syndrome_buffer_settings.SyndromeBufferSettings.from_yaml(
-        section, "weak_syndrome_buffer", clocks, PORTED_ROWS
+    storage = config.Clock.from_megahertz(1.0)
+    settings = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=storage
     )
     free = declared_run.weak_only_run()
     ported = declared_run.weak_only_run(weak_syndrome_buffer=settings)

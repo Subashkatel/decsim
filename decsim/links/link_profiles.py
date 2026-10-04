@@ -1,40 +1,21 @@
-"""The link number cards: the four shipped rows and the yaml's own.
+"""The link number cards decsim ships.
 
-logical_reference_profile is the default when no links card is given:
-each hop priced from a system of decsim's scale, a surface-code patch on
-one control rack with a decoder FPGA and a strong node one hop away. A
-card is a latency and a rate, so a transfer takes its latency plus its
-bits over the rate, the law ns-3's point-to-point device times a packet
-by (point-to-point-net-device.cc:243). bandwidth_limited_profile keeps
-those latencies and provisions finite rates from the run's geometry so
-contention becomes measurable; capacity_scale sweeps the whole fabric.
-roce_v2_measured_profile is the reference card with the strong tier's
-off-board path priced by Backline's measured RoCE v2 round trip; it is
-the roce_v2_cpu and roce_v2_gpu rows. from_yaml puts the yaml's own card
-on any path, a per-transfer setup cost (setup_cycles_per_transfer)
-included.
-
-Every number carries a source string on the settings record it sets,
-and a payload's source also travels into the traffic report with every
-transfer; paper locators are arXiv numbers and text lines. To
-change a number, copy a card into your own file and edit it, then pass
-it as the machine's links setting.
+A card is a latency and a rate per hop, so a transfer takes its latency
+plus its bits over the rate, the law ns-3's point-to-point device times
+a packet by (point-to-point-net-device.cc:243). Every number carries a
+source string on the record it sets, and a payload's source travels into
+the traffic report; paper locators are arXiv numbers and text lines. To
+change a number, copy a card into your own file and pass it as the
+machine's links setting.
 """
 
 import dataclasses
 import fractions
-import math
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
-import decsim.engine
-import decsim.links.fabric as fabric
 import decsim.links.settings as settings
-import decsim.ports as ports
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.tables as tables
 
 # A decoder result reaches the frame as one bit per logical observable, the
 # logical-frame convention: Caune et al. 2410.05202 return one Boolean per
@@ -56,11 +37,11 @@ STRONG_RESULT_PAYLOAD_SOURCE = (
 # Methods). A command to the pulse controller is one instruction word:
 # QubiC's distributed processor implements every instruction as a 128-bit
 # word (Fruitwala et al., arXiv 2404.15260, Sec. III and IV).
-BUS_WORD_BITS = 32
+BUS_WORD_BITS = 32  # 2410.05202 line 999
 BUS_WORD_SOURCE = (
     "one 32-bit control bus word (Caune et al. 2410.05202, WISHBONE)"
 )
-INSTRUCTION_WORD_BITS = 128
+INSTRUCTION_WORD_BITS = 128  # 2404.15260 line 177
 INSTRUCTION_WORD_SOURCE = (
     "one 128-bit control-processor instruction word "
     "(QubiC distributed processor, Fruitwala et al. 2404.15260)"
@@ -104,7 +85,7 @@ BOUNDARY_PAYLOAD_SOURCE = "DependencyResidual seam-layer detectors"
 # Yang et al. break their closed loop down at (arXiv 2605.04892 Table I,
 # text lines 1047-1063) and the cycle of IBM's decoder FPGA (Maurer et
 # al., arXiv 2510.21600, line 404). A card's rate is bits per cycle of it.
-_REFERENCE_CLOCK_MEGAHERTZ = 250
+_REFERENCE_CLOCK_MEGAHERTZ = 250  # 2605.04892 line 1063
 _REFERENCE_CYCLE_MICROSECONDS = 1 / _REFERENCE_CLOCK_MEGAHERTZ
 
 # Yang et al., arXiv 2605.04892, Table I, is the one loop of decsim's scale
@@ -113,11 +94,11 @@ _REFERENCE_CYCLE_MICROSECONDS = 1 / _REFERENCE_CLOCK_MEGAHERTZ
 # control over further links to the pulse generators (lines 184-199).
 # The readout hop starts where Table I's acquisition window ends, which
 # decsim's round period already holds, and it includes turning the signal
-# into bits, which is why the card is the reference number a yaml's own
+# into bits, which is why the card is the reference number a caller's own
 # readout cost must not repeat. Each qubit has its own demodulation
 # channel (QubiC, Fruitwala et al. 2404.15260, lines 709-715), so a
 # round's bits arrive in parallel and the hop serializes nothing.
-_READOUT_LATENCY_MICROSECONDS = 0.048
+_READOUT_LATENCY_MICROSECONDS = 0.048  # 2605.04892 lines 1053-1055
 _READOUT_SOURCE = (
     "Yang 2605.04892 Table I lines 1053-1055: ADC chip 12 ns, IQ "
     "demodulation 32 ns, qubit-state classification 4 ns"
@@ -129,7 +110,7 @@ _READOUT_SOURCE = (
 # split a round trip. The weak syndrome buffer sits on the decoder chip,
 # so the controller's write into it is the first link; a weak result
 # reaches the frame in the controller over the second.
-WEAK_STORE_LATENCY_MICROSECONDS = 0.018
+WEAK_STORE_LATENCY_MICROSECONDS = 0.018  # half 36 ns, 2605.04892 line 1056
 WEAK_STORE_SOURCE = (
     "Yang 2605.04892 Table I line 1056, digital communication 36 ns over "
     "the loop's two links; half, readout module to decoder FPGA"
@@ -145,7 +126,7 @@ _WEAK_RESULT_SOURCE = (
 # time for broadcasting between control system chassis" (240 to 260 ns,
 # lines 176-177), taken at the stated worst case for every hop that
 # crosses to or from the strong node.
-STRONG_STORE_LATENCY_MICROSECONDS = 0.26
+STRONG_STORE_LATENCY_MICROSECONDS = 0.26  # 2410.05202 line 177
 STRONG_STORE_SOURCE = (
     "Caune 2410.05202 Fig. 1a F, inter-node broadcast between control "
     "system chassis, 240 to 260 ns at the stated worst case"
@@ -177,7 +158,7 @@ _DECISION_SOURCE = (
 # From the pulse trigger to the pulse leaving the rack. The coax down to
 # the QPU is outside Yang's measurement, which ends at the pulse
 # generator's output port (lines 1699-1702), and no source gives it.
-_PULSE_LATENCY_MICROSECONDS = 0.088
+_PULSE_LATENCY_MICROSECONDS = 0.088  # 2605.04892 lines 1058-1060
 _PULSE_SOURCE = (
     "Yang 2605.04892 Table I lines 1058-1060: trigger propagation to the "
     "pulse generator 16 ns, waveform generation 32 ns, DAC chip 40 ns; "
@@ -185,25 +166,31 @@ _PULSE_SOURCE = (
 )
 
 # The rates. A word per cycle on the 32-bit bus the decoder is written
-# and read over (Caune 2410.05202 lines 998-1008 and 1252-1254; the paper
-# gives the width, not a transaction rate) and on the on-chip memory
-# word above; one 128-bit instruction word per cycle into the pulse
-# generator; and off board, the 100 Gb direct-attach cable from an FPGA
-# controller to its coprocessor host (Backline, arXiv 2609.09270, lines
-# 1229-1230), the one off-board line rate a referent of this scale gives.
+# and read over (Caune 2410.05202 lines 998-1008 and 1252-1254) and on
+# the on-chip memory word above: the width is Caune's, and one word a
+# 250 MHz cycle is an estimate, since Caune clock that bus at 156.25 MHz
+# (lines 1021-1027) and give no transaction rate. One 128-bit
+# instruction word per cycle into the pulse generator: the width is
+# QubiC's, and decsim runs it on its 250 MHz controller clock, while
+# QubiC's processors run at 500 MHz (2404.15260 lines 716-717). Off
+# board, the 100 Gb direct-attach cable from an FPGA controller to its
+# coprocessor host (Backline, arXiv 2609.09270, lines 1229-1230), the
+# one off-board line rate a referent of this scale gives.
 _WORD_BITS_PER_MICROSECOND = BUS_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
 _WORD_RATE_SOURCE = (
-    "one 32-bit word per 250 MHz cycle (Caune 2410.05202 lines 998-1008, "
-    "the decoder's 32-bit bus)"
+    "one 32-bit word per 250 MHz cycle, an estimate: the width is Caune "
+    "2410.05202 line 999's bus, which Caune clock at 156.25 MHz (lines "
+    "1021-1027)"
 )
 _INSTRUCTION_BITS_PER_MICROSECOND = (
     INSTRUCTION_WORD_BITS * _REFERENCE_CLOCK_MEGAHERTZ
 )
 _INSTRUCTION_RATE_SOURCE = (
-    "one 128-bit instruction word per 250 MHz cycle (QubiC 2404.15260 "
-    "lines 176-179)"
+    "one 128-bit instruction word per 250 MHz controller cycle, an "
+    "estimate: the width is QubiC 2404.15260 lines 176-179's, whose "
+    "processors run at 500 MHz (lines 716-717)"
 )
-_OFF_BOARD_BITS_PER_MICROSECOND = 100_000
+_OFF_BOARD_BITS_PER_MICROSECOND = 100_000  # 2609.09270 lines 1229-1230
 _OFF_BOARD_RATE_SOURCE = (
     "100 Gb/s, Backline 2609.09270 lines 1229-1230, the FPGA "
     "controller's direct-attach cable to its coprocessor host"
@@ -218,8 +205,8 @@ _OFF_BOARD_RATE_SOURCE = (
 # measurement is one number per round trip and the paper states no
 # per-direction split. These are the medians of the echo rows, which
 # carry no decoding work and price the fabric alone.
-ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS = 2.305
-ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS = 4.5
+ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS = 2.305  # 2609.09270 line 1627
+ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS = 4.5  # 2609.09270 line 1632
 ROCE_V2_CPU_SOURCE = (
     "Backline 2609.09270 Table III CPU echo, 2.305 us median round trip, "
     "FPGA controller to CPU coprocessor over RoCE v2"
@@ -240,7 +227,7 @@ ROCE_V2_ECHO_PAYLOAD_BITS = 128
 # and the FPGA times the round trip (line 400). The connection is
 # unreliable by choice: a dropped packet is not retransmitted (lines
 # 376-388). The steady-state mean and median are 3.839 us (line 485).
-NVQLINK_ROUND_TRIP_MICROSECONDS = 3.839
+NVQLINK_ROUND_TRIP_MICROSECONDS = 3.839  # 2510.25213 line 485
 # 32 bytes (2510.25213 lines 402-403)
 NVQLINK_ECHO_PAYLOAD_BITS = 256
 NVQLINK_SOURCE = (
@@ -281,28 +268,15 @@ ROCE_V2_REPLY_LEG = (
 )
 
 
-# The keys a path's card writes: the first three on every card, the rest
-# only when the path has lanes, a setup, a header or a packet protocol.
-_REQUIRED_CARD_KEYS = ("latency_cycles", "clock", "bits_per_cycle")
-_CARD_KEYS = _REQUIRED_CARD_KEYS + (
-    "channels",
-    "setup_cycles_per_transfer",
-    "header_bits_per_transfer",
-    "protocol",
-)
-
-
 def logical_reference_profile() -> settings.FabricSettings:
     """The default card: every hop from a system of decsim's scale.
 
-    Each hop has a latency and a rate, or is unbounded where its
-    referent moves every bit in parallel, so a transfer costs its
-    latency plus its bits over the rate. The weak loop is Yang et al.'s
-    closed loop (arXiv 2605.04892 Table I) hop for hop, the strong node
-    is Caune et al.'s inter-chassis hop away (arXiv 2410.05202 Fig. 1a),
-    and the rates are the referents' bus words and Backline's cable.
-    Actual-payload paths price the runtime's own bit counts;
-    default-payload paths price a stated word width.
+    A surface-code patch on one control rack, a decoder FPGA, and a strong
+    node one hop away. A hop is unbounded where its referent moves every bit
+    in parallel. The weak loop is Yang et al.'s closed loop (arXiv
+    2605.04892 Table I) hop for hop, the strong node is Caune et al.'s
+    inter-chassis hop away (arXiv 2410.05202 Fig. 1a), and the rates are the
+    referents' bus words and Backline's cable.
     """
     word_rate = settings.CapacitySettings(
         _WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE
@@ -403,7 +377,6 @@ def logical_reference_profile() -> settings.FabricSettings:
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="logical_reference",
-        kind="logical_reference",
     )
 
 
@@ -417,26 +390,18 @@ def bandwidth_limited_profile(
 ) -> settings.FabricSettings:
     """The reference card with finite rates from the run's own geometry.
 
-    Same paths and payload rules as logical_reference_profile, and its
-    latencies read from that card, so switching cards changes bandwidth
-    and nothing else. Capacity is bits per microsecond.
+    The latencies are the reference card's, so switching cards changes
+    bandwidth alone. Capacity is bits per microsecond. Every path carries
+    exactly its nominal traffic in one commit region, so at capacity_scale 1
+    each link runs at utilization one and at scale s at 1/s. State the
+    utilization when reporting: a single-server queue at utilization one
+    waits zero only under perfectly periodic arrivals (Little's law). The
+    rates are an explicit per-link provisioning, as ns-3 declares a DataRate
+    per device.
 
-    Every path is provisioned to carry exactly its nominal traffic in one
-    commit region (qc: one round's syndrome bits per round period), so at
-    capacity_scale 1 each link runs at utilization one, and a scale of s
-    runs it at utilization 1/s. State the utilization when reporting
-    results from this card: a single-server queue at utilization one
-    waits zero only under perfectly periodic arrivals, and any jitter
-    accumulates (Little's law). The rates are an explicit per-link
-    provisioning, the way ns-3 declares a DataRate per point-to-point
-    device, never a floor borrowed from another path.
-
-    Each rate is an exact fraction of the decimals given, so a nominal
-    payload serializes in exactly its period: a float such as 8 / 1.1
-    lands below the true rate, and the rounded-up serialization then
-    runs one tick past the period and a periodic stream queues one tick
-    more every round (ns-3 times a packet from its size and the device's
-    stated DataRate, point-to-point-net-device.cc:243).
+    Each rate is an exact fraction, so a nominal payload serializes in
+    exactly its period: a float such as 8 / 1.1 lands below the true rate,
+    and the rounded-up serialization then queues one tick more every round.
     """
     round_period_microseconds = fractions.Fraction(str(round_microseconds))
     commit_region_microseconds = commit_rounds * round_period_microseconds
@@ -582,266 +547,132 @@ def bandwidth_limited_profile(
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
         profile_name="bandwidth_limited",
-        kind="bandwidth_limited",
     )
-
-
-def roce_v2_measured_profile(coprocessor: str) -> settings.FabricSettings:
-    """The reference card with the strong path on a measured round trip.
-
-    Backline (arXiv 2609.09270, Sec. V-C and Table III) measures one
-    number: an FPGA controller writes into a coprocessor's memory over
-    RoCE v2 with a one-sided RDMA write, the coprocessor polls that
-    buffer and writes the reply back, and the controller times the whole
-    round trip in its own clock. The paper gives no per-direction
-    number, so the split below is decsim's rule rather than a
-    measurement: the controller's write into strong syndrome buffer, the
-    escalation request and the strong decoder's reply to the frame each
-    carry one half of the round trip, and the strong store's read into
-    the strong decoder is zero because the coprocessor polls a buffer in
-    its own memory. The three legs that cross the cable serialize their
-    bits at its 100 Gb/s (lines 1229-1230), and the measured round trip
-    already holds the 16-byte echo payload's time on it (line 1611), so
-    each leg's latency is its half less that time: an echo of that
-    payload, out, polled and back, takes the measured median exactly.
-
-    The card prices that median. It does not cover the first, warm-up
-    round trip, 4.64 us on the CPU path and 9.27 us on the GPU path, nor
-    the tails, which on the CPU path reach 2.420 us at P99, 2.475 us at
-    P99.999 and 2.590 us at the maximum, and on the GPU path 4.985 us,
-    5.255 us and 5.285 us. Every other hop keeps the number and the
-    source of logical_reference_profile.
-
-    Args:
-        coprocessor: "cpu" or "gpu", the two paths Backline measured.
-    """
-    round_trip_microseconds, measurement_source = _roce_v2_measurement(
-        coprocessor
-    )
-    cable_rate = settings.CapacitySettings(
-        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
-    )
-    strong_paths = _roce_v2_strong_paths(
-        round_trip_microseconds,
-        measurement_source,
-        cable_rate,
-        ROCE_V2_ECHO_PAYLOAD_BITS,
-    )
-    reference = logical_reference_profile()
-    row_name = f"roce_v2_{coprocessor}"
-    return dataclasses.replace(
-        reference, **strong_paths, profile_name=row_name, kind=row_name
-    )
-
-
-def nvqlink_measured_profile() -> settings.FabricSettings:
-    """The reference card with the strong path on NVQLink's round trip.
-
-    NVQLink (arXiv 2510.25213, Sec. 2.4) measures one number the way
-    Backline does: an FPGA sends RoCE packets that land in GPU memory, a
-    persistent GPU kernel loops each back, and the FPGA times the round
-    trip, 3.839 us in the steady-state median (line 485). The split is
-    roce_v2_measured_profile's, on the 32-byte echo payload (lines
-    402-403) and the 100 Gb Ethernet link (line 382, Fig. 2): an echo of
-    that payload takes the median exactly.
-
-    The connection is unreliable by choice (lines 376-388), so a frame
-    is never retransmitted: the ideal protocol row, whose wire loses
-    nothing, since the 100G cables are engineered for a bit error rate
-    under 1e-15 (lines 381-383). No framing row is attached: the
-    measured round trip already holds the framing of its 32-byte RoCE
-    echo (line 403), and the credit row that carries a framing needs a
-    receive buffer and a credit latency the paper does not state. The
-    card prices the steady-state median, not the warm-up period at the
-    start of a run (lines 413-416, Fig. 4: a 95th percentile of 4.02 us)
-    nor the tail (standard deviation 35 ns, maximum 3.96 us, line 485).
-    """
-    cable_rate = settings.CapacitySettings(
-        _OFF_BOARD_BITS_PER_MICROSECOND, _NVQLINK_RATE_SOURCE
-    )
-    strong_paths = _roce_v2_strong_paths(
-        NVQLINK_ROUND_TRIP_MICROSECONDS,
-        NVQLINK_SOURCE,
-        cable_rate,
-        NVQLINK_ECHO_PAYLOAD_BITS,
-    )
-    reference = logical_reference_profile()
-    row_name = "nvqlink_gpu"
-    return dataclasses.replace(
-        reference, **strong_paths, profile_name=row_name, kind=row_name
-    )
-
-
-def build_protocol_fabric(
-    card: settings.FabricSettings, engine: decsim.engine.Engine
-) -> ports.Link:
-    """The fabric every shipped row carries its transfers on.
-
-    Each row's build is this one function: the rows differ only in the
-    card their base_card supplies, and a row with its own fabric model
-    defines its own build.
-    """
-    return fabric.LinkFabric(card, engine, fabric.protocol_channel)
-
-
-class LogicalReferenceFabric:
-    """The default row: the reference card's latencies and rates.
-
-    A transfer costs its latency plus its bits over the hop's rate, and
-    transfers on one hop queue for its wire. This is the row a yaml gets
-    when it names no kind, and the numbers its per-path cards override.
-    """
-
-    @staticmethod
-    def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
-        return logical_reference_profile()
-
-    build = staticmethod(build_protocol_fabric)
-
-
-class BandwidthLimitedFabric:
-    """The same fabric with finite rates, provisioned from the geometry.
-
-    Every channel carries exactly its nominal traffic in one commit
-    region (the readout and store hops: one round's bits in one round
-    period), so contention becomes measurable and capacity_scale sweeps
-    the whole fabric. Its numbers come from the run's own geometry, not from the
-    links section, which is why base_card refuses a yaml and names what
-    a caller has to give it.
-    """
-
-    @staticmethod
-    def base_card() -> settings.FabricSettings:
-        """Refused: this row provisions itself from the run's geometry."""
-        raise ValueError(
-            "links.kind bandwidth_limited provisions every channel from "
-            "the sweep point's own geometry (the syndrome bits per round, "
-            "the round period, the commit and buffer rounds), which the "
-            "links section does not carry and which is known only per "
-            "point; build the card with "
-            "link_profiles.bandwidth_limited_profile(...) and pass it as "
-            "the machine's links setting"
-        )
-
-    build = staticmethod(build_protocol_fabric)
 
 
 class RoceV2CpuFabric:
     """The reference card with the strong path on Backline's CPU round trip.
 
-    The four strong-side hops are priced by Backline's measured
-    FPGA-to-CPU round trip over RoCE v2, 2.305 us in the median
-    (arXiv 2609.09270, Table III): half of it on each leg the write
-    crosses, less the echo payload's time on the cable, and nothing for
-    the coprocessor's poll of its own memory. Every other hop keeps the
-    reference numbers.
+    Backline's FPGA-to-CPU round trip over RoCE v2, 2.305 us median (arXiv
+    2609.09270, Table III), split as _measured_round_trip_card says.
     """
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
-        return roce_v2_measured_profile("cpu")
-
-    build = staticmethod(build_protocol_fabric)
+        """The reference card with this row's strong paths."""
+        return _measured_round_trip_card(
+            ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS,
+            ROCE_V2_CPU_SOURCE,
+            _OFF_BOARD_RATE_SOURCE,
+            ROCE_V2_ECHO_PAYLOAD_BITS,
+            "roce_v2_cpu",
+        )
 
 
 class RoceV2GpuFabric:
     """The reference card with the strong path on Backline's GPU round trip.
 
-    The four strong-side hops are priced by Backline's measured
-    FPGA-to-GPU round trip over RoCE v2, 4.5 us in the median
-    (arXiv 2609.09270, Table III): half of it on each leg the write
-    crosses, less the echo payload's time on the cable, and nothing for
-    the coprocessor's poll of its own memory. The GPU path is the slower
-    and the wider of the two Backline measured, because the reply is
-    written by a CPU thread the GPU signals. Every other hop keeps the
-    reference numbers.
+    Backline's FPGA-to-GPU round trip over RoCE v2, 4.5 us median (arXiv
+    2609.09270, Table III), split as _measured_round_trip_card says. It is
+    slower and wider than the CPU path because a CPU thread the GPU signals
+    writes the reply.
     """
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
-        return roce_v2_measured_profile("gpu")
-
-    build = staticmethod(build_protocol_fabric)
+        """The reference card with this row's strong paths."""
+        return _measured_round_trip_card(
+            ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS,
+            ROCE_V2_GPU_SOURCE,
+            _OFF_BOARD_RATE_SOURCE,
+            ROCE_V2_ECHO_PAYLOAD_BITS,
+            "roce_v2_gpu",
+        )
 
 
 class NvqlinkGpuFabric:
     """The reference card with the strong path on NVQLink's GPU round trip.
 
-    The four strong-side hops are priced by NVQLink's measured round
-    trip from an FPGA to a persistent GPU kernel over RoCE, 3.839 us in
-    the steady-state median (arXiv 2510.25213, line 485): half of it on
-    each leg the packet crosses, less the echo payload's time on the
-    cable, nothing for the kernel's poll of its own memory. Every other
-    hop keeps the reference numbers.
+    NVQLink's FPGA to persistent GPU kernel round trip over RoCE, 3.839 us
+    steady-state median (arXiv 2510.25213, line 485), split as
+    _measured_round_trip_card says.
     """
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
-        return nvqlink_measured_profile()
+        """The reference card with this row's strong paths.
 
-    build = staticmethod(build_protocol_fabric)
-
-
-# links.kind names one of these rows: which fabric model carries the
-# transfers and which numbers the section's per-path cards override. A
-# row answers base_card at the yaml boundary and build at the root.
-LINK_FABRICS = {
-    "logical_reference": LogicalReferenceFabric,
-    "bandwidth_limited": BandwidthLimitedFabric,
-    "roce_v2_cpu": RoceV2CpuFabric,
-    "roce_v2_gpu": RoceV2GpuFabric,
-    "nvqlink_gpu": NvqlinkGpuFabric,
-}
-
-
-def from_yaml(
-    section: Mapping, clocks: config.ClockSettings, name: str
-) -> settings.FabricSettings:
-    """The yaml's `links` section: a kind, and one card per path over it.
-
-    A card prices its path in cycles of a named clock domain: latency,
-    bits per cycle per lane (null is unbounded), the lane count, an
-    optional per-transfer setup cost, an optional per-transfer header
-    in bits, and an optional packet protocol (a PROTOCOLS row of
-    links/fabric.py, with its framing, buffer and recovery keys; none is
-    the ideal row). A null card keeps the chosen row's
-    numbers for that path. The config prices readout classification on
-    its own line, so its qpu_to_controller card is link propagation only,
-    and the fabric says so.
-    """
-    source = f"configs/{name}.yaml links"
-    kind = section.get("kind", "logical_reference")
-    row = tables.row(LINK_FABRICS, "links.kind", kind)
-    _check_section_names(section)
-    profile = row.base_card()
-    replacements = {}
-    for path_name, card in section.items():
-        if path_name == "kind":
-            continue
-        if card is None:
-            continue
-        _check_card(path_name, card)
-        path_settings = getattr(profile, path_name)
-        carded = _carded_path(path_name, path_settings, card, clocks, source)
-        replacements[path_name] = dataclasses.replace(
-            carded, excludes_receiver_processing=True
+        The connection is unreliable by choice (2510.25213 lines 376-388) on
+        cables engineered under 1e-15 bit errors, so the ideal protocol row; the
+        measured round trip already holds its 32-byte echo's framing (line 403),
+        so no framing row.
+        """
+        return _measured_round_trip_card(
+            NVQLINK_ROUND_TRIP_MICROSECONDS,
+            NVQLINK_SOURCE,
+            _NVQLINK_RATE_SOURCE,
+            NVQLINK_ECHO_PAYLOAD_BITS,
+            "nvqlink_gpu",
         )
+
+
+def path_card(
+    links: settings.FabricSettings,
+    path_name: str,
+    *,
+    clock: config.Clock,
+    latency_cycles: int,
+    bits_per_cycle: Optional[float],
+    source: str,
+    lane_count: int = 1,
+    setup_cycles_per_transfer: int = 0,
+    header_bits_per_transfer: int = 0,
+    protocol: Optional[settings.PacketProtocolSettings] = None,
+) -> settings.PathSettings:
+    """One path priced in cycles of a clock, over its payload rule in links.
+
+    A cycle is the clock's period in whole ticks, gem5's cyclesToTicks
+    (src/sim/clocked_object.hh:227), so a link's cycles and every other
+    component's cycles on one clock are the same ticks. Each of lane_count
+    lanes moves bits_per_cycle every period; None is an unbounded wire. The
+    path gets a wire of its own, and its latency times the wire alone, so
+    the receiver prices its own processing.
+    """
+    period_ticks = clock.period_ticks
+    latency_ticks = latency_cycles * period_ticks
+    setup_ticks = setup_cycles_per_transfer * period_ticks
+    capacity = None
+    if bits_per_cycle is not None:
+        lane_bits_per_cycle = fractions.Fraction(str(bits_per_cycle))
+        bits_per_period = lane_bits_per_cycle * lane_count
+        bits_per_tick = bits_per_period / period_ticks
+        bits_per_microsecond = bits_per_tick * config.TICKS_PER_MICROSECOND
+        capacity = settings.CapacitySettings(bits_per_microsecond, source)
+    channel = settings.ChannelSettings(
+        path_name, latency_ticks, capacity, source, protocol
+    )
+    path_settings = getattr(links, path_name)
     return dataclasses.replace(
-        profile,
-        **replacements,
-        kind=kind,
-        profile_name=f"{name}.yaml",
+        path_settings,
+        channel=channel,
+        setup_ticks=setup_ticks,
+        header_bits_per_transfer=header_bits_per_transfer,
+        excludes_receiver_processing=True,
     )
 
 
 def with_path_latency(
-    links: settings.FabricSettings, path_name: str, latency_ticks: int
+    links: settings.FabricSettings,
+    path_name: str,
+    latency_microseconds: float,
 ) -> settings.FabricSettings:
-    """The card with one path's wire at latency_ticks, the rest as it was."""
+    """The card with one path's wire at a latency, the rest as it was.
+
+    The latency is rounded to whole ticks once; the path keeps its rate,
+    setup, framing and what its latency covers.
+    """
+    config.check_duration("latency_microseconds", latency_microseconds)
+    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     path = getattr(links, path_name)
     channel = dataclasses.replace(
         path.channel, propagation_latency_ticks=latency_ticks
@@ -850,16 +681,37 @@ def with_path_latency(
     return dataclasses.replace(links, **{path_name: changed})
 
 
-def _roce_v2_measurement(coprocessor: str) -> tuple:
-    """(round trip in microseconds, source) of one echo row of Table III."""
-    if coprocessor == "cpu":
-        return ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS, ROCE_V2_CPU_SOURCE
-    if coprocessor == "gpu":
-        return ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS, ROCE_V2_GPU_SOURCE
-    raise ValueError(
-        f"a measured RoCE v2 card names the coprocessor Backline echoed "
-        f"from, 'cpu' or 'gpu', not {coprocessor!r}"
+def _measured_round_trip_card(
+    round_trip_microseconds: float,
+    measurement_source: str,
+    rate_source: str,
+    echo_payload_bits: int,
+    row_name: str,
+) -> settings.FabricSettings:
+    """The reference card with the strong path on a measured round trip.
+
+    Backline (arXiv 2609.09270, Sec. V-C and Table III) and NVQLink (arXiv
+    2510.25213, Sec. 2.4) each measure one FPGA-to-coprocessor round trip
+    over RoCE, with the coprocessor polling its own memory. Neither gives a
+    per-direction number, so the split is decsim's rule: the write into the
+    strong syndrome buffer, the escalation request and the reply to the
+    frame each carry half the round trip, and the strong store's read is
+    zero because the coprocessor polls its own memory. The three cable legs
+    serialize at 100 Gb/s, and each leg's latency is its half less the echo
+    payload's time on the cable, so an echo takes the measured median
+    exactly: not a warm-up round trip nor the tail.
+    """
+    cable_rate = settings.CapacitySettings(
+        _OFF_BOARD_BITS_PER_MICROSECOND, rate_source
     )
+    strong_paths = _roce_v2_strong_paths(
+        round_trip_microseconds,
+        measurement_source,
+        cable_rate,
+        echo_payload_bits,
+    )
+    reference = logical_reference_profile()
+    return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
 
 
 def _roce_v2_strong_paths(
@@ -870,13 +722,11 @@ def _roce_v2_strong_paths(
 ) -> dict:
     """The four strong-side paths, priced from one measured round trip.
 
-    The three legs that cross the measured cable serialize their bits at
-    its rate, as the reference card's strong hops do, so the echo
-    payload's time on the cable comes out of each leg's half; the poll
-    reads the coprocessor's own memory, crosses no cable and stays
-    unbounded.
+    The three cable legs serialize at its rate, so the echo payload's time
+    on the cable comes out of each leg's half; the poll crosses no cable and
+    stays unbounded.
     """
-    rate = cable_rate.exact_aggregate_bits_per_microsecond()
+    rate = cable_rate.input_bits_per_microsecond
     echo_fraction = echo_payload_bits / rate
     echo_on_the_cable = float(echo_fraction)
     half_microseconds = round_trip_microseconds / 2
@@ -920,171 +770,6 @@ def _roce_v2_strong_paths(
     }
 
 
-def _check_section_names(section: Mapping) -> None:
-    """The links section names the kind and paths, and nothing else."""
-    path_names = []
-    for path in transfer_records.LinkPath:
-        path_names.append(path.value)
-    for section_name in section:
-        if section_name == "kind":
-            continue
-        if section_name not in path_names:
-            raise ValueError(
-                f"links names {section_name!r}, which is not a path; the "
-                f"paths are {path_names}"
-            )
-
-
-def _check_card(path_name: str, card) -> None:
-    """A path's card is a mapping of the card keys, the first three written.
-
-    Refused here, once, with the card's yaml name, so a card never reaches
-    the arithmetic below as a list or with a key missing, and a misspelt
-    key is never read as the default of the key it meant.
-    """
-    card_name = f"links.{path_name}"
-    if not isinstance(card, Mapping):
-        raise ValueError(
-            f"{card_name} holds {card!r}; a path's card is a mapping of "
-            f"{list(_CARD_KEYS)}, or null for the row's own numbers"
-        )
-    tables.refuse_unknown_keys(card_name, card, _CARD_KEYS)
-    missing = [key for key in _REQUIRED_CARD_KEYS if key not in card]
-    if missing:
-        raise ValueError(
-            f"{card_name} needs {missing}; a card writes "
-            f"{list(_REQUIRED_CARD_KEYS)}, with bits_per_cycle null for an "
-            f"unbounded wire"
-        )
-    _check_bits_per_cycle(card_name, card["bits_per_cycle"])
-    lane_count = card.get("channels", 1)
-    _check_lane_count(card_name, lane_count)
-    _check_cycle_counts(card_name, card)
-    header_bits = card.get("header_bits_per_transfer", 0)
-    _check_header_bits(card_name, header_bits)
-
-
-def _check_cycle_counts(card_name: str, card: Mapping) -> None:
-    """The latency and the setup, when written, are whole cycle counts."""
-    config.check_cycles(f"{card_name}.latency_cycles", card["latency_cycles"])
-    setup_cycles = card.get("setup_cycles_per_transfer")
-    if setup_cycles is None:
-        return
-    setup_name = f"{card_name}.setup_cycles_per_transfer"
-    config.check_cycles(setup_name, setup_cycles)
-
-
-def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
-    """A lane's rate is a positive finite number, or null for no bound.
-
-    A yaml `true` is a boolean, which Python would read as the number 1,
-    so it is refused with the rest rather than priced as one bit.
-    """
-    if bits_per_cycle is None:
-        return
-    if _is_positive_number(bits_per_cycle):
-        return
-    raise ValueError(
-        f"{card_name}.bits_per_cycle is {bits_per_cycle!r}; it is the "
-        f"positive number of bits each lane moves per cycle, or null for "
-        f"an unbounded wire"
-    )
-
-
-def _check_lane_count(card_name: str, lane_count) -> None:
-    """A card's lanes are a positive whole number, never a yaml boolean."""
-    if config.is_whole_count(lane_count):
-        return
-    raise ValueError(
-        f"{card_name}.channels is {lane_count!r}; it is the positive whole "
-        f"number of parallel lanes the path's wire has"
-    )
-
-
-def _check_header_bits(card_name: str, header_bits) -> None:
-    """A card's framing is a whole number of bits, zero or more."""
-    if config.is_whole_count(header_bits, 0):
-        return
-    raise ValueError(
-        f"{card_name}.header_bits_per_transfer is {header_bits!r}; it is "
-        f"the whole number of framing bits every transfer of the path "
-        f"carries, zero or more"
-    )
-
-
-def _is_positive_number(value) -> bool:
-    """A finite number above zero, never a yaml boolean."""
-    if isinstance(value, bool):
-        return False
-    if not isinstance(value, (int, float)):
-        return False
-    return 0 < value < math.inf
-
-
-def _card_ticks(card: Mapping, clocks: config.ClockSettings) -> tuple:
-    """(latency ticks, aggregate rate, setup ticks) of one card.
-
-    A cycle costs its domain's period in whole ticks, gem5's
-    cyclesToTicks (src/sim/clocked_object.hh:227, clockPeriod() * c),
-    so a link's cycles and every other component's cycles on one domain
-    are the same ticks. The rate moves bits_per_cycle on each lane every
-    period, kept as an exact fraction of the card's decimals.
-    """
-    clock = clocks.clock(card["clock"])
-    period_ticks = clock.period_ticks
-    latency_cycles = card["latency_cycles"]
-    latency_ticks = latency_cycles * period_ticks
-    bits_per_cycle = card["bits_per_cycle"]
-    lane_count = card.get("channels", 1)
-    bits_per_microsecond = None
-    if bits_per_cycle is not None:
-        lane_bits_per_cycle = fractions.Fraction(str(bits_per_cycle))
-        bits_per_period = lane_bits_per_cycle * lane_count
-        bits_per_tick = bits_per_period / period_ticks
-        bits_per_microsecond = bits_per_tick * config.TICKS_PER_MICROSECOND
-    setup_cycles = card.get("setup_cycles_per_transfer")
-    setup_ticks = 0
-    if setup_cycles is not None:
-        setup_ticks = setup_cycles * period_ticks
-    return latency_ticks, bits_per_microsecond, setup_ticks
-
-
-def _carded_path(
-    path_name: str,
-    path_settings: settings.PathSettings,
-    card: Mapping,
-    clocks: config.ClockSettings,
-    source: str,
-) -> settings.PathSettings:
-    """The reference path with the card's channel and setup cost."""
-    latency_ticks, bits_per_microsecond, setup_ticks = _card_ticks(card, clocks)
-    capacity = None
-    if bits_per_microsecond is not None:
-        capacity = settings.CapacitySettings(bits_per_microsecond, source)
-    protocol = _card_protocol(path_name, card, clocks)
-    channel = settings.ChannelSettings(
-        path_name, latency_ticks, capacity, source, protocol
-    )
-    header_bits = card.get("header_bits_per_transfer", 0)
-    return dataclasses.replace(
-        path_settings,
-        channel=channel,
-        setup_ticks=setup_ticks,
-        header_bits_per_transfer=header_bits,
-    )
-
-
-def _card_protocol(
-    path_name: str, card: Mapping, clocks: config.ClockSettings
-) -> settings.ProtocolSettings:
-    """The card's protocol, counted on its clock; ideal when it names none."""
-    section = card.get("protocol")
-    if section is None:
-        return settings.ProtocolSettings()
-    clock = clocks.clock(card["clock"])
-    return fabric.protocol_settings_from_yaml(section, clock, path_name)
-
-
 class _Provisioning:
     """The bounded card's paths: the reference latency at a scaled rate."""
 
@@ -1105,13 +790,21 @@ class _Provisioning:
         rate = nominal_bits_per_microsecond * self._capacity_scale
         capacity = settings.CapacitySettings(rate, source)
         reference_path = getattr(self._reference, name)
+        reference_excludes_processing = (
+            reference_path.excludes_receiver_processing
+        )
         reference_channel = reference_path.channel
         latency_ticks = reference_channel.propagation_latency_ticks
         channel = settings.ChannelSettings(
             name, latency_ticks, capacity, source
         )
         payload = settings.PayloadSettings(bits, source)
-        return settings.PathSettings(channel, payload, actual_payload_source)
+        return settings.PathSettings(
+            channel,
+            payload,
+            actual_payload_source,
+            excludes_receiver_processing=reference_excludes_processing,
+        )
 
 
 def _channel(
@@ -1132,7 +825,10 @@ def _actual_path(
     capacity: Optional[settings.CapacitySettings] = None,
 ) -> settings.PathSettings:
     channel = _channel(name, latency_microseconds, source, capacity)
-    return settings.PathSettings(channel, None, actual_payload_source)
+    # a preset's latency is its referent's end-to-end number
+    return settings.PathSettings(
+        channel, None, actual_payload_source, excludes_receiver_processing=False
+    )
 
 
 def _default_path(
@@ -1145,4 +841,7 @@ def _default_path(
 ) -> settings.PathSettings:
     channel = _channel(name, latency_microseconds, latency_source, capacity)
     payload = settings.PayloadSettings(bits, payload_source)
-    return settings.PathSettings(channel, payload, None)
+    # a preset's latency is its referent's end-to-end number
+    return settings.PathSettings(
+        channel, payload, None, excludes_receiver_processing=False
+    )

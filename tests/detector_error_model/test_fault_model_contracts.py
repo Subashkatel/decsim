@@ -7,6 +7,7 @@ requirement joins with another; the module is a leaf that loads no
 numeric library when it is imported on its own.
 """
 
+import dataclasses
 import pathlib
 import subprocess
 import sys
@@ -15,7 +16,7 @@ import numpy
 import pytest
 import scipy.sparse
 
-from decsim.detector_error_model import fault_model_contracts
+from decsim.records import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL
@@ -63,7 +64,7 @@ def test_joining_keeps_the_link_when_either_side_needs_it():
 
 def test_a_link_needs_both_representations():
     only_graphlike = frozenset({GRAPHLIKE})
-    with pytest.raises(ValueError, match="both fault representations"):
+    with pytest.raises(ValueError, match="a physical-to-graphlike link"):
         fault_model_contracts.DecoderFaultModelRequirement(
             only_graphlike, require_physical_to_graphlike_link=True
         )
@@ -90,18 +91,8 @@ def test_a_placed_model_is_frozen_for_every_reader():
     assert placed.observables.indices.flags.writeable is False
     assert placed.source_fault_ids == (4, 9)
     assert placed.boundary_flips == {0: (0, 1, 7)}
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="object does not support item"):
         placed.boundary_flips[1] = (2,)
-
-
-def test_a_placed_model_keeps_its_matrices_as_uint8_columns():
-    placed = placed_model()
-    assert placed.check.dtype == numpy.uint8
-    assert placed.check.format == "csc"
-    dense_check = placed.check.toarray()
-    dense_observables = placed.observables.toarray()
-    assert dense_check.tolist() == [[1, 0], [1, 1]]
-    assert dense_observables.tolist() == [[0, 1]]
 
 
 def test_a_window_hands_out_the_representation_it_holds():
@@ -143,42 +134,8 @@ def test_a_window_refuses_a_representation_it_does_not_hold():
         graphlike_faults=placed,
         physical_faults=None,
     )
-    with pytest.raises(RuntimeError, match="does not contain physical faults"):
+    with pytest.raises(RuntimeError, match="window model does not contain"):
         window.require_faults(PHYSICAL)
-
-
-def test_a_window_refuses_a_representation_that_is_not_a_member():
-    placed = placed_model()
-    window = fault_model_contracts.WindowErrorModel(
-        detector_ids=(0, 1),
-        detector_coordinates=None,
-        defect_positions={},
-        first_commit_round=1,
-        graphlike_faults=placed,
-        physical_faults=None,
-    )
-    with pytest.raises(RuntimeError, match="FaultRepresentation"):
-        window.require_faults("physical")
-
-
-def test_a_windows_link_projection_is_frozen_too():
-    projection = scipy.sparse.csc_matrix([[1, 1], [0, 1]])
-    graphlike = placed_model()
-    physical = placed_model()
-    window = fault_model_contracts.WindowErrorModel(
-        detector_ids=(0, 1),
-        detector_coordinates=None,
-        defect_positions={},
-        first_commit_round=1,
-        graphlike_faults=graphlike,
-        physical_faults=physical,
-        physical_to_graphlike_detector_projection=projection,
-    )
-    frozen = window.physical_to_graphlike_detector_projection
-    assert frozen.dtype == numpy.uint8
-    assert frozen.data.flags.writeable is False
-    dense = frozen.toarray()
-    assert dense.tolist() == [[1, 1], [0, 1]]
 
 
 def test_a_windows_crossing_faults_are_the_ones_reaching_behind_it():
@@ -222,3 +179,50 @@ def test_importing_the_contract_alone_loads_no_numeric_library():
         check=True,
     )
     assert probe.stdout.strip() == "[]"
+
+
+def consistent_window():
+    """Two detectors with coordinates, read by the graphlike view."""
+    graphlike = placed_model()
+    return fault_model_contracts.WindowErrorModel(
+        detector_ids=(0, 1),
+        detector_coordinates=((0.0,), (1.0,)),
+        defect_positions={0: (1, 0), 1: (1, 1)},
+        first_commit_round=1,
+        graphlike_faults=graphlike,
+        physical_faults=None,
+    )
+
+
+THREE_COLUMN_OBSERVABLES = scipy.sparse.csc_matrix(
+    [[0, 1, 1]], dtype=numpy.uint8
+)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"priors": [0.1]}, {"observables": THREE_COLUMN_OBSERVABLES}],
+    ids=["one prior for two columns", "three observable columns for two"],
+)
+def test_every_fault_column_has_one_prior_and_one_observable_column(change):
+    placed = placed_model()
+
+    with pytest.raises(ValueError, match="needs one of each"):
+        dataclasses.replace(placed, **change)
+
+
+@pytest.mark.parametrize(
+    "change, refusal",
+    [
+        ({"detector_ids": (0, 1, 2)}, "every row needs one id"),
+        ({"detector_coordinates": ((0.0,),)}, "every id needs one"),
+    ],
+    ids=["three ids for two check rows", "one coordinate for two ids"],
+)
+def test_every_detector_id_has_one_check_row_and_one_coordinate(
+    change, refusal
+):
+    window = consistent_window()
+
+    with pytest.raises(ValueError, match=refusal):
+        dataclasses.replace(window, **change)

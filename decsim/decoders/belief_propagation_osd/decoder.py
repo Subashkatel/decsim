@@ -7,14 +7,16 @@ overruns past n - m, so the order is clamped to the window's own n - m,
 as stimbposd clamps it (bp_osd.py:62-68).
 """
 
+import dataclasses
 from typing import Optional
 
 import ldpc
+import numpy
 import scipy.sparse
 
 import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 
 class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
@@ -22,6 +24,28 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.PHYSICAL
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """Ldpc's BP-OSD arguments, by their decsim names."""
+
+        max_iterations: int = 2
+        osd_order: int = 0
+        belief_propagation_method: str = "product_sum"
+        schedule: str = "serial"
+        osd_method: str = "osd_cs"
+        # the word the reports name this row by
+        name = "bposd"
+
+        def build(self) -> "BeliefPropagationOsdDecoder":
+            """A fresh decoder of these settings."""
+            return BeliefPropagationOsdDecoder(
+                max_iterations=self.max_iterations,
+                osd_order=self.osd_order,
+                belief_propagation_method=self.belief_propagation_method,
+                schedule=self.schedule,
+                osd_method=self.osd_method,
+            )
 
     def __init__(
         self,
@@ -38,13 +62,27 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
         self.belief_propagation_method = belief_propagation_method
         self.schedule = schedule
         self.osd_method = osd_method
+        self.compile_key = (
+            BeliefPropagationOsdDecoder,
+            max_iterations,
+            osd_order,
+            belief_propagation_method,
+            schedule,
+            osd_method,
+        )
 
-    def compile(self, faults, model=None):
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> ldpc.BpOsdDecoder:
         """Ldpc's BP-OSD decoder over the window's physical check."""
         del model
         row_count, column_count = faults.check.shape
         window_rank = column_count - row_count
         window_osd_order = max(0, min(self.osd_order, window_rank))
+        # a writable copy: ldpc writes into its input, and a window's
+        # check is read-only
         check = scipy.sparse.csr_matrix(faults.check)
         error_channel = list(faults.priors)
         return ldpc.BpOsdDecoder(
@@ -57,7 +95,13 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
             osd_order=window_osd_order,
         )
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: ldpc.BpOsdDecoder,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """One BP-OSD call; ldpc always returns a correction."""
         del model
         del faults

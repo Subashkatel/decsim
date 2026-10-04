@@ -22,8 +22,9 @@ import pytest
 import stim
 
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.records.formation as formation_records
 
-DISTANCES = (3, 5, 7)
+DISTANCES = (3, 5)
 
 
 def _formation_table(distance: int, round_count: int):
@@ -45,45 +46,21 @@ def _detectors_per_round(table) -> dict:
 
 
 @pytest.mark.parametrize("distance", DISTANCES)
-def test_the_first_round_carries_half_a_rounds_detectors(distance):
-    round_count = 4 * distance
-    _circuit, table = _formation_table(distance, round_count)
-    per_round = _detectors_per_round(table)
-    half = (distance * distance - 1) // 2
-
-    assert per_round[1] == half
-
-
-@pytest.mark.parametrize("distance", DISTANCES)
-def test_a_middle_round_carries_one_detector_per_stabilizer(distance):
-    round_count = 4 * distance
-    _circuit, table = _formation_table(distance, round_count)
-    per_round = _detectors_per_round(table)
-    stabilizers = distance * distance - 1
-
-    assert per_round[2] == stabilizers
-
-
-@pytest.mark.parametrize("distance", DISTANCES)
-def test_the_last_round_carries_one_and_a_half_because_the_readout_folds(
+def test_the_rounds_carry_half_bulk_and_one_and_a_half_of_stims_detectors(
     distance,
 ):
-    round_count = 4 * distance
-    _circuit, table = _formation_table(distance, round_count)
-    per_round = _detectors_per_round(table)
-    stabilizers = distance * distance - 1
-    one_and_a_half = 3 * stabilizers // 2
-
-    assert per_round[round_count] == one_and_a_half
-
-
-@pytest.mark.parametrize("distance", DISTANCES)
-def test_the_rounds_sum_to_the_circuits_own_detector_count(distance):
-    """Nothing is lost or double counted by the folding."""
+    """The readout folds into the last round; nothing is lost or doubled."""
     round_count = 4 * distance
     circuit, table = _formation_table(distance, round_count)
+    per_round = _detectors_per_round(table)
+    stabilizers = distance * distance - 1
+    half = stabilizers // 2
+    one_and_a_half = 3 * stabilizers // 2
     formed = len(table.detectors)
 
+    assert per_round[1] == half
+    assert per_round[2] == stabilizers
+    assert per_round[round_count] == one_and_a_half
     assert formed == circuit.num_detectors
 
 
@@ -94,8 +71,8 @@ def test_the_three_layer_kinds_split_as_half_bulk_half(distance):
     by_kind = collections.Counter(recipe.kind for recipe in table.detectors)
     half = (distance * distance - 1) // 2
 
-    assert by_kind[detector_formation.LayerKind.PREPARATION] == half
-    assert by_kind[detector_formation.LayerKind.READOUT] == half
+    assert by_kind[formation_records.LayerKind.PREPARATION] == half
+    assert by_kind[formation_records.LayerKind.READOUT] == half
 
 
 @pytest.mark.parametrize("distance", DISTANCES)

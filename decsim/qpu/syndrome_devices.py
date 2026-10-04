@@ -1,36 +1,23 @@
 """Syndrome sources without a circuit: timing-only and fake-bit readout.
 
-A syndrome source fills the SyndromeSource port (decsim/ports.py) and
-is driven by the QPU cycle clock (cycle_clock.py): one payload list per
-operation round, one per idle stream round. Neither source here has a
-circuit, so neither builds a detector error model.
-
-TimingOnlyDevice emits payloads that carry no bit values and state the
-code card's widths, for runs that price timing alone; it is the
-default source of a run. A timing simulation models a transfer's size
-and not its content: gem5's packet trace records a tick, a command, an
-address and a size and no data (gem5 src/proto/packet.proto), and its
-network tester says "No need to do functional simulation / We just do
-timing simulation of the network" (gem5 src/cpu/testers/
-garnet_synthetic_traffic/GarnetSyntheticTraffic.cc). SyndromeBitDevice
-emits seeded random bits sized by the same width, to exercise the
-payload path end to end without Stim. Both state a round's raw width
-and the width its detection events take once formed, layer by layer
-(_round_widths), so each seat prices the width it holds, as a circuit
-source's formation table does. A program may split a stream's last
-round in two, the checks first and the data readout as its own
-terminal fragment, as the Stim source reads a declared terminal
-fragment out (stim_device.py finalize_stream_round); both sources then
-state the readout in finalize_stream_round. Both name NO_WINDOW_MODELS
-as their window model source, which answers every model question with
-nothing.
+TimingOnlyDevice, the default source, emits payloads with a size and no
+bit values. A timing simulation models a transfer's size, not its
+content: gem5's packet trace records no data (src/proto/packet.proto),
+and its network tester does "timing simulation of the network" only
+(GarnetSyntheticTraffic.cc). SyndromeBitDevice emits seeded random bits
+of the same width, to exercise the payload path without Stim. Both
+state a round's raw width and its event width layer by layer
+(_round_widths), so each seat prices what it holds, and both state a
+split-off data readout in finalize_stream_round.
 """
 
+import dataclasses
 import random
+from collections.abc import Mapping
 from typing import Any, Optional
 
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
@@ -47,9 +34,8 @@ def boundary_departure_tick(
 ) -> int:
     """The readout leaves the chip at the boundary it was read out at.
 
-    Every shipped source departs this way; a source whose readout
-    arrives with a fixed delay or a jitter names a later tick of its
-    own (ports.SyndromeSource.readout_departure_tick).
+    A source with a fixed delay or jitter names a later tick of its own
+    (ports.SyndromeSource.readout_departure_tick).
     """
     del readout
     return readout_tick
@@ -58,14 +44,12 @@ def boundary_departure_tick(
 class CircuitlessSource:
     """What a syndrome source with no circuit answers, whatever it emits.
 
-    It draws no shot, so it knows no truth; no circuit fixes a stream's
-    length or builds a window's model; a readout leaves the chip at the
-    boundary it was read out at; and each operation's last round, the
-    one its data qubits are read out on, is kept by decode identity.
+    No shot, so no truth; no stream length or window model; the readout
+    leaves at its boundary; each operation's last round is kept by decode
+    identity.
     """
 
     operation_circuit_scope = "none"
-    takes_code_card = True
     # nothing is sampled per shot, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
 
@@ -75,7 +59,8 @@ class CircuitlessSource:
         self.round_count_by_identity: dict = {}
 
     def logical_observable_truth(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> Optional[tuple[int, ...]]:
         """This source draws no shot, so it knows no truth."""
         del operation_id
@@ -116,14 +101,26 @@ class CircuitlessSource:
 
 
 class TimingOnlyDevice(CircuitlessSource):
-    """Emits payloads with a size and no bit values: timing alone.
+    """Emits valueless payloads, sized for timing alone.
 
-    A round's size is the code card's: a rotated surface code "requires
-    d2 - 1 syndrome qubits" a round (Barber et al. 2309.05558 lines
-    947-951), and the last round of an operation adds its data qubits
-    (_round_widths), so every link and every memory the round crosses
-    can price it.
+    A rotated surface code "requires d2 - 1 syndrome qubits" a round
+    (Barber et al. 2309.05558 lines 947-951), and an operation's last round
+    adds its data qubits (_round_widths).
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The timing-only source has no keys: the card states every width."""
+
+        # the word the reports name this row by
+        name = "timing_only"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "TimingOnlyDevice":
+            """A fresh source shaped by the run's card."""
+            del circuit_arguments
+            return TimingOnlyDevice(code)
 
     emits_bit_values = False
 
@@ -152,7 +149,7 @@ class TimingOnlyDevice(CircuitlessSource):
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -190,13 +187,24 @@ class TimingOnlyDevice(CircuitlessSource):
 class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     """Emits seeded random bits shaped like the code card's syndrome.
 
-    Each payload draws from a generator of its own, seeded by the
-    substream of its stream, round and patches (seeding.substream_seed,
-    the rule the Stim source samples each stream under). A round's bits
-    therefore depend on the seed and the round alone, and not on how many
-    rounds another operation drew before it, which another component's
-    timing decides.
+    Each payload's generator is seeded by the substream of its stream, round
+    and patches (seeding.substream_seed), so a round's bits do not depend on
+    how many rounds another operation drew first, which timing decides.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The random-bit source has no keys: the card states every width."""
+
+        # the word the reports name this row by
+        name = "syndrome_bits"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "SyndromeBitDevice":
+            """A fresh source shaped by the run's card."""
+            del circuit_arguments
+            return SyndromeBitDevice(code)
 
     emits_bit_values = True
 
@@ -206,11 +214,10 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         seed: Optional[int] = None,
         one_payload_per_patch: bool = False,
     ):
-        source = super()
-        source.__init__(code)
+        CircuitlessSource.__init__(self, code)
         self.one_payload_per_patch = one_payload_per_patch
         self._seed = seed
-        self._initialize_run_seed_binding(seed)
+        seeding._AtomicRunSeedConsumer.__init__(self, seed)
 
     def run_seed_children(self) -> tuple[seed_records.RunSeedChild, ...]:
         """The code card, which shapes every payload."""
@@ -234,7 +241,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -262,14 +269,21 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         self._seed = prepared_state
 
     def _fake_bits(
-        self, target: Any, global_round: int, patches: tuple, bit_count: int
+        self,
+        target: Any,  # an opaque identity
+        global_round: int,
+        patches: tuple,
+        bit_count: int,
     ) -> list:
         self._mark_stochastic_use()
         generator = self._payload_generator(target, global_round, patches)
         return [generator.randint(0, 1) for _ in range(bit_count)]
 
     def _payload_generator(
-        self, target: Any, global_round: int, patches: tuple
+        self,
+        target: Any,  # an opaque identity
+        global_round: int,
+        patches: tuple,
     ) -> random.Random:
         """The generator of one payload; an unseeded device draws entropy."""
         if self._seed is None:
@@ -281,7 +295,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     def _payloads(
         self,
         operation: program_records.Operation,
-        target: Any,
+        target: Any,  # an opaque identity
         global_round: int,
         has_data_readout: bool,
     ) -> list[round_records.QPUReadout]:
@@ -310,7 +324,11 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         return tuple(groups)
 
     def _payload(
-        self, target: Any, patches: tuple, global_round: int, widths: tuple
+        self,
+        target: Any,  # an opaque identity
+        patches: tuple,
+        global_round: int,
+        widths: tuple,
     ) -> round_records.QPUReadout:
         """Random raw bits at the (raw, event) widths, its events' stated."""
         raw_bits, event_bits = widths
@@ -326,12 +344,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
 
 
 class NoWindowModels:
-    """The window model source of a source with no circuit: no model at all.
-
-    One shared component answers every model question with nothing, so a
-    circuit-less source fills SyndromeSource alone and names this for its
-    models (ports.SyndromeSource.window_model_source).
-    """
+    """The window model source of a circuit-less source: no model at all."""
 
     # nothing here reads an operation's circuit
     operation_circuit_scope = "none"
@@ -371,7 +384,9 @@ class NoWindowModels:
         return []
 
     def window_model_for_stream(
-        self, stream_id: Any, window: window_records.Window
+        self,
+        stream_id: Any,  # an opaque identity
+        window: window_records.Window,
     ) -> None:
         """No circuit, so no stream window has an error model."""
 
@@ -407,14 +422,9 @@ def _round_widths(
 ) -> tuple:
     """(raw bits, event bits) of one memory round, by its layer.
 
-    Stim lays a memory out in three layers (detector_formation.py): the
-    first round's detectors compare half the checks against the
-    prepared state, every later round's compare all of them against the
-    round before, and the last round folds in the other half rebuilt
-    from the data-qubit readout. So a round reads out its checks raw,
-    the last its data qubits too, and forms c/2, c or c + c/2 events:
-    4, 8 and 12 at d=3, as stim.Circuit.generated's rotated memory
-    gives them, with 8 raw bits a round and 17 on the last.
+    Stim's three layers (detector_formation.py): c/2 events on the first
+    round, c on the middle ones, c + c/2 on the last with the data readout:
+    4, 8 and 12 at d=3, with 8 raw bits a round and 17 on the last.
     """
     check_bits = code.syndrome_bits_per_round(patch_count)
     half_the_checks = check_bits // 2
@@ -431,9 +441,7 @@ def _round_widths(
 def _data_readout_widths(code: ports.CodeModel, patch_count: int) -> tuple:
     """(raw bits, event bits) of a last round's data readout on its own.
 
-    The data qubits leave raw, and the events they close are the other
-    half of the checks, the last layer _round_widths folds into the last
-    round; the checks fragment keeps the rest.
+    The data qubits leave raw and close the other half of the checks.
     """
     raw_bits = code.data_bits_per_readout(patch_count)
     check_bits = code.syndrome_bits_per_round(patch_count)
@@ -449,9 +457,8 @@ def _reads_the_data_out(
 ) -> bool:
     """Whether this round of the operation carries the data readout.
 
-    The last round does, unless the program split it in two with this
-    operation's payloads first: the terminal fragment then brings the
-    readout (finalize_stream_round), one payload for each of these.
+    The last round does, unless the program split it and the terminal
+    fragment brings the readout (finalize_stream_round).
     """
     if global_round != last_round:
         return False
@@ -463,7 +470,7 @@ def _reads_the_data_out(
 
 def _valueless_readout(
     code: ports.CodeModel,
-    target: Any,
+    target: Any,  # an opaque identity
     patches: tuple,
     global_round: int,
     has_data_readout: bool,

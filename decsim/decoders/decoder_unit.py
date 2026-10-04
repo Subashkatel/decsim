@@ -1,28 +1,23 @@
 """One decoder unit's occupancy: slots, memory, compute claim.
 
-The unit is Smith's decoupled access-execute machine with two input slots
-(Smith 1982; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin's
-full/empty bits, tracked per cache line or per half array for double
-buffering, Shao et al. MICRO 2016 Sec. IV-B-2):
+The unit is Smith's decoupled access-execute machine with two input
+slots (Smith 1982; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin's
+double-buffering full/empty bits, Shao et al. MICRO 2016 Sec. IV-B-2):
 the next window's transfer lands in the second slot while the current
-decode computes. Compute is claimed apart from the slots (Tomasulo's
-rule: an instruction whose operands are not ready waits in its
-reservation station, never on the functional unit; gem5 O3 issues only
-ready work, inst_queue.hh scheduleReadyInsts). The compute takes one
-decode at a time, as Helios's controller refuses input while it decodes:
-input_ready is high only while it is idle or preparing the next
-measurement (Helios_scalable_QEC control_node_single_FPGA.v lines
-234-243).
-The unit records who holds what, gem5's functional unit
-(fu_pool.hh:64-75); the service starts and ends the decodes.
+decode computes. Compute is claimed apart from the slots, by Tomasulo's
+rule that work whose operands are not ready waits in its reservation
+station, never on the functional unit (gem5 O3 inst_queue.hh
+scheduleReadyInsts). The compute takes one decode at a time, as Helios's
+controller takes no input while it decodes (control_node_single_FPGA.v
+lines 234-243). The unit records who holds what; the service starts and
+ends the decodes.
 
 A finished result nobody has asked for yet waits in the unit's output
 slot, not in the manager: AFS keeps the finished error log in the unit
-(2001.06598 lines 833-840), ChipCheck's output sits in programmable
-registers until it is read (2309.05558 lines 484-485), and gem5's sender
-keeps the packet and sends it again when the far side accepts it
-(port.hh:244-255). Holding it costs nothing and blocks nothing: the
-compute and the input slots are freed at the decode's end as before.
+(2001.06598 lines 833-840), ChipCheck's output sits in registers until
+read (2309.05558 lines 484-485), and gem5's sender keeps a packet until
+the far side accepts it (port.hh:244-255). Holding it blocks nothing:
+the compute and the input slots are freed at the decode's end.
 """
 
 import dataclasses
@@ -31,6 +26,7 @@ from collections.abc import Callable
 from typing import Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 
 # the decode computing and the next window's input landing beside it
@@ -39,7 +35,7 @@ INPUT_SLOT_COUNT = 2
 
 @dataclasses.dataclass
 class ComputeClaim:
-    """Who holds or reserves the unit's compute, and when it is expected free.
+    """The claim on one unit's compute.
 
     The holder runs from assignment through decode end; None means the
     compute is free or back in the pool. The expected free tick comes
@@ -54,7 +50,7 @@ class ComputeClaim:
 
 @dataclasses.dataclass
 class UnitSlots:
-    """What the unit's slots hold, in and out.
+    """What the unit's slots hold.
 
     residents are the jobs whose input occupies or reserves an input
     slot (in transfer or landed), in dispatch order; at most the
@@ -106,17 +102,12 @@ class DecoderUnit:
     ) -> bool:
         """Whether a slot is free and the memory holds the job beside the rest.
 
-        A second resident joins only if the unit's memory holds both
-        inputs; a unit sized for one window keeps serial residency (the
-        doubled-SRAM price of overlap is paid explicitly, never assumed).
-        A first resident is always admitted, so a genuinely oversized
-        window still stops loudly at its deposit. A job whose rounds
-        this unit already holds needs no memory of its own: it is one
-        more reader of the copy that is here, and the same holds for
-        rounds still on their way to a resident that reads them, which
-        land as one copy. A resident whose input has landed carries its
-        rounds in the memory rather than in its payloads, so the
-        memory's own occupancy answers for it.
+        A second resident joins only if the memory holds both inputs, so
+        a unit sized for one window keeps serial residency. A first
+        resident is always admitted, so an oversized window stops at its
+        deposit. A job whose rounds the unit holds, or are on their way
+        to it, needs no memory of its own, and a landed resident is
+        counted by the memory's own occupancy.
         """
         if len(self.residents) >= resident_capacity:
             return False
@@ -184,10 +175,8 @@ class DecoderUnit:
     def residents_awaiting_compute_count(self) -> int:
         """How many residents still need this unit's compute.
 
-        A resident that has not started and is neither cancelled nor
-        completed is work waiting at this unit: it holds an input slot
-        and takes the compute as soon as it may. A decode in flight or
-        finished waits for nothing.
+        A resident not started, cancelled or completed holds an input
+        slot and takes the compute as soon as it may.
         """
         awaiting_count = 0
         for resident in self.residents:
@@ -201,14 +190,11 @@ class DecoderUnit:
     ) -> float:
         """Ticks of compute this unit may still owe the jobs it holds.
 
-        The time to the tick the holder is expected to free the
-        compute, then the declared cost of every other resident that
-        has not started. Nobody knows when a parked resident is
-        released, so its decode is counted whole: that is the most a
-        newcomer can wait behind it, and the least such total over the
-        units bounds the newcomer's worst start. A holder that outlived
-        its prediction, its result not yet read, is held for a time
-        nobody declared, so the work is unbounded.
+        The time until the holder is expected to free the compute, then
+        the declared cost of every other resident not started. A parked
+        resident's decode is counted whole, the most a newcomer can wait
+        behind it. A holder that outlived its prediction, its result not
+        yet read, makes the work unbounded.
         """
         work_left = 0.0
         holder = self.holder
@@ -244,21 +230,21 @@ class DecoderUnit:
 
     # -------------------------------------------------- the output slot
 
-    def hold_output(self, window_key: tuple, completion) -> None:
+    def hold_output(
+        self,
+        window_key: tuple,
+        completion: strong_requests_module.StrongCompletion,
+    ) -> None:
         """Keep one finished result until its destination asks for it.
 
-        A destination window has at most one unconsumed strong result,
-        so a second one for the same window is a defect, not a queue.
+        A destination has at most one unconsumed strong result
+        (StrongRequests.admit_strong).
         """
-        finished = self.slots.finished
-        if window_key in finished:
-            raise RuntimeError(
-                f"unit {self.name!r} already holds a finished result for "
-                f"window {window_key}"
-            )
-        finished[window_key] = completion
+        self.slots.finished[window_key] = completion
 
-    def take_output(self, window_key: tuple):
+    def take_output(
+        self, window_key: tuple
+    ) -> Optional[strong_requests_module.StrongCompletion]:
         """Take the result waiting for that destination, or None."""
         return self.slots.finished.pop(window_key, None)
 
@@ -314,8 +300,7 @@ class DecoderUnit:
 def is_startable(job: decoding_records.DecodeJob) -> bool:
     """A job whose window owes no boundary may hold compute.
 
-    Anything windowless (external, strong context, merged batch) always
-    may.
+    Anything windowless (external, strong context, merged batch) may.
     """
     window = job.window
     if window is None:

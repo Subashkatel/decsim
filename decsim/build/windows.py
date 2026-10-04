@@ -1,36 +1,32 @@
 """The windows part: which windows exist, when each is decoded, where it goes.
 
-The window manager is the part's face to the rest of the machine: the
-stores tell it which rounds landed, it closes each window whose rounds
-are in, the requester asks the decoder manager for a decode, the
-verdict keeps the result or escalates it, and the committer writes the
-correction and carries the boundary to the next window. A run that may
-escalate adds the strong re-decode, and a run that decides on a
-confidence adds the signal and the join of a window's solves.
+The window manager closes each window whose rounds are in, the requester
+asks the decoder manager for a decode, the verdict keeps the result or
+escalates it, and the committer writes the correction and carries the
+boundary to the next window.
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
-import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
 import decsim.confidence.gap_join as gap_join_module
+import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
-import decsim.escalation.pending_strong_windows as pending_strong_windows
-import decsim.escalation.strong_redecode as strong_redecode_module
-import decsim.escalation.strong_regions as strong_regions
+import decsim.escalation.settings as escalation_settings
+import decsim.frontends.settings as workload_settings
 import decsim.links.window_transfers as window_transfers_module
 import decsim.ports as ports
-import decsim.settings as machine_settings
-import decsim.tables as tables
+import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_commits as window_commits
 import decsim.windows.window_manager as window_manager_module
@@ -41,18 +37,9 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    confidence_signal and gap_join are None on a run that decides on no
-    confidence. The four strong fields are None on a run that never
-    escalates: regions says which rounds an escalated window covers,
-    shape lays the strong window over them, pending_strong_windows holds
-    one until the conditions its row named are met, and strong_redecode
-    submits it and takes its result back.
+    gap_join is None on a run with no switching.
     """
 
-    # the policy and the detector are built before the parts, since the
-    # plan and the decoder units are compiled for them
-    escalation_policy: ports.EscalationPolicy
-    burst_detector: Optional[ports.BurstDetector]
     models: window_planner_module.WindowModels
     planner: window_planner_module.WindowPlanner
     tracker: round_tracker_module.RoundTracker
@@ -67,36 +54,30 @@ class Windows:
     committer: window_commits.WindowCommitter
     verdict: window_commits.WindowVerdict
     requester: decode_requests.DecodeRequester
-    confidence_signal: Optional[ports.ConfidenceSignal]
     gap_join: Optional[gap_join_module.WindowGapJoin]
-    regions: Optional[strong_regions.StrongRegions]
-    # the row escalation.strong_window names
-    shape: Optional[Any]
-    pending_strong_windows: Optional[
-        pending_strong_windows.PendingStrongWindows
-    ]
-    strong_redecode: Optional[strong_redecode_module.StrongRedecode]
     window_manager: window_manager_module.WindowManager
 
     @classmethod
     def build(
         cls,
-        settings: machine_settings.MachineSettings,
+        windows_settings: window_settings.WindowSettings,
+        workload: workload_settings.WorkloadSettings,
+        switching_settings: Optional[escalation_settings.SwitchingSettings],
+        window_decoder: Optional[decoder_settings.DecoderPoolSettings],
+        strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
+        window_tier: window_records.DecoderTier,
+        machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         plan: plan_build.Plan,
-        escalation_policy: ports.EscalationPolicy,
-        burst_detector: Optional[ports.BurstDetector],
         links: ports.Link,
+        built_models: built_window_models.BuiltWindowModels,
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
-        One line per component, in the order a window meets them, then
-        the wires inside the part.
+        built_models is the window error model cache the shot reads and
+        fills.
         """
         run_plan = plan.run_plan
-        built_models = settings.workload.built_models
-        if built_models is None:
-            built_models = built_window_models.BuiltWindowModels()
         models = window_planner_module.WindowModels(built_models)
         planner = window_planner_module.WindowPlanner(
             run_plan.resolved_operations,
@@ -104,32 +85,34 @@ class Windows:
             plan.planned_operations,
         )
         tracker = round_tracker_module.RoundTracker()
-        retention = _retention(plan, escalation_policy)
+        is_switching = switching_settings is not None
+        retention = _retention(plan, window_tier, is_switching)
         window_transfers = window_transfers_module.WindowTransfers(engine)
         decoder_output = decoder_output_module.DecoderOutput(engine)
-        copies_the_fold = _copies_the_boundary_fold(settings, escalation_policy)
-        gate = decode_requests.WindowInputGate(copies_the_fold)
+        copies_the_window_fold = _copies_the_boundary_fold(window_decoder)
+        copies_the_strong_fold = _copies_the_boundary_fold(strong_decoder)
+        gate = decode_requests.WindowInputGate(
+            copies_the_window_fold, copies_the_strong_fold
+        )
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
         courier = window_boundaries.BoundaryCourier()
         committer = window_commits.WindowCommitter(engine)
-        verdict = _verdict(settings, engine)
+        verdict = _verdict(switching_settings, machine_clock, engine)
+        clocked_windows = config.with_machine_clock(
+            windows_settings, machine_clock
+        )
         requester = decode_requests.DecodeRequester(
-            clock=settings.windows.clock,
-            decision_cycles=settings.windows.decision_cycles,
+            clock=clocked_windows.clock,
+            decision_cycles=clocked_windows.decision_cycles,
         )
-        confidence_signal, gap_join = _confidence(settings, engine)
-        regions, shape, pending, strong_redecode = _strong_redecode(
-            settings, engine, escalation_policy
-        )
-        feedback_boundary_mode = settings.workload.feedback_boundary_mode
+        gap_join = _gap_join(is_switching, engine)
+        feedback_boundary_mode = workload.feedback_boundary_mode
         window_manager = window_manager_module.WindowManager(
             engine, feedback_boundary_mode=feedback_boundary_mode
         )
         windows = cls(
-            escalation_policy=escalation_policy,
-            burst_detector=burst_detector,
             models=models,
             planner=planner,
             tracker=tracker,
@@ -144,27 +127,19 @@ class Windows:
             committer=committer,
             verdict=verdict,
             requester=requester,
-            confidence_signal=confidence_signal,
             gap_join=gap_join,
-            regions=regions,
-            shape=shape,
-            pending_strong_windows=pending,
-            strong_redecode=strong_redecode,
             window_manager=window_manager,
         )
         windows._wire_the_plan(plan)
         windows._wire_the_window_chain(links)
         windows._wire_the_decision()
-        windows._wire_the_strong_redecode()
         return windows
 
     def connect(
         self,
-        weak_store: ports.SyndromeBuffer,
+        weak_store: Optional[ports.SyndromeBuffer],
         strong_store: Optional[ports.SyndromeBuffer],
-        store_output: ports.SyndromeBufferOutput,
-        strong_output: Optional[ports.SyndromeBufferOutput],
-        strong_receiver: Optional[ports.StrongSyndromeRoundReceiver],
+        store_output: Optional[ports.SyndromeBufferOutput],
         primary_decoder: Optional[ports.Decoder],
         strong_decoder: Optional[ports.Decoder],
         decode_queue: ports.DecodeQueue,
@@ -192,10 +167,6 @@ class Windows:
         self.results.factory = factory
         if self.gap_join is not None:
             self.gap_join.decode_queue = decode_queue
-        if self.strong_redecode is not None:
-            self.strong_redecode.strong_receiver = strong_receiver
-            self.strong_redecode.strong_output = strong_output
-            self.strong_redecode.decode_queue = strong_decode_queue
 
     def start(self) -> None:
         """Build every planned window's model, then its first boundary."""
@@ -203,18 +174,8 @@ class Windows:
         self.window_manager.start()
 
     def check_settled(self) -> None:
-        """No strong escalation is pending and every window has closed."""
-        strong_redecode = self.strong_redecode
-        if strong_redecode is not None and strong_redecode.has_pending():
-            pending = strong_redecode.pending_work()
-            raise RuntimeError(
-                f"the run ended with pending strong escalations: {pending}"
-            )
+        """Every window has closed."""
         self.window_manager.check_settled()
-
-    def seed_roots(self) -> tuple:
-        """This part's stochastic owners, each by the name its seed hashes."""
-        return (("escalation_policy", self.escalation_policy),)
 
     def _wire_the_plan(self, plan: plan_build.Plan) -> None:
         interaction = plan.window_interaction
@@ -228,8 +189,6 @@ class Windows:
         self.courier.interaction = interaction
         self.courier.boundary_policy = plan.boundary_policy
         self.window_manager.window_interaction = interaction
-        if self.regions is not None:
-            self.regions.interaction = interaction
 
     def _wire_the_window_chain(self, links: ports.Link) -> None:
         planner = self.planner
@@ -269,142 +228,66 @@ class Windows:
         requester = self.requester
         verdict.planner = self.planner
         verdict.tracker = self.tracker
-        verdict.escalation_policy = self.escalation_policy
         verdict.committer = self.committer
         requester.tracker = self.tracker
         requester.retention = self.retention
         requester.builder = self.builder
-        requester.escalation_policy = self.escalation_policy
         requester.verdict = verdict
         requester.gap_join = self.gap_join
-        if self.burst_detector is not None:
-            self.escalation_policy.burst_detector = self.burst_detector
         if self.gap_join is not None:
-            self.gap_join.signal = self.confidence_signal
             self.gap_join.verdict = verdict
-
-    def _wire_the_strong_redecode(self) -> None:
-        strong_redecode = self.strong_redecode
-        if strong_redecode is None:
-            return
-        regions = self.regions
-        regions.planner = self.planner
-        regions.tracker = self.tracker
-        regions.retention = self.retention
-        regions.burst_detector = self.burst_detector
-        shape = self.shape
-        shape.regions = regions
-        shape.planner = self.planner
-        shape.retention = self.retention
-        shape.builder = self.builder
-        shape.requester = self.requester
-        shape.ledger = self.ledger
-        shape.courier = self.courier
-        strong_redecode.shape = shape
-        strong_redecode.pending = self.pending_strong_windows
-        strong_redecode.retention = self.retention
-        strong_redecode.decoder_output = self.decoder_output
-        strong_redecode.verdict = self.verdict
-        self.committer.strong_redecode = strong_redecode
-        self.verdict.strong_redecode = strong_redecode
-        self.window_manager.strong_redecode = strong_redecode
-
-
-def _decides_on_a_confidence(
-    settings: machine_settings.MachineSettings,
-) -> bool:
-    """Whether the run joins the confidence of every solve of a window.
-
-    False when the row decides on no confidence, and false for a
-    Python-built policy, which brings its own decoder and reports its
-    own soft output from one decode.
-    """
-    if settings.escalation.policy is not None:
-        return False
-    row = escalation_build.escalation_row(settings.escalation)
-    return row.decides_on_a_confidence
 
 
 def _retention(
-    plan: plan_build.Plan, escalation_policy: ports.EscalationPolicy
+    plan: plan_build.Plan,
+    window_tier: window_records.DecoderTier,
+    is_switching: bool,
 ) -> round_retention_module.RoundRetention:
     """Which store holds a window's rounds, and for how long.
 
-    The reads the run places while it goes hold the rounds before their
-    first by the same rule as the reads the plan placed.
+    A switching run keeps every round a strong redo would read.
     """
     formation_reads = plan.formation_reads
     return round_retention_module.RoundRetention(
-        is_strong_context_retained=escalation_policy.requires_strong_context,
-        primary_tier=escalation_policy.primary_tier,
+        is_strong_context_retained=is_switching,
+        primary_tier=window_tier,
         strong_side_seat=formation_reads.strong_side_seat,
     )
 
 
-def _confidence(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
-) -> tuple:
-    """The signal a window's confidence is read from, and the join of solves.
-
-    Two Nones on a run that decides on no confidence.
-    """
-    if not _decides_on_a_confidence(settings):
-        return None, None
-    signal = escalation_build.confidence_signal(
-        settings.escalation, settings.weak_decoder
-    )
-    gap_join = gap_join_module.WindowGapJoin(engine)
-    return signal, gap_join
+def _gap_join(
+    is_switching: bool, engine: engine_module.Engine
+) -> Optional[gap_join_module.WindowGapJoin]:
+    """The join of a window's solves; None on a run with no switching."""
+    if not is_switching:
+        return None
+    return gap_join_module.WindowGapJoin(engine)
 
 
 def _verdict(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
+    switching: Optional[escalation_settings.SwitchingSettings],
+    machine_clock: Optional[config.Clock],
+    engine: engine_module.Engine,
 ) -> window_commits.WindowVerdict:
-    """Whether a decoded window is kept, priced on the escalation's clock."""
-    escalation = settings.escalation
+    """Whether a decoded window is kept, priced on the switching clock.
+
+    A run with no switching keeps every result at once.
+    """
+    if switching is None:
+        return window_commits.WindowVerdict(engine)
+    clocked_switching = config.with_machine_clock(switching, machine_clock)
     return window_commits.WindowVerdict(
         engine,
-        clock=escalation.clock,
-        threshold_cycles=escalation.threshold_cycles,
-        switch_cycles=escalation.switch_cycles,
+        clock=clocked_switching.clock,
+        threshold_cycles=clocked_switching.threshold_cycles,
+        switch_cycles=clocked_switching.switch_cycles,
     )
-
-
-def _strong_redecode(
-    settings: machine_settings.MachineSettings,
-    engine: engine_module.Engine,
-    escalation_policy: ports.EscalationPolicy,
-) -> tuple:
-    """The strong tier's four components; four Nones if it never escalates.
-
-    They are the strong regions, the strong window's shape, the ledger
-    of pending strong windows and the strong re-decode. The shape is the
-    row escalation.strong_window names: the redo window, or the double
-    window of Toshio Sec. III C.
-    """
-    if not escalation_policy.requires_strong_context:
-        return None, None, None, None
-    shape_row = escalation_build.strong_window_row(settings.escalation)
-    regions = strong_regions.StrongRegions()
-    shape = shape_row(engine)
-    pending = pending_strong_windows.PendingStrongWindows()
-    strong_redecode = strong_redecode_module.StrongRedecode(engine)
-    return regions, shape, pending, strong_redecode
 
 
 def _copies_the_boundary_fold(
-    settings: machine_settings.MachineSettings,
-    escalation_policy: ports.EscalationPolicy,
+    decoder: Optional[decoder_settings.DecoderPoolSettings],
 ) -> bool:
-    """Whether the tier that decodes the plan's windows folds into a copy.
-
-    <tier>.boundary_fold names the row; a value that is not one is
-    refused here, where the tier is named.
-    """
-    tier = escalation_policy.primary_tier.value
-    tier_settings = settings.decoder_settings_for(tier)
-    return tables.row(
-        decoder_settings.DECODER_BOUNDARY_FOLDS,
-        f"{tier}_decoder.boundary_fold",
-        tier_settings.boundary_fold,
-    )
+    """Whether a tier folds its boundary mask into a copy of its input."""
+    if decoder is None:
+        return True
+    return decoder.copies_boundary_fold

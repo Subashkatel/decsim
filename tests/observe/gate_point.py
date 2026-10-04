@@ -1,28 +1,18 @@
 """Gate point 1 for the observation tests: how to run it, what it holds.
 
 weak_decoder_baseline d 3 p 0.003 seed 0, the first strict point of the
-frozen gate: the shipped configs/bases/weak_decoder_baseline.yaml with the
-component I/O log on, which is the one line the gate's copy of that yaml
-adds. captured_fields returns the row the gate hashes, so a test can say
-that a knob moved nothing.
+frozen gate: the weak base with the component I/O log on, which is the
+one change the gate's copy of the base makes. captured_fields returns
+the row the gate hashes, so a test can say that a knob moved nothing.
 """
 
 import dataclasses
 import hashlib
 import json
-import pathlib
 
 import decsim.machine as machine_module
+import decsim.settings as machine_settings
 
-_THIS_FILE = pathlib.Path(__file__)
-_ABSOLUTE_FILE = _THIS_FILE.resolve()
-CONFIGS_DIR = _ABSOLUTE_FILE.parents[2] / "configs"
-CONFIG_PATH = CONFIGS_DIR / "bases/weak_decoder_baseline.yaml"
-POINT = {
-    "workload.arguments.physical_error_probability": 0.003,
-    "qpu.distance": 3,
-    "qpu.round_period_microseconds": 1.0,
-}
 SEED = 0
 # the log hash of the point; it moves when a log line changes text, and the
 # results the gate hashes do not move with it
@@ -31,11 +21,7 @@ POINT_LOG_SHA256 = "42b473b3cb9c"
 
 def settings(**observation_changes):
     """Gate point 1's settings, with its observation section changed."""
-    import decsim.experiments.experiment as experiment
-
-    config = experiment.load_experiment(CONFIG_PATH)
-    task = config.point_task(POINT)
-    shipped = task.settings
+    shipped = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
     changes = {"log_component_io": True, **observation_changes}
     observation = dataclasses.replace(shipped.observation, **changes)
     return dataclasses.replace(shipped, observation=observation)

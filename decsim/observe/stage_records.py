@@ -1,13 +1,13 @@
 """One run's decoder stage records, kept per operation and window.
 
-A listener on every decoder row's stage_recorded source. The decoder
-fires one DecoderStageRecord as each stage's end becomes known and keeps
-nothing itself, so a run with no ledger connected holds no stage history
-at all; the experiments layer's per-window measurement and the latency
-plot read the ledger. The stage vocabulary is the decoder row's own
-(decoders/staged_decoder.py), so an ASIC or GPU model fires its own
-stage names through the same source.
+The decoder keeps no stage history itself, so a run with no ledger holds
+none. The stage names are the decoder row's own
+(decoders/staged_decoder.py).
 """
+
+from typing import Any
+
+import decsim.records.decoding as decoding_records
 
 
 class StageLedger:
@@ -17,14 +17,20 @@ class StageLedger:
         self.records: list = []
         self._by_window: dict = {}
 
-    def stage_recorded(self, record) -> None:
+    def stage_recorded(
+        self, record: decoding_records.DecoderStageRecord
+    ) -> None:
         """One stage of one job ended on some unit."""
         self.records.append(record)
         key = (record.operation_id, record.window_id)
         window_records = self._by_window.setdefault(key, [])
         window_records.append(record)
 
-    def records_for(self, operation_id, window_id) -> tuple:
+    def records_for(
+        self,
+        operation_id: Any,  # an opaque identity
+        window_id: int,
+    ) -> tuple:
         """One window's stage records, in stage order."""
         key = (operation_id, window_id)
         window_records = self._by_window.get(key, ())

@@ -1,9 +1,7 @@
 """The window ledger: every window's record, heard as the plan grows.
 
-A listener on the window manager's window_planned and the committer's
-window_committed(window, contribution); it holds the Window records the
-plan laid out at build, so the stamps a window carries (a window's
-status lives on its record) are read here, never from the planner.
+A window's status lives on its record, so stamps are read here, never
+from the planner.
 """
 
 import decsim.records.decoding as decoding_records

@@ -1,21 +1,12 @@
 """The listeners of one run, by name.
 
-The Machine builds each listener the observation section asks for,
-connects it to the sources it hears, and keeps it here so
-decsim.experiments, the gate and the experiments read a run's numbers
-from its listeners and never from a component. The log writer, the
-window ledger, the runtime stamps, the queue depth, the controller
-counters, the command events, the frame's corrections, the referee's
-audit and the sampled shots are always there; the ones a study asks
-for are None when the section did not ask, the burst flags are None
-when the run has no burst detector, and the confidence ledger when no
-confidence signal decides the escalation.
+Experiments and the gate read a run's numbers from its listeners, never
+from a component. A listener a study did not ask for is None.
 """
 
 import dataclasses
 from typing import Optional
 
-import decsim.observe.burst_flags as burst_flags_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -57,5 +48,4 @@ class Observation:
     round_events: round_events_module.RoundEventRecorder
     referee_audit: referee_audit_module.RefereeAudit
     sampled_shots: sampled_shots_module.SampledShots
-    burst_flags: Optional[burst_flags_module.BurstFlags]
     confidence: Optional[decode_records_module.ConfidenceLedger]

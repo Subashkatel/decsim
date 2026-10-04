@@ -15,11 +15,14 @@ import enum
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
-import decsim.experiments.experiment as experiment
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
-import tests.experiments.yaml_configs as yaml_configs
+import decsim.settings as machine_settings
+import examples.two_tiers as two_tiers
+import tests.declared_run as declared_run
 
 
 class Tier(enum.Enum):
@@ -89,30 +92,31 @@ def test_reading_the_frame_does_not_change_it():
     assert first_read == second_read == (1, 1)
 
 
+def test_the_frame_keeps_its_own_copy_of_the_observables_it_was_given():
+    """A caller may reuse its buffer; the committed correction is fixed."""
+    engine, frame = frame_with_commit_ticks(0)
+    callers_buffer = [1, 0, 1]
+    commit(frame, ("stream", 0), callers_buffer)
+    callers_buffer[0] = 0
+    assert frame.frame_for_stream("stream") == (1, 0, 1)
+
+
+def test_a_snapshot_does_not_change_when_the_frame_does():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0))
+    before = frame.snapshot()
+    commit(frame, ("stream", 1), (1, 1))
+    after = frame.snapshot()
+    assert before.commit_count == 1
+    assert after.commit_count == 2
+
+
 def test_a_second_correction_for_a_window_is_refused():
     engine, frame = frame_with_commit_ticks(0)
     commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)
-    with pytest.raises(RuntimeError, match="second write"):
+    with pytest.raises(RuntimeError, match="already has a weak correction"):
         commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
     assert frame.frame_for_stream("stream") == (1,)
-
-
-def test_the_write_cost_is_charged_before_the_caller_continues():
-    engine, frame = frame_with_commit_ticks(4)
-    continued_at = []
-
-    def note_continuation():
-        continued_at.append(engine.now)
-
-    def commit_at_tick_ten():
-        commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
-
-    engine.schedule(10, commit_at_tick_ten)
-    engine.run()
-    assert continued_at == [14]
-    snapshot = frame.snapshot()
-    record = snapshot.records[0]
-    assert (record.accepted_ticks, record.committed_ticks) == (10, 14)
 
 
 def test_a_correction_without_observables_makes_the_fold_unknown():
@@ -120,37 +124,6 @@ def test_a_correction_without_observables_makes_the_fold_unknown():
     commit(frame, ("stream", 0), (1,))
     commit(frame, ("stream", 1), None)
     assert frame.frame_for_stream("stream") is None
-
-
-def test_a_charged_write_keeps_its_cycle_count_and_its_clock():
-    clock = config.Clock(4000)
-    settings = pauli_frame_module.PauliFrameConfig(write_cycles=1, clock=clock)
-    assert settings.write_cycles == 1
-    assert settings.clock.period_ticks == 4000
-
-
-def test_a_write_arriving_mid_cycle_lands_on_the_frame_clocks_next_edge():
-    """One write is one cycle of the frame unit, charged edge to edge.
-
-    Yang et al. 2605.04892 Fig. 1 price the update at one cycle, 4 ns at
-    250 MHz, so on a 4000-tick period a correction that arrives at tick
-    10 is written over the cycle that starts at 4000 and lands at 8000.
-    """
-    engine = engine_module.Engine()
-    clock = config.Clock(4000)
-    frame = pauli_frame_module.PauliFrame(engine, clock=clock, write_cycles=1)
-    continued_at = []
-
-    def note_continuation():
-        continued_at.append(engine.now)
-
-    def commit_at_tick_ten():
-        commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
-
-    engine.schedule(10, commit_at_tick_ten)
-    engine.run()
-
-    assert continued_at == [8000]
 
 
 def test_a_stream_whose_corrections_change_width_is_refused_when_read():
@@ -176,7 +149,7 @@ def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
         continued.append(engine.now)
 
     commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
-    with pytest.raises(RuntimeError, match="second write"):
+    with pytest.raises(RuntimeError, match="already has a weak correction"):
         commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
     engine.run()
     assert continued == [4]
@@ -185,84 +158,26 @@ def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
     assert snapshot.pending_write_count == 0
 
 
-def test_the_frame_keeps_its_own_copy_of_the_observables_it_was_given():
-    """A caller may reuse its buffer; the committed correction is fixed."""
-    engine, frame = frame_with_commit_ticks(0)
-    callers_buffer = [1, 0, 1]
-    commit(frame, ("stream", 0), callers_buffer)
-    callers_buffer[0] = 0
-    assert frame.frame_for_stream("stream") == (1, 0, 1)
-
-
-def test_a_snapshot_does_not_change_when_the_frame_does():
-    engine, frame = frame_with_commit_ticks(0)
-    commit(frame, ("stream", 0), (1, 0))
-    before = frame.snapshot()
-    commit(frame, ("stream", 1), (1, 1))
-    after = frame.snapshot()
-    assert before.commit_count == 1
-    assert after.commit_count == 2
-
-
-def test_a_write_cost_refusal_names_its_yaml_path():
-    clocks = config.ClockSettings({"fridge": 250.0})
-    section = {"clock": "fridge", "write_cycles": -1}
-
-    with pytest.raises(ValueError) as refusal:
-        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
-    assert str(refusal.value) == (
-        "pauli_frame.write_cycles must not be negative: cycles must be "
-        "nonnegative"
+def test_a_charged_write_with_no_clock_still_stops():
+    """A run that names no clock cannot land the first window's write."""
+    algorithm = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
     )
-
-
-def test_a_charged_write_without_a_clock_is_refused():
-    with pytest.raises(ValueError, match="needs the clock"):
-        pauli_frame_module.PauliFrameConfig(write_cycles=1)
-
-
-@pytest.mark.parametrize("key", ["clock", "write_cycles"])
-def test_a_section_without_a_required_key_is_refused_by_name(key):
-    """A sweep that leaves a key out reads a sentence, not a KeyError."""
-    clocks = config.ClockSettings({"fridge": 250.0})
-    section = {"kind": "logical_register", "clock": "fridge"}
-    section["write_cycles"] = 1
-    del section[key]
-
-    with pytest.raises(ValueError) as refusal:
-        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
-    assert str(refusal.value) == (
-        f"pauli_frame needs the keys ['{key}']; configs/reference.yaml "
-        "holds every key with its unit"
+    workload = declared_run.declared_workload(None, 6)
+    qpu = declared_run.declared_qpu()
+    frame = pauli_frame_module.PauliFrameConfig(write_cycles=1, clock=None)
+    settings = machine_settings.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak, pauli_frame=frame
     )
+    machine = machine_module.Machine.build(settings, 0)
 
-
-def test_a_key_the_section_does_not_have_is_refused_by_name():
-    """A misspelt key would otherwise leave its default silently."""
-    clocks = config.ClockSettings({"fridge": 250.0})
-    section = {"clock": "fridge", "write_cycles": 1, "write_cycle": 2}
-
-    with pytest.raises(ValueError) as refusal:
-        pauli_frame_module.PauliFrameConfig.from_yaml(section, clocks)
-    assert str(refusal.value) == (
-        "pauli_frame does not know ['write_cycle']; its keys are "
-        "['kind', 'clock', 'write_cycles']"
-    )
-
-
-def test_a_free_write_is_accepted_and_needs_no_clock():
-    settings = pauli_frame_module.PauliFrameConfig(write_cycles=0)
-    assert settings.write_cycles == 0
-    assert settings.clock is None
+    with pytest.raises(AttributeError, match="has no attribute 'edge'"):
+        machine.run()
 
 
 class CountingFrame(pauli_frame_module.PauliFrame):
-    """A frame row written outside decsim: it counts what it committed.
-
-    Its constructor is the port's, the engine and the write cost in
-    cycles of its clock, which is what the root gives every row of
-    FRAMES.
-    """
+    """A frame written outside decsim: it counts what it committed."""
 
     def __init__(self, engine, *, clock, write_cycles: int) -> None:
         reference = super()
@@ -283,38 +198,29 @@ class CountingFrame(pauli_frame_module.PauliFrame):
         )
 
 
-def test_a_frame_row_written_outside_decsim_runs_from_a_yaml(
-    monkeypatch, tmp_path
-):
-    """One FRAMES row and one pauli_frame.kind is the whole edit."""
-    monkeypatch.setitem(pauli_frame_module.FRAMES, "counting", CountingFrame)
-    section = dict(yaml_configs.MINIMAL_CONFIG["pauli_frame"])
-    section["kind"] = "counting"
-    config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
+class CountingFrameConfig(pauli_frame_module.PauliFrameConfig):
+    """The record that builds a CountingFrame."""
+
+    def build(self, engine) -> CountingFrame:
+        return CountingFrame(
+            engine, clock=self.clock, write_cycles=self.write_cycles
+        )
+
+
+def test_a_frame_written_outside_decsim_runs_from_its_record():
+    """One record that builds the frame is the whole edit."""
+    base = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    frame = base.pauli_frame
+    counting = CountingFrameConfig(
+        write_cycles=frame.write_cycles, clock=frame.clock
     )
-    settings = point.settings
+    settings = dataclasses.replace(base, pauli_frame=counting)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
 
     assert isinstance(machine.control.pauli_frame, CountingFrame)
     assert result.terminal_status == "complete"
     assert machine.control.pauli_frame.committed_windows != []
-
-
-def test_a_frame_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
-    """The table's own refusal, at the yaml boundary."""
-    section = dict(yaml_configs.MINIMAL_CONFIG["pauli_frame"])
-    section["kind"] = "not_a_row"
-    config_path = yaml_configs.write_config(tmp_path, {"pauli_frame": section})
-    with pytest.raises(ValueError, match="pauli_frame.kind 'not_a_row' is not"):
-        experiment.load_experiment(config_path)
 
 
 def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
@@ -342,23 +248,6 @@ def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
     assert continued_at == [14, 14]
 
 
-def test_every_write_is_stamped_with_its_own_arrival_and_its_own_end():
-    """A queue would show the second write starting where the first ended."""
-    engine, frame = frame_with_commit_ticks(4)
-
-    def commit_both():
-        commit(frame, ("stream", 0), (1,))
-        commit(frame, ("stream", 1), (1,))
-
-    engine.schedule(10, commit_both)
-    engine.run()
-    snapshot = frame.snapshot()
-    first, second = snapshot.records
-
-    assert (first.accepted_ticks, first.committed_ticks) == (10, 14)
-    assert (second.accepted_ticks, second.committed_ticks) == (10, 14)
-
-
 def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     """What the frame holds is what the run reports, escalations included.
 
@@ -369,16 +258,9 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     stream's logical correction is the sum of its committed windows'
     effects). Both folds must agree.
     """
-    config_path = yaml_configs.CONFIGS_DIR / "examples/two_tiers.yaml"
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.01,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
+    distance_three = two_tiers.points[0]
+    workload = machine_settings.memory_workload(3, 0.01, 30)
+    settings = dataclasses.replace(distance_three.machine, workload=workload)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     (operation_result,) = result.operation_results

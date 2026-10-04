@@ -1,24 +1,18 @@
 """How a link cuts one message into the frames its wire carries.
 
-A packet channel hands every message to its Framing row, which returns
-the wire bits of each frame in sending order; the channel serializes,
-credits and acknowledges frame by frame. A message is the path's header
-and its payload, the bytes the protocol carries, and the frames add the
-protocol's own framing on top. Every row gives a message of no bits one
-frame, because a message only arrives when a frame lands. The bits are
-the bits the channel's rate is written for: the rows that count a line
-code in their frames (aurora_64b66b, flits) are priced at the line rate,
-and the rows that count bytes (pcie_tlp, roce_v2, ethernet_udp) at the
-data rate after the physical layer's coding, which is how pcie-bench
-prices them (pcie-bench model/pcie.py:40-48, model/eth.py:29-41).
+A message is the path's header and its payload; the frames add the
+protocol's own framing. A message of no bits is one frame, because a
+message arrives only when a frame lands. The bits are those the
+channel's rate is written for: framings that count a line code
+(aurora_64b66b, flits) at the line rate, those that count bytes
+(pcie_tlp, roce_v2, ethernet_udp) at the data rate after line coding,
+as pcie-bench prices them (model/pcie.py:40-48, model/eth.py:29-41).
 """
 
 import dataclasses
-from collections.abc import Mapping
+from typing import ClassVar
 
 import decsim.links.settings as link_settings
-import decsim.ports as ports
-import decsim.tables as tables
 
 BITS_PER_BYTE = 8
 
@@ -68,6 +62,17 @@ class Whole:
     one (point-to-point-net-device.cc:528 and :243).
     """
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The whole framing has no keys of its own."""
+
+        # no acknowledgement packet of its own (RoceV2.Settings has one)
+        has_acknowledgement_packet: ClassVar[bool] = False
+
+        def build(self) -> "Whole":
+            """A fresh framing."""
+            return Whole()
+
     def frames(self, payload_bits: int, header_bits: int) -> tuple[int, ...]:
         """The one frame."""
         message_bits = payload_bits + header_bits
@@ -84,19 +89,18 @@ class Flits:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The flits row's key: the width of one flit in bits."""
+        """The width of one flit, a positive whole number of bits."""
 
         flit_bits: int
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, section_name: str
-        ) -> "Flits.Settings":
-            """The flit width, a positive whole number of bits."""
-            flit_bits = link_settings.positive_count_key(
-                section, "flit_bits", section_name
-            )
-            return cls(flit_bits=flit_bits)
+        has_acknowledgement_packet: ClassVar[bool] = False
+
+        def __post_init__(self) -> None:
+            link_settings.check_positive_count("flit_bits", self.flit_bits)
+
+        def build(self) -> "Flits":
+            """A fresh framing on these settings."""
+            return Flits(self)
 
     def __init__(self, settings: "Flits.Settings") -> None:
         self._flit_bits = settings.flit_bits
@@ -111,12 +115,20 @@ class Flits:
 class Aurora64b66b:
     """66-bit blocks: floor(n / 8) + 1 of them for a frame of n octets.
 
-    Each block is one entry of the receiver's FIFO, which is the unit
-    Aurora's native flow control counts (SP011 section 3.1, page 29), so
-    each block is one frame here. The rule is SP011's: full data blocks
-    of eight octets, then one separator block that carries the last zero
-    to seven octets.
+    A block is one entry of the receiver's FIFO, the unit Aurora's native
+    flow control counts (SP011 section 3.1, page 29): full blocks of eight
+    octets, then one separator block with the last zero to seven.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """Aurora's blocks have no keys of their own."""
+
+        has_acknowledgement_packet: ClassVar[bool] = False
+
+        def build(self) -> "Aurora64b66b":
+            """A fresh framing."""
+            return Aurora64b66b()
 
     def frames(self, payload_bits: int, header_bits: int) -> tuple[int, ...]:
         """One 66-bit frame per block of the Aurora frame."""
@@ -131,27 +143,28 @@ class PcieTlp:
     """Memory write TLPs of at most max_payload_bytes, 24 bytes on each.
 
     A write of n bytes costs ceil(n / MPS) x 24 + n bytes (pcie-bench
-    model/mem_bw.py:40-41; Neugebauer lines 385-389). A write of no
-    bytes is one TLP of overhead alone, where pcie-bench counts none.
-    Data link acknowledgements, flow-control updates and replay are not
-    in the frames: this row pairs with the credit protocol only.
+    model/mem_bw.py:40-41; Neugebauer lines 385-389); one of no bytes is one
+    TLP of overhead, where pcie-bench counts none. Data link ACKs,
+    flow-control updates and replay are left out: this row pairs with the
+    credit protocol only.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The pcie_tlp row's key: the link's Maximum Payload Size."""
+        """The link's Maximum Payload Size, a positive whole number of bytes."""
 
         max_payload_bytes: int
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, section_name: str
-        ) -> "PcieTlp.Settings":
-            """The Maximum Payload Size, a positive whole number of bytes."""
-            max_payload_bytes = link_settings.positive_count_key(
-                section, "max_payload_bytes", section_name
+        has_acknowledgement_packet: ClassVar[bool] = False
+
+        def __post_init__(self) -> None:
+            link_settings.check_positive_count(
+                "max_payload_bytes", self.max_payload_bytes
             )
-            return cls(max_payload_bytes=max_payload_bytes)
+
+        def build(self) -> "PcieTlp":
+            """A fresh framing on these settings."""
+            return PcieTlp(self)
 
     def __init__(self, settings: "PcieTlp.Settings") -> None:
         self._max_payload_bytes = settings.max_payload_bytes
@@ -172,27 +185,28 @@ class PcieTlp:
 class RoceV2:
     """RDMA write packets of at most path_mtu_bytes, each an Ethernet frame.
 
-    The first packet carries the RDMA extended header; every packet
-    carries IPv4, UDP, the base transport header, its payload padded to
-    four bytes and the invariant CRC, inside Ethernet's overhead (module
-    constants).
+    The first packet carries the RDMA extended header; every packet carries
+    IPv4, UDP, the base transport header, its payload padded to four bytes
+    and the invariant CRC, inside Ethernet's overhead.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The roce_v2 row's key: the connection's path MTU in bytes."""
+        """The connection's path MTU, a positive whole number of bytes."""
 
         path_mtu_bytes: int
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, section_name: str
-        ) -> "RoceV2.Settings":
-            """The path MTU, a positive whole number of bytes."""
-            path_mtu_bytes = link_settings.positive_count_key(
-                section, "path_mtu_bytes", section_name
+        # an ACK or a NAK is a RoCE packet (acknowledgement_bits)
+        has_acknowledgement_packet: ClassVar[bool] = True
+
+        def __post_init__(self) -> None:
+            link_settings.check_positive_count(
+                "path_mtu_bytes", self.path_mtu_bytes
             )
-            return cls(path_mtu_bytes=path_mtu_bytes)
+
+        def build(self) -> "RoceV2":
+            """A fresh framing on these settings."""
+            return RoceV2(self)
 
     def __init__(self, settings: "RoceV2.Settings") -> None:
         self._path_mtu_bytes = settings.path_mtu_bytes
@@ -225,35 +239,34 @@ class RoceV2:
 
 
 class EthernetUdp:
-    """UDP datagrams of at most mtu_bytes, IPv4 and UDP headers inside it.
+    """UDP datagrams over IPv4 of at most mtu_bytes, headers included.
 
-    NVQLink chose an unreliable connection over UDP on purpose
-    (2510.25213 lines 376-388). A message longer than one datagram is
-    cut into datagrams by the sender, each with its own headers.
+    NVQLink chose an unreliable connection over UDP on purpose (2510.25213
+    lines 376-388).
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The ethernet_udp row's key: the link's MTU in bytes."""
+        """The link's MTU, a whole number of bytes above the two headers."""
 
         mtu_bytes: int
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, section_name: str
-        ) -> "EthernetUdp.Settings":
-            """The MTU, a whole number of bytes above the two headers."""
-            mtu_bytes = link_settings.positive_count_key(
-                section, "mtu_bytes", section_name
-            )
+        has_acknowledgement_packet: ClassVar[bool] = False
+
+        def __post_init__(self) -> None:
+            link_settings.check_positive_count("mtu_bytes", self.mtu_bytes)
             headers_bytes = IPV4_HEADER_BYTES + UDP_HEADER_BYTES
-            if mtu_bytes <= headers_bytes:
-                raise ValueError(
-                    f"{section_name}.mtu_bytes is {mtu_bytes}; the MTU holds "
-                    f"the {headers_bytes} bytes of IPv4 and UDP headers and "
-                    f"at least one byte of data"
-                )
-            return cls(mtu_bytes=mtu_bytes)
+            if self.mtu_bytes > headers_bytes:
+                return
+            raise ValueError(
+                f"mtu_bytes is {self.mtu_bytes}; the MTU holds the "
+                f"{headers_bytes} bytes of IPv4 and UDP headers and at "
+                f"least one byte of data"
+            )
+
+        def build(self) -> "EthernetUdp":
+            """A fresh framing on these settings."""
+            return EthernetUdp(self)
 
     def __init__(self, settings: "EthernetUdp.Settings") -> None:
         self._mtu_bytes = settings.mtu_bytes
@@ -272,44 +285,6 @@ class EthernetUdp:
             frame_bits = frame_bytes * BITS_PER_BYTE
             frames.append(frame_bits)
         return tuple(frames)
-
-
-# protocol.framing.kind names one of these rows: how a packet channel
-# cuts a message into the frames its wire carries.
-FRAMINGS = {
-    "whole": Whole,
-    "flits": Flits,
-    "aurora_64b66b": Aurora64b66b,
-    "pcie_tlp": PcieTlp,
-    "roce_v2": RoceV2,
-    "ethernet_udp": EthernetUdp,
-}
-
-
-def framing_settings_from_yaml(
-    section, path_name: str
-) -> link_settings.FramingSettings:
-    """A card's framing mapping: a kind and the keys its row declares."""
-    section_name = f"links.{path_name}.protocol.framing"
-    if not isinstance(section, Mapping):
-        raise ValueError(
-            f"{section_name} holds {section!r}; it is a mapping with a kind, "
-            f"one of {sorted(FRAMINGS)}"
-        )
-    kind = section.get("kind")
-    row = tables.row(FRAMINGS, f"links.{path_name}.protocol.framing.kind", kind)
-    row_settings = tables.row_settings(
-        row, section_name, section, ("kind",), section_name
-    )
-    return link_settings.FramingSettings(kind=kind, row_settings=row_settings)
-
-
-def build(framing_settings: link_settings.FramingSettings) -> ports.Framing:
-    """The framing row the settings name, built from its own keys."""
-    row = FRAMINGS[framing_settings.kind]
-    if framing_settings.row_settings is None:
-        return row()
-    return row(framing_settings.row_settings)
 
 
 def _roce_datagram_bytes(chunk_bytes: int, is_first: bool) -> int:

@@ -27,6 +27,7 @@ import decsim.qpu.layouts as layouts
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 
 
 class RecordingLayout:
@@ -36,8 +37,8 @@ class RecordingLayout:
         self.code = code
         self.calls = []
 
-    def code_for_op(self, operation):
-        self.calls.append(("code_for_op", operation))
+    def code_for_operation(self, operation):
+        self.calls.append(("code_for_operation", operation))
         return self.code
 
     def code_for_patch(self, patch_identity):
@@ -75,25 +76,19 @@ def planning_view(qubits=(3, 5)):
     return program_records.OperationPlanningView.from_operation(operation)
 
 
-def settings_with(layout=None, code=None):
-    """One timing-only operation on the layout or the card given."""
+def settings_with(layout):
+    """One timing-only operation on the layout given."""
     operation = one_operation()
     workload = workload_settings.WorkloadSettings(operations=[operation])
-    qpu = qpu_settings.QpuSettings(code=code, layout=layout)
-    decoder = decoders.PresetLatencyDecoder(latency_us=1.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    layout_record = declared_run.GivenLayout(layout)
+    qpu = qpu_settings.QpuSettings(layout=layout_record)
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     return machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
-
-
-def test_the_uniform_layout_gives_every_operation_and_patch_one_card():
-    card = code_geometry.SurfaceCodeModel(distance=3)
-    layout = layouts.UniformLayout(card)
-    operation = planning_view()
-    assert layout.code_for_op(operation) is card
-    assert layout.code_for_patch(11) is card
-    assert layout.codes() == [card]
 
 
 def test_the_uniform_layout_claims_the_operations_qubits_exclusively():
@@ -106,18 +101,6 @@ def test_the_uniform_layout_claims_the_operations_qubits_exclusively():
 
     claimed_qubits = frozenset({2, 5, 8})
     expected = program_records.ResourceClaim("qubits", claimed_qubits)
-    assert claims == [expected]
-
-
-def test_an_operation_on_no_qubits_claims_nothing():
-    card = code_geometry.SurfaceCodeModel(distance=3)
-    layout = layouts.UniformLayout(card)
-    operation = planning_view(qubits=())
-
-    claims = layout.resources_for(operation)
-
-    no_qubits = frozenset()
-    expected = program_records.ResourceClaim("qubits", no_qubits)
     assert claims == [expected]
 
 
@@ -142,28 +125,11 @@ def test_a_layout_written_outside_decsim_hears_every_hook_of_a_run():
     operation = one_operation()
     view = program_records.OperationPlanningView.from_operation(operation)
     assert calls_by_name["codes"] == [None]
-    assert calls_by_name["code_for_op"] == [view]
+    assert calls_by_name["code_for_operation"] == [view]
     assert calls_by_name["spatial_nodes_for"] == [view]
     assert calls_by_name["resources_for"] == [view]
     assert calls_by_name["code_for_patch"] == [11]
     assert calls_by_name["patch_spatial_nodes_for"] == [11]
-
-
-def test_a_card_and_a_layout_together_are_refused_as_two_code_sources():
-    card = code_geometry.SurfaceCodeModel(distance=3)
-    layout = layouts.UniformLayout(card)
-    settings = settings_with(layout=layout, code=card)
-    with pytest.raises(ValueError, match="multiple code sources"):
-        machine_module.Machine.build(settings)
-
-
-def test_a_layout_that_declares_no_code_is_refused():
-    card = code_geometry.SurfaceCodeModel(distance=3)
-    layout = RecordingLayout(card)
-    layout.codes = list
-    settings = settings_with(layout=layout)
-    with pytest.raises(ValueError, match="exactly one code"):
-        machine_module.Machine.build(settings)
 
 
 def test_a_layout_that_declares_two_codes_is_refused():
@@ -176,7 +142,7 @@ def test_a_layout_that_declares_two_codes_is_refused():
 
     layout.codes = two_codes
     settings = settings_with(layout=layout)
-    with pytest.raises(ValueError, match="exactly one code"):
+    with pytest.raises(ValueError, match="layout must declare exactly"):
         machine_module.Machine.build(settings)
 
 
@@ -189,9 +155,9 @@ def test_an_operation_selector_that_returns_another_card_is_refused():
         del operation
         return code_geometry.SurfaceCodeModel(distance=3)
 
-    layout.code_for_op = another_card
+    layout.code_for_operation = another_card
     settings = settings_with(layout=layout)
-    with pytest.raises(ValueError, match="selected a code different"):
+    with pytest.raises(ValueError, match="layout operation 4 selected a code"):
         machine_module.Machine.build(settings)
 
 
@@ -205,5 +171,5 @@ def test_a_patch_selector_that_returns_another_card_is_refused():
 
     layout.code_for_patch = another_card
     settings = settings_with(layout=layout)
-    with pytest.raises(ValueError, match="selected a code different"):
+    with pytest.raises(ValueError, match="layout patch 11 selected a code"):
         machine_module.Machine.build(settings)

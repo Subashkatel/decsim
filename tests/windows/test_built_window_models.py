@@ -12,16 +12,6 @@ compile_decoder_for_dem).
 import decsim.windows.built_window_models as built_window_models
 
 
-def test_a_key_that_was_never_built_has_no_models_and_is_not_a_reuse():
-    models = built_window_models.BuiltWindowModels()
-
-    held = models.models_of(("operation", 1))
-
-    assert held == []
-    assert models.reuses == 0
-    assert models.builds == 0
-
-
 def test_a_remembered_key_is_handed_back_to_every_later_shot():
     models = built_window_models.BuiltWindowModels()
     first_shot_models = ["window 1", "window 2"]

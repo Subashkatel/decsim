@@ -6,10 +6,10 @@ bytes, so a run's order and its json never depend on Python's cross-type
 comparison or on a hash seed.
 """
 
-from typing import Any
+from typing import Union
 
 
-def is_stable_identity(value: Any) -> bool:
+def is_stable_identity(value: object) -> bool:
     """Whether a value may serve as a key decsim orders and records."""
     value_type = type(value)
     if value_type is int:
@@ -21,23 +21,18 @@ def is_stable_identity(value: Any) -> bool:
     return False
 
 
-def same_stable_identity(left: Any, right: Any) -> bool:
+def same_stable_identity(left: object, right: object) -> bool:
     """Compare stable identities without Python's cross-type equality."""
     if type(left) is not type(right):
         return False
     if type(left) is tuple:
-        if len(left) != len(right):
-            return False
-        return all(
-            same_stable_identity(left_item, right_item)
-            for left_item, right_item in zip(left, right, strict=True)
-        )
+        return _same_stable_items(left, right)
     if type(left) is int or type(left) is str:
         return left == right
     return False
 
 
-def stable_identity_bytes(identity: Any) -> bytes:
+def stable_identity_bytes(identity: Union[int, str, tuple]) -> bytes:
     """The identity's bytes, type-tagged and length-framed.
 
     An int, a str and a tuple never encode alike, and a tuple frames
@@ -69,7 +64,7 @@ def stable_identity_bytes(identity: Any) -> bytes:
     return b"T" + framed_count + joined_items
 
 
-def stable_identity_json(identity: Any) -> dict:
+def stable_identity_json(identity: Union[int, str, tuple]) -> dict:
     """The identity as recorded json: its kind, its value, its items.
 
     An integer's value is its decimal text, so a key too large for a
@@ -83,7 +78,7 @@ def stable_identity_json(identity: Any) -> dict:
     return {"kind": "tuple", "value": None, "items": items}
 
 
-def stable_identity_from_json(recorded: dict) -> Any:
+def stable_identity_from_json(recorded: dict) -> Union[int, str, tuple]:
     """The identity a recorded json value names, the inverse of the above.
 
     A reader that keys by an identity needs the identity itself: the
@@ -98,7 +93,17 @@ def stable_identity_from_json(recorded: dict) -> Any:
     return tuple(items)
 
 
-def _is_stable_string(value: Any) -> bool:
+def _same_stable_items(left: tuple, right: tuple) -> bool:
+    """Whether two tuples hold the same identities, item by item."""
+    if len(left) != len(right):
+        return False
+    return all(
+        same_stable_identity(left_item, right_item)
+        for left_item, right_item in zip(left, right, strict=True)
+    )
+
+
+def _is_stable_string(value: object) -> bool:
     """Whether a str is exactly a str and free of surrogate code points.
 
     A surrogate has no utf-8 encoding, so it could not be framed into

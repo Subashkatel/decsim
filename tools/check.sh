@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# The style checks of STYLE.md rule 9 (and rule 1, which the one-action
-# check enforces), on the paths given or on the whole tree, then rule
-# 10's partial order and its no-class-recognition rule over the whole
-# package, and rule 11's branch count, which fails on any function over
-# five branches.
+# The style checks of STYLE.md rule 9 (and rules 1 and 11, which the
+# one-action check enforces), on the paths given or on the whole tree,
+# then rule 10's partial order and its no-class-recognition rule over the
+# whole package.
 #
 # The interpreter is the active environment's python, which the dev
 # extra gives ruff. DECSIM_PYTHON names another interpreter, and
@@ -21,7 +20,7 @@ if [ -n "${DECSIM_PYDEPS:-}" ]; then
 fi
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
-  targets=(decsim tests tools)
+  targets=(decsim tests tools examples)
 fi
 status=0
 "$python" -m ruff format --check "${targets[@]}" || status=1
@@ -29,8 +28,4 @@ status=0
 "$python" tools/check_one_action.py "${targets[@]}" || status=1
 "$python" tools/check_uses_graph.py decsim || status=1
 "$python" tools/check_row_recognition.py decsim || status=1
-"$python" -m ruff check --quiet --select C901 \
-  --config "lint.mccabe.max-complexity=6" --output-format concise \
-  "${targets[@]}" | sed 's/^/over five branches: /'
-[ "${PIPESTATUS[0]}" -eq 0 ] || status=1
 exit $status

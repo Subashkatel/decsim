@@ -8,7 +8,7 @@ its law; Caune et al. 2410.05202 (a 32-bit bus word) and Fruitwala et al.
 provisioning rule of the bandwidth card (each path carries its nominal
 traffic in one commit region, ns-3's per-device DataRate); Backline
 2609.09270 Table III, the CPU and GPU echo rows, for the two measured
-RoCE v2 rows.
+RoCE v2 rows; Liu et al. 2603.16203 for the RISC-Q weak loop.
 """
 
 import ast
@@ -21,14 +21,11 @@ import pytest
 
 import decsim.config as config
 import decsim.engine
-import decsim.experiments.experiment as experiment
 import decsim.links.channel as channel_module
-import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
-import tests.experiments.yaml_configs as yaml_configs
 
 # the three hops a strong-node card prices as a cable or chassis crossing
 STRONG_NODE_CROSSINGS = (
@@ -75,7 +72,7 @@ def capacities_of(profile):
     for path in transfer_records.LinkPath:
         path_settings = profile.path_settings(path)
         capacity = path_settings.channel.capacity
-        rate = capacity.exact_aggregate_bits_per_microsecond()
+        rate = capacity.input_bits_per_microsecond
         capacities[path.value] = rate
     return capacities
 
@@ -106,12 +103,12 @@ def test_a_reference_hop_delivers_its_latency_after_its_bits_serialize():
     weak_store = profile.controller_to_weak_buffer.channel
     engine = decsim.engine.Engine()
     channel = channel_module.Channel(weak_store, engine)
-    framed = channel_module.FramedPayload(120)
+    framed = transfer_records.FramedPayload(120)
     delivered = []
     channel.send(framed, 0, 0, delivered.append)
     engine.run()
     transfer = delivered[0]
-    rate = weak_store.capacity.exact_aggregate_bits_per_microsecond()
+    rate = weak_store.capacity.input_bits_per_microsecond
     exact_ticks = 120 * config.TICKS_PER_MICROSECOND / rate
     serialization_ticks = math.ceil(exact_ticks)
     latency_ticks = weak_store.propagation_latency_ticks
@@ -287,10 +284,10 @@ def test_every_payload_source_that_names_a_field_names_a_real_one():
     bandwidth = link_profiles.bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
     provisioned = payload_sources_of(bandwidth)
     stated.extend(provisioned)
-    measured_cpu = link_profiles.roce_v2_measured_profile("cpu")
+    measured_cpu = link_profiles.RoceV2CpuFabric.base_card()
     measured_on_the_cpu_path = payload_sources_of(measured_cpu)
     stated.extend(measured_on_the_cpu_path)
-    measured_gpu = link_profiles.roce_v2_measured_profile("gpu")
+    measured_gpu = link_profiles.RoceV2GpuFabric.base_card()
     measured_on_the_gpu_path = payload_sources_of(measured_gpu)
     stated.extend(measured_on_the_gpu_path)
     unknown = _unknown_fields(stated, declared)
@@ -344,7 +341,7 @@ def test_a_nominal_round_serializes_in_exactly_one_round_period():
     engine = decsim.engine.Engine()
     readout = profile.qpu_to_controller.channel
     channel = channel_module.Channel(readout, engine)
-    framed = channel_module.FramedPayload(8)
+    framed = transfer_records.FramedPayload(8)
     delivered = []
     channel.send(framed, 0, 0, delivered.append)
     engine.run()
@@ -396,19 +393,20 @@ def test_a_cards_cycles_cost_its_clocks_period_in_whole_ticks():
     and eight bits at eight bits per cycle take one period, the same
     ticks every other component on the domain charges.
     """
-    clocks = config.ClockSettings({"fridge": 300.0})
-    card = {
-        "latency_cycles": 3,
-        "clock": "fridge",
-        "bits_per_cycle": 8.0,
-        "setup_cycles_per_transfer": 3,
-    }
-    section = {"controller_to_weak_buffer": card}
-    profile = link_profiles.from_yaml(section, clocks, "clocked")
-    path = profile.controller_to_weak_buffer
+    fridge = config.Clock.from_megahertz(300.0)
+    reference = link_profiles.logical_reference_profile()
+    path = link_profiles.path_card(
+        reference,
+        "controller_to_weak_buffer",
+        clock=fridge,
+        latency_cycles=3,
+        bits_per_cycle=8.0,
+        source="three cycles at 300 MHz",
+        setup_cycles_per_transfer=3,
+    )
     engine = decsim.engine.Engine()
     channel = channel_module.Channel(path.channel, engine)
-    framed = channel_module.FramedPayload(8)
+    framed = transfer_records.FramedPayload(8)
     delivered = []
     channel.send(framed, 0, 0, delivered.append)
     engine.run()
@@ -465,81 +463,6 @@ def test_a_run_without_a_card_uses_the_reference_card():
     explicit_machine = machine.Machine.build(explicit_settings)
     explicit_result = explicit_machine.run()
     assert default_result == explicit_result
-
-
-class CountingFabric:
-    """A fabric row written outside decsim: it counts what it carried.
-
-    Its base card is the reference row's, so a run on it prices every hop
-    exactly as the shipped row does and the count is the only difference.
-    """
-
-    sent = []
-
-    @staticmethod
-    def base_card():
-        """The numbers the section's per-path cards override."""
-        return link_profiles.logical_reference_profile()
-
-    @staticmethod
-    def build(card, engine):
-        """One LinkFabric, with every send counted on the way through."""
-        return _CountingLinkFabric(card, engine, channel_module.Channel)
-
-
-class _CountingLinkFabric(fabric_module.LinkFabric):
-    """The reference fabric, counting the transfers it carried."""
-
-    def send(self, path, payload_bits, now_ticks, attribution, on_delivered):
-        """Count the send, then carry it."""
-        CountingFabric.sent.append(path)
-        reference = super()
-        reference.send(path, payload_bits, now_ticks, attribution, on_delivered)
-
-
-def test_a_fabric_row_written_outside_decsim_runs_from_a_yaml(
-    monkeypatch, tmp_path
-):
-    """One LINK_FABRICS row and one links.kind is the whole edit."""
-    monkeypatch.setitem(link_profiles.LINK_FABRICS, "counting", CountingFabric)
-    monkeypatch.setattr(CountingFabric, "sent", [])
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "counting"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    built = machine.Machine.build(settings, 0)
-    result = built.run()
-
-    assert settings.links.kind == "counting"
-    assert isinstance(built.links, _CountingLinkFabric)
-    assert result.terminal_status == "complete"
-    assert CountingFabric.sent != []
-
-
-def test_a_links_kind_off_the_table_is_refused_naming_the_rows(tmp_path):
-    """The table's own refusal, at the yaml boundary."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "not_a_row"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    with pytest.raises(ValueError, match="links.kind 'not_a_row' is not"):
-        experiment.load_experiment(config_path)
-
-
-def test_the_bandwidth_row_says_what_it_needs_instead_of_a_yaml(tmp_path):
-    """Its channels come from the sweep point's geometry, not the section."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "bandwidth_limited"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    with pytest.raises(ValueError, match="provisions every channel"):
-        experiment.load_experiment(config_path)
 
 
 # an arXiv identifier as the cards write it: four digits, a dot, four or
@@ -651,15 +574,15 @@ def _cites_backline(source: str) -> bool:
 
 
 @pytest.mark.parametrize(
-    ("measured_profile", "arguments", "echo_bits", "round_trip_microseconds"),
+    ("measured_row", "echo_bits", "round_trip_microseconds"),
     [
-        (link_profiles.roce_v2_measured_profile, ("cpu",), 128, 2.305),
-        (link_profiles.roce_v2_measured_profile, ("gpu",), 128, 4.5),
-        (link_profiles.nvqlink_measured_profile, (), 256, 3.839),
+        (link_profiles.RoceV2CpuFabric, 128, 2.305),
+        (link_profiles.RoceV2GpuFabric, 128, 4.5),
+        (link_profiles.NvqlinkGpuFabric, 256, 3.839),
     ],
 )
 def test_an_echo_of_the_measured_payload_takes_the_measured_round_trip(
-    measured_profile, arguments, echo_bits, round_trip_microseconds
+    measured_row, echo_bits, round_trip_microseconds
 ):
     """The paper's own echo, replayed on the card, is the paper's median.
 
@@ -670,7 +593,7 @@ def test_an_echo_of_the_measured_payload_takes_the_measured_round_trip(
     memory, and the reply back, each its latency and its bits' time on
     its wire.
     """
-    profile = measured_profile(*arguments)
+    profile = measured_row.base_card()
     out = profile.weak_decoder_to_strong_decoder
     poll = profile.strong_buffer_to_strong_decoder
     back = profile.strong_decoder_to_frame
@@ -699,9 +622,12 @@ def _crossing_ticks(path_settings, bits: int) -> int:
     return latency + wire_ticks
 
 
-@pytest.mark.parametrize("coprocessor", ["cpu", "gpu"])
+@pytest.mark.parametrize(
+    "measured_row",
+    [link_profiles.RoceV2CpuFabric, link_profiles.RoceV2GpuFabric],
+)
 def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
-    coprocessor,
+    measured_row,
 ):
     """Backline 2609.09270 lines 1229-1230: a 100 Gb direct-attach cable.
 
@@ -709,14 +635,14 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
     microsecond; the poll reads the coprocessor's own memory, so it
     crosses no cable and is unbounded.
     """
-    profile = link_profiles.roce_v2_measured_profile(coprocessor)
+    profile = measured_row.base_card()
     write = profile.controller_to_strong_buffer.channel.capacity
     escalation = profile.weak_decoder_to_strong_decoder.channel.capacity
     reply = profile.strong_decoder_to_frame.channel.capacity
     poll = profile.strong_buffer_to_strong_decoder.channel.capacity
-    write_rate = write.exact_aggregate_bits_per_microsecond()
-    escalation_rate = escalation.exact_aggregate_bits_per_microsecond()
-    reply_rate = reply.exact_aggregate_bits_per_microsecond()
+    write_rate = write.input_bits_per_microsecond
+    escalation_rate = escalation.input_bits_per_microsecond
+    reply_rate = reply.input_bits_per_microsecond
 
     assert (write_rate, escalation_rate, reply_rate) == (100000,) * 3
     assert poll is None
@@ -725,8 +651,8 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
 def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
     """Only the four strong-side hops move: the rest is the default card."""
     reference = link_profiles.logical_reference_profile()
-    measured_cpu = link_profiles.roce_v2_measured_profile("cpu")
-    measured_gpu = link_profiles.roce_v2_measured_profile("gpu")
+    measured_cpu = link_profiles.RoceV2CpuFabric.base_card()
+    measured_gpu = link_profiles.RoceV2GpuFabric.base_card()
     unchanged = paths_outside_the_strong_side(reference)
     assert paths_outside_the_strong_side(measured_cpu) == unchanged
     assert paths_outside_the_strong_side(measured_gpu) == unchanged
@@ -739,7 +665,7 @@ def test_the_cpu_rows_strong_side_sources_cite_backline():
     "repository weak-to-strong model choice"; on this row it is a leg of
     a measured round trip and cites the paper it was read from.
     """
-    profile = link_profiles.roce_v2_measured_profile("cpu")
+    profile = link_profiles.RoceV2CpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_backline)
     assert cited == [
@@ -754,7 +680,7 @@ def test_the_cpu_rows_strong_side_sources_cite_backline():
 
 def test_the_gpu_rows_strong_side_sources_cite_backline():
     """The same four hops, read from the GPU echo row."""
-    profile = link_profiles.roce_v2_measured_profile("gpu")
+    profile = link_profiles.RoceV2GpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_backline)
     assert cited == [
@@ -777,15 +703,9 @@ def test_an_instruction_hop_moves_its_word_in_one_cycle(path):
     path_settings = profile.path_settings(path)
     word_bits = path_settings.default_payload.input_bits
     capacity = path_settings.channel.capacity
-    rate = capacity.exact_aggregate_bits_per_microsecond()
+    rate = capacity.input_bits_per_microsecond
     word_ticks = word_bits * config.TICKS_PER_MICROSECOND / rate
     assert word_ticks == 4000
-
-
-def test_a_coprocessor_backline_did_not_echo_from_is_refused():
-    """The measurement covers two paths, and the refusal names them."""
-    with pytest.raises(ValueError, match="'cpu' or 'gpu'"):
-        link_profiles.roce_v2_measured_profile("fpga")
 
 
 def strong_buffer_source_of(built) -> str:
@@ -798,53 +718,9 @@ def strong_buffer_source_of(built) -> str:
     return ""
 
 
-def test_the_measured_cpu_row_runs_from_a_yaml(tmp_path):
-    """One links.kind is the whole edit, and the run carries the source."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "roce_v2_cpu"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    built = machine.Machine.build(settings, 0)
-    result = built.run()
-
-    assert settings.links.kind == "roce_v2_cpu"
-    assert result.terminal_status == "complete"
-    assert "2609.09270" in strong_buffer_source_of(built)
-
-
-def test_the_measured_gpu_row_runs_from_a_yaml(tmp_path):
-    """The same, on the row that prices the GPU coprocessor's path."""
-    links = dict(yaml_configs.MINIMAL_CONFIG["links"])
-    links["kind"] = "roce_v2_gpu"
-    config_path = yaml_configs.write_config(tmp_path, {"links": links})
-    experiment_config = experiment.load_experiment(config_path)
-    point = experiment_config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 1.0,
-        },
-    )
-    settings = point.settings
-    built = machine.Machine.build(settings, 0)
-    result = built.run()
-
-    assert settings.links.kind == "roce_v2_gpu"
-    assert result.terminal_status == "complete"
-    assert "2609.09270" in strong_buffer_source_of(built)
-
-
 def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
     """The four strong-side hops read one measurement, 2510.25213."""
-    profile = link_profiles.nvqlink_measured_profile()
+    profile = link_profiles.NvqlinkGpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_nvqlink)
     assert cited == [
@@ -857,32 +733,94 @@ def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
 
 def test_the_nvqlink_rows_strong_side_retransmits_nothing():
     """An unreliable connection by choice (2510.25213 lines 376-388)."""
-    profile = link_profiles.nvqlink_measured_profile()
+    profile = link_profiles.NvqlinkGpuFabric.base_card()
     strong_side = (
         profile.controller_to_strong_buffer,
         profile.weak_decoder_to_strong_decoder,
         profile.strong_buffer_to_strong_decoder,
         profile.strong_decoder_to_frame,
     )
-    protocols = [path.channel.protocol.kind for path in strong_side]
-    assert protocols == ["ideal"] * 4
+    protocols = [path.channel.protocol for path in strong_side]
+    assert protocols == [None] * 4
 
 
 @pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)
 def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps(path):
     """NVQLink's 100 Gb Ethernet link (2510.25213 line 382, Fig. 2)."""
-    profile = link_profiles.nvqlink_measured_profile()
+    profile = link_profiles.NvqlinkGpuFabric.base_card()
     path_settings = profile.path_settings(path)
     capacity = path_settings.channel.capacity
-    rate = capacity.exact_aggregate_bits_per_microsecond()
+    rate = capacity.input_bits_per_microsecond
     assert rate == 100000
 
 
 def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
     reference = link_profiles.logical_reference_profile()
-    measured = link_profiles.nvqlink_measured_profile()
+    measured = link_profiles.NvqlinkGpuFabric.base_card()
     unchanged = paths_outside_the_strong_side(reference)
     assert paths_outside_the_strong_side(measured) == unchanged
+
+
+def test_a_path_cards_rate_is_the_exact_fraction_of_its_decimal():
+    """The rate stays the exact fraction of the decimal.
+
+    So two cards of the same numbers name one point (collect.json_value,
+    which a point's id hashes).
+    """
+    reference = link_profiles.logical_reference_profile()
+    fridge = config.Clock.from_megahertz(250.0)
+
+    python_card = link_profiles.path_card(
+        reference,
+        "controller_to_weak_buffer",
+        clock=fridge,
+        latency_cycles=40,
+        bits_per_cycle=38.79,
+        source="2603.16203 lines 895-897",
+        lane_count=4,
+        setup_cycles_per_transfer=2,
+        header_bits_per_transfer=16,
+    )
+
+    rate = python_card.channel.capacity.input_bits_per_microsecond
+    assert rate == fractions.Fraction(38790)
+    assert python_card.excludes_receiver_processing is True
+
+
+def test_a_path_card_with_no_rate_is_an_unbounded_wire():
+    reference = link_profiles.logical_reference_profile()
+    fridge = config.Clock.from_megahertz(250.0)
+
+    python_card = link_profiles.path_card(
+        reference,
+        "qpu_to_controller",
+        clock=fridge,
+        latency_cycles=1,
+        bits_per_cycle=None,
+        source="an unbounded wire",
+    )
+
+    assert python_card.channel.capacity is None
+
+
+def test_a_path_latency_in_microseconds_moves_that_path_alone():
+    reference = link_profiles.logical_reference_profile()
+
+    links = link_profiles.with_path_latency(
+        reference, "frame_to_controller", 0.5
+    )
+
+    changed = links.frame_to_controller.channel
+    assert changed.propagation_latency_ticks == 500_000
+    assert links.controller_to_qpu == reference.controller_to_qpu
+
+
+def test_a_path_latency_that_rounds_to_no_ticks_is_refused():
+    reference = link_profiles.logical_reference_profile()
+    sentence = "latency_microseconds is positive but rounds to zero ticks"
+
+    with pytest.raises(ValueError, match=sentence):
+        link_profiles.with_path_latency(reference, "frame_to_controller", 1e-7)
 
 
 def _cites_nvqlink(source: str) -> bool:

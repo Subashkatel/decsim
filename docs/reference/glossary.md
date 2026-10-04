@@ -37,40 +37,53 @@ part any reader can follow.
 - **reaction time**: the time from a round's measurement to the
   instruction that acts on its correction. It is what a run measures.
 - **tier**: which of the two decoders ran. `weak` is the fast one and
-  `strong` the accurate, slower one. The escalation says which tier
-  decodes the planned windows: `weak_baseline` and `switching` start
-  every window on the weak tier, and `strong_only` sends every window to
-  the strong tier.
+  `strong` the accurate, slower one. A machine with a weak decoder,
+  switching or not, starts every window on the weak tier, and a machine
+  with only a strong decoder sends every window to the strong tier.
 
 ## decsim's own words
 
 These are not from the papers. The pages use them everywhere.
 
-- **table**, **row**: a table is a dictionary of the names a yaml may
-  write for one pluggable component; a row is one such name and the
-  class the machine builds for it (`decsim/tables.py`).
+- **experiment**: one Python run file that names its points and how
+  each stops (`decsim.Experiment`).
+- **point**: one machine at one set of values (`decsim.Point`). It has a
+  name and an id, a hash of its record. Its optional `collection`
+  replaces the experiment's stop rule for it, and its `record_options`
+  say how many shots write their windows' confidence.
+- **shot**: one run of a point's machine at one seed.
+- **seed**: a shot's index, 0, 1, 2 and so on. Every random draw in the
+  shot follows from it.
+- **stop rule**: when a point ends, by failures, shots or core time
+  (`decsim.CollectionSettings`).
+- **results folder**: everything one experiment wrote, under
+  `results/<name>/`.
+- **setting**: one field of a component's settings record, with its
+  unit in its name and a default.
 - **port**: a small Protocol in `decsim/ports.py` naming the methods one
   component needs from a neighbour. The part that holds a component
   binds its ports.
-- **part**: one of the six records a machine is built from, in
-  `decsim/build/` (`Qpu`, `Control`, `Readout`, `Windows`, `Decoders`)
-  and the links. A part builds its components and wires them to one
-  another; `Machine.assemble` wires the parts together.
+- **part**: a group of components the machine builds and wires
+  together, one of the records in `decsim/build/` (`Qpu`, `Control`,
+  `Readout`, `Windows`, `Decoders`, and `Switching` in a switching
+  machine) or the links. A part builds its components and binds their
+  ports; `Machine.assemble` wires the parts together.
 - **seat**: a place on a round's path where its detection events may
-  form, named in `detection_events.formed_at`.
+  form, named in the `formed_at` setting of `DetectionEventSettings`.
 - **card**: a set of stated numbers used in place of a measurement. A
-  decoder card is a `kind` that is a number, the decode's time in
-  microseconds. A link card is a latency and, if bounded, a bandwidth
-  for one hop. A code card is the numbers the machine needs from a code.
+  decoder card is a decode's stated time, such as a decoder's
+  `preset_latency_microseconds`. A link card is a latency and, if
+  bounded, a bandwidth for one hop. A code card is the numbers the
+  machine needs from a code.
 - **hop**: one priced link between two components; the link paths below
   are the hops' names.
 - **unit**: one decoding engine inside a tier's chip: a memory that
-  holds a job's rounds plus the compute that decodes them. `units` is
-  how many identical engines the chip holds, gem5's `FUDesc.count`. They
+  holds a job's rounds plus the compute that decodes them. `unit_count`
+  is how many identical engines the chip holds, gem5's `FUDesc.count`. They
   form the tier's pool and share the tier's links. decsim models one
-  chip a tier, so the chip count is not a key.
+  chip a tier, so the chip count is not a setting.
 - **unit memory**: the input memory of one decoder unit, sized in bits
-  by `<tier>_decoder.unit_memory.bits`. A window's rounds are copied
+  by the pool's `unit_memory` setting. A window's rounds are copied
   into it before the unit decodes them and freed when the decode ends.
 - **job**: one decode of one window, asked of a tier's pool.
 - **stage (a job)**: to put a job's rounds on a unit before the job may
@@ -108,12 +121,9 @@ These are not from the papers. The pages use them everywhere.
 - **latency point**: one named span of a window's path that the run
   folder reports as its own columns (`decsim/experiments/measure.py`,
   `POINTS`).
-- **piece**: a run of consecutive seeds of one sweep point, run by one
-  process and saved whole as one folder of the experiment folder, sized
-  by `collection.piece_rounds` (`decsim/experiments/pieces.py`).
-- **round**: one Slurm array running one written plan of pieces,
-  `round<k>/plan.csv`; `decsim plan` writes the next round from what
-  the pieces say (`decsim/experiments/plan_command.py`).
+- **piece**: a run of consecutive seeds of one point, run by one
+  process and saved whole as one folder of the results folder, sized by
+  the stop rule's `piece_rounds` (`decsim/experiments/pieces.py`).
 - **scored shot**, **unscored shot**: a shot is scored when every
   decode it committed, provisional or final, got a correction from its
   decoder's backend, and unscored when a backend produced none; sinter
@@ -125,8 +135,9 @@ These are not from the papers. The pages use them everywhere.
 - **narrator**: the engine's line-by-line log of a run
   (`decsim/observe/log_writers.py`).
 - **referee**: a second decoder that decodes every window again and
-  counts the disagreements, turned on by
-  `observation.check_windows_with`.
+  counts the disagreements, turned on by wrapping a decoder's record in
+  `TesseractCheckedDecoder.Settings`
+  (`decsim/decoders/verify_windows.py`).
 - **buffer0 in a column name**: the weak syndrome buffer. The csv column
   names kept an older spelling.
 - **gate**, **gate point**, **golden**: the gate is a frozen set of runs
@@ -148,7 +159,7 @@ In the papers' symbols, `r_com` is the commit region's round count,
 | restart window, `PotentialRestart` | the window the weak decoder restarts on after an escalation | Toshio Sec. III C, Fig. 12 (2510.25222.txt lines 1232-1251) |
 | re-read width, `restart_reread_buffer_regions` | how far back into the strong region the restarted weak decode reads | Toshio Sec. III C |
 | boundary, `boundary_in`, artificial defects | the previous window's correction folded into this one. qLDPC calls it `net_error`, cuda-q QEC calls it `syndrome_mods` | Skoric Sec. I B, which calls them artificial defects (2209.08552.txt lines 269-281) |
-| seam window, sandwich schedule | Tan's type-2 window, the block between two independent type-1 windows | Tan, arXiv:2209.09219, supplementary material, the sandwich decoder section, p.14 of the arXiv pdf, and Fig. S4(b) |
+| seam window, sandwich schedule | Tan's type-2 window, the block between two independent type-1 windows. decsim's `sandwich` row is Tan's seam offset t = 0, a seam one round thick | Tan, arXiv:2209.09219, supplementary material, the sandwich decoder section, p.14 of the arXiv pdf, and Fig. S4(b) |
 
 ## The two tiers and the confidence
 
@@ -156,11 +167,12 @@ In the papers' symbols, `r_com` is the commit region's round count,
 | --- | --- | --- |
 | weak tier, strong tier | the fast soft-output decoder and the accurate, high-latency one it escalates to. Toshio's own words are "weak decoder" and "strong decoder" | Toshio Sec. III A, "Protocol" (2510.25222.txt lines 590-598) |
 | confidence, `SoftOutput` | soft information: an analog number saying how much the decoder trusts its own answer, rather than the answer itself | Toshio Sec. II B, "Soft information in decoding problem" (2510.25222.txt lines 386-396) |
-| `complementary_gap` row of `CONFIDENCE_SIGNALS` | the complementary gap: decode the window twice, each solve pinned to one logical class, and subtract the two weights | Toshio Sec. II B and Fig. 3(a,b) (2510.25222.txt lines 436-457); Gidney, Newman, Brooks and Jones, arXiv:2312.04522, Sec. "Complementary gaps" |
-| `cluster_gap` row of `CONFIDENCE_SIGNALS` | the cluster gap: decode the window once and walk the clustering that decode already did | Toshio Sec. II B and Fig. 3(c,d), which cites it as ref. 47; Meister, arXiv:2405.07433, Algorithm 2 |
-| `extra_cluster_gap` row of `CONFIDENCE_SIGNALS` | the extra-cluster gap: decode the window once, then grow every cluster on until the two boundaries join or the threshold's worth of growth is spent | Kishi, Toshio, Fujisaki, Oshima, Sato and Fujii, arXiv:2602.03336, Algorithm 1 and Theorems 1 and 2 |
-| threshold, `gap_threshold_db` in the yaml and `gap_threshold_nats` inside the code | `g_th`, the value of the soft output below which a window is escalated. The yaml is in decibels and the code in natural-log weight: nats are decibels times ln(10) over 10 (`decsim/escalation/settings.py`, `decibels_to_nats`) | Toshio Sec. III A, step 3 |
+| `ComplementaryGap` in `decsim/confidence/complementary.py` | the complementary gap: decode the window twice, each solve pinned to one logical class, and subtract the two weights | Toshio Sec. II B and Fig. 3(a,b) (2510.25222.txt lines 436-457); Gidney, Newman, Brooks and Jones, arXiv:2312.04522, Sec. "Complementary gaps" |
+| `ClusterGap` in `decsim/confidence/cluster.py` | the cluster gap: decode the window once and walk the clustering that decode already did | Toshio Sec. II B and Fig. 3(c,d), which cites it as ref. 47; Meister, arXiv:2405.07433, Algorithm 2 |
+| `ExtraClusterGap` in `decsim/confidence/extra_cluster.py` | the extra-cluster gap: decode the window once, then grow every cluster on until the two boundaries join or the threshold's worth of growth is spent | Kishi, Toshio, Fujisaki, Oshima, Sato and Fujii, arXiv:2602.03336, Algorithm 1 and Theorems 1 and 2 |
+| threshold, `threshold_decibels` on a threshold record | `g_th`, the value of the soft output below which a window is escalated. The record is in decibels and a gap is compared in natural-log weight, the record's `threshold_nats`: nats are decibels times ln(10) over 10 (`decsim/escalation/threshold_sources.py`, `decibels_to_nats`) | Toshio Sec. III A, step 3 |
 | osd | ordered statistics decoding, the post-processing step after belief propagation in BP-OSD. decsim calls the `ldpc` package's `BpOsdDecoder` | `decsim/decoders/belief_propagation_osd/decoder.py`, which names `ldpc`'s own `osd.hpp` and `stimbposd`'s `bp_osd.py` |
+| bp, `bposd`, `relay_bp` | belief propagation. `bposd` and `relay_bp` are the BP-OSD and Relay-BP rows' words in the results' `algorithm` column | `decsim/decoders/belief_propagation_osd/decoder.py`; `decsim/decoders/relay_belief_propagation/decoder.py`, after Müller et al., arXiv:2506.01779 |
 
 ## The two stores
 
@@ -183,16 +195,15 @@ is a field of a part in `decsim/build/` or a pool inside one.
 | The part | decsim | What it does |
 | --- | --- | --- |
 | strong syndrome buffer | the readout part's `strong_syndrome_buffer`, a `SyndromeBuffer`, with `strong_syndrome_round_receiver` as its landing and `strong_output` as its read | holds the rounds an escalation carried up until the strong decode has read them |
-| ledger of pending regions | the windows part's `pending_strong_windows`, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
-| strong window manager | the windows part's `shape`, one row of `STRONG_WINDOW_SHAPES` in `decsim/escalation/strong_window_shapes.py`, with its `regions` as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
+| ledger of pending regions | the switching part's `pending_strong_windows`, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
+| strong window manager | the switching part's `shape`, `RedoWindow` or `DoubleWindow` in `decsim/escalation/strong_window_shapes.py`, with its `regions` as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
 | strong decoder manager | the decoders part's `strong_decoder_manager`, a second `DecoderManager` over the strong pool alone, with its own ready queue, staging and outcomes; its `strong_requests` is the ledger it shares with the chip's `decoder_manager` | gives each strong job a free strong unit and returns its result; halts a request the weak result made unnecessary |
-| the strong decoders, `strong_decoder.units` of them | the `strong_decoder` row's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
+| the strong decoders, the strong pool's `unit_count` of them | the `strong_decoder` pool's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
 
 ## The link paths
 
 Every hop is booked under one path name, the `LinkPath` values in
-`decsim/records/transfers.py`. [The data path, hop by hop](../explanation/data_path.md) walks
-them in order; this is the name list.
+`decsim/records/transfers.py`.
 
 | decsim | The hop |
 | --- | --- |
@@ -210,5 +221,4 @@ them in order; this is the name list.
 ## Read next
 
 - `decsim/records/`: the frozen records these names belong to.
-- [Architecture](../explanation/architecture.md): where each of them sits.
-- [The ports](ports.md): the handoffs between them.
+- [The parts](parts.md): the settings records a machine is built from.

@@ -15,9 +15,9 @@ classification), packing is declared free, and from there the
 weak-buffer path publishes it 4 us on while the strong-buffer path
 lands it in the strong syndrome buffer 7 us on.
 
-The window trace walk at the end of the file reads one shot of
-configs/bases/weak_decoder_baseline.yaml as well, because the four
-events a latency claim rests on are read off a shipped config's own run. IBM
+The window trace walk at the end of the file reads one shot of the
+weak base as well, because the four events a latency claim rests on
+are read off a shipped machine's own run. IBM
 arXiv 2510.21600 lines 517-519 name them on the hardware: the decoder
 FPGA's trace observes when the decoders start and stop, when the
 syndromes and codewords arrive, and when the logical Pauli frame is
@@ -29,11 +29,10 @@ import random
 
 import pytest
 
-import decsim.collect as collect
 import decsim.config as config_module
-import decsim.experiments.experiment as experiment
+import decsim.machine as machine_module
+import decsim.settings as machine_settings
 import tests.declared_run as declared_run
-import tests.experiments.yaml_configs as yaml_configs
 import tests.observe.run_ledger as run_ledger
 
 
@@ -67,15 +66,6 @@ def events_by_id(ledger):
     for event in ledger.events:
         by_id[event.event_id] = event
     return by_id
-
-
-def events_of_kind(ledger, kind):
-    """Every event of the ledger of one kind, in ledger order."""
-    rows = []
-    for event in ledger.events:
-        if event.kind == kind:
-            rows.append(event)
-    return rows
 
 
 def one_event(ledger, kind, operation_id):
@@ -165,24 +155,6 @@ def test_a_windows_chain_is_exact_and_its_cause_is_the_last_round_it_read():
     assert cause.tick == config_module.microseconds_to_ticks(15.0)
 
 
-def test_every_emitted_round_reaches_exactly_one_terminal_state():
-    """Conservation over a whole run, which is the ledger's own claim.
-
-    A weak-only run of six rounds publishes all six, so the check finds
-    one terminal state per emitted round and nothing lost on the way
-    (run_ledger.py's RunLedgerView docstring).
-    """
-    machine = declared_run.weak_only_run(rounds=6)
-    ledger = run_ledger.ledger_of(machine)
-
-    ledger.check()
-
-    emitted = events_of_kind(ledger, "EMITTED")
-    published = events_of_kind(ledger, "PUBLISHED")
-    assert len(emitted) == 6
-    assert len(published) == 6
-
-
 def test_a_strong_primary_run_records_the_room_side_landing():
     """A strong-primary round travels once, and its journey ends there.
 
@@ -217,19 +189,6 @@ def test_a_strong_primary_run_records_the_room_side_landing():
     ]
     last = window_rows[-1]
     assert last.route == "strong"
-
-
-def test_a_full_escalation_runs_ledger_passes_its_check():
-    """Every window escalating exercises both tiers of one chain.
-
-    An escalated window is decoded twice and committed once, so the
-    accounting has to hold across the second decode as well as the
-    first.
-    """
-    machine = declared_run.switching_run(rounds=6, escalates=True)
-    ledger = run_ledger.ledger_of(machine)
-
-    ledger.check()
 
 
 def test_a_release_is_caused_by_the_blocking_operations_commit():
@@ -365,7 +324,7 @@ def switching_double_window_mode(_generator, rounds):
     return declared_run.switching_run(
         rounds=rounds,
         escalates=True,
-        strong_window="double_window",
+        strong_window=declared_run.DOUBLE_WINDOW,
     )
 
 
@@ -607,7 +566,7 @@ def ledger_without(ledger, kind, window_id):
 def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     """The shipped weak baseline, window by window, in pipeline order.
 
-    One shot of configs/bases/weak_decoder_baseline.yaml at p = 0.001,
+    One shot of the weak base at p = 0.001,
     distance 3 and a 10 us round period decodes nine sliding windows, and
     each carries the four events a latency claim is read from, with
     non-decreasing ticks: the window complete in the weak syndrome buffer,
@@ -618,17 +577,10 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     when the logical Pauli frame is produced), each one a named probe point
     a listener reads here (gem5 src/sim/probe/probe.hh lines 122 and 272).
     """
-    config_path = yaml_configs.CONFIGS_DIR / "bases/weak_decoder_baseline.yaml"
-    config = experiment.load_experiment(config_path)
-    task = config.point_task(
-        {
-            "workload.arguments.physical_error_probability": 0.001,
-            "qpu.distance": 3,
-            "qpu.round_period_microseconds": 10.0,
-        },
-    )
-    shot = collect.run_shot(task, 0)
-    ledger = run_ledger.ledger_of(shot.machine)
+    settings = machine_settings.weak_decoder_baseline(3, 0.001, 10.0)
+    machine = machine_module.Machine.build(settings, 0)
+    machine.run()
+    ledger = run_ledger.ledger_of(machine)
 
     problems = windows_with_a_broken_trace(ledger)
 

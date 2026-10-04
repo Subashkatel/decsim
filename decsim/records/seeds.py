@@ -6,7 +6,7 @@ machine draw the same numbers (decsim/seeding.py).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Union
 
 _SEED_PATH_TAG = {"field": b"F", "string_key": b"S"}
 
@@ -16,7 +16,7 @@ class RunSeedPathSegment:
     """One framed semantic edge in the run-level seed component graph."""
 
     kind: str
-    value: Any
+    value: Union[int, str]
 
     def canonical_bytes(self) -> bytes:
         """The normative typed and length-framed seed-path bytes.
@@ -43,13 +43,11 @@ class RunSeedChild:
     """One semantic child edge exposed by a seed-graph composite."""
 
     relative_path: tuple[RunSeedPathSegment, ...]
-    child: Any
+    child: object
 
 
 @dataclass(frozen=True, eq=False)
 class RunSeedReservation:
-    """A leaf-owned prepared RNG replacement plus manifest seed provenance."""
+    """The random state a leaf prepared, which its commit installs."""
 
-    proposed_seed_source: str
-    proposed_seed: Optional[int]
-    prepared_state: Any = field(repr=False)
+    prepared_state: object = field(repr=False)  # opaque to all but its leaf

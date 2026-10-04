@@ -8,7 +8,9 @@ The typed detector intervals are the vertex sets whose incident
 correction edges form each core.
 """
 
+import dataclasses
 import math
+from typing import Optional
 
 import decsim.records.windows as window_records
 import decsim.windows.schemes.window_data as window_data
@@ -25,14 +27,25 @@ class TanSandwichScheme:
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
 
-    def __init__(
-        self,
-        card: window_records.WindowingSchemeCard = (
-            window_records.DEFAULT_SCHEME_CARD
-        ),
-    ) -> None:
-        """This row lays Tan's sandwich, so it reads no key of the card."""
-        del card
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The sandwich row's window sizes; None is the code distance."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+
+        def __post_init__(self) -> None:
+            window_data.check_window_sizes(
+                self.commit_rounds, self.buffer_rounds
+            )
+
+        # the word the reports name this row by
+        name = "sandwich"
+
+        def build(self, terminal_policy: str) -> "TanSandwichScheme":
+            """Tan's sandwich, which lays its own tail."""
+            del terminal_policy
+            return TanSandwichScheme()
 
     def plan_operation(
         self,
@@ -134,7 +147,7 @@ def _check_step_and_buffer(step: int, buffer: int) -> None:
     """
     if step < 2:
         raise ValueError(
-            f"windows.commit_rounds {step}: the sandwich row lays each "
+            f"windows.scheme.commit_rounds {step}: the sandwich row lays each "
             "step as one seam round and s - 1 core rounds, so it needs a "
             "step of at least 2"
         )

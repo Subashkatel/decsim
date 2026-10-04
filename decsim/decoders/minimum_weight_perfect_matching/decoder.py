@@ -1,31 +1,32 @@
 """The PyMatching adapter: minimum-weight perfect matching on one window.
 
 PyMatching's Matching.from_check_matrix on the window's graphlike faults
-with log-odds weights, parallel faults merged as independent errors
-(the convention of Stim detector error models and of PyMatching's DEM
-loader), one matching per live window model, warmed on three columns
-before the first timed call. Higgott and Gidney, Sparse Blossom
-(2303.15933) is the algorithm behind
-the call. The same graph with the observable row appended as one more
-check answers a forced-class job: the appended detector's bit pins the
-observable's parity, so the solve is the minimum weight inside that
-logical class (Gidney et al. 2312.04522 Sec. "Complementary gap").
+with log-odds weights, parallel faults merged as independent errors (the
+convention of Stim detector error models and PyMatching's DEM loader),
+one matching per live window model. Sparse Blossom (Higgott and Gidney
+2303.15933) is the algorithm behind the call. The same graph with the
+observable row appended as one more check answers a forced-class job:
+the appended detector's bit pins the observable's parity, so the solve
+is the minimum weight inside that logical class (Gidney et al.
+2312.04522 Sec. "Complementary gap").
 """
 
 import dataclasses
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import numpy
 import pymatching
 import scipy.sparse
 
+import decsim.config as config
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.decoders as decoders
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.trace_source as trace_source
 
 WARM_UP_COLUMNS = 3
@@ -33,11 +34,12 @@ WARM_UP_COLUMNS = 3
 
 @dataclasses.dataclass(frozen=True)
 class MatchingGraphs:
-    """One window's matching graph, and the one that pins its observable.
+    """One window's matching graphs.
 
-    forced is None for a window whose model carries no single nonzero
-    observable row: there is no parity to pin, so no class can be
-    forced and the plain graph answers a forced job with no weight.
+    forced is the graph that pins the window's observable. It is None
+    for a window whose model carries no single nonzero observable row:
+    there is no parity to pin, so no class can be forced and the plain
+    graph answers a forced job with no weight.
     """
 
     plain: pymatching.Matching
@@ -47,20 +49,58 @@ class MatchingGraphs:
 class PyMatchingDecoder(decoder_module.WindowDecoderBase):
     """Decode one window with PyMatching.
 
-    Measured mode times ``matching.decode`` only, not syndrome extraction
-    or result construction. Measurements are of one call on one thread:
-    with several units they do not prove parallel hardware.
+    Measured mode times ``matching.decode`` alone, one call on one
+    thread: with several units it does not prove parallel hardware.
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
     decoder_evidence = decoding_records.FORCED_CLASS_SOLVES
 
-    def __init__(self, latency_model=None):
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row as a run names it: measured, or at a preset latency.
+
+        preset_latency_microseconds prices every decode at one fixed core
+        latency (decoders.py PresetLatencyDecoder) instead of the host
+        clock; the matching still decodes every window.
+        """
+
+        preset_latency_microseconds: Optional[float] = None
+
+        def __post_init__(self) -> None:
+            _check_preset_latency(self.preset_latency_microseconds)
+
+        @property
+        def name(self) -> Union[str, float]:
+            """The row's word, or its preset latency in its place."""
+            if self.preset_latency_microseconds is None:
+                return "pymatching"
+            return self.preset_latency_microseconds
+
+        def build(self) -> "PyMatchingDecoder":
+            """A fresh decoder of these settings."""
+            if self.preset_latency_microseconds is None:
+                return PyMatchingDecoder()
+            latency_model = decoders.PresetLatencyDecoder(
+                self.preset_latency_microseconds
+            )
+            return PyMatchingDecoder(latency_model)
+
+    def __init__(
+        self, latency_model: Optional[decoder_module.DecoderBase] = None
+    ):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
+        # the latency model prices the decode and leaves the graph alone
+        row = type(self)
+        self.compile_key = (row, None)
         self.forced_solve_unavailable = trace_source.TraceSource()
 
-    def compile(self, faults, model=None) -> MatchingGraphs:
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: Optional[fault_models.WindowErrorModel] = None,
+    ) -> MatchingGraphs:
         """The matching graphs of one placed model, both warm."""
         # PyMatching normalises the matrix it is given in place; the placed
         # matrix is frozen, so it gets a copy (one per model, cached).
@@ -86,13 +126,19 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         forced = self._forced_matching(faults, edge_weights)
         return MatchingGraphs(plain=matching, forced=forced)
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: MatchingGraphs,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """The matching's correction, or an empty one marked invalid.
 
-        PyMatching raises when a syndrome has odd parity in a boundaryless
-        component; no valid plan produces one, so that case is reported as
-        an empty correction with INVALID_CORRECTION and no correction's
-        reason, which leaves its shot unscored, rather than ending the run.
+        PyMatching raises on a syndrome with odd parity in a
+        boundaryless component; no valid plan produces one, so it is
+        reported as an empty correction with INVALID_CORRECTION, which
+        leaves its shot unscored, rather than ending the run.
         """
         del model
         try:
@@ -104,20 +150,22 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         return decoding_records.WindowDecode(selected)
 
     def decode_forced_window(
-        self, backend, model, faults, syndrome, forced_logical_class: int
-    ):
+        self,
+        backend: MatchingGraphs,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+        forced_logical_class: int,
+    ) -> decoding_records.WindowDecode:
         """The lightest correction whose observable parity is the class.
 
-        The appended detector carries the class bit, so the matching
-        must flip the observable an even or an odd number of times
-        (Gidney et al. 2312.04522 Sec. "Complementary gap"). A window
-        that pins no observable has no forced solve, and the plain
-        decode answers it with no weight, which leaves the confidence
-        without a gap and escalates the window. A class no matching
-        reaches raises in PyMatching as the plain decode does; it has no
-        correction and probability zero, so its weight is +inf, the
-        complementary gap being the log-likelihood ratio of the two
-        classes' best hypotheses (Gidney et al. 2312.04522 Sec. 4).
+        The appended detector carries the class bit (Gidney et al.
+        2312.04522 Sec. "Complementary gap"). A window that pins no
+        observable has no forced solve: the plain decode answers with no
+        weight, and the window escalates. A class no matching reaches
+        has no correction and probability zero, so its weight is +inf,
+        the gap being the log-likelihood ratio of the two classes' best
+        hypotheses (Sec. 4).
         """
         if backend.forced is None:
             return self.decode_window(backend, model, faults, syndrome)
@@ -160,15 +208,38 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
 class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     """Weight-oblivious MWPM: same matching graph, every edge at weight 1.
 
-    A deliberately coarse weak tier (a hardware matcher without
-    weighted-edge support): at circuit-level noise it decodes measurably
-    worse than weighted MWPM because hook-error paths are no longer
-    penalized.
+    A deliberately coarse weak tier, a hardware matcher without weighted
+    edges: at circuit-level noise it decodes worse than weighted MWPM
+    because hook-error paths are no longer penalized.
     """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row has no settings of its own."""
+
+        # the word the reports name this row by
+        name = "unweighted_pymatching"
+
+        def build(self) -> "UnweightedPyMatchingDecoder":
+            """A fresh decoder."""
+            return UnweightedPyMatchingDecoder()
 
     def _weights_for(self, faults):
         fault_count = len(faults.priors)
         return numpy.ones(fault_count)
+
+
+def _check_preset_latency(microseconds) -> None:
+    """A preset core latency is a finite number at least zero, or none."""
+    if microseconds is None:
+        return
+    is_finite = config.is_number(microseconds) and math.isfinite(microseconds)
+    if is_finite and microseconds >= 0:
+        return
+    raise ValueError(
+        "preset_latency_microseconds must be a finite nonnegative number "
+        f"of microseconds, or None (got {microseconds!r})"
+    )
 
 
 def _no_matching_decode(faults) -> decoding_records.WindowDecode:
@@ -184,13 +255,10 @@ def _no_matching_decode(faults) -> decoding_records.WindowDecode:
 def _warm_up(matching, faults) -> None:
     """Decode a few one-column syndromes so the graph is built and warm.
 
-    PyMatching builds its internal graph lazily and finishes warming
-    only once it has matched real defects; a running software decoder
-    has the window graph prebuilt and warm, so decode a few defects
-    before the first timed call. Each warm-up syndrome is the detector
-    set of one column, which that column alone explains, so it is
-    satisfiable on any graph (a boundaryless toric component would
-    reject an arbitrary detector pair).
+    PyMatching builds its graph lazily and warms only once it has
+    matched real defects, while a running decoder has it prebuilt. Each
+    warm-up syndrome is one column's detector set, which that column
+    alone explains, so it is satisfiable on any graph.
     """
     syndromes = _warm_up_syndromes(faults.check)
     for _column, syndrome in syndromes:
@@ -217,12 +285,10 @@ def _warm_up_syndromes(check) -> list:
 def _unpinnable_observable_reason(faults) -> Optional[str]:
     """Why this model pins no logical class, or None when it pins one.
 
-    A forced-class solve appends the observable row to the check matrix
-    as one more detector, and the appended detector's bit is the class
-    (Gidney et al. 2312.04522 lines 828-833 attach that virtual detector
-    to the boundary edges the observable runs along). The append needs
-    one nonzero observable row, and it needs every observable-flipping
-    fault to touch at most one detector.
+    The observable row is appended as one more detector whose bit is the
+    class (Gidney et al. 2312.04522 lines 828-833), which needs one
+    nonzero observable row and every observable-flipping fault to touch
+    at most one detector.
     """
     observables = faults.observables
     row_count = observables.shape[0]

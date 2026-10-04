@@ -18,16 +18,18 @@ reads one layer more than the cudaqx window over the same rounds; every
 earlier window reads the same layers.
 """
 
+import dataclasses
 import math
+from typing import Optional
 
 import decsim.records.windows as window_records
 import decsim.windows.schemes.window_data as window_data
 
 
 class SlidingWindowScheme:
-    """Serial commit and look-ahead buffer windows.
+    """Serial commit windows that read ahead where the stream allows.
 
-    windows.terminal_policy is the one key this row reads: flush ends the
+    terminal_policy is the one setting this row reads: flush ends the
     last window at the stream's last round, qLDPC's last window, and
     lookahead keeps the regular stride, so the last window still reads
     rounds past its own commit and a strong recovery has context to read.
@@ -36,14 +38,28 @@ class SlidingWindowScheme:
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
 
-    def __init__(
-        self,
-        card: window_records.WindowingSchemeCard = (
-            window_records.DEFAULT_SCHEME_CARD
-        ),
-    ) -> None:
-        self.terminal_policy = card.terminal_policy
-        self.has_trailing_tail_context = card.terminal_policy == "lookahead"
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The sliding row's window sizes; None is the code distance."""
+
+        commit_rounds: Optional[int] = None
+        buffer_rounds: Optional[int] = None
+
+        def __post_init__(self) -> None:
+            window_data.check_window_sizes(
+                self.commit_rounds, self.buffer_rounds
+            )
+
+        # the word the reports name this row by
+        name = "sliding"
+
+        def build(self, terminal_policy: str) -> "SlidingWindowScheme":
+            """The scheme, draining its last window by terminal_policy."""
+            return SlidingWindowScheme(terminal_policy)
+
+    def __init__(self, terminal_policy: str = "flush") -> None:
+        self.terminal_policy = terminal_policy
+        self.has_trailing_tail_context = terminal_policy == "lookahead"
 
     def plan_operation(
         self,
@@ -121,13 +137,11 @@ def _finite_double_window_geometries(
 ) -> tuple:
     """Finite forward windows with one closed all-core tail.
 
-    Regular windows commit F rounds and read W = F + B. The tail rule is
-    qLDPC's SlidingWindowDecoder rule (qLDPC src/qldpc/decoders/sinter.py:
-    776-777, `while start_time < end_time - max_size_of_last_window`,
-    that size being W + F - 1): the last window starts as soon as fewer
-    than W + F rounds remain, so it commits everything left and is never
-    shorter than W. A short tail is never decoded on its own; it is absorbed by
-    the last full-width window instead.
+    The tail follows qLDPC's SlidingWindowDecoder (qLDPC
+    src/qldpc/decoders/sinter.py:776-777, `while start_time < end_time -
+    max_size_of_last_window`, that size being W + F - 1): the last
+    window starts once fewer than W + F rounds remain, so it commits
+    everything left and is never shorter than W.
     """
     window_width = commit_round_count + buffer_round_count
     windows = []

@@ -6,36 +6,30 @@ The growth evidence it returns on every result feeds the cluster gap
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
-import decsim.config as config
+import numpy
+
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 
 class UnionFindDecoder(decoder_module.WindowDecoderBase):
     """Prior-weighted graphlike Union-Find hard decoder.
 
-    Faults must be graphlike; detector hyperedges are rejected. Initial
-    erasure side information is not implemented. Growth rounds natural
-    log-odds to the configured weight step; a probability of one half
-    has zero log-odds, so its edge has length zero and starts closed,
-    as an erased edge does (Delfosse and Nickerson 1709.06218). Every
-    logical observable row is kept in the hard result. Host runtime is
-    not simulated service latency, and the decoder does not claim the
-    paper's almost-linear bound: the cycle count's flood lays the closed
-    edges out again at every growth step.
-
-    The row is priced one of three ways: a latency model, as any window
-    decoder; its own cycle count (cycle_count.py), which reads the
-    growth steps and the peel depth of the decode just run and holds the
-    unit for their cycles on the count's clock; or, with neither, the
-    host clock.
+    Faults must be graphlike, and initial erasure side information is
+    not implemented. A probability of one half has zero log-odds, so its
+    edge starts closed, as an erased edge does (Delfosse and Nickerson
+    1709.06218). Every logical observable row is kept in the hard
+    result. The decoder does not claim the paper's almost-linear bound:
+    the cycle count's flood lays the closed edges out again at every
+    growth step. The row is priced by its own cycle count
+    (cycle_count.py), from the growth steps and the peel depth of the
+    decode just run, or by the host's measured time.
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -44,60 +38,45 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own keys in its tier section.
+        """The union-find row's settings.
 
-        weight_step is the growth resolution, the natural-log units of
-        weight one tick of an edge length is (Huang, Newman and Brown
-        2004.04693): the smaller it is, the longer every edge and the
-        more growth iterations a decode spans, which under a cycle count
-        is the engine's own time. cycle_count prices the decode's growth
-        steps in cycles of a named clock (cycle_count.py), in place of
-        the host wall clock.
+        weight_step is the growth resolution, the natural-log weight one
+        tick of edge length is (Huang, Newman and Brown 2004.04693): the
+        smaller it is, the longer every edge and the more growth
+        iterations a decode spans. timing prices the decode: a cycle
+        count (cycle_count.CycleCount) or
+        cycle_count.HostMeasuredTime(). A run names one; none is
+        refused, since the host's time is no hardware's and is never
+        assumed.
         """
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
-        cycle_count: Optional[cycle_count_module.CycleCount] = None
+        timing: Optional[cycle_count_module.Timing] = None
+        # the word the reports name this row by
+        name = "union_find"
 
-        @classmethod
-        def from_yaml(
-            cls,
-            section: Mapping,
-            clocks: config.ClockSettings,
-            section_name: str,
-        ) -> "UnionFindDecoder.Settings":
-            """Both keys, checked where they enter; absent is the default.
+        def __post_init__(self) -> None:
+            weight_step = evidence_records.normalized_weight_step(
+                self.weight_step, "weight_step"
+            )
+            object.__setattr__(self, "weight_step", weight_step)
+            if self.timing is None:
+                raise ValueError(
+                    "timing must be a cycle count (cycle_count.CycleCount) "
+                    "or the host's measured time "
+                    "(cycle_count.HostMeasuredTime()); none is given"
+                )
 
-            section_name is the tier section the row sits in, which a
-            weight_step or cycle_count refusal names.
-            """
-            weight_step = section.get(
-                "weight_step", evidence_records.DEFAULT_WEIGHT_STEP
-            )
-            key = f"{section_name}.weight_step"
-            normalized_step = evidence_records.normalized_weight_step(
-                weight_step, key
-            )
-            block = section.get("cycle_count")
-            if block is None:
-                return cls(weight_step=normalized_step)
-            cycle_count = cycle_count_module.CycleCount.from_yaml(
-                block, clocks, section_name
-            )
-            return cls(weight_step=normalized_step, cycle_count=cycle_count)
+        def build(self) -> "UnionFindDecoder":
+            """A fresh decoder of these settings."""
+            return UnionFindDecoder(self)
 
-    def __init__(
-        self,
-        latency_model: Optional[decoder_module.DecoderBase] = None,
-        settings: Optional["UnionFindDecoder.Settings"] = None,
-    ) -> None:
-        decoder_module.WindowDecoderBase.__init__(self, latency_model)
-        if settings is None:
-            settings = UnionFindDecoder.Settings()
+    def __init__(self, settings: "UnionFindDecoder.Settings") -> None:
+        decoder_module.WindowDecoderBase.__init__(self)
+        self.compile_key = (UnionFindDecoder, settings)
         # absolute natural-log units represented by one weight tick
-        self.weight_step = evidence_records.normalized_weight_step(
-            settings.weight_step
-        )
-        self.cycle_count = settings.cycle_count
+        self.weight_step = settings.weight_step
+        self.timing = settings.timing
 
     def ticks_after_decode(
         self,
@@ -105,14 +84,15 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         elapsed_nanoseconds: int,
         now: int,
     ) -> int:
-        """The cycle count's ticks to its clock edge, or the host's time."""
-        if self.cycle_count is None:
-            return decoder_module.WindowDecoderBase.ticks_after_decode(
-                self, result, elapsed_nanoseconds, now
-            )
-        return self.cycle_count.ticks(result.cluster_evidence, now)
+        """The ticks the row's timing holds the unit for this decode."""
+        evidence = result.cluster_evidence
+        return self.timing.decode_ticks(evidence, elapsed_nanoseconds, now)
 
-    def compile(self, faults, model=None) -> evidence_records.UnionFindGraph:
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> evidence_records.UnionFindGraph:
         """The immutable weighted graph of one placed model."""
         del model
         return window_decoder.graph_from_model(
@@ -121,7 +101,13 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             weight_step=self.weight_step,
         )
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: evidence_records.UnionFindGraph,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """The hard correction and the growth that produced it.
 
         The immutable growth evidence rides on the result, so a cluster

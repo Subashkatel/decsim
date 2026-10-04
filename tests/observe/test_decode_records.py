@@ -3,6 +3,7 @@
 import decsim.confidence.complementary as complementary
 import decsim.observe.decode_records as decode_records
 import decsim.records.decoding as decoding_records
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 
@@ -33,21 +34,6 @@ def _job():
     )
 
 
-def test_a_request_is_recorded_at_its_end():
-    ledger = decode_records.DecodeRecordLedger()
-    job = _job()
-    result = decoding_records.DecodeResult(1, 0)
-    outcome = (
-        decoding_records.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
-    )
-    ledger.request_ended(job, result, outcome, 40)
-    (request,) = ledger.requests
-    assert request.input_round_count == 5
-    assert request.decode_output_ticks == 40
-    assert request.dispatch_ticks == 15
-    assert request.service_key == job.service_key
-
-
 WEAK_KEPT = (
     decoding_records.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
 )
@@ -58,6 +44,38 @@ STRONG_ANSWER = (
 CANCELLED = (
     decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH
 )
+
+
+def test_a_request_whose_input_was_freed_before_its_end_keeps_its_weight():
+    # A confidence walk delays the verdict past the decode's end, and the
+    # unit frees the input then; the bits the decoder read stay on the job.
+    ledger = decode_records.DecodeRecordLedger()
+    job = _job()
+    first_round = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=0,
+        bits=(1, 0, 1),
+        size_bits=3,
+        fragment_index=0,
+    )
+    second_round = round_records.RetainedSyndromeFragment(
+        operation_id=1,
+        patch_ids=(0,),
+        round_index=1,
+        bits=(0, 1, 1),
+        size_bits=3,
+        fragment_index=0,
+    )
+    job.payloads = [first_round, second_round]
+    job.service_started = True
+    job.decoder_input = None
+    result = decoding_records.DecodeResult(1, 0)
+
+    ledger.request_ended(job, result, WEAK_ESCALATED, 40)
+
+    (request,) = ledger.requests
+    assert request.syndrome_weight == 4
 
 
 def _gap(nats):

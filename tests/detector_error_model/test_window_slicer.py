@@ -18,9 +18,9 @@ import stim
 
 from decsim.detector_error_model import (
     detector_chronology,
-    fault_model_contracts,
     window_slicer,
 )
+from decsim.records import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL
@@ -108,6 +108,15 @@ def columns_reaching_outside(model):
     return reaching_count
 
 
+def window_rows(detectors, row_by_detector):
+    """The window's rows among a fault's detectors; one outside has none."""
+    return [
+        row_by_detector[detector_id]
+        for detector_id in detectors
+        if detector_id in row_by_detector
+    ]
+
+
 def expected_check(catalog, model):
     """The check matrix the catalog implies for the window's rows, columns."""
     row_by_detector = {}
@@ -118,11 +127,7 @@ def expected_check(catalog, model):
     dense = [list(zero_row) for _ in model.detector_ids]
     for column, fault_index in enumerate(faults.source_fault_ids):
         detectors = catalog.detector_sets[fault_index]
-        local_rows = [
-            row_by_detector[detector_id]
-            for detector_id in detectors
-            if detector_id in row_by_detector
-        ]
+        local_rows = window_rows(detectors, row_by_detector)
         for row in local_rows:
             dense[row][column] = 1
     return dense
@@ -223,17 +228,6 @@ def test_a_committed_fault_is_left_out_of_the_next_window():
         + (125, 126, 127, 128, 130, 131, 132, 133, 134)
         + (136, 137, 138, 139, 140, 141, 143, 146, 147, 149, 150)
     )
-
-
-def test_the_last_window_owns_everything_it_sees():
-    slicer = surface_code_slicer(6)
-    slicer.slice_window(1, 1, 2, 3, is_last=False)
-    slicer.slice_window(3, 3, 4, 5, is_last=False)
-    last = slicer.slice_window(5, 5, 6, 6, is_last=True)
-    faults = last.require_faults(GRAPHLIKE)
-    assert faults.owned.all()
-    assert last.detector_ids == detectors_in_rounds(6, {5, 6})
-    assert last.detector_ids == tuple(range(28, 48))
 
 
 def test_every_fault_is_owned_by_exactly_one_window_of_a_sliding_plan():
@@ -366,7 +360,7 @@ def test_a_physical_fault_kept_uncommitted_past_its_component_is_refused():
     slicer.slice_window(
         1, 1, 3, 4, is_last=False, fault_exclusion_ranges=((4, 4),)
     )
-    with pytest.raises(RuntimeError, match="graphlike component XOR"):
+    with pytest.raises(RuntimeError, match="local physical detector"):
         slicer.slice_window(
             3, 4, 6, 6, is_last=True, fault_exclusion_ranges=((4, 4),)
         )

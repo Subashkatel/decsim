@@ -1,5 +1,8 @@
 """Check that every line of Python does one thing (STYLE.md, rule 1).
 
+It also holds every function to rule 11's five decisions, and in the
+package it checks rule 6's signatures and order.
+
 Usage:
     python tools/check_one_action.py <file or directory> ...
 
@@ -25,8 +28,16 @@ What is reported, by kind:
     walrus              an assignment hiding inside an expression
     long function       a function longer than MAX_FUNCTION_LINES
     deep nesting        blocks nested deeper than MAX_BLOCK_DEPTH
+    over five decisions a function that decides more than MAX_DECISIONS
+                        times, counted as rule 11 counts
     wide state          a class whose __init__ sets more attributes than
                         MAX_ATTRIBUTES, unless STYLE.md rule 1 names it
+    unannotated signature
+                        a public function or method of the package with a
+                        parameter or a return left unannotated
+    public after private
+                        a public module-level class or function of the
+                        package below a private one
 
 Two kinds are reports, not failures: long function and wide state. The
 40 lines is Google's prompt to think, not a limit, and the six
@@ -81,6 +92,7 @@ EXCLUDED_PARTS = frozenset(
 MAX_FUNCTION_LINES = 40
 MAX_BLOCK_DEPTH = 2
 MAX_ATTRIBUTES = 6
+MAX_DECISIONS = 5
 # STYLE.md rule 1 names the classes whose width is one responsibility with
 # genuinely many collaborators. The list lives there, not here, so a
 # reader of the rule sees every exemption and its one sentence.
@@ -94,9 +106,19 @@ EXEMPTION_LINE = re.compile(r"^- `(\w+)` \(`([^`]+)`\):")
 BLOCK_STATEMENTS = (ast.For, ast.While, ast.If, ast.With, ast.Try)
 ARITHMETIC = (ast.BinOp, ast.Compare, ast.BoolOp)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+# rule 11: a decision counts toward the innermost function whose text holds
+# it, so a nested function's, lambda's or class's body decides for itself,
+# while its decorators, defaults, annotations and bases, which sit outside
+# that body, decide for the function around it
+DEFINITIONS = (*FUNCTIONS, ast.Lambda, ast.ClassDef)
+TESTED_DECISIONS = (ast.If, ast.While, ast.IfExp)
+UNTESTED_DECISIONS = (ast.For, ast.AsyncFor, ast.ExceptHandler)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 # a lambda's body and a comprehension are checked where they are visited
 UNCHECKED_ARGUMENTS = (ast.Lambda, *COMPREHENSIONS)
+# rule 6's signature and order checks bind this package only
+PACKAGE = "decsim"
+UNANNOTATED_RECEIVERS = frozenset({"self", "cls"})
 
 
 def wide_state_exemptions():
@@ -134,6 +156,68 @@ class Finding:
 
     def __str__(self):
         return f"{self.path}:{self.line}: {self.kind}: {self.text}"
+
+
+def top_package(path):
+    """The outermost package a file sits in, read off its __init__.py files."""
+    resolved = path.resolve()
+    folder = resolved.parent
+    package = None
+    while (folder / "__init__.py").exists():
+        package = folder.name
+        folder = folder.parent
+    return package
+
+
+def public_functions(body):
+    """The public functions of a body, and of its public classes in turn."""
+    for node in body:
+        is_function = isinstance(node, FUNCTIONS)
+        if is_function and is_public_signature(node.name):
+            yield node
+        is_class = isinstance(node, ast.ClassDef)
+        if is_class and not node.name.startswith("_"):
+            yield from public_functions(node.body)
+
+
+def is_public_signature(name):
+    """A public name, or __init__, whose parameters a caller passes."""
+    if name == "__init__":
+        return True
+    return not name.startswith("_")
+
+
+def is_unannotated(function):
+    """Whether a parameter, or the return, carries no annotation."""
+    parameters = signature_parameters(function.args)
+    for parameter in parameters:
+        is_receiver = parameter.arg in UNANNOTATED_RECEIVERS
+        if parameter.annotation is None and not is_receiver:
+            return True
+    if function.name == "__init__":
+        return False
+    return function.returns is None
+
+
+def signature_parameters(arguments):
+    """Every parameter of a signature, the starred ones included."""
+    every = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
+    stars = (arguments.vararg, arguments.kwarg)
+    every.extend(star for star in stars if star is not None)
+    return every
+
+
+def public_after_private(body):
+    """The public module-level definitions that follow a private one."""
+    seen_private = False
+    for node in body:
+        if not isinstance(node, (*FUNCTIONS, ast.ClassDef)):
+            continue
+        if node.name.startswith("_"):
+            seen_private = True
+            continue
+        if seen_private:
+            yield node
 
 
 def is_allowed_call(node):
@@ -224,6 +308,137 @@ def block_depth(node, depth=0):
         below = block_depth(child, child_depth)
         deepest = max(deepest, below)
     return deepest
+
+
+def decision_count(function):
+    """How many times a function decides, counted as STYLE.md rule 11 counts.
+
+    A comprehension's `for` is a loop and its `if` an `if`. Only the body
+    is counted: a default value or a decorator runs once, where the
+    function is defined.
+    """
+    count = 0
+    for statement in function.body:
+        count += decisions_below(statement)
+    return count
+
+
+def decisions_below(node):
+    """The decisions of a node and everything below it, bodies apart."""
+    if isinstance(node, DEFINITIONS):
+        return definition_decisions(node)
+    count = own_decisions(node)
+    for child in ast.iter_child_nodes(node):
+        count += decisions_below(child)
+    return count
+
+
+def definition_decisions(node):
+    """What a definition decides where it is defined, its body left out."""
+    count = 0
+    for part in definition_parts(node):
+        count += decisions_below(part)
+    return count
+
+
+def definition_parts(node):
+    """A definition's decorators, defaults, annotations or bases."""
+    if isinstance(node, ast.ClassDef):
+        return [*node.decorator_list, *node.bases, *node.keywords]
+    defaults = argument_defaults(node.args)
+    if isinstance(node, ast.Lambda):
+        return defaults
+    annotations = signature_annotations(node)
+    return [*node.decorator_list, *defaults, *annotations]
+
+
+def argument_defaults(arguments):
+    """The default values a signature evaluates where it is defined."""
+    keyword_defaults = [
+        default for default in arguments.kw_defaults if default is not None
+    ]
+    return [*arguments.defaults, *keyword_defaults]
+
+
+def signature_annotations(function):
+    """What a definition evaluates for its types, the return's included."""
+    parameters = signature_parameters(function.args)
+    annotations = [parameter.annotation for parameter in parameters]
+    annotations.append(function.returns)
+    return [annotation for annotation in annotations if annotation]
+
+
+def own_decisions(node):
+    """The decisions one node makes, with the operators in its condition."""
+    if isinstance(node, TESTED_DECISIONS):
+        return tested_decisions(node.test)
+    if isinstance(node, UNTESTED_DECISIONS):
+        return 1
+    if isinstance(node, ast.comprehension):
+        return comprehension_decisions(node)
+    if isinstance(node, ast.Assert):
+        return condition_operators(node.test)
+    if isinstance(node, ast.match_case):
+        return guard_decisions(node)
+    return 0
+
+
+def comprehension_decisions(comprehension):
+    """A comprehension's loop, and each of its filters."""
+    count = 1
+    for test in comprehension.ifs:
+        count += tested_decisions(test)
+    return count
+
+
+def guard_decisions(case):
+    """A match case's guard is an `if`; a case without one decides nothing."""
+    if case.guard is None:
+        return 0
+    return tested_decisions(case.guard)
+
+
+def tested_decisions(test):
+    """One decision, and one more for each `and` or `or` in its test."""
+    operators = condition_operators(test)
+    return 1 + operators
+
+
+def condition_operators(node):
+    """The `and` and `or` operators that decide one condition's value.
+
+    They lie on the path from the test to its truth value, through `and`,
+    `or`, `not`, an assignment expression and both branches of a
+    conditional expression, whose own test is counted where it is. An
+    operator inside a call's arguments or a comprehension builds a value
+    and decides nothing here.
+    """
+    if isinstance(node, ast.BoolOp):
+        return joined_operators(node)
+    count = 0
+    for branch in value_branches(node):
+        count += condition_operators(branch)
+    return count
+
+
+def joined_operators(node):
+    """One `and` or `or` node's operators, with those of its values."""
+    value_count = len(node.values)
+    count = value_count - 1
+    for value in node.values:
+        count += condition_operators(value)
+    return count
+
+
+def value_branches(node):
+    """The parts of an expression whose truth value is its own."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return [node.operand]
+    if isinstance(node, ast.IfExp):
+        return [node.body, node.orelse]
+    if isinstance(node, ast.NamedExpr):
+        return [node.value]
+    return []
 
 
 def init_method(class_node):
@@ -319,7 +534,7 @@ def is_simple_lambda(node):
 
 
 class Checker(ast.NodeVisitor):
-    """Walks one file and collects findings."""
+    """Collects one file's findings."""
 
     def __init__(self, path, source_lines):
         self.path = path
@@ -334,14 +549,31 @@ class Checker(ast.NodeVisitor):
         finding = Finding(self.path, node.lineno, kind, stripped)
         self.findings.append(finding)
 
+    def report_decisions(self, node, decisions):
+        """Record a function over rule 11's line, naming its count."""
+        text = f"{node.name} decides {decisions} times"
+        finding = Finding(self.path, node.lineno, "over five decisions", text)
+        self.findings.append(finding)
+
+    def check_package_rules(self, tree):
+        """Report rule 6's unannotated signatures and out-of-order names."""
+        for function in public_functions(tree.body):
+            if is_unannotated(function):
+                self.report(function, "unannotated signature")
+        for node in public_after_private(tree.body):
+            self.report(node, "public after private")
+
     def visit_FunctionDef(self, node):
-        """Report long functions and deep nesting."""
+        """Report long functions, deep nesting and too many decisions."""
         length = node.end_lineno - node.lineno + 1
         if length > MAX_FUNCTION_LINES:
             self.report(node, "long function")
         depth = block_depth(node)
         if depth > MAX_BLOCK_DEPTH:
             self.report(node, "deep nesting")
+        decisions = decision_count(node)
+        if decisions > MAX_DECISIONS:
+            self.report_decisions(node, decisions)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node):
@@ -486,7 +718,14 @@ def check_file(path):
     source_lines = source.splitlines()
     checker = Checker(path, source_lines)
     checker.visit(tree)
-    return checker.findings
+    if top_package(path) == PACKAGE:
+        checker.check_package_rules(tree)
+    # one line nested three deep is one line to fix, so it is reported once
+    unique = {}
+    for finding in checker.findings:
+        unique.setdefault(str(finding), finding)
+    unique_findings = unique.values()
+    return list(unique_findings)
 
 
 def is_excluded(path, target):
@@ -527,11 +766,14 @@ REPORT_ONLY_KINDS = frozenset({"long function", "wide state"})
 def main(arguments):
     """Check every file named, print the findings, return the exit code."""
     findings = []
-    for path in python_files(arguments):
+    found_paths = python_files(arguments)
+    checked_paths = list(found_paths)
+    for path in checked_paths:
         file_findings = check_file(path)
         findings.extend(file_findings)
     failures, reports = _split_findings(findings)
-    _print_findings(failures, reports)
+    checked_count = len(checked_paths)
+    _print_findings(failures, reports, checked_count)
     if failures:
         return 1
     return 0
@@ -549,12 +791,17 @@ def _split_findings(findings):
     return failures, reports
 
 
-def _print_findings(failures, reports):
+def _print_findings(failures, reports, checked_count: int):
     """Print the failures with their count, then the size prompts."""
     for finding in failures:
         print(finding)
     failure_paths = {finding.path for finding in failures}
-    print(f"{len(failures)} findings in {len(failure_paths)} files")
+    failure_count = len(failures)
+    failed_file_count = len(failure_paths)
+    print(
+        f"{failure_count} findings in {failed_file_count} of "
+        f"{checked_count} files checked"
+    )
     if reports:
         print("reports (size prompts, answered in the change's report):")
     for finding in reports:

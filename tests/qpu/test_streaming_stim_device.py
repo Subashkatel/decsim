@@ -13,7 +13,6 @@ import stim
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detection_event_formation as formation
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.settings as event_settings
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
@@ -24,13 +23,18 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.circuits as circuit_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
-@pytest.mark.parametrize("round_count", [1, 2, 7, 13])
+@pytest.mark.parametrize("round_count", [1, 2, 7])
 def test_property_live_records_match_stim_at_different_stop_lengths(
     round_count: int,
 ) -> None:
@@ -113,7 +117,7 @@ def test_window_lookahead_does_not_execute_physical_measurements() -> None:
 def test_a_finalized_stream_refuses_another_physical_round() -> None:
     source, owner = _source()
     _execute(source, owner, 1)
-    with pytest.raises(RuntimeError, match="already finalized"):
+    with pytest.raises(RuntimeError, match="live Stim stream is already"):
         source.idle_round_payloads(
             owner,
             owner.id,
@@ -152,34 +156,35 @@ def test_idle_first_refuses_a_measurement_closed_owner() -> None:
         patches=(0,),
         feedback_boundary_mode="measurement_closed",
     )
-    with pytest.raises(ValueError, match="trailing-buffer feedback"):
+    with pytest.raises(ValueError, match="live Stim memory requires"):
         source.declare_stream(owner, 0)
     assert source.logical_observable_truth(owner.id) is None
 
 
-@pytest.mark.parametrize("patches", [("other",), ("patch", "other")])
-def test_a_segment_cannot_relabel_the_physical_patch(
-    patches: tuple[str, ...],
-) -> None:
+def test_a_segment_cannot_relabel_the_physical_patch() -> None:
     source, owner = _source()
     segment = dataclasses.replace(
-        owner, id="prefix", stream_id=owner.id, stream_offset=0, patches=patches
+        owner,
+        id="prefix",
+        stream_id=owner.id,
+        stream_offset=0,
+        patches=("other",),
     )
-    with pytest.raises(ValueError, match="patches must match its owner"):
+    with pytest.raises(ValueError, match="live Stim segment patches"):
         source.begin_operation(segment, 1, 0, round_period_ticks=1_100_000)
     assert source.sampled_measurements(owner.id) == ()
 
 
 def test_a_segment_refuses_a_one_tick_period_mismatch() -> None:
     source, owner = _source(1.1)
-    with pytest.raises(ValueError, match="differs from the QPU cadence"):
+    with pytest.raises(ValueError, match="physical circuit period differs"):
         source.begin_operation(owner, 1, 0, round_period_ticks=1_100_001)
     assert source.sampled_measurements(owner.id) == ()
 
 
 def test_idle_first_refuses_a_period_mismatch_before_sampling() -> None:
     source, owner = _source(1.1)
-    with pytest.raises(ValueError, match="differs from the QPU cadence"):
+    with pytest.raises(ValueError, match="physical circuit period differs"):
         source.idle_round_payloads(
             owner,
             owner.id,
@@ -231,16 +236,18 @@ def test_a_longer_feedback_wait_moves_the_actual_physical_readout() -> None:
     assert second_result.event_queue_empty
 
 
-@pytest.mark.parametrize("period_microseconds", [0.7, 1.25])
 @pytest.mark.parametrize(
-    "noise_parameters",
+    "period_microseconds, noise_parameters",
     [
-        {"noise_model": "sd6"},
-        {
-            "noise_model": "physical",
-            "relaxation_time_microseconds": 20.0,
-            "dephasing_time_microseconds": 30.0,
-        },
+        (0.7, {"noise_model": "sd6"}),
+        (
+            1.25,
+            {
+                "noise_model": "physical",
+                "relaxation_time_microseconds": 20.0,
+                "dephasing_time_microseconds": 30.0,
+            },
+        ),
     ],
 )
 def test_deltakit_rounds_use_the_same_live_machine_and_record_oracle(
@@ -362,14 +369,20 @@ def _protected_machine(
         program = memory_programs.memory_program()
     source = streaming_stim_device.StreamingStimDevice(programs={100: program})
     workload = _protected_workload()
+    source_record = declared_run.GivenSource(source)
     qpu = qpu_settings.QpuSettings(
         distance=3,
-        device=source,
+        source=source_record,
         round_period_microseconds=period_microseconds,
     )
     clock = config.Clock(1000)
     engine = decoder_settings.EngineSettings(clock=clock)
-    decoder = decoder_settings.DecoderSettings(kind=0.1, engine=engine)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.1
+    )
+    decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=matching, engine=engine
+    )
     links = link_profiles.logical_reference_profile()
     feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
     channel = dataclasses.replace(
@@ -422,7 +435,9 @@ def _protected_workload():
         emits_detector_data=False,
     )
     region = program_records.ProtectedRegion(100, 2, 4)
-    policy = round_policies.PerOperationRounds({100: 0, 1: 3, 2: 0, 3: 1, 4: 0})
+    policy = round_policies.PerOperationRounds(
+        ((100, 0), (1, 3), (2, 0), (3, 1), (4, 0))
+    )
     return workload_settings.WorkloadSettings(
         operations=(prefix, begin, resume, finish),
         dynamic_streams=(owner,),

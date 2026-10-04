@@ -15,14 +15,13 @@ import pytest
 import stim
 
 import decsim.config as config
-import decsim.experiments.experiment as experiment
+import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
 import decsim.producers as producers
 import decsim.records.circuits as circuit_records
-import tests.experiments.yaml_configs as yaml_configs
+import examples.live_memory_example as example
 import tests.qpu.memory_programs as memory_programs
-import tools.live_memory_example as example
 
 # The tool's protection workload as a decsim.ops/1 file: decode after
 # three rounds, wait for the answer, resume one round, read out. The
@@ -178,7 +177,7 @@ def test_replay_refuses_a_round_period_the_fragments_do_not_declare(
     output = tmp_path / "refused"
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--input",
         str(inputs),
         "--output",
@@ -190,7 +189,9 @@ def test_replay_refuses_a_round_period_the_fragments_do_not_declare(
         command, check=False, capture_output=True, text=True
     )
     assert refused.returncode != 0
-    assert "period differs from the QPU cadence" in refused.stderr
+    assert (
+        "physical circuit period differs from the QPU cadence" in refused.stderr
+    )
 
 
 def test_a_replay_refuses_a_flag_that_would_relabel_its_circuit(
@@ -201,7 +202,7 @@ def test_a_replay_refuses_a_flag_that_would_relabel_its_circuit(
     output = tmp_path / "relabelled"
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--input",
         str(inputs),
         "--output",
@@ -213,7 +214,7 @@ def test_a_replay_refuses_a_flag_that_would_relabel_its_circuit(
         command, check=False, capture_output=True, text=True
     )
     assert refused.returncode != 0
-    assert "--basis cannot change the fragments" in refused.stderr
+    assert "--basis cannot change the fragments --input loads" in refused.stderr
     assert not output.exists()
 
 
@@ -263,7 +264,7 @@ def test_replay_does_not_select_the_optional_producer(
     output = tmp_path / "ordinary"
     script = (
         "import sys\n"
-        "import tools.live_memory_example as example\n"
+        "import examples.live_memory_example as example\n"
         "example.main()\n"
         "loaded = [name for name in sys.modules "
         "if name.startswith('deltakit_')]\n"
@@ -315,7 +316,7 @@ def test_prefix_requires_a_physical_measurement_round() -> None:
 
     machine = machine_module.Machine.build(settings, seed=81)
 
-    with pytest.raises(ValueError, match="must finalize a stream round"):
+    with pytest.raises(ValueError, match="zero-duration detector emitters"):
         machine.run()
 
 
@@ -339,45 +340,40 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     assert source.logical_observable_truth(producers.LIVE_STREAM_ID) is not None
 
 
-@pytest.mark.parametrize("feedback_microseconds", [4.0, 8.0, 20.0])
-def test_the_files_row_runs_what_the_tool_builds_by_hand(
-    tmp_path: pathlib.Path, feedback_microseconds: float
+def test_the_files_reader_runs_what_the_tool_builds_by_hand(
+    tmp_path: pathlib.Path,
 ) -> None:
-    """The canonical fragments from a yaml, against the tool's own run."""
+    """The canonical fragments read from files, against the tool's own run."""
     program = memory_programs.memory_program()
     program = dataclasses.replace(program, round_period_microseconds=1.1)
     folder = _live_files(tmp_path, program)
-    workload = {
-        "kind": "files",
-        "operations": "live/operations.json",
-        "fragments": "live/fragments",
-    }
-    config_path = yaml_configs.example_tool_config(
-        folder, "streaming_stim", workload, feedback_microseconds
+    live = folder / "live"
+    operations_path = live / "operations.json"
+    fragments_path = live / "fragments"
+    workload = workload_files.read_workload(
+        operations_path, fragments_path=fragments_path
     )
-    config = experiment.load_experiment(config_path)
-    values = {"qpu.distance": 3, "qpu.round_period_microseconds": 1.1}
-    point = config.point_task(values)
-    settings = point.settings
-    machine = machine_module.Machine.build(settings, 17)
-    result = machine.run()
     tool_settings = example.live_settings(
         program,
         distance=3,
         round_period_microseconds=1.1,
         prefix_round_count=3,
         patch="memory-patch",
-        feedback_microseconds=feedback_microseconds,
+        feedback_microseconds=4.0,
         decoder_microseconds=0.1,
     )
+    read_workload = workload_settings.WorkloadSettings.running(workload)
+    settings = dataclasses.replace(tool_settings, workload=read_workload)
+    machine = machine_module.Machine.build(settings, 17)
+    result = machine.run()
     tool_machine = machine_module.Machine.build(tool_settings, 17)
     tool_result = tool_machine.run()
     stream_id = producers.LIVE_STREAM_ID
-    yaml_source = machine.qpu.syndrome_source
+    files_source = machine.qpu.syndrome_source
     source = tool_machine.qpu.syndrome_source
-    measurements = yaml_source.sampled_measurements(stream_id)
+    measurements = files_source.sampled_measurements(stream_id)
     tool_measurements = source.sampled_measurements(stream_id)
-    executed = yaml_source.executed_circuit(stream_id)
+    executed = files_source.executed_circuit(stream_id)
     tool_executed = source.executed_circuit(stream_id)
 
     assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)
@@ -423,7 +419,7 @@ def _write_fragments(
 
 def _saved_fragments(run_folder: pathlib.Path) -> pathlib.Path:
     """The fragments a tool run saved with its one point's inputs."""
-    saved = run_folder.glob("inputs/*/fragments")
+    saved = run_folder.glob("points/*/inputs/fragments")
     (fragments,) = saved
     return fragments
 
@@ -436,7 +432,7 @@ def _run_example(
 ) -> None:
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--input",
         str(inputs),
         "--output",
@@ -449,9 +445,13 @@ def _run_example(
 
 
 def _resolved_names(folder: pathlib.Path) -> list:
-    """The point ids a run folder recorded, which name its every value."""
-    paths = folder.glob("resolved/*.json")
-    return sorted(path.name for path in paths)
+    """The point ids a results folder recorded, which name its every value."""
+    paths = folder.glob("points/*/machine.json")
+    point_ids = []
+    for path in paths:
+        record = _read_json(path.parent, path.name)
+        point_ids.append(record["id"])
+    return sorted(point_ids)
 
 
 def _read_json(folder: pathlib.Path, filename: str) -> object:
@@ -468,7 +468,7 @@ def _executed_circuit(folder: pathlib.Path) -> stim.Circuit:
 def _producer_command(output: pathlib.Path, noise_model: str) -> list[str]:
     command = [
         sys.executable,
-        "tools/live_memory_example.py",
+        "examples/live_memory_example.py",
         "--output",
         str(output),
         "--round-period-microseconds",

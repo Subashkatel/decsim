@@ -1,74 +1,40 @@
 """The cluster gap: the confidence of one weighted Union-Find window decode.
 
-The extra-cluster gap row (extra_cluster.py) reads the same evidence
-and reports in the same unit, so the three checks and the conversion
-below are shared with it.
-
 Meister et al. 2405.07433 Definition 9 and Algorithm 2 (lines 518-536):
-the weighted edge intervals the hard decode grew are quotiented into a
-graph whose shortest closed walk of odd logical parity is the gap, in
-the growth's half-tick units, reported as natural-log weight, which is
-the unit the switching threshold is held in. The hard decode is Delfosse
-and Nickerson 1709.06218 (union_find/window_decoder.py), and this row
-reads the growth that decode already returned on its result
-(DecodeResult.cluster_evidence), so the confidence is the decoder's own
-and no second decode is run. The signal needs one ordinary decode of the
-window, not a forced-class pair, so its forced_logical_classes is empty.
+the gap is the shortest closed walk of odd logical parity through the
+edge intervals the hard decode grew (Delfosse and Nickerson 1709.06218),
+in half ticks of growth, reported as natural-log weight, the unit the
+switching threshold is held in. It reads the growth the decode returned
+(DecodeResult.cluster_evidence), so no second decode runs. The walk runs
+in C (union_find/cluster_gap.c), and its time is charged on the unit
+that produced the growth (Toshio et al. 2510.25222 lines 152-160).
 
-The walk is not free. Algorithm 2 is a Dijkstra over the decode's own
-edge intervals, one search per node of the quotient graph, which is the
-larger half of a switching window's host time when it runs in Python;
-it runs in C beside the decode that produced the growth
-(decoders/union_find/cluster_gap.c) and this row reports what it cost:
-measured on the host clock the way a measured decoder is, or the
-declared number of a tier that is a card. The evidence and its reader
-are the same hardware, so the time is charged on the unit that produced
-the growth (decision D8; Toshio et al. 2510.25222 lines 152-160 compute
-the soft output on the weak decoder).
-
-The exact likelihood-ratio reading of the gap holds only in the uniform
-repetition-code setting of Meister's Theorem 10; on a surface code it is
-a confidence, not a calibrated failure probability. The gap needs one
-logical-observable row; a growth no edge of which crosses that row
-admits no odd closed walk, so its gap is infinite (Definition 9 takes
-the minimum over the odd walks, and there are none), which is what a
-noiseless model leaves behind. Thresholds are calibrated per weight
-step.
+The likelihood-ratio reading holds only in the repetition-code setting
+of Meister's Theorem 10; on a surface code the gap is a confidence, not
+a calibrated failure probability. A growth with no edge across the one
+logical row admits no odd walk, so its gap is infinite.
 """
 
+import dataclasses
 import fractions
 import math
 import time
 from typing import Optional, Union
 
 import decsim.config as config
-import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.escalation.settings as escalation_settings
+import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
-
-def union_find_cluster_gap_source(
-    weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP,
-) -> decoding_records.SoftOutputSource:
-    """The source of a cluster gap at one absolute natural-log weight step."""
-    normalized_step = evidence_records.normalized_weight_step(weight_step)
-    return decoding_records.SoftOutputSource(
-        method="cluster_gap",
-        cluster_origin="union_find_decoder",
-        growth_schedule="weighted_global_fair",
-        gap_units="log_likelihood_weight",
-        correction="none",
-        weight_step_natural_log=normalized_step,
-        references=("cluster-gap method",),
-    )
+CLUSTER_GAP_SOURCE = decoding_records.SoftOutputSource(method="cluster_gap")
 
 
 class ClusterGap:
     """The signal row: the gap of one cluster-based decode's own growth."""
 
+    source = CLUSTER_GAP_SOURCE
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     decoder_evidence_requirement = decoding_records.CLUSTER_GROWTH_EVIDENCE
     # the window is decoded once; the gap is read off that decode
@@ -77,9 +43,8 @@ class ClusterGap:
         "the cluster gap walks the radii a growth left behind, and "
         "PyMatching's API reports no regions, blossoms or radii "
         "(pymatching 2.4.0 Matching), while belief propagation and "
-        "search decoders grow no clusters at all; use "
-        "weak_decoder.kind union_find, or escalation.confidence "
-        "complementary_gap"
+        "search decoders grow no clusters at all; use a union_find weak "
+        "decoder, or the complementary_gap confidence"
     )
 
     def __init__(
@@ -88,47 +53,55 @@ class ClusterGap:
         walk_microseconds: Optional[float] = None,
     ) -> None:
         self.weight_step = evidence_records.normalized_weight_step(weight_step)
-        self.source = union_find_cluster_gap_source(self.weight_step)
         # what the walk costs on the weak tier's clock: a card's declared
         # number, or None to measure the call as a measured decoder is
         self.walk_microseconds = walk_microseconds
 
-    @classmethod
-    def from_settings(
-        cls,
-        escalation: escalation_settings.EscalationSettings,
-        weak_decoder: decoder_settings.DecoderSettings,
-    ) -> "ClusterGap":
-        """The row at the weak decoder's weight step, priced by the card.
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """Its settings: walk_microseconds prices the walk, None measures it."""
 
-        A weak row with no Settings keeps no weight step and grows no
-        clusters, so the row takes the shipped step and the build refuses
-        the pairing by name (build/decoders.py).
-        """
-        walk_microseconds = escalation.confidence_walk_microseconds
-        row_settings = weak_decoder.row_settings
-        if row_settings is None:
-            return cls(walk_microseconds=walk_microseconds)
-        return cls(
-            weight_step=row_settings.weight_step,
-            walk_microseconds=walk_microseconds,
-        )
+        walk_microseconds: Optional[float] = None
+        # the word the reports name this row by
+        name = "cluster_gap"
+
+        def __post_init__(self) -> None:
+            if self.walk_microseconds is None:
+                return
+            config.check_microseconds(
+                "walk_microseconds", self.walk_microseconds
+            )
+
+        def build(
+            self,
+            weak_algorithm: ports.DecoderSettings,
+            threshold_nats: Optional[float],
+        ) -> "ClusterGap":
+            """The row at the weak decoder's weight step, or the default one.
+
+            A weak row with no weight step grows no clusters, and the
+            build refuses that pairing.
+            """
+            del threshold_nats
+            walk_microseconds = self.walk_microseconds
+            weight_step = getattr(weak_algorithm, "weight_step", None)
+            if weight_step is None:
+                return ClusterGap(walk_microseconds=walk_microseconds)
+            return ClusterGap(
+                weight_step=weight_step, walk_microseconds=walk_microseconds
+            )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
-        """The gap of the window's one decode, and what the walk cost.
+        """The gap in natural-log weight, and the ticks the walk cost.
 
-        The gap is in natural-log weight, and None when the decode
-        carried no growth: a job without a window model runs no growth,
-        and the escalation policy escalates a window without a soft
-        output (escalation/policies.py). A window with no growth walks
-        nothing and charges nothing.
+        A decode that carried no growth gives None and zero; the policy
+        escalates a window with no soft output.
         """
         evidence = solves[0].cluster_evidence
         if evidence is None:
             return decoding_records.SoftOutputComputation(None, 0)
         graph = evidence.graph
         require_one_logical_row(graph)
-        require_weight_step(graph, self.weight_step)
         gap, ticks = self._walk(evidence)
         soft_output = decoding_records.SoftOutput(gap=gap, source=self.source)
         return decoding_records.SoftOutputComputation(soft_output, ticks)
@@ -148,7 +121,7 @@ class ClusterGap:
         return gap, ticks
 
 
-def require_one_logical_row(graph) -> None:
+def require_one_logical_row(graph: evidence_records.UnionFindGraph) -> None:
     """The gap is defined for exactly one logical-observable row."""
     row_count = graph.logical_observable_count
     if row_count != 1:
@@ -158,26 +131,13 @@ def require_one_logical_row(graph) -> None:
         )
 
 
-def require_weight_step(graph, weight_step: float) -> None:
-    """The gap is read off the ticks the growth actually used."""
-    if graph.weight_step == weight_step:
-        return
-    raise RuntimeError(
-        "the cluster gap reads the decode's own ticks: the decoder grew "
-        f"at weight step {graph.weight_step} and the signal reports "
-        f"{weight_step}"
-    )
-
-
 def gap_half_ticks_to_natural_log_weight(
     gap_half_ticks: Union[int, float], weight_step: float
 ) -> float:
     """Half ticks of the growth as natural-log weight, exactly, rounded once.
 
-    Every signal reports its gap in the units the switching threshold is
-    held in (escalation.gap_threshold_db is converted once, at the yaml
-    boundary, by escalation/settings.py decibels_to_nats), so a threshold
-    means the same thing whichever signal a run names.
+    Every signal reports in the threshold's unit, so one threshold means
+    the same thing whichever signal a run names.
     """
     if gap_half_ticks == math.inf:
         return math.inf

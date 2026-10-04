@@ -1,11 +1,11 @@
 """The layout: which code every patch and every operation runs on.
 
-A uniform layout gives every patch the same code card and claims one
-qubit-exclusivity resource per operation. That is the only layout today;
-the seam it fills is LayoutModel below.
+The uniform layout, the only one, gives every patch the same card and
+claims one qubit-exclusivity resource per operation.
 """
 
-from typing import Any, Protocol, runtime_checkable
+import dataclasses
+from typing import Any
 
 import decsim.ports as ports
 import decsim.records.program as program_records
@@ -13,54 +13,29 @@ import decsim.records.program as program_records
 # A patch identity is opaque to the layout; Any stands for it below.
 
 
-@runtime_checkable
-class LayoutModel(Protocol):
-    """Which code every patch and every operation runs on, and its claims.
-
-    codes, code_for_op and code_for_patch stay stable for a build; every
-    selector returns the one declared run code.
-    """
-
-    def code_for_op(self, operation: program_records.OperationPlanningView):
-        """The code the operation runs on."""
-
-    def code_for_patch(self, patch_id: Any):
-        """The code the patch runs on."""
-
-    def codes(self) -> list:
-        """Every code the layout declares."""
-
-    def spatial_nodes_for(
-        self,
-        operation: program_records.OperationPlanningView,
-        *,
-        base_spatial_node_count: int,
-    ) -> int:
-        """Decoding-graph nodes per round of the operation."""
-
-    def patch_spatial_nodes_for(
-        self, patch_identity: Any, *, base_spatial_node_count: int
-    ) -> int:
-        """Decoding-graph nodes per round of the patch."""
-
-    def resources_for(
-        self, operation: program_records.OperationPlanningView
-    ) -> list[program_records.ResourceClaim]:
-        """The resources the operation holds while it runs."""
-
-
 class UniformLayout:
     """Every patch uses the same code card."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The uniform layout has no keys: every patch takes the run's card."""
+
+        def build(self, code: ports.CodeModel) -> "UniformLayout":
+            """A fresh layout over the run's card."""
+            return UniformLayout(code)
 
     def __init__(self, code: ports.CodeModel):
         self.code = code
 
-    def code_for_patch(self, patch_id: Any) -> ports.CodeModel:
+    def code_for_patch(
+        self,
+        patch_id: Any,  # an opaque identity
+    ) -> ports.CodeModel:
         """The one code, whatever the patch."""
         del patch_id
         return self.code
 
-    def code_for_op(
+    def code_for_operation(
         self, operation: program_records.OperationPlanningView
     ) -> ports.CodeModel:
         """The one code, whatever the operation."""
@@ -78,7 +53,10 @@ class UniformLayout:
         return base_spatial_node_count
 
     def patch_spatial_nodes_for(
-        self, patch_identity: Any, *, base_spatial_node_count: int
+        self,
+        patch_identity: Any,  # an opaque identity
+        *,
+        base_spatial_node_count: int,
     ) -> int:
         """The base node count, unchanged."""
         del patch_identity

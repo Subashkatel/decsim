@@ -1,102 +1,54 @@
 """The Pauli frame remembers the corrections the decoders have made.
 
-Each window gets one correction: a few bits, one per logical observable.
-The frame stores that correction and refuses a second one for the same
-window. A stream's total correction is all of its window corrections
-XORed together.
-
-Every write costs a fixed number of cycles of the frame unit's clock.
-The caller is called back only when that write lands on a clock edge, so
-anything waiting on the write waits too.
-
-The XOR fold follows PECOS's Pauli frame accumulator, which XORs each
-decode's observable mask into a running frame (PECOS
-crates/pecos-decoder-core/src/pauli_frame.rs:82). One correction per
-window is the sliding-window commit: a window makes the final correction
-decision for its commit region once, in software, and hands on its
-effect on the logical operators (Skoric et al. 2209.08552 lines 102-105
-and 444-445). The frame never applies a correction to a qubit, so the
-flush a Pauli frame unit performs before a non-Clifford gate (Riesebos,
-"Pauli Frames for Quantum Computer Architectures", TU Delft MSc thesis
-CE-MS-2016, Sec. 3.2 Table 3.1) has no counterpart here. One write costs
-one clock cycle, 4 ns at 250 MHz (Yang et al. 2605.04892 Table I).
+Each window gets one correction, one bit per logical observable, and a
+second for the same window is refused. A stream's total correction is
+its window corrections XORed together, as PECOS's frame accumulator
+XORs each decode's observable mask
+(crates/pecos-decoder-core/src/pauli_frame.rs:82). One correction per
+window is the sliding-window commit: a window decides its commit region
+once and hands on its effect on the logical operators (Skoric et al.
+2209.08552 lines 102-105, 444-445). The frame never applies a correction
+to a qubit, so the flush before a non-Clifford gate (Riesebos, TU Delft
+MSc thesis CE-MS-2016, Sec. 3.2) has no counterpart here. A write's
+caller is called back when the write lands on a clock edge.
 """
 
 import dataclasses
-from collections.abc import Callable, Mapping
-from typing import Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import decsim.config as config
+import decsim.engine as engine_module
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
-import decsim.tables as tables
+import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
-
-# The pauli_frame section's keys.
-_PAULI_FRAME_KEYS = ("kind", "clock", "write_cycles")
-# The keys with no default: a frame card states the write's cost and the
-# clock it counts on.
-_REQUIRED_PAULI_FRAME_KEYS = ("clock", "write_cycles")
 
 
 @dataclasses.dataclass(frozen=True)
 class PauliFrameConfig:
     """The frame's settings: what one write costs.
 
-    A write is one XOR into a register, one clock cycle of the frame unit.
-    Yang et al. (2605.04892, Fig. 1) measure 4 ns per frame update inside a
-    550 ns loop, one cycle at 250 MHz. Writes to different windows are
-    charged in parallel, never queued behind each other.
-
-    Table row (FRAMES, below): pauli_frame.kind names the frame this run
-    commits into; logical_register is the one shipped row, the frame that
-    XORs an observable bitmask per window.
+    A write is one XOR into a register, one cycle of the frame unit: Yang
+    et al. (2605.04892 Table I, line 1051) measure 4 ns per frame update
+    inside a 550 ns loop, one cycle at 250 MHz. Writes to different windows
+    are charged in parallel. clock None is the machine's clock.
     """
 
-    kind: str = "logical_register"
     write_cycles: int = 0
     clock: Optional[config.Clock] = None
 
     def __post_init__(self) -> None:
-        cycles = self.write_cycles
-        config.check_cycles("pauli_frame.write_cycles", cycles)
-        is_free = cycles == 0
-        if not is_free and self.clock is None:
-            raise ValueError("a charged write needs the clock it is priced on")
+        config.check_cycles("pauli_frame.write_cycles", self.write_cycles)
 
-    @classmethod
-    def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
-    ) -> "PauliFrameConfig":
-        """The `pauli_frame` section: a kind, and write_cycles on its clock."""
-        tables.refuse_unknown_keys("pauli_frame", section, _PAULI_FRAME_KEYS)
-        tables.refuse_missing_keys(
-            "pauli_frame", section, _REQUIRED_PAULI_FRAME_KEYS
+    def build(self, engine: engine_module.Engine) -> "PauliFrame":
+        """A fresh frame on these settings, on the run's engine."""
+        return PauliFrame(
+            engine, clock=self.clock, write_cycles=self.write_cycles
         )
-        kind = section.get("kind", "logical_register")
-        tables.row(FRAMES, "pauli_frame.kind", kind)
-        clock = clocks.clock(section["clock"])
-        write_cycles = section["write_cycles"]
-        return cls(kind=kind, write_cycles=write_cycles, clock=clock)
-
-    def resolve(self, engine):
-        """Build the row these settings name, on the run's engine."""
-        row = tables.row(FRAMES, "pauli_frame.kind", self.kind)
-        return row(engine, clock=self.clock, write_cycles=self.write_cycles)
-
-
-@dataclasses.dataclass(frozen=True)
-class PauliFrameCommitRecord:
-    """One accepted correction, kept in the order the frame accepted it."""
-
-    window_key: tuple
-    tier: str
-    run_sequence: int
-    accepted_ticks: int
-    committed_ticks: int
-    logical_observables: Optional[ObservableBits]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -110,16 +62,17 @@ class PauliFrameSnapshot:
 
 
 class PauliFrame:
-    """Keeps every committed correction and charges each write once.
+    """Keeps every committed correction.
 
-    Trace sources: correction_accepted(record) when a window's
-    correction is taken and its write charged, correction_committed(
-    record) when the write has landed; the record is the frame's own
-    PauliFrameCommitRecord.
+    It charges each write once.
     """
 
     def __init__(
-        self, engine, *, clock: Optional[config.Clock], write_cycles: int
+        self,
+        engine: engine_module.Engine,
+        *,
+        clock: Optional[config.Clock],
+        write_cycles: int,
     ) -> None:
         self.engine = engine
         self.clock = clock
@@ -128,7 +81,12 @@ class PauliFrame:
         self.trace = _TraceSources()
 
     def commit_correction(
-        self, *, window_key, logical_observables, request_key, on_committed
+        self,
+        *,
+        window_key: tuple,
+        logical_observables: Optional[ObservableBits],
+        request_key: window_records.DecoderRequestKey,
+        on_committed: Callable[[], None],
     ) -> None:
         """Accept a window's correction, charge the write, then call back."""
         if self._has_accepted(window_key):
@@ -143,7 +101,7 @@ class PauliFrame:
         self._log_received(tier, window_key, observables)
         accepted_ticks = self.engine.now
         committed_ticks = self._write_edge(accepted_ticks)
-        record = PauliFrameCommitRecord(
+        record = decoding_records.PauliFrameCommitRecord(
             window_key=window_key,
             tier=tier,
             run_sequence=request_key.run_sequence,
@@ -157,12 +115,14 @@ class PauliFrame:
         self.trace.correction_accepted.fire(record)
         self._charge_write(window_key)
 
-    def frame_for_stream(self, stream_id) -> Optional[ObservableBits]:
+    def frame_for_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> Optional[ObservableBits]:
         """The XOR of every committed correction on one stream.
 
-        Empty when the stream has no corrections yet. None when any of its
-        corrections carries no observables, since a fold over an unknown
-        value is unknown.
+        None when any correction carries no observables, since a fold over an
+        unknown value is unknown.
         """
         window_keys = self._state.windows_by_stream.get(stream_id, ())
         records = [self._state.committed_by_window[key] for key in window_keys]
@@ -261,7 +221,7 @@ class PauliFrame:
 class _PendingWrite:
     """A correction whose write cost is still being charged."""
 
-    record: PauliFrameCommitRecord
+    record: decoding_records.PauliFrameCommitRecord
     on_committed: Callable[[], None]
 
 
@@ -290,13 +250,7 @@ def _fold_by_xor(
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the pauli frame reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the pauli frame reports, as one member."""
 
     correction_accepted: trace_source.TraceSource = trace_source.new_source()
     correction_committed: trace_source.TraceSource = trace_source.new_source()
@@ -304,24 +258,15 @@ class _TraceSources:
 
 @dataclasses.dataclass
 class _FrameState:
-    """What the frame holds: its records and its two registries.
+    """What the frame holds, as one member.
 
-    records is every accepted correction in the order the frame
-    accepted it, a write still landing included;
-    pending_by_window is the writes charged and not yet landed;
-    committed_by_window is the window that already has a correction, so
-    a second one is refused. A stream id is whatever the front end
-    chose, and the frame never looks inside it.
+    records is every accepted correction in acceptance order, a write still
+    landing included; pending_by_window the writes not yet landed;
+    committed_by_window the windows already corrected. A stream id is
+    opaque to the frame.
     """
 
     records: list = dataclasses.field(default_factory=list)
     pending_by_window: dict = dataclasses.field(default_factory=dict)
     committed_by_window: dict = dataclasses.field(default_factory=dict)
     windows_by_stream: dict = dataclasses.field(default_factory=dict)
-
-
-# pauli_frame.kind names one of these rows: the frame a decoder's
-# correction is committed into. Every row takes the engine, the clock and
-# the write cost in cycles of it, and fills the Frame port
-# (decsim/ports.py).
-FRAMES = {"logical_register": PauliFrame}

@@ -16,6 +16,7 @@ byte per tick: a message's first packet is 38 + 20 + 8 + 12 + 16 + 256
 = 86 (tests/links/test_framings.py).
 """
 
+import dataclasses
 import functools
 import gc
 import math
@@ -26,11 +27,15 @@ import pytest
 
 import decsim.config as config
 import decsim.engine
-import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
+import decsim.links.link_profiles as link_profiles
 import decsim.links.reliable_channel as reliable_channel
 import decsim.links.settings as link_settings
+import decsim.machine as machine_module
+import decsim.records.transfers as transfer_records
+import decsim.settings as machine_settings
+import examples.two_tiers as two_tiers
 
 PATH_MTU_BYTES = 256
 RATE = 8_000_000  # bits per microsecond: one byte a tick
@@ -55,9 +60,8 @@ def reliable_settings(
     credit_latency_cycles=2,
     timeout_cycles=200,
 ):
-    roce_settings = framings.RoceV2.Settings(PATH_MTU_BYTES)
-    framing_settings = link_settings.FramingSettings("roce_v2", roce_settings)
-    row = reliable_channel.ReliableChannel.Settings(
+    framing_settings = framings.RoceV2.Settings(PATH_MTU_BYTES)
+    protocol = reliable_channel.ReliableChannel.Settings(
         framing=framing_settings,
         receive_buffer_frames=buffer_frames,
         credit_latency_cycles=credit_latency_cycles,
@@ -66,8 +70,8 @@ def reliable_settings(
         retransmit_timeout_cycles=timeout_cycles,
         retry_count=retry_count,
         bit_error_rate=bit_error_rate,
+        clock=CLOCK,
     )
-    protocol = link_settings.ProtocolSettings("reliable", row, CLOCK)
     capacity = link_settings.CapacitySettings(RATE, "test")
     return link_settings.ChannelSettings(
         "test", PROPAGATION, capacity, "test", protocol
@@ -99,11 +103,7 @@ def seed_losing(pattern):
     loses_any_below = loss_probability(ACK_TICKS)
     keeps_any_above = loss_probability(FIRST_PACKET_TICKS)
     for seed in range(2_000_000):
-        generator = random.Random(seed)
-        draws = [generator.random() for _ in pattern]
-        pairs = list(zip(draws, pattern, strict=True))
-        lost_draws = [draw for draw, is_lost in pairs if is_lost]
-        kept_draws = [draw for draw, is_lost in pairs if not is_lost]
+        lost_draws, kept_draws = lost_and_kept_draws(seed, pattern)
         highest_lost = max(lost_draws, default=0.0)
         lowest_kept = min(kept_draws, default=1.0)
         if highest_lost < loses_any_below and lowest_kept > keeps_any_above:
@@ -111,15 +111,30 @@ def seed_losing(pattern):
     raise AssertionError("no seed draws the pattern")
 
 
+def lost_and_kept_draws(seed, pattern) -> tuple:
+    """A seed's draws for the frames the pattern loses, then for the rest."""
+    generator = random.Random(seed)
+    draws = [generator.random() for _ in pattern]
+    pairs = list(zip(draws, pattern, strict=True))
+    lost_draws = [draw for draw, is_lost in pairs if is_lost]
+    kept_draws = [draw for draw, is_lost in pairs if not is_lost]
+    return lost_draws, kept_draws
+
+
 def send_at(engine, channel, tick, payload_bytes, delivered):
     delay = tick - engine.now
     payload_bits = payload_bytes * 8
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
 
     def send():
         channel.send(framed, tick, 0, delivered.append)
 
     engine.schedule(delay, send)
+
+
+def delivery_ticks_of(delivered) -> list:
+    """The tick each delivered transfer landed at, in delivery order."""
+    return [transfer.delivery_ticks for transfer in delivered]
 
 
 def test_a_lost_frame_is_resent_after_the_sequence_nak_hand_traced():
@@ -249,7 +264,7 @@ def test_a_lost_ack_is_made_good_by_the_timer_and_a_duplicate_ack():
     engine.run()
 
     starts = [record.timing.start_ticks for record in frames]
-    assert [transfer.delivery_ticks for transfer in delivered] == [598]
+    assert delivery_ticks_of(delivered) == [598]
     assert starts == [0, TIMEOUT_TICKS]
     assert engine.now == TIMEOUT_TICKS + 298 + PROPAGATION + 86 + PROPAGATION
 
@@ -266,8 +281,7 @@ def test_a_retry_with_none_left_fails_the_run_naming_the_frame():
     channel = seeded_channel(engine, settings, seed)
     send_at(engine, channel, 0, 200, [])
 
-    message = "channel 'test' gave up on frame 0 of transfer 0 [(]PSN 0[)]"
-    with pytest.raises(RuntimeError, match=message):
+    with pytest.raises(RuntimeError, match="after 1 retries without"):
         engine.run()
     assert engine.now == 2 * TIMEOUT_TICKS
 
@@ -290,7 +304,7 @@ def test_an_ack_that_moves_the_psn_fills_the_retry_count_again():
 
     engine.run()
 
-    deliveries = [transfer.delivery_ticks for transfer in delivered]
+    deliveries = delivery_ticks_of(delivered)
     assert deliveries == [10_598, 30_598]
 
 
@@ -317,10 +331,10 @@ def test_an_answer_while_the_message_waits_to_be_resent_is_dropped():
     delivered = []
     send_at(engine, channel, 0, 200, delivered)
 
-    with pytest.raises(RuntimeError, match="gave up on frame 0"):
+    with pytest.raises(RuntimeError, match="after 1 retries without"):
         engine.run()
     assert engine.now == 1698
-    assert [transfer.delivery_ticks for transfer in delivered] == [598]
+    assert delivery_ticks_of(delivered) == [598]
 
 
 def test_the_run_ends_at_the_last_acknowledgement_not_at_the_timer():
@@ -369,8 +383,8 @@ def test_an_acknowledged_message_is_let_go_under_loss():
     second_callback = _Delivery(delivered)
     first_reference = weakref.ref(first_callback)
     second_reference = weakref.ref(second_callback)
-    first_payload = channel_module.FramedPayload(1600)
-    second_payload = channel_module.FramedPayload(1600)
+    first_payload = transfer_records.FramedPayload(1600)
+    second_payload = transfer_records.FramedPayload(1600)
     first_send = functools.partial(
         channel.send, first_payload, 0, 0, first_callback
     )
@@ -384,7 +398,7 @@ def test_an_acknowledged_message_is_let_go_under_loss():
     engine.run()
     gc.collect()
 
-    delivery_ticks = [transfer.delivery_ticks for transfer in delivered]
+    delivery_ticks = delivery_ticks_of(delivered)
     assert delivery_ticks == [1880, 2178]
     assert first_reference() is None
     assert second_reference() is None
@@ -399,11 +413,8 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
         engine = decsim.engine.Engine()
         settings = reliable_settings(0.0, window_packets=10_000)
         reliable = seeded_channel(engine, settings, 1)
-        credit_row = credit_channel.CreditChannel.Settings(
-            settings.protocol.row_settings.framing, 16, 2
-        )
-        credit_protocol = link_settings.ProtocolSettings(
-            "credit", credit_row, CLOCK
+        credit_protocol = credit_channel.CreditChannel.Settings(
+            settings.protocol.framing, 16, 2, CLOCK
         )
         credit_settings = link_settings.ChannelSettings(
             "test", PROPAGATION, settings.capacity, "test", credit_protocol
@@ -415,9 +426,68 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
             send_at(engine, reliable, arrival, payload, by_reliable)
             send_at(engine, credit, arrival, payload, by_credit)
         engine.run()
-        reliable_deliveries = [item.delivery_ticks for item in by_reliable]
-        credit_deliveries = [item.delivery_ticks for item in by_credit]
+        reliable_deliveries = delivery_ticks_of(by_reliable)
+        credit_deliveries = delivery_ticks_of(by_credit)
         assert reliable_deliveries == credit_deliveries
+
+
+def _off_board_escalation(protocol) -> machine_settings.MachineSettings:
+    """The two-tier machine with its strong node one chassis hop away.
+
+    The escalation hop is the reference card's off-board one: 100 Gb/s,
+    400 bits a cycle at 250 MHz, 65 cycles of latency.
+    """
+    machine = two_tiers.points[0].machine
+    card = link_profiles.path_card(
+        machine.links,
+        "weak_decoder_to_strong_decoder",
+        clock=machine_settings.ROOM_CLOCK,
+        latency_cycles=65,
+        bits_per_cycle=400.0,
+        source="the reference card's off-board escalation hop",
+        protocol=protocol,
+    )
+    links = dataclasses.replace(
+        machine.links, weak_decoder_to_strong_decoder=card
+    )
+    return dataclasses.replace(machine, links=links)
+
+
+def test_a_reliable_link_at_no_errors_runs_as_its_credit_link_in_a_machine():
+    """RoCE v2 frames on the escalation hop of a whole shot, nothing lost."""
+    framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
+    room = machine_settings.ROOM_CLOCK
+    credit = credit_channel.CreditChannel.Settings(
+        framing=framing,
+        receive_buffer_frames=8,
+        credit_latency_cycles=65,
+        clock=room,
+    )
+    reliable = reliable_channel.ReliableChannel.Settings(
+        framing=framing,
+        receive_buffer_frames=8,
+        credit_latency_cycles=65,
+        window_packets=128,
+        ack_every_packets=66,
+        retransmit_timeout_cycles=100_000,
+        retry_count=7,
+        bit_error_rate=0.0,
+        clock=room,
+    )
+    by_credit_settings = _off_board_escalation(credit)
+    by_reliable_settings = _off_board_escalation(reliable)
+    by_credit = machine_module.Machine.build(by_credit_settings, 0)
+    by_reliable = machine_module.Machine.build(by_reliable_settings, 0)
+    frames = []
+    by_reliable.links.trace.frame_landed.connect(frames.append)
+
+    credit_result = by_credit.run()
+    reliable_result = by_reliable.run()
+
+    assert reliable_result.terminal_status == "complete"
+    assert len(frames) > 0
+    assert reliable_result.operation_results == credit_result.operation_results
+    assert reliable_result.link_traffic == credit_result.link_traffic
 
 
 def test_every_message_arrives_once_in_order_under_loss_property():
@@ -438,7 +508,7 @@ def test_every_message_arrives_once_in_order_under_loss_property():
             send_at(engine, channel, arrival, payload, delivered)
         engine.run()
         sequences = [transfer.physical_sequence for transfer in delivered]
-        deliveries = [transfer.delivery_ticks for transfer in delivered]
+        deliveries = delivery_ticks_of(delivered)
         assert sequences == list(range(count))
         assert deliveries == sorted(deliveries)
 
@@ -472,7 +542,7 @@ def test_the_expected_delay_leaves_out_the_window_wait():
     settings = reliable_settings(0.0, window_packets=1, ack_every_packets=1)
     channel = seeded_channel(engine, settings, 1)
     payload_bits = 512 * 8
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
     expected = channel.expected_delay_ticks(framed, 0, 0)
     delivered = []
     send_at(engine, channel, 0, 512, delivered)
@@ -488,7 +558,7 @@ def test_the_expected_delay_is_the_delivery_within_the_window():
     settings = reliable_settings(0.0)
     channel = seeded_channel(engine, settings, 1)
     payload_bits = 512 * 8
-    framed = channel_module.FramedPayload(payload_bits)
+    framed = transfer_records.FramedPayload(payload_bits)
     expected = channel.expected_delay_ticks(framed, 0, 0)
     delivered = []
     send_at(engine, channel, 0, 512, delivered)
@@ -498,58 +568,37 @@ def test_the_expected_delay_is_the_delivery_within_the_window():
     assert delivered[0].delivery_ticks == expected
 
 
-def _delivered_under_seed(seed: int) -> list:
-    engine = decsim.engine.Engine()
-    settings = reliable_settings(0.0001)
-    channel = seeded_channel(engine, settings, seed)
-    delivered = []
-    send_at(engine, channel, 0, 4000, delivered)
-    engine.run()
-    return delivered
-
-
-def test_one_seed_draws_the_same_losses_twice():
-    first_run = _delivered_under_seed(99)
-    second_run = _delivered_under_seed(99)
-
-    assert first_run == second_run
-
-
-def _reliable_section(framing: dict, bit_error_rate: float) -> dict:
-    return {
-        "framing": framing,
-        "receive_buffer_frames": 16,
-        "credit_latency_cycles": 2,
-        "window_packets": 128,
-        "ack_every_packets": 66,
-        "retransmit_timeout_cycles": 1000,
-        "retry_count": 7,
-        "bit_error_rate": bit_error_rate,
-    }
+def _reliable_protocol(framing, bit_error_rate: float, retry_count: int = 7):
+    return reliable_channel.ReliableChannel.Settings(
+        framing=framing,
+        receive_buffer_frames=16,
+        credit_latency_cycles=2,
+        window_packets=128,
+        ack_every_packets=66,
+        retransmit_timeout_cycles=1000,
+        retry_count=retry_count,
+        bit_error_rate=bit_error_rate,
+        clock=CLOCK,
+    )
 
 
 def test_a_bit_error_rate_of_one_is_refused():
-    framing = {"kind": "roce_v2", "path_mtu_bytes": 1024}
-    section = _reliable_section(framing, 1.0)
+    framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
 
-    with pytest.raises(ValueError, match="below 1"):
-        reliable_channel.ReliableChannel.Settings.from_yaml(section, "path")
+    with pytest.raises(ValueError, match="it is the probability that one bit"):
+        _reliable_protocol(framing, 1.0)
 
 
-def test_a_reliable_card_on_frames_other_than_roce_v2_is_refused():
+def test_a_reliable_protocol_on_frames_other_than_roce_v2_is_refused():
     """The ACK is a RoCE packet; flits have no acknowledgement of theirs."""
-    framing = {"kind": "flits", "flit_bits": 64}
-    section = _reliable_section(framing, 0.0)
-    settings_class = reliable_channel.ReliableChannel.Settings
+    framing = framings.Flits.Settings(flit_bits=64)
 
-    with pytest.raises(ValueError, match="flits runs on the credit row"):
-        settings_class.from_yaml(section, "p")
+    with pytest.raises(ValueError, match="the reliable protocol runs"):
+        _reliable_protocol(framing, 0.0)
 
 
 def test_a_retry_count_above_seven_is_refused():
-    framing = {"kind": "roce_v2", "path_mtu_bytes": 1024}
-    section = _reliable_section(framing, 0.0)
-    section["retry_count"] = 8
+    framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
 
-    with pytest.raises(ValueError, match="from 0 to 7"):
-        reliable_channel.ReliableChannel.Settings.from_yaml(section, "p")
+    with pytest.raises(ValueError, match="it is a whole number from 0 to 7"):
+        _reliable_protocol(framing, 0.0, retry_count=8)

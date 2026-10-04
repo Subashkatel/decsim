@@ -1,9 +1,6 @@
-"""When each command arrived at the QPU and when it started.
+"""When each command arrived at the QPU and when it started."""
 
-A listener on the QPU's command_event(event); the run command reads the
-events, and the run ledger the tests check closes every command's chain
-at the QPU with them (tests/observe/run_ledger.py).
-"""
+import decsim.records.program as program_records
 
 
 class CommandEvents:
@@ -12,6 +9,6 @@ class CommandEvents:
     def __init__(self) -> None:
         self.events: list = []
 
-    def command_event(self, event) -> None:
+    def command_event(self, event: program_records.QPUCommandEvent) -> None:
         """One more arrival or start."""
         self.events.append(event)

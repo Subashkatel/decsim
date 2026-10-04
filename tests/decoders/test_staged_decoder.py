@@ -30,6 +30,7 @@ import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 
 MEGAHERTZ = 250.0
 CYCLE_MICROSECONDS = 1 / MEGAHERTZ
@@ -145,7 +146,11 @@ def memory_circuit(stim):
 
 
 def memory_machine(decoder, circuit):
-    """The Stim-device memory run of one operation on this decoder row."""
+    """The Stim-device memory run of one operation on this decoder row.
+
+    The unit fetches a cycle a round and releases a cycle a job, as
+    fetch_and_release_timing does.
+    """
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
@@ -154,8 +159,13 @@ def memory_machine(decoder, circuit):
         operations=[operation], rounds_policy=rounds_policy
     )
     device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=MEMORY_DISTANCE, device=device)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    source = declared_run.GivenSource(device)
+    qpu = qpu_settings.QpuSettings(distance=MEMORY_DISTANCE, source=source)
+    algorithm = declared_run.OneDecoder(decoder)
+    engine = decoder_settings.EngineSettings(clock=CLOCK)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=engine
+    )
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
@@ -335,32 +345,11 @@ def test_a_cancel_during_the_algorithm_closes_it_and_the_timer_adds_none():
     assert engine.now == fetch_ticks + config.microseconds_to_ticks(5.0)
 
 
-def test_a_hardware_stage_may_not_be_named_algorithm():
-    """The algorithm stage is the wrapped decoder, never a unit stage.
+def test_a_unit_clock_with_no_period_is_refused():
+    """A period of no ticks would price every stage at nothing."""
+    no_period = config.Clock(0)
 
-    Its time is measured or priced by that decoder, so a hardware stage
-    of the same name would be charged twice and would collide in the
-    stage ledger (staged_decoder.py, UnitTiming.__post_init__).
-    """
-    stage = staged_decoder.DecoderStage(
-        staged_decoder.ALGORITHM_STAGE, cycles_per_job=1
-    )
-    before = (stage,)
-    with pytest.raises(ValueError, match="names the decoder itself"):
-        staged_decoder.UnitTiming(before, (), CLOCK)
-
-
-def test_a_negative_stage_cost_and_a_zero_period_are_refused():
-    """A card that cannot be a unit is refused where the card is built.
-
-    Negative cycles and a clock with no period have no reading as time,
-    and a card reaches decsim from a yaml section, so both raise at
-    construction (staged_decoder.py, DecoderStage and UnitTiming).
-    """
-    with pytest.raises(ValueError, match="cycles must be nonnegative"):
-        staged_decoder.DecoderStage("fetch", cycles_per_job=-1)
-    with pytest.raises(ValueError, match="period must be at least a tick"):
-        no_period = config.Clock(0)
+    with pytest.raises(ValueError, match="the unit's clock period"):
         staged_decoder.UnitTiming((), (), no_period)
 
 
@@ -425,11 +414,10 @@ def test_every_measured_algorithm_holds_the_unit_for_its_own_wall_clock():
     pytest.importorskip("pymatching")
     matching_row = adapter.PyMatchingDecoder(latency_model=None)
     measured = ElapsedRecorder(matching_row)
-    timing = fetch_and_release_timing()
-    unit = staged_decoder.StagedDecoder(measured, timing)
     probe_job = decode_job()
     circuit = memory_circuit(stim)
-    machine = memory_machine(unit, circuit)
+    machine = memory_machine(measured, circuit)
+    unit = machine.decoders.primary_decoder
     result = machine.run()
     algorithm = _algorithm_records(machine)
     held_ticks = [record.end_ticks - record.start_ticks for record in algorithm]

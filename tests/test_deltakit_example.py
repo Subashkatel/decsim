@@ -1,8 +1,9 @@
 """Supplied Explorer circuits obey the existing machine and cycle contracts.
 
 Referents: qpu/cycle_clock.py, qpu/stim_device.py, detector_formation.py,
-and tools/deltakit_example.py. Whole-shot PyMatching is an integration oracle,
-not an independent decoding algorithm. All tests execute functional decoding.
+and examples/deltakit_example.py. Whole-shot PyMatching is an integration
+oracle, not an independent decoding algorithm. All tests execute functional
+decoding.
 """
 
 import dataclasses
@@ -24,8 +25,9 @@ import decsim.frontends.deltakit as deltakit
 import decsim.machine as machines
 import decsim.producers as producers
 import decsim.qpu.stim_device as sources
-import decsim.syndrome_buffer.settings as buffer_settings
-import tools.deltakit_example as example
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import examples.deltakit_example as example
+import tests.declared_run as declared_run
 
 pytestmark = pytest.mark.usefixtures("explorer")
 
@@ -163,7 +165,7 @@ def test_a_feedback_wait_past_the_declared_horizon_exhausts_the_source() -> (
     None
 ):
     machine = _protected_machine(1.1, 100.0, 0.15)
-    with pytest.raises(ValueError, match="outside the finite source"):
+    with pytest.raises(ValueError, match="idle round is outside the finite"):
         machine.run()
 
 
@@ -184,7 +186,8 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
         0,
         measurement_rounds={producers.LIVE_STREAM_ID: mapping},
     )
-    qpu = dataclasses.replace(settings.qpu, device=source)
+    source_record = declared_run.GivenSource(source)
+    qpu = dataclasses.replace(settings.qpu, source=source_record)
     settings = dataclasses.replace(settings, qpu=qpu)
     machine = machines.Machine.build(settings, 0)
     readouts = []
@@ -204,11 +207,15 @@ def test_a_protected_stream_cannot_use_truth_from_a_later_final_readout() -> (
     None
 ):
     circuit, mapping = deltakit.memory_circuit("rotated_surface", 3, 24, "Z", 0)
-    workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
-    workload.operations[-1].scheduled_start_round = 20
+    protected = example.protection_workload(circuit, mapping, 24, 3, "patch")
+    readout = protected.operations[-1]
+    late_readout = dataclasses.replace(readout, scheduled_start_round=20)
+    earlier = protected.operations[:-1]
+    operations = earlier + (late_readout,)
+    workload = dataclasses.replace(protected, operations=operations)
     settings = _settings(workload, 3, 24)
     machine = machines.Machine.build(settings, 0)
-    with pytest.raises(RuntimeError, match="sealed at 20 rounds"):
+    with pytest.raises(RuntimeError, match="its Stim circuit was registered"):
         machine.run()
 
 
@@ -228,7 +235,7 @@ def test_a_circuit_without_logical_outputs_is_refused_before_decoding() -> None:
     kept = _without_observables(instructions)
     text = "\n".join(str(instruction) for instruction in kept)
     without_output = stim.Circuit(text)
-    with pytest.raises(ValueError, match="requires one logical observable"):
+    with pytest.raises(ValueError, match="the memory example requires"):
         _memory_machine(without_output, mapping, 3, 2)
 
 
@@ -238,9 +245,7 @@ def test_extending_a_finite_input_cannot_add_empty_rounds_after_readout() -> (
     circuit, mapping = deltakit.memory_circuit(
         "rotated_surface", 3, 2, "Z", 0.001
     )
-    with pytest.raises(
-        ValueError, match="horizon must equal the final readout round"
-    ):
+    with pytest.raises(ValueError, match="the declared horizon must equal"):
         _memory_machine(circuit, mapping, 3, 24)
 
 
@@ -249,7 +254,7 @@ def test_command_replay_preserves_repetition_geometry_and_horizon(
 ) -> None:
     original = tmp_path / "original"
     replay = tmp_path / "replay"
-    command = [sys.executable, "tools/deltakit_example.py"]
+    command = [sys.executable, "examples/deltakit_example.py"]
     generate = command + [
         "--family",
         "repetition",
@@ -281,9 +286,14 @@ def test_command_replay_preserves_repetition_geometry_and_horizon(
 def test_the_whole_shot_repetition_example_refuses_a_prefix_feedback_wait(
     tmp_path: pathlib.Path,
 ) -> None:
+    """Protection on repetition memory would otherwise run to completion.
+
+    The script's own check is the only stop: without it the run finishes
+    and writes a result for a mode the family cannot carry.
+    """
     command = [
         sys.executable,
-        "tools/deltakit_example.py",
+        "examples/deltakit_example.py",
         "--family",
         "repetition",
         "--mode",
@@ -309,10 +319,12 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
     # twelve rounds of the distance-three memory, the final round's data
     # readout included: 11 * 8 + 17 bits
     twelve_rounds_bits = 11 * 8 + 17
-    buffer = buffer_settings.SyndromeBufferSettings(bits=twelve_rounds_bits)
+    buffer = syndrome_buffer_module.SyndromeBufferSettings(
+        bits=twelve_rounds_bits
+    )
     memory = decoder_settings.UnitMemorySettings(bits=twelve_rounds_bits)
     decoder = dataclasses.replace(
-        settings.weak_decoder, unit_memory=memory, units=2
+        settings.weak_decoder, unit_memory=memory, unit_count=2
     )
     settings = dataclasses.replace(
         settings, weak_syndrome_buffer=buffer, weak_decoder=decoder
@@ -360,8 +372,10 @@ def _repetition_replay(circuit, mapping, measurements, distance, round_count):
         detector_rounds={1: detector_rounds},
     )
     code = example.RepetitionMemory(distance, round_count)
+    card = declared_run.GivenCard(code)
+    source_record = declared_run.GivenSource(source)
     qpu = dataclasses.replace(
-        settings.qpu, distance=None, code=code, device=source
+        settings.qpu, distance=None, code_card=card, source=source_record
     )
     settings = dataclasses.replace(settings, qpu=qpu)
     return machines.Machine.build(settings, 0)

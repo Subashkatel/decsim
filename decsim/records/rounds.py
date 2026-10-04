@@ -1,16 +1,15 @@
 """One syndrome round on its way out of the QPU and through the controller.
 
-A readout names its contributing patches, becomes a fragment, joins the other
-fragments of its round into a packet, and leaves the assembler as a
-packed round on a route. The two events at the end are what the ledgers
-record; the bits themselves are raw measurements, and detection events
-are formed later, downstream of these records.
+The bits are raw measurements; detection events are formed later,
+downstream of these records.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any, Optional, Union
+
+import numpy
 
 import decsim.records.windows as window_records
 
@@ -30,11 +29,12 @@ class SyndromePacketRoute:
     """
 
     kind: SyndromePacketRouteKind
-    source_operation_id: Optional[Any] = None
+    source_operation_id: Optional[Any] = None  # an opaque identity
 
     @classmethod
     def feedback_memory_round(
-        cls, source_operation_id
+        cls,
+        source_operation_id: Any,  # an opaque identity
     ) -> "SyndromePacketRoute":
         """The route of a round that feeds a source operation's memory."""
         return cls(
@@ -49,24 +49,18 @@ WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 class QPUReadout:
     """One readout of one round as it leaves the QPU for the controller.
 
-    decsim carries no analog waveform: bits are the round's raw
-    measurement outcomes, None from a timing-only source, and detection
-    events are formed from them later. operation_id is the decode
-    identity (a stream segment's stream id; an idle patch's memory round
-    names the patch), round_index the one-based round of that stream,
-    patch_ids the patches whose checks the bits read. fragment_index
-    (zero-based) and fragment_count place the readout among its round's
-    fragments. size_bits is its width on the wire, None when the source
-    states none. event_bits is the width its detection events take once
-    a seat forms them, stated by a source with no circuit to form them
-    from (qpu/syndrome_devices.py); None when a formation table sizes
-    them, or nothing does.
+    bits are raw outcomes, None from a timing-only source. operation_id is
+    the decode identity (a segment's stream id; an idle patch's memory round
+    names the patch), round_index one-based. size_bits is the wire width,
+    None when the source states none. event_bits is the width once formed,
+    stated by a source with no circuit (qpu/syndrome_devices.py); None when
+    a formation table sizes them, or nothing does.
     """
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     patch_ids: tuple
     round_index: int
-    bits: Optional[Any] = None
+    bits: Optional[Union[list, tuple, numpy.ndarray]] = None
     fragment_count: int = 1
     fragment_index: int = 0
     size_bits: Optional[int] = None
@@ -80,7 +74,7 @@ class RetainedSyndromeFragment:
     event_bits is the readout's, until a seat forms the fragment.
     """
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     patch_ids: tuple
     round_index: int
     bits: Optional[tuple[int, ...]]
@@ -113,7 +107,7 @@ class RetainedSyndromeFragment:
 class SyndromeRoundPacket:
     """One complete immutable syndrome round in declared measurement order."""
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
 
@@ -123,12 +117,9 @@ class SyndromeRoundPacket:
         The set detection-event indices across the fragments in order,
         sparse so d=11 lines stay readable.
         """
-        round_bits = []
-        for fragment in self.fragments:
-            bits = fragment.bits
-            if bits is None:
-                return "timing-only"
-            round_bits.extend(bits)
+        round_bits = self._round_bits()
+        if round_bits is None:
+            return "timing-only"
         defects = []
         for position, bit in enumerate(round_bits):
             if bit:
@@ -138,27 +129,30 @@ class SyndromeRoundPacket:
         indices = ", ".join(str(defect) for defect in defects)
         return f"defects {{{indices}}}"
 
+    def _round_bits(self) -> Optional[list]:
+        """The fragments' bits in order; None when one carries timing only."""
+        round_bits = []
+        for fragment in self.fragments:
+            bits = fragment.bits
+            if bits is None:
+                return None
+            round_bits.extend(bits)
+        return round_bits
+
 
 @dataclass(frozen=True)
 class EscalatedRegion:
     """The rounds of a strong window as they leave the chip for the strong side.
 
-    The escalation names the strong request and carries the rounds the
-    strong syndrome buffer lacks, read out of the weak syndrome buffer:
-    Toshio et al. 2510.25222 lines 1247 to 1250 assign the syndrome data
-    of r_strong rounds to the strong decoder at the switch, and CUDA-Q
-    QEC's enqueue_syndromes names the decoder and carries the rounds
-    (cudaqx_realtime_decoding.h lines 27 to 35). wire_bits is the sum of
-    the packets' fragment sizes, the width each round left the controller
-    at (PackedRound.wire_bits), and None when any fragment has no size;
-    it is what the strong syndrome buffer is written. message_bits is
-    what crosses the hop: those rounds behind the request's name, one
-    message with one name however many rounds it carries, as a gem5 DMA
-    request covers its whole range (src/dev/dma_device.cc:195-207).
-    packets are the strong window's rounds; rounds_before are the raw
-    rounds before its first, in order, which a strong side that forms
-    the events reads for that round's detectors
-    (windows/round_retention.py, strong_rounds_before) and never forms.
+    It carries the rounds the strong syndrome buffer lacks, read out of the
+    weak one: Toshio et al. 2510.25222 lines 1247-1250 assign r_strong
+    rounds to the strong decoder at the switch, and CUDA-Q QEC's
+    enqueue_syndromes names the decoder and carries them
+    (cudaqx_realtime_decoding.h lines 27-35). wire_bits is what the strong
+    buffer is written, None when a fragment has no size. message_bits is
+    one message behind one name however many rounds, as a gem5 DMA request
+    covers its range (src/dev/dma_device.cc:195-207). rounds_before are the
+    raw rounds before the first, read for its detectors and never formed.
     """
 
     request_key: window_records.DecoderRequestKey
@@ -204,10 +198,8 @@ class EscalatedRegion:
     def message_bits(self) -> Optional[int]:
         """The region on the wire: the request's name, then the rounds.
 
-        gem5 sizes a data message the same way, its data plus the
-        control size (gem5 src/mem/ruby/network/Network.cc
-        m_data_msg_size). None when a round states no size, as
-        wire_bits is.
+        gem5 sizes a data message as data plus control size
+        (src/mem/ruby/network/Network.cc m_data_msg_size). None as wire_bits.
         """
         if self.wire_bits is None:
             return None
@@ -226,10 +218,8 @@ class EscalatedRegion:
 class PackedRound:
     """A finished round as it leaves the assembler.
 
-    The packet, its route, and its size on the wire: what leaves the
-    controller, which is the detection events where the controller forms
-    them and the raw measurement outcomes where a seat after it does
-    (detection_events.formed_at).
+    wire_bits is the detection events where the controller forms them, the
+    raw outcomes where a later seat does.
     """
 
     packet: SyndromeRoundPacket
@@ -287,7 +277,9 @@ class ControllerOutputEvent:
     payload: object
 
 
-def fragment_wire_bits(fragments) -> Optional[int]:
+def fragment_wire_bits(
+    fragments: Sequence[RetainedSyndromeFragment],
+) -> Optional[int]:
     """The fragments' wire size, None when any fragment has no known size."""
     fragment_sizes = [fragment.size_bits for fragment in fragments]
     if None in fragment_sizes:
@@ -318,7 +310,9 @@ def stated_bits(bits: Optional[int]) -> int:
 
 
 def _split_at_the_first_round(
-    packets: tuple, operation_id: Any, first_round: int
+    packets: tuple,
+    operation_id: Any,  # an opaque identity
+    first_round: int,
 ) -> tuple:
     """(the rounds before first_round, the rest), each in the order given.
 

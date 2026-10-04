@@ -1,32 +1,26 @@
 """The memory inside one decoder unit.
 
-Each unit holds the input of the jobs it is decoding: the manager assigns
-a unit, the window's rounds move from the weak syndrome buffer into that unit's
-memory as one immutable DecoderInput, the engine reads them, and the memory is
-freed when the decode completes. Capacity is bits per unit; a window
-larger than the unit's memory cannot be decoded by that unit and stops
-the run. There is no shared store, no credits and no waiting: a job
-waits in the weak syndrome buffer for a unit, never for memory. Precedent:
-XQsim's error decode unit holds one syndrome input at a time in its own
-registers.
+Each unit holds the input of the jobs it decodes: the window's rounds
+move from the weak syndrome buffer into that unit's memory as one
+immutable DecoderInput (records/decoding.py), the engine reads them, and
+the memory is freed when the decode completes. Capacity is bits per
+unit; a window larger than the memory stops the run. A job waits in the
+weak syndrome buffer for a unit, never for memory, as XQsim's error
+decode unit holds one syndrome input at a time in its own registers.
 
-An input is held per input, not per job, with its readers recorded, so
-two jobs that read the same rounds on one unit are one copy and one
-transfer: gem5's MSHR keeps every target of a single fill
-(src/mem/cache/mshr.hh), and OpenMP's shared clause says every task
-reads the storage of the original item (OpenMP API 5.2, section 5.4.2).
-The rule the data-movement study rests on is one copy per unit that
-reads the window, never one copy per job and never a copy taken from
-another unit.
+An input is held once with its readers recorded, so two jobs that read
+the same rounds on one unit are one copy and one transfer: gem5's MSHR
+keeps every target of a single fill (src/mem/cache/mshr.hh), and
+OpenMP's shared clause has every task read the original item's storage
+(OpenMP API 5.2, section 5.4.2). One copy per unit that reads the
+window, never one per job and never one taken from another unit.
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
-import decsim.records.rounds as round_records
-import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
 
@@ -52,57 +46,14 @@ class DecoderMemoryCapacityError(RuntimeError):
         self.capacity_bits = capacity_bits
 
 
-@dataclasses.dataclass(frozen=True)
-class MaterializedSyndromeRound:
-    """One immutable syndrome round owned by the decoder side."""
-
-    operation_id: Any
-    round_index: int
-    fragments: tuple[round_records.RetainedSyndromeFragment, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class DecoderInput:
-    """Immutable local input for one decoder request.
-
-    Rounds are ordered by operation identity and round index.
-    """
-
-    operation_id: int
-    window_id: int
-    request_key: Optional[window_records.DecoderRequestKey]
-    rounds: tuple[MaterializedSyndromeRound, ...]
-
-    def fragments(self) -> list:
-        """The landed fragments, round by round."""
-        fragments = []
-        for round_input in self.rounds:
-            fragments.extend(round_input.fragments)
-        return fragments
-
-    def size_bits(self) -> Optional[int]:
-        """The bits this input occupies; None when a fragment states none.
-
-        An input with no rounds is no bits at all.
-        """
-        fragments = self.fragments()
-        return round_records.fragment_wire_bits(fragments)
-
-    def held_bits(self) -> int:
-        """The bits this input holds in a memory.
-
-        Rounds that state no size hold none; only a bounded memory needs
-        a size, and it refuses such an input before it lands.
-        """
-        bits = self.size_bits()
-        return round_records.stated_bits(bits)
-
-
 @dataclasses.dataclass
 class ResidentInput:
-    """One landed input of a unit and the jobs still reading it."""
+    """One landed input in a unit's memory.
 
-    decoder_input: DecoderInput
+    readers are the jobs still reading it.
+    """
+
+    decoder_input: decoding_records.DecoderInput
     readers: list
     # a job has written its window's boundary into these rounds; the
     # jobs that share them read what it wrote and none of them writes
@@ -110,7 +61,9 @@ class ResidentInput:
     rewritten: bool = False
 
 
-def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
+def materialize_decoder_input(
+    job: decoding_records.DecodeJob,
+) -> decoding_records.DecoderInput:
     """Build one immutable decoder memory input from a job's fragments."""
     fragments_by_round: dict = {}
     for payload in job.payloads:
@@ -122,7 +75,7 @@ def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
     rounds = []
     for identity, fragments in ordered:
         operation_id, round_index = identity
-        round_input = MaterializedSyndromeRound(
+        round_input = decoding_records.MaterializedSyndromeRound(
             operation_id=operation_id,
             round_index=round_index,
             fragments=tuple(fragments),
@@ -130,7 +83,7 @@ def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
         rounds.append(round_input)
     rounds = tuple(rounds)
     _check_detector_row_layout(job, rounds)
-    return DecoderInput(
+    return decoding_records.DecoderInput(
         operation_id=job.operation_id,
         window_id=job.window_id,
         request_key=job.request_key,
@@ -141,10 +94,9 @@ def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
 class DecoderMemory:
     """The input memory of one decoder unit.
 
-    Trace sources: deposited(job, decoder_input) when a job's rounds land
-    here, taken(job, decoder_input) when they are freed; a residence in
-    this memory runs between the two (data_path.md hop 6), and both
-    carry the input so a listener counts the bits that are held.
+    Trace sources: deposited(job, decoder_input) when a job's rounds
+    land here and taken(job, decoder_input) when they are freed; both
+    carry the input, so a listener counts the bits held.
     """
 
     def __init__(
@@ -179,10 +131,9 @@ class DecoderMemory:
     ) -> None:
         """A bounded memory needs rounds that state their size.
 
-        The link fabric refuses a payload of unknown size on a bounded
-        wire for the same reason (decsim/links/fabric.py): a bound is
-        measured against a size, so rounds with none cannot be admitted
-        to a memory that has one.
+        A bound is measured against a size, as on a bounded wire
+        (decsim/links/fabric.py); an unsized round would hold no bits
+        and fit silently.
         """
         if self.capacity_bits is None:
             return
@@ -204,13 +155,11 @@ class DecoderMemory:
         key = _memory_key(job)
         return key in self._inputs
 
-    def deposit(self, job: decoding_records.DecodeJob) -> DecoderInput:
+    def deposit(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecoderInput:
         """Materialize one job's rounds into this unit's memory."""
         key = _memory_key(job)
-        if key in self._inputs:
-            raise RuntimeError(
-                f"unit {self.pool!r}#{self.unit} already holds {job.label!r}"
-            )
         decoder_input = materialize_decoder_input(job)
         bits = decoder_input.size_bits()
         self.check_input_size(job, bits)
@@ -220,14 +169,18 @@ class DecoderMemory:
         self.trace.deposited.fire(job, decoder_input)
         return decoder_input
 
-    def add_reader(self, job: decoding_records.DecodeJob) -> DecoderInput:
+    def add_reader(
+        self, job: decoding_records.DecodeJob
+    ) -> decoding_records.DecoderInput:
         """One more job reads the rounds already here; no second copy."""
         key = _memory_key(job)
         resident = self._inputs[key]
         resident.readers.append(job)
         return resident.decoder_input
 
-    def input_of(self, job: decoding_records.DecodeJob):
+    def input_of(
+        self, job: decoding_records.DecodeJob
+    ) -> Optional[decoding_records.DecoderInput]:
         """The input this job reads here, or None when nothing is held."""
         key = _memory_key(job)
         resident = self._inputs.get(key)
@@ -242,20 +195,19 @@ class DecoderMemory:
         return resident.rewritten
 
     def rewrite(
-        self, job: decoding_records.DecodeJob, decoder_input: DecoderInput
-    ) -> DecoderInput:
+        self,
+        job: decoding_records.DecodeJob,
+        decoder_input: decoding_records.DecoderInput,
+    ) -> decoding_records.DecoderInput:
         """Replace the input this job reads, in the unit's own memory.
 
-        Every reader of that input reads the new one, so the input is
-        written once and by one job: Helios keeps its shared memory
-        single-writer (2301.08419 lines 632-640), and the rule belongs
-        to the memory that holds the input rather than to whoever asks,
-        so a second caller cannot forget it. The jobs that share one
-        landed input are the forced-class solves of one window's request
-        (decision D2), and the boundary they fold is that window's one
-        boundary, so the first of them writes it and the rest read what
-        it wrote (DecoderInputTransfer.fold_in_place). A second write
-        would be a second mask over the first and is refused here.
+        Every reader reads the new input, so it is written once and by
+        one job, a rule the memory keeps itself: Helios keeps its shared
+        memory single-writer (2301.08419 lines 632-640). The jobs
+        sharing one input are the forced-class solves of one window,
+        with one boundary, so the first writes it
+        (DecoderInputStaging.fold_in_place) and a second write, a mask
+        over the first, is refused.
         """
         key = _memory_key(job)
         resident = self._inputs[key]
@@ -330,7 +282,7 @@ def _round_order_key(item: tuple) -> tuple:
 
 def _check_detector_row_layout(
     job: decoding_records.DecodeJob,
-    rounds: tuple[MaterializedSyndromeRound, ...],
+    rounds: tuple[decoding_records.MaterializedSyndromeRound, ...],
 ) -> None:
     """A model-backed input lies in the model's rows, or the run stops.
 
@@ -355,7 +307,7 @@ def _check_detector_row_layout(
 
 def _input_row_identities(
     job: decoding_records.DecodeJob,
-    rounds: tuple[MaterializedSyndromeRound, ...],
+    rounds: tuple[decoding_records.MaterializedSyndromeRound, ...],
 ) -> tuple:
     """(operation, round, position) of every bit the input carries."""
     identities = []
@@ -374,7 +326,9 @@ def _input_row_identities(
     return tuple(identities)
 
 
-def _round_row_identities(round_input: MaterializedSyndromeRound) -> list:
+def _round_row_identities(
+    round_input: decoding_records.MaterializedSyndromeRound,
+) -> list:
     identities = []
     position_in_round = 0
     for fragment in round_input.fragments:
@@ -402,13 +356,7 @@ def _model_row_identities(
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the decoder memory reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the decoder memory reports, as one member."""
 
     deposited: trace_source.TraceSource = trace_source.new_source()
     taken: trace_source.TraceSource = trace_source.new_source()

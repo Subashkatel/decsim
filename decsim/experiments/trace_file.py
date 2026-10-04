@@ -1,15 +1,16 @@
 """One shot's Chrome trace, read back from disk and indexed.
 
 The file `decsim run --trace` writes (observe/trace_writer.py, the
-Chrome Trace Event Format's JSON Array Format). A reader asks for events
-by phase and for the link paths the moves crossed; the exact
-integer tick is always `args.tick`, never the viewer's `ts`, because
-`ts` is microseconds as a float (trace_and_viewer.md section 2).
+Chrome Trace Event Format's JSON Array Format), each event beside the
+thread it sat on. The exact integer tick is always `args.tick`, never
+the viewer's `ts`, because `ts` is microseconds as a float
+(trace_and_viewer.md section 2).
 """
 
 import gzip
 import json
-from typing import Optional
+import pathlib
+from typing import Union
 
 import decsim.config as config
 
@@ -25,34 +26,8 @@ class TraceDocument:
         self.events = tuple(events)
         self.process_name = process_name
 
-    def of_phase(self, phase: str) -> list:
-        """Every event of one Chrome phase, in the order the writer wrote."""
-        found = []
-        for event in self.events:
-            if event["ph"] == phase:
-                found.append(event)
-        return found
 
-    def link_paths(self) -> set:
-        """Every link path a move crossed in this shot.
-
-        A move sits on its path's thread and names the physical channel
-        it crossed in its args; two paths may share one named channel
-        (links/settings.py ChannelSettings), so the thread is the path.
-        """
-        found = set()
-        for event in self.of_phase("X"):
-            if is_move(event):
-                found.add(event["thread"])
-        return found
-
-
-def is_move(event: dict) -> bool:
-    """Whether an event is a link move: only a move names its channel."""
-    return "channel" in event["args"]
-
-
-def load(path) -> TraceDocument:
+def load(path: Union[str, pathlib.Path]) -> TraceDocument:
     """Read one trace file, plain or gzipped, and index its events."""
     text = _read_text(path)
     document = json.loads(text)
@@ -100,21 +75,6 @@ def range_of(text: str) -> tuple:
     low = int(words[0])
     high = int(words[1])
     return low, high
-
-
-def window_key_of(event: dict) -> Optional[tuple]:
-    """The window an event belongs to: its operation's text and its index.
-
-    Read off the "op:window" argument whole, since a window is its
-    operation and its index (records/windows.py Window.key) and two
-    operations share every index. The operation stays the text the
-    trace wrote.
-    """
-    key = event["args"].get("window")
-    if key is None:
-        return None
-    operation, window_index = key.rsplit(":", 1)
-    return (operation, int(window_index))
 
 
 def _read_text(path) -> str:

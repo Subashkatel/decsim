@@ -1,9 +1,6 @@
 """The switching study's terminal records: per request and per gap.
 
-Listeners on the decode outcomes' request_ended source; they never read
-the decoder. The request ledger is built only when the observation
-section asks for the switching windows, and the confidence ledger only
-when a confidence signal decides the escalation, so the decoder runs
+Each ledger is built only when a study asks for it, so the decoder runs
 with no record kept.
 """
 
@@ -32,12 +29,8 @@ class TerminalRequestRecord:
     """One decode request at its end: identity, input, ticks, confidence."""
 
     request_key: window_records.DecoderRequestKey
-    input_round_count: int
     syndrome_weight: Optional[int]
     ready_ticks: int
-    dispatch_ticks: Optional[int]
-    decode_output_ticks: Optional[int]
-    service_key: Optional[decoding_records.DecoderServiceKey]
     soft_output: Optional[decoding_records.SoftOutput]
 
 
@@ -56,29 +49,22 @@ class DecodeRecordLedger:
     ) -> None:
         """One request reached its terminal outcome."""
         del outcome
-        local_fragments = ()
-        if job.decoder_input is not None:
-            fragments = job.decoder_input.fragments()
-            local_fragments = tuple(fragments)
-        weight = _syndrome_weight(local_fragments)
+        del decode_output_ticks
+        weight = _decoded_syndrome_weight(job)
         soft_output = None
         if result is not None:
             soft_output = result.soft_output
         record = TerminalRequestRecord(
-            job.request_key,
-            job.round_count,
-            weight,
-            job.ready_time,
-            job.service_dispatch_ticks,
-            decode_output_ticks,
-            job.service_key,
-            soft_output,
+            job.request_key, weight, job.ready_time, soft_output
         )
         self.requests.append(record)
 
 
 class ConfidenceLedger:
-    """Each window's confidence gap, verdict and strong answer, as they end."""
+    """Each window's confidence record, kept as its requests end.
+
+    A record holds the confidence gap, the verdict and the strong answer.
+    """
 
     def __init__(self) -> None:
         self.verdict_results: dict = {}
@@ -137,8 +123,20 @@ def _window_order(key: tuple) -> tuple:
     return (operation_order, window_id)
 
 
+def _decoded_syndrome_weight(job: decoding_records.DecodeJob) -> Optional[int]:
+    """The set bits the job's decode read; None when it never started.
+
+    The unit frees its memory at the decode's end, before a confidence walk
+    ends the request, so payloads still holds the input then.
+    """
+    if not job.service_started:
+        return None
+    fragments = tuple(job.payloads)
+    return _syndrome_weight(fragments)
+
+
 def _syndrome_weight(fragments: tuple) -> Optional[int]:
-    """The set bits of the landed input; None when its bits are unknown."""
+    """The set bits of the input; None when its bits are unknown."""
     if not fragments:
         return None
     weight = 0

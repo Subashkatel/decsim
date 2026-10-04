@@ -1,191 +1,77 @@
-"""Building the escalation policy: the object first, the table second.
+"""Building the switching part: the signal, the policy, the strong side.
 
-The policy instance is the authority over its own tier and the table row
-is only how a yaml names one, which is sinter's order too
-(sinter/_collection/_mux_sampler.py:33-40 resolves the caller's own
-sampler before its built-in table) and gem5's
-(src/python/m5/SimObject.py:204-205 reads a built object's own params
-rather than its class table). Every row is built from one collaborators
-record, so a row written outside decsim reaches the root the same way.
+A run whose switching slot is filled gets the confidence its weak
+decoder reports, the policy that decides on it with the slot's
+threshold, and the strong window side; a run with none gets nothing,
+and the escalation ports stay unbound.
 """
 
-import pytest
+import dataclasses
 
 import decsim.build.escalation as escalation_build
-import decsim.burst_detectors.event_count.detector as event_count
-import decsim.burst_detectors.settings as burst_detector_settings
+import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
-import decsim.records.windows as window_records
-import decsim.settings as machine_settings
+import decsim.escalation.threshold_sources as threshold_sources
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
-def test_the_kinds_row_answers_the_tier_when_no_policy_was_built():
-    settings = escalation_settings.EscalationSettings(kind="strong_only")
+class _OwnPolicy:
+    """A policy of a researcher's own; the test reads only its class."""
 
-    tier = escalation_build.primary_tier(settings)
+    def __init__(self, threshold) -> None:
+        self.threshold = threshold
 
-    assert tier == window_records.DecoderTier.STRONG.value
+
+@dataclasses.dataclass(frozen=True)
+class _OwnPolicySwitching(escalation_settings.SwitchingSettings):
+    """A switching record that builds a policy of its own."""
+
+    def build_policy(self, threshold) -> _OwnPolicy:
+        """The researcher's policy on the slot's threshold."""
+        return _OwnPolicy(threshold)
 
 
-def test_a_built_policy_answers_for_itself_and_the_kind_is_ignored():
-    """The object is the one fact; the kind is only a yaml's name for one."""
-    built = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    settings = escalation_settings.EscalationSettings(
-        kind="weak_baseline", policy=built
+def _switching(
+    record=escalation_settings.SwitchingSettings, **changes
+) -> escalation_settings.SwitchingSettings:
+    """A switching slot on a fixed threshold and the complementary gap."""
+    confidence = complementary.ComplementaryGap.Settings()
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=20.0
     )
-
-    tier = escalation_build.primary_tier(settings)
-    row = escalation_build.escalation_row(settings)
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
-    policy = escalation_build.build_escalation_policy(settings, weak)
-
-    assert tier == window_records.DecoderTier.STRONG.value
-    assert row is built
-    assert isinstance(policy, escalation_policies.StrongOnly)
+    return record(confidence=confidence, threshold=threshold, **changes)
 
 
-def test_an_escalation_kind_that_names_no_row_is_refused():
-    settings = escalation_settings.EscalationSettings(kind="sometimes")
-
-    with pytest.raises(ValueError) as refusal:
-        escalation_build.escalation_row(settings)
-
-    sentence = str(refusal.value)
-    assert "escalation.kind" in sentence
-    assert "sometimes" in sentence
+def _weak() -> decoder_settings.DecoderPoolSettings:
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    return decoder_settings.DecoderPoolSettings(algorithm=matching)
 
 
-def test_a_row_that_decides_on_no_confidence_is_built_from_an_empty_record():
-    """The section carries none of the confidence keys for such a row."""
-    settings = escalation_settings.EscalationSettings(kind="weak_baseline")
-    row = escalation_build.escalation_row(settings)
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
+def test_every_machine_builds_its_own_policy_from_one_settings_record():
+    """One settings record builds a machine per shot, each its own policy."""
+    settings = _switching()
+    weak = _weak()
 
-    policy = escalation_build.build_escalation_policy(settings, weak)
+    first_engine = engine_module.Engine()
+    second_engine = engine_module.Engine()
 
-    assert row.decides_on_a_confidence is False
-    assert isinstance(policy, row)
+    first = escalation_build.Switching.build(settings, weak, first_engine)
+    second = escalation_build.Switching.build(settings, weak, second_engine)
 
-
-def test_a_row_that_decides_on_a_confidence_gets_the_three_fields():
-    settings = escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
-        confidence="complementary_gap",
-    )
-
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
-    signal = escalation_build.confidence_signal(settings, weak)
-    policy = escalation_build.build_escalation_policy(settings, weak)
-
-    assert policy.decides_on_a_confidence is True
-    assert policy.threshold.threshold_nats == 2.0
-    assert policy.expected_source is signal.source
-    assert policy.run_both_at_once is False
+    assert first.policy is not second.policy
+    assert first.strong_redecode is not second.strong_redecode
 
 
-class _StubBurstDetector:
-    """A peer for the burst detector port; its answers are not the law."""
-
-    def is_burst_window(self, window) -> bool:
-        del window
-        return False
-
-
-def test_every_machine_binds_its_own_copy_of_a_built_policy():
-    """One settings record builds a machine per shot.
-
-    Each machine binds its burst detector onto the policy's port, and a
-    port takes one peer, so a built policy is a prototype: every build
-    gets a copy with its ports unbound and the prototype's threshold.
-    """
-    switching = escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="fixed",
-        gap_threshold_nats=2.0,
-        confidence="complementary_gap",
-    )
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
-    built = escalation_build.build_escalation_policy(switching, weak)
-    settings = escalation_settings.EscalationSettings(policy=built)
-
-    first = escalation_build.build_escalation_policy(settings, weak)
-    first.burst_detector = _StubBurstDetector()
-    second = escalation_build.build_escalation_policy(settings, weak)
-    second.burst_detector = _StubBurstDetector()
-
-    assert first.burst_detector is not second.burst_detector
-    assert built.burst_detector is None
-    assert second.threshold is built.threshold
-
-
-def test_a_table_threshold_with_no_number_from_the_experiment_is_refused():
-    """The table row is resolved per sweep point, before the root builds."""
-    settings = escalation_settings.EscalationSettings(
-        kind="switching",
-        threshold_source="table",
-        gap_threshold_nats=None,
-        confidence="complementary_gap",
-    )
-
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
-    with pytest.raises(ValueError) as refusal:
-        escalation_build.build_escalation_policy(settings, weak)
-
-    assert "resolves the threshold per sweep point" in str(refusal.value)
-
-
-def test_the_strong_window_row_is_named_and_declares_whether_it_absorbs():
-    redo_window = escalation_settings.EscalationSettings(
-        strong_window="redo_window"
-    )
-    forward = escalation_settings.EscalationSettings(
-        strong_window="double_window"
-    )
-
-    redo_window_row = escalation_build.strong_window_row(redo_window)
-    double_window_row = escalation_build.strong_window_row(forward)
-
-    assert redo_window_row.absorbs_weak_windows is False
-    assert double_window_row.absorbs_weak_windows is True
-    assert escalation_build.absorbs_weak_windows(redo_window) is False
-    assert escalation_build.absorbs_weak_windows(forward) is True
-
-
-def test_a_strong_window_that_names_no_row_is_refused():
-    settings = escalation_settings.EscalationSettings(strong_window="sideways")
-
-    with pytest.raises(ValueError) as refusal:
-        escalation_build.strong_window_row(settings)
-
-    assert "escalation.strong_window" in str(refusal.value)
-
-
-def test_the_confidence_row_is_built_with_the_sections_walk_card():
-    settings = escalation_settings.EscalationSettings(
-        confidence="complementary_gap", confidence_walk_microseconds=0.25
-    )
-
-    weak = decoder_settings.DecoderSettings(kind="pymatching")
-
-    signal = escalation_build.confidence_signal(settings, weak)
-
-    assert signal.walk_microseconds == 0.25
-
-
-def test_a_burst_detector_beside_a_policy_that_never_escalates_is_refused():
-    """A flagged window goes to the strong tier, which weak_baseline lacks."""
-    row_settings = event_count.EventCountBurstDetector.Settings()
-    section = burst_detector_settings.BurstDetectorSettings(
-        kind="event_count", row_settings=row_settings
-    )
-    settings = machine_settings.MachineSettings(burst_detector=section)
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
+def test_a_switching_record_builds_the_policy_its_run_binds():
+    """A record that subclasses the switching slot brings its own policy."""
+    settings = _switching(_OwnPolicySwitching)
     engine = engine_module.Engine()
 
-    with pytest.raises(ValueError, match="only escalation.kind switching"):
-        escalation_build.build_burst_detector(settings, engine, None, policy)
+    weak = _weak()
+    switching = escalation_build.Switching.build(settings, weak, engine)
+
+    assert isinstance(switching.policy, _OwnPolicy)

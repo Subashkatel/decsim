@@ -6,36 +6,30 @@ measured_table does, and states the decode as the steps a CUDA-Q
 dispatcher takes, each timed on its own (measurements.py).
 
 On the device path (cuda-quantum releases/v0.15.2
-realtime/lib/daemon/dispatcher/dispatch_kernel.cu) one persistent
-kernel notices a filled ring slot, checks its header, runs the handler,
-fires the decode graph and holds until the fired decode ends, so every
-step holds the dispatcher. The device fire is compiled only for compute
-capability 9.0 and up (`#if __CUDA_ARCH__ >= 900`, line 491), so the
-A100 has no device path. On the host path (host_api.md lines
-1065-1113) a CPU monitor notices the slot, "acquires an idle worker"
-(line 1090), launches that worker's graph on its stream and moves on;
-the worker copies the syndrome in, decodes and copies the answer out,
-and is idle again when its stream is done (line 1112).
+realtime/lib/daemon/dispatcher/dispatch_kernel.cu) one persistent kernel
+notices a filled ring slot, checks its header, runs the handler, fires
+the decode graph and holds until the decode ends, so every step holds
+the dispatcher. The device fire is compiled only for compute capability
+9.0 and up (line 491), so the A100 has no device path. On the host path
+(host_api.md lines 1065-1113) a CPU monitor notices the slot, acquires
+an idle worker, launches that worker's graph on its stream and moves on;
+the worker copies the syndrome in, decodes and copies the answer out.
 
 Notice, check, handle and respond are inside the echo round trip the
-link card prices (the StrongBackend rule), so they are zero-tick steps
-naming it.
-
+link card prices (the StrongBackend rule), so they are zero-tick steps.
 The row decodes a region's X and Z detectors together only: its kernel
-lines were traced on whole regions, and a part is priced on a line
-measured on parts (measured_table's bases rows) or not at all.
+lines were traced on whole regions.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.dispatch_steps.measurements as measurements
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.strong_backend as strong_backend
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )
@@ -48,7 +42,7 @@ WORKER = strong_backend.WORKER
 
 @dataclasses.dataclass(frozen=True)
 class DispatchStepsSettings:
-    """The dispatch_steps row's keys in its tier section.
+    """The dispatch_steps row's settings.
 
     device names the GPU measured, path the dispatcher's (device or
     host), workers the host path's graph workers, each with its own
@@ -59,28 +53,20 @@ class DispatchStepsSettings:
     device: str = "gh200"
     path: str = "device"
     workers: int = 1
+    # the word the reports name this row by
+    name = "dispatch_steps"
 
-    @classmethod
-    def from_yaml(
-        cls,
-        section: Mapping,
-        clocks: config.ClockSettings,
-        section_name: str,
-    ) -> "DispatchStepsSettings":
-        """The three keys, checked where they enter against the cards."""
-        del clocks
-        device = section.get("device", "gh200")
-        path = section.get("path", "device")
-        _check_path(section_name, device, path)
-        workers = config.whole_count(
-            section, section_name, "workers", 1, "graph workers"
-        )
-        _check_workers(section_name, path, workers)
-        return cls(device=device, path=path, workers=workers)
+    def __post_init__(self) -> None:
+        config.check_whole_count("workers", self.workers, "graph workers")
+        _check_workers(self.path, self.workers)
+
+    def build(self) -> "DispatchStepsDecoder":
+        """A fresh decoder of these settings."""
+        return DispatchStepsDecoder(settings=self)
 
 
 class DispatchSteps:
-    """A GPU's dispatcher and workers, each step timed on its own."""
+    """The CUDA-Q dispatch path to one GPU, each step timed on its own."""
 
     def __init__(self, settings: DispatchStepsSettings) -> None:
         self.settings = settings
@@ -189,23 +175,10 @@ def _kernel_rows(device: str) -> tuple:
     return tuple(rows)
 
 
-def _check_path(section_name: str, device: str, path: str) -> None:
-    """A device and path with a measured card; the A100 has no device path."""
-    if (device, path) in measurements.CARDS:
-        return
-    measured = sorted(measurements.CARDS)
-    raise ValueError(
-        f"{section_name}.device {device!r} with path {path!r} has no card in "
-        f"dispatch_steps; the measured ones are {measured} (the device "
-        "path's graph fire is compiled for compute capability 9.0 and up, "
-        "dispatch_kernel.cu v0.15.2 line 491)"
-    )
-
-
-def _check_workers(section_name: str, path: str, workers: int) -> None:
+def _check_workers(path: str, workers: int) -> None:
     """Workers other than the one are named only on the host path."""
     if path == "device" and workers != 1:
         raise ValueError(
-            f"{section_name}.workers is the host path's; the device path "
-            "decodes on its one dispatcher"
+            "workers is the host path's; the device path decodes on its one "
+            "dispatcher"
         )

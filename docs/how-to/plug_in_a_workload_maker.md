@@ -14,8 +14,8 @@ maker hands decsim at most two things (`decsim/records/workload.py`):
   its rounds, and either its own circuit or a segment (`stream_id`,
   `stream_offset`) of the one physical circuit.
 
-A yaml names a maker with one entry, a Python function and its
-arguments. There is no plugin framework and no registration.
+A run file calls the maker and hands its workload to the machine.
+There is no plugin framework and no registration.
 
 ## 1. Write the function
 
@@ -31,54 +31,45 @@ def two_patch_memory(patch_rounds, distance):
     return workload_records.Workload((first, second), rounds)
 ```
 
-Every parameter is an argument the yaml writes, as each sweep point
-resolves it: a sweep axis may set one
-(`workload.arguments.patch_rounds: [4, 8]`), and a whole-value reference
-reads a setting the machine reads too (`distance: ${qpu.distance}`).
-The function runs once per sweep point, and every shot of the point
-runs what it returned.
+The arguments are yours: the run file calls the function once per
+point, so a point that sweeps `patch_rounds` calls it with each value,
+and every shot of the point runs what it returned.
 
-## 2. Name it in the yaml
+## 2. Hand it to the machine
 
-```yaml
-workload:
-  kind: producer
-  function: my_package.makers:two_patch_memory
-  arguments:
-    patch_rounds: 4
-    distance: ${qpu.distance}
+The machine's `workload` field is the workload, lowered for the
+machine by `WorkloadSettings.running` (`decsim/frontends/settings.py`):
+
+```python
+workload = two_patch_memory(4, distance)
+running = workload_settings.WorkloadSettings.running(workload)
+machine = dataclasses.replace(base, workload=running)
 ```
 
-The module is imported by name, so it needs to be importable where
-decsim runs (installed, or on `PYTHONPATH`). `decsim show` builds the
-first point, so it stops where a run would: a module that does not
-import or a function that is not there is refused with one sentence,
-and an argument the function does not take, one it needs and is not
-given stops the call with Python's own error, which names the
-argument.
-
-The makers decsim ships are named the same way, from
-`decsim/producers.py`: `decsim.producers:memory_circuit` (Stim's
-generated memory), `decsim.producers:memory_patches` (several such
-memories at once), and, with the `deltakit` extra installed,
-`decsim.producers:deltakit_memory` (Deltakit's finite memory) and
-`decsim.producers:deltakit_live_memory` (a live memory decoded after
-some rounds, then read out).
+The makers decsim ships are in `decsim/producers.py`: `memory_circuit`
+(Stim's generated memory), `memory_patches` (several such memories at
+once), and, with the `deltakit` extra installed, `deltakit_memory`
+(Deltakit's finite memory) and `deltakit_live_memory` (a live memory
+decoded after some rounds, then read out). `memory_workload` in
+`decsim/settings.py` is `memory_circuit` on the rotated surface code,
+running.
 
 ## Or read the two outputs from files
 
-A maker that runs elsewhere writes its two outputs to disk, and the
-`files` row reads them, paths relative to the folder of the yaml that
-writes the `workload` section (a base's section, inherited through
-`extends`, reads beside the base):
+A maker that runs elsewhere writes its two outputs to disk, and
+`read_workload` (`decsim/frontends/workload_files.py`) reads them:
 
-```yaml
-workload:
-  kind: files
-  operations: merge.json            # required
-  # circuit: history.stim           # a finite circuit, with
-  # measurement_rounds: rounds.json  # each measurement index's round
-  # fragments: live/                # or the four live fragments
+```python
+operations_path = pathlib.Path("merge.json")
+# a finite circuit with each measurement index's round, or
+# fragments_path, a folder of the four live fragments
+circuit_path = pathlib.Path("history.stim")
+measurement_rounds_path = pathlib.Path("rounds.json")
+workload = workload_files.read_workload(
+    operations_path,
+    circuit_path=circuit_path,
+    measurement_rounds_path=measurement_rounds_path,
+)
 ```
 
 The operation list is json with the schema `decsim.ops/1`:
@@ -107,31 +98,20 @@ each measurement index, as a string, to its one-based round. A
 `fragments` folder holds `first_round.stim`, `repeated_round.stim`,
 `final_round.stim`, `single_round.stim` and `physical.json`, which holds
 `round_period_microseconds`, the period the fragments' noise was built
-for. `decsim show` builds the first point, which reads the files, so a
-missing or malformed one stops it with Python's or Stim's own error,
-and an operations file of another schema is refused.
+for. A missing or malformed file stops the read with Python's or
+Stim's own error, and an operations file of another schema is refused.
 `decsim.frontends.workload_files.write_workload` writes a Python
 maker's workload in this form.
 
-## Run a live memory from a yaml
+## Run a live memory
 
-A live memory runs on `qpu: {kind: streaming_stim}`: the stream's
-first rounds are decoded, the patch keeps measuring while it waits for
-the decoded answer, one round resumes it, and the readout ends it. With
-Deltakit:
-
-```yaml
-qpu: {kind: streaming_stim}
-workload:
-  kind: producer
-  function: decsim.producers:deltakit_live_memory
-  arguments:
-    decode_after_rounds: 3
-    distance: ${qpu.distance}
-    round_period_microseconds: ${qpu.round_period_microseconds}
-```
-
-or with fragments on disk, the four operations written out:
+A live memory runs on the streaming Stim source, the QPU's source
+`StreamingStimDevice.Settings()`: the stream's first rounds are
+decoded, the patch keeps measuring while it waits for the decoded
+answer, one round resumes it, and the readout ends it. With Deltakit,
+the maker is `deltakit_live_memory`, called with the decode after its
+first rounds, `decode_after_rounds=3`; with fragments on disk, the four
+operations are written out:
 
 ```json
 {
@@ -149,7 +129,7 @@ or with fragments on disk, the four operations written out:
 }
 ```
 
-Both run what `tools/live_memory_example.py` builds by hand in Python
+Both run what `examples/live_memory_example.py` builds by hand in Python
 (`tests/test_live_memory_example.py` and `tests/test_producers.py`
 compare them field by field). The stream's owner, its protected region
 and its rounds are derived, as the next section says.

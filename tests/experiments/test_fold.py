@@ -19,23 +19,21 @@ the files one uncut run writes.
 import csv
 import json
 import math
+import os
 import pathlib
 import random
-import shutil
 import statistics
-import types
 
 import pytest
 
+import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.fold as fold
-import decsim.experiments.measure as measure
 import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
-import decsim.records.decoding as decoding_records
-import tests.experiments.yaml_configs as yaml_configs
+import tests.experiments.run_files as run_files
 
 CANCELLING = (1e100, 1.0, -1e100, 1.0)
 
@@ -81,35 +79,24 @@ def _place_of(row):
     return int(row["place"])
 
 
-# A shot of the one point below runs fifteen QEC rounds: the reference
-# workload's rounds_per_shot, which its resolved record reads back.
-ROUNDS_PER_SHOT = 15
+# A shot of the one point below runs fifteen QEC rounds, the minimal
+# machine's, which its resolved record reads back.
+ROUNDS_PER_SHOT = run_files.ROUNDS_PER_SHOT
 
 
 def _one_point_config(folder, shots, piece_shots):
-    card = {
-        "collection": {"piece_rounds": piece_shots * ROUNDS_PER_SHOT},
-        "sweep": [
-            {
-                "axes": {
-                    "workload.arguments.physical_error_probability": [0.001],
-                    "qpu.distance": [3],
-                    "qpu.round_period_microseconds": [1.0],
-                },
-                "collection": {"max_shots": shots},
-            }
-        ],
-    }
-    return yaml_configs.write_config(folder, card)
+    piece_rounds = piece_shots * ROUNDS_PER_SHOT
+    collection = {"max_shots": shots, "piece_rounds": piece_rounds}
+    return run_files.write_run_file(folder, collection=collection)
 
 
 def _pieces_of_one_point(tmp_path, shots, piece_shots):
-    """One point's shots collected in pieces; the experiment folder."""
+    """One point's shots collected in pieces; the results folder."""
     folder = tmp_path / f"of_{shots}"
     folder.mkdir()
     config_path = _one_point_config(folder, shots, piece_shots)
     experiment_dir = folder / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 
@@ -123,10 +110,7 @@ def _piece_folders(experiment_dir) -> list:
 def _folded(experiment_dir, folders, out_dir) -> list:
     """The pieces folded into out_dir as the collect that saved them does."""
     point_ids = [folders[0].parent.name]
-    seeds_by_point = pieces.seed_ranges_of(folders)
-    return report.fold_pieces(
-        experiment_dir, folders, point_ids, seeds_by_point, out_dir
-    )
+    return report.fold_pieces(experiment_dir, folders, point_ids, out_dir)
 
 
 def _peak_rows_alive(monkeypatch, experiment_dir, out_dir):
@@ -319,8 +303,8 @@ def test_merged_rows_are_the_stable_sort_of_the_files_rows(tmp_path):
     """Two files whose rows interleave, and rows of equal place in both.
 
     The stable sort of the concatenation keeps a row of equal place
-    behind every row the earlier file gave, which is the order
-    heapq.merge yields because the stream's index breaks the tie.
+    behind every row the earlier file gave, which is the order the
+    merge yields because the file's index breaks the tie.
     """
     first_rows = [_row(1, "a"), _row(3, "b"), _row(3, "c"), _row(7, "d")]
     second_rows = [_row(2, "e"), _row(3, "f"), _row(8, "g")]
@@ -337,6 +321,73 @@ def test_merged_rows_are_the_stable_sort_of_the_files_rows(tmp_path):
     assert merged == sorted_rows
     values = [row["value"] for row in merged]
     assert values == list("aebcfdg")
+
+
+def test_a_merge_of_disjoint_pieces_holds_one_file_open_at_a_time(tmp_path):
+    """A capped point's pieces are too many to open at once.
+
+    Three hundred files of three rows each, seed ranges apart as a
+    point's pieces are, given in reverse. The order's referent is the
+    stable sort of their rows; the open files are the process's own
+    descriptors, /proc/self/fd.
+    """
+    file_count = 300
+    paths = _disjoint_piece_files(tmp_path, file_count)
+    descriptors_before = _open_descriptor_count()
+
+    merged, descriptors_peak = _merged_and_peak_descriptors(paths)
+
+    together = _rows_of_files(paths)
+    sorted_rows = sorted(together, key=_place_of)
+    assert merged == sorted_rows
+    assert len(merged) == 3 * file_count
+    assert descriptors_peak - descriptors_before == 1
+
+
+def _disjoint_piece_files(folder, count: int) -> list:
+    """Files of three rows each, places 3i to 3i + 2, the last one first."""
+    paths = []
+    for piece in range(count):
+        first_place = 3 * piece
+        rows = _three_rows_from(first_place, piece)
+        path = folder / f"piece_{piece}.csv"
+        _write_rows(path, rows)
+        paths.append(path)
+    paths.reverse()
+    return paths
+
+
+def _three_rows_from(first_place: int, value) -> list:
+    rows = []
+    for offset in range(3):
+        place = first_place + offset
+        row = _row(place, value)
+        rows.append(row)
+    return rows
+
+
+def _rows_of_files(paths: list) -> list:
+    rows = []
+    for path in paths:
+        stream = fold.row_stream(path)
+        rows.extend(stream)
+    return rows
+
+
+def _open_descriptor_count() -> int:
+    descriptors = os.listdir("/proc/self/fd")
+    return len(descriptors)
+
+
+def _merged_and_peak_descriptors(paths: list) -> tuple:
+    """The merged rows, and the most descriptors open while they came."""
+    merged = []
+    peak = _open_descriptor_count()
+    for row in fold.merged_rows(paths, _place_of):
+        merged.append(row)
+        open_now = _open_descriptor_count()
+        peak = max(peak, open_now)
+    return merged, peak
 
 
 def test_a_file_with_no_rows_of_this_kind_is_skipped(tmp_path):
@@ -434,35 +485,12 @@ def _each_without_a_point(folders, name) -> None:
         _without_a_point(folder, name)
 
 
-def _each_with_a_renamed_point(folders, name, renamed) -> None:
-    for folder in folders:
-        _with_a_renamed_point(folder, name, renamed)
-
-
 def _without_columns(row: dict, columns: tuple) -> dict:
     kept = {}
     for column, value in row.items():
         if column not in columns:
             kept[column] = value
     return kept
-
-
-def _with_a_renamed_point(run_dir, name, renamed):
-    """The folder as a tree that called that latency point something else."""
-    folder = pathlib.Path(run_dir)
-    shots_path = folder / "shots.csv"
-    rows = _rows_of(shots_path)
-    for row in rows:
-        row[f"{renamed}_mean_us"] = row.pop(f"{name}_mean_us")
-        row[f"{renamed}_max_us"] = row.pop(f"{name}_max_us")
-    _write_rows(shots_path, rows)
-    samples_path = folder / "window_samples.csv"
-    samples = _rows_of(samples_path)
-    for row in samples:
-        if row["name"] != name:
-            continue
-        row["name"] = renamed
-    _write_rows(samples_path, samples)
 
 
 def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
@@ -534,57 +562,6 @@ def _each_without_a_shot_column(folders, column) -> None:
         _write_rows(shots_path, rows)
 
 
-def test_the_terminal_prints_the_latency_points_the_folded_rows_hold(tmp_path):
-    """The terminal keeps the rule the columns keep, or the fold dies.
-
-    A fold writes the folder and then prints it, so a terminal line
-    that asks for a point the rows do not hold raises KeyError after
-    the folder is on disk, and command.main catches only a refusal.
-    Here two pieces lack service, as an older tree's pieces do, and the
-    summary prints its other lines and says nothing about service. The
-    terminal names the points its folder's manifest lists, and the
-    collect's own run folder has that manifest.
-    """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
-    folders = _piece_folders(experiment_dir)
-    _each_without_a_point(folders, "service")
-    out_dir = tmp_path / "folded"
-    rows = _folded(experiment_dir, folders, out_dir)
-    run_dir = yaml_configs.run_folder_of(experiment_dir)
-    manifest_path = run_dir / "manifest.json"
-    shutil.copy(manifest_path, out_dir)
-
-    assert "service_mean_us" not in rows[0]
-    lines = report.terminal_lines(rows, out_dir)
-    printed = "\n".join(lines)
-    assert "service time per window" not in printed
-    assert "queue wait, mean:" in printed
-    assert "ready to frame commit:" in printed
-    assert "throughput:" in printed
-
-
-def test_a_folder_naming_a_point_this_tree_cannot_place_is_refused(tmp_path):
-    """A renamed point has no place in this tree's order of points.
-
-    A fold writes a point's counts where that point sits among this
-    tree's own, so a folder whose window samples name a point this tree
-    does not measure would fail that sort with sweep.csv and shots.csv
-    already written and a half folder left behind, so it is refused at
-    the boundary, by name.
-    """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
-    folders = _piece_folders(experiment_dir)
-    _each_with_a_renamed_point(folders, "service", "park")
-    out_dir = tmp_path / "folded"
-    with pytest.raises(refusal.RefusalError) as refused:
-        _folded(experiment_dir, folders, out_dir)
-    message = str(refused.value)
-    assert "'park'" in message
-    assert "this tree does not measure" in message
-    assert str(folders[0]) in message
-    assert not out_dir.exists()
-
-
 def test_pieces_of_one_point_that_hold_different_columns_are_refused(
     tmp_path,
 ):
@@ -616,29 +593,53 @@ def test_pieces_of_one_point_that_hold_different_columns_are_refused(
     assert not out_dir.exists()
 
 
+# A switching point that records each tier's waits and services, and the
+# weak tier alone, which has none to record, as Experiment 1 mixes them.
+MIXED_RUN_FILE = """
+import dataclasses
+
+import decsim
+import decsim.observe.settings as observe_settings
+import decsim.settings as machine_settings
+import tests.escalation.test_strong_window_shapes as shape_tests
+
+switching = shape_tests.gate_switching()
+recording = observe_settings.ObservationSettings(record_switching_windows=True)
+switching = dataclasses.replace(switching, observation=recording)
+weak_alone = machine_settings.weak_decoder_baseline(3, 0.008, 1.0)
+points = [
+    decsim.Point("switching", switching, {}),
+    decsim.Point("weak_alone", weak_alone, {}),
+]
+collection = decsim.CollectionSettings(max_shots=1)
+experiment = decsim.Experiment("mixed", points, collection)
+"""
+
+
 def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
-    """A quiet point and a burst point of one grid fold into one run folder.
+    """A switching point and a weak-alone point fold into one run folder.
 
-    A burst shot measures whether it was caught in time and a quiet shot
-    has no burst to catch, so their pieces hold different columns. The
-    folded file takes every column any point holds, first seen first, as
-    write_csv does for a run's own rows, and a point's cell for a column
-    it did not measure is empty.
+    The switching point measures its weak decodes' service and its
+    strong decodes' waits, and the weak-alone point has no tiers to
+    measure, so their pieces hold different columns. The folded file
+    takes every column any point holds, first seen first, as write_csv
+    does for a run's own rows, and a point's cell for a column it did
+    not measure is empty.
     """
-    experiment_dir = _burst_and_quiet_pieces(tmp_path)
+    run_file = tmp_path / "mixed.py"
+    run_file.write_text(MIXED_RUN_FILE)
+    run_dir = tmp_path / "run"
+    command.main(["run", str(run_file), "--out", str(run_dir)])
 
-    run_dir = yaml_configs.run_folder_of(experiment_dir)
     shots_path = run_dir / "shots.csv"
-    sweep_path = run_dir / "sweep.csv"
+    run_path = run_dir / "run.json"
     shots = _rows_of(shots_path)
-    sweep = _rows_of(sweep_path)
-
-    quiet_shots = _rows_with_qpu_kind(shots, sweep, "stim_device")
-    burst_shots = _rows_with_qpu_kind(shots, sweep, "burst_stim")
-    assert [row["burst_caught_in_time"] for row in quiet_shots] == [""]
-    assert [row["burst_caught_in_time"] for row in burst_shots] != [""]
-    quiet_points = _rows_with_qpu_kind(sweep, sweep, "stim_device")
-    assert [row["caught_in_time_share"] for row in quiet_points] == [""]
+    run_text = run_path.read_text()
+    run_record = json.loads(run_text)
+    switching_id, weak_alone_id = run_record["points"]
+    services = {row["point_id"]: row["weak_service_mean_us"] for row in shots}
+    assert services[switching_id] != ""
+    assert services[weak_alone_id] == ""
 
 
 def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
@@ -661,47 +662,24 @@ def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
     assert forwards_bytes == backwards_bytes
 
 
-def test_a_fold_records_the_seeds_of_the_pieces_it_folded(tmp_path):
-    """A run folder's record names the seeds its rows hold, and no others.
-
-    The last two of four pieces folded alone hold and record seeds 2
-    and 3; all four record 0 to 3, and a second fold into that same
-    folder records them once.
-    """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 1)
-    folders = _piece_folders(experiment_dir)
-    second_half_dir = tmp_path / "second_half"
-    whole_dir = tmp_path / "whole"
-
-    _folded(experiment_dir, folders[2:], second_half_dir)
-    _folded(experiment_dir, folders, whole_dir)
-    _folded(experiment_dir, folders, whole_dir)
-
-    assert _seeds_of_every_shot(second_half_dir) == ["2", "3"]
-    assert _seeds_of_the_one_point(second_half_dir) == [[2, 2]]
-    assert _seeds_of_the_one_point(whole_dir) == [[0, 4]]
-
-
 def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
     """A resumed collect's record holds the saved seeds and the new ones."""
     config_path = _one_point_config(tmp_path, 2, 1)
     experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
-    run_dir = yaml_configs.run_folder_of(experiment_dir)
-    first_seeds = _seeds_of_the_one_point(run_dir)
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
+    first_seeds = _seeds_of_the_one_point(experiment_dir)
     _one_point_config(tmp_path, 4, 1)
 
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
+    command.main(["run", str(config_path), "--out", str(experiment_dir)])
 
     assert first_seeds == [[0, 2]]
-    assert _seeds_of_the_one_point(run_dir) == [[0, 4]]
-    assert _seeds_of_every_shot(run_dir) == ["0", "1", "2", "3"]
+    assert _seeds_of_the_one_point(experiment_dir) == [[0, 4]]
+    assert _seeds_of_every_shot(experiment_dir) == ["0", "1", "2", "3"]
 
 
 # every file a fold writes from the pieces' rows
 FOLDED_FILES = (
     "sweep.csv",
-    "links.csv",
     "shots.csv",
     "shot_links.csv",
     "window_samples.csv",
@@ -723,69 +701,25 @@ def _seeds_of_every_shot(run_dir) -> list:
 
 
 def _seeds_of_the_one_point(run_dir) -> list:
-    """The seed ranges the run folder's one resolved record names."""
-    resolved_dir = run_dir / "resolved"
-    (resolved_path,) = resolved_dir.glob("*.json")
-    resolved_text = resolved_path.read_text()
-    resolved = json.loads(resolved_text)
-    return resolved["seeds"]
+    """The seed ranges the results folder's one point record names."""
+    (record_path,) = run_dir.glob("points/*/machine.json")
+    record_text = record_path.read_text()
+    record = json.loads(record_text)
+    return record["seeds"]
 
 
-# a burst at round 5 of a shot's thirty, so a burst shot measures its catch
-BURST_QPU = {
-    "kind": "burst_stim",
-    "burst_onset_round": 5,
-    "burst_decay_rounds": 600.0,
-    "burst_radius": 3.1,
-    "burst_error_probability": 0.01,
+# the one point a confidence run collects
+CONFIDENCE_AXES = {
+    run_files.DISTANCE_PATH: (3,),
+    run_files.ROUND_PERIOD_PATH: (1.0,),
+    run_files.ERROR_RATE_PATH: (0.003,),
 }
-
-
-def _burst_and_quiet_pieces(tmp_path):
-    """One shot each of a quiet and a burst point, collected in pieces."""
-    overrides = yaml_configs.online_threshold()
-    overrides["escalation"] = {
-        "kind": "switching",
-        "gap_threshold_db": 20.0,
-        "strong_window": "redo_window",
-    }
-    overrides["burst_detector"] = {"kind": "event_count"}
-    # the event count's windows need 22 rounds of a shot
-    overrides["workload"] = yaml_configs.memory_workload(30)
-    overrides["sweep"] = [
-        {
-            "axes": {
-                "qpu": [{"kind": "stim_device"}, BURST_QPU],
-                "workload.arguments.physical_error_probability": [0.001],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": 1},
-        }
-    ]
-    config_path = yaml_configs.write_config(tmp_path, overrides)
-    experiment_dir = tmp_path / "experiment"
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
-    return experiment_dir
-
-
-def _rows_with_qpu_kind(rows, sweep, kind) -> list:
-    """The rows of the points whose QPU is that kind, sweep.csv naming it."""
-    point_ids = set()
-    for point in sweep:
-        qpu = json.loads(point["qpu"])
-        if qpu["kind"] == kind:
-            point_ids.add(point["point_id"])
-    selected = []
-    for row in rows:
-        if row["point_id"] in point_ids:
-            selected.append(row)
-    return selected
+SWITCHING = {"machine": "switching"}
+EVERY_SHOT = {"confidence_shot_count": None}
 
 
 def test_a_switching_run_writes_both_confidence_files(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    run_dir = _confidence_run(tmp_path, overrides, 2)
+    run_dir = _confidence_run(tmp_path, SWITCHING, 2)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -799,9 +733,8 @@ def test_a_switching_run_writes_both_confidence_files(tmp_path):
 
 
 def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shot_count": "all"}
-    run_dir = _confidence_run(tmp_path, overrides, 3)
+    every = {**SWITCHING, "record_options": EVERY_SHOT}
+    run_dir = _confidence_run(tmp_path, every, 3)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -813,9 +746,8 @@ def test_the_histogram_counts_every_window_and_every_shot(tmp_path):
 
 
 def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
-    overrides = yaml_configs.fixed_threshold_switching()
-    overrides["observation"] = {"confidence_shot_count": 0}
-    run_dir = _confidence_run(tmp_path, overrides, 2)
+    none_sampled = {**SWITCHING, "record_options": {"confidence_shot_count": 0}}
+    run_dir = _confidence_run(tmp_path, none_sampled, 2)
     confidence_path = run_dir / "window_confidence.csv"
     histogram_path = run_dir / "confidence_histogram.csv"
 
@@ -827,9 +759,8 @@ def test_no_sampled_shot_writes_only_the_histogram(tmp_path):
 
 def test_pieces_fold_to_the_confidence_files_of_one_uncut_run(tmp_path):
     """Four one-shot pieces fold to the files one four-shot run writes."""
-    overrides = yaml_configs.fixed_threshold_switching()
-    uncut_dir = _confidence_run(tmp_path, overrides, 4, out="uncut")
-    pieces_dir = _confidence_run(tmp_path, overrides, 4, 1, out="pieces")
+    uncut_dir = _confidence_run(tmp_path, SWITCHING, 4, out="uncut")
+    pieces_dir = _confidence_run(tmp_path, SWITCHING, 4, 1, out="pieces")
     uncut_windows = uncut_dir / "window_confidence.csv"
     folded_windows = pieces_dir / "window_confidence.csv"
     uncut_histogram = uncut_dir / "confidence_histogram.csv"
@@ -852,10 +783,8 @@ def test_a_run_whose_escalation_reads_no_confidence_writes_neither_file(
 
 def test_a_piece_records_the_shots_its_confidence_rows_cover(tmp_path):
     """piece.json says what confidence it wrote: a count, all, or none."""
-    switching = yaml_configs.fixed_threshold_switching()
-    every = yaml_configs.fixed_threshold_switching()
-    every["observation"] = {"confidence_shot_count": "all"}
-    _confidence_run(tmp_path, switching, 1, out="sampled")
+    every = {**SWITCHING, "record_options": EVERY_SHOT}
+    _confidence_run(tmp_path, SWITCHING, 1, out="sampled")
     _confidence_run(tmp_path, every, 1, out="every")
     _confidence_run(tmp_path, {}, 1, out="plain")
 
@@ -877,8 +806,7 @@ def test_pieces_of_one_point_that_recorded_confidence_apart_are_refused(
     histogram would count fewer shots than the sweep row. The fold
     refuses and names the pieces, before it writes anything.
     """
-    overrides = yaml_configs.fixed_threshold_switching()
-    _confidence_run(tmp_path, overrides, 2, 1)
+    _confidence_run(tmp_path, SWITCHING, 2, 1)
     experiment_dir = tmp_path / "experiment"
     folders = _piece_folders(experiment_dir)
     older = folders[0]
@@ -900,103 +828,40 @@ def test_pieces_of_one_point_that_ran_different_commits_are_refused(
     """A resumed collect from another tree would pool two simulators.
 
     The second piece is saved as a process at another commit saves it;
-    the fold names both trees' pieces and writes nothing.
+    the fold names it and the tree run.json names, and writes nothing.
     """
     experiment_dir = _pieces_of_one_point(tmp_path, 2, 1)
     folders = _piece_folders(experiment_dir)
     later = folders[1]
     other_commit = "b" * 40
     _as_a_piece_run_at_commit(later, other_commit)
-    out_dir = tmp_path / "folded"
+    sweep_path = experiment_dir / "sweep.csv"
+    sweep_bytes = sweep_path.read_bytes()
 
     with pytest.raises(refusal.RefusalError) as refused:
-        _folded(experiment_dir, folders, out_dir)
+        collect_command.fold_the_run(experiment_dir)
 
     said = str(refused.value)
-    assert "ran different code" in said
-    assert f"{later} (commit {other_commit}" in said
-    assert not out_dir.exists()
-
-
-def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():
-    ten_decibels_in_nats = 2.302585092994046
-
-    assert report.gap_bin_low_decibels(ten_decibels_in_nats) == 10.0
-    assert report.gap_bin_low_decibels(0.0) == 0.0
-    assert report.gap_bin_low_decibels(math.inf) == math.inf
-
-
-def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
-    """A gapless window escalates as the least confident: its shot's too."""
-    ten_decibels_in_nats = 2.302585092994046
-    windows = (
-        decoding_records.WindowConfidence(
-            (1, 0), ten_decibels_in_nats, False, None
-        ),
-        decoding_records.WindowConfidence((1, 1), None, True, None),
-    )
-    confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
-    shot = types.SimpleNamespace(
-        point_id="p",
-        algorithm="pymatching",
-        confidence=confidence,
-        logical_failure=False,
-        is_scored=True,
-    )
-
-    rows = report.confidence_histogram_rows([shot])
-
-    assert rows == [
-        _one_count("window", None, True),
-        _one_count("window", 10.0, False),
-        _one_count("shot_minimum", None, None),
-    ]
-
-
-def test_an_unscored_shot_is_in_neither_confidence_file():
-    """An unscored shot is sinter's discard, and counts in no P(e|g).
-
-    Its logical_failure reads False, so a row of it would count as a
-    success beside every gap. sinter takes a discard out of every
-    failure-conditioned count (sinter/_decoding/_decoding.py:120-128),
-    and every row of both files carries shot_failed.
-    """
-    windows = (decoding_records.WindowConfidence((1, 0), 0.1, True, None),)
-    confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
-    shot = types.SimpleNamespace(
-        point_id="p",
-        algorithm="pymatching",
-        seed=0,
-        confidence=confidence,
-        logical_failure=False,
-        is_scored=False,
-    )
-
-    assert report.window_confidence_rows([shot]) == []
-    assert report.confidence_histogram_rows([shot]) == []
+    assert f"{later} ran commit {other_commit}" in said
+    assert sweep_path.read_bytes() == sweep_bytes
 
 
 def _confidence_run(
-    tmp_path, overrides, shots, piece_shots=None, out="experiment"
+    tmp_path, arguments, shots, piece_shots=None, out="experiment"
 ):
-    """A one-point d3 collect of shots, in pieces if asked; its run folder."""
+    """A one-point d3 collect of shots, in pieces if asked; its run folder.
+
+    arguments are run_files.sweep's, the axes and collection aside.
+    """
+    collection = {"max_shots": shots}
     if piece_shots is not None:
-        piece_rounds = piece_shots * ROUNDS_PER_SHOT
-        overrides["collection"] = {"piece_rounds": piece_rounds}
-    overrides["sweep"] = [
-        {
-            "axes": {
-                "workload.arguments.physical_error_probability": [0.003],
-                "qpu.distance": [3],
-                "qpu.round_period_microseconds": [1.0],
-            },
-            "collection": {"max_shots": shots},
-        }
-    ]
-    config_path = yaml_configs.write_config(tmp_path, overrides)
+        collection["piece_rounds"] = piece_shots * ROUNDS_PER_SHOT
+    run_path = run_files.write_run_file(
+        tmp_path, axes=CONFIDENCE_AXES, collection=collection, **arguments
+    )
     experiment_dir = tmp_path / out
-    command.main(["collect", str(config_path), "--out", str(experiment_dir)])
-    return yaml_configs.run_folder_of(experiment_dir)
+    command.main(["run", str(run_path), "--out", str(experiment_dir)])
+    return experiment_dir
 
 
 def _counts_of(rows, histogram) -> int:
@@ -1006,20 +871,6 @@ def _counts_of(rows, histogram) -> int:
         if row["histogram"] == histogram:
             counts.append(int(row["count"]))
     return sum(counts)
-
-
-def _one_count(histogram, gap_low_decibels, escalated) -> dict:
-    """A histogram row of one window or shot of that no-failure shot."""
-    return {
-        "point_id": "p",
-        "algorithm": "pymatching",
-        "signal": "complementary_gap",
-        "histogram": histogram,
-        "gap_low_decibels": gap_low_decibels,
-        "escalated": escalated,
-        "shot_failed": False,
-        "count": 1,
-    }
 
 
 def _the_one_piece(tmp_path, out) -> dict:

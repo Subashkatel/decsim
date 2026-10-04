@@ -2,17 +2,11 @@
 
 A window's detector error model is a function of the operation's circuit
 and the window plan, and of nothing a seed touches, so the shots of one
-sweep point all build the same models. They are most of a shot's wall
-time: at weak_ler's d 7, p 0.005 point, Machine.build costs 2.08 s of
-the 2.41 s a shot takes, and 2.0 s of that is inside
-build_window_error_models.
-
-sinter does the same thing one level down: it compiles the decoder once
-per task and decodes every shot of the task with it
+sweep point share them; building them is most of a shot's wall time.
+sinter likewise compiles its decoder once per task
 (sinter/_decoding/_decoding_decoder_class.py, compile_decoder_for_dem).
-decsim's `collect` builds one of these per task and hands it to every
-shot through the workload settings (a Python-only field, no yaml key);
-a Machine built alone gets an empty one and fills it for itself.
+collect hands one of these to every shot's Machine.build; a Machine
+built alone fills its own.
 """
 
 
@@ -24,7 +18,7 @@ class BuiltWindowModels:
         self.builds = 0
         self.reuses = 0
 
-    def models_of(self, key) -> list:
+    def models_of(self, key: tuple) -> list:
         """The models this key has already built, or an empty list."""
         held = self.models_by_key.get(key)
         if held is None:
@@ -32,7 +26,7 @@ class BuiltWindowModels:
         self.reuses += 1
         return held
 
-    def remember(self, key, models) -> None:
+    def remember(self, key: tuple, models: list) -> None:
         """Keep one key's models for the task's later shots."""
         self.models_by_key[key] = models
         self.builds += 1

@@ -14,9 +14,6 @@ import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.escalation.policies as escalation_policies
-import decsim.escalation.settings as escalation_settings
-import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -26,7 +23,6 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
@@ -90,44 +86,42 @@ def switching_machine(
     *,
     rounds: int,
     escalated_windows,
-    strong_window: str = "redo_window",
+    strong_window=declared_run.REDO_WINDOW,
     run_both_at_once: bool = False,
     round_microseconds: float = 1.0,
     escalation_microseconds: Optional[float] = None,
     record: bool = False,
-    escalation=None,
+    switching=None,
     trace_path=None,
     scheme=None,
     weak_syndrome_buffer=None,
     decision_cycles: int = 0,
+    online_threshold=None,
 ) -> machine_module.Machine:
     """One d=3 memory operation, weak-primary switching on declared ticks.
 
-    escalation replaces the Python-built Switching settings when given
-    (a table row under its own kind); scheme replaces the lookahead
+    switching replaces the declared switching slot when given (a table
+    row of its own, say), and online_threshold is the calibrator an
+    online threshold row decides on; scheme replaces the lookahead
     sliding windows with a caller's own windowing scheme; decision_cycles
     is the window side's decision, on the declared clock.
     """
     is_escalated = escalate_only(escalated_windows)
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
-    weak = declared_run.DeclaredConfidenceDecoder(
+    weak = declared_run.DeclaredConfidenceDecoder.Settings(
         weak_microseconds, is_escalated
     )
-    strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
-    weak_decoder = decoder_settings.DecoderSettings(decoder=weak)
-    strong_decoder = decoder_settings.DecoderSettings(decoder=strong)
-    threshold = threshold_sources.FixedThreshold(0.5)
-    collaborators = escalation_policies.EscalationCollaborators(
-        threshold=threshold,
-        expected_source=declared_run.DECLARED_CONFIDENCE_SOURCE,
-        run_both_at_once=run_both_at_once,
+    strong_microseconds = DECLARED_MICROSECONDS["strong"]
+    strong = decoders.PresetLatencyDecoder.Settings(strong_microseconds)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=weak, engine=declared_run.DECLARED_ENGINE
     )
-    policy = escalation_policies.Switching(collaborators)
-    boundary_policy = boundary_policies.Held()
-    # a name off the table stays, so the settings refuse it by name
-    row = escalation_settings.STRONG_WINDOW_SHAPES.get(strong_window)
-    if row is not None and row.absorbs_weak_windows:
-        boundary_policy = None
+    strong_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=strong, engine=declared_run.DECLARED_ENGINE
+    )
+    boundary_policy = boundary_policies.Held.Settings()
+    if strong_window.absorbs_weak_windows:
+        boundary_policy = boundary_policies.Eager.Settings()
     operation = program_records.Operation(
         id=1, name="mem1", qubits=(1,), patches=(1,)
     )
@@ -139,19 +133,18 @@ def switching_machine(
         distance=3, round_period_microseconds=round_microseconds
     )
     if scheme is None:
-        lookahead = window_records.WindowingSchemeCard(
-            terminal_policy="lookahead"
-        )
-        scheme = sliding_scheme.SlidingWindowScheme(lookahead)
+        scheme = sliding_scheme.SlidingWindowScheme.Settings()
     windows = window_settings.WindowSettings(
         clock=DECLARED_CLOCK,
         decision_cycles=decision_cycles,
         scheme=scheme,
+        terminal_policy="lookahead",
         boundary_policy=boundary_policy,
     )
-    if escalation is None:
-        escalation = escalation_settings.EscalationSettings(
-            policy=policy, strong_window=strong_window
+    if switching is None:
+        switching = declared_run.declared_switching(
+            run_both_at_once=run_both_at_once,
+            strong_window=strong_window,
         )
     links = declared_profile(escalation_microseconds)
     readout_cycles = declared_cycles("readout_to_bits")
@@ -178,7 +171,7 @@ def switching_machine(
         windows=windows,
         weak_decoder=weak_decoder,
         strong_decoder=strong_decoder,
-        escalation=escalation,
+        switching=switching,
         links=links,
         controller=controller,
         pauli_frame=pauli_frame,
@@ -188,7 +181,9 @@ def switching_machine(
         settings = dataclasses.replace(
             settings, weak_syndrome_buffer=weak_syndrome_buffer
         )
-    return machine_module.Machine.build(settings, 0)
+    return machine_module.Machine.build(
+        settings, 0, online_threshold=online_threshold
+    )
 
 
 def declared_profile(escalation_microseconds: Optional[float] = None):
@@ -247,5 +242,8 @@ def _declared_edge(
         "escalation test declared tick",
     )
     return link_settings.PathSettings(
-        channel, base_edge.default_payload, base_edge.actual_payload_source
+        channel,
+        base_edge.default_payload,
+        base_edge.actual_payload_source,
+        excludes_receiver_processing=base_edge.excludes_receiver_processing,
     )

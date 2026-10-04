@@ -13,10 +13,10 @@ from collections.abc import Container, Sequence
 from typing import Optional
 
 from decsim.detector_error_model import (
-    fault_model_contracts,
     window_placement,
     window_slicer,
 )
+from decsim.records import fault_model_contracts
 
 
 def dependency_depths(
@@ -26,16 +26,8 @@ def dependency_depths(
 
     Raises ValueError for an index outside the plan or a cycle.
     """
-    predecessors = [set() for _ in range(window_count)]
-    for source, destination in dependency_edges:
-        if source < 0 or destination < 0:
-            raise ValueError("window dependency indices must be nonnegative")
-        if source >= window_count or destination >= window_count:
-            raise ValueError(
-                f"window dependency edge ({source}, {destination}) names a "
-                f"window outside the plan of {window_count} windows"
-            )
-        predecessors[destination].add(source)
+    _check_edges_inside_the_plan(window_count, dependency_edges)
+    predecessors = _direct_predecessors(window_count, dependency_edges)
     depths: list[Optional[int]] = [None] * window_count
     while any(depth is None for depth in depths):
         progressed = _assign_ready_depths(predecessors, depths)
@@ -50,9 +42,7 @@ def dependency_ancestors(
     depths: tuple[int, ...],
 ) -> tuple[frozenset[int], ...]:
     """Every direct and indirect predecessor of each window."""
-    incoming = [set() for _ in range(window_count)]
-    for source, destination in dependency_edges:
-        incoming[destination].add(source)
+    incoming = _direct_predecessors(window_count, dependency_edges)
     ancestors = [set() for _ in range(window_count)]
 
     def depth_of(window_index: int) -> int:
@@ -135,6 +125,29 @@ class _AncestorOwnedFaults:
     def __contains__(self, fault_index: object) -> bool:
         owner = self.owner_of_fault.get(fault_index)
         return owner in self.ancestor_indices
+
+
+def _check_edges_inside_the_plan(
+    window_count: int, dependency_edges: tuple[tuple[int, int], ...]
+) -> None:
+    for source, destination in dependency_edges:
+        if source < 0 or destination < 0:
+            raise ValueError("window dependency indices must be nonnegative")
+        if source >= window_count or destination >= window_count:
+            raise ValueError(
+                f"window dependency edge ({source}, {destination}) names a "
+                f"window outside the plan of {window_count} windows"
+            )
+
+
+def _direct_predecessors(
+    window_count: int, dependency_edges: tuple[tuple[int, int], ...]
+) -> list[set[int]]:
+    """The windows each window waits for directly, by window index."""
+    predecessors = [set() for _ in range(window_count)]
+    for source, destination in dependency_edges:
+        predecessors[destination].add(source)
+    return predecessors
 
 
 def _assign_ready_depths(
@@ -231,16 +244,21 @@ def _owner_window(
         candidates.update(windows)
     if not candidates:
         return None
-    earliest_depth = min(depths[index] for index in candidates)
-    earliest = [
-        index for index in sorted(candidates) if depths[index] == earliest_depth
-    ]
+    earliest = _shallowest_windows(candidates, depths)
     if len(earliest) != 1:
         raise ValueError(
             f"{representation.value} fault {fault_index} straddles "
             "independent commit regions without a causal owner"
         )
     return earliest[0]
+
+
+def _shallowest_windows(candidates: set, depths: tuple) -> list[int]:
+    """The candidates of the least depth among them, in index order."""
+    earliest_depth = min(depths[index] for index in candidates)
+    return [
+        index for index in sorted(candidates) if depths[index] == earliest_depth
+    ]
 
 
 def _excluded_faults(

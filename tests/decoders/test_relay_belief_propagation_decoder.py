@@ -8,7 +8,7 @@ parts basis_split cuts (checked against Stim's own decomposition in
 tests/detector_error_model/test_basis_split.py), and the strong
 backend's split of the same window is the second referent. The wheel is
 the bb-decoders extra; the reference tests skip until it is installed.
-The yaml refusals need no wheel.
+The settings refusals need no wheel.
 """
 
 import dataclasses
@@ -17,15 +17,13 @@ import numpy
 import pytest
 import scipy.sparse
 
-import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
-import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 ROUNDS = 3
@@ -34,8 +32,8 @@ PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 SPLIT_REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED.joined(
     fault_models.DETECTOR_BASES_REQUIRED
 )
-# the paper's surface code values, Relay-BP-5 (Mueller et al. 2506.01779
-# lines 307, 332 and 343), with fewer legs so the test is quick
+# the Relay-BP paper's surface code Relay-BP-5 (2506.01779 lines 307,
+# 332, 343) with fewer legs, so the test is quick
 SURFACE = relay.RelayBeliefPropagationDecoder.Settings(
     gamma0=0.35,
     gamma_interval=(-0.254, 0.985),
@@ -79,6 +77,15 @@ def _reference_decoder(relay_bp, faults, settings):
         logging=False,
         seed=SEED,
     )
+
+
+def _decode_a_fresh_window(row, circuit, shot) -> None:
+    """One shot through a window model built anew, as a shot builds it."""
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    job = windows.job_for(model, shot)
+    row.decode(job)
 
 
 class _RelayDevice:
@@ -136,12 +143,9 @@ def test_two_windows_with_one_model_share_one_backend(monkeypatch):
         return build(*arguments)
 
     monkeypatch.setattr(relay_window, "_construct_backend", counted_build)
-    for _ in range(2):
-        model = windows.whole_circuit_window(
-            circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
-        )
-        job = windows.job_for(model, detection_events[0])
-        row.decode(job)
+    shot = detection_events[0]
+    _decode_a_fresh_window(row, circuit, shot)
+    _decode_a_fresh_window(row, circuit, shot)
     assert len(builds) == 1
 
 
@@ -227,63 +231,6 @@ def test_bases_apart_asks_the_window_model_for_detector_types():
     assert row.fault_model_requirement.detector_bases
 
 
-def test_the_tier_sections_keys_reach_the_rows_settings():
-    section = {
-        "kind": "relay_bp",
-        "units": 1,
-        "unit_memory": {"bits": None},
-        "engine": {
-            "clock": "decoder",
-            "fetch_cycles_per_round": 1,
-            "fetch_cycles_per_job": 0,
-            "release_cycles_per_job": 1,
-            "release_cycles_per_round": 0,
-        },
-        "alpha": 0.5,
-        "alpha_iteration_scaling_factor": 2,
-        "gamma0": 0.35,
-        "pre_iterations": 70,
-        "relay_set_count": 600,
-        "iterations_per_set": 50,
-        "gamma_interval": [-0.254, 0.985],
-        "converged_solution_count": 5,
-        "bases": "apart",
-    }
-    clocks = config.ClockSettings({"decoder": 250.0})
-    tier = decoder_settings.DecoderSettings.from_yaml(
-        section, clocks, "weak_decoder"
-    )
-    assert tier.row_settings == relay.RelayBeliefPropagationDecoder.Settings(
-        alpha=0.5,
-        alpha_iteration_scaling_factor=2.0,
-        gamma0=0.35,
-        pre_iterations=70,
-        relay_set_count=600,
-        iterations_per_set=50,
-        gamma_interval=(-0.254, 0.985),
-        converged_solution_count=5,
-        bases="apart",
-    )
-
-
-def test_a_section_with_no_keys_keeps_the_rows_old_profile():
-    """The defaults are the values the row was hard-wired to before."""
-    settings = relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
-        {}, None, "weak_decoder"
-    )
-    assert settings == relay.RelayBeliefPropagationDecoder.Settings(
-        alpha=None,
-        alpha_iteration_scaling_factor=1.0,
-        gamma0=0.1,
-        pre_iterations=80,
-        relay_set_count=300,
-        iterations_per_set=60,
-        gamma_interval=(-0.24, 0.66),
-        converged_solution_count=1,
-        bases="together",
-    )
-
-
 def test_the_first_relay_leg_must_run_at_least_once():
     """A zero first leg would hand back the previous window's answer.
 
@@ -294,15 +241,13 @@ def test_the_first_relay_leg_must_run_at_least_once():
     One iteration is enough, so the boundary is exclusive at zero.
     """
     with pytest.raises(ValueError) as caught:
-        relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
-            {"pre_iterations": 0}, None, "weak_decoder"
-        )
+        relay.RelayBeliefPropagationDecoder.Settings(pre_iterations=0)
     assert str(caught.value) == (
-        "weak_decoder.pre_iterations must be a whole number of iterations, "
+        "pre_iterations must be a whole number of iterations, "
         "at least 1 (got 0)"
     )
-    accepted = relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
-        {"pre_iterations": 1}, None, "weak_decoder"
+    accepted = relay.RelayBeliefPropagationDecoder.Settings(
+        **{"pre_iterations": 1}
     )
     assert accepted.pre_iterations == 1
 
@@ -323,11 +268,9 @@ def test_the_first_relay_leg_must_run_at_least_once():
 def test_a_gamma_interval_that_is_not_low_below_high_is_refused(interval):
     # relay-bp panics on an empty interval, [0.1, 0.1] among them
     with pytest.raises(ValueError) as caught:
-        relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
-            {"gamma_interval": interval}, None, "strong_decoder"
-        )
+        relay.RelayBeliefPropagationDecoder.Settings(gamma_interval=interval)
     assert str(caught.value) == (
-        "strong_decoder.gamma_interval must be [low, high], two finite real "
+        "gamma_interval must be [low, high], two finite real "
         f"numbers with low below high (got {interval!r})"
     )
 
@@ -356,20 +299,13 @@ def test_bases_apart_takes_the_sum_of_the_two_parts_times(monkeypatch):
 
 def test_a_memory_strength_that_is_not_a_number_is_refused():
     with pytest.raises(ValueError) as caught:
-        relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
-            {"gamma0": "0.35"}, None, "weak_decoder"
-        )
+        relay.RelayBeliefPropagationDecoder.Settings(gamma0="0.35")
     assert str(caught.value) == (
-        "weak_decoder.gamma0 must be a finite real number (got '0.35')"
+        "gamma0 must be a finite real number (got '0.35')"
     )
 
 
-def test_a_bases_value_off_its_table_is_refused():
-    with pytest.raises(ValueError) as caught:
-        relay.RelayBeliefPropagationDecoder.Settings.from_yaml(
-            {"bases": "xz"}, None, "weak_decoder"
-        )
-    assert str(caught.value) == (
-        "weak_decoder.bases 'xz' is not a row of its table; the rows are "
-        "['apart', 'together']"
-    )
+def test_a_bases_value_off_its_table_stops_the_build():
+    settings = relay.RelayBeliefPropagationDecoder.Settings(bases="xz")
+    with pytest.raises(KeyError, match="xz"):
+        settings.build()

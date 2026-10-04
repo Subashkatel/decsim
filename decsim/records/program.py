@@ -7,9 +7,11 @@ resolved once per run, so a planning collaborator reads a frozen record
 rather than the live operation with its Stim circuit.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional
+
+import stim
 
 
 @dataclass(frozen=True)
@@ -20,7 +22,6 @@ class ResolvedCodeGeometry:
     distance: int
     commit_round_count: int
     buffer_round_count: int
-    one_patch_spatial_node_count: int
 
 
 @dataclass(frozen=True)
@@ -36,9 +37,12 @@ class ResolvedOperationPlanning:
 
 @dataclass(frozen=True)
 class ResolvedPatchPlanning:
-    """Exact immutable cadence and idle-work facts for one patch."""
+    """Exact immutable planning facts for one patch.
 
-    patch_identity: Any
+    They cover its cadence and its idle work.
+    """
+
+    patch_identity: Any  # an opaque identity
     code_geometry: ResolvedCodeGeometry
     round_ticks: int
     spatial_node_count: int
@@ -76,9 +80,9 @@ class ExecutionProgram:
 
 @dataclass(frozen=True)
 class StreamBinding:
-    """Immutable runtime association between an operation and stream range."""
+    """Immutable runtime binding of an operation to a stream range."""
 
-    stream_id: Any
+    stream_id: Any  # an opaque identity
     stream_offset: int
 
 
@@ -86,12 +90,22 @@ class StreamBinding:
 class RunOperationBody:
     """Immutable controller-to-QPU command for one operation body."""
 
-    operation: Any
+    operation: "Operation"
     round_ticks: int
     round_count: int
     source_round_count: int
     emits_detector_data: bool = True
     finalizes_stream_round: bool = False
+
+
+@dataclass(frozen=True)
+class QPUCommandEvent:
+    """One QPU command transition, an arrival or a start."""
+
+    # "ARRIVED" or "STARTED"; the event ledger reads these words.
+    kind: str
+    tick: int
+    command: RunOperationBody
 
 
 @dataclass(frozen=True)
@@ -118,7 +132,7 @@ class OpKind(Enum):
     GENERIC = auto()
 
 
-@dataclass
+@dataclass(frozen=True)
 class Operation:
     """One logical operation in the circuit."""
 
@@ -126,9 +140,10 @@ class Operation:
     name: str  # human-readable label used in traces
     qubits: tuple  # logical qubit ids the op acts on
     clifford: bool = True  # non-Clifford implies a magic state by default
-    circuit: Optional[Any] = (
-        None  # stim circuit for real-syndrome (data-path) runs
-    )
+    # Stim circuit for real-syndrome (data-path) runs. A Stim circuit has
+    # no hash, and equal operations hold equal circuits, so the hash
+    # leaves it out and still agrees with equality.
+    circuit: Optional[stim.Circuit] = field(default=None, hash=False)
     consumes_magic_state: Optional[bool] = (
         None  # override; None = infer from clifford
     )
@@ -180,7 +195,7 @@ class OperationPlanningView:
     patches: tuple
     predecessors: tuple
     decoder_boundary_predecessors: tuple
-    stream_id: Optional[Any]
+    stream_id: Optional[Any]  # an opaque identity
     stream_offset: Optional[int]
     scheduled_start_round: int
     emits_detector_data: bool
@@ -239,7 +254,7 @@ def patches_of(operation: Operation) -> tuple:
     return (0,)
 
 
-def decode_identity(operation: Operation) -> Any:
+def decode_identity(operation: Operation) -> Any:  # an opaque identity
     """The decode stream an operation's rounds fold into.
 
     A stream segment names its stream; a standalone operation is its own

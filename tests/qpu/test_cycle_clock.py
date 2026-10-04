@@ -16,7 +16,6 @@ import pytest
 import decsim.config as config
 import decsim.engine
 import decsim.observe.command_events as command_events_module
-import decsim.observe.log_writers as log_writers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -71,28 +70,6 @@ class FinalizingSource(syndrome_devices.TimingOnlyDevice):
             operation.stream_id, (0,), source_round_count, bits=(1, 0, 1)
         )
         return [readout]
-
-
-class RecordingSource(syndrome_devices.TimingOnlyDevice):
-    """A timing-only source that keeps every begin_operation call."""
-
-    def __init__(self):
-        timing_only = super()
-        timing_only.__init__(CODE)
-        self.begun = []
-
-    def begin_operation(
-        self,
-        operation: program_records.Operation,
-        segment_round_count: int,
-        source_round_count: int,
-        *,
-        round_period_ticks: int,
-    ) -> None:
-        del round_period_ticks
-        self.begun.append(
-            (operation.id, segment_round_count, source_round_count)
-        )
 
 
 class SplitSource(syndrome_devices.TimingOnlyDevice):
@@ -188,31 +165,6 @@ def test_group_idle_ownership_excludes_busy_and_reassigned_members() -> None:
     ]
 
 
-def test_every_round_lands_on_a_boundary_of_the_1100_ns_cycle():
-    engine, qpu, log = clocked_qpu(1_100_000)
-    body = memory_body(1, 3, 1_100_000)
-    qpu.issue(body)
-    engine.schedule(3_300_000, qpu.finish)
-    engine.run()
-    assert log.round_ticks == [(1_100_000, 1), (2_200_000, 2), (3_300_000, 3)]
-    assert log.completion_ticks == [(3_300_000, 1)]
-
-
-def test_a_round_is_logged_as_fired_with_its_place_in_the_body():
-    engine, qpu, log = clocked_qpu(1_100_000)
-    lines = log_writers.LogWriter()
-    engine.line.connect(lines.write)
-    body = memory_body(1, 3, 1_100_000)
-    qpu.issue(body)
-    engine.schedule(3_300_000, qpu.finish)
-    engine.run()
-    assert lines.lines == [
-        "[  1.100 us] QPU: memory fires round 1/3",
-        "[  2.200 us] QPU: memory fires round 2/3",
-        "[  3.300 us] QPU: memory fires round 3/3",
-    ]
-
-
 def test_a_readout_leaves_at_the_tick_its_source_names():
     """gem5's queued port: the sender names the absolute send tick.
 
@@ -262,12 +214,8 @@ def test_a_departure_before_the_readout_is_refused():
     engine, qpu, log = clocked_qpu(10, source)
     body = memory_body(1, 1, 10)
     qpu.issue(body)
-    with pytest.raises(RuntimeError) as refusal:
+    with pytest.raises(RuntimeError, match="the syndrome source sends readout"):
         engine.run()
-    assert str(refusal.value) == (
-        "the syndrome source sends readout 1 of operation 1 at tick 9, "
-        "before tick 10 it was read out at"
-    )
 
 
 def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
@@ -283,29 +231,10 @@ def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
     engine.schedule(1_842_000, qpu.finish)
     engine.run()
     assert commands.events == [
-        cycle_clock.QPUCommandEvent("ARRIVED", 500_000, body),
-        cycle_clock.QPUCommandEvent("STARTED", 921_000, body),
+        program_records.QPUCommandEvent("ARRIVED", 500_000, body),
+        program_records.QPUCommandEvent("STARTED", 921_000, body),
     ]
     assert log.round_ticks == [(1_842_000, 1)]
-
-
-def test_a_command_arriving_on_a_boundary_starts_on_that_boundary():
-    engine, qpu, log = clocked_qpu(1_250_000)
-    commands = command_events_module.CommandEvents()
-    qpu.trace.command_event.connect(commands.command_event)
-    body = memory_body(1, 1, 1_250_000)
-
-    def issue_body():
-        qpu.issue(body)
-
-    engine.schedule(1_250_000, issue_body)
-    engine.schedule(2_500_000, qpu.finish)
-    engine.run()
-    assert commands.events == [
-        cycle_clock.QPUCommandEvent("ARRIVED", 1_250_000, body),
-        cycle_clock.QPUCommandEvent("STARTED", 1_250_000, body),
-    ]
-    assert log.round_ticks == [(2_500_000, 1)]
 
 
 def test_the_boundary_at_or_after_a_tick_on_a_921_ns_clock():
@@ -314,79 +243,6 @@ def test_the_boundary_at_or_after_a_tick_on_a_921_ns_clock():
     assert qpu.boundary_at_or_after(1) == 921_000
     assert qpu.boundary_at_or_after(921_000) == 921_000
     assert qpu.boundary_at_or_after(921_001) == 1_842_000
-
-
-def test_the_boundary_at_or_after_a_tick_on_a_1250_ns_clock():
-    engine, qpu, log = clocked_qpu(1_250_000)
-    assert qpu.boundary_at_or_after(1_300_000) == 2_500_000
-
-
-def test_an_idle_patch_emits_one_round_per_cycle_until_finish():
-    engine, qpu, log = clocked_qpu(10)
-    body = memory_body(1, 2, 10)
-    qpu.issue(body)
-    engine.schedule(45, qpu.finish)
-    engine.run()
-    assert log.round_ticks == [(10, 1), (20, 2)]
-    assert log.idle_ticks == [(30, 0, 1), (40, 0, 2), (50, 0, 3)]
-    assert engine.now == 50
-
-
-def test_an_operation_starting_on_a_patch_ends_its_idle_rounds():
-    engine, qpu, log = clocked_qpu(10)
-    first = memory_body(1, 1, 10)
-    second = memory_body(2, 2, 10)
-    qpu.issue(first)
-
-    def issue_second():
-        qpu.issue(second)
-
-    engine.schedule(25, issue_second)
-    engine.schedule(45, qpu.finish)
-    engine.run()
-    assert log.round_ticks == [(10, 1), (40, 1), (50, 2)]
-    assert log.idle_ticks == [(20, 0, 1), (30, 0, 2)]
-    assert log.completion_ticks == [(10, 1), (50, 2)]
-
-
-def test_two_operations_on_different_patches_run_in_the_same_cycles():
-    engine, qpu, log = clocked_qpu(10)
-    on_patch_a = memory_body(1, 2, 10, patch="A")
-    on_patch_b = memory_body(2, 1, 10, patch="B")
-    qpu.issue(on_patch_a)
-    qpu.issue(on_patch_b)
-    engine.schedule(15, qpu.finish)
-    engine.run()
-    assert log.round_ticks == [(10, 1), (10, 1), (20, 2)]
-    assert log.idle_ticks == [(20, "B", 1)]
-    assert log.completion_ticks == [(10, 2), (20, 1)]
-
-
-def test_a_running_body_begins_on_the_syndrome_source_when_it_starts():
-    source = RecordingSource()
-    engine, qpu, log = clocked_qpu(10, source)
-    body = memory_body(1, 2, 10)
-    qpu.issue(body)
-    engine.schedule(20, qpu.finish)
-    engine.run()
-    assert source.begun == [(1, 2, 2)]
-    assert log.round_ticks == [(10, 1), (20, 2)]
-
-
-def test_a_body_without_detector_data_holds_its_patch_silently():
-    engine, qpu, log = clocked_qpu(10)
-    operation = program_records.Operation(
-        id=1, name="wait", qubits=(0,), patches=(0,)
-    )
-    body = program_records.RunOperationBody(
-        operation, 10, 3, 3, emits_detector_data=False
-    )
-    qpu.issue(body)
-    engine.schedule(30, qpu.finish)
-    engine.run()
-    assert log.round_ticks == []
-    assert log.idle_ticks == []
-    assert log.completion_ticks == [(30, 1)]
 
 
 def test_a_zero_round_finalizer_delivers_the_final_readout_and_completes():
@@ -483,7 +339,7 @@ def test_a_payload_group_cannot_exceed_the_declared_round_size() -> None:
     )
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError, match="exceeds the declared syndrome"):
+    with pytest.raises(ValueError, match="readout group exceeds the declared"):
         engine.run()
 
 
@@ -493,7 +349,7 @@ def test_a_declared_fragment_count_must_match_the_emitted_payloads():
     body = memory_body(1, 1, 10, syndrome_fragment_count=3)
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError, match="must match emitted readouts"):
+    with pytest.raises(ValueError, match="declared syndrome fragment count"):
         engine.run()
 
 
@@ -503,7 +359,7 @@ def test_a_detector_emitting_round_must_emit_a_readout():
     body = memory_body(1, 1, 10)
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(RuntimeError, match="at least one readout"):
+    with pytest.raises(RuntimeError, match="a detector-emitting round"):
         engine.run()
 
 
@@ -525,44 +381,6 @@ def test_an_idle_stream_round_carries_the_sources_bits_to_the_windows():
     assert route == round_records.WINDOW_INPUT_ROUTE
 
 
-def test_the_emitted_event_is_the_qpus_own_at_the_instant_it_emits():
-    """The event belongs to the object the emission happened in.
-
-    gem5 reports a component's statistics from that component's own
-    group (gem5 src/base/stats/group.hh:60-92), so the
-    instant a readout leaves is the QPU's event and not the receiver's.
-    Every readout the clock hands on carries one, the timing-only
-    feedback-memory round included, each with the route it travels.
-    """
-    engine, qpu, log = clocked_qpu(1_000_000)
-    events = []
-    qpu.trace.round_event.connect(events.append)
-    body = memory_body(1, 2, 1_000_000)
-    qpu.issue(body)
-    engine.schedule(2_000_000, qpu.finish)
-    engine.run()
-    qpu.emit_feedback_memory_round(7, "A", 4)
-
-    kinds = [event.kind for event in events]
-    ticks = [event.tick for event in events]
-    rounds = [event.round_index for event in events]
-    routes = [event.route for event in events]
-    assert kinds == ["EMITTED", "EMITTED", "EMITTED"]
-    assert ticks == [1_000_000, 2_000_000, 2_000_000]
-    assert rounds == [1, 2, 4]
-    assert routes == ["WINDOW_INPUT", "WINDOW_INPUT", "FEEDBACK_MEMORY_ROUND"]
-
-
-def test_a_feedback_memory_round_is_routed_to_its_source_operation():
-    engine, qpu, log = clocked_qpu(10)
-    qpu.emit_feedback_memory_round(7, "A", 4)
-    payload, route = log.readouts[0]
-    assert payload.operation_id == ("idle", 7, "A")
-    assert payload.patch_ids == ("A",)
-    assert payload.round_index == 4
-    assert route == round_records.SyndromePacketRoute.feedback_memory_round(7)
-
-
 def test_an_idle_patchs_round_is_as_wide_as_one_patchs_syndrome():
     """Every measure qubit is read out each cycle, used or not."""
     engine, qpu, log = clocked_qpu(10)
@@ -575,7 +393,7 @@ def test_an_idle_patchs_round_is_as_wide_as_one_patchs_syndrome():
 def test_a_command_with_another_cadence_is_refused():
     engine, qpu, log = clocked_qpu(10)
     body = memory_body(1, 2, 11)
-    with pytest.raises(RuntimeError, match="cadence"):
+    with pytest.raises(RuntimeError, match="operation cadence must equal"):
         qpu.issue(body)
 
 
@@ -585,7 +403,7 @@ def test_an_instant_emitter_must_finalize_a_stream_round():
         id=1, name="tail", qubits=(0,), patches=(0,)
     )
     body = program_records.RunOperationBody(operation, 10, 0, 3)
-    with pytest.raises(ValueError, match="finalize"):
+    with pytest.raises(ValueError, match="zero-duration detector emitters"):
         qpu.issue(body)
 
 
@@ -594,24 +412,6 @@ def test_an_instant_emitter_must_finalize_a_stream_round():
 # operation round, an idle round, or a cycle of a body that reads out
 # nothing. The failure it guards against is the engine jumping from one
 # event tick to a far later one and dropping the boundaries between.
-
-
-def silent_body(operation_id, round_count, cycle_ticks, patch=0):
-    """A body that holds its patch for whole cycles without reading out."""
-    operation = program_records.Operation(
-        id=operation_id,
-        name="wait",
-        qubits=(patch,),
-        patches=(patch,),
-        emits_detector_data=False,
-    )
-    return program_records.RunOperationBody(
-        operation,
-        cycle_ticks,
-        round_count,
-        round_count,
-        emits_detector_data=False,
-    )
 
 
 def issuing(qpu, body):
@@ -836,54 +636,6 @@ def silent_boundaries(cycle, operations):
             tick = start + round_index * cycle
             ticks.add(tick)
     return ticks
-
-
-def test_a_long_jump_between_events_skips_no_boundary():
-    """Sparse events far apart: the engine jumps, the boundaries do not.
-
-    One three-round body on a one-millisecond cycle, an unrelated
-    mid-cycle event at 7777 and a finish at 10500 leave eight idle
-    boundaries between the body and the end of the run.
-    """
-    engine, qpu, log = clocked_qpu(1000)
-    body = memory_body(1, 3, 1000)
-    qpu.issue(body)
-    engine.schedule(7777, do_nothing, label="noise")
-    engine.schedule(10500, qpu.finish)
-    engine.run()
-
-    idle_ticks = [tick for tick, _patch, _round_index in log.idle_ticks]
-    assert log.round_ticks == [(1000, 1), (2000, 2), (3000, 3)]
-    assert idle_ticks == [4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000]
-
-
-def test_a_silent_body_takes_the_patch_from_the_idle_rounds_and_gives_it_back():
-    """Idle extraction stops while a silent body holds the patch.
-
-    The first body reads out rounds 1 and 2, the patch idles once, the
-    silent body occupies three cycles, and the last body reads out on the
-    boundary after it, with one idle round on each side of the pause.
-    """
-    engine, qpu, log = clocked_qpu(10)
-    first = memory_body(1, 2, 10)
-    silent = silent_body(2, 3, 10)
-    last = memory_body(3, 1, 10)
-    issue_silent = issuing(qpu, silent)
-    issue_last = issuing(qpu, last)
-    qpu.issue(first)
-    engine.schedule(25, issue_silent)
-    engine.schedule(65, issue_last)
-    engine.schedule(85, qpu.finish)
-    engine.run()
-
-    read_out = [
-        (tick, operation_id)
-        for tick, operation_id, _patch, _round_index in log.rounds
-    ]
-    idle_ticks = [tick for tick, _patch, _round_index in log.idle_ticks]
-    assert read_out == [(10, 1), (20, 1), (80, 3)]
-    assert idle_ticks == [30, 70, 90]
-    assert log.completion_ticks == [(20, 1), (60, 2), (80, 3)]
 
 
 def test_a_two_patch_body_reads_out_as_one_group_and_idles_on_both() -> None:

@@ -1,11 +1,10 @@
 """The logical observables each operation delivered.
 
-A listener on OperationResults' operation_result_delivered(operation_id,
-logical_observables); the folder delivers an operation's result once and
-withdraws it by delivering None, so the ledger holds exactly what the
-run produced. The RunResult's operation_results rows are read from here,
-never from the window side.
+An operation's result is delivered once and withdrawn by delivering
+None, so the ledger holds exactly what the run produced.
 """
+
+from typing import Optional
 
 
 class ResultLedger:
@@ -15,7 +14,7 @@ class ResultLedger:
         self.result_by_operation: dict = {}
 
     def operation_result_delivered(
-        self, operation_id, logical_observables
+        self, operation_id: int, logical_observables: Optional[tuple]
     ) -> None:
         """One operation's result was delivered, or withdrawn with None."""
         if logical_observables is None:
@@ -23,6 +22,6 @@ class ResultLedger:
             return
         self.result_by_operation[operation_id] = logical_observables
 
-    def observables_for(self, operation_id):
+    def observables_for(self, operation_id: int) -> Optional[tuple]:
         """The operation's delivered observables; None when it has none."""
         return self.result_by_operation.get(operation_id)

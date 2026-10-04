@@ -1,55 +1,36 @@
 """A manager's pool: its units, the free ones, the unit a job is offered.
 
-gem5's FUPool (src/cpu/o3/fu_pool.hh:64-75): the pool keeps the units and
-knows which are free; the issue logic decides what runs. Each manager
-has one pool: the chip's holds the units of the tier that decodes the
-plan's windows, the host's those of a switching run's strong tier. The
-manager's decoder port names the one algorithm every job of the pool
-runs (a Decoder row, ports.py).
+As gem5's FUPool (src/cpu/o3/fu_pool.hh:64-75), the pool keeps the units
+and knows which are free; the issue logic decides what runs. The chip's
+manager holds the units of the tier that decodes the plan's windows, the
+host's those of a switching run's strong tier, and every job of a pool
+runs the one algorithm of its manager's decoder port.
 
-A job that may start is offered a free unit with a free slot first.
-Among those, a unit that already holds this job's rounds, or is
-receiving them for another reader, comes first: there the job moves
-nothing and starts at the landing it shares (the staging's rule,
-decoder_memory_transfer.py). Where its rounds are nowhere yet, every
-free unit starts the job at the same tick, so the choice decides only
-whom the job delays, and the unit the fewest jobs already wait on is
-taken: a count of jobs, not of their work. gem5's pool takes any unit
-that is not busy (src/cpu/o3/fu_pool.cc:165-190) because its functional
-units hold no staged input; a unit here does.
+A job that may start takes a free unit with a free slot: first one that
+already holds or is receiving its rounds, where it moves nothing
+(decoder_memory_transfer.py), else the one the fewest jobs already wait
+on. gem5's pool takes any unit that is not busy
+(src/cpu/o3/fu_pool.cc:165-190) because its units hold no staged input;
+a unit here does.
 
-A job that cannot take compute now, because every unit computes or
-because its window still owes a boundary, is staged with its input on
-the unit with room that has the least work left: the rest of the running
-decode and the declared cost of every job already staged there. A free
-unit a staged job waits on is not an empty one, so two jobs that become
-startable together are staged on two units, and the two forced-class
-solves of one window overlap whenever two units have room. Least work
-left is the task-assignment rule that sends each job to the server whose
-outstanding work ends soonest. A job that may start is staged only on a
-unit whose work left is the pool's least, and waits in the queue while
-every such unit is full: on a unit with more work left it would start
-later than a central queue would start it. Where no cost is declared the
-work is unbounded, and the unit holding the fewest live jobs is taken,
-then the one that has the rounds.
+A job that cannot take compute now, because every unit computes or its
+window still owes a boundary, is staged with its input on the unit with
+room that has the least work left: the rest of the running decode and
+the declared cost of every job staged there. So two jobs that become
+startable together go to two units, and the two forced-class solves of
+one window overlap whenever two units have room. A job that may start is
+staged only on a unit with the pool's least work left, and waits in the
+queue while every such unit is full. With no declared cost the work is
+unbounded, and the unit holding the fewest live jobs is taken, then the
+one that has the rounds.
 
-The rule ranks compute only. When a parked job is released is not
-known, so its decode is counted whole, which bounds the newcomer's
-worst start and can cost it the rest of a running decode when the
-parked job is released much later. What an input copy costs is the
-link's to say, not the pool's, so a second unit is taken even where a
-bounded input link makes the second copy slower than waiting for the
-first unit would have been.
-
-When the work is known and deterministic, as a declared decode cost is,
-immediate dispatch of startable jobs by least work left starts every
-job at the tick a central FIFO queue over the pool would, so staging
-costs them nothing in start time and buys the input move. The central
-queue is Kiefer and Wolfowitz's (1955) over c identical servers: job n
-starts at the later of its arrival and the earliest tick a server is
-free. The textbook treatment is Harchol-Balter, Performance Modeling
-and Design of Computer Systems, Cambridge 2013. A job with no input has
-nothing to prefetch and waits in the queue for free compute.
+The rule ranks compute only. A parked job's decode is counted whole,
+since its release time is unknown, and an input copy's cost is the
+link's, not the pool's. With known, deterministic costs, least-work-left
+dispatch starts every job at the tick a central FIFO queue over the pool
+would (Kiefer and Wolfowitz 1955, c identical servers; Harchol-Balter,
+Performance Modeling and Design of Computer Systems, 2013), so staging
+costs no start time and buys the input move.
 """
 
 import dataclasses
@@ -79,16 +60,15 @@ InputIsOnTheUnit = Callable[
 class PoolSettings:
     """One pool as the root derives it from its tier's settings.
 
-    A manager takes its pool as this one record, as a gem5 FUPool takes
-    its units as one parameter (src/cpu/o3/FUPool.py:49). name labels
-    the pool in logs and results: "default" for the tier that decodes
-    the plan's windows, "strong" for the strong tier of a switching run.
-    unit_count is <tier>.units; capacity_bits is one unit's memory
-    (<tier>.unit_memory, None unbounded); copies_input is <tier>.input;
-    blocks_unit is the primary tier's result_blocks_unit on the default
-    pool and false on the strong one; formation is the tier's
-    event-detection logic when detection_events.formed_at seats it at
-    the tier's decoder, else None.
+    As a gem5 FUPool takes its units as one parameter
+    (src/cpu/o3/FUPool.py:49). name is "default" for the tier that
+    decodes the plan's windows and "strong" for a switching run's strong
+    tier; unit_count is <tier>.units; capacity_bits is one unit's memory
+    (None unbounded); copies_input is <tier>.input; blocks_unit is
+    result_blocks_unit on the default pool and false on the strong one;
+    formation is the tier's event-detection logic when
+    detection_events.formed_at seats it at the tier's decoder, else
+    None.
     """
 
     name: str
@@ -100,11 +80,12 @@ class PoolSettings:
 
 
 class DecoderPool:
-    """The pool's units and the free ones.
+    """The pool of one tier's decoder units.
 
-    Trace sources: unit_busy(unit) when a job takes a unit's compute out
-    of the free list, unit_freed(unit) when the compute goes back, so a
-    listener integrates the busy units without sampling the list.
+    It tracks which are free.
+
+    Trace sources: unit_busy(unit) when a job takes a unit's compute,
+    unit_freed(unit) when it goes back.
     """
 
     def __init__(
@@ -112,11 +93,6 @@ class DecoderPool:
         manager: "decoder_manager_module.DecoderManager",
         settings: PoolSettings,
     ) -> None:
-        if settings.unit_count < 1:
-            raise ValueError(
-                f"pool {settings.name!r} needs at least 1 unit "
-                f"(got {settings.unit_count})"
-            )
         self.manager = manager
         self.name = settings.name
         self.blocks_unit = settings.blocks_unit
@@ -147,13 +123,8 @@ class DecoderPool:
     ) -> Optional[tuple]:
         """(unit, has free compute) for this job, or None.
 
-        A job that may start takes a free unit with room: one that
-        already has its rounds, else the one the fewest jobs are
-        already waiting on. A job carrying input that finds none is
-        staged on a unit with the pool's least work left, or waits
-        while those are full; one that may not start yet is staged on
-        the unit with room that has the least work left. now is the
-        current tick; a unit's work left is counted from it.
+        now is the current tick; a unit's work left is counted from it.
+        The ranking is the module's.
         """
         takes_free_compute = decoder_unit_module.is_startable(job)
         if takes_free_compute or not carries_input:
@@ -165,19 +136,14 @@ class DecoderPool:
                 return unit, True
         if not carries_input:
             return None
-        with_room = _with_room(
-            self.units, job, resident_capacity, memory_demand_of
+        return self._staging_offer(
+            job,
+            now,
+            takes_free_compute,
+            resident_capacity,
+            memory_demand_of,
+            input_is_on_the_unit,
         )
-        if takes_free_compute:
-            with_room = self._freeing_first(with_room, now)
-        if not with_room:
-            return None
-        staging_rank = functools.partial(
-            self._staging_rank, job, now, input_is_on_the_unit
-        )
-        unit = min(with_room, key=staging_rank)
-        has_free_compute = self.is_free(unit)
-        return unit, has_free_compute
 
     def claim(
         self,
@@ -194,14 +160,36 @@ class DecoderPool:
         self.free.append(unit)
         self.trace.unit_freed.fire(unit)
 
+    def _staging_offer(
+        self,
+        job: decoding_records.DecodeJob,
+        now: int,
+        takes_free_compute: bool,
+        resident_capacity: int,
+        memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
+        input_is_on_the_unit: InputIsOnTheUnit,
+    ) -> Optional[tuple]:
+        """(unit, has free compute) to stage the job's input on, or None."""
+        with_room = _with_room(
+            self.units, job, resident_capacity, memory_demand_of
+        )
+        if takes_free_compute:
+            with_room = self._freeing_first(with_room, now)
+        if not with_room:
+            return None
+        staging_rank = functools.partial(
+            self._staging_rank, job, now, input_is_on_the_unit
+        )
+        unit = min(with_room, key=staging_rank)
+        has_free_compute = self.is_free(unit)
+        return unit, has_free_compute
+
     def _freeing_first(self, with_room: list, now: int) -> list:
         """The units with room among those with the pool's least work left.
 
-        A job that may start and finds no free unit starts when the unit
-        it is staged on frees its compute. Staged on a unit with more
-        work left, it starts later than a central FIFO queue over the
-        pool would start it, so while every unit that frees first is
-        full the job waits in the queue.
+        Staged on a unit with more work left, a job that may start would
+        start later than a central FIFO queue would start it, so it
+        waits in the queue while these are full.
         """
         work_left_by_unit = {}
         for unit in self.units:
@@ -224,9 +212,9 @@ class DecoderPool:
     ) -> tuple:
         """The order a job that must wait picks its unit by, smallest first.
 
-        Least work left, so the job's worst wait is shortest; then the
-        fewest live jobs; then a unit that already holds its rounds, so
-        nothing is copied. The job stays on the unit it picks.
+        Least work left, so the worst wait is shortest; then the fewest
+        live jobs; then a unit that holds the rounds, so nothing is
+        copied.
         """
         work_left = unit.work_left_ticks(now, self._occupancy_ticks)
         live_residents = unit.live_residents()
@@ -234,10 +222,7 @@ class DecoderPool:
         return work_left, len(live_residents), moves_input
 
     def _occupancy_ticks(self, job: decoding_records.DecodeJob) -> float:
-        """Ticks the job's decode holds a unit; unbounded when undeclared.
-
-        The staging rank totals these to find a unit's work left.
-        """
+        """Ticks the job's decode holds a unit; unbounded when undeclared."""
         decoder = self.manager.decoder
         occupancy = decoder.occupancy(job)
         if occupancy is None:
@@ -249,12 +234,9 @@ def decoder_rows(decoders: tuple) -> list:
     """Every decoder row inside these decoders, in the order the walk finds.
 
     A row is anything that answers the runtime-checkable Decoder port,
-    which every row of DECODERS does and a row written outside decsim
-    does too without inheriting decsim's base class; the port declares
-    the sources a row reports on, so the walk asks nothing further about
-    what a row has. The recursion asks the seeding protocol whether a
-    value names children of its own: a row that wraps another (the
-    confidence, staged and check wrappers) names its inner decoder.
+    inherited from decsim's base class or not. A row that wraps another
+    (the confidence, staged and check wrappers) names its inner decoder
+    through the seeding protocol, which the walk follows.
     """
     found = []
     seen = set()
@@ -267,12 +249,20 @@ def decoder_rows(decoders: tuple) -> list:
         seen.add(identity)
         if isinstance(decoder, ports.Decoder):
             found.append(decoder)
-        if not isinstance(decoder, seeding.RunSeedComposite):
-            continue
-        children = decoder.run_seed_children()
-        for child in children:
-            pending.append(child.child)
+        inner_decoders = _inner_decoders(decoder)
+        pending.extend(inner_decoders)
     return found
+
+
+def _inner_decoders(decoder) -> list:
+    """The decoders a wrapping row names through the seeding protocol."""
+    if not isinstance(decoder, seeding.RunSeedComposite):
+        return []
+    children = decoder.run_seed_children()
+    inner_decoders = []
+    for child in children:
+        inner_decoders.append(child.child)
+    return inner_decoders
 
 
 def _with_room(
@@ -306,11 +296,7 @@ def _free_unit_for(
     job: decoding_records.DecodeJob,
     input_is_on_the_unit: InputIsOnTheUnit,
 ) -> Optional[decoder_unit_module.DecoderUnit]:
-    """The free unit a job that may start takes, or None when none has room.
-
-    The unit that already holds the job's rounds comes first, so no
-    input moves; else the unit the fewest jobs wait on.
-    """
+    """The free unit a job that may start takes, or None when none has room."""
     if not free_with_room:
         return None
     unit_holding_input = _unit_holding_input(
@@ -334,13 +320,7 @@ def _fewest_awaiting_compute(units: list) -> decoder_unit_module.DecoderUnit:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the decoder pool reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the decoder pool reports, as one member."""
 
     unit_busy: trace_source.TraceSource = trace_source.new_source()
     unit_freed: trace_source.TraceSource = trace_source.new_source()

@@ -1,13 +1,12 @@
 """The workload makers decsim ships: Stim's and Deltakit's memories.
 
-A maker is a plain function a yaml names as module:function under
-workload.kind producer. decsim calls it with the yaml's arguments as
-each sweep point resolves them, and it returns a
-records.workload.Workload. A maker written outside decsim has the same
-shape; these are the ones that ship.
+A maker is a plain function that returns a records.workload.Workload,
+which WorkloadSettings.running lowers for the machine. A maker written
+outside decsim has the same shape; these are the ones that ship.
 """
 
-from typing import Optional, Union
+import dataclasses
+from typing import Optional
 
 import stim
 
@@ -19,37 +18,39 @@ import decsim.records.workload as workload_records
 
 # The stream a live memory's segments extend: an identity local to the
 # workload, which also names the stream's substream seed
-# (seeding.substream_seed), so it is the one tools/live_memory_example.py
-# uses and a run reproduces that tool's draws.
+# (seeding.substream_seed), so it is the one
+# examples/live_memory_example.py uses and a run reproduces that example's
+# draws.
 LIVE_STREAM_ID = 100
 
 
 def memory_circuit(
     code_task: str,
-    rounds_per_shot: Union[int, str],
+    rounds_per_shot: int,
     distance: int,
     physical_error_probability: float,
 ) -> workload_records.Workload:
     """Stim's generated memory circuit, one operation for the whole shot.
 
     One probability on all four of Stim's noise channels, as Stim's
-    guide does (frontends/settings.py memory_circuit); rounds_per_shot
-    is a round count or "<n>d", n rounds per unit of distance.
+    guide does (frontends/settings.py memory_circuit).
     """
-    circuit, rounds = _generated_memory(
+    circuit = workload_settings.memory_circuit(
         code_task, rounds_per_shot, distance, physical_error_probability
     )
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     return workload_records.Workload(
-        operations=(operation,), round_counts={1: rounds}
+        operations=(operation,),
+        round_counts={1: rounds_per_shot},
+        physical_error_probability=physical_error_probability,
     )
 
 
 def memory_patches(
     code_task: str,
-    rounds_per_shot: Union[int, str],
+    rounds_per_shot: int,
     patch_count: int,
     distance: int,
     physical_error_probability: float,
@@ -63,16 +64,14 @@ def memory_patches(
     The copies sit side by side along x in one Stim coordinate frame,
     patch p shifted by p (2 d + 2) with a SHIFT_COORDS ahead of its
     circuit, so a surface-code patch, 2 d units wide, starts one lattice
-    step past its neighbour and a burst region in that frame covers the
-    patches it reaches (McEwen 2104.05219: a burst starts at one spot and
-    spreads over the chip). Each copy draws its own shot.
+    step past its neighbour. Each copy draws its own shot.
     """
     if patch_count < 1:
         raise ValueError(
             f"workload.patch_count is at least 1, got {patch_count}; with "
             "no patch the run would finish having run nothing"
         )
-    circuit, rounds = _generated_memory(
+    circuit = workload_settings.memory_circuit(
         code_task, rounds_per_shot, distance, physical_error_probability
     )
     pitch = 2 * distance + 2
@@ -91,9 +90,11 @@ def memory_patches(
             circuit=placed,
         )
         operations.append(operation)
-        round_counts[operation_id] = rounds
+        round_counts[operation_id] = rounds_per_shot
     return workload_records.Workload(
-        operations=tuple(operations), round_counts=round_counts
+        operations=tuple(operations),
+        round_counts=round_counts,
+        physical_error_probability=physical_error_probability,
     )
 
 
@@ -109,7 +110,7 @@ def deltakit_memory(
 
     The Explorer's css_code_memory_circuit with SD6 noise at the sweep's
     probability, exported with its measurement-to-round map
-    (frontends/deltakit.py memory_circuit), as tools/deltakit_example.py
+    (frontends/deltakit.py memory_circuit), as examples/deltakit_example.py
     builds it by hand. The optional deltakit extra is imported only when
     this maker runs.
     """
@@ -120,7 +121,9 @@ def deltakit_memory(
         1, "memory", (patch,), patches=(patch,)
     )
     physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
-    return workload_records.Workload((operation,), {1: rounds}, physical)
+    return workload_records.Workload(
+        (operation,), {1: rounds}, physical, physical_error_probability
+    )
 
 
 def deltakit_live_memory(
@@ -149,7 +152,10 @@ def deltakit_live_memory(
         relaxation_time_microseconds=relaxation_time_microseconds,
         dephasing_time_microseconds=dephasing_time_microseconds,
     )
-    return live_memory(program, decode_after_rounds, patch)
+    workload = live_memory(program, decode_after_rounds, patch)
+    return dataclasses.replace(
+        workload, physical_error_probability=physical_error_probability
+    )
 
 
 def live_memory(
@@ -189,18 +195,3 @@ def live_memory(
     operations = (prefix, protect, resume, readout)
     round_counts = {1: decode_after_rounds, 2: 0, 3: 1, 4: 0}
     return workload_records.Workload(operations, round_counts, program)
-
-
-def _generated_memory(
-    code_task: str,
-    rounds_per_shot: Union[int, str],
-    distance: int,
-    physical_error_probability: float,
-) -> tuple:
-    """Stim's memory circuit at the sweep's point, and its round count."""
-    shot_length = workload_settings.RoundsPerShot.from_yaml(rounds_per_shot)
-    rounds = shot_length.rounds_for(distance)
-    circuit = workload_settings.memory_circuit(
-        code_task, rounds, distance, physical_error_probability
-    )
-    return circuit, rounds

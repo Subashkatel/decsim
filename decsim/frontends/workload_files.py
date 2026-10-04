@@ -64,8 +64,14 @@ def read_workload(
     """A maker's two outputs read from disk: the operations and the circuit.
 
     The physical circuit is a finite .stim with its measurement-to-round
-    json, a folder of the four fragments, or neither.
+    json, a folder of the four fragments, or neither; with both, one
+    would go unread.
     """
+    if circuit_path is not None and fragments_path is not None:
+        raise ValueError(
+            "a circuit and fragments are both given; a workload carries "
+            "one physical circuit"
+        )
     operations, round_counts = _read_operations(operations_path)
     physical = None
     if fragments_path is not None:
@@ -84,9 +90,10 @@ def write_workload(
     circuit with measurement_rounds, or fragments.
     """
     folder.mkdir(parents=True, exist_ok=True)
+    round_counts = dict(workload.round_counts)
     entries = []
     for operation in workload.operations:
-        entry = _operation_entry(operation, workload.round_counts, folder)
+        entry = _operation_entry(operation, round_counts, folder)
         entries.append(entry)
     document = {"schema": OPERATIONS_SCHEMA, "operations": entries}
     operations_path = folder / "operations.json"
@@ -228,7 +235,7 @@ def _write_finite_circuit(
     circuit_path = folder / "circuit.stim"
     physical.circuit.to_file(str(circuit_path))
     schedule = {}
-    for index, round_index in physical.measurement_rounds.items():
+    for index, round_index in physical.measurement_rounds:
         schedule[str(index)] = round_index
     schedule_path = folder / "measurement_rounds.json"
     _write_json(schedule_path, schedule)

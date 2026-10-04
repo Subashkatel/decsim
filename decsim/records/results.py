@@ -9,9 +9,10 @@ from typing import Optional, Protocol
 
 @dataclasses.dataclass(frozen=True)
 class LogicalOperationResult:
-    """One operation's prediction and, when sampled, its truth.
+    """One logical operation's result.
 
-    logical_failure is true when any predicted bit differs from truth.
+    It holds the prediction and, when sampled, the truth. logical_failure
+    is true when any predicted bit differs from truth.
     """
 
     operation_id: int
@@ -55,15 +56,15 @@ class UnitTask(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class UnitOutcome:
-    """What one unit ran: its measured rows, its task, its memory.
+    """What one unit ran: its rows, its task, its memory, its packages.
 
-    task is the task as the unit left it, its online calibrator after
-    the unit's shots. peak_memory_mb is the peak resident memory of the
-    process that ran the unit, read when the unit ended. A worker runs
-    units one after another, so it bounds the unit's own peak from
-    above, which is the side a memory request needs.
+    task is as the unit left it, its online calibrator after the shots.
+    peak_memory_mb is the worker process's peak at the unit's end, an upper
+    bound since units run one after another. module_versions is read in the
+    process that decoded, where a decoder's package loads.
     """
 
     rows: list
     task: UnitTask
     peak_memory_mb: float
+    module_versions: dict

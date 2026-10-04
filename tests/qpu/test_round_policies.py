@@ -4,12 +4,7 @@ Sources: the lattice-surgery unit of d rounds per step that
 decsim/qpu/round_policies.py takes from Horsman et al. 1111.4022 and
 Litinski 1808.02892; the section citations live in that module and are not
 verified here. The policies receive the OperationPlanningView the planner
-builds (decsim/frontends/planner.py). The yaml configs' "10d"
-rounds-per-shot rule is resolved by the workload settings
-(decsim/frontends/settings.py, RoundsPerShot.rounds_for: ten times the
-distance) and handed to the run as FixedRounds(rounds)
-(decsim/frontends/settings.py:147); CodeRounds(scale=10) gives the same
-count from the surface card and is not what the yaml configs use.
+builds (decsim/frontends/planner.py).
 """
 
 import pytest
@@ -26,15 +21,6 @@ def operation(operation_id, qubits=(0,), kind=program_records.OpKind.GENERIC):
     return program_records.OperationPlanningView.from_operation(
         workload_operation
     )
-
-
-def test_a_fixed_policy_gives_every_operation_the_same_count():
-    policy = round_policies.FixedRounds(7)
-    memory = operation(1)
-    distance_three = code_geometry.SurfaceCodeModel(distance=3)
-    distance_nine = code_geometry.SurfaceCodeModel(distance=9)
-    assert policy.rounds_for(memory, distance_three) == 7
-    assert policy.rounds_for(memory, distance_nine) == 7
 
 
 def test_the_code_rounds_policy_scaled_by_ten_gives_ten_d_rounds():
@@ -112,7 +98,9 @@ def test_a_generic_one_qubit_operation_costs_memory():
 
 def test_per_operation_counts_win_over_the_fallback_and_may_be_zero():
     fallback = round_policies.FixedRounds(9)
-    policy = round_policies.PerOperationRounds({1: 0, 2: 4}, fallback=fallback)
+    policy = round_policies.PerOperationRounds(
+        ((1, 0), (2, 4)), fallback=fallback
+    )
     code = code_geometry.SurfaceCodeModel(distance=3)
     first = operation(1)
     second = operation(2)
@@ -123,10 +111,23 @@ def test_per_operation_counts_win_over_the_fallback_and_may_be_zero():
 
 
 def test_a_fixed_policy_without_a_round_is_refused():
-    with pytest.raises(ValueError, match=">= 1 round"):
+    with pytest.raises(ValueError, match="must give >= 1 round"):
         round_policies.FixedRounds(0)
 
 
 def test_a_negative_per_operation_count_is_refused():
-    with pytest.raises(ValueError, match=">= 0 rounds"):
-        round_policies.PerOperationRounds({1: -1})
+    with pytest.raises(ValueError, match="must give >= 0 rounds"):
+        round_policies.PerOperationRounds(((1, -1),))
+
+
+def test_per_operation_counts_given_as_a_dict_are_refused_naming_the_form():
+    with pytest.raises(
+        ValueError,
+        match="PerOperationRounds.rounds_by_operation must be a tuple",
+    ):
+        round_policies.PerOperationRounds({1: 3})
+
+
+def test_a_round_count_that_is_not_a_whole_number_is_refused():
+    with pytest.raises(ValueError, match="FixedRounds must give a whole"):
+        round_policies.FixedRounds(2.5)

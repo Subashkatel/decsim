@@ -2,69 +2,45 @@
 
 Each row is one measured cell: a device, how it was shared (whole: one
 process on the whole GPU; mps: one client of an MPS daemon; 3g.40gb and
-1g.10gb: one process on one Multi-Instance GPU slice of the NVIDIA
-profile of that name), how many decodes ran on it at once, and the
-region decoded, named by its detector count. The time of one decode is
-intercept_microseconds plus microseconds_per_iteration times the
-Relay-BP iterations it ran, the least-squares line through the cell's
-2,000 timed decodes, and never less than fastest_decode_microseconds,
-the fastest of those decodes (the minimum of the time_ns column of the
-cell's measurement file, in microseconds). Below its fastest decode a
-line is extrapolating to times the device never showed.
+1g.10gb: one process on one Multi-Instance GPU slice of that NVIDIA
+profile), how many decodes ran on it at once, and the region decoded,
+named by its detector count. One decode takes intercept_microseconds
+plus microseconds_per_iteration times its Relay-BP iterations, the
+least-squares line through the cell's 2,000 timed decodes, and never
+less than fastest_decode_microseconds, the fastest of them, since below
+it a line extrapolates to times the device never showed.
 
-How the times were made. The decoder is NVIDIA's Relay-BP,
-nv-qldpc-decoder from cudaq-qec-cu12 0.8.0 (CUDA-Q QEC 0.8.0, cudaqx
-commit 6ac00e5c), with decsim's relay_bp profile as its keys: bp_method
-3, composition 1, gamma0 0.1, 80 pre-iterations, 300 relay sets of 60
-iterations, stop at the first converged solution, fp32, and decsim's own
-gamma table. Each time is one decode() call from Python on the host
-clock: the binding, the syndrome's copy to the device, the kernels and
-the answer's copy back, with no dispatcher and no link. The GPUs are an
-NVIDIA A100-SXM4-80GB (x86 host) and a GH200 144G HBM3e (Grace host,
-NVLink-C2C), driver 610.57.04, CUDA user-mode driver 13.3, toolkit 12.9.
-The two slice profiles were cut on NVIDIA A100 80GB PCIe boards, as
-nvidia-smi names them in the measurement's logs, so a slice row is not
-the whole-card row's own board cut in parts.
+The decoder is NVIDIA's Relay-BP, nv-qldpc-decoder from cudaq-qec-cu12
+0.8.0 (CUDA-Q QEC 0.8.0, cudaqx commit 6ac00e5c), at decsim's relay_bp
+keys: bp_method 3, composition 1, gamma0 0.1, 80 pre-iterations, 300
+relay sets of 60 iterations, stop at the first converged solution, fp32,
+and decsim's own gamma table. Each time is one decode() call from Python
+on the host clock: the binding, the syndrome's copy to the device, the
+kernels and the answer's copy back, with no dispatcher and no link. The
+GPUs are an NVIDIA A100-SXM4-80GB (x86 host) and a GH200 144G HBM3e
+(Grace host, NVLink-C2C), driver 610.57.04, CUDA user-mode driver 13.3,
+toolkit 12.9; the slice profiles were cut on A100 80GB PCIe boards.
+
 The regions are decsim's memory circuit (Stim
 surface_code:rotated_memory_z, p = 0.001 on all four noise channels) of
 3d rounds, r_strong = r_com + 2 r_buf at r_com = r_buf = d (Toshio et
-al. arXiv:2510.25222 lines 1246-1250), 2,000 Stim shots per distance.
-Rows with bases apart time the X part and the Z part of the same
-regions on the same shots, each one decode at a time on the whole card:
-decsim's split (detector_error_model/basis_split.py) cuts the region's
-model, each part is given decsim's gamma table for its own column
-count, and each part is a row of its own, named by its detector count.
+al. 2510.25222 lines 1246-1250), 2,000 Stim shots per distance. Rows
+with bases apart time the X and Z parts of the same regions, one decode
+at a time on the whole card, cut by decsim's split
+(detector_error_model/basis_split.py), each part with decsim's gamma
+table for its own column count. Each row's comment gives its line's r2;
+two fit poorly, the GH200 at d = 13 (0.683, a few slow outliers) and the
+A100's d = 5 X part (0.864, one decode of one iteration took 1,704 us).
+Cells with two or more decodes at once without MPS are not here: the
+processes time-slice the GPU, so a decode's time follows the others'
+work, not its own iterations.
 
-Every whole-card and MPS line explains its cell's times with r2 at
-least 0.996 except the GH200 at d = 13, 0.683, where a few slow outliers
-sit off the line; the part lines explain r2 0.990 to 1.000 except the
-A100's d = 5 X part, 0.864, where one decode of one iteration took
-1,704 us, an outlier the line cannot follow. The slice
-lines explain r2 0.951 to 0.9999, and a line leans on the long decodes:
-at a cell's median decode a slice's line reads 1 percent high to 13
-percent low, the whole card's 1 percent high to 6 percent low. The
-1g.10gb line at d = 13 leans the hardest: it reads 522 us at the three
-iterations its fastest region ran and crosses zero below two, while
-that region took 1,406 us, which is why a line is floored at its cell's
-fastest decode.
-Cells with two or more decodes at once are not here: without MPS the
-processes time-slice the GPU and a decode's time follows the others'
-work, not its own iterations (their lines explain r2 0.11 to 0.96), so
-no line prices them.
-
-The rows that name RELAY_BP_5 were measured at the Relay-BP paper's
-surface code Relay-BP-5 (Mueller et al. 2506.01779 lines 307, 332 and
-343), the decoder baseline's strong decoder: gamma0 0.35, the interval
-[-0.254, 0.985], 600 relay sets of 60 after 80 pre-iterations, stop
-after 5 converged solutions (nv-qldpc-decoder's NConv criterion), and
-the rest as above, with decsim's gamma table drawn at these keys. They
-are one decode at a time on the whole A100-SXM4-80GB, X and Z
-together, the same regions and shots, Slurm job 14676845 on 2026-09-29
-(driver 610.57.04, CUDA user-mode driver 13.3). Each slope is the
-Relay-BP-1 line's to within 7 percent and each intercept 32 to 108 us
-higher, so at a cell's median decode the Relay-BP-1 line at the same
-iterations reads 1.5 to 13 percent low, the cell's own line 2.5
-percent low to 0.6 percent high.
+The rows that name _RELAY_BP_5_KEYS were measured at the Relay-BP
+paper's surface code Relay-BP-5 (Mueller et al. 2506.01779 lines 307,
+332 and 343), the decoder baseline's strong decoder: gamma0 0.35, the
+interval [-0.254, 0.985], 600 relay sets of 60 after 80 pre-iterations,
+stop after 5 converged solutions (NConv), one decode at a time on the
+whole A100-SXM4-80GB, X and Z together, on the same regions and shots.
 """
 
 import dataclasses
@@ -74,8 +50,8 @@ from decsim.decoders.relay_belief_propagation import (
 )
 
 RelaySettings = relay_belief_propagation.RelayBeliefPropagationDecoder.Settings
-
-RELAY_BP_5 = RelaySettings(
+# the keys the Relay-BP-5 rows ran at (2506.01779 lines 307, 332, 343)
+_RELAY_BP_5_KEYS = RelaySettings(
     gamma0=0.35,
     gamma_interval=(-0.254, 0.985),
     relay_set_count=600,
@@ -88,8 +64,8 @@ class MeasuredTime:
     """One cell's decode time as a line in its Relay-BP iterations.
 
     relay_settings are the relay_bp row's keys every decode of the cell
-    ran at, its defaults unless the row names others, each decode X and
-    Z together; bases says whether the region was cut into parts first.
+    ran at, X and Z together; bases says whether the region was cut into
+    parts first.
     """
 
     device: str
@@ -161,7 +137,7 @@ RELAY_BP_TIMES = (
         110.852,
         9.827,
         147.187,
-        relay_settings=RELAY_BP_5,
+        relay_settings=_RELAY_BP_5_KEYS,
     ),
     # d 7, Relay-BP-5, 0.9897
     MeasuredTime(
@@ -173,7 +149,7 @@ RELAY_BP_TIMES = (
         178.551,
         19.533,
         259.108,
-        relay_settings=RELAY_BP_5,
+        relay_settings=_RELAY_BP_5_KEYS,
     ),
     # d 9, Relay-BP-5, 0.9940
     MeasuredTime(
@@ -185,7 +161,7 @@ RELAY_BP_TIMES = (
         218.469,
         26.372,
         640.656,
-        relay_settings=RELAY_BP_5,
+        relay_settings=_RELAY_BP_5_KEYS,
     ),
     # d 11, Relay-BP-5, 0.9993
     MeasuredTime(
@@ -197,7 +173,7 @@ RELAY_BP_TIMES = (
         276.795,
         36.079,
         1092.257,
-        relay_settings=RELAY_BP_5,
+        relay_settings=_RELAY_BP_5_KEYS,
     ),
     # d 13, Relay-BP-5, 0.9985
     MeasuredTime(
@@ -209,7 +185,7 @@ RELAY_BP_TIMES = (
         417.132,
         48.252,
         1748.302,
-        relay_settings=RELAY_BP_5,
+        relay_settings=_RELAY_BP_5_KEYS,
     ),
     # d 5, X part, 0.8641
     MeasuredTime("a100", "whole", "apart", 1, 168, 59.437, 7.752, 64.058),

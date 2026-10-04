@@ -1,27 +1,18 @@
 """The assembler: raw measurement fragments become one packed round.
 
-The controller's packing stage merges the fragments of a round in
-fragment order, charges the packing time once per complete round, asks
-the run's detection event placement for the round that leaves, and hands
-it to the writer once that placement's own time is charged
-(detector_error_model/detection_event_formation.py, seated by
-detection_events.formed_at). Caune et al. 2410.05202 measure
-250 to 370 FPGA cycles for packetization, bus transfer, result return
-and the conditional together, an upper bound for the packing time. The
-stage admits a bounded number of rounds at once
-(controller.packing_rounds_in_flight, RoundsInFlight): a round counts
-from its emission until the windows hear of it, whether it is still on
-the readout link, in assembly, held for store room or on its route.
-Rounds take places in the order the QPU emitted them. A round that
-finds the stage full waits in front of it, whole, and enters when a
-round leaves the stage. The QPU keeps measuring (qpu/cycle_clock.py),
-so the wait is the controller's. A refused transfer waits at its sender
-and is offered again on the retry (gem5 src/mem/port.hh:244-262; garnet
-keeps a message at the head of its MessageBuffer while no virtual
-channel has a credit, NetworkInterface.cc:207-218 and :397-400; Helios
-pops its upstream FIFO only when the next one is ready,
-design/channels/pu_arbitration.sv:142-148), so it is the same waiting
-line the sender keeps in front of the stores (HeldRounds).
+The packing stage merges a round's fragments, charges the packing time
+once per round, and hands the round on after the detection event
+placement's own time. Caune et al. 2410.05202 measure 250 to 370 FPGA
+cycles for packetization, bus transfer, result return and the
+conditional together, an upper bound for the packing time.
+
+The stage admits a bounded number of rounds
+(controller.packing_rounds_in_flight), taken in emission order. A round
+that finds it full waits whole in front of it while the QPU keeps
+measuring, so the wait is the controller's. A refused transfer waits at
+its sender and is offered again on the retry (gem5 src/mem/port.hh;
+garnet NetworkInterface.cc; Helios pu_arbitration.sv), the same line
+the sender keeps in front of the stores (HeldRounds).
 """
 
 import dataclasses
@@ -45,16 +36,11 @@ _SEAT = "controller"
 class RoundsInFlight:
     """The rounds in flight through the packing stage, against the bound.
 
-    A round is in flight from its emission until the windows hear of
-    it: its publication on the window route, its delivery on the
-    memory route, its landing in the strong syndrome buffer on a
-    strong-primary run. Until then it is in one of four places, in
-    assembly here (from its emission, while its readout crosses too),
-    held for store room (HeldRounds), on its route (RoundTransmitter) or
-    crossing to the strong syndrome buffer (SyndromeRoundSender), and
-    each place keeps its own count; the stage's count is their sum, read
-    when an emitted round asks for room, so no exit can forget a release.
-    A round waiting in front of the stage is not in it.
+    A round is in flight from its emission until the windows hear of it: in
+    assembly, held for store room, on its route, or crossing to the strong
+    syndrome buffer. Each place keeps its own count and the stage reads
+    their sum, so no exit can forget a release. A round waiting in front of
+    the stage is not in it.
     """
 
     held_rounds = ports.Port(ports.HeldRounds)
@@ -84,9 +70,7 @@ class RoundsInFlight:
 class RoundAssembler:
     """Fragments in, one packed round out, after the packing time.
 
-    Trace sources: round_event(RoundEvent) with kinds BINARY_AVAILABLE
-    and PACKED; copy_made(round_key, bits, "controller intake",
-    "controller assembler") for the merged round (data_path.md hop 2).
+    copy_made fires for the merged round (data_path.md hop 2).
     """
 
     syndrome_round_sender = ports.Port(ports.SyndromeRoundSender)
@@ -114,13 +98,11 @@ class RoundAssembler:
     ) -> None:
         """The QPU emitted the round: it takes its place, or waits for one.
 
-        Places are taken in emission order, before transport can reorder
-        the arrivals, as gem5's O3 rename stalls in program order when the
-        reorder buffer has no free entry (src/cpu/o3/rename.cc:556-584)
-        and commit inserts in that order (src/cpu/o3/commit.cc:1295-1316).
-        A ready round retires after its predecessors, as commitInsts
-        retires the ready head per thread. A round that arrives early
-        therefore never holds the place its predecessor needs.
+        Places are taken in emission order, before transport can reorder the
+        arrivals, and a ready round retires after its predecessors, as gem5's O3
+        rename and commit do (src/cpu/o3/rename.cc:556-584,
+        commit.cc:1295-1316). An early round never holds its predecessor's
+        place.
         """
         identity = _round_identity(fragment, route)
         if self.workspace.context_of(identity) is not None:
@@ -138,11 +120,7 @@ class RoundAssembler:
         fragment: round_records.RetainedSyndromeFragment,
         route: round_records.SyndromePacketRoute,
     ) -> None:
-        """Take one fragment; the round is packed when its last one arrives.
-
-        A fragment of a round still waiting for its place is kept with
-        the round, which packs when it takes the place.
-        """
+        """Take one fragment; the round is packed when its last one arrives."""
         available = round_records.RoundEvent.of(
             "BINARY_AVAILABLE",
             self.engine.now,
@@ -171,11 +149,7 @@ class RoundAssembler:
             )
 
     def _enter(self, context) -> bool:
-        """A waiting round takes a place in the stage, when one is free.
-
-        A round whose fragments all arrived while it waited starts its
-        packing at this tick, after the line has let it go.
-        """
+        """A waiting round takes a free place; packs now if complete."""
         if not self.workspace.has_room(self.rounds_in_flight):
             return False
         self.workspace.enter(context)
@@ -239,11 +213,10 @@ class RoundAssembler:
         self._depart(packed, context)
 
     def _depart(self, packed: round_records.PackedRound, context) -> None:
-        """Hand the round on, after the placement's own time is charged.
+        """Hand the round on after the controller's detection event time.
 
-        The controller pays for a conversion it does here, one round's
-        latency on the former's clock (detection_events); a seat after
-        it pays its own, so the round leaves at once.
+        A seat after the controller pays its own time, so the round leaves at
+        once.
         """
         formation_cycles = self.detection_events.cycles_at(_SEAT, 1)
         if formation_cycles == 0:
@@ -265,7 +238,7 @@ class RoundAssembler:
 
 @dataclasses.dataclass
 class _PackingContext:
-    """One round in assembly: its route and the fragments so far."""
+    """One round being packed from its fragments."""
 
     identity: tuple
     round_key: tuple
@@ -344,8 +317,8 @@ def _round_identity(fragment, route) -> tuple:
 def _merge_adjacent_fragments(fragments) -> tuple:
     """Coalesce adjacent acquisitions without permuting measurement records.
 
-    Stim record targets address the declared measurement order. Two parts
-    with another acquisition between them cannot be concatenated here.
+    Stim record targets address the declared measurement order, so two parts
+    with another acquisition between them stay apart.
     """
     merged = []
     by_fragment_index = operator.attrgetter("fragment_index")
@@ -388,13 +361,7 @@ def _joined_width(first: Optional[int], second: Optional[int]) -> Optional[int]:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the round assembler reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the round assembler reports, as one member."""
 
     round_event: trace_source.TraceSource = trace_source.new_source()
     copy_made: trace_source.TraceSource = trace_source.new_source()

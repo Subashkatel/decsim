@@ -1,24 +1,23 @@
 """The shots the syndrome source sampled, by the operation that asked.
 
-A listener on the SyndromeSource port's shot_sampled source. A sampled
-shot is the run's input, not its output: the detection events the device
-drew, which the shot's sample digest hashes (experiments/measure.py), and
-the circuit they came from, which a whole-circuit reference decode reads
-to check the loop's answer. They are heard once at sampling time instead
-of read back off the device, since a streaming source forms its circuit
-only when it samples.
+A sampled shot is the run's input: the detection events the shot's
+digest hashes and the circuit a reference decode reads. They are heard
+at sampling, since a streaming source forms its circuit only then.
 """
 
 import dataclasses
-from typing import Any
+
+import stim
+
+import decsim.records.program as program_records
 
 
 @dataclasses.dataclass(frozen=True)
 class SampledShot:
-    """One sampled shot: the circuit, and the events it produced."""
+    """One shot the source sampled for an operation."""
 
-    operation_id: Any
-    circuit: Any  # a stim.Circuit; the listener never reads inside it
+    operation_id: int
+    circuit: stim.Circuit  # the listener never reads inside it
     detection_events: tuple
 
 
@@ -28,7 +27,9 @@ class SampledShots:
     def __init__(self) -> None:
         self.shots_by_operation: dict = {}
 
-    def shot_sampled(self, operation, detection_events) -> None:
+    def shot_sampled(
+        self, operation: program_records.Operation, detection_events: tuple
+    ) -> None:
         """One operation's shot was drawn, with its whole-circuit events."""
         events = tuple(bool(bit) for bit in detection_events)
         shot = SampledShot(

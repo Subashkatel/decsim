@@ -1,22 +1,15 @@
 """The window commits: a result rides home and commits its window once.
 
-The boundary is decoder state (the residual defects at the commit edge),
-so it leaves for dependent windows once the verdict is ready, as Skoric's
-blocks pass their artificial defects on: the corrections crossing out of
-the commit region become artificial defects (2209.08552 lines 268-269),
-and the next window decodes them with the buffer region's unresolved
-defects and the new rounds (lines 272-275). LILLIPUT's state register
-and qLDPC's net_error do the same
-(qldpc/decoders/sinter.py decode_shots_to_error); the frame commit
-downstream never gates the next window.
+The boundary is decoder state, the residual defects at the commit edge,
+so it leaves for the dependent windows at the verdict, as Skoric's
+blocks pass their artificial defects on (2209.08552 lines 268-275) and
+qLDPC its net_error (qldpc/decoders/sinter.py decode_shots_to_error).
+The frame commit downstream never gates the next window.
 
-Two classes, because a window's result meets two decisions. WindowVerdict
-is every window job's on_decoded: it applies the threshold, escalates or
-cancels, and tells the decode queue what it decided. WindowCommitter
-then commits the window and hands the correction on; the decoder side
-executes the send that carries it to the frame
-(decoders/decoder_output.py). The committer is written first, because
-the verdict declares it as a port and a port carries the class it names.
+WindowVerdict is every window job's on_decoded: it applies the
+threshold, escalates or cancels, and tells the decode queue.
+WindowCommitter then commits the window and hands the correction on; the
+decoder side sends it to the frame (decoders/decoder_output.py).
 """
 
 import dataclasses
@@ -40,19 +33,14 @@ import decsim.windows.window_planner as window_planner
 
 
 class WindowCommitter:
-    """Commits one window once and hands its correction on.
+    """Commits each window once.
 
-    The engine stamps and logs; the courier, the decoder output and the
-    results are the three the commit hands to; the strong redecode
-    (None when the run never escalates) hears every weak boundary as the
-    courier takes it, because a held strong window waits for the
-    boundaries the weak decoder has determined (Toshio et al. 2510.25222
-    lines 1248-1250), and a final result's trip to the frame comes after
-    that. The commit is also where
-    the result is in the window side's hands, so the caller's
-    on_result_read runs there. Trace source: window_committed(window,
-    contribution), the window's record and the contribution that owns
-    its rounds, at every commit.
+    The strong redecode, None when the run never escalates, hears every
+    weak boundary as the courier takes it, because a held strong window
+    waits for the boundaries the weak decoder determined (Toshio et al.
+    2510.25222 lines 1248-1250). The caller's on_result_read runs at the
+    commit, where the window side has the result. Trace source:
+    window_committed(window, contribution) at every commit.
     """
 
     courier = ports.Port(window_boundaries.BoundaryCourier)
@@ -61,7 +49,7 @@ class WindowCommitter:
     # the strong tier's window side; None when the run never escalates
     strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.trace = _TraceSources()
 
@@ -76,9 +64,8 @@ class WindowCommitter:
     ) -> None:
         """A provisional result commits now; a final one commits on its send.
 
-        The commit is the moment the window side has the result in hand,
-        so it is where the decoder side hears that its output was read
-        (<tier>.result_blocks_unit, decoders/settings.py).
+        The commit is where the decoder side hears that its output was
+        read (<tier>.result_blocks_unit, decoders/settings.py).
         """
         if not is_final:
             self.commit(window, operation, result, request_key, False)
@@ -183,9 +170,8 @@ class WindowCommitter:
     ) -> None:
         """The strong result is the window's final one.
 
-        Its prediction, its status and its no-correction reason replace
-        the provisional ones, the held boundary ships now that it is
-        final, and the operation may complete.
+        Its prediction, status and no-correction reason replace the
+        provisional ones, and a boundary held for it ships.
         """
         _record_the_decode(window, result)
         if result.logical_observables is not None:
@@ -208,21 +194,16 @@ class WindowCommitter:
 class WindowVerdict:
     """Applies the threshold to one window's result; the job's on_decoded.
 
-    The planner and the tracker name the window and its operation, the
-    escalation policy answers the window's confidence, the decode queue
-    hears that answer and, at the commit, that the result was read, the
-    strong redecode (None when the run never escalates) hears an
-    escalated result before its provisional commit and every weak commit
-    after it, and the committer stamps the window with the tick the
-    decode answered and performs whichever commit the verdict asks for.
-    The engine and the cycle costs price this handoff's threshold and
-    switch logic on its own clock, like gem5's frontend and forward
-    latencies (src/mem/XBar.py). Zero costs keep the handoff synchronous.
+    The threshold and switch logic are priced on the verdict's own
+    clock, like gem5's frontend and forward latencies (src/mem/XBar.py);
+    zero costs keep the handoff synchronous.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker_module.RoundTracker)
-    escalation_policy = ports.Port(ports.EscalationPolicy)
+    # the switching policy; None on a run with no switching, which keeps
+    # every result
+    escalation_policy = ports.Port(ports.EscalationPolicy, optional=True)
     # the strong tier's window side; None when the run never escalates
     strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
     decode_queue = ports.Port(ports.DecodeQueue)
@@ -247,12 +228,11 @@ class WindowVerdict:
     ) -> None:
         """The window's answer: apply the threshold, publish or escalate.
 
-        The result carries the window's confidence, so the threshold is
-        applied here (Toshio et al. 2510.25222 Sec. III A, step 3): a
-        kept result rides its output link to the frame and commits as
-        final; a result below the threshold asks the strong tier for
-        the window first after the switch cost, then commits
-        provisionally, its boundary leaving with the commit.
+        Toshio et al. 2510.25222 Sec. III A, step 3: a kept result rides
+        its output link to the frame and commits as final; a result
+        below the threshold asks the strong tier for the window after
+        the switch cost, then commits provisionally, its boundary
+        leaving with the commit.
         """
         key = (job.operation_id, job.window_id)
         window = self.planner.windows_by_key[key]
@@ -261,7 +241,7 @@ class WindowVerdict:
         if cycles == 0 or result.soft_output is None:
             self._form_verdict(job, result)
             return
-        if not self.escalation_policy.decides_on_a_confidence:
+        if self.escalation_policy is None:
             self._form_verdict(job, result)
             return
         edge = self.clock.edge(cycles, self.engine.now)
@@ -287,7 +267,7 @@ class WindowVerdict:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        verdict = self.escalation_policy.verdict_for_weak_result(job, result)
+        verdict = self._verdict_for(job, result)
         if verdict is decoding_records.Verdict.KEEP or self.switch_cycles == 0:
             self._apply_verdict(job, result, verdict)
             return
@@ -295,6 +275,16 @@ class WindowVerdict:
         delay = edge - self.engine.now
         apply = functools.partial(self._apply_verdict, job, result, verdict)
         self.engine.schedule(delay, apply, label="escalation switch")
+
+    def _verdict_for(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
+        """The policy's verdict; a run with no switching keeps every result."""
+        if self.escalation_policy is None:
+            return decoding_records.Verdict.KEEP
+        return self.escalation_policy.verdict_for_weak_result(job, result)
 
     def _apply_verdict(
         self,
@@ -357,12 +347,6 @@ def _with_the_crossing_commit(
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the window committer reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the window committer reports, as one member."""
 
     window_committed: trace_source.TraceSource = trace_source.new_source()

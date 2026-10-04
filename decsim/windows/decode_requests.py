@@ -1,27 +1,23 @@
 """The decode requests: a job per complete window, asked for once.
 
-A complete window pays its store read and readiness decision before submission;
-a window that still owes a boundary is masked when its decode starts (qLDPC
-folds the net error into the syndrome of the next window,
-qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps raw rounds and
-applies syndrome_mods at assembly). WindowInputGate is what the decoder side
-calls back into through job.gate: may_stage says whether a blocked job may take
-an input slot yet, may_start whether the landed job may decode, mask_input folds
-the boundary into the landed input once. The requester builds the primary tier's
-job, asks the escalation policy which tiers decode the window now, and enqueues
-one submission per tier on the DecodeQueue port with each job's input send; a
-speculative strong decode's submission is the strong tier's window side's, and a
-speculative strong decode that side holds for its input has no submission to
-make here.
+A complete window pays its store read and readiness decision before
+submission. A window that still owes a boundary is masked when its
+decode starts (qLDPC folds the net error into the next window's
+syndrome, qldpc/decoders/sinter.py decode_shots_to_error; cudaq-x keeps
+raw rounds and applies syndrome_mods at assembly). The requester builds
+the primary tier's job, asks the escalation policy which tiers decode
+the window now, and enqueues one submission per tier on the DecodeQueue
+port.
 """
 
 import dataclasses
 import functools
 import operator
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
@@ -36,18 +32,13 @@ import decsim.windows.window_planner as window_planner
 
 
 class WindowInputGate:
-    """Whether a job may take a slot, may start, and what its input reads.
+    """The boundary gate a window's decode job passes through.
 
-    The decoder side calls back into this through job.gate: may_stage
-    says whether a boundary-blocked job may occupy an input slot yet,
-    may_start whether the landed job may decode, mask_input says what the
-    landed input must read once the window's boundary is folded in. It is
-    decoder-side policy about one window, so it is its own class rather
-    than a second face of the builder. What the mask is, and which row
-    the tier declares, are decided here; the write itself is the decoder
-    side's, which owns the memory and the working copy it lands in
-    (<tier>.boundary_fold, decoders/settings.py, and
-    decoders/decoder_memory_transfer.py).
+    It says whether the job may take a slot, whether it may start, and
+    what its input reads. The decoder side calls it through job.gate. It
+    decides the mask and the row the tier declares; the write is the
+    decoder side's, which owns the memory (<tier>.boundary_fold,
+    decoders/settings.py).
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -55,10 +46,17 @@ class WindowInputGate:
     # the decoder side's input, which installs what this hands it
     input_fold = ports.Port(ports.DecoderInputFold)
 
-    def __init__(self, copies_the_fold: bool = True):
-        # weak_decoder.boundary_fold: copy duplicates the landed input,
-        # in_place XORs the mask into the unit's own memory
-        self.copies_the_fold = copies_the_fold
+    def __init__(
+        self,
+        copies_the_window_fold: bool = True,
+        copies_the_strong_fold: bool = True,
+    ):
+        # each tier's copies_boundary_fold: a copy duplicates the landed
+        # input, in place XORs the mask into the unit's own memory. A
+        # window job is decoded by the tier that decodes the plan's
+        # windows, a strong re-decode by the strong tier.
+        self.copies_the_window_fold = copies_the_window_fold
+        self.copies_the_strong_fold = copies_the_strong_fold
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
         """May this boundary-blocked job occupy an input slot yet?
@@ -78,9 +76,8 @@ class WindowInputGate:
     def may_start(self, job: decoding_records.DecodeJob) -> bool:
         """May this landed job start its decode?
 
-        False parks the job in its slot until its window's last boundary
-        arrives. Pure check: the mask itself is applied by mask_input at
-        the actual start, so a re-check can never fold the boundary twice.
+        False parks the job in its slot until its last boundary arrives.
+        It only checks; mask_input folds the mask at the start, once.
         """
         window = job.window
         if window is None:
@@ -90,21 +87,13 @@ class WindowInputGate:
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the input the decode reads.
 
-        The fold's condition is that a boundary arrived, which the window
-        interaction answers, and not that a bit is set in it: cuda-q QEC
-        applies the accumulated syndrome mods to every window past the
-        first, whatever they hold (sliding_window.cpp:287-293, the
-        `w > 0` branch), and a fold skipped on an all-zero mask would
-        make the work the seam costs follow the noise, which is the cost
-        D9 (docs/explanation/decisions.md:156-164) prices independent of
-        it so that a sweep can read it. The mask is this side's: what a
-        boundary is and how it lands on a round layer are the window
-        interaction's. Where the masked input is written is the decoder
-        side's, which is handed it here: with the copy fold the unit's
-        stored rounds stay raw (cudaq-x keeps raw rounds and applies
-        syndrome_mods at window assembly) and the job reads a masked
-        duplicate; with the in-place fold the mask goes into the unit's
-        own memory and nothing is duplicated.
+        The fold runs when a boundary arrived, not when a bit is set:
+        cuda-q QEC applies the accumulated syndrome mods to every window
+        past the first (sliding_window.cpp:287-293), so the seam's cost
+        does not follow the noise. With the copy fold the unit's stored
+        rounds stay raw and the job reads a masked duplicate, as cudaq-x
+        does; with the in-place fold the mask goes into the unit's own
+        memory.
         """
         window = job.window
         if window is None:
@@ -122,12 +111,18 @@ class WindowInputGate:
         masked_input = dataclasses.replace(
             job.decoder_input, rounds=tuple(masked_rounds)
         )
-        if self.copies_the_fold:
+        if self._copies_the_fold(job):
             self.input_fold.fold_into_a_copy(job, masked_input)
             return
         self.input_fold.fold_in_place(job, masked_input)
 
     # ---- private
+
+    def _copies_the_fold(self, job: decoding_records.DecodeJob) -> bool:
+        """The fold of the tier that decodes this job."""
+        if job.kind is decoding_records.DecodeJobKind.WINDOW:
+            return self.copies_the_window_fold
+        return self.copies_the_strong_fold
 
     def _every_dependency_resolving(self, dependencies, visiting: set) -> bool:
         for dependency in dependencies:
@@ -157,13 +152,10 @@ class WindowInputGate:
 
 
 class DecodeRequestBuilder:
-    """Builds one decode job from a complete window.
+    """Builds one decode job from a complete window, its gate stamped on.
 
-    It stamps the gate on every job it builds, so the decoder side has
-    the window's input policy without knowing the window package. Trace
-    source: window_data_complete(window, read_keys) when the last round
-    the window reads is readable in its store, which is the moment the
-    window may be requested.
+    Trace source: window_data_complete(window, read_keys) when the last
+    round the window reads is readable in its store.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -171,7 +163,7 @@ class DecodeRequestBuilder:
     interaction = ports.Port(window_interactions.WindowInteraction)
     gate = ports.Port(WindowInputGate)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.next_request_sequence = 0
         self.trace = _TraceSources()
@@ -179,7 +171,10 @@ class DecodeRequestBuilder:
     # ---- building a request
 
     def new_request_key(
-        self, operation_id, window_id: int, tier: window_records.DecoderTier
+        self,
+        operation_id: Any,  # an opaque identity
+        window_id: int,
+        tier: window_records.DecoderTier,
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
         request_key = window_records.DecoderRequestKey(
@@ -188,7 +183,9 @@ class DecodeRequestBuilder:
         self.next_request_sequence += 1
         return request_key
 
-    def stamp_first_round(self, window: window_records.Window, store) -> None:
+    def stamp_first_round(
+        self, window: window_records.Window, store: ports.RetainedRounds
+    ) -> None:
         """Retain arrival provenance for latency accounting."""
         if window.t_first_round is not None:
             return
@@ -224,7 +221,7 @@ class DecodeRequestBuilder:
         window: window_records.Window,
         operation: program_records.Operation,
         tier: window_records.DecoderTier,
-        store,
+        store: ports.RetainedRounds,
         forced_logical_class: Optional[int] = None,
     ) -> decoding_records.DecodeJob:
         """The tier's decode job for one complete window, read from store.
@@ -297,7 +294,9 @@ class DecodeRequestBuilder:
             forced_logical_class=forced_logical_class,
         )
 
-    def assemble_payloads(self, window: window_records.Window, store) -> list:
+    def assemble_payloads(
+        self, window: window_records.Window, store: ports.RetainedRounds
+    ) -> list:
         """Collect this window's raw payloads, with successor overflow rounds.
 
         The boundary is never folded here: the mask is XORed into the
@@ -403,7 +402,9 @@ class DecodeRequester:
     # the strong side's manager, which serves the speculative decode a window
     # submits beside its weak job; a run that never escalates has none
     strong_decode_queue = ports.Port(ports.DecodeQueue, optional=True)
-    escalation_policy = ports.Port(ports.EscalationPolicy)
+    # the switching policy; None on a run with no switching, whose
+    # windows are decoded on the primary tier alone
+    escalation_policy = ports.Port(ports.EscalationPolicy, optional=True)
     verdict = ports.Port(window_commits.WindowVerdict)
     # the primary store's outgoing port; it executes the input send
     store_output = ports.Port(ports.SyndromeBufferOutput)
@@ -420,7 +421,9 @@ class DecodeRequester:
         # the windows whose decision has not ended, by window key
         self.deciding_by_window: dict = {}
 
-    def request_ready_windows(self, windows, strong_redecode) -> None:
+    def request_ready_windows(
+        self, windows: list, strong_redecode: Optional[ports.StrongRedecode]
+    ) -> None:
         """Request each window that has its data, in the given order.
 
         strong_redecode is the strong tier's window side, which builds the
@@ -431,7 +434,9 @@ class DecodeRequester:
             self.request_if_ready(window, strong_redecode)
 
     def request_if_ready(
-        self, window: window_records.Window, strong_redecode
+        self,
+        window: window_records.Window,
+        strong_redecode: Optional[ports.StrongRedecode],
     ) -> None:
         """If the window has its data, submit it through the policy."""
         if window.queued or window.committed:
@@ -458,19 +463,17 @@ class DecodeRequester:
         self,
         window: window_records.Window,
         operation: program_records.Operation,
-        strong_redecode,
+        strong_redecode: Optional[ports.StrongRedecode],
     ) -> None:
         """Build the primary jobs; the window's requests leave at its decision.
 
-        The primary tier's jobs are built and their input held here; a strong
-        tier the policy names too gets its speculative strong decode from the
-        strong redecode. The window side decides once per window, the pre-decode
-        step a syndrome passes before any decoder has it (RISC-Q 2603.16203
-        lines 895-898), and Step 1 feeds that syndrome to both decoders at once
-        (Toshio et al. 2510.25222 lines 598-601), so the speculative strong
-        decode is planned and every request admitted when it ends. The store is
-        read when the input leaves it, at dispatch
-        (syndrome_buffer/round_output.py), not here.
+        The window side decides once per window, the pre-decode step a
+        syndrome passes before any decoder has it (RISC-Q 2603.16203
+        lines 895-898), and Step 1 feeds the syndrome to both decoders
+        at once (Toshio et al. 2510.25222 lines 598-601), so a
+        speculative strong decode is planned and every request admitted
+        when the decision ends. The store is read at dispatch
+        (syndrome_buffer/round_output.py).
         """
         store = self.retention.primary_store
         self.builder.stamp_first_round(window, store)
@@ -481,7 +484,7 @@ class DecodeRequester:
             window, operation, primary_tier, store, first_class
         )
         window.queued = True
-        tiers = self.escalation_policy.tiers_for_ready_window(window)
+        tiers = self._tiers_for(window, primary_tier)
         primary_jobs = self._primary_jobs(job, forced_classes)
         window_reads = decoding_records.WindowReads(window.key)
         is_input_held = self._bind_input_hold(primary_jobs, window_reads)
@@ -496,6 +499,12 @@ class DecodeRequester:
         delay = edge - engine.now
         decide = functools.partial(self._decide, window.key)
         engine.schedule(delay, decide, label="window decision")
+
+    def _tiers_for(self, window, primary_tier) -> tuple:
+        """The tiers decoding the window now: the policy's, or the primary."""
+        if self.escalation_policy is None:
+            return (primary_tier,)
+        return self.escalation_policy.tiers_for_ready_window(window)
 
     def _decide(self, window_key: tuple) -> None:
         """The window's decision ended: issue its requests, unless withdrawn."""
@@ -542,12 +551,9 @@ class DecodeRequester:
     ) -> list:
         """The primary tier's jobs: the built one, and one per other class.
 
-        A confidence built from forced-class solves needs the window
-        decoded once per class, and all of them are asked for at one instant
-        (CUDA launches a whole grid in one call, CUDA C++ Programming
-        Guide section 5.1, Kernels; OpenMP's primary thread "creates a
-        team of itself and zero or more additional threads", OpenMP 5.2
-        specification section 1.3, Execution Model).
+        A confidence from forced-class solves needs one decode per
+        class, all asked for at one instant, as a CUDA grid launches in
+        one call (CUDA C++ Programming Guide section 5.1).
         """
         jobs = [job]
         for forced_class in forced_classes[1:]:
@@ -560,9 +566,8 @@ class DecodeRequester:
     ) -> decoding_records.Submission:
         """One primary job with its input send; a held input lands at once.
 
-        The send is the store's own (syndrome_buffer/round_output.py):
-        this side asks for it and the decoder manager calls it at
-        dispatch, and neither of them executes it.
+        The send is the store's own (syndrome_buffer/round_output.py);
+        the decoder manager calls it at dispatch.
         """
         send_input = self.store_output.input_send_for(job, is_input_held)
         return decoding_records.Submission(job, send_input)
@@ -603,12 +608,11 @@ class DecodeRequester:
     def withdraw(self, window: window_records.Window) -> None:
         """Withdraw one window's early-shipped, unstarted decode.
 
-        Its submission bookkeeping is reset so it can be resubmitted fresh
-        (a strong window that absorbs the window owns its rounds from then
-        on). The reset comes first: taking the decode back frees its slot
-        and the manager dispatches at once, and a later window staged then
-        must not read this one as still dispatched, the order gem5's IEW
-        keeps by taking a squash before it dispatches (src/cpu/o3/iew.cc
+        Its submission bookkeeping is reset first, so it can be
+        resubmitted fresh: taking the decode back frees its slot and the
+        manager dispatches at once, and a later window staged then must
+        not read this one as dispatched. gem5's IEW takes a squash
+        before it dispatches in the same order (src/cpu/o3/iew.cc
         1451-1452).
         """
         window.queued = False
@@ -619,7 +623,9 @@ class DecodeRequester:
         if not has_dropped_decision:
             self.decode_queue.withdraw_window(window.key)
 
-    def release_parked(self, window_key: tuple, strong_redecode) -> None:
+    def release_parked(
+        self, window_key: tuple, strong_redecode: Optional[ports.StrongRedecode]
+    ) -> None:
         """The window's last boundary arrived: its parked decodes may start.
 
         The window's weak decode parks on the chip's manager; a speculative
@@ -687,7 +693,7 @@ class _SharedInputHold:
 
 @dataclasses.dataclass(frozen=True)
 class _DecidingWindow:
-    """A window in its decision: its primary job, tiers and submissions."""
+    """What one window issues when its decision ends."""
 
     job: decoding_records.DecodeJob
     tiers: tuple
@@ -723,12 +729,6 @@ def _first_forced_class(forced_classes: tuple) -> Optional[int]:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the decode request builder reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the decode request builder reports, as one member."""
 
     window_data_complete: trace_source.TraceSource = trace_source.new_source()

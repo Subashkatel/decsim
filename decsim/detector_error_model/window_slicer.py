@@ -16,10 +16,10 @@ import stim
 from decsim.detector_error_model import (
     basis_split,
     detector_chronology,
-    fault_model_contracts,
     stim_fault_catalog,
     window_placement,
 )
+from decsim.records import fault_model_contracts
 
 
 class WindowSlicer:

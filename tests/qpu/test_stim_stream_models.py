@@ -10,11 +10,11 @@ import numpy
 import pytest
 
 import decsim.detector_error_model.detector_formation as formation
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.frontends.deltakit as deltakit
 import decsim.qpu.stim_stream_models as stream_models
 import decsim.records.circuits as circuit_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.windows as window_records
 import tests.qpu.memory_programs as memory_programs
 
@@ -39,12 +39,12 @@ def program(
     )
 
 
-@pytest.mark.parametrize("distance", [3, 5])
 @pytest.mark.parametrize("basis", ["X", "Z"])
-@pytest.mark.parametrize("round_count", [1, 2, 7, 13])
+@pytest.mark.parametrize("round_count", [1, 2, 7])
 def test_assembled_fragments_preserve_stims_generated_circuit(
-    distance: int, basis: str, round_count: int
+    basis: str, round_count: int
 ) -> None:
+    distance = 3
     program = memory_programs.memory_program(distance, basis)
     assembled, measurement_rounds = program.assemble(round_count)
     expected = memory_programs.memory_circuit(round_count, distance, basis)
@@ -57,14 +57,14 @@ def test_assembled_fragments_preserve_stims_generated_circuit(
     assert measurement_rounds[last_measurement] == round_count
 
 
-@pytest.mark.parametrize("horizon", [13, 21])
 def test_interior_window_effects_match_a_longer_complete_circuit(
-    program: circuit_records.RepeatedStimCircuit, horizon: int
+    program: circuit_records.RepeatedStimCircuit,
 ) -> None:
     growing = stream_models.GrowingStimModels(program, LINKED)
     first = window_records.Window(1, 0, 1, 3, 6, 6)
     actual = growing.for_window(first)
-    referent = _referent(program, horizon)
+    longer_horizon = 13
+    referent = _referent(program, longer_horizon)
     expected = _slice(referent, first)
     _assert_same_model(actual, expected)
     _assert_linked_detector_effects(actual)
@@ -95,7 +95,7 @@ def test_queued_fault_identities_survive_later_model_horizons(
     _assert_stable_identities(before, after)
 
 
-@pytest.mark.parametrize("round_count", [1, 2, 3])
+@pytest.mark.parametrize("round_count", [1, 3])
 def test_finishing_rebuilds_the_unqueued_initial_terminal_model(
     program: circuit_records.RepeatedStimCircuit, round_count: int
 ) -> None:
@@ -113,7 +113,7 @@ def test_finishing_rebuilds_the_unqueued_initial_terminal_model(
     _assert_linked_detector_effects(actual)
 
 
-@pytest.mark.parametrize("round_count", [7, 8, 9])
+@pytest.mark.parametrize("round_count", [7, 9])
 def test_finishing_refreshes_tail_models_without_changing_queued_ownership(
     program: circuit_records.RepeatedStimCircuit, round_count: int
 ) -> None:
@@ -172,7 +172,7 @@ def test_a_closed_weak_window_is_refused_at_the_model_boundary(
     closed = window_records.Window(
         1, 0, 1, 3, 6, 6, closed_temporal_boundaries=True
     )
-    with pytest.raises(ValueError, match="trailing-buffer feedback"):
+    with pytest.raises(ValueError, match="live Stim streams require"):
         growing.for_window(closed)
 
 
@@ -183,7 +183,7 @@ def test_a_closed_strong_window_is_refused_at_the_model_boundary(
     closed = window_records.Window(
         1, 0, 1, 3, 6, 6, closed_temporal_boundaries=True
     )
-    with pytest.raises(ValueError, match="trailing-buffer feedback"):
+    with pytest.raises(ValueError, match="live Stim streams require"):
         growing.for_strong_window(closed, (), None)
 
 

@@ -1,11 +1,9 @@
 """Deltakit memory circuits exported into the supplied-circuit frontend.
 
 Explorer's css_code_memory_circuit and CSSStage define the physical
-history and measurement order. Canonical Stim circuits, measurement
-schedules and declared cadence leave this optional provider.
+history and measurement order. Deltakit is imported only here.
 """
 
-import importlib.util
 import itertools
 import math
 from typing import TYPE_CHECKING, Optional
@@ -19,6 +17,14 @@ import decsim.records.circuits as circuit_records
 # block holds two.
 TEMPLATE_ROUND_COUNT = 4
 TEMPLATE_REPEAT_COUNT = TEMPLATE_ROUND_COUNT - 2
+
+# Each of these acts on every target alone, so target order carries no
+# meaning, but stim draws their noise in target order. Explorer's CSSStage
+# keeps resets in a frozenset of gates hashed by class identity, so their
+# order changes between processes.
+ORDER_FREE_INSTRUCTIONS = frozenset(
+    {"R", "RX", "RY", "X_ERROR", "Y_ERROR", "Z_ERROR", "DEPOLARIZE1"}
+)
 
 if TYPE_CHECKING:
     import deltakit_circuit as circuit_api
@@ -36,25 +42,18 @@ def memory_circuit(
 ) -> tuple[stim.Circuit, dict[int, int]]:
     """Export one single-patch memory with standard depolarising noise.
 
-    Families are rotated_surface and repetition. X or Z selects the
-    prepared and measured logical basis, and repetition uses checks of
-    that basis. SD6 applies the supplied probability to gates, resets,
-    measurements and idle locations; it is not a calibrated device model.
+    Families are rotated_surface and repetition; X or Z selects the
+    prepared and measured logical basis. SD6 puts the supplied probability
+    at gates, resets, measurements and idle locations; it is not a
+    calibrated device model. The map gives every measurement a one-based
+    round, the final data readout in the last packet.
 
-    The map assigns every absolute measurement index to a one-based
-    round. The final destructive data readout joins the last packet.
-    Deltakit is imported only here; simulation uses the existing source.
-    Circuit and schedule are exported together to keep their order explicit.
-
-    The native gates and the qubit numbering are memory_rounds', so one
-    memory at one round count has one error model on both paths. SD6
-    charges every idle location, and the Explorer's default gate set
-    decomposes CZ and MX into more layers, so more idle locations, than
-    its exhaustive set (Explorer qpu/_native_gate_set.py).
+    The native gates and qubit numbering are memory_rounds', so one memory
+    at one round count has one error model on both paths. SD6 charges every
+    idle location, and the Explorer's default gate set decomposes CZ and MX
+    into more layers than its exhaustive set (Explorer
+    qpu/_native_gate_set.py).
     """
-    _require_explorer()
-    _check_memory_parameters(distance, round_count, basis)
-    check_probability(physical_error_probability)
     import deltakit_circuit.gates as gates
     import deltakit_explorer.qpu as qpu
 
@@ -72,10 +71,6 @@ def memory_circuit(
     qubit_mapping = _qubit_mapping(code.qubits)
     circuit = _export_compiled_memory(compiled, device, qubit_mapping)
     measurement_rounds = _measurement_rounds(code, round_count, basis)
-    if len(measurement_rounds) != circuit.num_measurements:
-        raise ValueError(
-            "Deltakit noise changed the memory measurement schedule"
-        )
     return circuit, measurement_rounds
 
 
@@ -92,17 +87,12 @@ def memory_rounds(
 ) -> circuit_records.RepeatedStimCircuit:
     """Export protection rounds whose declared cadence matches the QPU period.
 
-    Native gates have equal duration, calibrated by the CSS schedule to the
-    QPU round period, including preparation and destructive final readout.
-
-    SD6 uses physical_error_probability at gates, resets, readout and idle
-    locations. Physical noise uses it at gates, resets and measurement, with
-    T1/T2 noise applied only to idle intervals. Physical requires relaxation
-    and dephasing times; SD6 rejects them. T1/T2 use a Pauli approximation.
+    Native gates have equal duration, calibrated to the QPU round period.
+    SD6 puts physical_error_probability at gates, resets, readout and idle
+    locations. Physical noise puts it at gates, resets and measurement, with
+    T1/T2 noise (a Pauli approximation) on idle intervals only; it requires
+    the relaxation and dephasing times, and SD6 refuses them.
     """
-    _require_explorer()
-    check_positive_integer(distance, "distance")
-    _check_basis(basis)
     import deltakit_circuit.gates as gates
 
     logical_basis = gates.PauliBasis[basis]
@@ -130,17 +120,10 @@ def css_memory_rounds(
 ) -> circuit_records.RepeatedStimCircuit:
     """Export a supplied CSS code with every declared logical observable.
 
-    The public Explorer code stays at this producer boundary. Its observable
-    indices retain the supplied generator definitions, which need not be
-    canonically paired X/Z logicals. All four physical fragments must fit the
-    declared cadence. Noise follows memory_rounds, including its T1/T2 units.
-    This function keeps setup together so its noise, indexing and physical
-    timing are visibly shared by both finite templates.
+    Observable indices keep the supplied generator definitions, which need
+    not be canonically paired X/Z logicals. All four physical fragments must
+    fit the declared cadence. Noise follows memory_rounds.
     """
-    _require_explorer()
-    _check_basis(basis)
-    check_probability(physical_error_probability)
-    _positive_duration(round_period_microseconds, "round_period_microseconds")
     import deltakit_circuit.gates as gates
 
     logical_basis = gates.PauliBasis[basis]
@@ -165,44 +148,6 @@ def css_memory_rounds(
     return fragments
 
 
-def check_positive_integer(value: int, name: str) -> None:
-    """Refuse a distance or round count that is not a positive int."""
-    value_type = type(value)
-    if value_type is not int or value < 1:
-        raise ValueError(f"{name} must be a positive integer")
-
-
-def check_probability(probability: float) -> None:
-    """Refuse a physical error probability outside [0, 1].
-
-    A NaN or an infinity is outside it: every comparison with a NaN is
-    false, so no separate finiteness test is needed.
-    """
-    if not 0 <= probability <= 1:
-        raise ValueError("physical_error_probability must lie in [0, 1]")
-
-
-def _require_explorer() -> None:
-    specification = importlib.util.find_spec("deltakit_explorer")
-    if specification is None:
-        raise ValueError(
-            "Deltakit memory requires the optional decsim[deltakit] extra"
-        )
-
-
-def _check_memory_parameters(
-    distance: int, round_count: int, basis: str
-) -> None:
-    check_positive_integer(distance, "distance")
-    check_positive_integer(round_count, "round_count")
-    _check_basis(basis)
-
-
-def _check_basis(basis: str) -> None:
-    if basis not in ("X", "Z"):
-        raise ValueError("memory basis must be X or Z")
-
-
 def _memory_code(
     code_family: str, distance: int, basis: "gates.PauliBasis"
 ) -> "codes.StabiliserCode":
@@ -212,7 +157,10 @@ def _memory_code(
         return codes.RotatedPlanarCode(width=distance, height=distance)
     if code_family == "repetition":
         return codes.RepetitionCode(distance=distance, stabiliser_type=basis)
-    raise ValueError("code_family must be rotated_surface or repetition")
+    raise ValueError(
+        "code_family must be rotated_surface or repetition, "
+        f"not {code_family!r}"
+    )
 
 
 def _measurement_rounds(code, round_count: int, basis: str) -> dict[int, int]:
@@ -232,11 +180,6 @@ def _measurement_rounds(code, round_count: int, basis: str) -> dict[int, int]:
     rounds.extend(terminal_rounds)
     measurement_items = enumerate(rounds)
     return dict(measurement_items)
-
-
-def _positive_duration(duration: float, name: str) -> None:
-    if not math.isfinite(duration) or duration <= 0:
-        raise ValueError(f"{name} must be finite and positive")
 
 
 def _memory_noise(
@@ -261,6 +204,15 @@ def _memory_noise(
     )
 
 
+def _check_finite(duration: float, name: str) -> None:
+    """Refuse an infinite time: it runs, but the run's json cannot hold it.
+
+    json.dumps writes it as Infinity, which RFC 8259 readers refuse.
+    """
+    if not math.isfinite(duration):
+        raise ValueError(f"{name} must be finite")
+
+
 def _physical_noise(
     probability: float,
     relaxation_microseconds: Optional[float],
@@ -268,22 +220,17 @@ def _physical_noise(
 ) -> "qpu.PhysicalNoise":
     """The Explorer's T1/T2 idle noise with one probability at every gate.
 
-    Idle noise per interval is the Pauli channel of Ghosh et al.
-    1210.5799 equation 10 (Explorer qpu/_noise/_noise_parameters.py,
-    which also refuses a T2 of twice T1 or more). The Explorer takes a
-    separate probability for one-qubit gates, two-qubit gates, resets,
+    Idle noise per interval is the Pauli channel of Ghosh et al. 1210.5799
+    equation 10 (Explorer qpu/_noise/_noise_parameters.py). The Explorer
+    takes separate probabilities for one- and two-qubit gates, resets,
     measurement and readout flips; this frontend puts the one supplied
-    probability at all five, a simplification of its own, so the T1/T2
-    times are the only place the two models differ.
+    probability at all five, so T1/T2 are the only difference between the
+    two models.
     """
     import deltakit_explorer.qpu as qpu
 
-    if relaxation_microseconds is None or dephasing_microseconds is None:
-        raise ValueError(
-            "Physical noise requires relaxation and dephasing times"
-        )
-    _positive_duration(relaxation_microseconds, "relaxation_time_microseconds")
-    _positive_duration(dephasing_microseconds, "dephasing_time_microseconds")
+    _check_finite(relaxation_microseconds, "relaxation_time_microseconds")
+    _check_finite(dephasing_microseconds, "dephasing_time_microseconds")
     relaxation_seconds = relaxation_microseconds * 1e-6
     dephasing_seconds = dephasing_microseconds * 1e-6
     return qpu.PhysicalNoise(
@@ -316,12 +263,10 @@ def _calibrated_device(
 ) -> "qpu.QPU":
     """A device whose native schedule of one round fills the round period.
 
-    Every gate family gets the same duration, the period divided by the
-    layers of the reference round, so a round of the schedule takes the
-    declared period. A real cycle is dominated by measurement and reset,
-    not by the gate layers (Google 2408.13687: a 1.1 us cycle), so this
-    even split is the frontend's simplification, and it decides how the
-    physical model's idle noise is spread over the round.
+    Every gate family gets the period divided by the reference round's
+    layers. A real cycle is dominated by measurement and reset (Google
+    2408.13687: a 1.1 us cycle), so this even split is a simplification,
+    and it decides how idle noise spreads over the round.
     """
     import deltakit_explorer.qpu as qpu
 
@@ -459,7 +404,31 @@ def _export_compiled_memory(
     noisy = device.compile_and_add_noise_to_circuit(compiled)
     exported = noisy.as_stim_circuit(qubit_mapping=qubit_mapping)
     circuit_text = str(exported)
-    return stim.Circuit(circuit_text)
+    circuit = stim.Circuit(circuit_text)
+    return _sorted_order_free_targets(circuit)
+
+
+def _sorted_order_free_targets(circuit: stim.Circuit) -> stim.Circuit:
+    """One seed draws the same samples in every process."""
+    sorted_circuit = stim.Circuit()
+    for instruction in circuit:
+        if isinstance(instruction, stim.CircuitRepeatBlock):
+            body = instruction.body_copy()
+            sorted_body = _sorted_order_free_targets(body)
+            repeat_count = instruction.repeat_count
+            block = stim.CircuitRepeatBlock(repeat_count, sorted_body)
+            sorted_circuit.append(block)
+            continue
+        targets = instruction.targets_copy()
+        if instruction.name in ORDER_FREE_INSTRUCTIONS:
+            targets.sort(key=_qubit_index)
+        arguments = instruction.gate_args_copy()
+        sorted_circuit.append(instruction.name, targets, arguments)
+    return sorted_circuit
+
+
+def _qubit_index(target: stim.GateTarget) -> int:
+    return target.value
 
 
 def _memory_fragments(

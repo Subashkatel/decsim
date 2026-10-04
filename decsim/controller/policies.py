@@ -1,38 +1,63 @@
-"""How an idle round of a waiting patch travels: the idle policy rows.
+"""How an idle round of a waiting patch travels: the idle policies.
 
-idle_policy.kind names one of Ignore or SeparateDecodeJobs; each fills
-the IdlePolicy seam (decsim/ports.py). The boundary policy rows live
-beside the windows they ship for (windows/boundary_policies.py). A patch
-that holds a stream never reaches a policy: its idle rounds continue the
-stream (controller/idle_rounds.py).
-
-Idle rounds are real decoder workload. Terhal's backlog bound sets the
-rate syndrome bits are generated, rgen, against the rate they are
-processed, rproc, and every generated bit counts: "the decoding should
-never lead to a increasing backlog of syndrome data" (1302.3428 lines
-3151-3159). Battistel et al. say the same per logical qubit: "the
-decoder needs to process that data at the acquisition rate or close to
-it to avoid an exponential slowdown due to an ever-growing data backlog"
-(2303.00054 line 144). Deferring them is legitimate, deleting them is a
-modeling choice: only data feeding the next non-Clifford decision is
-latency-critical (Skoric 2209.08552), so each policy below is valid for a
+Idle rounds are real decoder workload: every generated syndrome bit
+counts against the decoder's rate (Terhal 1302.3428: "the decoding should
+never lead to a increasing backlog of syndrome data"; Battistel et al.
+2303.00054 line 144). Deferring them is legitimate and deleting them is
+a modeling choice, since only data feeding the next non-Clifford
+decision is latency-critical (Skoric 2209.08552), so each policy suits a
 different claim.
 """
 
+import dataclasses
+from typing import Any
+
+import decsim.ports as ports
+import decsim.records.program as program_records
+
+
+@dataclasses.dataclass(frozen=True)
+class IgnoreSettings:
+    """The optimistic card: idle rounds cost no decode work (Ignore)."""
+
+    def build(self) -> "Ignore":
+        """A fresh policy."""
+        return Ignore()
+
+
+@dataclasses.dataclass(frozen=True)
+class SeparateDecodeJobsSettings:
+    """The default card: idle rounds are decode jobs (SeparateDecodeJobs)."""
+
+    def build(self) -> "SeparateDecodeJobs":
+        """A fresh policy."""
+        return SeparateDecodeJobs()
+
 
 class Ignore:
-    """Idle rounds travel as feedback-memory rounds and cost no decode work.
+    """Idle rounds cost no decode work.
 
-    An optimistic card: valid for latency studies of the active path, an
-    undercount of decoder throughput, utilization, and unit counts on
-    multi-operation workloads (every reference decodes idle volume).
+    They travel as feedback-memory rounds. Valid for latency studies of
+    the active path; it undercounts decoder throughput, utilization and
+    unit counts on multi-operation workloads.
     """
 
-    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
+    def relay(
+        self,
+        idle_rounds: ports.IdleRounds,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """Send the round as a memory round."""
         idle_rounds.emit_memory_round(operation, patch, round_index)
 
-    def end_idle_period(self, idle_rounds, operation, patch) -> None:
+    def end_idle_period(
+        self,
+        idle_rounds: ports.IdleRounds,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+    ) -> None:
         """Nothing was charged, so nothing settles."""
         del idle_rounds
         del operation
@@ -40,24 +65,33 @@ class Ignore:
 
 
 class SeparateDecodeJobs:
-    """Idle rounds travel as memory rounds and are charged as decode jobs.
+    """Idle rounds are charged as decode jobs.
 
-    Every commit region of them costs one synthetic load-only decode job,
-    sized to the region plus the buffer rounds and carrying no real
-    syndrome contents. The rounds left over when an operation claims the
-    patch, or when the workload completes, cost one shorter job: a final
-    window may be smaller than a regular one (Tan et al. 2209.09219;
-    Skoric et al. 2209.08552), and no validated system leaves the end of
-    a stream undecoded (Google's streaming decoder, LILLIPUT's per-cycle
-    decode, Bombin's modular decoding of idle memory). The honest default
-    for throughput, utilization, backlog, or unit-count claims.
+    They travel as memory rounds. Every commit region costs one load-only
+    decode job sized to the region plus the buffer rounds. The rounds left
+    when an operation claims the patch, or the workload completes, cost one
+    shorter job: a final window may be smaller (Tan et al. 2209.09219;
+    Skoric et al. 2209.08552), and no validated system leaves the end of a
+    stream undecoded. The honest default for throughput, utilization,
+    backlog or unit-count claims.
     """
 
-    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
+    def relay(
+        self,
+        idle_rounds: ports.IdleRounds,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """Send the memory round and count it toward the next job."""
         idle_rounds.emit_memory_round(operation, patch, round_index)
         idle_rounds.submit_idle_decode_if_due(operation, patch, round_index)
 
-    def end_idle_period(self, idle_rounds, operation, patch) -> None:
+    def end_idle_period(
+        self,
+        idle_rounds: ports.IdleRounds,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+    ) -> None:
         """Charge the rounds left after the last full commit region."""
         idle_rounds.submit_idle_decode_for_remaining_rounds(operation, patch)

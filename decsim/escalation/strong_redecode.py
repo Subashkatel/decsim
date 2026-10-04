@@ -1,38 +1,25 @@
 """The strong re-decode: the window side of the strong tier.
 
-When the escalation policy escalates a weak result, StrongRedecode asks
-the shape for the strong window's job (strong_window_shapes.py), sends
-the window's selection over weak_decoder_to_strong_decoder, tells the
-decoder side to await the request's result (the DecodeQueue port), and
-submits the job now or when the conditions the shape declared fire: the
-commits of the weak windows it named, or the stored rounds of an
-operation. The ledger of held windows is its own component, the pending
-strong windows (pending_strong_windows.py), reached through a port, so
-a new shape row names its own condition rather than adding a hook.
-The rounds a strong window reads go up with the escalation: Toshio et
-al. 2510.25222 lines 1247 to 1250 assign the syndrome data of r_strong
-rounds to the strong decoder at the switch, "after the boundary
-conditions at both ends have been determined by the weak decoder", so
-a held window whose commits have landed and whose rounds the strong
-syndrome buffer lacks has them read out of the weak syndrome buffer
-and carried over the same hop (rounds_to_carry, send_region), in one
-transfer or, for a window whose tail is still being measured, several
-(CUDA-Q QEC's enqueue_syndromes takes the rounds in one call or many,
-realtime_decoding.rst lines 52 to 56); the landing stores them and
-releases the window. When the policy decodes both tiers at once
-(Sec. III A, Step 1), it builds the speculative strong decode the requester
-enqueues beside the weak job and selects it at the verdict. A strong
-input landed in its unit waits for its selection to arrive before it
-decodes; the submission uses the per-job law,
-decode_queue.enqueue(job, send_input, on_decoded) with the committer's
-accept_strong_result as the return path.
+When the policy escalates a weak result, StrongRedecode asks the shape
+for the strong window's job, sends the window's selection over
+weak_decoder_to_strong_decoder, tells the decoder side to await the
+result, and submits the job now or when the conditions the shape
+declared fire. A held window whose rounds the strong syndrome buffer
+lacks has them read out of the weak syndrome buffer and carried over the
+same hop (Toshio et al. 2510.25222 lines 1247-1250), in one transfer or
+several (CUDA-Q QEC's enqueue_syndromes, realtime_decoding.rst lines
+52-56). When both tiers decode at once (Step 1), it builds the
+speculative strong decode beside the weak job and selects it at the
+verdict; a landed strong input waits for its selection before it
+decodes.
 """
 
 import dataclasses
 import functools
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
+import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
@@ -44,7 +31,7 @@ import decsim.trace_source as trace_source
 
 
 class StrongRedecode:
-    """Selects, submits and lands the strong tier's re-decode of a window."""
+    """Drives each escalated window's strong re-decode."""
 
     shape = ports.Port(strong_window_shapes.StrongWindowShape)
     # the ledger of held strong windows and what releases each
@@ -62,7 +49,7 @@ class StrongRedecode:
     # the strong job's return path
     verdict = ports.Port(ports.WindowVerdict)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.selections = _StrongSelections()
         # the rounds sent up and not landed yet, so a wake-up while a
@@ -79,17 +66,13 @@ class StrongRedecode:
     ) -> Optional[decoding_records.Submission]:
         """The speculative strong decode, started with the weak job (Step 1).
 
-        Step 1 feeds both decoders the same window and starts them together
-        (2510.25222 lines 598-601), and a weak job whose window still owes a
-        boundary parks until it lands, so its speculative strong decode is
-        planned when the weak job leaves the park (unparked_submission): a
-        strong window that pins a face reads the neighbour's final commit, and
-        under held boundaries that commit is what unparks the weak job. A
-        planned speculative decode has its context held and its send built now;
-        the verdict selects it or cancels it. One whose input has not landed yet
-        is held instead and enqueued when its condition fires, so there is no
-        submission for the requester to make: in a model that prices transport
-        the strong decoder starts when its copy has arrived.
+        Step 1 starts both decoders on the same window (2510.25222 lines
+        598-601). A weak job that still owes a boundary parks until it
+        lands, so its speculative decode is planned when it leaves the
+        park (unparked_submission): a pinned face reads the neighbour's
+        final commit, which is what unparks the weak job. One whose
+        input has not landed is held and enqueued when its condition
+        fires, so there is no submission.
         """
         key = (weak_job.operation_id, weak_job.window_id)
         if weak_job.window.deps_remaining > 0:
@@ -122,13 +105,10 @@ class StrongRedecode:
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the strong tier to re-decode the weak job's window.
 
-        The selection rides weak_decoder_to_strong_decoder and the
-        decoder side awaits the request's result. A speculative strong decode
-        started with the weak job is selected as it is; otherwise the
-        shape assigns the strong window: a job built now is queued
-        behind its selection, a held one is registered under the
-        conditions it declared and leaves when they fire (a window
-        waiting on data already stored leaves now).
+        A speculative strong decode started with the weak job is
+        selected as it is; otherwise the shape assigns the strong
+        window, whose job is queued behind its selection now or held
+        under its conditions.
         """
         key = (weak_job.operation_id, weak_job.window_id)
         speculative_request_key = self.selections.speculative_decode_for(key)
@@ -158,7 +138,10 @@ class StrongRedecode:
         released = self.pending.released_by_commit(window_key)
         self._submit_released(released)
 
-    def submit_if_stored_data_releases(self, operation_id) -> None:
+    def submit_if_stored_data_releases(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> None:
         """A round is stored: a strong window waiting on that data leaves."""
         released = self.pending.released_by_stored_data(operation_id)
         self._submit_released(released)
@@ -166,12 +149,11 @@ class StrongRedecode:
     def cancel_strong_request(self, window_key: tuple) -> None:
         """A kept weak result: its strong request ends, held or submitted.
 
-        The strong decode started with the weak one is speculative (Toshio et
-        al. 2510.25222 Sec. III A, Step 1), so a confident weak result halts it
-        (Step 3, lines 606-614). One still held for its input is dropped here,
-        before the window's final commit frees the rounds it would have read;
-        one already submitted is cancelled by the strong side's manager wherever
-        it is, and a window with no request there is left alone.
+        A confident weak result halts the speculative strong decode
+        (Toshio et al. 2510.25222 Sec. III A, Step 3, lines 606-614).
+        One still held is dropped here, before the window's final commit
+        frees the rounds it would read; one submitted is cancelled by
+        the strong side's manager.
         """
         held = self.pending.held_for(window_key)
         if held is not None:
@@ -228,8 +210,8 @@ class StrongRedecode:
     def _submit_released(self, released: tuple) -> None:
         """Ask each released row for its job; submit the ones it builds.
 
-        A row that has no job yet lacks rounds on the strong side, so
-        the ones the chip has and has not sent go up now.
+        A row with no job yet lacks rounds on the strong side, so the
+        ones the chip has and has not sent go up now.
         """
         for held in released:
             job = self.shape.held_job(held.assignment)
@@ -279,11 +261,8 @@ class StrongRedecode:
     def _region_landed(self, region: round_records.EscalatedRegion) -> None:
         """The region reached the strong side: its store takes every round.
 
-        The rounds count as carried until the store has all of them: a
-        landing wakes the held windows round by round, and a wake-up in
-        the middle must not send the rest of the same region again. A
-        strong seat that forms the rounds stores them only once it has
-        formed them, later than the landing.
+        The rounds count as carried until the store has all of them, so
+        a wake-up between the landing and the store sends nothing twice.
         """
         stored = functools.partial(self._region_stored, region)
         self.strong_receiver.receive_region(region, stored)
@@ -324,10 +303,8 @@ class StrongRedecode:
     ) -> int:
         """Send the input at dispatch; returns the delay the pool expects.
 
-        The unit is assigned first, then strong syndrome buffer moves the
-        input into that unit's memory; a job selected at
-        the verdict also waits for its selection to arrive, and the
-        pool's estimate is the later of the two.
+        A job selected at the verdict also waits for its selection to
+        arrive, and the estimate is the later of the two.
         """
         landed = on_landed
         if selection_arrival_ticks is not None:
@@ -349,11 +326,7 @@ class StrongRedecode:
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
     ) -> int:
-        """Send the window's selection; returns the tick it is expected.
-
-        At the delivery a landed input waiting for it may start, and the
-        decoder side accepts the selection.
-        """
+        """Send the window's selection; returns the tick it is expected."""
         key = (weak_job.operation_id, weak_job.window_id)
         on_selection_delivered = functools.partial(
             self.decode_queue.accept_selection, key, strong_request_key
@@ -378,14 +351,7 @@ class StrongRedecode:
 
 
 class _StrongSelections:
-    """The selection handshake's state.
-
-    Which weak jobs wait in their park for their speculative strong decode
-    to be planned, which speculative strong decode each window may select
-    (the paper's Step 1), which selections have arrived over
-    weak_decoder_to_strong_decoder, and which landed strong inputs wait for
-    one that has not.
-    """
+    """The selection handshake: parked jobs, speculative decodes, arrivals."""
 
     def __init__(self) -> None:
         self.speculative_key_by_window: dict = {}
@@ -439,13 +405,7 @@ class _StrongSelections:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the strong redecode reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the redecode reports, as one member (gem5's stats Group)."""
 
     strong_window_held: trace_source.TraceSource = trace_source.new_source()
     strong_window_left: trace_source.TraceSource = trace_source.new_source()

@@ -1,40 +1,34 @@
 """How often a run copied bits, referenced them and moved them.
 
-The counters of the data path's hops (docs/explanation/data_path.md),
-so a study reads the data path without the trace file. gem5's
-vocabulary: a copy duplicates bits into a structure the receiver owns
-(mem/cache/cache_blk.hh 97-104), a reference is a handle to bits that
-stay where they are (mem/packet.hh 1163-1171), a move crosses a link
+gem5's vocabulary: a copy duplicates bits into a structure the receiver
+owns (mem/cache/cache_blk.hh 97-104), a reference is a handle to bits
+that stay (mem/packet.hh 1163-1171), a move crosses a link
 (dev/dma_device.cc 194-213).
 
-A listener on copy_made on every component that copies, on the fabric's
-transfer_delivered for the moves, and on the stores' hold_registered
-for the references; it counts and keeps no bits.
-
-The counts are also grouped by the memory class the hop crosses, because
-the classical sources make the class the cost and not the count: a DRAM
-access is "a couple of orders-of-magnitude higher than the cost of an
-internal cache access" (Horowitz, ISSCC 2014 lines 232-247), and on an
-accelerator "memory accesses have a cost that is a function of the size
-of the memory being accessed" (Dally, CACM 2020 lines 231-234), so a
-copy into a register and a copy across a cryostat link must not be
-summed. The two tables below are decsim's placement of this machine's
-structures and links, read off the sources named on each row; they are
-a report-side grouping and no component reads them.
+The counts are also grouped by the memory class the hop crosses, since
+the class is the cost: a DRAM access is "a couple of orders-of-magnitude
+higher than the cost of an internal cache access" (Horowitz, ISSCC
+2014), and "memory accesses have a cost that is a function of the size
+of the memory being accessed" (Dally, CACM 2020), so a register copy and
+a cryostat-link copy must not be summed. The two tables are decsim's
+placement of its structures and links, a report-side grouping no
+component reads.
 """
 
 import dataclasses
 import enum
+from typing import Any, Optional, Union
+
+import decsim.records.decoding as decoding_records
+import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 
 
 class MemoryClass(enum.Enum):
-    """The memory a hop crosses, and what it costs to cross it.
+    """The cost class of the memory a hop crosses.
 
-    ON_CHIP is a register or an SRAM inside one chip; ON_BOARD is a
-    memory two chips of one board share; OFF_BOARD is a link between
-    boards or out of the cryostat. UNCLASSIFIED is a structure or a path
-    no table row names, so a grouped report still sums to the run's
-    total.
+    UNCLASSIFIED is a structure or path no table row names, so a grouped
+    report still sums to the run's total.
     """
 
     ON_CHIP = "on_chip"
@@ -128,7 +122,10 @@ def memory_class_of_link_path(path: str) -> MemoryClass:
 
 
 class DataMovement:
-    """Copies, references and moves, in total and per named path."""
+    """The run's data-movement tally.
+
+    It counts copies, references and moves, in total and per named path.
+    """
 
     def __init__(self) -> None:
         self.copies = _PathCounts()
@@ -139,22 +136,27 @@ class DataMovement:
         # seat -> the most raw bits one operation's history held there
         self.formation_state_bits_by_seat: dict = {}
 
-    def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
+    def copy_made(
+        self,
+        key: Union[tuple, decoding_records.DecodeJob],
+        bits: Optional[int],
+        source_name: str,
+        target_name: str,
+    ) -> None:
         """One structure duplicated the bits into another."""
         path = f"{source_name}{PATH_SEPARATOR}{target_name}"
         rounds = _rounds(key)
         memory_class = memory_class_of_structure(target_name)
         self._add(self.copies, path, bits, rounds, memory_class)
 
-    def transfer_delivered(self, record) -> None:
+    def transfer_delivered(
+        self, record: transfer_records.TransferRecord
+    ) -> None:
         """One move landed on its link, its header with its payload.
 
-        The wire serializes the path's framing beside the payload, and the
-        link ledger charges both (ns-3's point-to-point device adds its
-        header in Send and times the whole packet, ns-3
-        src/point-to-point/model/point-to-point-net-device.cc lines 528
-        and 243), so a move counts the same bits: every header, and the
-        payload when its size is known.
+        The wire serializes the framing beside the payload and the link ledger
+        charges both (ns-3 point-to-point-net-device.cc lines 528, 243), so a
+        move counts the same bits.
         """
         transfer = record.transfer
         bits = transfer.header_bits
@@ -165,37 +167,51 @@ class DataMovement:
         memory_class = memory_class_of_link_path(path)
         self._add(self.moves, path, bits, rounds, memory_class)
 
-    def hold_registered(self, holder, round_keys) -> None:
+    def hold_registered(
+        self,
+        holder: Any,  # an opaque identity
+        round_keys: tuple,
+    ) -> None:
         """One token referenced the rounds where they already sit."""
         del holder
         self.references.events += 1
         self.references.rounds += len(round_keys)
         self.holds.registered += 1
 
-    def hold_transferred(self, old_holder, new_holder) -> None:
+    def hold_transferred(
+        self,
+        old_holder: Any,  # an opaque identity
+        new_holder: Any,  # an opaque identity
+    ) -> None:
         """A live reference moved to a new token, copying nothing."""
         del old_holder
         del new_holder
         self.holds.transferred += 1
 
-    def hold_released(self, holder) -> None:
+    def hold_released(
+        self,
+        holder: Any,  # an opaque identity
+    ) -> None:
         """One reference ended."""
         del holder
         self.holds.released += 1
 
-    def formation_state_held(self, seat: str, operation_id, bits) -> None:
+    def formation_state_held(
+        self,
+        seat: str,
+        operation_id: Any,  # an opaque identity
+        bits: int,
+    ) -> None:
         """A seat's former holds these raw bits of one operation now.
 
-        The ledger keeps the most one history held at each seat: the
-        state a seat keeps to form the next round (detection_events),
-        reported because no referent sizes it and nothing is refused
-        for it.
+        The most one history held at each seat is kept, reported because no
+        referent sizes it.
         """
         del operation_id
         held = self.formation_state_bits_by_seat.get(seat, 0)
         self.formation_state_bits_by_seat[seat] = max(held, bits)
 
-    def round_emitted(self, readout) -> None:
+    def round_emitted(self, readout: round_records.QPUReadout) -> None:
         """One more round exists, so a per-round rate has a denominator."""
         self.rounds_seen.add((readout.operation_id, readout.round_index))
 
@@ -249,10 +265,8 @@ class DataMovement:
 class _Counts:
     """One structure's tally: the events, the rounds they carried, bits.
 
-    data_path.md's hop table counts per round, so one job's input copy
-    of six rounds is one event and six rounds; a study that prices the
-    hop reads the events, one that counts the table's hops reads the
-    rounds.
+    A six-round input copy is one event and six rounds: a study pricing the
+    hop reads events, one counting data_path.md's hops reads rounds.
     """
 
     events: int = 0
@@ -280,9 +294,8 @@ def _row_of(rows: dict, key):
 def _as_rows(kind: "_PathCounts") -> dict:
     """One row per path, in path order, each naming the class it crosses.
 
-    The class travels with the path because the report groups by it and
-    a reported path is the only name the report has: reading the class
-    back off that text would put this table's placement in two files.
+    The report has only the path's text, so the class travels with it
+    rather than being read back off that text.
     """
     rows = {}
     for path in sorted(kind.by_path):
@@ -329,7 +342,7 @@ class _PathCounts:
 
 @dataclasses.dataclass
 class _HoldTallies:
-    """How often a reference was registered, handed on and ended."""
+    """How often each kind of hold event happened."""
 
     registered: int = 0
     transferred: int = 0

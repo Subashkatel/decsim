@@ -1,27 +1,24 @@
-"""What the yaml and the number cards build for the links: settings only.
+"""What the number cards build for the links: settings only.
 
-A channel is one wire with a propagation latency and, optionally, a
-finite bandwidth: ns-3's point-to-point device, a DataRate and a delay
-(point-to-point-net-device.cc). A path is one named hop between two
-components; it rides one channel, carries a payload rule, and may pay a
-per-transfer setup cost, the descriptor and doorbell work a processor
-does before the data mover starts (Shao et al., MICRO 2016, section
-III.C), and a per-transfer header, the framing the wire serializes with
-the payload (ns-3's device adds a header to every packet it sends,
-point-to-point-net-device.cc:528, and times the packet with it, :243).
-A fabric is one path setting per hop plus a profile name; two paths
-whose channels carry the same name share one wire and one setup engine.
-The values are checked here, once, because the yaml and the number cards
-are where they enter decsim.
+A channel is one wire with a propagation latency and optionally a finite
+bandwidth: ns-3's point-to-point device, a DataRate and a delay. A path
+is one named hop between two components; it rides one channel, carries a
+payload rule, and may pay a per-transfer setup cost, the descriptor and
+doorbell work before the data mover starts (Shao et al., MICRO 2016,
+section III.C), and a per-transfer header the wire serializes with the
+payload (point-to-point-net-device.cc:528, :243). Two paths whose
+channels carry the same name share one wire and one setup engine. The
+values are checked here, where the cards enter decsim.
 """
 
 import dataclasses
 import fractions
 import math
-from collections.abc import Mapping
-from typing import Optional, Union
+from typing import Optional, Protocol
 
 import decsim.config as config
+import decsim.engine
+import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 
@@ -30,16 +27,14 @@ import decsim.records.transfers as transfer_records
 class CapacitySettings:
     """Bandwidth of one whole channel in bits per microsecond.
 
-    A link of several parallel bit lanes is one wire with aggregate
-    bandwidth (a PCIe x4 link stripes one transfer over four lanes), so
-    a yaml card folds its `channels` count into this rate before the
-    setting is built. The rate is kept as written, a decimal from a
-    Python card or an exact Fraction from the yaml and the bandwidth
-    card, and the serialization arithmetic reads it exactly
-    (exact_aggregate_bits_per_microsecond).
+    Parallel lanes are one wire with aggregate bandwidth (a PCIe x4 link
+    stripes one transfer over four), so a card folds its lane count in. The
+    rate is one exact Fraction of the number as written, so an int, a float
+    or a Fraction is one value with one point id, and a whole-tick duration
+    is never inflated by float error, as ns-3's integer DataRate arithmetic.
     """
 
-    input_bits_per_microsecond: Union[float, fractions.Fraction]
+    input_bits_per_microsecond: fractions.Fraction
     # where the rate was written, a label: no part of a point's id
     source: str = dataclasses.field(compare=False)
 
@@ -49,16 +44,9 @@ class CapacitySettings:
         )
         if self.input_bits_per_microsecond <= 0:
             raise ValueError("input_bits_per_microsecond must be positive")
-
-    def exact_aggregate_bits_per_microsecond(self) -> fractions.Fraction:
-        """The whole channel's rate as an exact Fraction of the card's text.
-
-        ns-3's DataRate does the same arithmetic in integers, so a
-        whole-tick duration is never inflated by a binary float's hidden
-        expansion.
-        """
         rate_text = str(self.input_bits_per_microsecond)
-        return fractions.Fraction(rate_text)
+        exact_rate = fractions.Fraction(rate_text)
+        object.__setattr__(self, "input_bits_per_microsecond", exact_rate)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -75,41 +63,49 @@ class PayloadSettings:
             raise ValueError("input_bits must be nonnegative")
 
 
-@dataclasses.dataclass(frozen=True)
-class FramingSettings:
-    """How a packet channel cuts a message: a FRAMINGS row and its keys.
+class FramingSettings(Protocol):
+    """A framing row's settings record (framings.py), which builds it.
 
-    row_settings is the row's own Settings record, None for a row with
-    no keys (decsim/links/framings.py).
+    has_acknowledgement_packet says whether the framing has a packet of
+    its own for an acknowledgement, which the reliable protocol needs.
     """
 
-    kind: str = "whole"
-    row_settings: Optional[object] = None
+    has_acknowledgement_packet: bool
+
+    def build(self) -> ports.Framing:
+        """A fresh framing."""
 
 
-@dataclasses.dataclass(frozen=True)
-class ProtocolSettings:
-    """What a channel's frames follow: a PROTOCOLS row and its keys.
+class PacketProtocolSettings(Protocol):
+    """A packet protocol's settings record, which builds its channel.
 
-    ideal is the whole transfer on an unbounded buffer with nothing
-    lost; credit and reliable are packet rows (decsim/links/fabric.py
-    PROTOCOLS). row_settings is the row's own Settings record, None for
-    ideal; its cycles count on clock, the card's clock domain.
+    Every packet protocol cuts a message into frames and credits them
+    from a receive buffer (credit_channel.py): framing cuts the frames,
+    receive_buffer_frames is the buffer's C frames, and
+    credit_latency_cycles is a credit's return L_c on clock.
     """
 
-    kind: str = "ideal"
-    row_settings: Optional[object] = None
-    clock: Optional[config.Clock] = None
+    framing: FramingSettings
+    receive_buffer_frames: int
+    credit_latency_cycles: int
+    clock: config.Clock
+
+    def build(
+        self,
+        channel_settings: "ChannelSettings",
+        engine: decsim.engine.Engine,
+    ) -> ports.Channel:
+        """A fresh channel whose protocol is these settings."""
 
 
 @dataclasses.dataclass(frozen=True)
 class ChannelSettings:
     """One physical channel: its name, a propagation latency, a bandwidth.
 
-    No capacity means an unbounded wire that charges its latency only.
-    Two paths whose channels carry the same name share one channel, so
-    the name is the identity a fabric wires by. A packet protocol cuts
-    every message into frames of known size, so it needs a bounded wire.
+    No capacity is an unbounded wire that charges its latency only. The
+    name is the identity a fabric wires by. protocol None is the ideal wire,
+    the whole transfer, an unbounded buffer, nothing lost. A packet protocol
+    cuts messages into frames of known size, so it needs a bounded wire.
     """
 
     name: str
@@ -117,7 +113,7 @@ class ChannelSettings:
     capacity: Optional[CapacitySettings]
     # where the card was written, a label: no part of a point's id
     configuration_source: str = dataclasses.field(compare=False)
-    protocol: ProtocolSettings = ProtocolSettings()
+    protocol: Optional["PacketProtocolSettings"] = None
 
     def __post_init__(self) -> None:
         propagation_latency_ticks = _as_whole_number(
@@ -128,39 +124,30 @@ class ChannelSettings:
         )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
-        is_packet_protocol = self.protocol.kind != "ideal"
-        if is_packet_protocol and self.capacity is None:
-            raise ValueError(
-                f"channel {self.name!r} runs the {self.protocol.kind} "
-                f"protocol, which cuts every message into frames of known "
-                f"size; give it a bounded wire (bits_per_cycle)"
-            )
 
 
 @dataclasses.dataclass(frozen=True)
 class PathSettings:
-    """One path: its channel, its payload rule, and its setup cost.
+    """How one path carries a transfer.
 
     At least one of the default payload and the actual payload source is
     given. setup_ticks is paid on the channel's setup engine before every
-    transfer of the path; zero means the path programs nothing.
-    header_bits_per_transfer is the framing every transfer of the path
-    carries beside its payload, serialized with it and counted apart
-    from it; zero means the path frames nothing. CUDA-Q's real-time
-    messages are the worked case: a 24 byte RPCHeader in front of every
-    request and a 24 byte RPCResponse in front of every reply
-    (cudaqx decoder_rpc_wire_format.h lines 41-43), and 32 bytes of
-    fields in front of the syndromes of an enqueue (lines 62-69). Those
-    bytes hold CUDA-Q's own ids, an int64 decoder id among the enqueue's
-    fields and a 32-bit request id in each header, and the three kinds
-    of message of a strong request already carry decsim's 64-bit name
-    (records/windows.py REQUEST_KEY_WIRE_BITS), so a run that prices
-    this framing leaves out the id the name stands for.
-    excludes_receiver_processing says what the card's latency covers: a
-    reference number measured end to end includes the receiver turning
-    the arrival into bits, and a card the run's own yaml wrote times the
-    wire alone, so only the second lets that processing be priced again
-    on the receiving component.
+    transfer; header_bits_per_transfer is serialized with every payload and
+    counted apart. CUDA-Q's real-time messages are the worked case: a 24
+    byte RPCHeader per request, a 24 byte RPCResponse per reply, and 32
+    bytes of fields before an enqueue's syndromes (cudaqx
+    decoder_rpc_wire_format.h lines 41-43, 62-69). Those bytes hold CUDA-Q's
+    ids, which decsim's 64-bit request name already stands for
+    (records/windows.py REQUEST_KEY_WIRE_BITS), so pricing that framing
+    leaves the id out.
+
+    excludes_receiver_processing says what the latency covers: a number
+    measured end to end includes the receiver turning the arrival into
+    bits; a card that times the wire alone lets the receiving component
+    price that processing. It has no default, so every card says which.
+    The build reads it on the readout hops alone, where the controller's
+    readout_to_bits_cycles needs a card that leaves that cost out; on
+    every other hop it records what the number means.
     """
 
     channel: ChannelSettings
@@ -170,7 +157,7 @@ class PathSettings:
     header_bits_per_transfer: int = 0
     # the card times the wire alone, so the receiving component's own
     # processing of what arrives is priced somewhere else
-    excludes_receiver_processing: bool = False
+    excludes_receiver_processing: bool = dataclasses.field(kw_only=True)
 
     def __post_init__(self) -> None:
         has_default = self.default_payload is not None
@@ -191,8 +178,8 @@ class PathSettings:
 class ReadoutRoute:
     """The readout path setting for one complete physical patch footprint.
 
-    A joint acquisition stays one transfer. A route never splits its bits
-    or selects a channel from only one of its contributing patches.
+    A joint acquisition stays one transfer: a route never splits its bits or
+    picks a channel from one contributing patch.
     """
 
     patch_ids: tuple
@@ -210,21 +197,14 @@ class ReadoutRoute:
 
 @dataclasses.dataclass(frozen=True)
 class FabricSettings:
-    """A fabric card: one path setting per hop, a profile name and a kind.
+    """A fabric card: one path setting per hop.
 
-    Every hop of the reaction path is priced, so a card names all eleven
-    and a caller that leaves one out is refused where it constructs the
-    card. A card whose QPU-to-controller latency leaves out the
-    controller's readout processing says so, because the timing card
-    prices that processing on its own line. kind names the row of
-    LINK_FABRICS (link_profiles.py) that supplied these numbers and
-    builds the run's fabric from them with build(card, engine);
-    profile_name is the row's name, or the yaml's own file name for a
-    card read from a yaml, which the run's description prints. Python
-    callers can set readout_routes to choose a path card by the complete
-    contributing patch footprint.
-    Unmatched footprints use qpu_to_controller. Equal channel names share
-    the same setup engine and serializer, including across routed cards.
+    Every hop of the reaction path is priced, so a card names all eleven. A
+    card whose QPU-to-controller latency leaves out the controller's
+    readout processing says so, since the timing card prices it apart.
+    readout_routes picks a path by the complete contributing footprint;
+    unmatched footprints use qpu_to_controller. Equal channel names share a
+    setup engine and serializer, across routed cards too.
     """
 
     qpu_to_controller: PathSettings
@@ -241,7 +221,6 @@ class FabricSettings:
     # the card's name for the run's description, a label: no part of a
     # point's id
     profile_name: str = dataclasses.field(compare=False)
-    kind: str = "logical_reference"
     readout_routes: tuple[ReadoutRoute, ...] = ()
 
     def __post_init__(self) -> None:
@@ -278,28 +257,18 @@ class FabricSettings:
         return tuple(bindings)
 
 
-def required_key(section: Mapping, key: str, section_name: str) -> object:
-    """A key a link card needs, refused by name when missing."""
-    if key not in section:
-        raise ValueError(f"{section_name} needs {key}")
-    return section[key]
-
-
-def positive_count_key(section: Mapping, key: str, section_name: str) -> int:
-    """A key a link card needs: a positive whole number, never a boolean."""
-    value = required_key(section, key, section_name)
+def check_positive_count(name: str, value: object) -> None:
+    """A positive whole number, never a boolean, or a refusal naming it."""
     if config.is_whole_count(value):
-        return value
-    raise ValueError(
-        f"{section_name}.{key} is {value!r}; it is a positive whole number"
-    )
+        return
+    raise ValueError(f"{name} is {value!r}; it is a positive whole number")
 
 
 def _as_whole_number(value, name: str) -> int:
     """A value as an exact int, or a ValueError naming the field.
 
     3.0 is fine; 3.5, NaN and None are not, nor a boolean, which Python
-    would read as 0 or 1 and a yaml writes as a flag.
+    would read as 0 or 1.
     """
     if isinstance(value, bool):
         raise ValueError(f"{name} must be a finite whole number")

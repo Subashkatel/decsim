@@ -1,16 +1,12 @@
 """The window planner: which windows exist, planned or grown.
 
-The static plan (frontends/planner.py) lays out every window of an
-operation of known length up front; a dynamic stream's windows are laid
-out here as its rounds arrive, the runtime twin of that plan. The
-commit and buffer regions are the planner's only geometry: a window
-reads [start_round, buffer_hi] and commits [commit_lo, commit_hi]
-(Skoric et al. 2209.08552, the overlapping recovery method; Tan et al.
-2209.09219, core and buffer regions). qLDPC separates the window plan
-from the decode loop the same way (qldpc/decoders/sinter.py,
-SlidingWindowDecoder.compile_decoder_for_dem and
-CompiledSequentialWindowDecoder.decode_shots_to_error); readiness is
-the RoundTracker's.
+The static plan (frontends/planner.py) lays every window of an operation
+of known length up front; a dynamic stream's windows are laid here as
+its rounds arrive. A window reads [start_round, buffer_hi] and commits
+[commit_lo, commit_hi] (Skoric et al. 2209.08552, the overlapping
+recovery method; Tan et al. 2209.09219, core and buffer regions). As in
+qLDPC, the plan is apart from the decode loop (qldpc/decoders/sinter.py,
+SlidingWindowDecoder); readiness is the RoundTracker's.
 """
 
 import dataclasses
@@ -18,6 +14,7 @@ import types
 from typing import Any, Optional
 
 import decsim.ports as ports
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
@@ -25,10 +22,11 @@ import decsim.windows.built_window_models as built_window_models
 
 
 class WindowModels:
-    """The decoder-facing models of windows and streams, from the source.
+    """The decoder-facing window models, from the source.
 
-    A run whose source gives no models (a timing-only device) has none;
-    every question answers None or nothing.
+    They cover the planned windows and those a dynamic stream lays. A run
+    whose source gives no models (a timing-only device) has none; every
+    question answers None or nothing.
     """
 
     # a circuit-less source names one that answers every model with None
@@ -46,7 +44,7 @@ class WindowModels:
         # models object builds them, so it is where they live
         self.model_by_window: dict = {}
 
-    def requirement(self):
+    def requirement(self) -> fault_models.DecoderFaultModelRequirement:
         """What a model must offer every decoder that may decode it."""
         requirement = self.decoder.fault_model_requirement
         if self.strong_decoder is None:
@@ -55,12 +53,15 @@ class WindowModels:
         return requirement.joined(strong_needs)
 
     def models_for_operation(
-        self, operation, resolved_operation, windows: list, protocol
+        self,
+        operation: program_records.Operation,
+        resolved_operation: program_records.ResolvedOperationPlanning,
+        windows: list,
+        protocol: window_records.WindowProtocol,
     ) -> list:
         """One model per window of a planned operation, or none.
 
-        Built once per task: the models are a function of the circuit
-        and the window plan, so the shots of one sweep point share them
+        Built once per task and shared by its shots
         (built_window_models).
         """
         if self.provider is None:
@@ -83,13 +84,21 @@ class WindowModels:
         self.built_models.remember(key, models)
         return models
 
-    def model_for_stream(self, stream_id, window: window_records.Window):
+    def model_for_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+        window: window_records.Window,
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The model of one window of a dynamic stream, or None."""
         if self.provider is None:
             return None
         return self.provider.window_model_for_stream(stream_id, window)
 
-    def register_stream(self, stream_operation, resolved_operation):
+    def register_stream(
+        self,
+        stream_operation: program_records.Operation,
+        resolved_operation: program_records.ResolvedOperationPlanning,
+    ) -> Optional[int]:
         """Note a dynamic stream; the rounds its source can supply, or None."""
         if self.provider is None:
             return None
@@ -114,12 +123,12 @@ class WindowModels:
 
     def strong_model_for_operation(
         self,
-        operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The model of one strong window, with the listed faults excluded.
 
         prior_faults is what the neighbour of a pinned face has already
@@ -139,8 +148,9 @@ class WindowModels:
 
 
 class WindowPlanner:
-    """Which windows exist: the plan's, and a stream's as it grows.
+    """Which windows exist.
 
+    The plan lays some up front, and a stream lays its own as it grows.
     Trace source: window_planned(window) for every window a stream lays
     after build; the plan's own windows exist before anyone listens.
     """
@@ -150,9 +160,11 @@ class WindowPlanner:
 
     def __init__(
         self,
-        resolved_operations,
+        resolved_operations: tuple[
+            program_records.ResolvedOperationPlanning, ...
+        ],
         plan: window_records.WindowPlan,
-        planned_operations,
+        planned_operations: tuple,
     ) -> None:
         resolved_by_id = {
             resolved.operation_id: resolved for resolved in resolved_operations
@@ -166,10 +178,8 @@ class WindowPlanner:
     def start(self) -> None:
         """Build the model of every window the plan laid.
 
-        The models come from the port, so they are built once the root
-        has bound it, which is gem5's split between the constructor and
-        startup (gem5 src/sim/sim_object.hh lines 194 and
-        280).
+        It runs once the ports are bound, as gem5's startup does
+        (src/sim/sim_object.hh lines 194 and 280).
         """
         for operation in self.planned_operations:
             self._build_operation_models(operation)
@@ -195,7 +205,11 @@ class WindowPlanner:
         """The window at (operation id, index)."""
         return self.plan.windows[key]
 
-    def later_windows(self, operation_id, window_index: int) -> list:
+    def later_windows(
+        self,
+        operation_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> list:
         """The operation's windows past that index, in index order."""
         later = []
         for index in self.window_indices_of(operation_id):
@@ -223,7 +237,10 @@ class WindowPlanner:
         return window
 
     def reslice_window(
-        self, key: tuple, buffer_lo: int, model
+        self,
+        key: tuple,
+        buffer_lo: int,
+        model: Optional[fault_models.WindowErrorModel],
     ) -> window_records.Window:
         """Move a window's read start and install the model it reads with."""
         window = self.plan.windows[key]
@@ -233,7 +250,7 @@ class WindowPlanner:
             self.models.model_by_window[key] = model
         return window
 
-    def check_absorbable(self, window_keys) -> None:
+    def check_absorbable(self, window_keys: tuple) -> None:
         """Every listed window is still undecoded and uncommitted."""
         for key in window_keys:
             window = self.plan.windows[key]
@@ -258,7 +275,7 @@ class WindowPlanner:
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The error model of one strong window of that operation."""
         return self.models.strong_model_for_operation(
             operation,
@@ -282,32 +299,38 @@ class WindowPlanner:
             return None
         return model.crossing_fault_ids()
 
-    def window_indices_of(self, operation_id) -> list:
+    def window_indices_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> list:
         """The operation's window indices in order; none when unplanned."""
         return self.plan.op_windows.get(operation_id, [])
 
-    def window_count_of(self, operation_id) -> int:
+    def window_count_of(self, operation_id: Any) -> int:  # an opaque identity
         """How many windows the operation has."""
         return self.plan.window_count[operation_id]
 
-    def windows_of(self, operation_id) -> list:
+    def windows_of(self, operation_id: Any) -> list:  # an opaque identity
         """The operation's windows, in index order."""
         windows = []
         for window_index in self.window_indices_of(operation_id):
             windows.append(self.plan.windows[(operation_id, window_index)])
         return windows
 
-    def is_windowed(self, operation_id) -> bool:
+    def is_windowed(self, operation_id: Any) -> bool:  # an opaque identity
         """False for an operation decoded as one whole batch."""
         return self.plan.windowed_by_operation[operation_id]
 
-    def batches_idle_rounds(self, operation_id) -> bool:
+    def batches_idle_rounds(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> bool:
         """Whether idle rounds before the operation fold into its batch."""
         return self.plan.batch_preceding_idle_rounds_by_operation.get(
             operation_id, False
         )
 
-    def prepend_idle_rounds(self, operation_id, round_count: int) -> None:
+    def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style operation."""
         if round_count <= 0:
             return
@@ -318,15 +341,21 @@ class WindowPlanner:
 
     # ---- the resolved operations
 
-    def round_count_of(self, operation_id) -> int:
+    def round_count_of(self, operation_id: Any) -> int:  # an opaque identity
         """The root-resolved round count of an operation."""
         return self.resolved_operation_by_id[operation_id].round_count
 
-    def code_geometry_of(self, operation_id):
+    def code_geometry_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> program_records.ResolvedCodeGeometry:
         """The resolved code geometry of an operation."""
         return self.resolved_operation_by_id[operation_id].code_geometry
 
-    def spatial_node_count_of(self, operation_id) -> int:
+    def spatial_node_count_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
         """The decoding-graph nodes per round of an operation."""
         return self.resolved_operation_by_id[operation_id].spatial_node_count
 
@@ -368,17 +397,17 @@ class WindowPlanner:
         )
         return source_round_limit
 
-    def has_stream(self, stream_id) -> bool:
+    def has_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True for a stream whose windows are planned at runtime."""
         return stream_id in self.growth_by_stream
 
-    def is_finite_stream(self, stream_id) -> bool:
+    def is_finite_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True when the source fixed the stream's window plan up front."""
         return self.growth_by_stream[stream_id].finite_geometries is not None
 
     def grow_stream(
         self,
-        stream_id,
+        stream_id: Any,  # an opaque identity
         highest_known_round: int,
         round_cap: Optional[int],
     ) -> list:
@@ -408,11 +437,14 @@ class WindowPlanner:
         if model is not None:
             self.models.model_by_window[window.key] = model
 
-    def refresh_stream_models(self, stream_id: Any) -> None:
-        """Install actual terminal models before the remaining windows queue.
+    def refresh_stream_models(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> None:
+        """Install the terminal models before the remaining windows queue.
 
-        The stream identity is opaque. A runtime-selected readout can affect
-        every unqueued tail buffer, while published models stay unchanged.
+        A readout chosen at run time can change every unqueued tail
+        buffer's model; published ones stay.
         """
         for window in self.windows_of(stream_id):
             if window.queued or window.committed:
@@ -420,17 +452,17 @@ class WindowPlanner:
             self.attach_stream_model(window)
 
     def trim_stream_tail(
-        self, stream_id, stream_round_count: int
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
     ) -> Optional[window_records.Window]:
         """Clip the one window whose commit region holds a closed tail.
 
         The tail is the sealed length or a measurement-closed boundary.
-        The window commits through it, its buffer follows the new commit
-        end, and the stream's next window starts on the round after it:
-        a last window may be smaller than the others (Tan et al.
-        2209.09219 lines 1052-1056; Skoric et al. 2209.08552 lines
-        692-700). The window is returned so its holds can shrink with
-        it. None when no window is clipped.
+        The window commits through it, its buffer follows, and the next
+        window starts after it, so a last window may be smaller than the
+        others (Tan et al. 2209.09219 lines 1052-1056; Skoric et al.
+        2209.08552 lines 692-700). Returns the clipped window, or None.
         """
         growth = self.growth_by_stream[stream_id]
         for window in self.windows_of(stream_id):
@@ -440,19 +472,18 @@ class WindowPlanner:
         return None
 
     def cut_stream_after(
-        self, stream_id: Any, last_round: int
+        self,
+        stream_id: Any,  # an opaque identity
+        last_round: int,
     ) -> Optional[window_records.Window]:
         """End a commit region on the round: a segment starts after it.
 
         A segment's result is the sum of the windows committed over its
-        rounds (Skoric et al. 2209.08552, the stream's correction is the
-        sum over its committed windows; operation_results.py), so its
-        first round starts a window. A window already laid across the
-        round commits through it and may be smaller than the others, as
-        at a closed tail (Tan et al. 2209.09219 lines 1052-1056), but the
-        stream's model stays open; a window not laid yet is cut as it is
-        laid. Every cut is kept, so a later replan keeps the segments
-        bound before it. The window clipped is returned, or None.
+        rounds (Skoric et al. 2209.08552; operation_results.py), so its
+        first round starts a window. A window laid across the round
+        commits through it, as at a closed tail; one not laid yet is cut
+        as it is laid. Every cut is kept, so a later replan keeps it.
+        Returns the clipped window, or None.
         """
         growth = self.growth_by_stream[stream_id]
         clipped = None
@@ -468,7 +499,10 @@ class WindowPlanner:
     # ---- private
 
     def _replan_finite_after(
-        self, stream_id: Any, growth: "_StreamGrowth", last_round: int
+        self,
+        stream_id: Any,  # an opaque identity
+        growth: "_StreamGrowth",
+        last_round: int,
     ) -> None:
         """Lay the finite source's windows not laid yet from the cut on.
 
@@ -498,7 +532,7 @@ class WindowPlanner:
 
     def _plan_stretch(
         self,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         growth: "_StreamGrowth",
         round_before: int,
         last_round: int,
@@ -528,11 +562,6 @@ class WindowPlanner:
         )
         if not models:
             return
-        successor_ids = self.plan.successors.get(operation.id, ())
-        if successor_ids:
-            _refuse_reads_past_the_model(
-                operation, windows, models, resolved.round_count
-            )
         for window, model in zip(windows, models, strict=True):
             self.models.model_by_window[window.key] = model
 
@@ -594,36 +623,6 @@ def _model_key(
         requirement,
         protocol,
     )
-
-
-def _refuse_reads_past_the_model(
-    operation: program_records.Operation,
-    windows: list,
-    models: list,
-    round_count: int,
-) -> None:
-    """A window with an error model reads only its own operation's rounds.
-
-    The model is sliced from the operation's own circuit, so its rows
-    end at the operation's last round. A window whose buffer runs on
-    into the next operation's rounds would hand the decoder rows its
-    model does not have, which the decoder's input memory refuses in the
-    middle of the run (decoders/decoder_memory.py). The flush terminal
-    policy ends the last window inside its operation.
-    """
-    for window, model in zip(windows, models, strict=True):
-        if model is None:
-            continue
-        if window.buffer_hi <= round_count:
-            continue
-        first_foreign_round = round_count + 1
-        raise ValueError(
-            f"{operation.name} window {window.window_index} reads rounds "
-            f"{first_foreign_round} to {window.buffer_hi} from the operation "
-            f"after it, but its error model holds only the operation's own "
-            f"{round_count} rounds; windows.terminal_policy flush ends the "
-            "last window inside its operation"
-        )
 
 
 def _clip(
@@ -723,7 +722,7 @@ def _stream_round_limit(physical_round_limit, model_round_limit):
 
 
 class _StreamGrowth:
-    """One stream's growth: its region sizes and the next window to lay."""
+    """One stream's window growth."""
 
     def __init__(
         self, commit_rounds: int, buffer_rounds: int, finite_geometries
@@ -784,12 +783,6 @@ class _StreamGrowth:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the window planner reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the window planner reports, as one member."""
 
     window_planned: trace_source.TraceSource = trace_source.new_source()

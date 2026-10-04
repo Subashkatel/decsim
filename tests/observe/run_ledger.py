@@ -96,9 +96,9 @@ class RunLedgerView:
         for event in self.events:
             if event.op != op:
                 continue
-            if round is not None and event.round != round:
+            if not _is_wanted(event.round, round):
                 continue
-            if window is not None and event.window != window:
+            if not _is_wanted(event.window, window):
                 continue
             rows.append(event)
         ordered = sorted(rows, key=_event_id)
@@ -146,6 +146,13 @@ class RunLedgerView:
 
 def _event_id(event: LedgerEvent) -> int:
     return event.event_id
+
+
+def _is_wanted(value: Optional[int], wanted: Optional[int]) -> bool:
+    """Whether a round or a window is the one asked for; None asks for any."""
+    if wanted is None:
+        return True
+    return value == wanted
 
 
 def _round_terminals(events: tuple) -> tuple:

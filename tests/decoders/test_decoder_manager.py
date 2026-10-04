@@ -1,10 +1,10 @@
-"""The facade's laws: a row plugs in through the pool, a job is admitted once.
+"""The facade's laws: a job is admitted once, withdrawn whole, and settled.
 
-sinter's BUILT_IN_DECODERS
-(sinter/_decoding/_decoding_all_built_in_decoders.py): a new decoder is
-one class on the port and one row; here the row is routed by the pool
-and its result reaches on_decoded once, with the manager's log naming
-the job it started.
+A withdrawn window leaves the queue and gives its claim back; a tier
+that blocks holds its unit until the result is read (Chen 2605.30765);
+the copy and in-place rows put the rounds where the unit reads them.
+A new row through the pool is tests/machine/test_machine.py::
+test_a_new_decoder_is_one_class_and_its_settings_record.
 """
 
 import dataclasses
@@ -19,15 +19,12 @@ import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.detector_error_model.detection_event_formation as event_formation
-import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
-import decsim.escalation.policies as escalation_policies
-import decsim.observe.log_writers as log_writers
 import decsim.records.decoding as decoding_records
+import decsim.records.formation as formation_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.trace_source as trace_source
 
 
 class FixedRow(decoder_module.DecoderBase):
@@ -49,15 +46,15 @@ class OneRoundSource:
     def formation_table(self, operation_id):
         """The one table: one event, the round's first outcome."""
         del operation_id
-        recipe = detector_formation.DetectorRecipe(
+        recipe = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
-            kind=detector_formation.LayerKind.PREPARATION,
+            kind=formation_records.LayerKind.PREPARATION,
             records=((1, 0),),
             reference_parity=0,
             coordinates=(),
         )
-        return detector_formation.FormationTable(
+        return formation_records.FormationTable(
             round_count=1,
             packet_width_by_round={1: 2},
             readout_slot_start=None,
@@ -72,23 +69,23 @@ class TwoRoundSource:
     def formation_table(self, operation_id):
         """One event a round, the second the XOR of both rounds' outcome."""
         del operation_id
-        first = detector_formation.DetectorRecipe(
+        first = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
-            kind=detector_formation.LayerKind.PREPARATION,
+            kind=formation_records.LayerKind.PREPARATION,
             records=((1, 0),),
             reference_parity=0,
             coordinates=(),
         )
-        second = detector_formation.DetectorRecipe(
+        second = formation_records.DetectorRecipe(
             detector_index=1,
             round_index=2,
-            kind=detector_formation.LayerKind.BULK,
+            kind=formation_records.LayerKind.BULK,
             records=((1, 0), (2, 0)),
             reference_parity=0,
             coordinates=(),
         )
-        return detector_formation.FormationTable(
+        return formation_records.FormationTable(
             round_count=2,
             packet_width_by_round={1: 1, 2: 1},
             readout_slot_start=None,
@@ -99,7 +96,6 @@ class TwoRoundSource:
 
 def _manager(engine, row, formation=None, unit_count=1):
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=unit_count, formation=formation
     )
@@ -110,7 +106,6 @@ def _manager(engine, row, formation=None, unit_count=1):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
-    manager.escalation_policy = policy
     return manager
 
 
@@ -136,29 +131,6 @@ def _window_job():
     )
 
 
-def test_a_fake_row_through_the_pool_decodes_the_window_once():
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    row = FixedRow()
-    manager = _manager(engine, row)
-    delivered = []
-
-    def on_decoded(job, result):
-        delivered.append((engine.now, result))
-        manager.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
-
-    job = _window_job()
-    manager.enqueue(job, None, on_decoded)
-    engine.run()
-    (delivery,) = delivered
-    tick, result = delivery
-    assert tick == config.microseconds_to_ticks(2.0)
-    assert result.logical_observables == (1,)
-    assert "Decoder manager: START DECODE mem W0" in log.lines[-1]
-    manager.check_decode_work_settled()
-
-
 def _resolving(manager):
     """An on_decoded that closes the request, as the window side does."""
     keep = decoding_records.Verdict.KEEP
@@ -175,7 +147,7 @@ def test_a_spent_job_is_refused():
     manager = _manager(engine, row)
     job = _window_job()
     manager.enqueue(job, None, lambda _job, _result: None)
-    with pytest.raises(RuntimeError, match="submitted once"):
+    with pytest.raises(RuntimeError, match="has already been admitted"):
         manager.enqueue(job, None, lambda _job, _result: None)
 
 
@@ -292,43 +264,6 @@ def test_the_rounds_before_are_held_by_the_tier_and_not_deposited():
     assert job.rounds_before == ()
 
 
-class UnpinnableRow(FixedRow):
-    """A row that reports, at compile time, that no class can be forced."""
-
-    def __init__(self) -> None:
-        base = super()
-        base.__init__()
-        self.forced_solve_unavailable = trace_source.TraceSource()
-
-
-class _Model:
-    """The part of a window model the narrated line reads."""
-
-    detector_ids = (0, 1, 2, 3, 4)
-
-
-def test_the_manager_narrates_a_model_that_can_pin_no_logical_class():
-    """The line belongs to the component whose row reports it.
-
-    The log the frozen gate hashes is a product of the components alone.
-    The manager owns the rows that report it, so it says it, and a run
-    with no observer says it too.
-    """
-    engine = engine_module.Engine()
-    log = log_writers.LogWriter()
-    engine.line.connect(log.write)
-    row = UnpinnableRow()
-    manager = _manager(engine, row)
-    manager.start()
-    model = _Model()
-    reason = "one observable, no boundary"
-    row.forced_solve_unavailable.fire(model, reason)
-    lines = _lines_containing(log.lines, "NO FORCED SOLVE")
-    assert len(lines) == 1
-    assert "5-detector window model" in lines[0]
-    assert "one observable, no boundary" in lines[0]
-
-
 def test_every_job_kind_says_how_it_is_settled():
     """The settle table is read at every completion, so it is closed at import.
 
@@ -344,7 +279,6 @@ def test_every_job_kind_says_how_it_is_settled():
 def _blocking_manager(engine, row, *, blocks_unit: bool):
     """A one-unit manager whose default pool blocks, or does not."""
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=1, blocks_unit=blocks_unit
     )
@@ -355,7 +289,6 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
-    manager.escalation_policy = policy
     return manager
 
 
@@ -524,7 +457,6 @@ def _enqueue_timed_jobs(manager, decode_microseconds, send_input, on_decoded):
 def _staging_manager(engine, row, *, copies_input: bool):
     """A one-unit manager whose default pool copies its input, or does not."""
     scheduler = schedulers.FifoScheduler()
-    policy = escalation_policies.Baseline(escalation_policies.NO_CONFIDENCE)
     pool_settings = decoder_pool.PoolSettings(
         name="default", unit_count=1, copies_input=copies_input
     )
@@ -535,7 +467,6 @@ def _staging_manager(engine, row, *, copies_input: bool):
     )
     manager.strong_requests = strong_requests_module.StrongRequests()
     manager.decoder = row
-    manager.escalation_policy = policy
     return manager
 
 

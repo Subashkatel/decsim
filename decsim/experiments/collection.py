@@ -1,10 +1,9 @@
-"""The collection section: how a sweep point's shots are cut and stopped.
+"""The collection: how a point's shots are cut and stopped.
 
-sinter's CollectionOptions as yaml (sinter/_data/_collection_options.py:
-34-38), at the top of a file or in one sweep block, whose keys override
-the top's one by one. None of its keys enters a point's id or a
-configuration's id, as sinter's strong id leaves the collection options
-out (sinter/_data/_task.py:167-204): collecting longer is the same point
+sinter's CollectionOptions (sinter/_data/_collection_options.py:34-38):
+an experiment's default and a point's own. None of its keys enters a
+point's id, as sinter's strong id leaves the collection options out
+(sinter/_data/_task.py:167-204): collecting longer is the same point
 run longer.
 
 A point stops on its contiguous prefix of seeds, sinter's rule
@@ -24,23 +23,11 @@ from typing import Optional
 
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
-import decsim.experiments.refusal as refusal
 
 # QEC rounds per piece, every patch's rounds added up: a shot's cost
 # grows with its rounds, so a piece sized in rounds takes about as long
 # at any history length.
 DEFAULT_PIECE_ROUNDS = 20000
-KEYS = (
-    "max_failures",
-    "max_shots",
-    "max_core_seconds",
-    "min_shots",
-    "piece_rounds",
-)
-# The keys that stop a point; sinter refuses a collection without
-# max_shots for the same reason (sinter/_collection/_collection_manager.py:
-# 230-231): a point with no cap may never stop.
-CAP_KEYS = ("max_shots", "max_core_seconds")
 # the state of a prefix its time cap stopped, whose limits assume a
 # shot's time is independent of its failure
 TIME_CAP_STATE = "time cap"
@@ -48,11 +35,12 @@ TIME_CAP_STATE = "time cap"
 
 @dataclasses.dataclass(frozen=True)
 class CollectionSettings:
-    """One point's collection: when it stops and the rounds of a piece.
+    """The settings of one point's collection.
 
-    max_failures is the target, None for none; min_shots the scored
-    shots a point runs whatever its failures; max_shots and
-    max_core_seconds the caps, at least one of them set.
+    max_failures is the target, None for none; min_shots the scored shots
+    run whatever the failures; max_shots and max_core_seconds the caps, at
+    least one set; piece_rounds the rounds of one piece. Python input
+    enters here, so it checks its own values.
     """
 
     max_shots: Optional[int] = None
@@ -61,25 +49,13 @@ class CollectionSettings:
     min_shots: int = 0
     piece_rounds: int = DEFAULT_PIECE_ROUNDS
 
-    @classmethod
-    def from_yaml(
-        cls, top: Optional[Mapping], block: Optional[Mapping], where: str
-    ) -> "CollectionSettings":
-        """The top section's keys, the block's written over them, checked.
-
-        where names the block in a refusal, as the other block checks do.
-        """
-        merged = {}
-        _add_section(merged, top, "the collection section")
-        _add_section(merged, block, f"{where} collection")
-        _check_caps(merged, where)
-        _check_optional_count(merged, "max_shots", where)
-        _check_optional_count(merged, "max_failures", where)
-        _check_core_seconds(merged, where)
-        _check_minimum(merged, where)
-        piece_rounds = merged.get("piece_rounds", DEFAULT_PIECE_ROUNDS)
-        _check_count(piece_rounds, "piece_rounds", where)
-        return cls(**merged)
+    def __post_init__(self) -> None:
+        _check_caps(self)
+        _check_optional_count(self.max_shots, "max_shots")
+        _check_optional_count(self.max_failures, "max_failures")
+        _check_core_seconds(self.max_core_seconds)
+        _check_minimum(self.min_shots)
+        _check_count(self.piece_rounds, "piece_rounds")
 
     def text(self) -> str:
         """Every key the collection sets and its value, as one phrase."""
@@ -101,11 +77,9 @@ class CollectionSettings:
     ) -> Optional[failure_statistics.StopKind]:
         """Why a contiguous prefix with these counts has stopped, or None.
 
-        The rule is checked after every shot and its counts only grow, so
-        the first prefix it returns a kind for is the stop. The target
-        reached on the minimum's own shot is a minimum stop, and the
-        target comes before a cap reached on the same shot
-        (failure_statistics.StopKind).
+        The counts only grow, so the first prefix given a kind is the stop. The
+        target reached on the minimum's shot is a minimum stop, and the target
+        comes before a cap on the same shot.
         """
         if self._has_reached_the_target(counts):
             return self._target_or_minimum(counts)
@@ -178,11 +152,11 @@ class PointRule:
 
     @classmethod
     def from_record(cls, record: Mapping) -> "PointRule":
-        """The rule a point's resolved/ record says its prefix is read by.
+        """The rule a point's machine.json says its prefix is read by.
 
         The record's experiment facts are what collect_command wrote when
         it recorded the point, so a fold reads a point by the collection
-        it was run under, whatever the yaml says now.
+        it was run under, whatever its run file says now.
         """
         facts = record["experiment"]
         settings = CollectionSettings(**facts["collection"])
@@ -250,11 +224,8 @@ class PrefixTracker:
     def round_shape(self) -> Optional[tuple]:
         """The (outputs, rounds per output) every prefix shot ran, or None.
 
-        A per-round rate inverts one shape (failure_statistics
-        per_output_round_rate). A live stream idles through its
-        feedback wait, so two of its shots can run different rounds, and
-        outputs that ran apart have no one length; no one shape converts
-        such a prefix's rate.
+        A live stream's shots can run different rounds, and outputs that ran
+        apart have no one length, so no one shape converts such a prefix.
         """
         if len(self.round_shapes) != 1:
             return None
@@ -293,81 +264,58 @@ def _round_shape_of(row: Mapping) -> tuple:
     return (outputs, rounds)
 
 
-def _add_section(merged: dict, section: Optional[Mapping], name: str) -> None:
-    """One collection mapping's keys into the merged ones, each one known."""
-    if section is None:
-        return
-    keys_text = ", ".join(KEYS)
-    if not isinstance(section, Mapping):
-        raise refusal.RefusalError(
-            f"{name} is {section!r}; it is a mapping of {keys_text}"
-        )
-    written = set(section)
-    unknown = written - set(KEYS)
-    if unknown:
-        listed = sorted(unknown)
-        raise refusal.RefusalError(
-            f"{name} names {listed}, which are no collection keys; the "
-            f"keys are {keys_text} (configs/reference.yaml)"
-        )
-    merged.update(section)
-
-
-def _check_caps(merged: dict, where: str) -> None:
+def _check_caps(settings: CollectionSettings) -> None:
     """A point stops only at a cap it is given, so it needs one."""
-    for key in CAP_KEYS:
-        if merged.get(key) is not None:
-            return
-    raise refusal.RefusalError(
-        f"{where} has no cap; its collection sets max_shots or "
-        "max_core_seconds, or a point may never stop"
+    if settings.max_shots is not None:
+        return
+    if settings.max_core_seconds is not None:
+        return
+    raise ValueError(
+        "collection has no cap; it sets max_shots or max_core_seconds, or a "
+        "point may never stop"
     )
 
 
-def _check_optional_count(merged: dict, key: str, where: str) -> None:
-    """A count that may be null is null or a whole number of at least one."""
-    value = merged.get(key)
+def _check_optional_count(value, key: str) -> None:
+    """A count that may be None is None or a whole number of at least one."""
     if value is None:
         return
-    _check_count(value, key, where)
+    _check_count(value, key)
 
 
-def _check_count(value, key: str, where: str) -> None:
+def _check_count(value, key: str) -> None:
     """A count the collection reads is a whole number of at least one."""
     is_whole_number = isinstance(value, int) and not isinstance(value, bool)
     if is_whole_number and value >= 1:
         return
-    raise refusal.RefusalError(
-        f"{where} collection {key} must be a whole number of at least 1, "
-        f"got {value!r}"
+    raise ValueError(
+        f"collection {key} must be a whole number of at least 1, got {value!r}"
     )
 
 
-def _check_core_seconds(merged: dict, where: str) -> None:
+def _check_core_seconds(value) -> None:
     """The time cap, when given, is a finite number of seconds above zero.
 
     An infinite cap is no cap: a point with no other would never stop.
     """
-    value = merged.get("max_core_seconds")
     if value is None:
         return
     is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
     is_finite_number = is_number and math.isfinite(value)
     if is_finite_number and value > 0:
         return
-    raise refusal.RefusalError(
-        f"{where} collection max_core_seconds must be a finite number of "
-        f"seconds above 0, got {value!r}"
+    raise ValueError(
+        "collection max_core_seconds must be a finite number of seconds "
+        f"above 0, got {value!r}"
     )
 
 
-def _check_minimum(merged: dict, where: str) -> None:
+def _check_minimum(value) -> None:
     """min_shots is a whole number, zero for no minimum."""
-    value = merged.get("min_shots", 0)
     is_whole_number = isinstance(value, int) and not isinstance(value, bool)
     if is_whole_number and value >= 0:
         return
-    raise refusal.RefusalError(
-        f"{where} collection min_shots must be a whole number of at least "
-        f"0, got {value!r}"
+    raise ValueError(
+        f"collection min_shots must be a whole number of at least 0, got "
+        f"{value!r}"
     )

@@ -10,7 +10,8 @@ may be cut at, validated for the graphlike representation only.
 from typing import Optional
 
 import decsim.records.windows as window_records
-from decsim.detector_error_model import fault_model_contracts, window_slicer
+from decsim.detector_error_model import window_slicer
+from decsim.records import fault_model_contracts
 
 
 def validate_closed_windows_are_dependency_destinations(
@@ -72,12 +73,7 @@ def validate_window_protocol(
     for seam_index in seam_indices:
         _check_seam_is_one_layer(entries[seam_index])
         _check_seam_has_a_task_after_it(seam_index, len(entries))
-    expected_edges = _seam_edges(seam_indices)
-    declared_edges = dependency_edges or ()
-    if set(declared_edges) != set(expected_edges):
-        raise ValueError(
-            "each Tan type-2 seam must depend on its two adjacent type-1 tasks"
-        )
+    _check_seam_edges(seam_indices, dependency_edges)
 
 
 def _check_window_cuts_no_fault(
@@ -132,6 +128,18 @@ def _check_seam_has_a_task_after_it(seam_index: int, window_count: int) -> None:
             f"Tan type-2 seam {seam_index} has no type-1 task after it: "
             f"window {window_after} is outside the plan of {window_count} "
             "windows"
+        )
+
+
+def _check_seam_edges(
+    seam_indices: tuple[int, ...],
+    dependency_edges: Optional[tuple[tuple[int, int], ...]],
+) -> None:
+    expected_edges = _seam_edges(seam_indices)
+    declared_edges = dependency_edges or ()
+    if set(declared_edges) != set(expected_edges):
+        raise ValueError(
+            "each Tan type-2 seam must depend on its two adjacent type-1 tasks"
         )
 
 

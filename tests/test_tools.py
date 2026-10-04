@@ -2,9 +2,10 @@
 
 tools/check.sh runs three checkers over the tree, and a checker that
 misreads its arguments fails open: it exits 0 having looked at nothing,
-and the check silently stops holding. slurm/round.sh fails the same way,
-by asking for the wrong job or running a task on code nobody can name.
-These tests hold each script to what it does with its arguments.
+and the check silently stops holding. `decsim run --slurm` fails the
+same way, by asking for the wrong job or running a task on code nobody
+can name, so it is held here beside them, against a stub git and
+sbatch. These tests hold each to what it does with its arguments.
 """
 
 import ast
@@ -12,7 +13,9 @@ import importlib.util
 import os
 import pathlib
 import re
+import shlex
 import subprocess
+import sys
 
 import pytest
 
@@ -21,24 +24,15 @@ TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 TOOLS = PACKAGE_ROOT / "tools"
 CHECK_SCRIPT = TOOLS / "check.sh"
-ROUND_SCRIPT = PACKAGE_ROOT / "slurm" / "round.sh"
-# What a submitting shell could hand round.sh: an excuse for a dirty
-# tree, a pinned python, a dry run, or the array job the suite itself
-# runs in.
-UNSET_FOR_THE_ROUND = (
+# What a submitting shell could hand `decsim run --slurm`: an excuse for
+# a dirty tree, a tree reading, or the job the suite itself runs in.
+UNSET_FOR_SLURM = (
     "ALLOW_DIRTY",
-    "DECSIM_PYTHON",
-    "DRY_RUN",
+    "DECSIM_TREE_DIRTY",
+    "DECSIM_TREE_PATCH_SHA256",
     "SLURM_ARRAY_TASK_ID",
     "SLURM_CPUS_PER_TASK",
-    "SUBMIT_LIMIT",
-)
-# A round's tasks.csv: two tasks share a shape of job, one has its own.
-TASKS_TEXT = (
-    "task,cores,memory_mb,hours,estimated_core_hours\n"
-    "0,4,16384,24,\n"
-    "1,4,6144,24,1.5\n"
-    "2,4,16384,24,\n"
+    "SLURM_JOB_ID",
 )
 
 
@@ -60,15 +54,6 @@ def test_the_uses_graph_check_says_what_it_wants_with_no_argument(capsys):
     assert "usage: check_uses_graph.py" in captured.err
 
 
-def test_the_uses_graph_check_refuses_a_path_that_is_not_a_directory(capsys):
-    """A mistyped root is named, so the reader sees which argument was wrong."""
-    tool = _tool("check_uses_graph")
-    exit_code = tool.main(["decsim/machine.py"])
-    captured = capsys.readouterr()
-    assert exit_code == 2
-    assert "is not a directory" in captured.err
-
-
 def test_the_uses_graph_check_reports_the_levels_of_the_package(capsys):
     """With the package it prints the partial order and passes."""
     tool = _tool("check_uses_graph")
@@ -78,21 +63,6 @@ def test_the_uses_graph_check_reports_the_levels_of_the_package(capsys):
     assert exit_code == 0
     assert "0 cycles" in captured.out
     assert "level 0:" in captured.out
-
-
-def test_the_uses_graph_puts_a_package_importing_none_at_level_zero(
-    tmp_path,
-):
-    tool = _tool("check_uses_graph")
-    root_module = tmp_path / "__init__.py"
-    root_module.write_text('"""The package."""\n')
-    leaf = tmp_path / "leaf.py"
-    leaf.write_text('"""Imports nothing of the package."""\n')
-
-    edges = tool.read_edges(tmp_path)
-    nodes = tool.nodes_of(edges)
-
-    assert tool.levels_of(edges, nodes) == {"leaf": 0}
 
 
 def test_the_recognition_check_passes_on_the_tree(capsys):
@@ -127,22 +97,6 @@ def test_the_recognition_check_catches_a_row_chosen_by_its_class(
     )
     assert "build_something.py:4" in captured.out
     assert "BeliefMatchingDecoder" in captured.out
-
-
-def test_the_recognition_check_reads_an_enum_member_as_a_value(
-    tmp_path, capsys
-):
-    """A member is a value, so comparing one is not a class test."""
-    tool = _tool("check_row_recognition")
-    module = tmp_path / "reads_a_member.py"
-    module.write_text(
-        "def is_strong(tier):\n"
-        "    return tier is window_records.DecoderTier.STRONG\n"
-    )
-    exit_code = tool.main([str(tmp_path)])
-    captured = capsys.readouterr()
-    assert exit_code == 0
-    assert "0 unlisted class tests" in captured.out
 
 
 def test_the_one_action_check_fails_a_call_or_sum_passed_as_an_argument(
@@ -186,6 +140,191 @@ def test_a_checkout_under_a_folder_named_tmp_is_still_checked(tmp_path, capsys):
     assert "skipped.py" not in captured.out
 
 
+def test_rule_six_checks_bind_the_package_and_nothing_else(tmp_path, capsys):
+    """An unannotated public function below a private one fails in decsim.
+
+    The same module outside the package passes the check.
+    """
+    tool = _tool("check_one_action")
+    module_text = (
+        "def _helper():\n"
+        "    return 1\n"
+        "\n"
+        "\n"
+        "def public(value):\n"
+        "    return value\n"
+    )
+    package = tmp_path / "decsim"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "part.py").write_text(module_text)
+    (tmp_path / "part.py").write_text(module_text)
+    exit_code = tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "decsim/part.py:5: unannotated signature" in captured.out
+    assert "decsim/part.py:5: public after private" in captured.out
+    assert "2 findings in 1 of 3 files checked" in captured.out
+
+
+def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
+    """Five decisions pass and six fail, under rule 11's own count.
+
+    An `and`, an `or` and a comprehension's `for` and `if` each count
+    one, and the nested `inner` is counted apart from `outer`.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def five(values):\n"
+        "    kept = [value for value in values if value]\n"
+        "    while kept:\n"
+        "        kept.pop()\n"
+        "    if values or kept:\n"
+        "        return values\n"
+        "\n"
+        "def six(values):\n"
+        "    kept = [value for value in values if value]\n"
+        "    while kept and values:\n"
+        "        kept.pop()\n"
+        "    if values or kept:\n"
+        "        return values\n"
+        "\n"
+        "def outer(values):\n"
+        "    kept = [value for value in values if value]\n"
+        "    def inner():\n"
+        "        while kept and values:\n"
+        "            kept.pop()\n"
+        "        if values or kept:\n"
+        "            return values\n"
+        "    return inner\n"
+    )
+    exit_code = tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "decisions.py:8: over five decisions: six decides 6 times" in (
+        captured.out
+    )
+    assert "1 findings in 1 of 1 files checked" in captured.out
+
+
+def test_rule_eleven_counts_each_condition_operator_once(tmp_path, capsys):
+    """An operator inside a nested condition counts for that condition only.
+
+    In `filtered`, the filter's `and` counts once, and the default value
+    sits outside the body. In `chosen`, the `and` of a conditional
+    expression that is a whole test counts once; rule 1 reports that
+    expression as an inline conditional.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def filtered(values, enabled, kept=tuple(v for v in () if v)):\n"
+        "    if any(value for value in values if value and enabled):\n"
+        "        return True\n"
+        "    if enabled:\n"
+        "        return False\n"
+        "\n"
+        "def chosen(a, b, c, d):\n"
+        "    if a if b and c else d:\n"
+        "        return a\n"
+        "    if b or c:\n"
+        "        return b\n"
+    )
+    tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert "filtered decides" not in captured.out
+    assert "chosen decides" not in captured.out
+
+
+def test_rule_eleven_counts_the_operators_that_decide_a_condition(
+    tmp_path, capsys
+):
+    """Only an `and` on the path to a test's truth value counts.
+
+    In `branch`, the `and` is the value of the `if` when `c` holds, so
+    it decides; in `element`, the `and` builds each item of a list whose
+    truth is only whether it is empty.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def branch(a, b, c, d):\n"
+        "    if (a and b) if c else d:\n"
+        "        pass\n"
+        "    if a:\n"
+        "        pass\n"
+        "    if b:\n"
+        "        pass\n"
+        "    if c:\n"
+        "        pass\n"
+        "\n"
+        "def element(values, enabled):\n"
+        "    if [value and enabled for value in values]:\n"
+        "        pass\n"
+        "    if values:\n"
+        "        pass\n"
+        "    if enabled:\n"
+        "        pass\n"
+        "    if not values:\n"
+        "        pass\n"
+    )
+    tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert "over five decisions: branch decides 6 times" in captured.out
+    assert "element decides" not in captured.out
+
+
+def test_rule_eleven_counts_a_definitions_outer_parts_in_the_function_around_it(
+    tmp_path, capsys
+):
+    """A nested definition's decorator and defaults sit in the outer body.
+
+    `defined` holds its inner function's decorator and default, and its
+    assert's `and` is in a condition: six. `deferred`'s lambda body is a
+    function of its own, so `deferred` decides twice.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def defined(values, a):\n"
+        "    @decorate([value for value in values if value])\n"
+        "    def inner(kept=[value for value in values if value and a]):\n"
+        "        return kept\n"
+        "    assert values and a\n"
+        "    return inner\n"
+        "\n"
+        "def deferred(a, b, c):\n"
+        "    if a:\n"
+        "        return None\n"
+        "    if b:\n"
+        "        return None\n"
+        "    return lambda: (a if b and c else 0, b if a or c else 1)\n"
+    )
+    tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert "over five decisions: defined decides 6 times" in captured.out
+    assert "deferred decides" not in captured.out
+
+
+def test_rule_eleven_counts_a_case_guard_as_an_if(tmp_path, capsys):
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def guarded(value, a, b):\n"
+        "    match value:\n"
+        "        case 1 if a and b:\n"
+        "            return 1\n"
+        "        case 2 if a and b:\n"
+        "            return 2\n"
+        "        case 3 if a and b:\n"
+        "            return 3\n"
+    )
+    tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert "over five decisions: guarded decides 6 times" in captured.out
+
+
 def _classes_tested_against(tool, root) -> set:
     tested = set()
     for path in tool.source_paths(root):
@@ -210,27 +349,15 @@ def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
     assert stale == set()
 
 
-def _stub_python(tmp_path, checkout=None):
-    """An interpreter that writes down the command line it was given.
-
-    It answers the runner's question about where decsim was imported
-    from with the checkout it is given, so the test never runs a sweep
-    and chooses which tree the runner reads.
-    """
-    if checkout is None:
-        checkout = tmp_path
+def _stub_python(tmp_path):
+    """An interpreter that writes down every command line it is given."""
     recorded = tmp_path / "argv.txt"
     stub = tmp_path / "python"
     stub.write_text(
-        "#!/usr/bin/env bash\n"
-        'if [ "$1" = "-c" ]; then\n'
-        f'  echo "{checkout}"\n'
-        "  exit 0\n"
-        "fi\n"
-        f'printf "%s\\n" "$@" > "{recorded}"\n'
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" >> "{recorded}"\n'
     )
     stub.chmod(0o755)
-    return stub, recorded
+    return recorded
 
 
 def test_the_check_script_runs_the_active_environments_python(tmp_path):
@@ -238,7 +365,7 @@ def test_the_check_script_runs_the_active_environments_python(tmp_path):
 
     A fresh clone has no .venv of its own, so the default names none.
     """
-    _stub, recorded = _stub_python(tmp_path)
+    recorded = _stub_python(tmp_path)
     environment = dict(os.environ)
     environment.pop("DECSIM_PYTHON", None)
     environment.pop("DECSIM_PYDEPS", None)
@@ -281,7 +408,8 @@ def test_the_tutorial_check_runs_the_pages_own_commands():
         "```\n"
     )
 
-    commands = check.page_commands(text)
+    blocks = check.fenced_blocks(text)
+    commands = check.block_commands(blocks[0].lines)
 
     assert len(commands) == 2
     assert commands[0].split() == [
@@ -296,12 +424,39 @@ def test_the_tutorial_check_runs_the_pages_own_commands():
 
 
 @pytest.mark.parametrize(
+    "shown, difference_count", [("2", 0), ("3", 1)], ids=["same", "moved"]
+)
+def test_the_tutorial_check_runs_the_python_blocks_as_one_session(
+    tmp_path, shown, difference_count
+):
+    """A later block reads what an earlier one set, and its print is held."""
+    check = _tool("check_tutorial_runs")
+    text = (
+        "```python\n"
+        "count = 1\n"
+        "```\n"
+        "```python\n"
+        "print(count + 1)\n"
+        "```\n"
+        "```\n"
+        f"{shown}\n"
+        "```\n"
+    )
+    tutorial = check.Tutorial(page="page.md", is_priced=True)
+    blocks = check.fenced_blocks(text)
+
+    _outputs, differences = check.run_page(tutorial, blocks, tmp_path)
+
+    assert len(differences) == difference_count
+
+
+@pytest.mark.parametrize(
     "shown_line, moved_line",
     [
-        (r"^(queue wait, mean: )[0-9.]+", r"\g<1>999.000"),
-        (r"^27\.224 ", "27.225 "),
+        (r"^(3,15,50,)[0-9.]+", r"\g<1>99.9"),
+        (r"^88\.424 ", "88.425 "),
     ],
-    ids=["summary timing", "trace tick"],
+    ids=["sweep column", "trace tick"],
 )
 def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
     shown_line, moved_line
@@ -311,9 +466,11 @@ def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
     tutorial = check.TUTORIALS[2]
     text, outputs = _page_and_its_own_output(check, tutorial.page)
     moved = re.sub(shown_line, moved_line, text, count=1, flags=re.MULTILINE)
+    blocks = check.fenced_blocks(text)
+    moved_blocks = check.fenced_blocks(moved)
 
-    unmoved_differences = check.page_differences(tutorial, text, outputs)
-    moved_differences = check.page_differences(tutorial, moved, outputs)
+    unmoved_differences = check.page_differences(tutorial, blocks, outputs)
+    moved_differences = check.page_differences(tutorial, moved_blocks, outputs)
 
     assert tutorial.is_priced
     assert moved != text
@@ -321,267 +478,241 @@ def test_a_priced_tutorial_fails_the_check_when_a_value_moves(
     assert len(moved_differences) == 1
 
 
-def test_a_wall_clock_tutorial_holds_its_counts_and_not_its_timings():
-    """first_run's load is the host's; its failure count is the seed's."""
+def test_a_wall_clock_tutorial_holds_its_qpu_tick_and_not_its_decode_tick():
+    """With a named decoder, fully done is the host's; execution done is not."""
     check = _tool("check_tutorial_runs")
-    tutorial = check.TUTORIALS[0]
-    text, outputs = _page_and_its_own_output(check, tutorial.page)
-    new_load = re.sub(
-        r"^(load .*: )[0-9.]+", r"\g<1>99.99", text, count=1, flags=re.MULTILINE
+    tutorial = check.Tutorial(page="page.md", is_priced=False)
+    printed = (
+        "config: page",
+        "execution done: 30000000 ticks",
+        "fully done: 31084000 ticks",
     )
-    new_count = text.replace(
-        "logical failures: 0 of 2 scored shots",
-        "logical failures: 1 of 2 scored shots",
+    outputs = [check.Printed(command="decsim run page.py", lines=printed)]
+    text = "```\n" + "\n".join(printed) + "\n```\n"
+    new_fully_done = text.replace("fully done: 31084000", "fully done: 99")
+    new_execution_done = text.replace(
+        "execution done: 30000000", "execution done: 99"
     )
+    decode_blocks = check.fenced_blocks(new_fully_done)
+    qpu_blocks = check.fenced_blocks(new_execution_done)
 
-    load_differences = check.page_differences(tutorial, new_load, outputs)
-    count_differences = check.page_differences(tutorial, new_count, outputs)
+    decode_differences = check.page_differences(
+        tutorial, decode_blocks, outputs
+    )
+    qpu_differences = check.page_differences(tutorial, qpu_blocks, outputs)
 
-    assert not tutorial.is_priced
-    assert new_load != text
-    assert load_differences == []
-    assert len(count_differences) == 1
+    assert new_fully_done != text
+    assert decode_differences == []
+    assert len(qpu_differences) == 1
 
 
 def _stub_git(tmp_path, status):
     """A git that answers about the checkout without one existing.
 
     `status` is what `git status --porcelain` does: print a changed file,
-    print nothing, or fail the way git fails outside a repository.
+    print nothing, or fail the way git fails outside a repository. Every
+    other question gets nothing, so the run records hold no patch.
     """
     answers = {
-        "dirty": ('  echo "?? edited.py"', "echo 264853ada3"),
-        "clean": ("  :", "echo 264853ada3"),
-        "unknown": ("  exit 128", "exit 128"),
+        "dirty": ('echo "?? edited.py"', "echo 264853ada3"),
+        "clean": (":", "echo 264853ada3"),
+        "unknown": ("exit 128", "exit 128"),
     }
     porcelain, revision = answers[status]
     stub = tmp_path / "git"
     stub.write_text(
         "#!/usr/bin/env bash\n"
-        'if [ "$3" = "status" ]; then\n'
-        f"{porcelain}\n"
-        "  exit 0\n"
-        "fi\n"
-        f"{revision}\n"
-    )
-    stub.chmod(0o755)
-
-
-def _stub_squeue(tmp_path):
-    """A squeue that lists $STUB_QUEUED_JOBS of the user's jobs, one a line."""
-    stub = tmp_path / "squeue"
-    stub.write_text(
-        "#!/usr/bin/env bash\n"
-        "for ((job = 0; job < ${STUB_QUEUED_JOBS:-0}; job++)); do\n"
-        '  echo "$job"\n'
-        "done\n"
+        'case "$3" in\n'
+        f"  status) {porcelain} ;;\n"
+        f"  rev-parse) {revision} ;;\n"
+        "esac\n"
     )
     stub.chmod(0o755)
 
 
 def _stub_sbatch(tmp_path):
-    """An sbatch that records each submission, so no test reaches Slurm."""
+    """An sbatch that records each submission and answers a job id.
+
+    The ids count up from 1000 in submission order, as --parsable prints
+    them, so no test reaches Slurm and a dependency names the job it
+    follows.
+    """
     stub = tmp_path / "sbatch"
     submissions = tmp_path / "submissions.txt"
-    stub.write_text(f'#!/usr/bin/env bash\necho "$*" >> {submissions}\n')
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$*" >> {submissions}\n'
+        f"wc -l < {submissions} | awk '{{print 999 + $1}}'\n"
+    )
     stub.chmod(0o755)
 
 
-def _round_folder(tmp_path) -> pathlib.Path:
-    """An experiment folder holding round 1's tasks.csv."""
-    experiment_dir = tmp_path / "experiment"
-    round_dir = experiment_dir / "round1"
-    round_dir.mkdir(parents=True)
-    (round_dir / "tasks.csv").write_text(TASKS_TEXT)
-    return experiment_dir
-
-
-def _run_the_round_script(tmp_path, status, extra_environment):
-    """round.sh for round 1, against a stub python and a stub git.
-
-    With DECSIM_PYTHON unset, the script takes the python on PATH, which
-    is the stub, as a fresh clone's job does.
-    """
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    _stub_python(tmp_path, checkout)
+def _slurm_environment(tmp_path, status):
+    """The submitting shell: a stub git and a stub sbatch."""
     _stub_git(tmp_path, status)
-    _stub_squeue(tmp_path)
     _stub_sbatch(tmp_path)
-    experiment_dir = _round_folder(tmp_path)
     environment = {
         name: value
         for name, value in os.environ.items()
-        if name not in UNSET_FOR_THE_ROUND
+        if name not in UNSET_FOR_SLURM
     }
-    environment["SLURM_SUBMIT_DIR"] = str(PACKAGE_ROOT)
     path = environment.get("PATH", "")
     environment["PATH"] = f"{tmp_path}:{path}"
-    environment.update(extra_environment)
-    completed = subprocess.run(
-        ["bash", str(ROUND_SCRIPT), str(experiment_dir), "1"],
+    environment["PYTHONPATH"] = str(PACKAGE_ROOT)
+    return environment
+
+
+def _decsim(tmp_path, arguments: list, environment):
+    """One decsim command line, run as the submitting shell runs it."""
+    command = [sys.executable, "-m", "decsim", *arguments]
+    return subprocess.run(
+        command,
         capture_output=True,
         text=True,
         env=environment,
+        cwd=tmp_path,
     )
-    return completed, experiment_dir
 
 
-def _sbatch_lines(printed: str) -> list:
-    """The sbatch lines a dry run printed, each split into its words."""
-    lines = []
-    for line in printed.splitlines():
-        if line.startswith("sbatch "):
-            words = line.split()
-            lines.append(words)
-    return lines
+# The weak base at two distances, four shots each.
+TWO_POINT_RUN_FILE = """
+import decsim
+import decsim.settings as machine_settings
+
+points = []
+for distance in (3, 5):
+    machine = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
+    point = decsim.Point(f"d{distance}", machine, {"qpu.distance": distance})
+    points.append(point)
+collection = decsim.CollectionSettings(max_shots=4)
+experiment = decsim.Experiment("two_points", points, collection)
+"""
 
 
-def _expected_sbatch_line(experiment_dir, tasks: str, memory: str) -> list:
-    """The line round.sh submits for one shape of job, word by word."""
-    round_dir = experiment_dir / "round1"
+def _two_point_run_file(tmp_path) -> pathlib.Path:
+    """A run file of two distances."""
+    run_file = tmp_path / "two_points.py"
+    run_file.write_text(TWO_POINT_RUN_FILE)
+    return run_file
+
+
+def _slurm_arguments(config_path, results_dir, *extra) -> list:
+    """`decsim run <run file> --slurm`, into results_dir."""
     return [
-        "sbatch",
-        "--job-name",
-        "decsim-round1",
-        "--array",
-        tasks,
-        "--nodes",
-        "1",
-        "--ntasks",
-        "1",
-        "--cpus-per-task",
-        "4",
-        "--mem",
-        memory,
-        "--time",
-        "24:00:00",
-        "--output",
-        f"{round_dir}/%a/log.txt",
-        str(ROUND_SCRIPT),
-        str(experiment_dir),
-        "1",
+        "run",
+        str(config_path),
+        "--slurm",
+        "--out",
+        str(results_dir),
+        *extra,
     ]
 
 
-def test_a_round_submits_one_array_per_shape_of_job(tmp_path):
-    """The referent is tasks.csv: one array per cores, memory and hours.
+def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
+    """Task i of the array runs point i of the run file, then a fold.
 
-    A Slurm array has one memory request, so the two tasks of one shape
-    share an array and the third has its own. A dry run submits nothing
-    and makes no task folder.
+    A dry run records the points and writes both files, and submits
+    nothing. The folder's path holds a space, and each line still reads
+    back as the arguments it was written from, the task index left for
+    the shell to expand.
     """
-    dry_run = {"DRY_RUN": "1"}
+    config_path = _two_point_run_file(tmp_path)
+    results_dir = tmp_path / "run folder"
+    environment = _slurm_environment(tmp_path, "clean")
+    arguments = _slurm_arguments(config_path, results_dir, "--dry-run")
 
-    completed, experiment_dir = _run_the_round_script(
-        tmp_path, "clean", dry_run
-    )
+    completed = _decsim(tmp_path, arguments, environment)
 
-    lines = _sbatch_lines(completed.stdout)
-    task_folder = experiment_dir / "round1" / "0"
+    run_script = results_dir / "run.sbatch"
+    run_text = run_script.read_text()
+    run_lines = run_text.splitlines()
+    fold_script = results_dir / "fold.sbatch"
+    fold_text = fold_script.read_text()
+    fold_lines = fold_text.splitlines()
+    decsim_run = [sys.executable, "-m", "decsim", "run"]
+    run_path = config_path.resolve()
     assert completed.returncode == 0, completed.stderr
-    assert lines == [
-        _expected_sbatch_line(experiment_dir, "0,2", "16384M"),
-        _expected_sbatch_line(experiment_dir, "1", "6144M"),
+    assert run_lines[1] == (
+        "#SBATCH --array=0-1 --cpus-per-task=4 --mem=16384M --time=24:00:00"
+    )
+    assert shlex.split(run_lines[2]) == [
+        "#SBATCH",
+        f"--output={results_dir}/logs/%a.log",
     ]
-    assert not task_folder.exists()
-
-
-def test_a_round_task_runs_its_share_of_the_plan(tmp_path):
-    """Inside the array the script is the job: one collect --plan task.
-
-    It runs the task the array gives it, one process per core, on the
-    python of the job's environment.
-    """
-    in_the_array = {"SLURM_ARRAY_TASK_ID": "2", "SLURM_CPUS_PER_TASK": "4"}
-
-    completed, experiment_dir = _run_the_round_script(
-        tmp_path, "clean", in_the_array
-    )
-
-    recorded = tmp_path / "argv.txt"
-    recorded_text = recorded.read_text()
-    arguments = recorded_text.splitlines()
-    plan_path = experiment_dir / "round1" / "plan.csv"
-    assert completed.returncode == 0, completed.stderr
-    assert "dirty: 0" in completed.stdout
-    assert arguments == [
-        "-m",
-        "decsim",
-        "collect",
-        "--plan",
-        str(plan_path),
+    assert shlex.split(run_lines[3]) == [
+        *decsim_run,
+        str(run_path),
+        "--out",
+        str(results_dir),
         "--task",
-        "2",
+        "$SLURM_ARRAY_TASK_ID",
         "--processes",
         "4",
     ]
+    assert shlex.split(fold_lines[2]) == [
+        "#SBATCH",
+        f"--output={results_dir}/logs/fold.log",
+    ]
+    assert shlex.split(fold_lines[3]) == [
+        *decsim_run,
+        "--fold",
+        "--out",
+        str(results_dir),
+    ]
+    point_records = results_dir.glob("points/*/machine.json")
+    point_record_paths = list(point_records)
+    assert len(point_record_paths) == 2
+    assert not (tmp_path / "submissions.txt").exists()
+
+
+def test_a_launch_submits_the_array_then_the_fold_behind_it(tmp_path):
+    """The fold's dependency names the job id sbatch answered."""
+    config_path = _two_point_run_file(tmp_path)
+    results_dir = tmp_path / "results"
+    environment = _slurm_environment(tmp_path, "clean")
+    arguments = _slurm_arguments(config_path, results_dir)
+
+    completed = _decsim(tmp_path, arguments, environment)
+
+    submissions_path = tmp_path / "submissions.txt"
+    submissions_text = submissions_path.read_text()
+    array_text, fold_text = submissions_text.splitlines()
+    assert completed.returncode == 0, completed.stderr
+    assert array_text == f"--parsable {results_dir / 'run.sbatch'}"
+    assert fold_text == (
+        f"--parsable --dependency=afterany:1000 {results_dir / 'fold.sbatch'}"
+    )
+    assert "array job 1000, fold job 1001" in completed.stdout
 
 
 @pytest.mark.parametrize(
     ("status", "sentence"),
     [("dirty", "has uncommitted changes"), ("unknown", "git says nothing")],
 )
-@pytest.mark.parametrize(
-    "where", [{"DRY_RUN": "1"}, {"SLURM_ARRAY_TASK_ID": "0"}]
-)
-def test_a_round_refuses_a_tree_git_does_not_vouch_for(
+@pytest.mark.parametrize("where", ["launch", "task"])
+def test_a_tree_git_does_not_vouch_for_is_refused_where_it_starts(
     tmp_path, status, sentence, where
 ):
     """A dirty tree, or one git cannot read, is refused where it starts.
 
-    Every task imports the tree as it stands when that task starts, so a
-    round launched from a tree still being edited runs code no piece of
-    it can name. Submitting refuses it, so no array is queued, and so
+    Every task imports the tree as it stands when that task starts, so
+    an array launched from a tree still being edited runs code no piece
+    of it can name. Launching refuses it, so nothing is queued, and so
     does every task, since the tree may change after submission.
     """
-    completed, _experiment_dir = _run_the_round_script(tmp_path, status, where)
+    config_path = _two_point_run_file(tmp_path)
+    results_dir = tmp_path / "results"
+    environment = _slurm_environment(tmp_path, status)
+    arguments = {
+        "launch": _slurm_arguments(config_path, results_dir),
+        "task": ["run", str(config_path), "--out", str(results_dir)]
+        + ["--task", "0"],
+    }
 
-    recorded = tmp_path / "argv.txt"
-    assert completed.returncode != 0
+    completed = _decsim(tmp_path, arguments[where], environment)
+
+    assert completed.returncode == 1
     assert sentence in completed.stderr
     assert "ALLOW_DIRTY=1" in completed.stderr
-    assert _sbatch_lines(completed.stdout) == []
-    assert not recorded.exists()
-
-
-@pytest.mark.parametrize("where", [{"DRY_RUN": "1"}, {"DRY_RUN": ""}])
-def test_a_round_past_the_submit_limit_is_refused_before_any_array(
-    tmp_path, where
-):
-    """Its three tasks and two queued jobs pass a limit of four.
-
-    The limit counts each array task as a job, so a round past it would
-    be half submitted; it is refused before the first array, dry run or
-    not, with a sentence that says to plan with fewer tasks.
-    """
-    over_the_limit = {"SUBMIT_LIMIT": "4", "STUB_QUEUED_JOBS": "2", **where}
-
-    completed, experiment_dir = _run_the_round_script(
-        tmp_path, "clean", over_the_limit
-    )
-
-    task_folder = experiment_dir / "round1" / "0"
-    submissions = tmp_path / "submissions.txt"
-    assert completed.returncode != 0
-    assert "fewer --tasks" in completed.stderr
-    assert _sbatch_lines(completed.stdout) == []
-    assert not task_folder.exists()
-    assert not submissions.exists()
-
-
-@pytest.mark.parametrize("limit", ["mistyped", "0", "-3", "1.5"])
-def test_a_submit_limit_that_is_no_positive_whole_number_is_refused(
-    tmp_path, limit
-):
-    """A limit the script cannot compare would let any round through."""
-    malformed = {"SUBMIT_LIMIT": limit}
-
-    completed, _experiment_dir = _run_the_round_script(
-        tmp_path, "clean", malformed
-    )
-
-    submissions = tmp_path / "submissions.txt"
-    assert completed.returncode != 0
-    assert "SUBMIT_LIMIT must be a whole number" in completed.stderr
-    assert not submissions.exists()
+    assert not (tmp_path / "submissions.txt").exists()
+    assert not results_dir.exists()

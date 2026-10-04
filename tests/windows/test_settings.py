@@ -1,175 +1,81 @@
-"""The windows section: the tables it resolves and the keys it refuses.
+"""The windows record: its defaults, the switching preset, its sizes.
 
-STYLE.md rule 7: a pluggable component's section carries one kind key
-naming a row of the root's table. This section carries four such keys,
-and two of them, terminal_policy and boundaries, carry
-a null default whose meaning is decided later, so the refusal each
-one raises at the yaml boundary is what a user meets first.
+A run with no switching drains with a flush tail and ships boundaries
+eagerly; switching_windows gives a switching run the lookahead tail
+and the boundary row its strong window declares.
 """
 
 import dataclasses
 
 import pytest
 
-import decsim.config as config
-import decsim.records.windows as window_records
+import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.schemes.naive_online as naive_online_scheme
+import decsim.windows.schemes.parallel as parallel_scheme
+import decsim.windows.schemes.sandwich as sandwich_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 
-CLOCKS = config.ClockSettings({"decisions": 250.0})
-
-
-def _section(**overrides) -> dict:
-    """A complete windows section, with the given keys overridden."""
-    section = {"kind": "sliding", "commit_rounds": None, "buffer_rounds": None}
-    section.update(overrides)
-    return section
-
-
-def test_every_windowing_scheme_row_has_one_class():
-    """The table is the plug point: one name, one row (STYLE.md rule 7)."""
-    rows = window_settings.WINDOWING_SCHEMES
-    row_classes = rows.values()
-    distinct_classes = set(row_classes)
-
-    assert sorted(rows) == ["naive_online", "parallel", "sandwich", "sliding"]
-    assert len(distinct_classes) == len(rows)
-
-
-def test_a_terminal_policy_that_is_not_one_of_the_two_words_is_refused():
-    section = _section(terminal_policy="drain")
-
-    with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    sentence = str(refusal.value)
-    assert "windows.terminal_policy is one of" in sentence
-    assert "'drain'" in sentence
-
-
-@pytest.mark.parametrize("policy", window_records.TERMINAL_POLICIES)
-def test_both_terminal_policies_of_the_record_are_accepted(policy):
-    section = _section(terminal_policy=policy)
-    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    assert settings.terminal_policy == policy
-
-
-def test_a_boundaries_key_that_names_no_row_is_refused():
-    section = _section(boundaries="lazy")
-
-    with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    sentence = str(refusal.value)
-    assert "windows.boundaries" in sentence
-    assert "lazy" in sentence
-
-
-def test_a_boundary_payload_that_names_no_row_is_refused_at_load():
-    section = _section(boundary_payload="bitmap")
-
-    with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    sentence = str(refusal.value)
-    assert "windows.boundary_payload" in sentence
-    assert "bitmap" in sentence
-
-
-@pytest.mark.parametrize("name", sorted(window_settings.BOUNDARY_POLICIES))
-def test_both_boundary_policy_rows_are_reachable_by_name(name):
-    section = _section(boundaries=name)
-    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    assert settings.boundaries == name
-
-
-def test_both_keys_default_to_null_so_the_plan_decides_them():
-    """Null is not a policy: the escalation row's declared fact picks one."""
-    section = _section()
-    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    assert settings.terminal_policy is None
-    assert settings.boundaries is None
-
-
-def test_a_section_without_its_sizes_is_refused_by_name():
-    section = {"kind": "sliding"}
-
-    with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    assert str(refusal.value) == (
-        "windows needs the keys ['buffer_rounds', 'commit_rounds']; "
-        "configs/reference.yaml holds every key with its meaning"
-    )
-
-
-@pytest.mark.parametrize(
-    "key, rounds",
-    [
-        ("commit_rounds", 0),
-        ("commit_rounds", True),
-        ("commit_rounds", "3"),
-        ("commit_rounds", 2.5),
-        ("buffer_rounds", -1),
-        ("buffer_rounds", False),
-    ],
+# every windowing scheme decsim ships
+SCHEME_ROWS = (
+    sliding_scheme.SlidingWindowScheme,
+    parallel_scheme.ParallelWindowScheme,
+    sandwich_scheme.TanSandwichScheme,
+    naive_online_scheme.NaiveOnlineScheme,
 )
-def test_a_window_size_that_is_not_a_whole_count_is_refused(key, rounds):
-    """F >= 1 and B >= 0, refused at load, never as a TypeError at build."""
-    section = _section(**{key: rounds})
-    with pytest.raises(ValueError, match=f"windows.{key} is a whole"):
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
 
 
-def test_the_smallest_whole_window_size_is_accepted():
-    section = _section(commit_rounds=1, buffer_rounds=0)
-    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
+def test_a_python_record_defaults_to_flush_and_eager():
+    settings = window_settings.WindowSettings()
 
-    assert (settings.commit_rounds, settings.buffer_rounds) == (1, 0)
-
-
-def test_a_charged_window_decision_needs_its_clock():
-    with pytest.raises(
-        ValueError, match="windows.decision_cycles needs a clock"
-    ):
-        window_settings.WindowSettings(decision_cycles=1)
+    assert settings.scheme.name == "sliding"
+    assert settings.terminal_policy == "flush"
+    assert settings.boundary_policy == boundary_policies.Eager.Settings()
 
 
-class _SteppedScheme(sliding_scheme.SlidingWindowScheme):
-    """A sliding scheme with one key of its own, for the section's split."""
+def test_a_terminal_policy_off_its_two_words_is_refused():
+    """A misspelt word lays out a last window that is neither policy's."""
+    with pytest.raises(ValueError, match="terminal_policy is one of"):
+        window_settings.WindowSettings(terminal_policy="lookahaed")
+
+
+class _OutsideHeld:
+    """A boundary row written outside decsim, in no table."""
+
+    ships_provisional_boundaries = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        stride_rounds: int = 1
+        """The outside row's record."""
 
-        @classmethod
-        def from_yaml(cls, section):
-            return cls(**section)
+        def build(self) -> "_OutsideHeld":
+            return _OutsideHeld()
 
-
-def test_a_scheme_rows_own_key_reaches_its_settings(monkeypatch):
-    """gem5's shape: the row declares its key, the section hands it over."""
-    monkeypatch.setitem(
-        window_settings.WINDOWING_SCHEMES, "stepped", _SteppedScheme
-    )
-    section = _section(kind="stepped", stride_rounds=2)
-
-    settings = window_settings.WindowSettings.from_yaml(section, CLOCKS)
-
-    assert settings.row_settings == _SteppedScheme.Settings(stride_rounds=2)
+    def on_commit(self, window, *, final: bool) -> bool:
+        """Ship when final."""
+        del window
+        return final
 
 
-def test_a_key_no_row_declares_is_refused_naming_the_sections_keys():
-    section = _section(stride_rounds=2)
+@dataclasses.dataclass(frozen=True)
+class _OutsideStrongWindow:
+    """A strong window record from outside, giving its own boundary row."""
 
-    with pytest.raises(ValueError) as refusal:
-        window_settings.WindowSettings.from_yaml(section, CLOCKS)
+    boundary_policy = _OutsideHeld.Settings()
 
-    assert str(refusal.value) == (
-        "windows does not know ['stride_rounds']; its keys are ['kind', "
-        "'clock', 'decision_cycles', 'commit_rounds', 'buffer_rounds', "
-        "'boundary_payload', 'terminal_policy', 'boundaries']"
-    )
+
+def test_the_switching_preset_takes_the_record_its_strong_window_gives():
+    """The record arrives whole: no table is read and no word is named."""
+    plain_windows = window_settings.WindowSettings()
+    strong_window = _OutsideStrongWindow()
+
+    windows = window_settings.switching_windows(plain_windows, strong_window)
+
+    assert windows.boundary_policy is strong_window.boundary_policy
+    assert windows.terminal_policy == "lookahead"
+
+
+@pytest.mark.parametrize("row", SCHEME_ROWS)
+def test_every_scheme_record_refuses_a_window_that_commits_nothing(row):
+    with pytest.raises(ValueError, match="commit_rounds"):
+        row.Settings(commit_rounds=0)

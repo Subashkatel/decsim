@@ -1,2 +1,7 @@
+union-find, pymatching, tesseract-short-beam
 commit e5f821d454a61a910212ff3936735c1bf777ae76
+dirty False
+
+xyz-relay-bp-5
+commit 7024df9d3e726c56b0d530113999c15866263949
 dirty False

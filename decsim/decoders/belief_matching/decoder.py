@@ -11,6 +11,7 @@ with -log(posterior) weights. The posterior clamp is 1e-15 here and
 accurate decoder invoked on demand.
 """
 
+import dataclasses
 from typing import Optional
 
 import ldpc
@@ -22,9 +23,9 @@ import scipy.special
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 POSTERIOR_FLOOR = 1e-15
 POSTERIOR_CEILING = 1.0 - POSTERIOR_FLOOR
@@ -50,6 +51,22 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         )
     }
 
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The belief propagation that reweights the matching graph."""
+
+        max_iterations: int = 30
+        belief_propagation_method: str = "product_sum"
+        # the word the reports name this row by
+        name = "belief_matching"
+
+        def build(self) -> "BeliefMatchingDecoder":
+            """A fresh decoder of these settings."""
+            return BeliefMatchingDecoder(
+                max_iterations=self.max_iterations,
+                belief_propagation_method=self.belief_propagation_method,
+            )
+
     def __init__(
         self,
         latency_model: Optional[decoder_module.DecoderBase] = None,
@@ -59,8 +76,17 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         self.max_iterations = max_iterations
         self.belief_propagation_method = belief_propagation_method
+        self.compile_key = (
+            BeliefMatchingDecoder,
+            max_iterations,
+            belief_propagation_method,
+        )
 
-    def compile(self, faults, model) -> tuple:
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> tuple:
         """The model's BP decoder and sparse hyperedge-to-edge map, warm.
 
         The first decode on a model builds ldpc's message-passing state;
@@ -71,10 +97,6 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             fault_models.FaultRepresentation.PHYSICAL
         )
         projection = model.physical_to_graphlike_detector_projection
-        if projection is None:
-            raise ValueError(
-                "belief matching needs the physical-to-graphlike link"
-            )
         columns, error_channel = _distinct_hyperedges(physical)
         physical_check = scipy.sparse.csr_matrix(physical.check)
         hyperedge_check = physical_check[:, columns]
@@ -94,7 +116,13 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         self.decode_window(backend, model, faults, empty_syndrome)
         return backend
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: tuple,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """BP on the hyperedges, then a matching with posterior weights.
 
         PyMatching raises on odd parity in a boundaryless component (see

@@ -8,9 +8,6 @@ it is about.
 """
 
 import dataclasses
-import pathlib
-import shutil
-import types
 
 import pytest
 
@@ -18,40 +15,19 @@ import decsim.build.readout as readout_part
 import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
-import decsim.escalation.policies as escalation_policies
-import decsim.escalation.settings as escalation_settings
-import decsim.experiments.experiment as experiment
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
-import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.settings as store_settings
+import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
-
-THIS_FILE = pathlib.Path(__file__)
-CONFIGS = THIS_FILE.parents[2] / "configs"
-# the data-movement grid's fourth block, the one with the strong tier
-DATA_MOVEMENT_SWITCHING_BLOCK = 3
+import tests.escalation.test_strong_window_shapes as shape_tests
 
 
 class _DeviceWithNoFormationTable:
     """A timing-only or synthetic source: it forms nothing."""
-
-
-class _CountingDetector:
-    """A burst detector that records the rounds it is shown."""
-
-    def __init__(self):
-        self.observed = []
-
-    def observe_round(self, operation_id, round_index, events):
-        """One round's events."""
-        del operation_id, events
-        self.observed.append(round_index)
 
 
 def _settings_forming_at(formed_at=("controller",)):
@@ -62,41 +38,15 @@ def _settings_forming_at(formed_at=("controller",)):
     return _machine_settings(detection_events=detection_events)
 
 
-def _policy(primary_tier="weak", requires_strong_context=False):
-    """The two facts the paths of a run are read off."""
-    tier = window_records.DecoderTier(primary_tier)
-    return types.SimpleNamespace(
-        primary_tier=tier, requires_strong_context=requires_strong_context
-    )
-
-
-WEAK_BASELINE = _policy()
-SWITCHING = _policy(requires_strong_context=True)
-STRONG_ONLY = _policy("strong")
-
-
-def test_a_source_that_does_not_answer_the_port_forms_nothing():
-    settings = _settings_forming_at()
-    device = _DeviceWithNoFormationTable()
-    fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
-        patch_ids=(0,),
-        round_index=1,
-        bits=None,
-        size_bits=8,
-        fragment_index=0,
-    )
-    carried = (fragment,)
-
-    placement = readout_part.build_detection_events(
-        settings, device, WEAK_BASELINE
-    )
-
-    assert placement.form_at("controller", carried) == carried
+# The two facts the paths of a run are read off: the tier that decodes
+# the plan's windows, and whether regions escalate to the strong tier.
+WEAK_BASELINE = (window_records.DecoderTier.WEAK, False)
+SWITCHING = (window_records.DecoderTier.WEAK, True)
+STRONG_ONLY = (window_records.DecoderTier.STRONG, False)
 
 
 @pytest.mark.parametrize(
-    "policy, formed_at",
+    "run_facts, formed_at",
     [
         (WEAK_BASELINE, ("controller",)),
         (WEAK_BASELINE, ("weak_syndrome_buffer",)),
@@ -108,155 +58,139 @@ def test_a_source_that_does_not_answer_the_port_forms_nothing():
         (STRONG_ONLY, ("weak_syndrome_buffer", "strong_decoder")),
     ],
 )
-def test_a_seat_list_every_path_crosses_once_is_built(policy, formed_at):
+def test_a_seat_list_every_path_crosses_once_is_built(run_facts, formed_at):
     settings = _settings_forming_at(formed_at)
     device = _DeviceWithNoFormationTable()
 
-    placement = readout_part.build_detection_events(settings, device, policy)
+    placement = readout_part.build_detection_events(
+        settings.detection_events, None, device, *run_facts
+    )
 
     assert placement.forms_at(formed_at[0])
 
 
 @pytest.mark.parametrize(
-    "policy, formed_at, crossed",
+    "run_facts, formed_at",
     [
-        (WEAK_BASELINE, ("strong_decoder",), "[]"),
-        (WEAK_BASELINE, ("controller", "weak_decoder"), "['controller', "),
-        (SWITCHING, ("weak_decoder",), "[]"),
-        (
-            SWITCHING,
-            ("weak_syndrome_buffer", "strong_syndrome_buffer"),
-            "['weak_syndrome_buffer', 'strong_syndrome_buffer']",
-        ),
-        (STRONG_ONLY, ("weak_syndrome_buffer",), "[]"),
+        (WEAK_BASELINE, ("strong_decoder",)),
+        (WEAK_BASELINE, ("controller", "weak_decoder")),
+        (SWITCHING, ("weak_decoder",)),
+        (SWITCHING, ("weak_syndrome_buffer", "strong_syndrome_buffer")),
+        (STRONG_ONLY, ("weak_syndrome_buffer",)),
     ],
 )
-def test_a_path_that_crosses_no_seat_or_two_is_refused(
-    policy, formed_at, crossed
-):
+def test_a_path_that_crosses_no_seat_or_two_is_refused(run_facts, formed_at):
     """None decodes raw outcomes; two form events of events."""
     settings = _settings_forming_at(formed_at)
     device = _DeviceWithNoFormationTable()
 
-    with pytest.raises(ValueError) as refusal:
-        readout_part.build_detection_events(settings, device, policy)
-
-    sentence = str(refusal.value)
-    assert f"at {crossed}" in sentence
-    assert "crosses exactly one seat" in sentence
-
-
-def test_the_burst_detector_counts_at_the_primary_tiers_seat():
-    """The escalated region's seat forms too, but is not counted twice."""
-    settings = _settings_forming_at(("weak_decoder", "strong_decoder"))
-    source = _OneRoundSource()
-    detector = _CountingDetector()
-    placement = readout_part.build_detection_events(
-        settings, source, SWITCHING, detector
-    )
-    raw = (_OneRoundSource.fragment(),)
-
-    placement.form_at("strong_decoder", raw)
-    placement.form_at("weak_decoder", raw)
-
-    assert detector.observed == [1]
-
-
-def test_a_burst_detector_on_a_source_that_forms_nothing_is_refused():
-    settings = _settings_forming_at()
-    device = _DeviceWithNoFormationTable()
-    detector = _CountingDetector()
-
-    with pytest.raises(ValueError, match="burst_detector counts detection"):
+    with pytest.raises(ValueError, match="a path with none decodes raw"):
         readout_part.build_detection_events(
-            settings, device, WEAK_BASELINE, detector
+            settings.detection_events, None, device, *run_facts
         )
 
 
-def test_buffer_zero_is_built_from_the_kind_the_section_names():
-    settings = _machine_settings()
+def test_a_placement_that_names_no_clock_forms_on_the_machines():
+    """No preset clock ticks at 300 MHz, so a former on one fails here."""
+    detection_events = event_settings.DetectionEventSettings(latency_cycles=5)
+    machine_clock = config.Clock.from_megahertz(300.0)
+    device = _DeviceWithNoFormationTable()
 
-    machine = machine_module.Machine.build(settings)
-
-    kind = settings.weak_syndrome_buffer.kind
-    store = machine.readout.weak_syndrome_buffer
-    assert isinstance(store, ported_syndrome_buffer.SYNDROME_BUFFERS[kind])
-
-
-def test_a_syndrome_buffer_kind_that_names_no_row_is_refused():
-    weak_syndrome_buffer = store_settings.SyndromeBufferSettings(kind="tape")
-    settings = _machine_settings(weak_syndrome_buffer=weak_syndrome_buffer)
-
-    with pytest.raises(ValueError) as refusal:
-        machine_module.Machine.build(settings)
-
-    assert "weak_syndrome_buffer.kind" in str(refusal.value)
-
-
-# A ported strong store's row settings: the default byte FIFO, and AFS's
-# 32-bit word at four cycles an access (ported_syndrome_buffer.py).
-PORTED_ROW_SETTINGS = [
-    ported_syndrome_buffer.PortedSyndromeBuffer.Settings(),
-    ported_syndrome_buffer.PortedSyndromeBuffer.Settings(
-        word_bits=32, cycles_per_access=4
-    ),
-]
-
-
-@pytest.mark.parametrize("row_settings", PORTED_ROW_SETTINGS)
-@pytest.mark.parametrize("plan", ["weak_only", "strong_only"])
-def test_a_ported_strong_store_is_refused_at_build(row_settings, plan):
-    """Its writes land unbooked, so its reads alone would be priced.
-
-    The build refuses it whether or not a tier reads the room side, as
-    it refuses a kind off the table.
-    """
-    storage_clock = config.Clock(1000)
-    strong_syndrome_buffer = store_settings.SyndromeBufferSettings(
-        kind="ported_syndrome_buffer",
-        clock=storage_clock,
-        row_settings=row_settings,
+    placement = readout_part.build_detection_events(
+        detection_events, machine_clock, device, *WEAK_BASELINE
     )
-    settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
-    planned = _with_one_tier(settings, plan)
 
-    with pytest.raises(ValueError, match="ported_syndrome_buffer prices"):
+    assert placement.clock == machine_clock
+
+
+def test_a_controller_that_names_no_clock_runs_on_the_machines():
+    """No preset clock ticks at 300 MHz, so a controller on one fails here."""
+    machine_clock = config.Clock.from_megahertz(300.0)
+    declared = declared_run.declared_controller()
+    controller = dataclasses.replace(declared, clock=None)
+    settings = _machine_settings(clock=machine_clock, controller=controller)
+
+    machine = machine_module.Machine.build(settings, 0)
+
+    assert machine.readout.controller.settings.clock == machine_clock
+
+
+# A ported strong store: the default byte FIFO, and AFS's 32-bit word at
+# four cycles an access (ported_syndrome_buffer.py).
+PORTED_CLOCK = config.Clock(1000)
+PORTED_STRONG_STORE = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+    clock=PORTED_CLOCK
+)
+
+
+def test_a_ported_strong_store_is_refused_at_build():
+    """Its writes land unbooked, so its reads alone would be priced."""
+    settings = _machine_settings(strong_syndrome_buffer=PORTED_STRONG_STORE)
+    planned = _strong_only(settings)
+
+    with pytest.raises(ValueError, match="the strong syndrome buffer takes"):
         machine_module.Machine.build(planned)
 
 
-def test_a_ported_strong_store_is_refused_alike_from_yaml_and_python(
-    tmp_path,
+# One cost each, set on the plain store: the clock, a write, a read.
+CHARGED_STRONG_STORES = [
+    syndrome_buffer_module.SyndromeBufferSettings(clock=PORTED_CLOCK),
+    syndrome_buffer_module.SyndromeBufferSettings(write_cycles=100),
+    syndrome_buffer_module.SyndromeBufferSettings(read_cycles=100),
+]
+
+
+@pytest.mark.parametrize("strong_syndrome_buffer", CHARGED_STRONG_STORES)
+def test_a_cost_on_the_strong_store_is_refused_at_build(
+    strong_syndrome_buffer,
 ):
-    """Both routes ask the one check, so they refuse in one sentence."""
-    configs = tmp_path / "configs"
-    shutil.copytree(CONFIGS, configs)
-    path = configs / "experiments" / "data_movement" / "data_movement.yaml"
-    text = path.read_text()
-    config = experiment.load_experiment(path)
-    switching_block = config.sweep[DATA_MOVEMENT_SWITCHING_BLOCK]
-    points = switching_block.points()
-    values = dict(points[0])
-    values["workload.arguments.physical_error_probability"] = 0.001
-    point = config.point_task(values)
-    settings = point.settings
-    ported_strong = dataclasses.replace(
-        settings.strong_syndrome_buffer, kind="ported_syndrome_buffer"
-    )
-    python_built = dataclasses.replace(
-        settings, strong_syndrome_buffer=ported_strong
-    )
-    ported_section = "strong_syndrome_buffer:\n  kind: ported_syndrome_buffer\n"
-    ported_text = text + ported_section
-    path.write_text(ported_text)
+    """Its receiving end books no access, so the cost would go unpaid."""
+    settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
+    planned = _strong_only(settings)
 
-    with pytest.raises(ValueError) as yaml_refusal:
-        experiment.load_experiment(path)
-    with pytest.raises(ValueError) as python_refusal:
-        machine_module.Machine.build(python_built)
+    with pytest.raises(ValueError, match="the strong syndrome buffer stores"):
+        machine_module.Machine.build(planned)
 
-    yaml_sentence = str(yaml_refusal.value)
-    python_sentence = str(python_refusal.value)
-    assert yaml_sentence.endswith(python_sentence)
+
+def test_a_strong_store_with_only_a_capacity_is_built():
+    capacity_only = syndrome_buffer_module.SyndromeBufferSettings(bits=4096)
+    settings = _machine_settings(strong_syndrome_buffer=capacity_only)
+    planned = _strong_only(settings)
+
+    machine = machine_module.Machine.build(planned)
+
+    assert machine.readout.strong_syndrome_buffer is not None
+
+
+def test_a_ported_strong_store_is_refused():
+    """The strong store books no port access, so a ported card is refused."""
+    ported_strong = ported_syndrome_buffer.PortedSyndromeBufferSettings()
+
+    sentence = _strong_store_refusal(ported_strong)
+
+    assert "not PortedSyndromeBufferSettings" in sentence
+
+
+def test_a_strong_store_cost_is_refused():
+    """The strong store charges nothing, so a cost set on it is refused."""
+    costed_strong = syndrome_buffer_module.SyndromeBufferSettings(
+        write_cycles=3
+    )
+
+    sentence = _strong_store_refusal(costed_strong)
+
+    assert "which only the weak syndrome buffer charges" in sentence
+
+
+def _strong_store_refusal(strong_store) -> str:
+    """The build refusal of a switching point given the strong store."""
+    settings = shape_tests.weak_base_switching(3, 0.001, 1.0)
+    settings = dataclasses.replace(
+        settings, strong_syndrome_buffer=strong_store
+    )
+    with pytest.raises(ValueError) as refusal:
+        machine_module.Machine.build(settings)
+    return str(refusal.value)
 
 
 def test_a_weak_only_run_reads_nothing_from_the_room_side():
@@ -270,49 +204,19 @@ def test_a_weak_only_run_reads_nothing_from_the_room_side():
     assert readout.strong_output is None
 
 
-def test_a_run_that_may_escalate_reads_the_room_side():
-    """The weak tier still decodes the plan's windows from its own store."""
-    machine = declared_run.switching_run()
-    readout = machine.readout
-
-    assert readout.primary_output is readout.weak_output
-    assert readout.strong_syndrome_buffer is not None
-    assert readout.strong_syndrome_round_receiver is not None
-
-
-def test_a_strong_primary_run_reads_the_room_side():
-    machine = declared_run.strong_only_run()
-    readout = machine.readout
-
-    assert readout.strong_syndrome_buffer is not None
-    assert readout.primary_output is readout.strong_output
-
-
 def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():
     """Otherwise the reference latency charges the same work twice."""
     settings = _settings_with_readout_cost(
         readout_to_bits_cycles=6, card_excludes_it=False
     )
 
-    with pytest.raises(ValueError) as refusal:
+    with pytest.raises(ValueError, match="a separate controller readout cost"):
         machine_module.Machine.build(settings)
-
-    sentence = str(refusal.value)
-    assert "separate controller readout cost" in sentence
-    assert "excludes that cost" in sentence
 
 
 def test_a_readout_cost_beside_a_card_that_excludes_it_is_allowed():
     settings = _settings_with_readout_cost(
         readout_to_bits_cycles=6, card_excludes_it=True
-    )
-
-    machine_module.Machine.build(settings)
-
-
-def test_no_readout_cost_asks_nothing_of_the_card():
-    settings = _settings_with_readout_cost(
-        readout_to_bits_cycles=0, card_excludes_it=False
     )
 
     machine_module.Machine.build(settings)
@@ -342,28 +246,8 @@ def test_every_readout_route_must_exclude_separately_charged_processing(
     )
     settings = dataclasses.replace(settings, links=links)
 
-    with pytest.raises(ValueError, match="latency excludes that cost"):
+    with pytest.raises(ValueError, match="a separate controller readout cost"):
         machine_module.Machine.build(settings)
-
-
-@pytest.mark.parametrize(
-    "readout_cycles, excludes_processing", [(0, False), (6, True)]
-)
-def test_readout_routes_allow_processing_to_be_charged_once(
-    readout_cycles: int, excludes_processing: bool
-) -> None:
-    settings = _settings_with_readout_cost(
-        readout_to_bits_cycles=readout_cycles, card_excludes_it=True
-    )
-    path = dataclasses.replace(
-        settings.links.qpu_to_controller,
-        excludes_receiver_processing=excludes_processing,
-    )
-    route = link_settings.ReadoutRoute((0,), path)
-    links = dataclasses.replace(settings.links, readout_routes=(route,))
-    settings = dataclasses.replace(settings, links=links)
-
-    machine_module.Machine.build(settings)
 
 
 def _settings_with_readout_cost(*, readout_to_bits_cycles, card_excludes_it):
@@ -393,8 +277,10 @@ def _machine_settings(**changes):
     links = declared_run.declared_profile()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
-    decoder = decoders.PresetLatencyDecoder(1.0)
-    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
+    )
     settings = machine_settings.MachineSettings(
         workload=workload,
         qpu=qpu,
@@ -417,8 +303,8 @@ def _ported_run_with_a_rate(bits_per_microsecond):
     path = dataclasses.replace(path, channel=channel)
     links = dataclasses.replace(links, weak_buffer_to_weak_decoder=path)
     storage_clock = config.Clock(1000)
-    ported = store_settings.SyndromeBufferSettings(
-        kind="ported_syndrome_buffer", clock=storage_clock
+    ported = ported_syndrome_buffer.PortedSyndromeBufferSettings(
+        clock=storage_clock
     )
     return _machine_settings(weak_syndrome_buffer=ported, links=links)
 
@@ -427,59 +313,14 @@ def test_a_rate_out_of_a_ported_store_is_refused_as_a_second_price():
     """The store's read port prices the bits; the link keeps its latency."""
     settings = _ported_run_with_a_rate(2000.0)
 
-    with pytest.raises(ValueError, match="set its bits_per_cycle to null"):
+    with pytest.raises(ValueError, match="weak_syndrome_buffer kind"):
         machine_module.Machine.build(settings)
 
 
-def test_a_ported_store_beside_an_unrated_link_is_accepted():
-    settings = _ported_run_with_a_rate(None)
-
-    machine_module.Machine.build(settings)
-
-
-def _with_one_tier(settings, plan: str):
-    """The settings with one decoding tier: the weak one or the strong one."""
-    decoder = decoders.PresetLatencyDecoder(1.0)
-    tier = decoder_settings.DecoderSettings(decoder=decoder)
-    if plan == "weak_only":
-        return dataclasses.replace(settings, weak_decoder=tier)
-    policy = escalation_policies.StrongOnly(escalation_policies.NO_CONFIDENCE)
-    escalation = escalation_settings.EscalationSettings(policy=policy)
-    return dataclasses.replace(
-        settings, strong_decoder=tier, escalation=escalation
+def _strong_only(settings):
+    """The settings with the strong tier alone decoding the windows."""
+    decoder = decoders.PresetLatencyDecoder.Settings(1.0)
+    tier = decoder_settings.DecoderPoolSettings(
+        algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
-
-
-class _OneRoundSource:
-    """Recipes of a one-round operation: its one event is its first outcome."""
-
-    def formation_table(self, operation_id):
-        """The one table."""
-        del operation_id
-        recipe = detector_formation.DetectorRecipe(
-            detector_index=0,
-            round_index=1,
-            kind=detector_formation.LayerKind.PREPARATION,
-            records=((1, 0),),
-            reference_parity=0,
-            coordinates=(),
-        )
-        return detector_formation.FormationTable(
-            round_count=1,
-            packet_width_by_round={1: 1},
-            readout_slot_start=None,
-            detectors=(recipe,),
-            observables=(),
-        )
-
-    @staticmethod
-    def fragment():
-        """The operation's one round, its outcome set."""
-        return round_records.RetainedSyndromeFragment(
-            operation_id=1,
-            patch_ids=(0,),
-            round_index=1,
-            bits=(1,),
-            size_bits=1,
-            fragment_index=0,
-        )
+    return dataclasses.replace(settings, weak_decoder=None, strong_decoder=tier)

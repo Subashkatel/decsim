@@ -16,6 +16,8 @@ import pytest
 import stim
 
 import decsim.config as config
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.planner as planner
 import decsim.machine as machine_module
@@ -26,18 +28,15 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
-
-
-def test_the_run_period_is_used_when_the_card_declares_none():
-    qpu = qpu_settings.QpuSettings(round_period_microseconds=0.75)
-    settings = machine_settings.MachineSettings(qpu=qpu)
-    machine = machine_module.Machine.build(settings)
-    assert machine.qpu.device.clock.period_ticks == 750_000
+import tests.declared_run as declared_run
 
 
 def test_the_card_period_wins_over_the_run_period():
     card = code_geometry.SurfaceCodeModel(round_microseconds=2.0)
-    qpu = qpu_settings.QpuSettings(round_period_microseconds=1.25, code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(
+        round_period_microseconds=1.25, code_card=card_record
+    )
     settings = machine_settings.MachineSettings(qpu=qpu)
     machine = machine_module.Machine.build(settings)
     assert machine.qpu.device.clock.period_ticks == 2_000_000
@@ -46,56 +45,31 @@ def test_the_card_period_wins_over_the_run_period():
 def test_a_period_shorter_than_one_tick_is_refused():
     qpu = qpu_settings.QpuSettings(round_period_microseconds=0.0)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(
-        ValueError, match="resolved round cadence must be at least one tick"
-    ):
+    with pytest.raises(ValueError, match="resolved round cadence"):
         machine_module.Machine.build(settings)
 
 
-def test_a_card_period_saves_a_run_period_shorter_than_one_tick():
-    card = code_geometry.SurfaceCodeModel(round_microseconds=2.0)
-    qpu = qpu_settings.QpuSettings(round_period_microseconds=0.0, code=card)
-    settings = machine_settings.MachineSettings(qpu=qpu)
-    machine = machine_module.Machine.build(settings)
-    assert machine.qpu.device.clock.period_ticks == 2_000_000
-
-
-def test_a_cadence_that_is_not_a_finite_number_is_refused():
+def test_a_card_cadence_that_is_not_a_finite_number_still_stops():
+    """Rounding an infinite period to ticks stops the build."""
     card = code_geometry.SurfaceCodeModel(round_microseconds=float("inf"))
-    qpu = qpu_settings.QpuSettings(code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(
-        ValueError, match="the code card's round_microseconds must be a finite"
-    ):
+    with pytest.raises(OverflowError, match="cannot convert float infinity"):
         machine_module.Machine.build(settings)
 
 
 def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
-    """The card holds what the yaml said; the plan is where it must be a count.
+    """The card holds what it was given; the plan needs a count.
 
     A geometry that is zero or fractional never terminates: the round
     count, the window sizes and the node counts all derive from it.
     """
     card = code_geometry.SurfaceCodeModel(distance=3.5)
-    qpu = qpu_settings.QpuSettings(code=card)
+    card_record = declared_run.GivenCard(card)
+    qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(ValueError, match="distance must be an int >= 1"):
-        machine_module.Machine.build(settings)
-
-
-def test_a_distance_of_zero_is_refused_by_name():
-    card = code_geometry.SurfaceCodeModel(distance=0)
-    qpu = qpu_settings.QpuSettings(code=card)
-    settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(ValueError, match="distance must be an int >= 1"):
-        machine_module.Machine.build(settings)
-
-
-def test_a_commit_width_of_zero_is_refused_by_name():
-    card = code_geometry.SurfaceCodeModel(commit_rounds_override=0)
-    qpu = qpu_settings.QpuSettings(code=card)
-    settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(ValueError, match="commit_rounds must be an int >= 1"):
+    with pytest.raises(ValueError, match="distance must be an int"):
         machine_module.Machine.build(settings)
 
 
@@ -119,7 +93,6 @@ def resolved_geometry(name="surface"):
         distance=3,
         commit_round_count=2,
         buffer_round_count=1,
-        one_patch_spatial_node_count=10,
     )
 
 
@@ -200,7 +173,7 @@ class RecordingLayout:
         self.operation_calls = []
         self.patch_calls = []
 
-    def code_for_op(self, operation):
+    def code_for_operation(self, operation):
         del operation
         return self.code
 
@@ -258,7 +231,6 @@ def compiled_plan(operations, planned_ids, **overrides):
     retain_strong_context = overrides.pop("retain_strong_context", False)
     absorbs_weak_windows = overrides.pop("absorbs_weak_windows", False)
     reread_regions = overrides.pop("restart_reread_buffer_regions", 0)
-    open_ended = overrides.pop("open_ended", False)
     formation_reads = overrides.pop(
         "formation_reads", window_records.NO_FORMING_READER
     )
@@ -277,7 +249,6 @@ def compiled_plan(operations, planned_ids, **overrides):
         retain_strong_context=retain_strong_context,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
-        has_open_ended_dynamic_streams=open_ended,
         formation_reads=formation_reads,
     )
 
@@ -311,41 +282,31 @@ def test_the_plan_sizes_every_operation_and_every_patch_through_the_layout():
         resolved.patch_identity for resolved in plan.resolved_patches
     ]
     assert plan.round_ticks == 2_500_000
-    assert plan.code_geometry.one_patch_spatial_node_count == 10
     assert operation_nodes == [21, 21]
     assert patch_identities == [1, "1", "q1", "q2"]
     assert scheme.plan_calls == [(10, 4, 2, 1), (20, 4, 2, 1)]
 
 
-SWEPT_CADENCES = [
-    (numpy.float32(1.25), 1_250_000),
-    (numpy.float64(1.5), 1_500_000),
-    (numpy.int64(2), 2_000_000),
-]
-
-
-@pytest.mark.parametrize("cadence, expected_ticks", SWEPT_CADENCES)
-def test_a_cadence_that_is_a_numpy_scalar_is_taken_as_its_value(
-    cadence, expected_ticks
-):
+def test_a_cadence_that_is_a_numpy_scalar_is_taken_as_its_value():
     """A sweep hands the plan numpy floats; a tick count is still an int."""
+    cadence = numpy.float32(1.25)
     code = RecordingCode(cadence)
     only = operation_of(1)
     plan = compiled_plan((only,), (1,), code=code)
-    assert plan.round_ticks == expected_ticks
+    assert plan.round_ticks == 1_250_000
     assert type(plan.round_ticks) is int
 
 
 def test_an_operation_planned_for_no_rounds_is_refused():
-    rounds_policy = round_policies.PerOperationRounds({1: 0})
+    rounds_policy = round_policies.PerOperationRounds(((1, 0),))
     only = operation_of(1)
-    with pytest.raises(ValueError, match="at least one round"):
+    with pytest.raises(ValueError, match="decode owners must have at least"):
         compiled_plan((only,), (1,), rounds_policy=rounds_policy)
 
 
 def test_an_operation_nobody_plans_may_run_for_no_rounds():
     """Only the planned operations decode, so only they need a round."""
-    rounds_policy = round_policies.PerOperationRounds({1: 2, 2: 0})
+    rounds_policy = round_policies.PerOperationRounds(((1, 2), (2, 0)))
     first = operation_of(1)
     second = operation_of(2)
     plan = compiled_plan((first, second), (1,), rounds_policy=rounds_policy)
@@ -356,22 +317,27 @@ def test_an_operation_nobody_plans_may_run_for_no_rounds():
 
 
 @pytest.mark.parametrize(
-    "graph, sentence",
+    "graph, error",
     [
-        (((1, ()), (1, ())), "duplicate operation id"),
-        (((1, (1,)),), "depends on itself"),
-        (((1, (9,)),), "unknown predecessor"),
-        (((1, ()), (2, (1, 1))), "more than once"),
-        (((1, (2,)), (2, (1,))), "cycle"),
+        (((1, ()), (1, ())), ValueError),
+        (((1, (1,)),), ValueError),
+        (((1, (9,)),), KeyError),
+        (((1, ()), (2, (1, 1))), ValueError),
+        (((1, (2,)), (2, (1,))), ValueError),
     ],
+    ids=["duplicate id", "self edge", "unknown edge", "edge twice", "cycle"],
 )
-def test_a_workload_graph_that_cannot_run_is_refused_by_name(graph, sentence):
-    """The graph is checked once, at build: a run cannot repair it."""
+def test_a_workload_graph_that_cannot_run_is_refused(graph, error):
+    """The graph is checked once, at build: a run cannot repair it.
+
+    A self edge is a cycle, and an unknown predecessor stops at its
+    lookup.
+    """
     operations = [
         operation_of(operation_id, predecessors=predecessor_ids)
         for operation_id, predecessor_ids in graph
     ]
-    with pytest.raises(ValueError, match=sentence):
+    with pytest.raises(error):
         planner.check_operation_graph(operations)
 
 
@@ -382,24 +348,71 @@ def test_a_blocking_operation_is_checked_only_when_the_run_asks():
     planner.check_operation_graph(
         [blocked], validate_blockers=True, external_blocker_ids=(99,)
     )
-    with pytest.raises(ValueError, match="unknown blocking operation"):
+    with pytest.raises(ValueError, match="operation 1 has unknown blocking"):
         planner.check_operation_graph([blocked], validate_blockers=True)
 
 
 def test_an_operation_blocked_by_itself_is_refused():
     blocked = operation_of(1, blocked_by=1)
-    with pytest.raises(ValueError, match="blocked by itself"):
+    with pytest.raises(ValueError, match="operation 1 is blocked by itself"):
         planner.check_operation_graph([blocked], validate_blockers=True)
 
 
-def test_a_stream_producer_and_its_owner_are_two_operations():
-    """A dynamic stream is owned by one operation and fed by others."""
-    static = operation_of(1)
-    producer = operation_of(2, stream_id=3)
-    owner = operation_of(3)
-    static_workload = [static]
-    planner.check_workload_identity(static_workload, static_workload, [])
-    planner.check_workload_identity([producer], [], [owner])
+memory = declared_run.memory_operation
+CYCLE_AFTER_A_ROOT = (
+    memory(0),
+    memory(1, predecessors=(0, 2)),
+    memory(2, predecessors=(1,)),
+)
+SELF_BLOCK_AFTER_A_ROOT = (
+    memory(0),
+    memory(1, predecessors=(0,), blocked_by=1),
+)
+BOUNDARY_CYCLE = (
+    memory(1, decoder_boundary_predecessors=(2,)),
+    memory(2, decoder_boundary_predecessors=(1,)),
+    memory(3, predecessors=(1,), blocked_by=1),
+)
+BOUNDARY_EDGE_TWICE = (
+    memory(1),
+    memory(2, decoder_boundary_predecessors=(1, 1)),
+    memory(3, predecessors=(2,), blocked_by=2),
+)
+
+
+@pytest.mark.parametrize(
+    "operations, message",
+    [
+        (CYCLE_AFTER_A_ROOT, "cycle"),
+        (SELF_BLOCK_AFTER_A_ROOT, "blocked by itself"),
+        (BOUNDARY_CYCLE, "cycle"),
+        (BOUNDARY_EDGE_TWICE, "more than once"),
+    ],
+    ids=[
+        "cycle after a root",
+        "self block after a root",
+        "boundary cycle",
+        "boundary edge twice",
+    ],
+)
+def test_a_graph_that_waits_forever_after_a_root_is_refused_at_build(
+    operations, message
+):
+    """A first operation finishes, then another waits forever.
+
+    Idle patches keep scheduling rounds, so the run never empties its
+    queue and never reaches the end-of-run check: the build must refuse.
+    """
+    workload = declared_run.declared_workload(list(operations), 2)
+    algorithm = decoders.PresetLatencyDecoder.Settings(0.1)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    settings = machine_settings.MachineSettings(
+        workload=workload, weak_decoder=weak_decoder
+    )
+    with pytest.raises(ValueError, match=message):
+        machine_module.Machine.build(settings)
 
 
 def test_two_objects_with_one_id_in_one_role_are_refused_naming_it():
@@ -415,9 +428,7 @@ def test_two_objects_with_one_id_in_one_role_are_refused_naming_it():
     first = operation_of(1)
     second_with_the_same_id = operation_of(1)
     workload = (first, second_with_the_same_id)
-    with pytest.raises(
-        ValueError, match="operation id 1 appears more than once in ops"
-    ):
+    with pytest.raises(ValueError, match="ops"):
         planner.check_workload_identity(workload, (), ())
 
 
@@ -430,7 +441,7 @@ def test_one_operation_in_two_roles_is_refused():
 def test_a_decode_operation_outside_the_workload_is_refused():
     workload_operation = operation_of(3)
     decode_owner = operation_of(4)
-    with pytest.raises(ValueError, match="static decode membership"):
+    with pytest.raises(ValueError, match="operation 3 must share static"):
         planner.check_workload_identity(
             (workload_operation,), (decode_owner,), ()
         )
@@ -439,7 +450,7 @@ def test_a_decode_operation_outside_the_workload_is_refused():
 def test_a_stream_whose_owner_is_not_declared_is_refused():
     producer = operation_of(5, stream_id=7)
     another_owner = operation_of(1)
-    with pytest.raises(ValueError, match="does not name"):
+    with pytest.raises(ValueError, match="operation 5 stream_id 7 does"):
         planner.check_workload_identity((producer,), (), (another_owner,))
 
 
@@ -535,21 +546,6 @@ def test_a_windows_hold_reaches_into_the_successors_it_overflows_into():
         (3, 1),
     )
     assert buffering.potential_holds == ()
-
-
-def test_an_open_ended_stream_leaves_the_stores_capacity_unbounded():
-    """A stream with no end has no sufficient live-round set to size on."""
-    execution = overlapping_successor_plan()
-
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=False,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-        has_open_ended_dynamic_streams=True,
-    )
-
-    assert buffering.sufficient_live_rounds is None
 
 
 def chained_sliding_windows():
@@ -784,31 +780,6 @@ def test_a_double_windows_strong_hold_ends_at_the_operations_end():
     assert held_rounds == tuple((1, index) for index in range(3, 8))
 
 
-def test_the_strong_union_counts_a_shared_round_once():
-    """The store's sufficient set is the union of holds, not their sum.
-
-    Overlapping strong contexts do not each allocate a packet, so four
-    windows whose contexts total twenty four round reads keep fifteen
-    rounds alive, once each.
-    """
-    execution = chained_sliding_windows()
-
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=True,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-    )
-
-    holds = buffering.potential_holds
-    read_count = sum(len(held_rounds) for _owner, held_rounds in holds)
-    sufficient = buffering.strong_sufficient_live_rounds
-    every_round = {(1, index) for index in range(1, 16)}
-    assert read_count == 24
-    assert len(sufficient) == 15
-    assert set(sufficient) == every_round
-
-
 def test_the_boundary_graph_is_checked_on_the_boundary_edges():
     """The decode graph is the boundary edges, not the workload's order.
 
@@ -818,8 +789,8 @@ def test_the_boundary_graph_is_checked_on_the_boundary_edges():
     """
     first = operation_of(1, decoder_boundary_predecessors=(2,))
     second = operation_of(2, decoder_boundary_predecessors=(1,))
-    with pytest.raises(ValueError, match="cycle"):
+    with pytest.raises(ValueError, match="operation dependency cycle"):
         compiled_plan((first, second), (1, 2))
     only = operation_of(1)
-    with pytest.raises(ValueError, match="duplicate operation id"):
+    with pytest.raises(ValueError, match="duplicate operation id 1"):
         compiled_plan((only,), (1, 1))

@@ -1,30 +1,39 @@
 """The code cards: the numbers the simulator needs from a QEC code.
 
-A card is a small frozen record, not a stabilizer code. The simulator
-prices decoder timing, so all it takes from a code is its distance, its
-window sizes, the size of the decoding graph per round, and the syndrome
-bits per round. The numbers can be set by hand or copied from an upstream
-tool's output; decsim never imports such a tool. Each card fills the
-CodeModel port (decsim/ports.py).
-
-The rotated surface-code card follows Stim's generated
-``surface_code:rotated_memory_z`` circuit (Stim, src/stim/gen/
-gen_surface_code.cc): a distance-d patch has d*d data qubits and d*d - 1
-measure qubits, and every round reads out every measure qubit once. The
-bivariate-bicycle card follows Bravyi et al., High-threshold and
-low-overhead fault-tolerant quantum memory (Nature 627, 778, 2024; arXiv
-2308.07915): a [[n, k, d]] code whose round measures n/2 X checks and n/2
-Z checks, the [[144, 12, 12]] gross code by default.
+A card is a small frozen record, not a stabilizer code: decsim prices
+decoder timing, so it takes a distance, window sizes, the graph size per
+round and the syndrome bits per round, and never imports an upstream
+tool. The rotated surface card follows Stim's
+surface_code:rotated_memory_z (src/stim/gen/gen_surface_code.cc): d*d
+data and d*d - 1 measure qubits, each measure qubit read once a round.
+The bivariate-bicycle card follows Bravyi et al. (Nature 627, 778, 2024;
+arXiv 2308.07915): n/2 X and n/2 Z checks a round, the [[144, 12, 12]]
+gross code by default.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 
 @dataclasses.dataclass(frozen=True)
 class SurfaceCodeModel:
-    """Timing and sizing card of one rotated surface-code patch."""
+    """The code card of one rotated surface-code patch."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The surface card has no keys beyond the qpu's distance."""
+
+        def build(
+            self,
+            distance: Optional[int],
+            commit_rounds_override: Optional[int],
+            buffer_rounds_override: Optional[int],
+        ) -> "SurfaceCodeModel":
+            """The card at the distance, three when None, and window sizes."""
+            arguments = _card_arguments(
+                distance, commit_rounds_override, buffer_rounds_override
+            )
+            return SurfaceCodeModel(**arguments)
 
     distance: int = 3
     # None: the run's cadence.
@@ -62,52 +71,52 @@ class SurfaceCodeModel:
             return self.buffer_rounds_override
         return self.distance
 
-    def spatial_nodes(self, num_patches: int) -> int:
+    def spatial_nodes(self, patch_count: int) -> int:
         """Per-round graph size for a latency model: d*d per patch, plus a seam.
 
-        A size knob, not the detector count: a rotated patch contributes
-        d*d - 1 detector nodes per round (Stim's bulk layer, read off
-        stim.Circuit.generated at d=3, 5 and 7 as 8, 24 and 48), one
-        fewer per patch than this returns. No shipped decoder row reads
-        the number; a latency model a study supplies would, where the
-        difference is a scale factor and reaches no correction. The seam
-        strip is the one line of d intermediate qubits a lattice-surgery
-        merge of two patches adds (Horsman et al. arXiv:1111.4022 Sec.
-        3.1); for more patches the paper gives no count, and one line
-        stays.
+        A size knob, not the detector count: a patch has d*d - 1 detectors a
+        round (Stim's bulk layer: 8, 24 and 48 at d=3, 5, 7). No shipped decoder
+        row reads it; for a supplied latency model the difference is a scale
+        factor and reaches no correction. The seam is the one line of d qubits a
+        two-patch lattice-surgery merge adds (Horsman et al. 1111.4022 Sec.
+        3.1); for more patches the paper gives no count.
         """
         node_count_per_patch = self.distance * self.distance
         seam_node_count = 0
-        if num_patches > 1:
+        if patch_count > 1:
             seam_node_count = self.distance
-        patch_node_count = num_patches * node_count_per_patch
+        patch_node_count = patch_count * node_count_per_patch
         return patch_node_count + seam_node_count
 
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
+    def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Bits read out per round: the d*d - 1 stabilizers of every patch."""
         qubit_count = self.distance * self.distance
         stabilizer_count = qubit_count - 1
-        return num_patches * stabilizer_count
+        return patch_count * stabilizer_count
 
-    def data_bits_per_readout(self, num_patches: int) -> int:
+    def data_bits_per_readout(self, patch_count: int) -> int:
         """Bits the final readout adds: the d*d data qubits of every patch."""
         qubit_count = self.distance * self.distance
-        return num_patches * qubit_count
+        return patch_count * qubit_count
 
 
 @dataclasses.dataclass(frozen=True)
 class BivariateBicycleCodeModel:
-    """Timing and sizing card of one bivariate-bicycle CSS code.
+    """The code card of one bivariate-bicycle CSS code.
 
-    One modeled round is one complete extraction cycle: n/2 X checks and
-    n/2 Z checks. The detector error model owns the exact window-local
-    detector rows. The qubit counts are the card's own keys (Settings);
-    the distance comes from the sweep, as the surface card's does.
+    One round is a whole extraction cycle, n/2 X and n/2 Z checks; the
+    detector error model owns the window rows. The distance comes from the
+    sweep, as the surface card's does.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The card's own keys: n and k of the [[n, k, d]] code."""
+        """The card's own keys.
+
+        qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The
+        defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines
+        180-184); its distance is twelve when the run names none.
+        """
 
         qubit_count: int = 144
         logical_qubit_count: int = 12
@@ -128,12 +137,17 @@ class BivariateBicycleCodeModel:
                     f"qubit_count={self.qubit_count!r}"
                 )
 
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping
-        ) -> "BivariateBicycleCodeModel.Settings":
-            """The qpu section's qubit counts; absent is the gross code's."""
-            return cls(**section)
+        def build(
+            self,
+            distance: Optional[int],
+            commit_rounds_override: Optional[int],
+            buffer_rounds_override: Optional[int],
+        ) -> "BivariateBicycleCodeModel":
+            """The card at the distance, twelve when None, and window sizes."""
+            arguments = _card_arguments(
+                distance, commit_rounds_override, buffer_rounds_override
+            )
+            return BivariateBicycleCodeModel(settings=self, **arguments)
 
     settings: Settings = dataclasses.field(default_factory=Settings)
     distance: int = 12
@@ -186,17 +200,32 @@ class BivariateBicycleCodeModel:
             return 0
         return self.buffer_rounds_override
 
-    def spatial_nodes(self, num_patches: int) -> int:
+    def spatial_nodes(self, patch_count: int) -> int:
         """Per-round graph size for a latency model: n per patch."""
-        return num_patches * self.settings.qubit_count
+        return patch_count * self.settings.qubit_count
 
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
+    def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Bits read out per round: the n X-plus-Z checks of every patch."""
-        return num_patches * self.settings.qubit_count
+        return patch_count * self.settings.qubit_count
 
-    def data_bits_per_readout(self, num_patches: int) -> int:
+    def data_bits_per_readout(self, patch_count: int) -> int:
         """Bits the final readout adds: the n data qubits of every patch."""
-        return num_patches * self.settings.qubit_count
+        return patch_count * self.settings.qubit_count
+
+
+def _card_arguments(
+    distance: Optional[int],
+    commit_rounds_override: Optional[int],
+    buffer_rounds_override: Optional[int],
+) -> dict:
+    """A card's constructor keywords; a distance of None is the card's own."""
+    arguments = {
+        "commit_rounds_override": commit_rounds_override,
+        "buffer_rounds_override": buffer_rounds_override,
+    }
+    if distance is not None:
+        arguments["distance"] = distance
+    return arguments
 
 
 def _check_window_overrides(

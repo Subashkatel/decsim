@@ -5,8 +5,7 @@ rounds it deposits at a landing, and the masked input a window's gate
 hands it once the window's boundary is known. Both writes land in
 storage this side owns, so this side makes them and books its own copy:
 a copy is booked where it lands, by the name of the structure it landed
-in (docs/explanation/data_path.md), and the destination takes what it is
-handed before it acts (OMNeT++
+in, and the destination takes what it is handed before it acts (OMNeT++
 src/sim/csimplemodule.cc:782-783). One input has
 one writer, which is the memory's own rule (Helios 2301.08419 lines
 632-640, decoder_memory.py rewrite).
@@ -14,16 +13,16 @@ one writer, which is the memory's own rule (Helios 2301.08419 lines
 
 import dataclasses
 
-import pytest
-
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.decoders.detection_events as detection_events
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import tests.declared_run as declared_run
 
 
 class _CopyRecorder:
@@ -131,15 +130,29 @@ def test_a_fold_in_place_is_written_by_the_memory_that_holds_the_input():
     assert job.decoder_input is masked
 
 
-def test_a_fold_in_place_with_no_unit_memory_is_refused():
-    """A tier that reads its input in place has nothing to write into."""
-    engine = engine_module.Engine()
-    staging = _staging(engine)
-    job = _job_with_rounds()
-    landed = decoder_memory.materialize_decoder_input(job)
+def test_each_tier_folds_its_boundary_where_its_own_setting_says():
+    """The weak tier folds in place; the strong tier, reading in place, copies.
 
-    with pytest.raises(RuntimeError, match="in_place needs the unit's own"):
-        staging.fold_in_place(job, landed)
+    A strong re-decode keeps no copy of its rounds to fold into, so it
+    folds into a duplicate as its own copies_boundary_fold says, and the
+    answers are the ones the copy fold gives on both tiers.
+    """
+    reading_in_place = declared_run.switching_run(
+        rounds=9, escalates=True, strong_copies_input=False
+    )
+    settings = reading_in_place.settings
+    weak = dataclasses.replace(
+        settings.weak_decoder, copies_boundary_fold=False
+    )
+    folding_in_place = dataclasses.replace(settings, weak_decoder=weak)
+    in_place_machine = machine_module.Machine.build(folding_in_place, 0)
+    copying_machine = machine_module.Machine.build(settings, 0)
+
+    in_place = in_place_machine.run()
+    copying = copying_machine.run()
+
+    assert in_place.terminal_status == "complete"
+    assert in_place.operation_results == copying.operation_results
 
 
 def test_a_companion_that_joins_after_the_fold_reads_the_written_rounds():

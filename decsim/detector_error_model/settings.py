@@ -1,24 +1,15 @@
-"""The yaml's `detection_events` section: where the former sits, and its cost.
+"""The detection events' settings: where the former sits, and its cost.
 
-A detection event is a parity of raw measurement outcomes
-(detector_formation.py), so its value is the same wherever the machine
-forms it; the seat moves the width every hop after it carries, the
-state the seat holds and the clock the conversion is charged on. The
-published seats are four: the controller's workstation (Google
-2408.13687 lines 472-477), the decoder chip's input path (Maurer
-2510.21600 lines 234-236), inside the decoder (Caune 2410.05202 lines
-1252-1255, LILLIPUT 2108.06569 lines 500-509, cudaqx
-libs/qec/lib/decoder.cpp:426-432) and offline (Deltakit through Stim's
-compile_m2d_converter). This section names the seats on decsim's path
-that do it.
+The published seats are four: the controller's workstation (Google
+2408.13687), the decoder chip's input path (Maurer 2510.21600), inside
+the decoder (Caune 2410.05202, LILLIPUT 2108.06569, cudaqx) and offline
+(Deltakit through Stim's compile_m2d_converter).
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
-import decsim.tables as tables
 
 # The points on the path from the controller to a decoder where the
 # former may sit, in path order: the controller's assembler, the two
@@ -52,26 +43,19 @@ STRONG_PATH = ("controller", "strong_syndrome_buffer", "strong_decoder")
 # already read, so they read the raw round before the region too.
 STRONG_SIDE_SEATS = ("strong_syndrome_buffer", "strong_decoder")
 
-_KEYS = ("formed_at", "clock", "latency_cycles", "cycles_per_round")
-
 
 @dataclasses.dataclass(frozen=True)
 class DetectionEventSettings:
-    """The seats that form a round's detection events, and what it costs.
+    """How a round's detection events are formed.
 
-    formed_at lists the seats, each named once; every path a round takes
-    to a decoder crosses exactly one of them, which the build checks
-    against the run's paths (build/readout.py). One conversion
-    costs latency_cycles, plus cycles_per_round for every round after
-    the first when a seat forms several rounds together, on clock, the
-    clock of the logic that forms them: a pipelined stage takes a round
-    a cycle after its fixed latency (Yang et al. 2605.04892 lines
-    1273-1275, "The total latency of the preprocessing stage for
-    syndrome calculation ... at 20 ns (5 FPGA clock cycles)", with "All
-    variables ... in FPGA registers, enabling fully pipelined
-    operation"). A seat that forms one round at a time pays the latency
-    for each. No source publishes a controller-side or buffer-side
-    figure, so both costs are zero by default.
+    formed_at lists the seats, each once; every path a round takes to a
+    decoder crosses exactly one (build/readout.py). One conversion costs
+    latency_cycles, plus cycles_per_round for each further round a seat
+    forms together, on the clock of the forming logic: a pipelined stage
+    takes a round a cycle after its fixed latency (Yang et al. 2605.04892:
+    syndrome calculation "at 20 ns (5 FPGA clock cycles)", "fully pipelined
+    operation"). No source publishes a controller-side or buffer-side
+    figure, so both costs default to zero. clock None is the machine's.
     """
 
     formed_at: tuple = ("controller",)
@@ -87,35 +71,6 @@ class DetectionEventSettings:
             "detection_events.cycles_per_round", self.cycles_per_round
         )
         _check_seats(self.formed_at)
-        charged = self.latency_cycles + self.cycles_per_round
-        if charged > 0 and self.clock is None:
-            raise ValueError(
-                "a charged detection_events cost needs the clock its "
-                "cycles are counted on; name one, or give the controller "
-                "a clock"
-            )
-
-    @classmethod
-    def from_yaml(
-        cls,
-        section: Mapping,
-        clocks: config.ClockSettings,
-        controller_clock: Optional[config.Clock],
-    ) -> "DetectionEventSettings":
-        """The section's seats and cost, on controller.clock by default."""
-        tables.refuse_unknown_keys("detection_events", section, _KEYS)
-        formed_at = _formed_at(section)
-        clock = controller_clock
-        if "clock" in section:
-            clock = clocks.clock(section["clock"])
-        latency_cycles = section.get("latency_cycles", 0)
-        cycles_per_round = section.get("cycles_per_round", 0)
-        return cls(
-            formed_at=formed_at,
-            clock=clock,
-            latency_cycles=latency_cycles,
-            cycles_per_round=cycles_per_round,
-        )
 
     def strong_side_seat(self) -> Optional[str]:
         """The seat past the weak syndrome buffer that forms; None for none.
@@ -134,17 +89,6 @@ class DetectionEventSettings:
             return 0
         after_the_first = round_count - 1
         return self.latency_cycles + self.cycles_per_round * after_the_first
-
-
-def _formed_at(section: Mapping) -> tuple:
-    """The formed_at list as a tuple; a single seat is refused as a list."""
-    formed_at = section.get("formed_at", ["controller"])
-    if not isinstance(formed_at, list):
-        raise ValueError(
-            f"detection_events.formed_at is a list of seats, as in "
-            f"[{formed_at}]; got {formed_at!r}"
-        )
-    return tuple(formed_at)
 
 
 def _check_seats(formed_at: tuple) -> None:

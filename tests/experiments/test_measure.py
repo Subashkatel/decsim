@@ -1642,32 +1642,47 @@ def lindley_waits_us(requests, stages) -> list:
     a decode arrives at it an input hop after its enqueue, and is served
     for its compute span, both off the stage ledger, in arrival order.
     """
-    strong = window_records.DecoderTier.STRONG
-    strong_requests = [
-        request for request in requests if request.request_key.tier is strong
-    ]
-    by_arrival = sorted(strong_requests, key=ready_ticks_of)
+    by_arrival = strong_requests_by_arrival(requests)
     waits = []
     free_at = 0
     for request in by_arrival:
-        run_sequence = request.request_key.run_sequence
-        records = [
-            record
-            for record in stages.records
-            if run_sequence in record.run_sequences
-        ]
+        records = stage_records_of(stages, request)
         first = records[0]
         input_hop = first.ready_ticks - first.dispatch_ticks
         arrival = request.ready_ticks + input_hop
-        starts = [record.start_ticks for record in records]
-        ends = [record.end_ticks for record in records]
-        duration = max(ends) - min(starts)
+        duration = service_ticks(records)
         start = max(arrival, free_at)
         wait_ticks = start - arrival
         wait = config_module.ticks_to_microseconds(wait_ticks)
         waits.append(wait)
         free_at = start + duration
     return waits
+
+
+def strong_requests_by_arrival(requests) -> list:
+    """The strong decode requests, in the order they became ready."""
+    strong = window_records.DecoderTier.STRONG
+    strong_requests = [
+        request for request in requests if request.request_key.tier is strong
+    ]
+    return sorted(strong_requests, key=ready_ticks_of)
+
+
+def stage_records_of(stages, request) -> list:
+    """The stage ledger's records of one decode request's run."""
+    run_sequence = request.request_key.run_sequence
+    return [
+        record
+        for record in stages.records
+        if run_sequence in record.run_sequences
+    ]
+
+
+def service_ticks(records) -> int:
+    """A decode's service: its first stage's start to its last one's end."""
+    starts = [record.start_ticks for record in records]
+    ends = [record.end_ticks for record in records]
+    return max(ends) - min(starts)
 
 
 def ready_ticks_of(request) -> int:

@@ -22,10 +22,11 @@ import decsim.records.fault_model_contracts as fault_models
 
 
 class UnionFindDecoder(sinter.Decoder):
-    """The factory sinter pickles to each worker and compiles per task.
+    """The factory sinter pickles to each worker.
 
-    weight_step is checked where it enters, as the union_find row
-    checks its own (decoders/union_find/decoder.py).
+    sinter compiles it once per task. weight_step is checked where it
+    enters, as the union_find row checks its own
+    (decoders/union_find/decoder.py).
     """
 
     def __init__(

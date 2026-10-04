@@ -118,7 +118,7 @@ The command prints its folder, then one line per point as it finishes.
 The numbers are in `sweep.csv`; these are the columns this step reads:
 
 ```bash
-cut -d, -f3,8,9,35,73,97,130,131 results/two_tiers/sweep.csv
+cut -d, -f3,8,9,35,77,101,134,135 results/two_tiers/sweep.csv
 ```
 
 ```

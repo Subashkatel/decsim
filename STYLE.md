@@ -219,14 +219,18 @@ attribute has its final value when `__init__` returns; a collaborator
 arrives through the constructor. Public methods read top to bottom in the
 order a reader meets them; private classes and functions come after every
 public one in the module and carry a leading underscore. A package's
-`__init__.py` holds the package docstring and nothing else.
+`__init__.py` holds the package docstring and nothing else; the root's
+also lends a run file its names (`decsim.Point`, `decsim.Experiment` and
+the rest), each loaded on first use.
 
 A record used by one component lives next to it. A record shared by two
 or more components lives in `decsim/records/`, one module per record family.
 
 Every public signature is annotated. An `engine` parameter is typed
 `Engine`. `Any` is used only for an opaque identity, with a comment that
-says so.
+says so. In the package, `tools/check_one_action.py` fails a public
+signature left unannotated and a public class or function below a
+private one.
 
 ## Rule 7. Components plug in through ports
 

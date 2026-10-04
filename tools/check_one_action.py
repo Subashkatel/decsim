@@ -1,5 +1,7 @@
 """Check that every line of Python does one thing (STYLE.md, rule 1).
 
+In the package it also checks rule 6's signatures and order.
+
 Usage:
     python tools/check_one_action.py <file or directory> ...
 
@@ -27,6 +29,12 @@ What is reported, by kind:
     deep nesting        blocks nested deeper than MAX_BLOCK_DEPTH
     wide state          a class whose __init__ sets more attributes than
                         MAX_ATTRIBUTES, unless STYLE.md rule 1 names it
+    unannotated signature
+                        a public function or method of the package with a
+                        parameter or a return left unannotated
+    public after private
+                        a public module-level class or function of the
+                        package below a private one
 
 Two kinds are reports, not failures: long function and wide state. The
 40 lines is Google's prompt to think, not a limit, and the six
@@ -97,6 +105,9 @@ FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 # a lambda's body and a comprehension are checked where they are visited
 UNCHECKED_ARGUMENTS = (ast.Lambda, *COMPREHENSIONS)
+# rule 6's signature and order checks bind this package only
+PACKAGE = "decsim"
+UNANNOTATED_RECEIVERS = frozenset({"self", "cls"})
 
 
 def wide_state_exemptions():
@@ -134,6 +145,63 @@ class Finding:
 
     def __str__(self):
         return f"{self.path}:{self.line}: {self.kind}: {self.text}"
+
+
+def top_package(path):
+    """The outermost package a file sits in, read off its __init__.py files."""
+    resolved = path.resolve()
+    folder = resolved.parent
+    package = None
+    while (folder / "__init__.py").exists():
+        package = folder.name
+        folder = folder.parent
+    return package
+
+
+def public_functions(body):
+    """The public functions of a body, and of its public classes in turn."""
+    for node in body:
+        is_function = isinstance(node, FUNCTIONS)
+        if is_function and is_public_signature(node.name):
+            yield node
+        is_class = isinstance(node, ast.ClassDef)
+        if is_class and not node.name.startswith("_"):
+            yield from public_functions(node.body)
+
+
+def is_public_signature(name):
+    """A public name, or __init__, whose parameters a caller passes."""
+    if name == "__init__":
+        return True
+    return not name.startswith("_")
+
+
+def is_unannotated(function):
+    """Whether a parameter, or the return, carries no annotation."""
+    arguments = function.args
+    every = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
+    stars = (arguments.vararg, arguments.kwarg)
+    every.extend(star for star in stars if star is not None)
+    for argument in every:
+        is_receiver = argument.arg in UNANNOTATED_RECEIVERS
+        if argument.annotation is None and not is_receiver:
+            return True
+    if function.name == "__init__":
+        return False
+    return function.returns is None
+
+
+def public_after_private(body):
+    """The public module-level definitions that follow a private one."""
+    seen_private = False
+    for node in body:
+        if not isinstance(node, (*FUNCTIONS, ast.ClassDef)):
+            continue
+        if node.name.startswith("_"):
+            seen_private = True
+            continue
+        if seen_private:
+            yield node
 
 
 def is_allowed_call(node):
@@ -334,6 +402,14 @@ class Checker(ast.NodeVisitor):
         finding = Finding(self.path, node.lineno, kind, stripped)
         self.findings.append(finding)
 
+    def check_package_rules(self, tree):
+        """Report rule 6's unannotated signatures and out-of-order names."""
+        for function in public_functions(tree.body):
+            if is_unannotated(function):
+                self.report(function, "unannotated signature")
+        for node in public_after_private(tree.body):
+            self.report(node, "public after private")
+
     def visit_FunctionDef(self, node):
         """Report long functions and deep nesting."""
         length = node.end_lineno - node.lineno + 1
@@ -486,6 +562,8 @@ def check_file(path):
     source_lines = source.splitlines()
     checker = Checker(path, source_lines)
     checker.visit(tree)
+    if top_package(path) == PACKAGE:
+        checker.check_package_rules(tree)
     # one line nested three deep is one line to fix, so it is reported once
     unique = {}
     for finding in checker.findings:

@@ -226,7 +226,9 @@ or more components lives in `decsim/records/`, one module per record family.
 
 Every public signature is annotated. An `engine` parameter is typed
 `Engine`. `Any` is used only for an opaque identity, with a comment that
-says so.
+says so. In the package, `tools/check_one_action.py` fails a public
+signature left unannotated and a public class or function below a
+private one.
 
 ## Rule 7. Components plug in through ports
 

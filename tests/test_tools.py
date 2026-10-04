@@ -140,6 +140,33 @@ def test_a_checkout_under_a_folder_named_tmp_is_still_checked(tmp_path, capsys):
     assert "skipped.py" not in captured.out
 
 
+def test_rule_six_checks_bind_the_package_and_nothing_else(tmp_path, capsys):
+    """An unannotated public function below a private one fails in decsim.
+
+    The same module outside the package passes the check.
+    """
+    tool = _tool("check_one_action")
+    module_text = (
+        "def _helper():\n"
+        "    return 1\n"
+        "\n"
+        "\n"
+        "def public(value):\n"
+        "    return value\n"
+    )
+    package = tmp_path / "decsim"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "part.py").write_text(module_text)
+    (tmp_path / "part.py").write_text(module_text)
+    exit_code = tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "decsim/part.py:5: unannotated signature" in captured.out
+    assert "decsim/part.py:5: public after private" in captured.out
+    assert "2 findings in 1 of 3 files checked" in captured.out
+
+
 def _classes_tested_against(tool, root) -> set:
     tested = set()
     for path in tool.source_paths(root):

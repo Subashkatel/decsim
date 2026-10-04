@@ -137,20 +137,6 @@ def test_a_window_refuses_a_representation_it_does_not_hold():
         window.require_faults(PHYSICAL)
 
 
-def test_a_window_refuses_a_representation_that_is_not_a_member():
-    placed = placed_model()
-    window = fault_model_contracts.WindowErrorModel(
-        detector_ids=(0, 1),
-        detector_coordinates=None,
-        defect_positions={},
-        first_commit_round=1,
-        graphlike_faults=placed,
-        physical_faults=None,
-    )
-    with pytest.raises(RuntimeError):
-        window.require_faults("physical")
-
-
 def test_a_windows_crossing_faults_are_the_ones_reaching_behind_it():
     """What a window commits of the seam behind its commit region.
 

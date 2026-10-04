@@ -1936,11 +1936,11 @@ class CodeModel(Protocol):
     def buffer_rounds(self) -> int:
         """Look-ahead rounds per decode window."""
 
-    def spatial_nodes(self, num_patches: int) -> int:
+    def spatial_nodes(self, patch_count: int) -> int:
         """The per-round graph size a latency model prices this card at."""
 
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
+    def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Syndrome bits one round of this many patches produces."""
 
-    def data_bits_per_readout(self, num_patches: int) -> int:
+    def data_bits_per_readout(self, patch_count: int) -> int:
         """Data-qubit bits the final readout of this many patches adds."""

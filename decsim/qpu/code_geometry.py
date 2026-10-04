@@ -71,7 +71,7 @@ class SurfaceCodeModel:
             return self.buffer_rounds_override
         return self.distance
 
-    def spatial_nodes(self, num_patches: int) -> int:
+    def spatial_nodes(self, patch_count: int) -> int:
         """Per-round graph size for a latency model: d*d per patch, plus a seam.
 
         A size knob, not the detector count: a patch has d*d - 1 detectors a
@@ -83,21 +83,21 @@ class SurfaceCodeModel:
         """
         node_count_per_patch = self.distance * self.distance
         seam_node_count = 0
-        if num_patches > 1:
+        if patch_count > 1:
             seam_node_count = self.distance
-        patch_node_count = num_patches * node_count_per_patch
+        patch_node_count = patch_count * node_count_per_patch
         return patch_node_count + seam_node_count
 
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
+    def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Bits read out per round: the d*d - 1 stabilizers of every patch."""
         qubit_count = self.distance * self.distance
         stabilizer_count = qubit_count - 1
-        return num_patches * stabilizer_count
+        return patch_count * stabilizer_count
 
-    def data_bits_per_readout(self, num_patches: int) -> int:
+    def data_bits_per_readout(self, patch_count: int) -> int:
         """Bits the final readout adds: the d*d data qubits of every patch."""
         qubit_count = self.distance * self.distance
-        return num_patches * qubit_count
+        return patch_count * qubit_count
 
 
 @dataclasses.dataclass(frozen=True)
@@ -199,17 +199,17 @@ class BivariateBicycleCodeModel:
             return 0
         return self.buffer_rounds_override
 
-    def spatial_nodes(self, num_patches: int) -> int:
+    def spatial_nodes(self, patch_count: int) -> int:
         """Per-round graph size for a latency model: n per patch."""
-        return num_patches * self.settings.qubit_count
+        return patch_count * self.settings.qubit_count
 
-    def syndrome_bits_per_round(self, num_patches: int) -> int:
+    def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Bits read out per round: the n X-plus-Z checks of every patch."""
-        return num_patches * self.settings.qubit_count
+        return patch_count * self.settings.qubit_count
 
-    def data_bits_per_readout(self, num_patches: int) -> int:
+    def data_bits_per_readout(self, patch_count: int) -> int:
         """Bits the final readout adds: the n data qubits of every patch."""
-        return num_patches * self.settings.qubit_count
+        return patch_count * self.settings.qubit_count
 
 
 def _card_arguments(

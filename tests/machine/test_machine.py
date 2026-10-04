@@ -2166,14 +2166,14 @@ class OutsideCodeCard:
     def buffer_rounds(self):
         return 0
 
-    def spatial_nodes(self, num_patches):
-        return 4 * num_patches
+    def spatial_nodes(self, patch_count):
+        return 4 * patch_count
 
-    def syndrome_bits_per_round(self, num_patches):
-        return 3 * num_patches
+    def syndrome_bits_per_round(self, patch_count):
+        return 3 * patch_count
 
-    def data_bits_per_readout(self, num_patches):
-        return 4 * num_patches
+    def data_bits_per_readout(self, patch_count):
+        return 4 * patch_count
 
 
 def _resolved_geometry(machine):

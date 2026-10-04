@@ -28,26 +28,13 @@ import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
-
-def union_find_cluster_gap_source(
-    weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP,
-) -> decoding_records.SoftOutputSource:
-    """The source of a cluster gap at one absolute natural-log weight step."""
-    normalized_step = evidence_records.normalized_weight_step(weight_step)
-    return decoding_records.SoftOutputSource(
-        method="cluster_gap",
-        cluster_origin="union_find_decoder",
-        growth_schedule="weighted_global_fair",
-        gap_units="log_likelihood_weight",
-        correction="none",
-        weight_step_natural_log=normalized_step,
-        references=("cluster-gap method",),
-    )
+CLUSTER_GAP_SOURCE = decoding_records.SoftOutputSource(method="cluster_gap")
 
 
 class ClusterGap:
     """The signal row: the gap of one cluster-based decode's own growth."""
 
+    source = CLUSTER_GAP_SOURCE
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     decoder_evidence_requirement = decoding_records.CLUSTER_GROWTH_EVIDENCE
     # the window is decoded once; the gap is read off that decode
@@ -66,7 +53,6 @@ class ClusterGap:
         walk_microseconds: Optional[float] = None,
     ) -> None:
         self.weight_step = evidence_records.normalized_weight_step(weight_step)
-        self.source = union_find_cluster_gap_source(self.weight_step)
         # what the walk costs on the weak tier's clock: a card's declared
         # number, or None to measure the call as a measured decoder is
         self.walk_microseconds = walk_microseconds

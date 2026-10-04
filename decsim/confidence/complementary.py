@@ -17,13 +17,7 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 
 COMPLEMENTARY_GAP_SOURCE = decoding_records.SoftOutputSource(
-    method="complementary_gap",
-    cluster_origin="mwpm_opposite_logical",
-    growth_schedule="minimum_weight_matching",
-    gap_units="log_likelihood_weight",
-    correction="opposite_logical_constraint",
-    weight_step_natural_log=None,
-    references=("complementary-gap method",),
+    method="complementary_gap"
 )
 # the two logical classes a window's solves are pinned to, in the order
 # the window side submits them

@@ -286,15 +286,7 @@ class _CostingSignal:
 
     def __init__(self, ticks: int) -> None:
         self.ticks = ticks
-        self.source = decoding_records.SoftOutputSource(
-            method="test_signal",
-            cluster_origin="test",
-            growth_schedule="test",
-            gap_units="log_likelihood_weight",
-            correction="none",
-            weight_step_natural_log=None,
-            references=(),
-        )
+        self.source = decoding_records.SoftOutputSource(method="test_signal")
 
     def compute(self, solves):
         """One gap, and the ticks this row's own computation took."""

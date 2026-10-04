@@ -16,15 +16,9 @@ import decsim.records.windows as window_records
 
 @dataclass(frozen=True)
 class SoftOutputSource:
-    """Exact provenance required to interpret one confidence threshold."""
+    """The signal that computed a gap, by its method's name."""
 
     method: str
-    cluster_origin: str
-    growth_schedule: str
-    gap_units: str
-    correction: str
-    weight_step_natural_log: Optional[float]
-    references: tuple[str, ...]
 
 
 @dataclass(frozen=True)

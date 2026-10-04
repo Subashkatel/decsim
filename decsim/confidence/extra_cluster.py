@@ -40,20 +40,9 @@ import decsim.records.decoding as decoding_records
 _LARGEST_TICK_COUNT = 2**63 - 1
 
 
-def union_find_extra_cluster_gap_source(
-    weight_step: float,
-) -> decoding_records.SoftOutputSource:
-    """The source of an extra-cluster gap at one natural-log weight step."""
-    normalized_step = evidence_records.normalized_weight_step(weight_step)
-    return decoding_records.SoftOutputSource(
-        method="extra_cluster_gap",
-        cluster_origin="union_find_decoder",
-        growth_schedule="weighted_global_fair",
-        gap_units="log_likelihood_weight",
-        correction="none",
-        weight_step_natural_log=normalized_step,
-        references=("extra-cluster gap without cluster graph",),
-    )
+EXTRA_CLUSTER_GAP_SOURCE = decoding_records.SoftOutputSource(
+    method="extra_cluster_gap"
+)
 
 
 def growth_limit_ticks(growth_limit_nats: float, weight_step: float) -> int:
@@ -76,6 +65,7 @@ def growth_limit_ticks(growth_limit_nats: float, weight_step: float) -> int:
 class ExtraClusterGap:
     """The signal row: the growth spent before the boundaries join."""
 
+    source = EXTRA_CLUSTER_GAP_SOURCE
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     decoder_evidence_requirement = decoding_records.CLUSTER_GROWTH_EVIDENCE
     # the window is decoded once; the growth goes on from that decode
@@ -96,7 +86,6 @@ class ExtraClusterGap:
         walk_microseconds: Optional[float] = None,
     ) -> None:
         self.weight_step = evidence_records.normalized_weight_step(weight_step)
-        self.source = union_find_extra_cluster_gap_source(self.weight_step)
         self.growth_limit_ticks = growth_limit_ticks(
             growth_limit_nats, self.weight_step
         )

@@ -51,15 +51,7 @@ ENGINE_CLOCK = config.Clock(10_000)
 ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # the frame writes one cycle of a 250 MHz clock, 4 ns
 FRAME_CLOCK = config.Clock(4000)
-SOURCE = decoding_records.SoftOutputSource(
-    method="matching-gap",
-    cluster_origin="decoder",
-    growth_schedule="uniform",
-    gap_units="natural-log",
-    correction="minimum-weight",
-    weight_step_natural_log=1.0,
-    references=(),
-)
+SOURCE = decoding_records.SoftOutputSource(method="matching-gap")
 WINDOW = window_records.Window(
     operation_id=1,
     window_index=1,

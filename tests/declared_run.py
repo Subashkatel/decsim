@@ -111,13 +111,7 @@ DECLARED_EDGE_NAMES = (
 # 0.5 nats, which decibels_to_nats gives back exactly
 ESCALATION_THRESHOLD_DECIBELS = threshold_sources.nats_to_decibels(0.5)
 DECLARED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
-    method="declared_confidence",
-    cluster_origin="declared",
-    growth_schedule="declared_per_window",
-    gap_units="branch_marker",
-    correction="none",
-    weight_step_natural_log=None,
-    references=("declared by the test",),
+    method="declared_confidence"
 )
 
 

@@ -111,6 +111,7 @@ FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 COUNTED_APART = (*FUNCTIONS, ast.ClassDef)
 TESTED_DECISIONS = (ast.If, ast.While, ast.IfExp)
 UNTESTED_DECISIONS = (ast.For, ast.AsyncFor, ast.ExceptHandler)
+OWN_CONDITIONS = (ast.comprehension, ast.IfExp)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 # a lambda's body and a comprehension are checked where they are visited
 UNCHECKED_ARGUMENTS = (ast.Lambda, *COMPREHENSIONS)
@@ -311,11 +312,13 @@ def block_depth(node, depth=0):
 def decision_count(function):
     """How many times a function decides, counted as STYLE.md rule 11 counts.
 
-    A comprehension's `for` is a loop and its `if` an `if`.
+    A comprehension's `for` is a loop and its `if` an `if`. Only the body
+    is counted: a default value or a decorator runs once, where the
+    function is defined.
     """
     count = 0
-    for child in ast.iter_child_nodes(function):
-        count += decisions_below(child)
+    for statement in function.body:
+        count += decisions_below(statement)
     return count
 
 
@@ -345,10 +348,23 @@ def own_decisions(node):
 
 def tested_decisions(test):
     """One decision, and one more for each `and` or `or` in its test."""
-    count = 1
-    for inner in ast.walk(test):
-        if isinstance(inner, ast.BoolOp):
-            count += len(inner.values) - 1
+    operators = condition_operators(test)
+    return 1 + operators
+
+
+def condition_operators(node):
+    """The `and` and `or` operators of one condition.
+
+    A comprehension or a conditional expression inside it holds its own
+    condition, which is counted where that node is.
+    """
+    count = 0
+    if isinstance(node, ast.BoolOp):
+        count += len(node.values) - 1
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, OWN_CONDITIONS):
+            continue
+        count += condition_operators(child)
     return count
 
 

@@ -171,7 +171,9 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
     """Five decisions pass and six fail, under rule 11's own count.
 
     An `and`, an `or` and a comprehension's `for` and `if` each count
-    one, and the nested `inner` is counted apart from `outer`.
+    one, and the nested `inner` is counted apart from `outer`. In
+    `filtered`, the filter's `and` counts once, and the default value is
+    no part of the body.
     """
     tool = _tool("check_one_action")
     module = tmp_path / "decisions.py"
@@ -198,6 +200,12 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
         "        if values or kept:\n"
         "            return values\n"
         "    return inner\n"
+        "\n"
+        "def filtered(values, enabled, kept=tuple(v for v in () if v)):\n"
+        "    if any(value for value in values if value and enabled):\n"
+        "        return True\n"
+        "    if enabled:\n"
+        "        return False\n"
     )
     exit_code = tool.main([str(tmp_path)])
     captured = capsys.readouterr()

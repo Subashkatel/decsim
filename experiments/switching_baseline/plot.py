@@ -60,6 +60,23 @@ STAGES = {
     "frame_commit": "write the Pauli frame",
 }
 TOTAL_STAGE = "buffer0_ready_to_frame"
+# one color per stage, by kind: waiting in oranges and reds, data moving
+# in blues, decoding in greens, the verdict's work in purples
+STAGE_COLOR = {
+    "admission_wait": "#fdd49e",
+    "queue_wait": "#fc8d59",
+    "weak_attempt": "#bcbddc",
+    "dep_block": "#d7301f",
+    "input_link_per_window": "#9ecae1",
+    "compute_wait": "#7f0000",
+    "fetch": "#a1d99b",
+    "algorithm": "#31a354",
+    "release": "#006d2c",
+    "confidence": "#756bb1",
+    "selection_wait": "#fdae6b",
+    "output_link_per_window": "#3182bd",
+    "frame_commit": "#08306b",
+}
 # inside dep_block: the escalated rounds moving to the strong decoder
 SEND_STAGE = "escalation_link_per_window"
 # the weak tier's windows take microseconds, the strong tier's milliseconds
@@ -408,8 +425,8 @@ def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
             axis = axes[row_index][column_index]
             draw_breakdown(axis, stage_means, error_rate, tier, drawn_stages)
     legend_handles = []
-    for stage_index, stage in enumerate(drawn_stages):
-        color = stage_color(stage_index)
+    for stage in drawn_stages:
+        color = stage_color(stage)
         stage_patch = patches.Patch(color=color, label=STAGES[stage])
         legend_handles.append(stage_patch)
     figure.legend(
@@ -429,15 +446,9 @@ def stages_with_time(stage_means: dict) -> list:
     return [stage for stage in STAGES if stage in timed_stages]
 
 
-def stage_color(stage_index: int):
-    """A stage's color, the same in every panel; no two stages share one."""
-    distinct_colors = [
-        *pyplot.get_cmap("tab10").colors,
-        "black",
-        "gold",
-        "teal",
-    ]
-    return distinct_colors[stage_index]
+def stage_color(stage: str) -> str:
+    """A stage's own color, fixed by its kind and never by the data."""
+    return STAGE_COLOR[stage]
 
 
 def draw_breakdown(
@@ -451,13 +462,13 @@ def draw_breakdown(
             distances.append(distance)
     lefts = [0.0] * len(distances)
     positions = list(range(len(distances)))
-    for stage_index, stage in enumerate(drawn_stages):
+    for stage in drawn_stages:
         widths = []
         for distance in distances:
             key = (error_rate, distance, tier, stage)
             mean_us = stage_means.get(key, 0.0)
             widths.append(mean_us / unit_us)
-        color = stage_color(stage_index)
+        color = stage_color(stage)
         axis.barh(positions, widths, left=lefts, height=0.6, color=color)
         lefts = [
             left + width for left, width in zip(lefts, widths, strict=True)

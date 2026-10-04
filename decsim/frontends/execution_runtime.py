@@ -215,10 +215,9 @@ class _ResourceLedger:
             kind, resource_id = key
             raise RuntimeError(
                 f"{operation.name} and {holder_name} share {kind} "
-                f"resource {resource_id!r} but have no dependency edge. "
-                "The operation list is missing "
-                "program-order wiring (run it through _wire_circuit / a "
-                "frontend)"
+                f"resource {resource_id!r} but have no dependency edge; "
+                "circuit_frontend.lowered gives operations that share a "
+                "patch their program order"
             )
         for key in keys_to_claim:
             self.holder_by_resource[key] = operation.id

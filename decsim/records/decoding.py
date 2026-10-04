@@ -464,8 +464,8 @@ class DecodeResult:
     # the message-passing iterations the decode ran, what a measured
     # device time law reads; None from a row that runs no iterations
     iterations: Optional[int] = None
-    # round-keyed seam defects (synthetic decoders, recovery lock
-    # scenarios)
+    # round-keyed seam defects a decoder may report in place of a
+    # residual in boundary_data
     boundary_defects: Optional[dict] = None
     boundary_data: Optional[Any] = None  # optional richer interaction payload
     # CrossingCommit: the part of the correction that commits faults

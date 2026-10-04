@@ -575,6 +575,33 @@ def test_a_module_that_states_its_version_is_named_by_it(monkeypatch):
     assert versions["example_package"] == "3.1.4"
 
 
+def test_a_module_whose_wheel_lists_no_top_level_is_found_by_its_files(
+    tmp_path, monkeypatch
+):
+    """A maturin wheel, relay-bp's among them, writes no top_level.txt.
+
+    Its module is named by the folder its files sit in, on every Python.
+    """
+    package = tmp_path / "example_wheel"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    dist_info = tmp_path / "example_wheel-1.2.3.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: example-wheel\nVersion: 1.2.3\n"
+    )
+    (dist_info / "RECORD").write_text(
+        "example_wheel/__init__.py,,\nexample_wheel-1.2.3.dist-info/RECORD,,\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    unstated = types.ModuleType("example_wheel")
+    monkeypatch.setitem(sys.modules, "example_wheel", unstated)
+
+    versions = collect.imported_module_versions()
+
+    assert versions["example_wheel"] == "1.2.3"
+
+
 def test_the_standard_library_and_submodules_are_left_out():
     versions = collect.imported_module_versions()
 

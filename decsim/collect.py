@@ -14,11 +14,13 @@ first shot, as sinter compiles its decoder once per task. A unit is
 handed on the moment it ends, so a caller saves it while others run.
 """
 
+import collections
 import concurrent.futures
 import dataclasses
 import enum
 import hashlib
 import importlib.metadata
+import inspect
 import json
 import numbers
 import pathlib
@@ -190,7 +192,7 @@ def imported_module_versions() -> dict:
     against the module beside it; one that states none (relay_bp) is named
     by its distribution.
     """
-    distributions_by_module = importlib.metadata.packages_distributions()
+    distributions_by_module = _distributions_by_module()
     versions = {}
     for name in sorted(sys.modules):
         version = _module_version(name, distributions_by_module)
@@ -305,6 +307,41 @@ def _module_version(
     if not distributions:
         return None
     return importlib.metadata.version(distributions[0])
+
+
+def _distributions_by_module() -> dict:
+    """Each top-level module, the distributions that install it.
+
+    Python 3.11's packages_distributions infers a module from the
+    distribution's files when it has no top_level.txt, which a maturin
+    wheel such as relay-bp's does not write; 3.10's reads only that file.
+    The inference is done here, the same on every Python.
+    """
+    found = collections.defaultdict(list)
+    for distribution in importlib.metadata.distributions():
+        name = distribution.metadata["Name"]
+        for module in _top_level_modules(distribution):
+            found[module].append(name)
+    return found
+
+
+def _top_level_modules(distribution: importlib.metadata.Distribution) -> set:
+    """The modules a distribution's top_level.txt names, or its files hold."""
+    declared = distribution.read_text("top_level.txt")
+    if declared:
+        declared_names = declared.split()
+        return set(declared_names)
+    files = distribution.files or ()
+    names = {_top_level_name(path) for path in files}
+    return {name for name in names if "." not in name}
+
+
+def _top_level_name(path: importlib.metadata.PackagePath) -> str:
+    """A file's top folder, or its module name when it lies at the top."""
+    if len(path.parts) > 1:
+        return path.parts[0]
+    module_name = inspect.getmodulename(str(path))
+    return module_name or str(path)
 
 
 def _unit_outcomes(

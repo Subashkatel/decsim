@@ -143,10 +143,18 @@ def test_one_seed_draws_the_same_samples_in_every_process() -> None:
 
 
 @pytest.mark.usefixtures("explorer")
-@pytest.mark.parametrize("family,distance", [("unknown", 3), ("repetition", 0)])
-def test_invalid_selected_memory_is_refused(family: str, distance: int) -> None:
+@pytest.mark.parametrize(
+    "family,distance,sentence",
+    [
+        ("unknown", 3, "code_family must be rotated_surface or repetition"),
+        ("repetition", 0, "Code distance must be at least 2."),
+    ],
+)
+def test_invalid_selected_memory_is_refused(
+    family: str, distance: int, sentence: str
+) -> None:
     """An unknown family is decsim's refusal; a bad distance the Explorer's."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=sentence):
         deltakit.memory_circuit(family, distance, 3, "Z", 0.01)
 
 

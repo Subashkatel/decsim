@@ -26,18 +26,7 @@ class RunPlan:
     resolved_patches: tuple[program_records.ResolvedPatchPlanning, ...]
     round_ticks: int
     execution: window_records.WindowPlan
-    buffering: "SyndromeBufferingPlan"
-
-
-@dataclasses.dataclass(frozen=True)
-class SyndromeBufferingPlan:
-    """The holds every window places on the stores.
-
-    A hold names the rounds a consumer keeps alive.
-    """
-
-    weak_holds: tuple
-    potential_holds: tuple
+    buffering: decoding_records.SyndromeBufferingPlan
 
 
 def plan_execution(
@@ -327,7 +316,7 @@ def _plan_syndrome_buffering(
     formation_reads: window_records.FormationReads = (
         window_records.NO_FORMING_READER
     ),
-) -> SyndromeBufferingPlan:
+) -> decoding_records.SyndromeBufferingPlan:
     """Plan logical holds over one upstream round allocation.
 
     formation_reads says which reads also hold the raw rounds before
@@ -356,7 +345,9 @@ def _plan_syndrome_buffering(
                 absorbs_weak_windows,
                 formation_reads,
             )
-    return SyndromeBufferingPlan(tuple(weak.holds), tuple(strong.holds))
+    return decoding_records.SyndromeBufferingPlan(
+        tuple(weak.holds), tuple(strong.holds)
+    )
 
 
 def _hold_window(

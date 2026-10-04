@@ -235,27 +235,35 @@ class RetainedRounds(Protocol):
 
     A hold names the rounds its holder will read from the moment it is
     placed, so the store may hold a round it has not received yet; the
-    holder is any record that answers referenced_operation_ids,
-    operation_ids_read_at_once and holders_waited_for
-    (records/decoding.py).
+    holder is one of the hold records, which answer
+    referenced_operation_ids, operation_ids_read_at_once and
+    holders_waited_for (records/decoding.py Hold).
     """
 
-    def register_hold(self, holder, round_keys: tuple) -> None:
+    def register_hold(
+        self, holder: decoding_records.Hold, round_keys: tuple
+    ) -> None:
         """Keep these rounds for this holder until it releases them."""
 
-    def replace_hold(self, holder, round_keys: tuple) -> None:
+    def replace_hold(
+        self, holder: decoding_records.Hold, round_keys: tuple
+    ) -> None:
         """The holder reads a different span now; the old span may go."""
 
-    def transfer_hold(self, old_holder, new_holder) -> None:
+    def transfer_hold(
+        self,
+        old_holder: decoding_records.Hold,
+        new_holder: decoding_records.Hold,
+    ) -> None:
         """The same span passes to a new holder, with no gap between."""
 
-    def release_hold(self, holder) -> None:
+    def release_hold(self, holder: decoding_records.Hold) -> None:
         """The holder is done; rounds no other holder wants may go."""
 
-    def has_hold(self, holder) -> bool:
+    def has_hold(self, holder: decoding_records.Hold) -> bool:
         """Whether this holder's span is live."""
 
-    def hold_round_identities(self, holder) -> tuple:
+    def hold_round_identities(self, holder: decoding_records.Hold) -> tuple:
         """The rounds this holder keeps, in the order it named them."""
 
     def release_round_if_unheld(self, round_key: tuple) -> bool:
@@ -657,11 +665,13 @@ class WindowRetention(Protocol):
         """No earlier escalation can re-slice the window: its claim ends."""
 
     def release_hold_if_live(
-        self, owner, store: Optional[RetainedRounds] = None
+        self,
+        owner: decoding_records.Hold,
+        store: Optional[RetainedRounds] = None,
     ) -> None:
         """Drop a hold that is still live; nothing for one already gone."""
 
-    def release_strong_hold_if_live(self, owner) -> None:
+    def release_strong_hold_if_live(self, owner: decoding_records.Hold) -> None:
         """Drop a room-side hold when it is still registered."""
 
     def release_absorbed_strong_hold(

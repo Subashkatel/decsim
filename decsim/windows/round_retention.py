@@ -88,7 +88,9 @@ class RoundRetention:
             return self.primary_store
         return store
 
-    def install_planned_holds(self, buffering_plan) -> None:
+    def install_planned_holds(
+        self, buffering_plan: decoding_records.SyndromeBufferingPlan
+    ) -> None:
         """Place the holds the plan's windows keep on the stores."""
         for owner, identities in buffering_plan.weak_holds:
             self.primary_store.register_hold(owner, identities)
@@ -250,7 +252,7 @@ class RoundRetention:
 
     def release_hold_if_live(
         self,
-        owner: Any,  # an opaque identity
+        owner: decoding_records.Hold,
         store: Optional[ports.RetainedRounds] = None,
     ) -> None:
         """Drop a hold that is still live; nothing for one already gone."""
@@ -436,10 +438,7 @@ class RoundRetention:
             store.register_hold(guard, guarded)
         return guard
 
-    def release_strong_hold_if_live(
-        self,
-        owner: Any,  # an opaque identity
-    ) -> None:
+    def release_strong_hold_if_live(self, owner: decoding_records.Hold) -> None:
         """Drop a strong context hold, in both stores, when it is registered."""
         for store in self._strong_context_stores():
             self.release_hold_if_live(owner, store)

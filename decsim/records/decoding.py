@@ -269,6 +269,31 @@ class RephaseGuard:
         return ()
 
 
+# Every hold a syndrome buffer keeps rounds for; the store asks it the
+# three questions above and never reads which one it is.
+Hold = Union[
+    WindowReads,
+    PotentialStrong,
+    PotentialRestart,
+    LaterStreamReads,
+    PendingStrong,
+    StrongInputInFlight,
+    DecoderInputHold,
+    RephaseGuard,
+]
+
+
+@dataclass(frozen=True)
+class SyndromeBufferingPlan:
+    """The holds every window places on the stores.
+
+    A hold names the rounds a consumer keeps alive.
+    """
+
+    weak_holds: tuple
+    potential_holds: tuple
+
+
 @dataclass(frozen=True)
 class DecoderServiceKey:
     """Identity of one decoder service (a batch of requests served together)."""

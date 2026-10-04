@@ -178,17 +178,22 @@ def is_public_signature(name):
 
 def is_unannotated(function):
     """Whether a parameter, or the return, carries no annotation."""
-    arguments = function.args
-    every = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
-    stars = (arguments.vararg, arguments.kwarg)
-    every.extend(star for star in stars if star is not None)
-    for argument in every:
-        is_receiver = argument.arg in UNANNOTATED_RECEIVERS
-        if argument.annotation is None and not is_receiver:
+    parameters = signature_parameters(function.args)
+    for parameter in parameters:
+        is_receiver = parameter.arg in UNANNOTATED_RECEIVERS
+        if parameter.annotation is None and not is_receiver:
             return True
     if function.name == "__init__":
         return False
     return function.returns is None
+
+
+def signature_parameters(arguments):
+    """Every parameter of a signature, the starred ones included."""
+    every = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
+    stars = (arguments.vararg, arguments.kwarg)
+    every.extend(star for star in stars if star is not None)
+    return every
 
 
 def public_after_private(body):

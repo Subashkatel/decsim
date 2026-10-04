@@ -118,7 +118,7 @@ def build_decoder_unit(
     machine_clock: Optional[config.Clock],
     formation: Optional[detection_events_module.TierFormation],
     signal: Optional[ports.ConfidenceSignal],
-):
+) -> Optional[staged_decoder.StagedDecoder]:
     """The decoder unit of one tier, weak or strong; None for an empty slot.
 
     A tier handed a confidence signal must produce the evidence it reads.

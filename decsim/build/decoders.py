@@ -28,11 +28,11 @@ FORMATION_STAGE = "detection_event_formation"
 
 @dataclasses.dataclass(frozen=True)
 class DecoderPool:
-    """The tiers' units and the managers' pool knobs.
+    """What each tier's decoder manager is built over.
 
-    active and chip are the unit and pool of the tier that decodes the
-    plan's windows (active None with no decoder); strong and host are
-    the strong tier's, on a switching run only.
+    active and chip are the unit and pool settings of the tier that
+    decodes the plan's windows (active None with no decoder); strong and
+    host are the strong tier's, on a switching run only.
     """
 
     active: Optional[ports.Decoder]
@@ -43,7 +43,7 @@ class DecoderPool:
 
 @dataclasses.dataclass(frozen=True)
 class Decoders:
-    """The decode side: the units of both tiers and the managers over them.
+    """The decode side: each tier's decoder manager over its units.
 
     A switching run has the host's manager over the strong tier's units
     too (LATTE 2509.03954 lines 705-720); the two share one ledger of

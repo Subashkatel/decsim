@@ -81,8 +81,9 @@ class WindowInteraction(Protocol):
 
 
 class DefaultWindowInteraction:
-    """decsim's defect-mask boundary and double-window region.
+    """The window interaction decsim uses by default.
 
+    Its boundary is a defect mask and its strong region the double window.
     The boundary is a mask per (round, patch_ids) or per round, XORed
     into the landed rounds when the decode starts; a same-operation A/B
     delivery is mapped by stable detector identity.

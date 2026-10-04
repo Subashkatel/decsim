@@ -33,7 +33,7 @@ import decsim.windows.window_planner as window_planner
 
 
 class WindowCommitter:
-    """Commits one window once and hands its correction on.
+    """Commits each window once.
 
     The strong redecode, None when the run never escalates, hears every
     weak boundary as the courier takes it, because a held strong window

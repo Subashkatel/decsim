@@ -35,7 +35,7 @@ class BoundaryPayloadSettings(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class WindowSettings:
-    """How the rounds are cut into decode windows, and what a window ships.
+    """The window side's settings.
 
     scheme is a windowing scheme row's Settings record (windows/schemes/),
     which holds the window sizes, commit_rounds and buffer_rounds, None

@@ -24,11 +24,12 @@ import decsim.windows.window_planner as window_planner
 
 
 class OperationResults:
-    """Delivers each operation's and segment's result once it is final.
+    """Delivers each result once it is final.
 
-    Trace source: operation_result_delivered(operation_id,
-    logical_observables) at every delivery, and with None when a
-    delivery is withdrawn; the result ledger listens.
+    A result is an operation's or a stream segment's. Trace source:
+    operation_result_delivered(operation_id, logical_observables) at
+    every delivery, and with None when a delivery is withdrawn; the
+    result ledger listens.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -358,7 +359,7 @@ def _stream_place(operation: program_records.Operation, segment) -> tuple:
 
 
 class _Deliveries:
-    """What has been delivered so far, and whether the workload is done."""
+    """The progress of the deliveries so far."""
 
     def __init__(self) -> None:
         self.is_workload_done = False
@@ -369,7 +370,10 @@ class _Deliveries:
 
 
 class _Segment:
-    """Where one operation's rounds fold into a stream, and its result's end."""
+    """Where one operation's rounds fold into a stream.
+
+    required_stream_end is the stream round its result waits for.
+    """
 
     def __init__(self) -> None:
         self.stream_id = None

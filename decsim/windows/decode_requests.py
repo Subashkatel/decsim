@@ -32,11 +32,13 @@ import decsim.windows.window_planner as window_planner
 
 
 class WindowInputGate:
-    """Whether a job may take a slot, may start, and what its input reads.
+    """The boundary gate a window's decode job passes through.
 
-    The decoder side calls it through job.gate. It decides the mask and
-    the row the tier declares; the write is the decoder side's, which
-    owns the memory (<tier>.boundary_fold, decoders/settings.py).
+    It says whether the job may take a slot, whether it may start, and
+    what its input reads. The decoder side calls it through job.gate. It
+    decides the mask and the row the tier declares; the write is the
+    decoder side's, which owns the memory (<tier>.boundary_fold,
+    decoders/settings.py).
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -691,7 +693,7 @@ class _SharedInputHold:
 
 @dataclasses.dataclass(frozen=True)
 class _DecidingWindow:
-    """A window in its decision: its primary job, tiers and submissions."""
+    """What one window issues when its decision ends."""
 
     job: decoding_records.DecodeJob
     tiers: tuple

@@ -57,7 +57,7 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
     ) -> None:
         self.settings = settings
         self._initialize_run_seed_binding(None)
-        self._effective_seed = None
+        self._installed_seed = None
         self.compiled_by_model: dict = {}
         self._worker_process_id = os.getpid()
         self._worker_thread_id = None
@@ -112,7 +112,7 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         return secrets.randbits(64)
 
     def _install_run_seed_state(self, prepared_state) -> None:
-        self._effective_seed = prepared_state
+        self._installed_seed = prepared_state
         self.compiled_by_model.clear()
 
     def _resolved_detector_order_seed(self) -> int:
@@ -125,10 +125,10 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
                     "TesseractWindowDecoder cannot draw while a run-seed "
                     "reservation is pending"
                 )
-            if self._effective_seed is None:
-                self._effective_seed = secrets.randbits(64)
+            if self._installed_seed is None:
+                self._installed_seed = secrets.randbits(64)
             self._stochastic_use_started = True
-            return self._effective_seed
+            return self._installed_seed
 
     def _claim_worker(self) -> None:
         """One decoder serves one thread; a new process starts afresh."""

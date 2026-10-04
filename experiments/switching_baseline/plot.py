@@ -40,54 +40,41 @@ TIER_COLOR = {"weak": "C0", "strong": "C1"}
 TIER_NAME = {"weak": "union-find (weak)", "strong": "Relay-BP-5 (strong)"}
 VIOLIN_HALF_WIDTH = 0.8
 VIOLIN_BINS = 40
-# A window's stages from its first round readable in the weak syndrome
-# buffer to its correction written in the Pauli frame, in the order
-# they happen. Each is one recorded point of
-# decsim/experiments/measure.py, and a tier's stages add up to its
-# TIER_SPAN.
-STAGES = {
-    "buffer_fill": "wait for the window's rounds",
-    "admission_wait": "window into the decode queue",
-    "queue_wait": "wait for the union-find decoder",
-    "weak_attempt": "union-find attempt before escalating",
-    "dep_block": "wait for a decoder slot, rounds and boundary",
-    "input_link_per_window": "input into decoder memory",
-    "compute_wait": "wait for the decoder to finish the job ahead",
-    "fetch": "read window from decoder memory",
-    "algorithm": "decoding algorithm",
-    "release": "write correction out",
-    "confidence": "confidence check",
-    "selection_wait": "hold strong answer for the selection",
-    "output_link_per_window": "send correction to the Pauli frame",
-    "frame_commit": "write the Pauli frame",
+# The breakdown's six parts, each the sum of the recorded points of
+# decsim/experiments/measure.py it names, so a part means the same on
+# both tiers. Every recorded point between a span's two ends is in
+# exactly one part, so a tier's parts add up to its TIER_SPAN.
+BREAKDOWN_PARTS = {
+    "wait for the window's rounds": ("#bdbdbd", ["buffer_fill"]),
+    "union-find attempt before escalating": ("#bcbddc", ["weak_attempt"]),
+    "wait for a decoder": (
+        "#d7301f",
+        [
+            "admission_wait",
+            "queue_wait",
+            "dep_block",
+            "compute_wait",
+            "selection_wait",
+        ],
+    ),
+    "decoding (read, algorithm, write)": (
+        "#31a354",
+        ["fetch", "algorithm", "release"],
+    ),
+    "confidence check": ("#756bb1", ["confidence"]),
+    "moving data (into decoder, to Pauli frame)": (
+        "#3182bd",
+        ["input_link_per_window", "output_link_per_window", "frame_commit"],
+    ),
 }
 # Each tier's bar: the recorded span it draws, where that span starts,
-# and the stages outside it. A kept window's bar starts when the window
+# and the points outside it. A kept window's bar starts when the window
 # is formed, so the wait for its rounds is left out.
 TIER_SPAN = {
     "weak": ("buffer0_ready_to_frame", "window formed", {"buffer_fill"}),
     "strong": ("buffer0_first_round_to_frame", "first round", set()),
 }
-# one color per stage, by kind: the rounds arriving in gray, waiting in
-# oranges and reds, data moving in blues, decoding in greens, the
-# verdict's work in purples
-STAGE_COLOR = {
-    "buffer_fill": "#bdbdbd",
-    "admission_wait": "#fdd49e",
-    "queue_wait": "#fc8d59",
-    "weak_attempt": "#bcbddc",
-    "dep_block": "#d7301f",
-    "input_link_per_window": "#9ecae1",
-    "compute_wait": "#7f0000",
-    "fetch": "#a1d99b",
-    "algorithm": "#31a354",
-    "release": "#006d2c",
-    "confidence": "#756bb1",
-    "selection_wait": "#fdae6b",
-    "output_link_per_window": "#3182bd",
-    "frame_commit": "#08306b",
-}
-# the weak tier's windows take microseconds, the strong tier's milliseconds
+BREAKDOWN_ERROR_RATE = 0.003
 TIER_UNIT = {"weak": ("µs", 1.0), "strong": ("ms", 1e3)}
 TIER_WINDOWS = {
     "weak": "windows union-find kept",
@@ -407,35 +394,27 @@ def stage_means_of(folder: pathlib.Path) -> dict:
 
 
 def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
-    """Where a window's time goes: a row per error rate, a column per tier.
+    """Where a window's time goes at one error rate, kept and escalated.
 
     Each bar is one distance's mean time per window, split into the
-    stages in the order they happen. Means, unlike medians, add up, so
-    a bar's length is the mean of its tier's span (TIER_SPAN) to the
-    correction written in the Pauli frame: the number at its end.
+    BREAKDOWN_PARTS. Means, unlike medians, add up, so a bar's length is
+    the mean of its tier's recorded span (TIER_SPAN): the number at its
+    end.
     """
-    drawn_stages = stages_with_time(stage_means)
     tiers = list(TIER_WINDOWS)
-    row_count = len(ERROR_RATES)
-    column_count = len(tiers)
-    figure_width = column_count * plots.PANEL_WIDTH_INCHES * 1.3
-    figure_height = row_count * plots.PANEL_HEIGHT_INCHES * 0.6
+    figure_width = len(tiers) * plots.PANEL_WIDTH_INCHES * 1.3
     figure, axes = pyplot.subplots(
-        row_count,
-        column_count,
-        figsize=(figure_width, figure_height),
+        1,
+        len(tiers),
+        figsize=(figure_width, plots.PANEL_HEIGHT_INCHES),
         layout="constrained",
-        squeeze=False,
     )
-    for row_index, error_rate in enumerate(ERROR_RATES):
-        for column_index, tier in enumerate(tiers):
-            axis = axes[row_index][column_index]
-            draw_breakdown(axis, stage_means, error_rate, tier, drawn_stages)
+    for axis, tier in zip(axes, tiers, strict=True):
+        draw_breakdown(axis, stage_means, BREAKDOWN_ERROR_RATE, tier)
     legend_handles = []
-    for stage in drawn_stages:
-        color = stage_color(stage)
-        stage_patch = patches.Patch(color=color, label=STAGES[stage])
-        legend_handles.append(stage_patch)
+    for part_name, (color, _) in BREAKDOWN_PARTS.items():
+        part_patch = patches.Patch(color=color, label=part_name)
+        legend_handles.append(part_patch)
     figure.legend(
         handles=legend_handles,
         loc="outside lower center",
@@ -444,22 +423,16 @@ def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
     plots.save(figure, path)
 
 
-def stages_with_time(stage_means: dict) -> list:
-    """The stages some window spent time in, in the order they happen."""
-    timed_stages = set()
-    for (_, _, _, stage), mean in stage_means.items():
-        if mean > 0:
-            timed_stages.add(stage)
-    return [stage for stage in STAGES if stage in timed_stages]
-
-
-def stage_color(stage: str) -> str:
-    """A stage's own color, fixed by its kind and never by the data."""
-    return STAGE_COLOR[stage]
+def part_mean_us(stage_means: dict, point: tuple, stages: list) -> float:
+    """One part's mean time per window: its recorded points summed."""
+    total_us = 0.0
+    for stage in stages:
+        total_us += stage_means.get((*point, stage), 0.0)
+    return total_us
 
 
 def draw_breakdown(
-    axis, stage_means: dict, error_rate: float, tier: str, drawn_stages: list
+    axis, stage_means: dict, error_rate: float, tier: str
 ) -> None:
     """One tier's stacked bars at one error rate, a bar per distance."""
     unit_name, unit_us = TIER_UNIT[tier]
@@ -470,16 +443,15 @@ def draw_breakdown(
             distances.append(distance)
     lefts = [0.0] * len(distances)
     positions = list(range(len(distances)))
-    bar_stages = [
-        stage for stage in drawn_stages if stage not in left_out_stages
-    ]
-    for stage in bar_stages:
+    for color, stages in BREAKDOWN_PARTS.values():
+        part_stages = [
+            stage for stage in stages if stage not in left_out_stages
+        ]
         widths = []
         for distance in distances:
-            key = (error_rate, distance, tier, stage)
-            mean_us = stage_means.get(key, 0.0)
+            point = (error_rate, distance, tier)
+            mean_us = part_mean_us(stage_means, point, part_stages)
             widths.append(mean_us / unit_us)
-        color = stage_color(stage)
         axis.barh(positions, widths, left=lefts, height=0.6, color=color)
         lefts = [
             left + width for left, width in zip(lefts, widths, strict=True)

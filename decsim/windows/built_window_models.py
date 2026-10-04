@@ -18,7 +18,7 @@ class BuiltWindowModels:
         self.builds = 0
         self.reuses = 0
 
-    def models_of(self, key) -> list:
+    def models_of(self, key: tuple) -> list:
         """The models this key has already built, or an empty list."""
         held = self.models_by_key.get(key)
         if held is None:
@@ -26,7 +26,7 @@ class BuiltWindowModels:
         self.reuses += 1
         return held
 
-    def remember(self, key, models) -> None:
+    def remember(self, key: tuple, models: list) -> None:
         """Keep one key's models for the task's later shots."""
         self.models_by_key[key] = models
         self.builds += 1

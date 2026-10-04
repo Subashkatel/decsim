@@ -42,7 +42,7 @@ class WindowModels:
         # models object builds them, so it is where they live
         self.model_by_window: dict = {}
 
-    def requirement(self):
+    def requirement(self) -> object:
         """What a model must offer every decoder that may decode it."""
         requirement = self.decoder.fault_model_requirement
         if self.strong_decoder is None:
@@ -51,7 +51,11 @@ class WindowModels:
         return requirement.joined(strong_needs)
 
     def models_for_operation(
-        self, operation, resolved_operation, windows: list, protocol
+        self,
+        operation: program_records.Operation,
+        resolved_operation: program_records.ResolvedOperationPlanning,
+        windows: list,
+        protocol: window_records.WindowProtocol,
     ) -> list:
         """One model per window of a planned operation, or none.
 
@@ -78,13 +82,21 @@ class WindowModels:
         self.built_models.remember(key, models)
         return models
 
-    def model_for_stream(self, stream_id, window: window_records.Window):
+    def model_for_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+        window: window_records.Window,
+    ) -> object:
         """The model of one window of a dynamic stream, or None."""
         if self.provider is None:
             return None
         return self.provider.window_model_for_stream(stream_id, window)
 
-    def register_stream(self, stream_operation, resolved_operation):
+    def register_stream(
+        self,
+        stream_operation: program_records.Operation,
+        resolved_operation: program_records.ResolvedOperationPlanning,
+    ) -> Optional[int]:
         """Note a dynamic stream; the rounds its source can supply, or None."""
         if self.provider is None:
             return None
@@ -109,12 +121,12 @@ class WindowModels:
 
     def strong_model_for_operation(
         self,
-        operation,
+        operation: program_records.Operation,
         window: window_records.Window,
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ):
+    ) -> object:
         """The model of one strong window, with the listed faults excluded.
 
         prior_faults is what the neighbour of a pinned face has already
@@ -145,9 +157,11 @@ class WindowPlanner:
 
     def __init__(
         self,
-        resolved_operations,
+        resolved_operations: tuple[
+            program_records.ResolvedOperationPlanning, ...
+        ],
         plan: window_records.WindowPlan,
-        planned_operations,
+        planned_operations: tuple,
     ) -> None:
         resolved_by_id = {
             resolved.operation_id: resolved for resolved in resolved_operations
@@ -188,7 +202,11 @@ class WindowPlanner:
         """The window at (operation id, index)."""
         return self.plan.windows[key]
 
-    def later_windows(self, operation_id, window_index: int) -> list:
+    def later_windows(
+        self,
+        operation_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> list:
         """The operation's windows past that index, in index order."""
         later = []
         for index in self.window_indices_of(operation_id):
@@ -216,7 +234,7 @@ class WindowPlanner:
         return window
 
     def reslice_window(
-        self, key: tuple, buffer_lo: int, model
+        self, key: tuple, buffer_lo: int, model: object
     ) -> window_records.Window:
         """Move a window's read start and install the model it reads with."""
         window = self.plan.windows[key]
@@ -226,7 +244,7 @@ class WindowPlanner:
             self.models.model_by_window[key] = model
         return window
 
-    def check_absorbable(self, window_keys) -> None:
+    def check_absorbable(self, window_keys: tuple) -> None:
         """Every listed window is still undecoded and uncommitted."""
         for key in window_keys:
             window = self.plan.windows[key]
@@ -251,7 +269,7 @@ class WindowPlanner:
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ):
+    ) -> object:
         """The error model of one strong window of that operation."""
         return self.models.strong_model_for_operation(
             operation,
@@ -275,32 +293,38 @@ class WindowPlanner:
             return None
         return model.crossing_fault_ids()
 
-    def window_indices_of(self, operation_id) -> list:
+    def window_indices_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> list:
         """The operation's window indices in order; none when unplanned."""
         return self.plan.op_windows.get(operation_id, [])
 
-    def window_count_of(self, operation_id) -> int:
+    def window_count_of(self, operation_id: Any) -> int:  # an opaque identity
         """How many windows the operation has."""
         return self.plan.window_count[operation_id]
 
-    def windows_of(self, operation_id) -> list:
+    def windows_of(self, operation_id: Any) -> list:  # an opaque identity
         """The operation's windows, in index order."""
         windows = []
         for window_index in self.window_indices_of(operation_id):
             windows.append(self.plan.windows[(operation_id, window_index)])
         return windows
 
-    def is_windowed(self, operation_id) -> bool:
+    def is_windowed(self, operation_id: Any) -> bool:  # an opaque identity
         """False for an operation decoded as one whole batch."""
         return self.plan.windowed_by_operation[operation_id]
 
-    def batches_idle_rounds(self, operation_id) -> bool:
+    def batches_idle_rounds(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> bool:
         """Whether idle rounds before the operation fold into its batch."""
         return self.plan.batch_preceding_idle_rounds_by_operation.get(
             operation_id, False
         )
 
-    def prepend_idle_rounds(self, operation_id, round_count: int) -> None:
+    def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style operation."""
         if round_count <= 0:
             return
@@ -311,15 +335,21 @@ class WindowPlanner:
 
     # ---- the resolved operations
 
-    def round_count_of(self, operation_id) -> int:
+    def round_count_of(self, operation_id: Any) -> int:  # an opaque identity
         """The root-resolved round count of an operation."""
         return self.resolved_operation_by_id[operation_id].round_count
 
-    def code_geometry_of(self, operation_id):
+    def code_geometry_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> program_records.ResolvedCodeGeometry:
         """The resolved code geometry of an operation."""
         return self.resolved_operation_by_id[operation_id].code_geometry
 
-    def spatial_node_count_of(self, operation_id) -> int:
+    def spatial_node_count_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
         """The decoding-graph nodes per round of an operation."""
         return self.resolved_operation_by_id[operation_id].spatial_node_count
 
@@ -361,17 +391,17 @@ class WindowPlanner:
         )
         return source_round_limit
 
-    def has_stream(self, stream_id) -> bool:
+    def has_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True for a stream whose windows are planned at runtime."""
         return stream_id in self.growth_by_stream
 
-    def is_finite_stream(self, stream_id) -> bool:
+    def is_finite_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True when the source fixed the stream's window plan up front."""
         return self.growth_by_stream[stream_id].finite_geometries is not None
 
     def grow_stream(
         self,
-        stream_id,
+        stream_id: Any,  # an opaque identity
         highest_known_round: int,
         round_cap: Optional[int],
     ) -> list:
@@ -413,7 +443,9 @@ class WindowPlanner:
             self.attach_stream_model(window)
 
     def trim_stream_tail(
-        self, stream_id, stream_round_count: int
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
     ) -> Optional[window_records.Window]:
         """Clip the one window whose commit region holds a closed tail.
 

@@ -12,10 +12,11 @@ double-window region.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, Union, runtime_checkable
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 
@@ -53,9 +54,9 @@ class WindowInteraction(Protocol):
         self,
         state: Any,
         window: window_records.WindowInfo,
-        payload,
+        payload: round_records.RetainedSyndromeFragment,
         round_key: int,
-    ):
+    ) -> round_records.RetainedSyndromeFragment:
         """Fold one delivered boundary into a landed round of the window."""
 
     def boundary_payload_bits(
@@ -95,11 +96,17 @@ class DefaultWindowInteraction:
         self.restart_reread_buffer_regions = restart_reread_buffer_regions
         self.boundary_payload = boundary_payload
 
-    def initial_boundary_state(self, _window):
+    def initial_boundary_state(
+        self, _window: window_records.WindowInfo
+    ) -> dict:
         """An empty mask."""
         return _DefectBoundaryState()
 
-    def boundary_from_result(self, result, fallback):
+    def boundary_from_result(
+        self,
+        result: Optional[decoding_records.DecodeResult],
+        fallback: Optional[Union[window_records.DependencyResidual, dict]],
+    ) -> Optional[Union[window_records.DependencyResidual, dict]]:
         """The result's residual, its boundary defects, or the fallback.
 
         A result that carries a correction and no defects crosses no
@@ -116,11 +123,20 @@ class DefaultWindowInteraction:
             return None
         return fallback
 
-    def boundary_targets(self, source, _windows):
+    def boundary_targets(
+        self,
+        source: window_records.WindowInfo,
+        _windows: Mapping[tuple, window_records.WindowInfo],
+    ) -> list:
         """Every declared dependent of the source."""
         return list(source.dependents)
 
-    def merge_boundary(self, delivery, destination, current_state):
+    def merge_boundary(
+        self,
+        delivery: window_records.BoundaryDelivery,
+        destination: window_records.WindowInfo,
+        current_state: dict,
+    ) -> window_records.BoundaryUpdate:
         """A current delivery replaces its source's contribution to the mask."""
         if not delivery.is_current:
             return window_records.BoundaryUpdate(
@@ -144,7 +160,7 @@ class DefaultWindowInteraction:
             release_dependency=release_dependency,
         )
 
-    def boundary_arrived(self, state):
+    def boundary_arrived(self, state: dict) -> bool:
         """Whether a source has contributed to this window's mask.
 
         merge_boundary records the source's contribution whatever bits
@@ -156,7 +172,13 @@ class DefaultWindowInteraction:
         contributions = getattr(state, "contributions", None)
         return bool(contributions)
 
-    def apply_boundary(self, state, _window, payload, round_key):
+    def apply_boundary(
+        self,
+        state: Optional[dict],
+        _window: window_records.WindowInfo,
+        payload: round_records.RetainedSyndromeFragment,
+        round_key: int,
+    ) -> round_records.RetainedSyndromeFragment:
         """XOR the round's mask into the payload's bits.
 
         A timing-only payload (no bits) takes the mask as its bits.
@@ -175,7 +197,12 @@ class DefaultWindowInteraction:
             bits = tuple(masked)
         return dataclasses.replace(payload, bits=bits)
 
-    def boundary_payload_bits(self, payload, destination, source):
+    def boundary_payload_bits(
+        self,
+        payload: Optional[Union[window_records.DependencyResidual, dict]],
+        destination: window_records.WindowInfo,
+        source: window_records.WindowInfo,
+    ) -> Optional[int]:
         """The bits this hand-off takes in the configured representation.
 
         The message updates the one layer of the destination the two
@@ -190,8 +217,11 @@ class DefaultWindowInteraction:
         return self.boundary_payload.bits(seam)
 
     def plan_strong_region(
-        self, weak_window, _later_windows, operation_round_count
-    ):
+        self,
+        weak_window: window_records.WindowInfo,
+        _later_windows: list,
+        operation_round_count: int,
+    ) -> window_records.StrongRegionPlan:
         """The double window: commit plus two buffers, one restart.
 
         The strong window commits from the weak window's commit start over

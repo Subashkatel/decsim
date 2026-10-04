@@ -93,7 +93,7 @@ class BoundaryCourier:
             return False
         return record.committed_request_key is not None
 
-    def committed(self, key: tuple):
+    def committed(self, key: tuple) -> object:
         """The boundary the window shipped, or None."""
         record = self.record_by_window.get(key)
         if record is None:
@@ -106,7 +106,7 @@ class BoundaryCourier:
         self,
         window: window_records.Window,
         operation: program_records.Operation,
-        boundary,
+        boundary: object,
         *,
         source_request_key: window_records.DecoderRequestKey,
     ) -> None:
@@ -139,7 +139,10 @@ class BoundaryCourier:
             )
 
     def merge_available(
-        self, source_key: tuple, destination: window_records.Window, boundary
+        self,
+        source_key: tuple,
+        destination: window_records.Window,
+        boundary: object,
     ) -> None:
         """Merge an already-delivered predecessor into a newly built window."""
         record = self._record(source_key)

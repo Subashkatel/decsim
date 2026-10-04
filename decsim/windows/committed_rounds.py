@@ -10,7 +10,7 @@ ledger against a per-round oracle.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.records.decoding as decoding_records
 
@@ -73,7 +73,7 @@ class LogicalLedger:
 
     def observables_for_interval(
         self,
-        stream_id,
+        stream_id: Any,  # an opaque identity
         commit_lo: int,
         commit_hi: int,
         *,

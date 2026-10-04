@@ -10,7 +10,7 @@ window is final.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -46,7 +46,9 @@ class OperationResults:
     # ---- what the committer tells
 
     def install_window_contribution(
-        self, window: window_records.Window, logical_observables
+        self,
+        window: window_records.Window,
+        logical_observables: Optional[tuple[int, ...]],
     ) -> decoding_records.LogicalContribution:
         """The window owns its commit range, unless a strong window does.
 
@@ -65,7 +67,9 @@ class OperationResults:
         self.ledger.install(contribution)
         return contribution
 
-    def replace_prediction(self, key: tuple, logical_observables) -> None:
+    def replace_prediction(
+        self, key: tuple, logical_observables: Optional[tuple[int, ...]]
+    ) -> None:
         """A strong result replaces the owner's prediction."""
         self.ledger.replace_prediction(key, logical_observables)
 
@@ -117,7 +121,10 @@ class OperationResults:
         self.deliveries.is_workload_done = True
         self.factory.shutdown()
 
-    def release_committed_segments(self, stream_id) -> None:
+    def release_committed_segments(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> None:
         """Deliver the segments the stream's committed prefix covers."""
         committed = self.deliveries.committed_round_count_by_stream.get(
             stream_id, 0
@@ -125,7 +132,9 @@ class OperationResults:
         self.release_stream_segments_at_commit(stream_id, committed)
 
     def release_stream_segments_at_commit(
-        self, stream_id, committed_round_count: int
+        self,
+        stream_id: Any,  # an opaque identity
+        committed_round_count: int,
     ) -> None:
         """Deliver the segment results whose full round range committed.
 
@@ -141,7 +150,10 @@ class OperationResults:
     # ---- the segment binds
 
     def bind_stream_segment(
-        self, operation_id: int, stream_id, stream_offset: int
+        self,
+        operation_id: int,
+        stream_id: Any,  # an opaque identity
+        stream_offset: int,
     ) -> None:
         """Note which stream and offset a segment's rounds fold into."""
         segment = self._segment(operation_id)
@@ -157,7 +169,10 @@ class OperationResults:
 
     # ---- the rounds backlog
 
-    def committed_prefix_round_count(self, operation_id) -> int:
+    def committed_prefix_round_count(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
         """Rounds decoded in an unbroken prefix from round 1."""
         committed_ranges = []
         for window in self._committed_windows_of(operation_id):

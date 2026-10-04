@@ -49,7 +49,7 @@ class WindowCommitter:
     # the strong tier's window side; None when the run never escalates
     strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.trace = _TraceSources()
 

@@ -14,9 +14,10 @@ import dataclasses
 import functools
 import operator
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
@@ -147,7 +148,7 @@ class DecodeRequestBuilder:
     interaction = ports.Port(window_interactions.WindowInteraction)
     gate = ports.Port(WindowInputGate)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.next_request_sequence = 0
         self.trace = _TraceSources()
@@ -155,7 +156,10 @@ class DecodeRequestBuilder:
     # ---- building a request
 
     def new_request_key(
-        self, operation_id, window_id: int, tier: window_records.DecoderTier
+        self,
+        operation_id: Any,  # an opaque identity
+        window_id: int,
+        tier: window_records.DecoderTier,
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
         request_key = window_records.DecoderRequestKey(
@@ -164,7 +168,9 @@ class DecodeRequestBuilder:
         self.next_request_sequence += 1
         return request_key
 
-    def stamp_first_round(self, window: window_records.Window, store) -> None:
+    def stamp_first_round(
+        self, window: window_records.Window, store: ports.RetainedRounds
+    ) -> None:
         """Retain arrival provenance for latency accounting."""
         if window.t_first_round is not None:
             return
@@ -200,7 +206,7 @@ class DecodeRequestBuilder:
         window: window_records.Window,
         operation: program_records.Operation,
         tier: window_records.DecoderTier,
-        store,
+        store: ports.RetainedRounds,
         forced_logical_class: Optional[int] = None,
     ) -> decoding_records.DecodeJob:
         """The tier's decode job for one complete window, read from store.
@@ -273,7 +279,9 @@ class DecodeRequestBuilder:
             forced_logical_class=forced_logical_class,
         )
 
-    def assemble_payloads(self, window: window_records.Window, store) -> list:
+    def assemble_payloads(
+        self, window: window_records.Window, store: ports.RetainedRounds
+    ) -> list:
         """Collect this window's raw payloads, with successor overflow rounds.
 
         The boundary is never folded here: the mask is XORed into the
@@ -398,7 +406,9 @@ class DecodeRequester:
         # the windows whose decision has not ended, by window key
         self.deciding_by_window: dict = {}
 
-    def request_ready_windows(self, windows, strong_redecode) -> None:
+    def request_ready_windows(
+        self, windows: list, strong_redecode: Optional[ports.StrongRedecode]
+    ) -> None:
         """Request each window that has its data, in the given order.
 
         strong_redecode is the strong tier's window side, which builds the
@@ -409,7 +419,9 @@ class DecodeRequester:
             self.request_if_ready(window, strong_redecode)
 
     def request_if_ready(
-        self, window: window_records.Window, strong_redecode
+        self,
+        window: window_records.Window,
+        strong_redecode: Optional[ports.StrongRedecode],
     ) -> None:
         """If the window has its data, submit it through the policy."""
         if window.queued or window.committed:
@@ -436,7 +448,7 @@ class DecodeRequester:
         self,
         window: window_records.Window,
         operation: program_records.Operation,
-        strong_redecode,
+        strong_redecode: Optional[ports.StrongRedecode],
     ) -> None:
         """Build the primary jobs; the window's requests leave at its decision.
 
@@ -596,7 +608,9 @@ class DecodeRequester:
         if not has_dropped_decision:
             self.decode_queue.withdraw_window(window.key)
 
-    def release_parked(self, window_key: tuple, strong_redecode) -> None:
+    def release_parked(
+        self, window_key: tuple, strong_redecode: Optional[ports.StrongRedecode]
+    ) -> None:
         """The window's last boundary arrived: its parked decodes may start.
 
         The window's weak decode parks on the chip's manager; a speculative

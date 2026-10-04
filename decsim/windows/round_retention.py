@@ -177,7 +177,7 @@ class RoundRetention:
 
     def read_keys_for_bounds(
         self,
-        operation_id,
+        operation_id: Any,  # an opaque identity
         start_round: int,
         buffer_hi: int,
         window: Optional[window_records.Window] = None,
@@ -242,7 +242,11 @@ class RoundRetention:
 
     # ---- holds moving between owners
 
-    def release_hold_if_live(self, owner, store=None) -> None:
+    def release_hold_if_live(
+        self,
+        owner: Any,  # an opaque identity
+        store: Optional[ports.RetainedRounds] = None,
+    ) -> None:
         """Drop a hold that is still live; nothing for one already gone."""
         store = self.store_for(store)
         if store.has_hold(owner):
@@ -256,7 +260,10 @@ class RoundRetention:
         return self.primary_store.has_hold(owner)
 
     def bind_input_hold(
-        self, job: decoding_records.DecodeJob, previous_owner, store=None
+        self,
+        job: decoding_records.DecodeJob,
+        previous_owner: decoding_records.WindowReads,
+        store: Optional[ports.RetainedRounds] = None,
     ) -> None:
         """Transfer the window's hold to its admitted request.
 
@@ -308,7 +315,9 @@ class RoundRetention:
         """Whether the operation's syndrome RAM is still open."""
         return self.primary_store.has_operation(operation_id)
 
-    def strong_window_input(self, builder, window) -> list:
+    def strong_window_input(
+        self, builder: ports.WindowJobBuilder, window: window_records.Window
+    ) -> list:
         """The room-side payloads of a strong window, its first round stamped.
 
         Which store a strong window reads is the retention's to say, so
@@ -317,7 +326,7 @@ class RoundRetention:
         builder.stamp_first_round(window, self.strong_store)
         return builder.assemble_payloads(window, self.strong_store)
 
-    def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
+    def context_rounds_in_flight(self, key: tuple, read_keys: tuple) -> tuple:
         """The rounds the strong syndrome buffer lacks that the weak one has.
 
         A round the QPU has not produced yet is not late. A round that
@@ -351,7 +360,7 @@ class RoundRetention:
             )
         return tuple(crossing)
 
-    def escalated_rounds(self, round_keys) -> tuple:
+    def escalated_rounds(self, round_keys: list) -> tuple:
         """The weak syndrome buffer's packets of these rounds, to carry up.
 
         The rounds are there: the window's potential strong read keeps
@@ -392,10 +401,10 @@ class RoundRetention:
         self,
         key: tuple,
         restart_key: Optional[tuple],
-        proposed_restart,
-        strong_request_key,
-        context_keys,
-        restart_read_keys,
+        proposed_restart: Optional[window_records.Window],
+        strong_request_key: window_records.DecoderRequestKey,
+        context_keys: tuple,
+        restart_read_keys: tuple,
     ) -> Optional[decoding_records.RephaseGuard]:
         """Hold the restart window's strong context while a plan lands.
 
@@ -416,13 +425,19 @@ class RoundRetention:
             store.register_hold(guard, guarded)
         return guard
 
-    def release_strong_hold_if_live(self, owner) -> None:
+    def release_strong_hold_if_live(
+        self,
+        owner: Any,  # an opaque identity
+    ) -> None:
         """Drop a strong context hold, in both stores, when it is registered."""
         for store in self._strong_context_stores():
             self.release_hold_if_live(owner, store)
 
     def release_absorbed_strong_hold(
-        self, key: tuple, restart_key: Optional[tuple], replacement
+        self,
+        key: tuple,
+        restart_key: Optional[tuple],
+        replacement: decoding_records.PendingStrong,
     ) -> None:
         """Drop the absorbed window's potential read; the request holds it.
 
@@ -516,12 +531,15 @@ class RoundRetention:
         )
         return guarded
 
-    def require_strong_retained(self, round_keys, purpose: str) -> None:
+    def require_strong_retained(self, round_keys: list, purpose: str) -> None:
         """Every listed round must still sit in the strong syndrome buffer."""
         self.require_retained(round_keys, purpose, self.strong_store)
 
     def require_retained(
-        self, round_keys: list, purpose: str, store=None
+        self,
+        round_keys: list,
+        purpose: str,
+        store: Optional[ports.RetainedRounds] = None,
     ) -> None:
         """Reject a new consumer if any already-arrived input was released."""
         store = self.store_for(store)
@@ -627,7 +645,7 @@ class RoundRetention:
             store.release_hold(owner)
 
 
-def round_identities_of(payloads) -> tuple:
+def round_identities_of(payloads: list) -> tuple:
     """The distinct (operation, round) keys of the payloads, in order."""
     identities = {}
     for fragment in payloads:

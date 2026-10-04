@@ -16,6 +16,7 @@ MSHR queue, write buffer and tags and implements the ports
 import dataclasses
 from typing import Any, Optional
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
@@ -65,7 +66,11 @@ class WindowManager:
     strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
     window_interaction = ports.Port(window_interactions.WindowInteraction)
 
-    def __init__(self, engine, feedback_boundary_mode: str = "trailing_buffer"):
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        feedback_boundary_mode: str = "trailing_buffer",
+    ):
         self.engine = engine
         self.feedback_boundary_mode = feedback_boundary_mode
 
@@ -163,7 +168,11 @@ class WindowManager:
         previous = self.planner.windows_by_key[previous_key]
         previous.dependents.append(key)
 
-    def seal_stream(self, stream_id, stream_round_count: int) -> None:
+    def seal_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
+    ) -> None:
         """Close a dynamic stream once its full length has arrived."""
         if self.tracker.is_sealed(stream_id):
             return
@@ -185,7 +194,11 @@ class WindowManager:
         self.check_windows_for_operation(stream_id)
         self.results.finish_workload_if_ready()
 
-    def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
+    def close_stream_boundary(
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
+    ) -> None:
         """Mark a live stream round as a measurement-closed boundary.
 
         The window whose commit region holds the boundary commits through
@@ -216,7 +229,7 @@ class WindowManager:
         self.planner.refresh_stream_models(stream_id)
         self._refresh_unqueued_stream_windows(stream_id)
 
-    def has_dynamic_stream(self, stream_id) -> bool:
+    def has_dynamic_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True for a stream whose windows are planned at runtime."""
         return self.planner.has_stream(stream_id)
 
@@ -267,12 +280,19 @@ class WindowManager:
                 f"device round limit {round_limit}"
             )
 
-    def accept_feedback_memory_round(self, source_operation_id) -> None:
+    def accept_feedback_memory_round(
+        self,
+        source_operation_id: Any,  # an opaque identity
+    ) -> None:
         """Record one idle or memory round and re-check waiting windows."""
         self.tracker.note_memory_round(source_operation_id)
         self.check_windows_for_operation(source_operation_id)
 
-    def accept_room_round(self, operation_id, round_index: int) -> None:
+    def accept_room_round(
+        self,
+        operation_id: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """The strong syndrome buffer stored a round.
 
         Wake the strong tier's listeners, and drive readiness when the
@@ -394,14 +414,17 @@ class WindowManager:
         """
         return []
 
-    def reads_windows_from(self, store) -> bool:
+    def reads_windows_from(self, store: Optional[ports.SyndromeBuffer]) -> bool:
         """Whether the primary tier's window reads come from this store."""
         return self.retention.primary_store is store
 
     # ---- what the feedback streams ask
 
     def bind_stream_operation(
-        self, operation_id: int, stream_id, stream_offset: int
+        self,
+        operation_id: int,
+        stream_id: Any,  # an opaque identity
+        stream_offset: int,
     ) -> None:
         """Note which stream and offset a segment's rounds fold into.
 

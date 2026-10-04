@@ -10,7 +10,7 @@ limit, sealed length and closed boundaries) lives here; its geometry is
 the planner's.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.identity as identity_records
@@ -45,7 +45,9 @@ class RoundTracker:
         return is_new
 
     def register_stream(
-        self, stream_operation: program_records.Operation, source_round_limit
+        self,
+        stream_operation: program_records.Operation,
+        source_round_limit: Optional[int],
     ) -> None:
         """Track a stream's arrivals and what is known of its length."""
         stream_id = stream_operation.id
@@ -56,7 +58,11 @@ class RoundTracker:
 
     # ---- arrivals
 
-    def note_arrival(self, operation_id, round_index: int) -> int:
+    def note_arrival(
+        self,
+        operation_id: Any,  # an opaque identity
+        round_index: int,
+    ) -> int:
         """Advance the readiness counter; returns the rounds arrived now.
 
         The counter is the rounds arrived from round 1 without a gap. A
@@ -74,35 +80,45 @@ class RoundTracker:
             next_round = arrivals.rounds + 1
         return arrivals.rounds
 
-    def note_memory_round(self, operation_id) -> int:
+    def note_memory_round(self, operation_id: Any) -> int:  # an opaque identity
         """Record one idle or memory round; returns the count so far."""
         arrivals = self.arrivals_by_operation[operation_id]
         arrivals.memory_rounds += 1
         return arrivals.memory_rounds
 
-    def note_room_round(self, operation_id, round_index: int) -> None:
+    def note_room_round(
+        self,
+        operation_id: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """The strong syndrome buffer stored a round of the operation."""
         if operation_id not in self.arrivals_by_operation:
             self.arrivals_by_operation[operation_id] = _Arrivals()
         arrivals = self.arrivals_by_operation[operation_id]
         arrivals.strong_rounds = max(arrivals.strong_rounds, round_index)
 
-    def operation(self, operation_id) -> program_records.Operation:
+    def operation(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> program_records.Operation:
         """The operation record of that id."""
         return self.operation_by_id[operation_id]
 
-    def rounds_arrived(self, operation_id) -> int:
+    def rounds_arrived(self, operation_id: Any) -> int:  # an opaque identity
         """The rounds the arrival authority has published from round 1."""
         arrivals = self.arrivals_by_operation.get(operation_id)
         if arrivals is None:
             return 0
         return arrivals.rounds
 
-    def memory_rounds(self, operation_id) -> int:
+    def memory_rounds(self, operation_id: Any) -> int:  # an opaque identity
         """The idle or memory rounds recorded for the operation."""
         return self.arrivals_by_operation[operation_id].memory_rounds
 
-    def strong_rounds_arrived(self, operation_id) -> int:
+    def strong_rounds_arrived(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
         """The operation's round stored through the strong syndrome buffer."""
         arrivals = self.arrivals_by_operation.get(operation_id)
         if arrivals is None:
@@ -111,7 +127,7 @@ class RoundTracker:
 
     # ---- a stream's length
 
-    def is_sealed(self, operation_id) -> bool:
+    def is_sealed(self, operation_id: Any) -> bool:  # an opaque identity
         """True for non-streams and sealed streams."""
         stream = self.stream_by_id.get(operation_id)
         if stream is None:
@@ -125,11 +141,17 @@ class RoundTracker:
                 return True
         return False
 
-    def source_round_limit(self, stream_id) -> Optional[int]:
+    def source_round_limit(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> Optional[int]:
         """The rounds the stream's source can supply, None when unbounded."""
         return self.stream_by_id[stream_id].source_round_limit
 
-    def reaches_source_limit(self, stream_id) -> bool:
+    def reaches_source_limit(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> bool:
         """Whether every round the source can supply has arrived."""
         stream = self.stream_by_id[stream_id]
         if stream.source_round_limit is None:
@@ -137,11 +159,18 @@ class RoundTracker:
         arrived = self.rounds_arrived(stream_id)
         return arrived >= stream.source_round_limit
 
-    def seal(self, stream_id, stream_round_count: int) -> None:
+    def seal(
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
+    ) -> None:
         """The stream's full length has arrived."""
         self.stream_by_id[stream_id].sealed_round_count = stream_round_count
 
-    def arrival_round_limit(self, operation_id) -> Optional[int]:
+    def arrival_round_limit(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> Optional[int]:
         """Maximum legal device round, or None for an open unbounded stream."""
         stream = self.stream_by_id.get(operation_id)
         if stream is None:
@@ -150,7 +179,11 @@ class RoundTracker:
             return stream.sealed_round_count
         return stream.source_round_limit
 
-    def close_boundary(self, stream_id, stream_round_count: int) -> None:
+    def close_boundary(
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
+    ) -> None:
         """Mark a live stream round as a measurement-closed boundary.
 
         A finite real-syndrome stream refuses one inside its registered
@@ -163,7 +196,9 @@ class RoundTracker:
     # ---- round counts and readiness
 
     def round_count_for_window(
-        self, operation_id, window: Optional[window_records.Window] = None
+        self,
+        operation_id: Any,  # an opaque identity
+        window: Optional[window_records.Window] = None,
     ) -> int:
         """The round count to check or read one window against."""
         stream = self.stream_by_id.get(operation_id)
@@ -178,7 +213,9 @@ class RoundTracker:
         return self.rounds_arrived(operation_id)
 
     def effective_round_count_for_window(
-        self, operation_id, window: Optional[window_records.Window]
+        self,
+        operation_id: Any,  # an opaque identity
+        window: Optional[window_records.Window],
     ) -> int:
         """The round count a window reads against, clipped at a closed tail."""
         round_count = self.round_count_for_window(operation_id, window)

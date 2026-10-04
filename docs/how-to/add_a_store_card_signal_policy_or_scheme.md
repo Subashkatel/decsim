@@ -66,19 +66,42 @@ same kind of job, with a page of its own:
 A card is numbers, not a class: a `FabricSettings` record, one
 `PathSettings` per hop, put in the machine's `links` field.
 
-- **Start** from `link_profiles.logical_reference_profile()`
-  (`decsim/links/link_profiles.py`) and replace the hops you have
-  numbers for. To time a strong-side hop with no weak decoder in the
-  way, start the machine from
+- **Start** from a card and replace the hops you have numbers for.
+  `base.links` keeps the hops of the base you start from;
+  `link_profiles.logical_reference_profile()`
+  (`decsim/links/link_profiles.py`) is the card of a machine given
+  none. A base's card is that card with the base's own hops set to one
+  cycle of their clock, so the two differ.
+- **A strong-side hop alone:** start the machine from
   `decsim.settings.strong_decoder_baseline(3, 0.001, 1.0)` (distance,
   physical error probability, round period in microseconds), the strong
-  decoder alone.
+  decoder with no weak decoder in the way. Its decoder is belief
+  matching timed on the host's clock; for a timing that is the same on
+  every host, swap in a priced decoder, as
+  `examples/priced_cards_example.py` does.
 - **One hop in cycles of a clock:** `link_profiles.path_card(links,
   "weak_decoder_to_strong_decoder", clock=..., latency_cycles=...,
   bits_per_cycle=..., source=...)` returns the hop's `PathSettings`;
   `bits_per_cycle=None` is an unbounded wire.
 - **One hop's latency alone:** `link_profiles.with_path_latency(links,
   path_name, latency_microseconds)` returns the whole card.
+- **One hop in microseconds with a rate,** measured end to end:
+
+  ```python
+  capacity = link_settings.CapacitySettings(bits_per_microsecond, source)
+  channel = link_settings.ChannelSettings(
+      path_name, latency_ticks, capacity, source
+  )
+  old_path = getattr(links, path_name)
+  path = dataclasses.replace(
+      old_path, channel=channel, excludes_receiver_processing=False
+  )
+  ```
+
+  Then put `path` in the card with `dataclasses.replace(links, ...)`.
+- **A measured latency already holds its payload's time on the wire.**
+  Take bits over rate off the measured number before you write it as
+  the hop's latency, or the paper's own transfer prices high.
 - **Two hops on one wire** share a `ChannelSettings.name`; a rate is
   bits per microsecond, a `fractions.Fraction`.
 - **Write the paper's numbers in your run file**, each with its source
@@ -87,7 +110,10 @@ A card is numbers, not a class: a `FabricSettings` record, one
   `decsim.links.fabric.LinkFabric(card, engine).expected_delay_ticks(
   path, bits, engine.now)` is what one send costs on an idle wire
   (`tests/links/test_fabric.py`). `tests/links/test_link_profiles.py`
-  checks the measured cards against their papers' transfers.
+  checks the measured cards against their papers' transfers. A card in
+  an experiment's run file is tested the same way: load the file with
+  `decsim.experiments.experiment.load(path)` and replay the transfer on
+  the `links` of a point's machine.
 
 ## A confidence signal
 

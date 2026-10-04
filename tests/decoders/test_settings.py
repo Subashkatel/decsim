@@ -1,4 +1,11 @@
-"""The decoder settings records: the pool, the engine, the manager."""
+"""The decoder settings records of decsim/decoders/settings.py.
+
+The pool, the engine and the unit memory each refuse a bad field by its
+own name, and the manager holds its scheduler as a record that builds
+it. linear_decoder_pool is Toshio et al.'s linear decode time,
+T_dec(r) = tau_dec r (2510.25222 lines 968-971), charged as fetch
+cycles a round on the pool's clock.
+"""
 
 import pytest
 

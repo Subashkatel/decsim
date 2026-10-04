@@ -1131,19 +1131,11 @@ def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
     gaps = chain_gap_ticks(shot, measurement)
     confidence = measurement.samples["confidence"]
     walk_us = 12.0
-    kept = []
-    for index, value in enumerate(confidence):
-        if value:
-            kept.append(index)
-    assert kept
-    assert len(kept) < len(confidence)
-    for index, value in enumerate(confidence):
-        if index in kept:
-            assert value == walk_us
-        else:
-            assert value == 0.0
-    for gap in gaps.values():
-        assert gap == 0
+    confidence_values = set(confidence)
+    gap_ticks = gaps.values()
+    gap_values = set(gap_ticks)
+    assert confidence_values == {0.0, walk_us}
+    assert gap_values == {0}
 
 
 def test_the_stage_points_are_the_committing_decodes_own_stages():
@@ -1299,22 +1291,17 @@ def test_a_stores_read_is_its_own_point_and_not_in_the_park():
     anything and dep_block is zero; the chain still adds up to each
     window's reaction time.
     """
-    settings = store_read_settings()
+    base = one_tier_machine(0.1)
+    store = dataclasses.replace(
+        base.weak_syndrome_buffer, read_cycles=25, clock=FRIDGE_CLOCK
+    )
+    settings = dataclasses.replace(base, weak_syndrome_buffer=store)
     task = point_task(settings)
     measurement = measured(task)
 
     assert measurement.samples["store_read"] == [0.1] * 9
     assert measurement.samples["dep_block"] == [0.0] * 9
     assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
-
-
-def store_read_settings() -> machine_settings.MachineSettings:
-    """A 0.1 us unit behind a weak store that reads in 25 fridge cycles."""
-    base = one_tier_machine(0.1)
-    store = dataclasses.replace(
-        base.weak_syndrome_buffer, read_cycles=25, clock=FRIDGE_CLOCK
-    )
-    return dataclasses.replace(base, weak_syndrome_buffer=store)
 
 
 def input_setup_settings() -> machine_settings.MachineSettings:

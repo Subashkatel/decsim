@@ -278,6 +278,9 @@ def test_command_replay_preserves_repetition_geometry_and_horizon(
         altered, check=False, capture_output=True, text=True
     )
     assert refused.returncode != 0
+    assert (
+        "rounds differs from the exported circuit parameters" in refused.stderr
+    )
 
 
 def test_the_whole_shot_repetition_example_refuses_a_prefix_feedback_wait(
@@ -302,7 +305,9 @@ def test_the_whole_shot_repetition_example_refuses_a_prefix_feedback_wait(
         command, check=False, capture_output=True, text=True
     )
     assert refused.returncode != 0
-    assert "ValueError" in refused.stderr
+    assert (
+        "protection example requires rotated_surface memory" in refused.stderr
+    )
 
 
 def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:

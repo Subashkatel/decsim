@@ -283,6 +283,15 @@ def _observe_each(tracker, gaps: list) -> None:
         tracker.observe(gap)
 
 
+def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
+    """Decibels are 10 log10 of the ratio, the weight its natural log."""
+    weight_nats = math.log(100.0)
+
+    assert threshold_sources.nats_to_decibels(weight_nats) == pytest.approx(
+        20.0
+    )
+
+
 @pytest.mark.parametrize(
     "threshold_decibels", [float("nan"), math.inf, -1.0, True, "20"]
 )
@@ -471,9 +480,6 @@ CALIBRATION_TABLE = (
     "7,0.008,,20.0,\n"
 )
 GATE_FACTS = {"distance": 3, "physical_error_probability": 0.008}
-# two rates a Stim circuit prints alike, so their circuits are one and
-# only the calibrator's seed text tells the points apart
-PRINTED_ALIKE = (0.001, 0.0010000000000000002)
 
 
 def _gate_on(threshold) -> machine_settings.MachineSettings:
@@ -744,8 +750,13 @@ def _two_shots_of_a_fresh_online_point() -> tuple:
 
 
 def test_two_online_points_whose_rates_print_alike_have_two_ids():
-    """The seed text picks the windows the calibrator audits."""
-    plain_rate, nudged_rate = PRINTED_ALIKE
+    """The seed text picks the windows the calibrator audits.
+
+    A Stim circuit prints the two rates alike, so their circuits are one
+    and only the calibrator's seed text tells the points apart.
+    """
+    plain_rate = 0.001
+    nudged_rate = 0.0010000000000000002
     plain_gate = _online_gate(plain_rate)
     nudged_gate = _online_gate(nudged_rate)
 

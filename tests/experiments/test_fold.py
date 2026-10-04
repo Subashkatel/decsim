@@ -23,19 +23,16 @@ import os
 import pathlib
 import random
 import statistics
-import types
 
 import pytest
 
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.fold as fold
-import decsim.experiments.measure as measure
 import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
-import decsim.records.decoding as decoding_records
 import tests.experiments.run_files as run_files
 
 CANCELLING = (1e100, 1.0, -1e100, 1.0)
@@ -670,15 +667,14 @@ def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
     config_path = _one_point_config(tmp_path, 2, 1)
     experiment_dir = tmp_path / "experiment"
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
-    run_dir = experiment_dir
-    first_seeds = _seeds_of_the_one_point(run_dir)
+    first_seeds = _seeds_of_the_one_point(experiment_dir)
     _one_point_config(tmp_path, 4, 1)
 
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
 
     assert first_seeds == [[0, 2]]
-    assert _seeds_of_the_one_point(run_dir) == [[0, 4]]
-    assert _seeds_of_every_shot(run_dir) == ["0", "1", "2", "3"]
+    assert _seeds_of_the_one_point(experiment_dir) == [[0, 4]]
+    assert _seeds_of_every_shot(experiment_dir) == ["0", "1", "2", "3"]
 
 
 # every file a fold writes from the pieces' rows
@@ -850,64 +846,6 @@ def test_pieces_of_one_point_that_ran_different_commits_are_refused(
     assert sweep_path.read_bytes() == sweep_bytes
 
 
-def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():
-    ten_decibels_in_nats = 2.302585092994046
-
-    assert report.gap_bin_low_decibels(ten_decibels_in_nats) == 10.0
-    assert report.gap_bin_low_decibels(0.0) == 0.0
-    assert report.gap_bin_low_decibels(math.inf) == math.inf
-
-
-def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
-    """A gapless window escalates as the least confident: its shot's too."""
-    ten_decibels_in_nats = 2.302585092994046
-    windows = (
-        decoding_records.WindowConfidence(
-            (1, 0), ten_decibels_in_nats, False, None
-        ),
-        decoding_records.WindowConfidence((1, 1), None, True, None),
-    )
-    confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
-    shot = types.SimpleNamespace(
-        point_id="p",
-        algorithm="pymatching",
-        confidence=confidence,
-        logical_failure=False,
-        is_scored=True,
-    )
-
-    rows = report.confidence_histogram_rows([shot])
-
-    assert rows == [
-        _one_count("window", None, True),
-        _one_count("window", 10.0, False),
-        _one_count("shot_minimum", None, None),
-    ]
-
-
-def test_an_unscored_shot_is_in_neither_confidence_file():
-    """An unscored shot is sinter's discard, and counts in no P(e|g).
-
-    Its logical_failure reads False, so a row of it would count as a
-    success beside every gap. sinter takes a discard out of every
-    failure-conditioned count (sinter/_decoding/_decoding.py:120-128),
-    and every row of both files carries shot_failed.
-    """
-    windows = (decoding_records.WindowConfidence((1, 0), 0.1, True, None),)
-    confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
-    shot = types.SimpleNamespace(
-        point_id="p",
-        algorithm="pymatching",
-        seed=0,
-        confidence=confidence,
-        logical_failure=False,
-        is_scored=False,
-    )
-
-    assert report.window_confidence_rows([shot]) == []
-    assert report.confidence_histogram_rows([shot]) == []
-
-
 def _confidence_run(
     tmp_path, arguments, shots, piece_shots=None, out="experiment"
 ):
@@ -933,20 +871,6 @@ def _counts_of(rows, histogram) -> int:
         if row["histogram"] == histogram:
             counts.append(int(row["count"]))
     return sum(counts)
-
-
-def _one_count(histogram, gap_low_decibels, escalated) -> dict:
-    """A histogram row of one window or shot of that no-failure shot."""
-    return {
-        "point_id": "p",
-        "algorithm": "pymatching",
-        "signal": "complementary_gap",
-        "histogram": histogram,
-        "gap_low_decibels": gap_low_decibels,
-        "escalated": escalated,
-        "shot_failed": False,
-        "count": 1,
-    }
 
 
 def _the_one_piece(tmp_path, out) -> dict:

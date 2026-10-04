@@ -430,7 +430,10 @@ def test_two_regions_on_one_stream_are_refused():
         _region(7, 1, 1),
     )
 
-    with pytest.raises(ValueError, match="protected stream 7"):
+    sentence = (
+        "protected stream 7 has two protected regions; a stream has at most one"
+    )
+    with pytest.raises(ValueError, match=sentence):
         _streams(program, regions=two_on_one_stream)
 
 

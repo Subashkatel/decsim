@@ -23,8 +23,8 @@ LIVE_FRAGMENTS = circuit_records.RepeatedStimCircuit(
     ONE_MEASUREMENT, ONE_MEASUREMENT, ONE_MEASUREMENT, ONE_MEASUREMENT
 )
 # The Deltakit makers need the Deltakit packages, which no extra installs.
-DELTAKIT_SPEC = importlib.util.find_spec("deltakit_explorer")
-IS_DELTAKIT_ABSENT = DELTAKIT_SPEC is None
+DELTAKIT_SPECIFICATION = importlib.util.find_spec("deltakit_explorer")
+IS_DELTAKIT_ABSENT = DELTAKIT_SPECIFICATION is None
 NEEDS_DELTAKIT = pytest.mark.skipif(
     IS_DELTAKIT_ABSENT, reason="could not import 'deltakit_explorer'"
 )

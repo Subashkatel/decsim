@@ -9,6 +9,7 @@ command line is never the only record of a number.
 import csv
 import dataclasses
 import datetime
+import errno
 import functools
 import hashlib
 import importlib.metadata
@@ -158,23 +159,6 @@ def _manifest_of(run_dir):
     path = run_dir / "run.json"
     text = path.read_text()
     return json.loads(text)
-
-
-def _commit_of_this_tree():
-    """This test file's own checkout at HEAD, read without git.
-
-    Walked up from this file rather than from the module under test, so
-    a manifest that named some other tree would fail here. The container
-    the suite runs in has no git binary, which is why the git files are
-    read directly; the reader knows a worktree's .git file and the refs
-    it shares with the repo.
-    """
-    this_file = pathlib.Path(__file__)
-    here = this_file.resolve()
-    checkout = here
-    while not (checkout / ".git").exists():
-        checkout = checkout.parent
-    return run_folder._commit_from_git_files(checkout)
 
 
 def test_an_unknown_verb_prints_the_verbs_and_fails():
@@ -638,10 +622,8 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     command.main(["run", str(cut_path), "--out", str(cut_dir)])
 
     reissued_status = (kept_piece / "piece.json").stat()
-    whole_run_dir = whole_dir
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    cut_run_dir = cut_dir
-    cut_rows = _rows_of_every_file(cut_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    cut_rows = _rows_of_every_file(cut_dir)
     assert lost_piece.is_dir()
     assert reissued_status.st_mtime_ns == kept_status.st_mtime_ns
     assert cut_rows == whole_rows
@@ -668,10 +650,8 @@ def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
     written = out_dir / "pieces" / point_dir.name / piece_path.parent.name
-    whole_run_dir = whole_dir
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    out_run_dir = out_dir
-    out_rows = _rows_of_every_file(out_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    out_rows = _rows_of_every_file(out_dir)
     assert (written / "piece.json").exists()
     assert out_rows == whole_rows
 
@@ -739,17 +719,15 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
     whole_dir = tmp_path / "whole"
     target_dir = tmp_path / "target"
     command.main(["run", str(whole_path), "--out", str(whole_dir)])
-    whole_run_dir = whole_dir
-    whole_shots_path = whole_run_dir / "shots.csv"
+    whole_shots_path = whole_dir / "shots.csv"
     expected_shots = _shots_to_the_target(whole_shots_path, 3)
 
     command.main(["run", str(target_path), "--out", str(target_dir)])
 
-    target_run_dir = target_dir
     target_pieces = target_dir.glob("pieces/*/*")
     assert expected_shots < 30
     assert len(list(target_pieces)) == expected_shots
-    assert _shot_count_of(target_run_dir) == expected_shots
+    assert _shot_count_of(target_dir) == expected_shots
 
 
 # a shot of NOISY_AXES runs 15 rounds, so a piece holds two shots
@@ -860,8 +838,7 @@ def test_a_target_stop_reports_its_exact_limits_and_unbiased_estimate(
 
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    run_dir = out_dir
-    row = _sweep_row_of(run_dir)
+    row = _sweep_row_of(out_dir)
     shots = row["prefix_scored_shots"]
     low_second_shape = shots - 2
     high_second_shape = shots - 3
@@ -901,10 +878,8 @@ def test_pieces_past_the_stop_leave_the_estimate_as_the_serial_run_has_it(
 
     command.main([*pooled, "--processes", "8"])
 
-    serial_run_dir = serial_dir
-    pooled_run_dir = pooled_dir
-    serial = _sweep_row_of(serial_run_dir)
-    pooled_row = _sweep_row_of(pooled_run_dir)
+    serial = _sweep_row_of(serial_dir)
+    pooled_row = _sweep_row_of(pooled_dir)
     assert pooled_row["shots"] > serial["shots"]
     assert pooled_row["prefix_shots"] == serial["prefix_shots"]
     assert pooled_row["state"] == serial["state"]
@@ -1128,12 +1103,10 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
 
     command.main(["run", str(cut_config), "--out", str(cut_dir)])
 
-    whole_run_dir = whole_dir
-    cut_run_dir = cut_dir
-    whole_decisions = _shot_decisions(whole_run_dir)
-    cut_decisions = _shot_decisions(cut_run_dir)
-    whole_trajectory = _online_trajectory_rows(whole_run_dir)
-    cut_trajectory = _online_trajectory_rows(cut_run_dir)
+    whole_decisions = _shot_decisions(whole_dir)
+    cut_decisions = _shot_decisions(cut_dir)
+    whole_trajectory = _online_trajectory_rows(whole_dir)
+    cut_trajectory = _online_trajectory_rows(cut_dir)
     assert _piece_names(cut_dir) == ["0-0", "1-1", "2-2", "3-3"]
     assert cut_decisions == whole_decisions
     assert whole_trajectory[-1]["window_count"] == "20"
@@ -1270,10 +1243,9 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
 
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    run_dir = out_dir
-    sweep_path = run_dir / "sweep.csv"
-    shots_path = run_dir / "shots.csv"
-    links_path = run_dir / "shot_links.csv"
+    sweep_path = out_dir / "sweep.csv"
+    shots_path = out_dir / "shots.csv"
+    links_path = out_dir / "shot_links.csv"
     sweep_header = fold.header_of(sweep_path)
     shots_header = fold.header_of(shots_path)
     links_header = fold.header_of(links_path)
@@ -1799,10 +1771,8 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
             "4",
         ]
     )
-    serial_run_dir = serial_dir
-    serial_rows = _rows_of_every_file(serial_run_dir)
-    pooled_run_dir = pooled_dir
-    pooled_rows = _rows_of_every_file(pooled_run_dir)
+    serial_rows = _rows_of_every_file(serial_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
     assert pooled_rows == serial_rows
 
 
@@ -1827,18 +1797,16 @@ def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_point(tmp_path):
 
     whole_pieces = whole_dir.glob("pieces/*/*")
     cut_pieces = cut_dir.glob("pieces/*/*")
-    whole_run_dir = whole_dir
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    cut_run_dir = cut_dir
-    cut_rows = _rows_of_every_file(cut_run_dir)
-    pooled_run_dir = pooled_dir
-    pooled_rows = _rows_of_every_file(pooled_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    cut_rows = _rows_of_every_file(cut_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
     assert len(list(whole_pieces)) == 4
     assert len(list(cut_pieces)) == 8
     assert cut_rows == whole_rows
     assert pooled_rows == whole_rows
 
 
+@requires_git
 def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     tmp_path, monkeypatch
 ):
@@ -1847,18 +1815,22 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     A cluster task starts in the folder its job was submitted from and
     may import a checkout pinned somewhere else, so the manifest reads
     the tree decsim came from. Here the run is made from a directory
-    that is no checkout at all, and the commit is still the one this
-    test's own tree is at.
+    that is no checkout at all, with git silenced as in the container,
+    which reads the tree's git files instead; the commit is still the
+    one git itself reads for this test's own tree.
     """
+    rev_parse = ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"]
+    head = subprocess.run(rev_parse, check=True, capture_output=True, text=True)
+    commit_of_this_tree = head.stdout.strip()
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     out_dir = tmp_path / "run"
     monkeypatch.chdir(tmp_path)
     command.main(["run", str(config_path), "--out", str(out_dir)])
-    run_dir = out_dir
-    manifest = _manifest_of(run_dir)
+    manifest = _manifest_of(out_dir)
     recorded = manifest["git"]
 
-    assert recorded["commit"] == _commit_of_this_tree()
+    assert recorded["commit"] == commit_of_this_tree
     assert "dirty" in recorded
 
 
@@ -1886,10 +1858,8 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     run_folder._tree_reading.cache_clear()
     command.main(["run", str(config_path), "--out", str(clean_dir)])
 
-    dirty_run_dir = dirty_dir
-    clean_run_dir = clean_dir
-    dirty_manifest = _manifest_of(dirty_run_dir)
-    clean_manifest = _manifest_of(clean_run_dir)
+    dirty_manifest = _manifest_of(dirty_dir)
+    clean_manifest = _manifest_of(clean_dir)
     dirty = dirty_manifest["git"]
     clean = clean_manifest["git"]
     assert dirty["dirty"] is True
@@ -2051,9 +2021,14 @@ def test_array_tasks_then_the_fold_write_the_local_runs_rows(tmp_path):
     job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
 
-    for index in ("3", "1", "0", "2"):
-        task = _task_arguments(split_dir, index)
-        command.main(task)
+    task_3 = _task_arguments(split_dir, "3")
+    command.main(task_3)
+    task_1 = _task_arguments(split_dir, "1")
+    command.main(task_1)
+    task_0 = _task_arguments(split_dir, "0")
+    command.main(task_0)
+    task_2 = _task_arguments(split_dir, "2")
+    command.main(task_2)
     command.main(["run", "--fold", "--out", str(split_dir)])
 
     assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)
@@ -2230,43 +2205,30 @@ def test_a_refused_fold_leaves_the_last_run_folder_as_it_was(tmp_path):
 
 
 def test_a_fold_that_fails_part_way_leaves_the_last_run_folder_as_it_was(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
     """A fold that raises after writing some files publishes none of them.
 
-    Every piece is made to name a latency point this tree does not
-    measure, as a tree that called service something else would write
-    it, so the fold's sort of the window samples raises after sweep.csv
-    and shots.csv are written. Those went into the staging folder, so
-    every file of the run folder is what the first fold wrote.
+    The second fold writes shots.csv whole, then the disk fills partway
+    through sweep.csv. Both went into the staging folder, so every file
+    of the run folder is what the first fold wrote.
     """
     config_path = _capped_noisy_config(tmp_path, 2, 15)
     out_dir = tmp_path / "out"
     command.main(["run", str(config_path), "--out", str(out_dir)])
     before = _run_folder_bytes(out_dir)
-    for piece_folder in out_dir.glob("pieces/*/*"):
-        _with_a_renamed_point(piece_folder, "service", "park")
+    monkeypatch.setattr(report, "write_csv", _write_part_then_fill_the_disk)
 
-    with pytest.raises(ValueError, match="x not in tuple"):
+    with pytest.raises(OSError, match="No space left on device"):
         command.main(["run", "--fold", "--out", str(out_dir)])
 
     assert _run_folder_bytes(out_dir) == before
 
 
-def _with_a_renamed_point(piece_folder, name: str, renamed: str) -> None:
-    """The piece as a tree that called that latency point renamed writes it."""
-    shots_path = piece_folder / "shots.csv"
-    shot_rows = _csv_rows(shots_path)
-    for row in shot_rows:
-        row[f"{renamed}_mean_us"] = row.pop(f"{name}_mean_us")
-        row[f"{renamed}_max_us"] = row.pop(f"{name}_max_us")
-    _write_csv_rows(shots_path, shot_rows)
-    samples_path = piece_folder / "window_samples.csv"
-    samples = _csv_rows(samples_path)
-    for row in samples:
-        if row["name"] == name:
-            row["name"] = renamed
-    _write_csv_rows(samples_path, samples)
+def _write_part_then_fill_the_disk(_rows, path, _swept=None) -> None:
+    """write_csv on a disk that fills after the header's first column."""
+    path.write_text("point_id,")
+    raise OSError(errno.ENOSPC, "No space left on device", str(path))
 
 
 def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:

@@ -1774,11 +1774,11 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
             named.append(line)
     # the weak tier of this card is the default pool's one unit
     assert "on unit default#0" in named[0]
-    later_by = []
     paired = zip(decodes.finished, longer_decodes.finished, strict=True)
-    for finished, longer in paired:
-        lag_ticks = longer.finish_ticks - finished.finish_ticks
-        later_by.append(lag_ticks)
+    later_by = [
+        longer.finish_ticks - finished.finish_ticks
+        for finished, longer in paired
+    ]
     last_walk = window_count + 1
     walks_before_and_own = range(1, last_walk)
     assert later_by == [
@@ -2628,9 +2628,9 @@ def link_totals(machine, path):
 
 # a base's shot at d = 3: thirty rounds of eight checks, and the nine
 # data qubits read out at its end
-BASE_ROUNDS = 30
-CHECKS_PER_ROUND = 8
-DATA_QUBITS = 9
+BASE_ROUND_COUNT = 30
+CHECK_COUNT = 8
+DATA_QUBIT_COUNT = 9
 
 
 def base_run(base):
@@ -2659,10 +2659,10 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    events = BASE_ROUNDS * CHECKS_PER_ROUND
-    outcomes = events + DATA_QUBITS
-    assert link_totals(machine, store_hop) == (BASE_ROUNDS, events)
-    assert link_totals(machine, readout_hop) == (BASE_ROUNDS, outcomes)
+    events = BASE_ROUND_COUNT * CHECK_COUNT
+    outcomes = events + DATA_QUBIT_COUNT
+    assert link_totals(machine, store_hop) == (BASE_ROUND_COUNT, events)
+    assert link_totals(machine, readout_hop) == (BASE_ROUND_COUNT, outcomes)
     assert link_totals(machine, room_hop) == (0, 0)
 
 
@@ -2680,10 +2680,10 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    events = BASE_ROUNDS * CHECKS_PER_ROUND
-    outcomes = events + DATA_QUBITS
-    assert link_totals(machine, room_hop) == (BASE_ROUNDS, events)
-    assert link_totals(machine, readout_hop) == (BASE_ROUNDS, outcomes)
+    events = BASE_ROUND_COUNT * CHECK_COUNT
+    outcomes = events + DATA_QUBIT_COUNT
+    assert link_totals(machine, room_hop) == (BASE_ROUND_COUNT, events)
+    assert link_totals(machine, readout_hop) == (BASE_ROUND_COUNT, outcomes)
     assert link_totals(machine, store_hop) == (0, 0)
 
 

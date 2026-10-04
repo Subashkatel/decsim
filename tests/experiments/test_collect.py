@@ -368,16 +368,11 @@ def test_two_records_with_the_same_fields_are_two_tasks():
     class NoRound:
         pass
 
-    tasks = []
-    for rounds_policy in (EveryRound(), NoRound()):
-        workload = workload_settings.WorkloadSettings(
-            rounds_policy=rounds_policy
-        )
-        settings = machine_settings.MachineSettings(workload=workload)
-        task = collect.Task(settings, {"point": 1})
-        tasks.append(task)
+    every_round = EveryRound()
+    no_round = NoRound()
+    every_round_task = _rounds_task(every_round)
+    no_round_task = _rounds_task(no_round)
 
-    every_round_task, no_round_task = tasks
     assert every_round_task.strong_id() != no_round_task.strong_id()
 
 
@@ -618,11 +613,7 @@ def _stable_columns(row: dict) -> dict:
 
 
 def _link_means(shot_link_rows: list) -> list:
-    """Each link's counters averaged over one point's shots, as text.
-
-    A mean is statistics.fmean, and bits_per_transfer is the mean
-    payload over the mean transfers, zero on a link that sent nothing.
-    """
+    """Each link's counters averaged over one point's shots, as text."""
     rows_by_link = {}
     for row in shot_link_rows:
         link_rows = rows_by_link.setdefault(row["link"], [])
@@ -630,19 +621,29 @@ def _link_means(shot_link_rows: list) -> list:
     mean_rows = []
     for link in sorted(rows_by_link):
         rows = rows_by_link[link]
-        means = {}
-        for counter in LINK_COUNTERS:
-            values = [float(row[counter]) for row in rows]
-            means[counter] = statistics.fmean(values)
-        bits_per_transfer = 0.0
-        if means["transfers"]:
-            bits_per_transfer = means["payload_bits"] / means["transfers"]
-        mean_row = {"algorithm": rows[0]["algorithm"], "link": link}
-        for counter in LINK_COUNTERS:
-            mean_row[f"{counter}_per_shot"] = str(means[counter])
-        mean_row["bits_per_transfer"] = str(bits_per_transfer)
+        mean_row = _means_of_one_link(link, rows)
         mean_rows.append(mean_row)
     return mean_rows
+
+
+def _means_of_one_link(link: str, rows: list) -> dict:
+    """One link's counters averaged over its shots' rows, as text.
+
+    A mean is statistics.fmean, and bits_per_transfer is the mean
+    payload over the mean transfers, zero on a link that sent nothing.
+    """
+    means = {}
+    for counter in LINK_COUNTERS:
+        values = [float(row[counter]) for row in rows]
+        means[counter] = statistics.fmean(values)
+    bits_per_transfer = 0.0
+    if means["transfers"]:
+        bits_per_transfer = means["payload_bits"] / means["transfers"]
+    mean_row = {"algorithm": rows[0]["algorithm"], "link": link}
+    for counter in LINK_COUNTERS:
+        mean_row[f"{counter}_per_shot"] = str(means[counter])
+    mean_row["bits_per_transfer"] = str(bits_per_transfer)
+    return mean_row
 
 
 def _without_point_id(rows: list) -> list:
@@ -738,6 +739,10 @@ class _SlottedRounds:
 
 def _slotted_rounds_task(round_count: int) -> collect.Task:
     rounds_policy = _SlottedRounds(round_count)
+    return _rounds_task(rounds_policy)
+
+
+def _rounds_task(rounds_policy) -> collect.Task:
     workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
     settings = machine_settings.MachineSettings(workload=workload)
     return collect.Task(settings, {"point": 1})

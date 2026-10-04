@@ -189,6 +189,9 @@ def test_replay_refuses_a_round_period_the_fragments_do_not_declare(
         command, check=False, capture_output=True, text=True
     )
     assert refused.returncode != 0
+    assert (
+        "physical circuit period differs from the QPU cadence" in refused.stderr
+    )
 
 
 def test_a_replay_refuses_a_flag_that_would_relabel_its_circuit(
@@ -211,6 +214,7 @@ def test_a_replay_refuses_a_flag_that_would_relabel_its_circuit(
         command, check=False, capture_output=True, text=True
     )
     assert refused.returncode != 0
+    assert "--basis cannot change the fragments --input loads" in refused.stderr
     assert not output.exists()
 
 

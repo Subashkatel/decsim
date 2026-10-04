@@ -180,7 +180,8 @@ A card is numbers, not a class: a `FabricSettings` record, one
   (`decsim/windows/settings.py`).
 - **Record:** `name`, `commit_rounds` and `buffer_rounds` (None is the
   code distance) and `build(terminal_policy)`. Check the sizes with
-  `window_data.check_window_sizes(self)` in `__post_init__`, and add
+  `window_data.check_window_sizes(self)`
+  (`decsim/windows/schemes/window_data.py`) in `__post_init__`, and add
   your row to `SCHEME_ROWS` in `tests/windows/test_settings.py`.
 - **Component:** fills `ports.WindowingScheme`. Set its three flags;
   the port's docstring says what each one means. `data_complete` says
@@ -197,13 +198,16 @@ A card is numbers, not a class: a `FabricSettings` record, one
   - `windowed` False decodes the operation as one batch, and
     `batch_preceding_idle_rounds` folds the idle rounds before it into
     that batch. Only `naive_online` sets them so.
-  - `protocol`: `WindowProtocol.GENERIC`. The other member is Tan's
-    sandwich alone: one-layer seams, graphlike decoders only.
+  - `protocol`: `WindowProtocol.GENERIC`. The other member only adds
+    build checks for Tan's sandwich (one-layer seams, graphlike
+    decoders only) and builds the same models, so a sandwich with
+    thicker seams uses `GENERIC`.
 - **Every plan must hold,** or the build refuses it:
   - the commit regions, in plan order, cover the rounds with no gap or
     overlap;
   - a window with `closed_temporal_boundaries` is the later end of a
-    dependency and cuts no fault.
+    dependency, and no fault in its model reaches a detector outside
+    it.
 - **Which window decodes a fault:** with dependencies, the shallowest
   window whose commit rounds the fault touches
   (`decsim/detector_error_model/window_ownership_dag.py`). So a seam

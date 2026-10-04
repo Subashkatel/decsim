@@ -549,9 +549,13 @@ class WindowRetention(Protocol):
         """The room-side payloads of a strong window, first round stamped."""
 
     def hold_strong_context(
-        self, key: tuple, strong_request_key, context_keys
+        self, key: tuple, strong_request_key, context_keys, restart_key
     ) -> None:
-        """The rounds kept in case the window escalates pass to its request."""
+        """The rounds kept in case the window escalates pass to its request.
+
+        restart_key is the window whose weak commit releases the
+        request, or None.
+        """
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
         """The rounds the strong syndrome buffer lacks that the weak one has."""

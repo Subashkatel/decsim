@@ -404,22 +404,20 @@ def test_interleaved_successors_waiting_for_room_stop_the_run():
         )
 
 
-def strong_store_of(monkeypatch, store_settings) -> None:
-    """Every declared run from here on sizes its strong store so."""
+def store_of(monkeypatch, field: str, store_settings) -> None:
+    """Every declared run from here on sizes that store so."""
     run_machine = declared_run.run_machine
 
-    def run_with_the_strong_store(settings, seed=0, probes=()):
-        sized = dataclasses.replace(
-            settings, strong_syndrome_buffer=store_settings
-        )
+    def run_with_the_store(settings, seed=0, probes=()):
+        sized = dataclasses.replace(settings, **{field: store_settings})
         return run_machine(sized, seed, probes)
 
-    monkeypatch.setattr(declared_run, "run_machine", run_with_the_strong_store)
+    monkeypatch.setattr(declared_run, "run_machine", run_with_the_store)
 
 
 def test_a_strong_store_narrower_than_a_round_stops_the_run(monkeypatch):
     """The strong-primary run writes every round into the strong store."""
-    strong_store_of(monkeypatch, NARROWER_THAN_A_ROUND)
+    store_of(monkeypatch, "strong_syndrome_buffer", NARROWER_THAN_A_ROUND)
     operations = blocked_successor()
 
     with pytest.raises(RuntimeError, match="no round leaving it makes room"):
@@ -432,11 +430,31 @@ def test_a_strong_store_too_small_for_a_region_stops_the_run(monkeypatch):
     Each 6-round region is 48 bits against a store of 8.
     """
     store_of_8_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=8)
-    strong_store_of(monkeypatch, store_of_8_bits)
+    store_of(monkeypatch, "strong_syndrome_buffer", store_of_8_bits)
     operations = blocked_successor()
 
     with pytest.raises(RuntimeError, match="strong_syndrome_buffer.bits"):
         declared_run.switching_run(escalates=True, operations=operations)
+
+
+def test_a_region_held_for_its_restart_window_stops_the_run(monkeypatch):
+    """The double window keeps mem1's region until its restart commits.
+
+    Every window escalates. The region, rounds 1 to 9, waits for the
+    restart window, which reads rounds 7 to 12, so round 12's 12 bits
+    must sit beside the 84 of rounds 1 to 11, past an 88-bit store.
+    """
+    store_of_88_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=88)
+    store_of(monkeypatch, "weak_syndrome_buffer", store_of_88_bits)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match=r"round \(1, 12\) needs 96 bits"):
+        declared_run.switching_run(
+            rounds=12,
+            escalates=True,
+            operations=operations,
+            strong_window=declared_run.DOUBLE_WINDOW,
+        )
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():

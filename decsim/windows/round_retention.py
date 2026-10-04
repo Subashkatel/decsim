@@ -370,10 +370,13 @@ class RoundRetention:
         key: tuple,
         strong_request_key: window_records.DecoderRequestKey,
         context_keys: tuple,
+        restart_key: Optional[tuple],
     ) -> None:
         """The window's potential strong read becomes the request's hold."""
         potential_hold = decoding_records.PotentialStrong(key)
-        pending_hold = decoding_records.PendingStrong(strong_request_key)
+        pending_hold = decoding_records.PendingStrong(
+            strong_request_key, restart_key
+        )
         stores = self._strong_context_stores()
         for store in stores:
             store.transfer_hold(potential_hold, pending_hold)

@@ -173,21 +173,29 @@ class LaterStreamReads:
 
 @dataclass(frozen=True)
 class PendingStrong:
-    """A hold: rounds for an admitted, not yet served strong request."""
+    """A hold: rounds for an admitted, not yet served strong request.
+
+    restart_key is the window whose weak commit releases the request, or
+    None at the operation's end (escalation/strong_window_shapes.py,
+    _far_face_conditions); the request key alone names the hold.
+    """
 
     request_key: window_records.DecoderRequestKey
+    restart_key: Optional[tuple] = field(default=None, compare=False)
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the requested window's own."""
         return ()
 
     def operation_ids_read_at_once(self) -> tuple:
-        """None: the escalation, not the window side, starts its decode."""
-        return ()
+        """The request's operation: its job waits for every round stored."""
+        return (self.request_key.operation_id,)
 
     def holders_waited_for(self) -> tuple:
-        """None: the escalation, not the window side, releases it."""
-        return ()
+        """The restart window's read, which ends before its weak commit."""
+        if self.restart_key is None:
+            return ()
+        return (WindowReads(self.restart_key),)
 
 
 @dataclass(frozen=True)

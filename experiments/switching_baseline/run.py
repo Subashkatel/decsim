@@ -295,7 +295,9 @@ def experiment_one_links() -> link_settings.FabricSettings:
     Every other hop keeps the reference card.
     """
     links = link_profiles.logical_reference_profile()
-    leg_microseconds = 2.305 / 2 - 128 / 100_000
+    half_echo_microseconds = 2.305 / 2
+    echo_on_cable_microseconds = 128 / 100_000
+    leg_microseconds = half_echo_microseconds - echo_on_cable_microseconds
     for path_name in STRONG_CABLE_LEGS:
         links = link_profiles.with_path_latency(
             links, path_name, leg_microseconds

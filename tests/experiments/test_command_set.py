@@ -622,10 +622,8 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     command.main(["run", str(cut_path), "--out", str(cut_dir)])
 
     reissued_status = (kept_piece / "piece.json").stat()
-    whole_run_dir = whole_dir
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    cut_run_dir = cut_dir
-    cut_rows = _rows_of_every_file(cut_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    cut_rows = _rows_of_every_file(cut_dir)
     assert lost_piece.is_dir()
     assert reissued_status.st_mtime_ns == kept_status.st_mtime_ns
     assert cut_rows == whole_rows
@@ -652,10 +650,8 @@ def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
     written = out_dir / "pieces" / point_dir.name / piece_path.parent.name
-    whole_run_dir = whole_dir
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    out_run_dir = out_dir
-    out_rows = _rows_of_every_file(out_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    out_rows = _rows_of_every_file(out_dir)
     assert (written / "piece.json").exists()
     assert out_rows == whole_rows
 
@@ -723,17 +719,15 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
     whole_dir = tmp_path / "whole"
     target_dir = tmp_path / "target"
     command.main(["run", str(whole_path), "--out", str(whole_dir)])
-    whole_run_dir = whole_dir
-    whole_shots_path = whole_run_dir / "shots.csv"
+    whole_shots_path = whole_dir / "shots.csv"
     expected_shots = _shots_to_the_target(whole_shots_path, 3)
 
     command.main(["run", str(target_path), "--out", str(target_dir)])
 
-    target_run_dir = target_dir
     target_pieces = target_dir.glob("pieces/*/*")
     assert expected_shots < 30
     assert len(list(target_pieces)) == expected_shots
-    assert _shot_count_of(target_run_dir) == expected_shots
+    assert _shot_count_of(target_dir) == expected_shots
 
 
 # a shot of NOISY_AXES runs 15 rounds, so a piece holds two shots
@@ -844,8 +838,7 @@ def test_a_target_stop_reports_its_exact_limits_and_unbiased_estimate(
 
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    run_dir = out_dir
-    row = _sweep_row_of(run_dir)
+    row = _sweep_row_of(out_dir)
     shots = row["prefix_scored_shots"]
     low_second_shape = shots - 2
     high_second_shape = shots - 3
@@ -885,10 +878,8 @@ def test_pieces_past_the_stop_leave_the_estimate_as_the_serial_run_has_it(
 
     command.main([*pooled, "--processes", "8"])
 
-    serial_run_dir = serial_dir
-    pooled_run_dir = pooled_dir
-    serial = _sweep_row_of(serial_run_dir)
-    pooled_row = _sweep_row_of(pooled_run_dir)
+    serial = _sweep_row_of(serial_dir)
+    pooled_row = _sweep_row_of(pooled_dir)
     assert pooled_row["shots"] > serial["shots"]
     assert pooled_row["prefix_shots"] == serial["prefix_shots"]
     assert pooled_row["state"] == serial["state"]
@@ -1112,12 +1103,10 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
 
     command.main(["run", str(cut_config), "--out", str(cut_dir)])
 
-    whole_run_dir = whole_dir
-    cut_run_dir = cut_dir
-    whole_decisions = _shot_decisions(whole_run_dir)
-    cut_decisions = _shot_decisions(cut_run_dir)
-    whole_trajectory = _online_trajectory_rows(whole_run_dir)
-    cut_trajectory = _online_trajectory_rows(cut_run_dir)
+    whole_decisions = _shot_decisions(whole_dir)
+    cut_decisions = _shot_decisions(cut_dir)
+    whole_trajectory = _online_trajectory_rows(whole_dir)
+    cut_trajectory = _online_trajectory_rows(cut_dir)
     assert _piece_names(cut_dir) == ["0-0", "1-1", "2-2", "3-3"]
     assert cut_decisions == whole_decisions
     assert whole_trajectory[-1]["window_count"] == "20"
@@ -1254,10 +1243,9 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
 
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    run_dir = out_dir
-    sweep_path = run_dir / "sweep.csv"
-    shots_path = run_dir / "shots.csv"
-    links_path = run_dir / "shot_links.csv"
+    sweep_path = out_dir / "sweep.csv"
+    shots_path = out_dir / "shots.csv"
+    links_path = out_dir / "shot_links.csv"
     sweep_header = fold.header_of(sweep_path)
     shots_header = fold.header_of(shots_path)
     links_header = fold.header_of(links_path)
@@ -1783,10 +1771,8 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
             "4",
         ]
     )
-    serial_run_dir = serial_dir
-    serial_rows = _rows_of_every_file(serial_run_dir)
-    pooled_run_dir = pooled_dir
-    pooled_rows = _rows_of_every_file(pooled_run_dir)
+    serial_rows = _rows_of_every_file(serial_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
     assert pooled_rows == serial_rows
 
 
@@ -1811,12 +1797,9 @@ def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_point(tmp_path):
 
     whole_pieces = whole_dir.glob("pieces/*/*")
     cut_pieces = cut_dir.glob("pieces/*/*")
-    whole_run_dir = whole_dir
-    whole_rows = _rows_of_every_file(whole_run_dir)
-    cut_run_dir = cut_dir
-    cut_rows = _rows_of_every_file(cut_run_dir)
-    pooled_run_dir = pooled_dir
-    pooled_rows = _rows_of_every_file(pooled_run_dir)
+    whole_rows = _rows_of_every_file(whole_dir)
+    cut_rows = _rows_of_every_file(cut_dir)
+    pooled_rows = _rows_of_every_file(pooled_dir)
     assert len(list(whole_pieces)) == 4
     assert len(list(cut_pieces)) == 8
     assert cut_rows == whole_rows
@@ -1844,8 +1827,7 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     out_dir = tmp_path / "run"
     monkeypatch.chdir(tmp_path)
     command.main(["run", str(config_path), "--out", str(out_dir)])
-    run_dir = out_dir
-    manifest = _manifest_of(run_dir)
+    manifest = _manifest_of(out_dir)
     recorded = manifest["git"]
 
     assert recorded["commit"] == commit_of_this_tree
@@ -1876,10 +1858,8 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     run_folder._tree_reading.cache_clear()
     command.main(["run", str(config_path), "--out", str(clean_dir)])
 
-    dirty_run_dir = dirty_dir
-    clean_run_dir = clean_dir
-    dirty_manifest = _manifest_of(dirty_run_dir)
-    clean_manifest = _manifest_of(clean_run_dir)
+    dirty_manifest = _manifest_of(dirty_dir)
+    clean_manifest = _manifest_of(clean_dir)
     dirty = dirty_manifest["git"]
     clean = clean_manifest["git"]
     assert dirty["dirty"] is True

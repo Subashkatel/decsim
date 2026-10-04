@@ -667,15 +667,14 @@ def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
     config_path = _one_point_config(tmp_path, 2, 1)
     experiment_dir = tmp_path / "experiment"
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
-    run_dir = experiment_dir
-    first_seeds = _seeds_of_the_one_point(run_dir)
+    first_seeds = _seeds_of_the_one_point(experiment_dir)
     _one_point_config(tmp_path, 4, 1)
 
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
 
     assert first_seeds == [[0, 2]]
-    assert _seeds_of_the_one_point(run_dir) == [[0, 4]]
-    assert _seeds_of_every_shot(run_dir) == ["0", "1", "2", "3"]
+    assert _seeds_of_the_one_point(experiment_dir) == [[0, 4]]
+    assert _seeds_of_every_shot(experiment_dir) == ["0", "1", "2", "3"]
 
 
 # every file a fold writes from the pieces' rows

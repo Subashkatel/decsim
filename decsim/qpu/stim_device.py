@@ -560,25 +560,6 @@ class RecordedStimDevice(StimDevice):
         self.measurements = measurements
         self.shot = shot
 
-    @staticmethod
-    def detector_rounds_from_coordinates(
-        circuit: stim.Circuit, round_count: int
-    ) -> dict[int, int]:
-        """The one-based emitted round of every detector of a hardware circuit.
-
-        Google's released memory experiments write detector coordinates as
-        concatenated (x, y, t) triples; a detector belongs to its latest t.
-        """
-        rounds = {}
-        coordinates_by_detector = circuit.get_detector_coordinates()
-        for detector_id, coordinates in coordinates_by_detector.items():
-            layer = int(max(coordinates[2::3]))
-            if layer >= round_count:
-                rounds[detector_id] = round_count
-            else:
-                rounds[detector_id] = layer + 1
-        return rounds
-
     def _measurement_row(
         self, sampler: stim.CompiledMeasurementSampler
     ) -> tuple[int, ...]:

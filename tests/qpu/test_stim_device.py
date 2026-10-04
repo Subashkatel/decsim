@@ -489,21 +489,6 @@ def test_a_window_declared_past_the_source_reads_to_its_last_round():
     assert model.detector_ids == tuple(range(12, 32))
 
 
-def test_a_hardware_detector_belongs_to_its_latest_layer_up_to_the_end():
-    circuit = stim.Circuit(
-        """
-        DETECTOR(1, 1, 0) rec[-1]
-        DETECTOR(1, 1, 1, 1, 1, 0) rec[-1]
-        DETECTOR(2, 2, 3, 2, 2, 2) rec[-1]
-        DETECTOR(2, 2, 3, 3, 3, 3, 4, 4, 2) rec[-1]
-        """
-    )
-    rounds = stim_device.RecordedStimDevice.detector_rounds_from_coordinates(
-        circuit, 3
-    )
-    assert rounds == {0: 1, 1: 2, 2: 3, 3: 3}
-
-
 def qec_burst_scaling_circuit(circuit, qubits, start_round, probabilities):
     """qecburst/circuit.py inject_burst_profile, written out.
 

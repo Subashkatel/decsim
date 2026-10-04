@@ -62,7 +62,6 @@ NON_COLUMN_FIELDS = (
     "maxes",
     "link_totals",
     "data_movement",
-    "trace_path",
     "window_statuses",
     "confidence",
 )
@@ -572,7 +571,6 @@ def _refused_or_ordered(folders: list, point_ids: list):
     order = functools.partial(_row_task_and_seed, positions)
     _refuse_folders_of_different_columns(folders)
     _refuse_pieces_that_recorded_confidence_apart(folders)
-    _refuse_pieces_that_ran_different_code(folders)
     _refuse_a_repeated_shot(folders, order)
     return order
 
@@ -1228,25 +1226,6 @@ def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
             _refuse_the_confidence_coverage(point_id, by_coverage)
 
 
-def _refuse_pieces_that_ran_different_code(run_dirs: list) -> None:
-    """A point's pieces must have run one tree: one commit, one patch.
-
-    A point's estimate pools its pieces' shots, and the results folder's
-    run.json names one tree, so pieces of two trees would pool two
-    simulators under one name. Each piece records its commit, whether
-    the tree was dirty, and the sha256 of the tree's code state patch,
-    so two dirty trees of one commit are two trees too.
-    """
-    code_by_point = _pieces_by_point_and_value(run_dirs, _code_of)
-    _refuse_a_point_of_two_trees(code_by_point)
-
-
-def _refuse_a_point_of_two_trees(code_by_point: dict) -> None:
-    for point_id, by_code in code_by_point.items():
-        if len(by_code) > 1:
-            _refuse_the_code(point_id, by_code)
-
-
 def _pieces_by_point_and_value(run_dirs: list, value_of) -> dict:
     """Each point's first piece folder for every value value_of reads."""
     folders_by_point = {}
@@ -1261,28 +1240,6 @@ def _pieces_by_point_and_value(run_dirs: list, value_of) -> dict:
 def _confidence_coverage_of(piece: dict):
     """The shots a piece recorded confidence for; None for an older piece."""
     return piece.get("confidence_shot_count")
-
-
-def _code_of(piece: dict) -> tuple:
-    """A piece's tree; a piece written before the patch hash has None."""
-    return (piece["commit"], piece["dirty"], piece.get("patch_sha256"))
-
-
-def _refuse_the_code(point_id: str, by_code: dict):
-    """Say which pieces of the point ran which tree."""
-    pieces_named = []
-    for (commit, is_dirty, patch_sha256), run_dir in by_code.items():
-        pieces_named.append(
-            f"{run_dir} (commit {commit}, dirty {is_dirty}, "
-            f"patch {patch_sha256})"
-        )
-    listed = ", ".join(pieces_named)
-    raise refusal.RefusalError(
-        f"the pieces of point {point_id} ran different code: {listed}; "
-        "one estimate would pool two simulators under one run.json, so "
-        "collect the point into a new results folder, or move one "
-        "tree's pieces out of this one"
-    )
 
 
 def _piece_of(run_dir) -> dict:

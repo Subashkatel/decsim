@@ -18,6 +18,7 @@ submitting environment and folder.
 import dataclasses
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 from typing import Optional, Union
@@ -148,18 +149,26 @@ def _dirty_text(is_dirty: Optional[bool]) -> str:
 def _run_lines(
     copied: pathlib.Path, run_dir: pathlib.Path, point_count: int, job: JobShape
 ) -> str:
-    """run.sbatch: the array, task i running point i into the folder."""
+    """run.sbatch: the array, task i running point i into the folder.
+
+    Every path is quoted, which bash and sbatch's own reading of an
+    #SBATCH line both undo, and the task index is left for bash to
+    expand.
+    """
     last_task = point_count - 1
     shape = (
         f"--array=0-{last_task} --cpus-per-task={job.cores} "
         f"--mem={job.memory_mb}M --time={job.hours}:00:00"
     )
     log = run_dir / LOGS_FOLDER / "%a.log"
+    literal = [sys.executable, "-m", "decsim", "run", str(copied)]
+    literal += ["--out", str(run_dir)]
     command = (
-        f"{sys.executable} -m decsim run {copied} --out {run_dir} "
+        f"{shlex.join(literal)} "
         f"--task $SLURM_ARRAY_TASK_ID --processes {job.cores}"
     )
-    lines = ["#!/bin/bash", f"#SBATCH {shape}", f"#SBATCH --output={log}"]
+    output = shlex.quote(f"--output={log}")
+    lines = ["#!/bin/bash", f"#SBATCH {shape}", f"#SBATCH {output}"]
     lines.append(command)
     return "\n".join(lines) + "\n"
 
@@ -167,8 +176,11 @@ def _run_lines(
 def _fold_lines(run_dir: pathlib.Path) -> str:
     """fold.sbatch: every saved piece folded into the folder's csv files."""
     log = run_dir / LOGS_FOLDER / "fold.log"
-    command = f"{sys.executable} -m decsim run --fold --out {run_dir}"
-    lines = ["#!/bin/bash", f"#SBATCH {FOLD_SHAPE}", f"#SBATCH --output={log}"]
+    literal = [sys.executable, "-m", "decsim", "run", "--fold"]
+    literal += ["--out", str(run_dir)]
+    command = shlex.join(literal)
+    output = shlex.quote(f"--output={log}")
+    lines = ["#!/bin/bash", f"#SBATCH {FOLD_SHAPE}", f"#SBATCH {output}"]
     lines.append(command)
     return "\n".join(lines) + "\n"
 

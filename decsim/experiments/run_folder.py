@@ -171,34 +171,34 @@ def refuse_another_tree(run_dir: pathlib.Path) -> None:
     recorded = read_json(run_path)
     recorded_git = recorded["git"]
     this_git = _git_state()
-    if _is_one_tree(recorded_git, this_git):
+    if is_one_tree(recorded_git, this_git):
         return
     raise refusal.RefusalError(
-        f"{run_dir} holds a run of commit {recorded_git['commit']} dirty "
-        f"{recorded_git['dirty']} patch {recorded_git.get('patch_sha256')}, "
-        f"and this is commit {this_git['commit']} dirty {this_git['dirty']} "
-        f"patch {this_git['patch_sha256']}; a folder holds one tree's "
-        "results, so give --out a new folder"
+        f"{run_dir} holds a run of {tree_text(recorded_git)}, and this is "
+        f"{tree_text(this_git)}; a folder holds one tree's results, so "
+        "give --out a new folder"
     )
 
 
-def _is_one_tree(recorded_git: dict, this_git: dict) -> bool:
-    """One commit, and no dirty flag or patch hash read apart.
+def is_one_tree(one: dict, other: dict) -> bool:
+    """One commit, one dirty flag and one patch hash, each read as is.
 
-    A flag or hash nobody could read (None) says nothing either way, so
-    only two read values that differ are refused. A run.json written
-    before the patch hash was recorded has none, which reads as None.
+    Each is a run.json git block or a piece.json. A value nobody could
+    read is None and matches only None, and a record written before the
+    patch hash was recorded has no key, so reading it raises KeyError
+    before any shot runs.
     """
-    if recorded_git["commit"] != this_git["commit"]:
-        return False
-    for key in ("dirty", "patch_sha256"):
-        recorded_value = recorded_git.get(key)
-        this_value = this_git[key]
-        if None in (recorded_value, this_value):
-            continue
-        if recorded_value != this_value:
-            return False
-    return True
+    return _tree_of(one) == _tree_of(other)
+
+
+def _tree_of(record: dict) -> tuple:
+    return (record["commit"], record["dirty"], record["patch_sha256"])
+
+
+def tree_text(record: dict) -> str:
+    """A run.json git block's or a piece.json's tree, for a refusal."""
+    commit, is_dirty, patch_sha256 = _tree_of(record)
+    return f"commit {commit} dirty {is_dirty} patch {patch_sha256}"
 
 
 def _refuse_an_unread_commit() -> None:
@@ -700,12 +700,6 @@ def _how_it_ran() -> dict:
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "argv": sys.argv,
     }
-
-
-def rounds_per_shot(task: collect.Task) -> int:
-    """A shot's QEC rounds as the point's plan gives them (_rounds_per_shot)."""
-    plan = _plan(task)
-    return _rounds_per_shot(plan)
 
 
 def _plan(task: collect.Task) -> plan_build.Plan:

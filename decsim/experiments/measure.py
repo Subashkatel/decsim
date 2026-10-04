@@ -266,9 +266,6 @@ class ShotMeasurement:
     # them, None when observation.data_movement is off, so a run that
     # counted none writes no data-movement row rather than a row of zeros
     data_movement: Optional[dict]
-    # where this shot's Chrome trace was written, None when the shot was
-    # not one of observation.trace_shots; the residence table reads it
-    trace_path: Optional[str]
     # WINDOW_STATUS_COLUMNS -> the committed windows whose decode carried
     # that status; shots.csv holds one column per entry
     window_statuses: dict
@@ -311,9 +308,8 @@ def measure_shot(
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
         run_folder.write_log(observation, run_dir, label)
-    trace_path = None
     if run_dir is not None:
-        trace_path = _write_trace(shot, run_dir, label, only_traced_shot)
+        _write_trace(shot, run_dir, label, only_traced_shot)
     device = shot.machine.qpu.device
     round_period_microseconds = config_module.ticks_to_microseconds(
         device.clock.period_ticks
@@ -328,7 +324,6 @@ def measure_shot(
         point_id=point_id,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
-        trace_path=trace_path,
     )
 
 
@@ -808,7 +803,6 @@ def _measurement(
     point_id: str,
     seed: int,
     wall_seconds: float,
-    trace_path: Optional[str],
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records.
 
@@ -892,7 +886,6 @@ def _measurement(
         link_totals=totals,
         sim_wall_seconds=wall_seconds,
         data_movement=result.data_movement,
-        trace_path=trace_path,
         window_statuses=window_statuses,
         is_scored=is_scored,
         unscored_reason=unscored_reason,
@@ -1760,9 +1753,7 @@ def _maxes(samples: dict) -> dict:
     return maxes
 
 
-def _write_trace(
-    shot, run_dir, label: str, only_traced_shot: bool
-) -> Optional[str]:
+def _write_trace(shot, run_dir, label: str, only_traced_shot: bool) -> None:
     """The shot's Chrome trace, when the section asked and named it.
 
     trace: chrome names the file by the shot's label, its point id and
@@ -1770,19 +1761,15 @@ def _write_trace(
     that label in the name, so no shot overwrites another's file, unless
     the run traces this shot alone and no other can take the path. Only
     the shots trace_shots names are written, so a sweep point of two
-    thousand shots writes one file. The file it wrote
-    comes back, so the shot's measurement can say where its trace is; a
-    shot that was not traced returns None.
+    thousand shots writes one file.
     """
     observation = shot.task.settings.observation
     if not observation.writes_trace:
-        return None
+        return
     if shot.seed not in observation.trace_shots:
-        return None
+        return
     writer = shot.machine.observation.trace_writer
     path = run_folder.trace_path_of(observation, run_dir, label)
     if observation.trace_path is not None and not only_traced_shot:
         path = trace_path_for_shot(path, label)
-    written = str(path)
-    writer.write(written)
-    return written
+    writer.write(str(path))

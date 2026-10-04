@@ -27,6 +27,7 @@ import types
 
 import pytest
 
+import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
@@ -402,6 +403,17 @@ def test_a_file_with_no_rows_of_this_kind_is_skipped(tmp_path):
     streamed = fold.merged_rows(paths, _place_of)
     merged = list(streamed)
     assert merged == [only_row]
+
+
+def test_a_file_whose_rows_go_backwards_is_refused(tmp_path):
+    """A merge assumes sorted inputs, so an unsorted file is not folded."""
+    path = tmp_path / "backwards.csv"
+    backwards = [_row(3, "a"), _row(1, "b")]
+    _write_rows(path, backwards)
+    merged = fold.merged_rows([path], _place_of)
+    with pytest.raises(refusal.RefusalError) as refused:
+        list(merged)
+    assert "holds a row at 1 after a row at 3" in str(refused.value)
 
 
 def test_a_row_file_leaves_a_column_its_row_lacks_empty(tmp_path):
@@ -820,22 +832,22 @@ def test_pieces_of_one_point_that_ran_different_commits_are_refused(
     """A resumed collect from another tree would pool two simulators.
 
     The second piece is saved as a process at another commit saves it;
-    the fold names both trees' pieces and writes nothing.
+    the fold names it and the tree run.json names, and writes nothing.
     """
     experiment_dir = _pieces_of_one_point(tmp_path, 2, 1)
     folders = _piece_folders(experiment_dir)
     later = folders[1]
     other_commit = "b" * 40
     _as_a_piece_run_at_commit(later, other_commit)
-    out_dir = tmp_path / "folded"
+    sweep_path = experiment_dir / "sweep.csv"
+    sweep_bytes = sweep_path.read_bytes()
 
     with pytest.raises(refusal.RefusalError) as refused:
-        _folded(experiment_dir, folders, out_dir)
+        collect_command.fold_the_run(experiment_dir)
 
     said = str(refused.value)
-    assert "ran different code" in said
-    assert f"{later} (commit {other_commit}" in said
-    assert not out_dir.exists()
+    assert f"{later} ran commit {other_commit}" in said
+    assert sweep_path.read_bytes() == sweep_bytes
 
 
 def test_a_gaps_bin_is_its_tenth_of_a_decibel_below():

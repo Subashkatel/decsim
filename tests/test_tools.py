@@ -13,6 +13,7 @@ import importlib.util
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 
@@ -438,10 +439,12 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
     """Task i of the array runs point i of the folder's copy, then a fold.
 
     A dry run records the points and writes both files, and submits
-    nothing.
+    nothing. The folder's path holds a space, and each line still reads
+    back as the arguments it was written from, the task index left for
+    the shell to expand.
     """
     config_path = _two_point_run_file(tmp_path)
-    results_dir = tmp_path / "results"
+    results_dir = tmp_path / "run folder"
     environment = _slurm_environment(tmp_path, "clean")
     arguments = _slurm_arguments(config_path, results_dir, "--dry-run")
 
@@ -450,15 +453,35 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
     run_lines = (results_dir / "run.sbatch").read_text().splitlines()
     fold_lines = (results_dir / "fold.sbatch").read_text().splitlines()
     copied = results_dir / config_path.name
+    decsim_run = [sys.executable, "-m", "decsim", "run"]
     assert completed.returncode == 0, completed.stderr
     assert run_lines[1] == (
         "#SBATCH --array=0-1 --cpus-per-task=4 --mem=16384M --time=24:00:00"
     )
-    assert run_lines[3].endswith(
-        f"-m decsim run {copied} --out {results_dir} "
-        "--task $SLURM_ARRAY_TASK_ID --processes 4"
-    )
-    assert fold_lines[3].endswith(f"-m decsim run --fold --out {results_dir}")
+    assert shlex.split(run_lines[2]) == [
+        "#SBATCH",
+        f"--output={results_dir}/logs/%a.log",
+    ]
+    assert shlex.split(run_lines[3]) == [
+        *decsim_run,
+        str(copied),
+        "--out",
+        str(results_dir),
+        "--task",
+        "$SLURM_ARRAY_TASK_ID",
+        "--processes",
+        "4",
+    ]
+    assert shlex.split(fold_lines[2]) == [
+        "#SBATCH",
+        f"--output={results_dir}/logs/fold.log",
+    ]
+    assert shlex.split(fold_lines[3]) == [
+        *decsim_run,
+        "--fold",
+        "--out",
+        str(results_dir),
+    ]
     assert len(list(results_dir.glob("points/*/machine.json"))) == 2
     assert not (tmp_path / "submissions.txt").exists()
 

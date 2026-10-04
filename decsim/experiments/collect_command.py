@@ -234,7 +234,7 @@ def start_the_folder(
     Returns every point's id in the experiment's order, the chosen
     points' collections, and the start time.
     """
-    run_folder.refuse_another_tree(run_dir)
+    _refuse_another_tree(run_dir)
     every_id = _experiment_point_ids(study)
     points = recorded_points(run_dir, chosen)
     run_folder.accept_raised_stop_rules(run_dir, run_file, every_id)
@@ -259,7 +259,7 @@ def run_task(
     """
     _check_processes(processes)
     study = experiment.load(run_file)
-    run_folder.refuse_another_tree(run_dir)
+    _refuse_another_tree(run_dir)
     point = study.points[index]
     chosen = study.only(point.name)
     points = recorded_points(run_dir, chosen)
@@ -307,7 +307,7 @@ def run_one_shot(
     task = dataclasses.replace(task, settings=settings)
     machine = _built_machine(task, seed, run_file)
     run_dir = run_folder.run_dir_for(study.name, out_dir)
-    run_folder.refuse_another_tree(run_dir)
+    _refuse_another_tree(run_dir)
     point_id = task.strong_id()
     _refuse_a_name_recorded_for_another_point(run_dir, point.name, point_id)
     run_points = _run_points(run_dir, point_id)
@@ -337,6 +337,7 @@ def fold_the_folder(
     point with different columns) leaves the last one as it was. Then
     each record names the seeds its pieces hold.
     """
+    pieces.refuse_pieces_of_another_tree(run_dir, folders)
     with tempfile.TemporaryDirectory(dir=run_dir, prefix=".") as staged:
         staging = pathlib.Path(staged)
         rows = _fold_into_the_staging(run_dir, folders, point_ids, staging)
@@ -344,6 +345,18 @@ def fold_the_folder(
     seeds_by_point = pieces.seed_ranges_of(folders)
     run_folder.record_seeds(run_dir, seeds_by_point)
     return rows
+
+
+def _refuse_another_tree(run_dir: pathlib.Path) -> None:
+    """This tree, and every piece the folder saved, are run.json's tree.
+
+    A new folder has neither run.json nor a piece, so its pieces are
+    not asked about.
+    """
+    run_folder.refuse_another_tree(run_dir)
+    saved = pieces.every_folder(run_dir)
+    if saved:
+        pieces.refuse_pieces_of_another_tree(run_dir, saved)
 
 
 def recorded_points(

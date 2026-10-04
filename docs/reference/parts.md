@@ -160,7 +160,7 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 
 ### `FifoScheduler.Settings`
 
-`decsim/decoders/schedulers.py`. FIFO has no knob; the record names the rule and builds it.
+`decsim/decoders/schedulers.py`. FIFO's settings: the rule has no knob.
 
 ### `UnitMemorySettings`
 
@@ -370,7 +370,7 @@ weight_step is the growth resolution, the natural-log weight one tick of edge le
 
 ### `DetectionEventSettings`
 
-`decsim/detector_error_model/settings.py`. The seats that form a round's detection events, and what it costs.
+`decsim/detector_error_model/settings.py`. How a round's detection events are formed.
 
 formed_at lists the seats, each once; every path a round takes to a decoder crosses exactly one (build/readout.py). One conversion costs latency_cycles, plus cycles_per_round for each further round a seat forms together, on the clock of the forming logic: a pipelined stage takes a round a cycle after its fixed latency (Yang et al. 2605.04892: syndrome calculation "at 20 ns (5 FPGA clock cycles)", "fully pipelined operation"). No source publishes a controller-side or buffer-side figure, so both costs default to zero. clock None is the machine's.
 
@@ -433,7 +433,7 @@ Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier repo
 
 ### `DoubleWindow.Settings`
 
-`decsim/escalation/strong_window_shapes.py`. The double window and how far its restart window re-reads.
+`decsim/escalation/strong_window_shapes.py`. The double window, as the switching slot names it.
 
 restart_reread_buffer_regions is how many of the strong region's buffer regions the restarted weak window re-reads (Toshio 2510.25222 Sec. III C, lines 1229-1235). 1, the default, is Fig. 12 step 5: the region's last buffer region is the restart window's past context. 0 reads nothing inside the region.
 
@@ -451,9 +451,9 @@ restart_reread_buffer_regions is how many of the strong region's buffer regions 
 
 ### `TableThreshold.Settings`
 
-`decsim/escalation/threshold_sources.py`. The csv and its column, and the threshold they give the point.
+`decsim/escalation/threshold_sources.py`. The calibration table's threshold for one point.
 
-table is a label and no part of a point's id: the number the table gives names the point. threshold_decibels is that number, None until the point's row is read (at_point), which the point's task does before it names the point.
+column is the csv column it reads. table is a label and no part of a point's id: the number the table gives names the point. threshold_decibels is that number, None until the point's row is read (at_point), which the point's task does before it names the point.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -463,7 +463,7 @@ table is a label and no part of a point's id: the number the table gives names t
 
 ### `OnlineThreshold.Settings`
 
-`decsim/escalation/threshold_sources.py`. The starting threshold and the calibrator's knobs.
+`decsim/escalation/threshold_sources.py`. The online calibrator's knobs.
 
 threshold_decibels is where the rate tracker starts; it steps toward target_escalation_rate by step_decibels per window. The audit lane strong-decodes audit_rate of the kept windows; one revised audit multiplies the target by adjust_factor, and ceil(3 / kept_bad_budget) clean audits divide it back, inside [min_escalation_rate, max_escalation_rate - audit_rate]. The defaults are the drift-replay configuration it was validated on.
 
@@ -499,7 +499,7 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 
 ### `CreditChannel.Settings`
 
-`decsim/links/credit_channel.py`. The framing, the buffer, the credit's return, and their clock.
+`decsim/links/credit_channel.py`. The credit protocol's settings.
 
 receive_buffer_frames is C; credit_latency_cycles is L_c on clock, the card's domain, from the receiver taking a frame to its credit being usable. Every field is written, since each is a sourced hardware number.
 
@@ -552,9 +552,9 @@ receive_buffer_frames is C; credit_latency_cycles is L_c on clock, the card's do
 
 ### `ReliableChannel.Settings`
 
-`decsim/links/reliable_channel.py`. The credit protocol's fields, the connection's, and their clock.
+`decsim/links/reliable_channel.py`. The reliable protocol's settings.
 
-window_packets is the most unacknowledged packets in flight; ack_every_packets bounds the packets between acknowledgement requests; retransmit_timeout_cycles is on clock, the card's domain; retry_count is rxe's retry_cnt, 0 to 7; bit_error_rate is the probability one wire bit is wrong.
+The framing, buffer and credit fields are the credit protocol's. window_packets is the most unacknowledged packets in flight; ack_every_packets bounds the packets between acknowledgement requests; retransmit_timeout_cycles is on clock, the card's domain; retry_count is rxe's retry_cnt, 0 to 7; bit_error_rate is the probability one wire bit is wrong.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -629,7 +629,7 @@ No capacity is an unbounded wire that charges its latency only. The name is the 
 
 ### `PathSettings`
 
-`decsim/links/settings.py`. One path: its channel, its payload rule, and its setup cost.
+`decsim/links/settings.py`. How one path carries a transfer.
 
 At least one of the default payload and the actual payload source is given. setup_ticks is paid on the channel's setup engine before every transfer; header_bits_per_transfer is serialized with every payload and counted apart. CUDA-Q's real-time messages are the worked case: a 24 byte RPCHeader per request, a 24 byte RPCResponse per reply, and 32 bytes of fields before an enqueue's syndromes (cudaqx decoder_rpc_wire_format.h lines 41-43, 62-69). Those bytes hold CUDA-Q's ids, which decsim's 64-bit request name already stands for (records/windows.py REQUEST_KEY_WIRE_BITS), so pricing that framing leaves the id out.
 
@@ -646,7 +646,7 @@ excludes_receiver_processing says what the latency covers: a number measured end
 
 ### `FabricSettings`
 
-`decsim/links/settings.py`. A fabric card: one path setting per hop and a profile name.
+`decsim/links/settings.py`. A fabric card: one path setting per hop.
 
 Every hop of the reaction path is priced, so a card names all eleven. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
 
@@ -707,9 +707,9 @@ A write is one XOR into a register, one cycle of the frame unit: Yang et al. (26
 
 ### `BivariateBicycleCodeModel.Settings`
 
-`decsim/qpu/code_geometry.py`. The card's own keys: n and k of the [[n, k, d]] code.
+`decsim/qpu/code_geometry.py`. The card's own keys.
 
-The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines 180-184); its distance is twelve when the run names none.
+qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines 180-184); its distance is twelve when the run names none.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -764,7 +764,7 @@ levels runs from the first level up. preparation_logical_cycles 2 and preparatio
 
 ### `QpuSettings`
 
-`decsim/qpu/settings.py`. The QPU: its syndrome source, its code card and its round period.
+`decsim/qpu/settings.py`. The QPU's settings.
 
 source is a source row's Settings record, which builds the device over the run's card and the workload's circuits. code_card is a card row's record, built at distance (None is the card's own) with the windows record's commit and buffer sizes. layout maps patches to codes, uniform by default. error_model_provider is a circuit source whose window models the decoders read in place of the source's own; None is the source's own.
 
@@ -791,7 +791,7 @@ Its build stops on the missing measurements, so a replay runs from a record of t
 
 ### `BurstStimDevice.Settings`
 
-`decsim/qpu/stim_device.py`. The burst: its rise and decay, where, how strong, which noise.
+`decsim/qpu/stim_device.py`. The one burst each shot carries.
 
 burst_onset_round is the first one-based round with extra noise. It climbs to burst_error_probability over burst_rise_rounds, (i + 1) / rise of it in the i-th round, then decays as exp(-(rounds since the peak) / burst_decay_rounds), McEwen's "typical ~25 ms exponential decay" (2104.05219) and qecburst exponential_decay_profile; None holds the peak to the shot's end. A rise of 1 is McEwen's step; the six largest bursts in the 2408.13687 repetition-code data peak about 3 rounds after onset, as Kurilovich's T1 transient of about 10 us would (2506.18228). The region is every qubit whose first two Stim coordinates lie within burst_radius of burst_center (the qubits' midpoint when None); a radius of None is every qubit. burst_channels names the noise raised. A probability of 0 is no burst.
 
@@ -821,7 +821,7 @@ burst_onset_round is the first one-based round with extra noise. It climbs to bu
 
 ### `PortedSyndromeBufferSettings`
 
-`decsim/syndrome_buffer/ported_syndrome_buffer.py`. The ported store: its capacity, its ports, its word and its timing.
+`decsim/syndrome_buffer/ported_syndrome_buffer.py`. The ported store's settings.
 
 bits bounds the store; None is unbounded. read_ports, write_ports and read_write_ports count OpenRAM's three port kinds. word_bits is what one access moves, cycles_per_access how long one access holds its port, and access_latency_cycles how long after its last access the data is usable, both on clock; clock None is the machine's clock. AFS's memory read, "a readout time of four cycles to read 32-bit data" per read (2001.06598 lines 529-531, 1107-1110), is word_bits 32, cycles_per_access 4 and access_latency_cycles 0. The defaults are the sky130 pseudo dual port byte FIFO (VLSIDA sky130_sram_macros at 965df150, sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 14-16), a word a clock with no added latency as Helios's fall-through FIFO (design/generics/fifo_fwft.v lines 95, 105 and 115).
 
@@ -838,7 +838,7 @@ bits bounds the store; None is unbounded. read_ports, write_ports and read_write
 
 ### `SyndromeBufferSettings`
 
-`decsim/syndrome_buffer/syndrome_buffer.py`. The plain store: its capacity, and a flat cost per write and per read.
+`decsim/syndrome_buffer/syndrome_buffer.py`. The plain store's settings.
 
 bits bounds the store; None is unbounded. A full store makes the controller hold the finished round and write it in order once a slot frees, the backpressure real systems apply to their source (Caune et al. 2410.05202: the sequencer stalls on the decoder's status register); a run whose waiting round can never enter stops after the action that makes it certain. A write costs write_cycles and a read of a job's rounds read_cycles, on clock, whatever their width, and no access waits for another: SimpleMemory's latency with no bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174). clock None is the machine's clock.
 
@@ -890,7 +890,7 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 
 ### `WindowSettings`
 
-`decsim/windows/settings.py`. How the rounds are cut into decode windows, and what a window ships.
+`decsim/windows/settings.py`. The window side's settings.
 
 scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on decoder_to_decoder. clock and decision_cycles price issuing one decode request; clock None is the machine's clock.
 

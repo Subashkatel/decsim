@@ -17,10 +17,12 @@ import decsim.records.program as program_records
 class LayoutModel(Protocol):
     """Which code every patch and every operation runs on, and its claims."""
 
-    def code_for_op(self, operation: program_records.OperationPlanningView):
+    def code_for_op(
+        self, operation: program_records.OperationPlanningView
+    ) -> ports.CodeModel:
         """The code the operation runs on."""
 
-    def code_for_patch(self, patch_id: Any):
+    def code_for_patch(self, patch_id: Any) -> ports.CodeModel:
         """The code the patch runs on."""
 
     def codes(self) -> list:

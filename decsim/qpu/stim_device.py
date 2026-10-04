@@ -638,7 +638,7 @@ class BurstStimDevice(StimDevice):
         return burst_circuit(circuit, table, self.burst)
 
 
-def validated_seed(seed) -> Optional[int]:
+def validated_seed(seed: Optional[numbers.Integral]) -> Optional[int]:
     """The seed under Stim's public unsigned 64-bit contract, or None.
 
     Every Stim-backed source draws under the same contract.

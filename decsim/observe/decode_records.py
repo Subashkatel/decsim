@@ -32,12 +32,8 @@ class TerminalRequestRecord:
     """One decode request at its end: identity, input, ticks, confidence."""
 
     request_key: window_records.DecoderRequestKey
-    input_round_count: int
     syndrome_weight: Optional[int]
     ready_ticks: int
-    dispatch_ticks: Optional[int]
-    decode_output_ticks: Optional[int]
-    service_key: Optional[decoding_records.DecoderServiceKey]
     soft_output: Optional[decoding_records.SoftOutput]
 
 
@@ -56,19 +52,13 @@ class DecodeRecordLedger:
     ) -> None:
         """One request reached its terminal outcome."""
         del outcome
+        del decode_output_ticks
         weight = _decoded_syndrome_weight(job)
         soft_output = None
         if result is not None:
             soft_output = result.soft_output
         record = TerminalRequestRecord(
-            job.request_key,
-            job.round_count,
-            weight,
-            job.ready_time,
-            job.service_dispatch_ticks,
-            decode_output_ticks,
-            job.service_key,
-            soft_output,
+            job.request_key, weight, job.ready_time, soft_output
         )
         self.requests.append(record)
 

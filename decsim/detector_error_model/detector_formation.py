@@ -473,13 +473,17 @@ def _round_of_each_measurement(
     rounds = [
         int(measurement_rounds[index]) for index in range(measurement_count)
     ]
+    _check_declared_rounds(rounds, round_count)
+    return rounds, None
+
+
+def _check_declared_rounds(rounds: list[int], round_count: int) -> None:
     if any(not 1 <= round_index <= round_count for round_index in rounds):
         raise ValueError(
             "declared measurement rounds must lie in 1..round_count"
         )
     if _has_a_backward_step(rounds):
         raise ValueError("declared measurement rounds must be non-decreasing")
-    return rounds, None
 
 
 def _measurement_packets(

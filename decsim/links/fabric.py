@@ -1,21 +1,14 @@
 """The link fabric: every hop of the reaction path wired to its channel.
 
-LinkFabric is the root of the links and the one object the other
-components hold; it implements the Link port. send(path, ...) selects the
-payload the path is priced with, frames it with the path's header, sends
-it on the path's channel, and at
-delivery fires the finished transfer's record on transfer_delivered (the
-traffic ledger and the trace writer listen) before the caller's
-continuation runs. Two paths whose settings name the same channel share
-its wire and its setup engine. The shape is gem5's: a SimObject owns its
-parameters and its children and is reached through its ports
-(src/sim/sim_object.hh, src/mem/port.hh); the trace source is ns-3's
-TracedCallback fired at the device's transition
-(point-to-point-net-device.cc TransmitComplete). The channels are what
-each card's protocol record builds (the Channel port in decsim/ports.py),
-or the ideal wire for a card with none, one per channel name. The
-fabric is the seed composite of its channels, so a channel that draws
-(the reliable row's losses) is seeded under its name.
+LinkFabric implements the Link port and is the one link object other
+components hold. send selects the payload the path is priced with,
+frames it with the path's header, sends it on the path's channel, and at
+delivery fires transfer_delivered before the caller's continuation
+runs. The shape is gem5's: a SimObject owns its parameters and children
+and is reached through ports (src/sim/sim_object.hh, src/mem/port.hh);
+the trace source is ns-3's TracedCallback at TransmitComplete. One
+channel per name; the fabric is their seed composite, so a channel that
+draws (the reliable row's losses) is seeded under its name.
 """
 
 import dataclasses
@@ -43,14 +36,7 @@ def protocol_channel(
 
 
 class LinkFabric:
-    """One run's fabric: the wired paths on their channels.
-
-    Trace sources: transfer_delivered(record), one TransferRecord per
-    delivered transfer, carrying the path, the attribution and the
-    Transfer with its send, serializer and delivery ticks; and
-    frame_landed(record), one FrameRecord per frame a channel moves,
-    the transfer's inside.
-    """
+    """One run's fabric: the wired paths on their channels."""
 
     def __init__(
         self,
@@ -84,8 +70,8 @@ class LinkFabric:
     ) -> int:
         """What a send now would pay if nothing else reached its channel.
 
-        A routed readout is priced by its footprint, which an estimate is
-        not given, so asking for one is a caller's bug.
+        A routed readout is priced by its footprint, which an estimate lacks, so
+        asking for one is a caller's bug.
         """
         is_readout = path is transfer_records.LinkPath.QPU_TO_CONTROLLER
         if is_readout and self._readout_by_footprint:
@@ -219,10 +205,9 @@ def _select_payload(
 ) -> tuple:
     """The bits a transfer is priced with, and where they came from.
 
-    The actual payload when the caller supplied one (the path must name
-    its source), else the card's default, else unresolved. An unresolved
-    payload rides an unbounded channel for its latency alone; a bounded
-    wire cannot serialize it and stops.
+    The caller's actual payload (the path must name its source), else the
+    card's default, else unresolved: that rides an unbounded channel for its
+    latency alone, and stops on a bounded wire.
     """
     if payload_bits is not None:
         if path_settings.actual_payload_source is None:
@@ -250,13 +235,7 @@ def _select_payload(
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the link fabric reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the link fabric reports, as one member."""
 
     frame_landed: "_EveryChannelsFrames"
     transfer_delivered: trace_source.TraceSource = trace_source.new_source()

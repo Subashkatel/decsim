@@ -1,18 +1,14 @@
 """What the number cards build for the links: settings only.
 
-A channel is one wire with a propagation latency and, optionally, a
-finite bandwidth: ns-3's point-to-point device, a DataRate and a delay
-(point-to-point-net-device.cc). A path is one named hop between two
-components; it rides one channel, carries a payload rule, and may pay a
-per-transfer setup cost, the descriptor and doorbell work a processor
-does before the data mover starts (Shao et al., MICRO 2016, section
-III.C), and a per-transfer header, the framing the wire serializes with
-the payload (ns-3's device adds a header to every packet it sends,
-point-to-point-net-device.cc:528, and times the packet with it, :243).
-A fabric is one path setting per hop plus a profile name; two paths
-whose channels carry the same name share one wire and one setup engine.
-The values are checked here, once, because the number cards are where
-they enter decsim.
+A channel is one wire with a propagation latency and optionally a finite
+bandwidth: ns-3's point-to-point device, a DataRate and a delay. A path
+is one named hop between two components; it rides one channel, carries a
+payload rule, and may pay a per-transfer setup cost, the descriptor and
+doorbell work before the data mover starts (Shao et al., MICRO 2016,
+section III.C), and a per-transfer header the wire serializes with the
+payload (point-to-point-net-device.cc:528, :243). Two paths whose
+channels carry the same name share one wire and one setup engine. The
+values are checked here, where the cards enter decsim.
 """
 
 import dataclasses
@@ -31,15 +27,11 @@ import decsim.records.transfers as transfer_records
 class CapacitySettings:
     """Bandwidth of one whole channel in bits per microsecond.
 
-    A link of several parallel bit lanes is one wire with aggregate
-    bandwidth (a PCIe x4 link stripes one transfer over four lanes), so
-    a card folds its lane count into this rate before the setting is
-    built. The rate is held as one exact Fraction of the
-    number as written (a float 0.20846 is the Fraction 10423/50000), so
-    a rate written as an int, a float or a Fraction is one value with
-    one point id. ns-3's DataRate does the serialization arithmetic in
-    integers the same way, so a whole-tick duration is never inflated by
-    a binary float's hidden expansion.
+    Parallel lanes are one wire with aggregate bandwidth (a PCIe x4 link
+    stripes one transfer over four), so a card folds its lane count in. The
+    rate is one exact Fraction of the number as written, so an int, a float
+    or a Fraction is one value with one point id, and a whole-tick duration
+    is never inflated by float error, as ns-3's integer DataRate arithmetic.
     """
 
     input_bits_per_microsecond: fractions.Fraction
@@ -72,11 +64,7 @@ class PayloadSettings:
 
 
 class PacketProtocolSettings(Protocol):
-    """A packet protocol's settings record, which builds its channel.
-
-    CreditChannel.Settings and ReliableChannel.Settings
-    (credit_channel.py, reliable_channel.py) are the two.
-    """
+    """A packet protocol's settings record, which builds its channel."""
 
     def build(
         self,
@@ -90,14 +78,10 @@ class PacketProtocolSettings(Protocol):
 class ChannelSettings:
     """One physical channel: its name, a propagation latency, a bandwidth.
 
-    No capacity means an unbounded wire that charges its latency only.
-    Two paths whose channels carry the same name share one channel, so
-    the name is the identity a fabric wires by. protocol is a packet
-    protocol's settings record, which builds the channel
-    (credit_channel.py, reliable_channel.py); None is the ideal wire,
-    the whole transfer on an unbounded buffer with nothing lost. A
-    packet protocol cuts every message into frames of known size, so it
-    runs on a bounded wire; on an unbounded one its first frame stops.
+    No capacity is an unbounded wire that charges its latency only. The
+    name is the identity a fabric wires by. protocol None is the ideal wire,
+    the whole transfer, an unbounded buffer, nothing lost. A packet protocol
+    cuts messages into frames of known size, so it needs a bounded wire.
     """
 
     name: str
@@ -124,25 +108,19 @@ class PathSettings:
 
     At least one of the default payload and the actual payload source is
     given. setup_ticks is paid on the channel's setup engine before every
-    transfer of the path; zero means the path programs nothing.
-    header_bits_per_transfer is the framing every transfer of the path
-    carries beside its payload, serialized with it and counted apart
-    from it; zero means the path frames nothing. CUDA-Q's real-time
-    messages are the worked case: a 24 byte RPCHeader in front of every
-    request and a 24 byte RPCResponse in front of every reply
-    (cudaqx decoder_rpc_wire_format.h lines 41-43), and 32 bytes of
-    fields in front of the syndromes of an enqueue (lines 62-69). Those
-    bytes hold CUDA-Q's own ids, an int64 decoder id among the enqueue's
-    fields and a 32-bit request id in each header, and the three kinds
-    of message of a strong request already carry decsim's 64-bit name
-    (records/windows.py REQUEST_KEY_WIRE_BITS), so a run that prices
-    this framing leaves out the id the name stands for.
-    excludes_receiver_processing says what the card's latency covers: a
-    reference number measured end to end includes the receiver turning
-    the arrival into bits, and a card the caller wrote times the wire
-    alone, so only the second lets that processing be priced again
-    on the receiving component. It has no default, so every card says
-    which it is.
+    transfer; header_bits_per_transfer is serialized with every payload and
+    counted apart. CUDA-Q's real-time messages are the worked case: a 24
+    byte RPCHeader per request, a 24 byte RPCResponse per reply, and 32
+    bytes of fields before an enqueue's syndromes (cudaqx
+    decoder_rpc_wire_format.h lines 41-43, 62-69). Those bytes hold CUDA-Q's
+    ids, which decsim's 64-bit request name already stands for
+    (records/windows.py REQUEST_KEY_WIRE_BITS), so pricing that framing
+    leaves the id out.
+
+    excludes_receiver_processing says what the latency covers: a number
+    measured end to end includes the receiver turning the arrival into
+    bits; a card that times the wire alone lets the receiving component
+    price that processing. It has no default, so every card says which.
     """
 
     channel: ChannelSettings
@@ -173,8 +151,8 @@ class PathSettings:
 class ReadoutRoute:
     """The readout path setting for one complete physical patch footprint.
 
-    A joint acquisition stays one transfer. A route never splits its bits
-    or selects a channel from only one of its contributing patches.
+    A joint acquisition stays one transfer: a route never splits its bits or
+    picks a channel from one contributing patch.
     """
 
     patch_ids: tuple
@@ -194,16 +172,12 @@ class ReadoutRoute:
 class FabricSettings:
     """A fabric card: one path setting per hop and a profile name.
 
-    Every hop of the reaction path is priced, so a card names all eleven
-    and a caller that leaves one out is refused where it constructs the
-    card. A card whose QPU-to-controller latency leaves out the
-    controller's readout processing says so, because the timing card
-    prices that processing on its own line. profile_name is the card's
-    name, which the run's description prints. Callers can set
-    readout_routes to choose a path card by the complete
-    contributing patch footprint.
-    Unmatched footprints use qpu_to_controller. Equal channel names share
-    the same setup engine and serializer, including across routed cards.
+    Every hop of the reaction path is priced, so a card names all eleven. A
+    card whose QPU-to-controller latency leaves out the controller's
+    readout processing says so, since the timing card prices it apart.
+    readout_routes picks a path by the complete contributing footprint;
+    unmatched footprints use qpu_to_controller. Equal channel names share a
+    setup engine and serializer, across routed cards too.
     """
 
     qpu_to_controller: PathSettings

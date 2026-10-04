@@ -1,45 +1,29 @@
 """A channel whose frames need a credit from a finite receive buffer.
 
-The packet protocol `credit`. A message is cut into frames by its framing
-row; each frame takes the wire when the wire is free and the sender
-holds a credit, one frame at a time in order; the receive buffer holds
-receive_buffer_frames frames, the receiver takes each frame as it
-lands, and the frame's credit is back at the sender credit_latency
-later. So frame k starts at
+The packet protocol `credit`. A message is cut into frames; each takes
+the wire when the wire is free and the sender holds a credit; the
+receive buffer holds C frames, and a frame's credit is back L_c after
+it lands. So frame k starts at
 
     s_k = max(ready, e_(k-1), c_(k-C)),   e_k = s_k + ceil(w_k / R),
     c_k = e_k + L + L_c,
 
-and the message is delivered when its last frame lands, e_n + L. This
-is Garnet's credit loop: an output virtual channel starts with
-buffers_per_data_vc credits (gem5 src/mem/ruby/network/garnet/
-OutVcState.cc:56-63), a flit is sent only while it has one and takes one
-(NetworkInterface.cc:506, 530), and the receiver returns the credit when
-the flit leaves its buffer (InputUnit.cc:140-150, and at once in a
-network interface, NetworkInterface.cc:236-274), over a credit link of
-its own latency (NetworkLink.cc:92-102). The credits travel on backward
-flow-control links of their own, a CreditLink beside each forward link
-(GarnetLink.py:60-63, 84-88, 126-142), so a credit takes no time on the
-data wire and is never lost, which is how this row returns it.
-Aurora's native flow control, where a receiver asks its partner to send
-idles within the time of 256 blocks (Xilinx SP011 sections 3.1 and 3.3,
-pages 29-30), is this row with that bound as its credit latency: an
-equivalence, not Aurora's own mechanism. PCIe's flow-control credits
-and NVIDIA's real-time ring, whose producer reuses a slot only when its
-flags are clear (cuda-quantum realtime/lib/daemon/dispatcher/
-cudaq_realtime_api.cpp:360-364), have the same shape. With unbounded
-credits and the whole framing the law is the ideal row's.
+and the message is delivered at e_n + L. This is Garnet's credit loop
+(gem5 src/mem/ruby/network/garnet/OutVcState.cc:56-63,
+NetworkInterface.cc:506, 530, InputUnit.cc:140-150), with credits on
+CreditLinks of their own (GarnetLink.py), so a credit takes no time on
+the data wire and is never lost. Aurora's native flow control, idles
+within 256 blocks (Xilinx SP011 sections 3.1 and 3.3), is this row with
+that bound as its credit latency, an equivalence. PCIe's flow-control
+credits and NVIDIA's real-time ring (cuda-quantum
+cudaq_realtime_api.cpp:360-364) have the same shape. With unbounded
+credits and the whole framing it is the ideal row.
 
-Garnet's own loop is this one with two cycles more than its link
-latency, which a card that means Garnet writes into
-credit_latency_cycles: the input unit schedules the credit link a cycle
-after the flit leaves (InputUnit.cc:151), and a network interface
-spends a credit the cycle after it lands, reading credits after it has
-scheduled its output (NetworkInterface.cc:221 and 286-298). Garnet also
-holds a virtual channel for a whole packet, freed only by the tail's
-credit (NetworkInterface.cc:293-296 and 477); frames here share the
-buffer's credits, so a message does not wait for the one before it to
-drain.
+Garnet's loop is two cycles longer than its link latency, which a card
+meaning Garnet writes into credit_latency_cycles (InputUnit.cc:151;
+NetworkInterface.cc:221, 286-298). Garnet also holds a virtual channel
+per packet (NetworkInterface.cc:293-296); frames here share the
+buffer's credits, so a message does not wait for the one before it.
 """
 
 import collections
@@ -64,11 +48,9 @@ class CreditChannel(channel_module.Channel):
     class Settings:
         """The framing, the buffer, the credit's return, and their clock.
 
-        receive_buffer_frames is C, the frames the receiver can hold;
-        credit_latency_cycles is L_c on clock, the card's clock domain,
-        from the receiver taking a frame to its credit being usable at
-        the sender. Every field is written, because each is a number of
-        the hardware the card describes and carries its source.
+        receive_buffer_frames is C; credit_latency_cycles is L_c on clock, the
+        card's domain, from the receiver taking a frame to its credit being
+        usable. Every field is written, since each is a sourced hardware number.
         """
 
         framing: framings.FramingSettings
@@ -171,9 +153,8 @@ class CreditWire:
     def _credit_ticks(self) -> int:
         """When the sender holds a credit: at once, or when the oldest returns.
 
-        Credits return in the order their frames were sent, because every
-        frame lands one propagation after its end and its credit one
-        credit latency after that.
+        Credits return in send order: each lands one propagation after its
+        frame's end and returns one credit latency later.
         """
         credits_out = len(self._credit_returns)
         if credits_out < self._credit_returns.maxlen:

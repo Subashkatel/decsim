@@ -1,23 +1,12 @@
 """The link number cards decsim ships.
 
-logical_reference_profile is the default when no links card is given:
-each hop priced from a system of decsim's scale, a surface-code patch on
-one control rack with a decoder FPGA and a strong node one hop away. A
-card is a latency and a rate, so a transfer takes its latency plus its
-bits over the rate, the law ns-3's point-to-point device times a packet
-by (point-to-point-net-device.cc:243). bandwidth_limited_profile keeps
-those latencies and provisions finite rates from the run's geometry so
-contention becomes measurable; capacity_scale sweeps the whole fabric.
-The roce_v2_cpu, roce_v2_gpu and nvqlink_gpu rows are the reference card
-with the strong tier's off-board path priced by a measured RoCE round
-trip. path_card prices one path in cycles of a clock, a per-transfer
-setup cost (setup_cycles_per_transfer) included.
-
-Every number carries a source string on the settings record it sets,
-and a payload's source also travels into the traffic report with every
-transfer; paper locators are arXiv numbers and text lines. To
-change a number, copy a card into your own file and edit it, then pass
-it as the machine's links setting.
+A card is a latency and a rate per hop, so a transfer takes its latency
+plus its bits over the rate, the law ns-3's point-to-point device times
+a packet by (point-to-point-net-device.cc:243). Every number carries a
+source string on the record it sets, and a payload's source travels into
+the traffic report; paper locators are arXiv numbers and text lines. To
+change a number, copy a card into your own file and pass it as the
+machine's links setting.
 """
 
 import dataclasses
@@ -282,14 +271,12 @@ ROCE_V2_REPLY_LEG = (
 def logical_reference_profile() -> settings.FabricSettings:
     """The default card: every hop from a system of decsim's scale.
 
-    Each hop has a latency and a rate, or is unbounded where its
-    referent moves every bit in parallel, so a transfer costs its
-    latency plus its bits over the rate. The weak loop is Yang et al.'s
-    closed loop (arXiv 2605.04892 Table I) hop for hop, the strong node
-    is Caune et al.'s inter-chassis hop away (arXiv 2410.05202 Fig. 1a),
-    and the rates are the referents' bus words and Backline's cable.
-    Actual-payload paths price the runtime's own bit counts;
-    default-payload paths price a stated word width.
+    A surface-code patch on one control rack, a decoder FPGA, and a strong
+    node one hop away. A hop is unbounded where its referent moves every bit
+    in parallel. The weak loop is Yang et al.'s closed loop (arXiv
+    2605.04892 Table I) hop for hop, the strong node is Caune et al.'s
+    inter-chassis hop away (arXiv 2410.05202 Fig. 1a), and the rates are the
+    referents' bus words and Backline's cable.
     """
     word_rate = settings.CapacitySettings(
         _WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE
@@ -403,26 +390,18 @@ def bandwidth_limited_profile(
 ) -> settings.FabricSettings:
     """The reference card with finite rates from the run's own geometry.
 
-    Same paths and payload rules as logical_reference_profile, and its
-    latencies read from that card, so switching cards changes bandwidth
-    and nothing else. Capacity is bits per microsecond.
+    The latencies are the reference card's, so switching cards changes
+    bandwidth alone. Capacity is bits per microsecond. Every path carries
+    exactly its nominal traffic in one commit region, so at capacity_scale 1
+    each link runs at utilization one and at scale s at 1/s. State the
+    utilization when reporting: a single-server queue at utilization one
+    waits zero only under perfectly periodic arrivals (Little's law). The
+    rates are an explicit per-link provisioning, as ns-3 declares a DataRate
+    per device.
 
-    Every path is provisioned to carry exactly its nominal traffic in one
-    commit region (qc: one round's syndrome bits per round period), so at
-    capacity_scale 1 each link runs at utilization one, and a scale of s
-    runs it at utilization 1/s. State the utilization when reporting
-    results from this card: a single-server queue at utilization one
-    waits zero only under perfectly periodic arrivals, and any jitter
-    accumulates (Little's law). The rates are an explicit per-link
-    provisioning, the way ns-3 declares a DataRate per point-to-point
-    device, never a floor borrowed from another path.
-
-    Each rate is an exact fraction of the decimals given, so a nominal
-    payload serializes in exactly its period: a float such as 8 / 1.1
-    lands below the true rate, and the rounded-up serialization then
-    runs one tick past the period and a periodic stream queues one tick
-    more every round (ns-3 times a packet from its size and the device's
-    stated DataRate, point-to-point-net-device.cc:243).
+    Each rate is an exact fraction, so a nominal payload serializes in
+    exactly its period: a float such as 8 / 1.1 lands below the true rate,
+    and the rounded-up serialization then queues one tick more every round.
     """
     round_period_microseconds = fractions.Fraction(str(round_microseconds))
     commit_region_microseconds = commit_rounds * round_period_microseconds
@@ -580,23 +559,16 @@ def _measured_round_trip_card(
 ) -> settings.FabricSettings:
     """The reference card with the strong path on a measured round trip.
 
-    Backline (arXiv 2609.09270, Sec. V-C and Table III) and NVQLink
-    (arXiv 2510.25213, Sec. 2.4) each measure one number: an FPGA
-    controller writes into a coprocessor's memory over RoCE, the
-    coprocessor polls that buffer and writes the reply back, and the
-    controller times the whole round trip in its own clock. Neither
-    gives a per-direction number, so the split is decsim's rule rather
-    than a measurement: the controller's write into the strong syndrome
-    buffer, the escalation request and the strong decoder's reply to the
-    frame each carry one half of the round trip, and the strong store's
-    read into the strong decoder is zero because the coprocessor polls a
-    buffer in its own memory. The three legs that cross the cable
-    serialize their bits at its 100 Gb/s, and the measured round trip
-    already holds the echo payload's time on it, so each leg's latency
-    is its half less that time: an echo of that payload, out, polled and
-    back, takes the measured median exactly. The card prices that
-    median, not a warm-up round trip nor the tail. Every other hop keeps
-    the number and the source of logical_reference_profile.
+    Backline (arXiv 2609.09270, Sec. V-C and Table III) and NVQLink (arXiv
+    2510.25213, Sec. 2.4) each measure one FPGA-to-coprocessor round trip
+    over RoCE, with the coprocessor polling its own memory. Neither gives a
+    per-direction number, so the split is decsim's rule: the write into the
+    strong syndrome buffer, the escalation request and the reply to the
+    frame each carry half the round trip, and the strong store's read is
+    zero because the coprocessor polls its own memory. The three cable legs
+    serialize at 100 Gb/s, and each leg's latency is its half less the echo
+    payload's time on the cable, so an echo takes the measured median
+    exactly: not a warm-up round trip nor the tail.
     """
     cable_rate = settings.CapacitySettings(
         _OFF_BOARD_BITS_PER_MICROSECOND, rate_source
@@ -614,12 +586,8 @@ def _measured_round_trip_card(
 class RoceV2CpuFabric:
     """The reference card with the strong path on Backline's CPU round trip.
 
-    The four strong-side hops are priced by Backline's measured
-    FPGA-to-CPU round trip over RoCE v2, 2.305 us in the median
-    (arXiv 2609.09270, Table III): half of it on each leg the write
-    crosses, less the echo payload's time on the cable, and nothing for
-    the coprocessor's poll of its own memory. Every other hop keeps the
-    reference numbers.
+    Backline's FPGA-to-CPU round trip over RoCE v2, 2.305 us median (arXiv
+    2609.09270, Table III), split as _measured_round_trip_card says.
     """
 
     @staticmethod
@@ -637,14 +605,10 @@ class RoceV2CpuFabric:
 class RoceV2GpuFabric:
     """The reference card with the strong path on Backline's GPU round trip.
 
-    The four strong-side hops are priced by Backline's measured
-    FPGA-to-GPU round trip over RoCE v2, 4.5 us in the median
-    (arXiv 2609.09270, Table III): half of it on each leg the write
-    crosses, less the echo payload's time on the cable, and nothing for
-    the coprocessor's poll of its own memory. The GPU path is the slower
-    and the wider of the two Backline measured, because the reply is
-    written by a CPU thread the GPU signals. Every other hop keeps the
-    reference numbers.
+    Backline's FPGA-to-GPU round trip over RoCE v2, 4.5 us median (arXiv
+    2609.09270, Table III), split as _measured_round_trip_card says. It is
+    slower and wider than the CPU path because a CPU thread the GPU signals
+    writes the reply.
     """
 
     @staticmethod
@@ -662,24 +626,19 @@ class RoceV2GpuFabric:
 class NvqlinkGpuFabric:
     """The reference card with the strong path on NVQLink's GPU round trip.
 
-    The four strong-side hops are priced by NVQLink's measured round
-    trip from an FPGA to a persistent GPU kernel over RoCE, 3.839 us in
-    the steady-state median (arXiv 2510.25213, line 485): half of it on
-    each leg the packet crosses, less the echo payload's time on the
-    cable, nothing for the kernel's poll of its own memory. Every other
-    hop keeps the reference numbers.
+    NVQLink's FPGA to persistent GPU kernel round trip over RoCE, 3.839 us
+    steady-state median (arXiv 2510.25213, line 485), split as
+    _measured_round_trip_card says.
     """
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
         """The reference card with this row's strong paths.
 
-        The connection is unreliable by choice (2510.25213 lines
-        376-388), so no frame is retransmitted: the ideal protocol row,
-        since the 100G cables are engineered for a bit error rate under
-        1e-15 (lines 381-383). The measured round trip already holds the
-        framing of its 32-byte echo (line 403), so no framing row is
-        attached.
+        The connection is unreliable by choice (2510.25213 lines 376-388) on
+        cables engineered under 1e-15 bit errors, so the ideal protocol row; the
+        measured round trip already holds its 32-byte echo's framing (line 403),
+        so no framing row.
         """
         return _measured_round_trip_card(
             NVQLINK_ROUND_TRIP_MICROSECONDS,
@@ -705,15 +664,12 @@ def path_card(
 ) -> settings.PathSettings:
     """One path priced in cycles of a clock, over its payload rule in links.
 
-    A cycle costs the clock's period in whole ticks, gem5's cyclesToTicks
-    (src/sim/clocked_object.hh:227, clockPeriod() * c), so a link's
-    cycles and every other component's cycles on one clock are the same
-    ticks. Each of lane_count lanes moves bits_per_cycle every period,
-    the rate kept as an exact fraction of the decimal; None is an
-    unbounded wire. The path gets a wire of its own, named for it, and
-    its latency times the wire alone, so the receiving component prices
-    its own processing of what arrives. source says where the numbers
-    come from.
+    A cycle is the clock's period in whole ticks, gem5's cyclesToTicks
+    (src/sim/clocked_object.hh:227), so a link's cycles and every other
+    component's cycles on one clock are the same ticks. Each of lane_count
+    lanes moves bits_per_cycle every period; None is an unbounded wire. The
+    path gets a wire of its own, and its latency times the wire alone, so
+    the receiver prices its own processing.
     """
     period_ticks = clock.period_ticks
     latency_ticks = latency_cycles * period_ticks
@@ -745,9 +701,8 @@ def with_path_latency(
 ) -> settings.FabricSettings:
     """The card with one path's wire at a latency, the rest as it was.
 
-    The latency is rounded to whole ticks once (config.microseconds_to_
-    ticks), and the path keeps its rate, setup, framing and what its
-    latency covers; path_card writes a whole card instead.
+    The latency is rounded to whole ticks once; the path keeps its rate,
+    setup, framing and what its latency covers.
     """
     config.check_duration("latency_microseconds", latency_microseconds)
     latency_ticks = config.microseconds_to_ticks(latency_microseconds)
@@ -767,11 +722,9 @@ def _roce_v2_strong_paths(
 ) -> dict:
     """The four strong-side paths, priced from one measured round trip.
 
-    The three legs that cross the measured cable serialize their bits at
-    its rate, as the reference card's strong hops do, so the echo
-    payload's time on the cable comes out of each leg's half; the poll
-    reads the coprocessor's own memory, crosses no cable and stays
-    unbounded.
+    The three cable legs serialize at its rate, so the echo payload's time
+    on the cable comes out of each leg's half; the poll crosses no cable and
+    stays unbounded.
     """
     rate = cable_rate.input_bits_per_microsecond
     echo_fraction = echo_payload_bits / rate

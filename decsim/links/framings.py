@@ -1,18 +1,12 @@
 """How a link cuts one message into the frames its wire carries.
 
-A packet channel hands every message to its framing, which returns
-the wire bits of each frame in sending order; the channel serializes,
-credits and acknowledges frame by frame. A message is the path's header
-and its payload, the bytes the protocol carries, and the frames add the
-protocol's own framing on top. Every framing gives a message of no bits
-one frame, because a message only arrives when a frame lands. The bits
-are the bits the channel's rate is written for: the framings that count
-a line code in their frames (aurora_64b66b, flits) are priced at the
-line rate, and those that count bytes (pcie_tlp, roce_v2, ethernet_udp)
-at the data rate after the physical layer's coding, which is how
-pcie-bench prices them (pcie-bench model/pcie.py:40-48,
-model/eth.py:29-41). Each framing's Settings record checks its own
-values and builds it.
+A message is the path's header and its payload; the frames add the
+protocol's own framing. A message of no bits is one frame, because a
+message arrives only when a frame lands. The bits are those the
+channel's rate is written for: framings that count a line code
+(aurora_64b66b, flits) at the line rate, those that count bytes
+(pcie_tlp, roce_v2, ethernet_udp) at the data rate after line coding,
+as pcie-bench prices them (model/pcie.py:40-48, model/eth.py:29-41).
 """
 
 import dataclasses
@@ -121,11 +115,9 @@ class Flits:
 class Aurora64b66b:
     """66-bit blocks: floor(n / 8) + 1 of them for a frame of n octets.
 
-    Each block is one entry of the receiver's FIFO, which is the unit
-    Aurora's native flow control counts (SP011 section 3.1, page 29), so
-    each block is one frame here. The rule is SP011's: full data blocks
-    of eight octets, then one separator block that carries the last zero
-    to seven octets.
+    A block is one entry of the receiver's FIFO, the unit Aurora's native
+    flow control counts (SP011 section 3.1, page 29): full blocks of eight
+    octets, then one separator block with the last zero to seven.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -151,10 +143,10 @@ class PcieTlp:
     """Memory write TLPs of at most max_payload_bytes, 24 bytes on each.
 
     A write of n bytes costs ceil(n / MPS) x 24 + n bytes (pcie-bench
-    model/mem_bw.py:40-41; Neugebauer lines 385-389). A write of no
-    bytes is one TLP of overhead alone, where pcie-bench counts none.
-    Data link acknowledgements, flow-control updates and replay are not
-    in the frames: this row pairs with the credit protocol only.
+    model/mem_bw.py:40-41; Neugebauer lines 385-389); one of no bytes is one
+    TLP of overhead, where pcie-bench counts none. Data link ACKs,
+    flow-control updates and replay are left out: this row pairs with the
+    credit protocol only.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -193,10 +185,9 @@ class PcieTlp:
 class RoceV2:
     """RDMA write packets of at most path_mtu_bytes, each an Ethernet frame.
 
-    The first packet carries the RDMA extended header; every packet
-    carries IPv4, UDP, the base transport header, its payload padded to
-    four bytes and the invariant CRC, inside Ethernet's overhead (module
-    constants).
+    The first packet carries the RDMA extended header; every packet carries
+    IPv4, UDP, the base transport header, its payload padded to four bytes
+    and the invariant CRC, inside Ethernet's overhead.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -250,9 +241,8 @@ class RoceV2:
 class EthernetUdp:
     """UDP datagrams of at most mtu_bytes, IPv4 and UDP headers inside it.
 
-    NVQLink chose an unreliable connection over UDP on purpose
-    (2510.25213 lines 376-388). A message longer than one datagram is
-    cut into datagrams by the sender, each with its own headers.
+    NVQLink chose an unreliable connection over UDP on purpose (2510.25213
+    lines 376-388).
     """
 
     @dataclasses.dataclass(frozen=True)

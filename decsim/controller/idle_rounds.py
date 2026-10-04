@@ -161,7 +161,7 @@ class IdleRoundAccounting:
             label=f"mem({operation.name},r{round_index})",
         )
 
-    def _idle(self, patch) -> _PatchIdle:
+    def _idle(self, patch) -> "_PatchIdle":
         idle = self.idle_by_patch.get(patch)
         if idle is None:
             idle = _PatchIdle()

@@ -23,7 +23,7 @@ import functools
 import json
 import math
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.collect as collect
 import decsim.escalation.threshold_sources as threshold_sources
@@ -416,7 +416,7 @@ def gap_bin_low_decibels(gap_nats: float) -> float:
     return tenths / CONFIDENCE_BINS_PER_DECIBEL
 
 
-def confidence_shot_count_of(measurements: list):
+def confidence_shot_count_of(measurements: list) -> Optional[Union[int, str]]:
     """The shots a piece's confidence rows cover, for its piece.json.
 
     The first shots' count, all, or None when no confidence signal ran.

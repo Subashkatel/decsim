@@ -30,6 +30,8 @@ import decsim.engine as engine_module
 import decsim.experiments.refusal as refusal
 import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
+import decsim.observe.observation as observation_module
+import decsim.observe.settings as observe_settings
 import decsim.records.program as program_records
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
@@ -62,7 +64,9 @@ PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
 CODE_PATHSPEC = ("--", ".", f":(exclude){RESULTS_DIR}")
 
 
-def run_dir_for(name: str, out_dir=None) -> pathlib.Path:
+def run_dir_for(
+    name: str, out_dir: Optional[pathlib.Path] = None
+) -> pathlib.Path:
     """Where this run writes: the folder asked for, or a new dated one.
 
     gem5's --outdir names the folder and makes it (src/python/m5/main.py:
@@ -382,7 +386,11 @@ def write_shot(
     _write_result(result, run_dir)
 
 
-def write_log(observation, run_dir: pathlib.Path, label: str) -> None:
+def write_log(
+    observation: observation_module.Observation,
+    run_dir: pathlib.Path,
+    label: str,
+) -> None:
     """log/<label>.log: the engine narrator's full line record of a shot.
 
     The same lines log: print shows live.
@@ -396,7 +404,9 @@ def write_log(observation, run_dir: pathlib.Path, label: str) -> None:
 
 
 def trace_path_of(
-    observation, run_dir: pathlib.Path, label: str
+    observation: observe_settings.ObservationSettings,
+    run_dir: pathlib.Path,
+    label: str,
 ) -> pathlib.Path:
     """Where a shot's trace goes: the named path, or trace/ in the folder."""
     named = observation.trace_path
@@ -464,7 +474,7 @@ def seed_ranges(ranges: list) -> list:
     return joined
 
 
-def write_json(path: pathlib.Path, value) -> None:
+def write_json(path: pathlib.Path, value: dict) -> None:
     """A json file of the run folder: indented, ending in a newline."""
     text = json.dumps(value, indent=2)
     lines = text + "\n"

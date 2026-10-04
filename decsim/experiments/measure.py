@@ -13,7 +13,7 @@ import json
 import math
 import pathlib
 import statistics
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.collect as collect
 import decsim.config as config_module
@@ -22,6 +22,7 @@ import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module
+import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
@@ -289,7 +290,10 @@ class ShotMeasurement:
 
 
 def measure_shot(
-    shot: collect.Shot, run_dir=None, *, only_traced_shot: bool = False
+    shot: collect.Shot,
+    run_dir: Optional[pathlib.Path] = None,
+    *,
+    only_traced_shot: bool = False,
 ) -> ShotMeasurement:
     """Read one collected shot's numbers off its machine and result.
 
@@ -489,9 +493,9 @@ def qpu_send_ticks(transfers: list) -> dict:
 
 
 def window_points_us(
-    window,
-    frame_record,
-    decode,
+    window: window_records.Window,
+    frame_record: pauli_frame_module.PauliFrameCommitRecord,
+    decode: "_CommittedDecode",
     first_dispatch: int,
     stage_us: dict,
     link_delay: dict,
@@ -686,7 +690,9 @@ def chain_load(samples: dict, window_period_us: float) -> float:
     return chain_us / window_period_us
 
 
-def active_decoder_kind(settings: machine_settings.MachineSettings):
+def active_decoder_kind(
+    settings: machine_settings.MachineSettings,
+) -> Optional[Union[str, float]]:
     """The kind of the tier that decodes the plan's windows."""
     tier = settings.window_tier.value
     tier_settings = settings.decoder_settings_for(tier)
@@ -695,7 +701,7 @@ def active_decoder_kind(settings: machine_settings.MachineSettings):
     return tier_settings.algorithm.name
 
 
-def trace_path_for_shot(path, label: str) -> str:
+def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
     """The path a swept shot writes to: the label joins the given path.
 
     run.trace.json becomes run_<label>.trace.json, the label holding the

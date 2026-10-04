@@ -62,7 +62,9 @@ class FollowedPath:
     counts: Counts
 
 
-def follow(document, kind: str, key: str) -> FollowedPath:
+def follow(
+    document: trace_file.TraceDocument, kind: str, key: str
+) -> FollowedPath:
     """Every hop of one round or window in one traced shot."""
     events = _events_of(document, kind, key)
     hops = []
@@ -79,7 +81,7 @@ def follow(document, kind: str, key: str) -> FollowedPath:
     )
 
 
-def table_lines(hops) -> list:
+def table_lines(hops: tuple) -> list:
     """One header line and one line per hop, columns aligned."""
     rows = [("tick (us)", "where", "what", "dur (us)", "transfer", "bits")]
     for hop in hops:

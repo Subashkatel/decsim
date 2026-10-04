@@ -79,7 +79,7 @@ def rows_of_basis(
     return rows
 
 
-def column_rows(matrix, column: int) -> tuple:
+def column_rows(matrix: scipy.sparse.csc_matrix, column: int) -> tuple:
     """The rows one column of a csc matrix flips, as Python ints.
 
     A check or an observable matrix of a placed fault model is csc, so a

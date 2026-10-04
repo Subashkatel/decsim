@@ -11,7 +11,8 @@ answer is known without running the machine:
   (docs/reference/glossary.md), by exactly that latency;
 - every round is committed by exactly one owner and every owner's
   correction enters the Pauli frame exactly once (Toshio et al. 2510.25222
-  Theorem 1: two owners never claim one round).
+  Theorem 1: two owners never claim one round);
+- a decoder pool with more units commits no window later.
 
 Three more laws sit beside the parts they exercise: switching that never
 escalates is the weak tier alone (tests/escalation/test_switching_mode.py),
@@ -36,7 +37,11 @@ import decsim.links.link_profiles as link_profiles
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.windows.schemes.parallel as parallel
 import decsim.windows.settings as window_settings
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 DISTANCE = 3
 ROUND_PERIOD_MICROSECONDS = 1.0
@@ -57,6 +62,7 @@ REACTION_PATH = (
     "controller_to_qpu",
 )
 FEEDBACK_ROUNDS = 6
+UNIT_COUNTS = (1, 2, 3, 4)
 
 
 def run(settings, seed: int = 0) -> collect.Shot:
@@ -258,3 +264,88 @@ def test_every_round_has_one_owner_and_the_frame_takes_each_owner_once(shape):
     owners_once = dict.fromkeys(contributions, 1)
     assert committed_rounds(contributions) == list(range(1, 31))
     assert frame_commits_by_window(shot) == owners_once
+
+
+def charged_pool(pool, microseconds: float, unit_count: int):
+    """The pool's units decoding with PyMatching, charged a fixed time."""
+    algorithm = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=microseconds
+    )
+    return dataclasses.replace(pool, algorithm=algorithm, unit_count=unit_count)
+
+
+def strong_units_on_double_windows(unit_count: int):
+    """Every window escalating to strong units that take 30 us a region."""
+    settings = switching_on_double_windows(PHYSICAL_ERROR_PROBABILITY)
+    strong = charged_pool(settings.strong_decoder, 30.0, unit_count)
+    return dataclasses.replace(settings, strong_decoder=strong)
+
+
+def weak_units_on_parallel_windows(unit_count: int):
+    """The weak base on parallel windows, 20 us a decode."""
+    settings = weak_only(PHYSICAL_ERROR_PROBABILITY)
+    scheme = parallel.ParallelWindowScheme.Settings()
+    windows = dataclasses.replace(settings.windows, scheme=scheme)
+    weak = charged_pool(settings.weak_decoder, 20.0, unit_count)
+    return dataclasses.replace(settings, windows=windows, weak_decoder=weak)
+
+
+def commit_ticks_by_window(settings) -> dict:
+    """The tick each window's correction committed in the frame."""
+    shot = run(settings)
+    ticks = {}
+    for record in shot.machine.observation.frame_corrections.committed:
+        ticks[record.window_key] = record.committed_ticks
+    return ticks
+
+
+def windows_committed_later(shape) -> list:
+    """Each window a bigger pool commits later than the pool one smaller."""
+    later = []
+    smaller = None
+    for unit_count in UNIT_COUNTS:
+        settings = shape(unit_count)
+        ticks = commit_ticks_by_window(settings)
+        if smaller is not None:
+            found = _later_than(smaller, ticks, unit_count)
+            later.extend(found)
+        smaller = ticks
+    return later
+
+
+def _later_than(smaller: dict, bigger: dict, unit_count: int) -> list:
+    later = []
+    for window_key, tick in bigger.items():
+        if tick > smaller[window_key]:
+            later.append((unit_count, window_key, smaller[window_key], tick))
+    return later
+
+
+# a parked decode is bound to its unit: on parallel windows the second
+# unit takes a startable decode beside it and the parked one waits
+PARKED_DECODE_HOLDS_ITS_UNIT = pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "a decode parked on a busy unit waits for that unit while another "
+        "idles: on two units window (1, 1) commits at 70.160 us, on one at "
+        "69.252 us"
+    ),
+)
+POOLS = (
+    strong_units_on_double_windows,
+    pytest.param(
+        weak_units_on_parallel_windows, marks=PARKED_DECODE_HOLDS_ITS_UNIT
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    POOLS,
+    ids=("strong_units_on_double_windows", "weak_units_on_parallel_windows"),
+)
+def test_more_decoder_units_commit_no_window_later(shape):
+    """One to four units: no window commits later on the bigger pool."""
+    later = windows_committed_later(shape)
+
+    assert later == []

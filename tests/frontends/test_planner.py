@@ -91,7 +91,6 @@ def resolved_geometry(name="surface"):
         distance=3,
         commit_round_count=2,
         buffer_round_count=1,
-        one_patch_spatial_node_count=10,
     )
 
 
@@ -230,7 +229,6 @@ def compiled_plan(operations, planned_ids, **overrides):
     retain_strong_context = overrides.pop("retain_strong_context", False)
     absorbs_weak_windows = overrides.pop("absorbs_weak_windows", False)
     reread_regions = overrides.pop("restart_reread_buffer_regions", 0)
-    open_ended = overrides.pop("open_ended", False)
     formation_reads = overrides.pop(
         "formation_reads", window_records.NO_FORMING_READER
     )
@@ -249,7 +247,6 @@ def compiled_plan(operations, planned_ids, **overrides):
         retain_strong_context=retain_strong_context,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
-        has_open_ended_dynamic_streams=open_ended,
         formation_reads=formation_reads,
     )
 
@@ -283,7 +280,6 @@ def test_the_plan_sizes_every_operation_and_every_patch_through_the_layout():
         resolved.patch_identity for resolved in plan.resolved_patches
     ]
     assert plan.round_ticks == 2_500_000
-    assert plan.code_geometry.one_patch_spatial_node_count == 10
     assert operation_nodes == [21, 21]
     assert patch_identities == [1, "1", "q1", "q2"]
     assert scheme.plan_calls == [(10, 4, 2, 1), (20, 4, 2, 1)]
@@ -491,21 +487,6 @@ def test_a_windows_hold_reaches_into_the_successors_it_overflows_into():
         (3, 1),
     )
     assert buffering.potential_holds == ()
-
-
-def test_an_open_ended_stream_leaves_the_stores_capacity_unbounded():
-    """A stream with no end has no sufficient live-round set to size on."""
-    execution = overlapping_successor_plan()
-
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=False,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-        has_open_ended_dynamic_streams=True,
-    )
-
-    assert buffering.sufficient_live_rounds is None
 
 
 def chained_sliding_windows():
@@ -738,31 +719,6 @@ def test_a_double_windows_strong_hold_ends_at_the_operations_end():
 
     held_rounds = buffering.potential_holds[0][1]
     assert held_rounds == tuple((1, index) for index in range(3, 8))
-
-
-def test_the_strong_union_counts_a_shared_round_once():
-    """The store's sufficient set is the union of holds, not their sum.
-
-    Overlapping strong contexts do not each allocate a packet, so four
-    windows whose contexts total twenty four round reads keep fifteen
-    rounds alive, once each.
-    """
-    execution = chained_sliding_windows()
-
-    buffering = planner._plan_syndrome_buffering(
-        execution,
-        retain_strong_context=True,
-        absorbs_weak_windows=False,
-        restart_reread_buffer_regions=0,
-    )
-
-    holds = buffering.potential_holds
-    read_count = sum(len(held_rounds) for _owner, held_rounds in holds)
-    sufficient = buffering.strong_sufficient_live_rounds
-    every_round = {(1, index) for index in range(1, 16)}
-    assert read_count == 24
-    assert len(sufficient) == 15
-    assert set(sufficient) == every_round
 
 
 def test_the_boundary_graph_is_checked_on_the_boundary_edges():

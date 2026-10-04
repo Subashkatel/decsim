@@ -162,7 +162,6 @@ def build_plan(
         retain_strong_context=is_switching,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
-        has_open_ended_dynamic_streams=bool(dynamic_streams),
         formation_reads=formation_reads,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)

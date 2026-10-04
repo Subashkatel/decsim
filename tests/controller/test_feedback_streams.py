@@ -392,7 +392,6 @@ def _resolved_operation(operation_id: int):
         distance=3,
         commit_round_count=3,
         buffer_round_count=3,
-        one_patch_spatial_node_count=9,
     )
     return program_records.ResolvedOperationPlanning(
         operation_id=operation_id,
@@ -595,7 +594,6 @@ def _resolved_patch(patch_identity):
         distance=3,
         commit_round_count=3,
         buffer_round_count=3,
-        one_patch_spatial_node_count=9,
     )
     return program_records.ResolvedPatchPlanning(
         patch_identity=patch_identity,

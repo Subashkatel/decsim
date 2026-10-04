@@ -20,7 +20,6 @@ class ResolvedCodeGeometry:
     distance: int
     commit_round_count: int
     buffer_round_count: int
-    one_patch_spatial_node_count: int
 
 
 @dataclass(frozen=True)

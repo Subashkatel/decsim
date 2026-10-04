@@ -23,7 +23,6 @@ import importlib.util
 from typing import Any
 
 import ldpc
-import ldpc.ckt_noise.dem_matrices as dem_matrices
 import numpy
 import pymatching
 import pytest
@@ -1131,14 +1130,12 @@ def test_longer_joint_feedback_protects_both_blocks_without_resampling() -> (
     _assert_joint_acquisitions(second)
 
 
-# At RUN_SEED no logical flips in either basis; seed 3 flips a Z logical.
-@pytest.mark.parametrize(
-    "basis, seed, has_logical_flips",
-    [("X", RUN_SEED, False), ("Z", 3, True)],
-)
+# Both seeds flip a logical. At Z seed 1 ldpc's Stim converter, which keys
+# faults by detectors alone, predicts the wrong logicals.
+@pytest.mark.parametrize("basis, seed", [("X", 3), ("Z", 1)])
 @pytest.mark.parametrize("placement", ["controller", "decoder"])
 def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
-    basis: str, seed: int, has_logical_flips: bool, placement: str
+    basis: str, seed: int, placement: str
 ) -> None:
     pytest.importorskip("deltakit_explorer")
     program = _bb_memory(basis)
@@ -1158,7 +1155,7 @@ def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
     assert len(expected) == 8
     assert owner.logical_observables == expected
     assert owner.observable_truth == expected
-    assert any(expected) == has_logical_flips
+    assert any(expected)
     assert len(run.decodes.finished) == 1
 
 
@@ -3919,15 +3916,18 @@ def _bb_logical_qubits(
 
 
 def _direct_bp_osd_prediction(run: _Run) -> tuple[int, ...]:
-    """Ldpc's published Stim converter retains the undecomposed hyperedges."""
+    """Ldpc's BP-OSD on the shot's whole model, one column per fault.
+
+    A fault is its detectors and its observables. Ldpc's Stim converter
+    keys columns by detectors alone, which merges faults that flip
+    different logicals, so this model is built here.
+    """
     circuit = run.shots[0][0].circuit
     model = circuit.detector_error_model(approximate_disjoint_errors=False)
-    matrices = dem_matrices.detector_error_model_to_check_matrices(
-        model, allow_undecomposed_hyperedges=True
-    )
+    check, observables, priors = _fault_columns(model)
     backend = ldpc.BpOsdDecoder(
-        matrices.check_matrix,
-        error_channel=list(matrices.priors),
+        check,
+        error_channel=priors,
         max_iter=2,
         bp_method="product_sum",
         schedule="serial",
@@ -3938,9 +3938,60 @@ def _direct_bp_osd_prediction(run: _Run) -> tuple[int, ...]:
     events = source.sampled_detection_events(100)
     syndrome = numpy.array(events, dtype=numpy.uint8)
     correction = backend.decode(syndrome)
-    prediction = matrices.observables_matrix @ correction
+    prediction = observables @ correction
     prediction %= 2
     return tuple(int(bit) for bit in prediction)
+
+
+def _fault_columns(
+    model: stim.DetectorErrorModel,
+) -> tuple[numpy.ndarray, numpy.ndarray, list[float]]:
+    """Check and observable matrices and priors, in first-seen order.
+
+    Errors with one identity merge as independent errors.
+    """
+    priors_by_fault: dict = {}
+    for instruction in model.flattened():
+        if instruction.type != "error":
+            continue
+        fault = _fault_identity(instruction)
+        detectors, _observables = fault
+        if not detectors:
+            continue
+        arguments = instruction.args_copy()
+        probability = arguments[0]
+        prior = priors_by_fault.get(fault, 0.0)
+        merged = prior * (1 - probability) + probability * (1 - prior)
+        priors_by_fault[fault] = merged
+    fault_count = len(priors_by_fault)
+    check_shape = (model.num_detectors, fault_count)
+    observable_shape = (model.num_observables, fault_count)
+    check = numpy.zeros(check_shape, dtype=numpy.uint8)
+    observables = numpy.zeros(observable_shape, dtype=numpy.uint8)
+    for column, fault in enumerate(priors_by_fault):
+        detectors, logicals = fault
+        detector_rows = sorted(detectors)
+        observable_rows = sorted(logicals)
+        check[detector_rows, column] = 1
+        observables[observable_rows, column] = 1
+    fault_priors = priors_by_fault.values()
+    priors = list(fault_priors)
+    return check, observables, priors
+
+
+def _fault_identity(
+    instruction: stim.DemInstruction,
+) -> tuple[frozenset, frozenset]:
+    """The detectors and observables one error flips, modulo two."""
+    detectors = set()
+    logicals = set()
+    for target in instruction.targets_copy():
+        flipped = {target.val}
+        if target.is_relative_detector_id():
+            detectors ^= flipped
+        if target.is_logical_observable_id():
+            logicals ^= flipped
+    return frozenset(detectors), frozenset(logicals)
 
 
 def _bb_fault_measurements(

@@ -64,6 +64,10 @@ qldpc_dems = pytest.importorskip("qldpc.decoders.dems")
 # them).
 NEAR_CASES = ((3, 14, 5), (5, 23, 3), (7, 32, 1))
 FORWARD_CASES = ((3, 14, 1), (5, 23, 2), (7, 32, 1))
+# each case on the row it was chosen for
+PINNED_ROW_CASES = tuple(
+    (declared_run.REDO_WINDOW, case) for case in NEAR_CASES
+) + tuple((declared_run.DOUBLE_WINDOW, case) for case in FORWARD_CASES)
 PHYSICAL_ERROR_PROBABILITY = 0.008
 
 
@@ -364,7 +368,9 @@ def _differing(raw: dict, masked: dict) -> list:
     return changed
 
 
-def test_the_near_pinned_input_is_the_syndrome_bombin_defines(monkeypatch):
+def test_the_near_pinned_input_is_the_syndrome_bombin_defines_property(
+    monkeypatch,
+):
     """The raw input XOR (H kappa) on its own detectors, at d 3, 5, 7.
 
     The oracle's H is qLDPC's detector flip matrix of the same circuit's
@@ -399,7 +405,9 @@ def _expected_input(raw: dict, flipped: set) -> dict:
     return expected
 
 
-def test_the_forward_pinned_input_differs_on_its_two_seam_layers(monkeypatch):
+def test_the_forward_pinned_input_differs_on_its_two_seam_layers_property(
+    monkeypatch,
+):
     """Both faces pinned: the oldest and the newest read layer, at d 3, 5, 7.
 
     The far face is the window that restarts the weak chain, whose
@@ -425,7 +433,8 @@ def test_the_forward_pinned_input_differs_on_its_two_seam_layers(monkeypatch):
     assert nonempty_jobs
 
 
-def test_a_pinned_pair_commits_no_fault_twice(monkeypatch):
+@pytest.mark.parametrize("case", NEAR_CASES)
+def test_a_pinned_pair_commits_no_fault_twice(monkeypatch, case):
     """Bombin 2303.04846 lines 703-704, on the run's own corrections.
 
     Only the restriction of a task's estimate to its commit region is
@@ -433,11 +442,8 @@ def test_a_pinned_pair_commits_no_fault_twice(monkeypatch):
     that reads it commit disjoint sets of faults: no detector is
     explained twice.
     """
-    shared = []
-    for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, declared_run.REDO_WINDOW)
-        counts = _shared_fault_counts(run)
-        shared.extend(counts)
+    run = _run_case(monkeypatch, case, declared_run.REDO_WINDOW)
+    shared = _shared_fault_counts(run)
     assert shared
     assert set(shared) == {0}
 
@@ -457,7 +463,10 @@ def _shared_fault_counts(run: tuple) -> list:
     return counts
 
 
-def test_a_pinned_pair_leaves_its_seam_layer_clean(monkeypatch):
+@pytest.mark.parametrize("strong_window, case", PINNED_ROW_CASES)
+def test_a_pinned_pair_leaves_its_seam_layer_clean(
+    monkeypatch, strong_window, case
+):
     """Bombin's consistency condition on the layer two tasks share.
 
     d(kappa_i + kappa_j + e) = 0 on the shared checks (lines 748-749).
@@ -466,15 +475,8 @@ def test_a_pinned_pair_leaves_its_seam_layer_clean(monkeypatch):
     exactly when the model carries no column the neighbour owns. Both
     faces of both pinned rows are read, at d 3, 5 and 7.
     """
-    residuals = []
-    for case in NEAR_CASES:
-        run = _run_case(monkeypatch, case, declared_run.REDO_WINDOW)
-        near = _seam_residuals(run)
-        residuals.extend(near)
-    for case in FORWARD_CASES:
-        run = _run_case(monkeypatch, case, declared_run.DOUBLE_WINDOW)
-        forward = _seam_residuals(run)
-        residuals.extend(forward)
+    run = _run_case(monkeypatch, case, strong_window)
+    residuals = _seam_residuals(run)
     assert residuals
     assert set(residuals) == {0}
 

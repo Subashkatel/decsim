@@ -7,7 +7,7 @@ none. The stage names are the decoder row's own
 
 from typing import Any
 
-import decsim.decoders.staged_decoder as staged_decoder
+import decsim.records.decoding as decoding_records
 
 
 class StageLedger:
@@ -17,7 +17,9 @@ class StageLedger:
         self.records: list = []
         self._by_window: dict = {}
 
-    def stage_recorded(self, record: staged_decoder.DecoderStageRecord) -> None:
+    def stage_recorded(
+        self, record: decoding_records.DecoderStageRecord
+    ) -> None:
         """One stage of one job ended on some unit."""
         self.records.append(record)
         key = (record.operation_id, record.window_id)

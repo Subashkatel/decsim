@@ -1,6 +1,6 @@
 """The frame's corrections: every window's write, as it landed."""
 
-import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.records.decoding as decoding_records
 
 
 class FrameCorrections:
@@ -14,7 +14,7 @@ class FrameCorrections:
         self.committed: list = []
 
     def correction_committed(
-        self, record: pauli_frame_module.PauliFrameCommitRecord
+        self, record: decoding_records.PauliFrameCommitRecord
     ) -> None:
         """One window's write has landed in the frame."""
         self.committed.append(record)

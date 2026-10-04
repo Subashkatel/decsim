@@ -96,6 +96,16 @@ class RunOperationBody:
 
 
 @dataclass(frozen=True)
+class QPUCommandEvent:
+    """When a command arrived at the QPU, and when it started."""
+
+    # "ARRIVED" or "STARTED"; the event ledger reads these words.
+    kind: str
+    tick: int
+    command: RunOperationBody
+
+
+@dataclass(frozen=True)
 class ProtectedRegion:
     """One owner patch group protected between inclusive operation endpoints."""
 

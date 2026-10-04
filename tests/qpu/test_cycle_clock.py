@@ -231,8 +231,8 @@ def test_a_command_arriving_mid_cycle_starts_on_the_next_boundary():
     engine.schedule(1_842_000, qpu.finish)
     engine.run()
     assert commands.events == [
-        cycle_clock.QPUCommandEvent("ARRIVED", 500_000, body),
-        cycle_clock.QPUCommandEvent("STARTED", 921_000, body),
+        program_records.QPUCommandEvent("ARRIVED", 500_000, body),
+        program_records.QPUCommandEvent("STARTED", 921_000, body),
     ]
     assert log.round_ticks == [(1_842_000, 1)]
 

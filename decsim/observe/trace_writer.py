@@ -17,11 +17,9 @@ from typing import Any, Optional, Union
 
 import decsim.config as config
 import decsim.decoders.decoder_unit as decoder_unit_module
-import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
-import decsim.pauli_frame.pauli_frame as pauli_frame_module
-import decsim.qpu.cycle_clock as cycle_clock
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -215,7 +213,7 @@ class TraceWriter:
         if event.kind == "RELEASED":
             self._end_held_round(round_key)
 
-    def command_event(self, event: cycle_clock.QPUCommandEvent) -> None:
+    def command_event(self, event: program_records.QPUCommandEvent) -> None:
         """A command arrived at the QPU or started on a boundary."""
         kind = event.kind.lower()
         name = f"command {kind}"
@@ -605,7 +603,9 @@ class TraceWriter:
         args = open_row["args"]
         self._complete(thread, name, "window,service", start, duration, args)
 
-    def stage_recorded(self, record: staged_decoder.DecoderStageRecord) -> None:
+    def stage_recorded(
+        self, record: decoding_records.DecoderStageRecord
+    ) -> None:
         """One stage of one job on the lane of the unit that ran it.
 
         Two decodes of one window can run on two units at once (a forced-class
@@ -656,7 +656,7 @@ class TraceWriter:
     # ---- the frame
 
     def correction_accepted(
-        self, record: pauli_frame_module.PauliFrameCommitRecord
+        self, record: decoding_records.PauliFrameCommitRecord
     ) -> None:
         """The frame took one window's correction."""
         window = window_text(record.window_key)
@@ -673,7 +673,7 @@ class TraceWriter:
         self._end_window_flow("Frame", record.window_key, self.engine.now)
 
     def correction_committed(
-        self, record: pauli_frame_module.PauliFrameCommitRecord
+        self, record: decoding_records.PauliFrameCommitRecord
     ) -> None:
         """The frame's write for one window has landed."""
         window = window_text(record.window_key)

@@ -22,7 +22,6 @@ import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module
-import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
@@ -494,7 +493,7 @@ def qpu_send_ticks(transfers: list) -> dict:
 
 def window_points_us(
     window: window_records.Window,
-    frame_record: pauli_frame_module.PauliFrameCommitRecord,
+    frame_record: decoding_records.PauliFrameCommitRecord,
     decode: "_CommittedDecode",
     first_dispatch: int,
     stage_us: dict,

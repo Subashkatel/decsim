@@ -546,6 +546,64 @@ class LogicalContribution:
     logical_observables: Optional[tuple[int, ...]]
 
 
+@dataclass(frozen=True)
+class PauliFrameCommitRecord:
+    """One accepted correction, kept in the order the frame accepted it."""
+
+    window_key: tuple
+    tier: str
+    run_sequence: int
+    accepted_ticks: int
+    committed_ticks: int
+    logical_observables: Optional[tuple[int, ...]]
+
+
+@dataclass(frozen=True)
+class DecoderStageRecord:
+    """One stage of one job: name, cycles charged, start and end ticks."""
+
+    operation_id: int
+    window_id: int
+    stage: str
+    cycles: Optional[int]  # None for the algorithm, priced in time
+    start_ticks: int
+    end_ticks: int
+    # the unit the decode ran on, the lane it belongs to, as each LLVM
+    # XRay record carries the thread it ran on
+    # (tools/llvm-xray/xray-converter.cc:232-245)
+    unit_name: str
+    # the (operation, round) identities a formation stage turned into
+    # detection events here; empty for every stage that forms none
+    round_keys: tuple = ()
+    # the run ordinals of the requests this decode serves, so a reader
+    # can tell one window's decodes apart: its two forced-class solves,
+    # its strong re-decode, and the members of a merged batch all carry
+    # the same window key and different ordinals
+    run_sequences: tuple = ()
+    # the decode was cancelled while this stage was open: the stage ends
+    # at the cancel, and no latency point reads it
+    cancelled: bool = False
+    # the tick a unit took this decode. The window record keeps the last
+    # decode's, so a window decoded more than once needs each decode's
+    # own here, beside the run ordinals that name them
+    dispatch_ticks: Optional[int] = None
+    # the tick this decode first may compute: its input landed and its
+    # window owed no boundary. What it waited for after this tick is the
+    # unit's compute, which is a wait of a different kind
+    ready_ticks: Optional[int] = None
+    # the rounds the decode read, the job's own count: a strong decode's
+    # r_strong is what Toshio's backlog bound divides by (2510.25222
+    # lines 1270-1300), and the window record keeps only the last decode
+    round_count: int = 0
+    # the ticks the decode had waited inside a strong backend when this
+    # stage closed (DecodeJob.backend_queue_wait_ticks), all of it by the
+    # algorithm stage's end
+    backend_queue_wait_ticks: int = 0
+    # the ticks the decode's input read took in its store
+    # (DecodeJob.store_read_ticks)
+    store_read_ticks: int = 0
+
+
 class DecoderEvidence(Enum):
     """What a decode can show about itself, beyond its correction.
 

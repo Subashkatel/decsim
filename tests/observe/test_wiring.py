@@ -13,7 +13,6 @@ import dataclasses
 
 import decsim.config
 import decsim.decoders.settings as decoder_settings
-import decsim.decoders.staged_decoder as staged_decoder
 import decsim.machine as machine_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
@@ -242,7 +241,7 @@ class PortOnlyDecoder:
         """One stage per job, fired on the port's own source."""
         result = self.decode(job)
         end_tick = engine.now + self.latency_ticks
-        record = staged_decoder.DecoderStageRecord(
+        record = decoding_records.DecoderStageRecord(
             job.operation_id,
             job.window_id,
             "algorithm",

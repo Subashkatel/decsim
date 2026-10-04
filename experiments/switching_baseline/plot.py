@@ -40,39 +40,71 @@ TIER_COLOR = {"weak": "C0", "strong": "C1"}
 TIER_NAME = {"weak": "union-find (weak)", "strong": "Relay-BP-5 (strong)"}
 VIOLIN_HALF_WIDTH = 0.8
 VIOLIN_BINS = 40
-# The breakdown's six parts, each the sum of the recorded points of
-# decsim/experiments/measure.py it names, so a part means the same on
-# both tiers. Every recorded point between a span's two ends is in
-# exactly one part, so a tier's parts add up to its TIER_SPAN.
-BREAKDOWN_PARTS = {
-    "wait for the window's rounds": ("#bdbdbd", ["buffer_fill"]),
-    "union-find attempt before escalating": ("#bcbddc", ["weak_attempt"]),
-    "wait for a decoder": (
-        "#d7301f",
-        [
-            "admission_wait",
-            "queue_wait",
-            "dep_block",
-            "compute_wait",
-            "selection_wait",
-        ],
+# A window's path through the machine, one segment per place in the
+# order the window passes it, after Liu et al. 2603.16203 Fig. 8. Each
+# segment is the recorded points of decsim/experiments/measure.py it
+# adds, less any it subtracts, and a path's segments add up to its
+# span. A kept window's path starts when the window is formed, an
+# escalated window's at its first round.
+#
+# dep_block, the wait between the verdict and the decode's start, holds
+# two places on an escalated path: the escalation link,
+# escalation_link_per_window, which ends before the strong job is
+# queued, and the wait for a free input slot on the strong decoder
+# after it. On a kept path it is the wait for the previous window's
+# boundary.
+KEPT_PATH = {
+    "union-find queue": ("#9ecae1", ["admission_wait", "queue_wait"], []),
+    "wait for previous window's boundary": ("#6baed6", ["dep_block"], []),
+    "into union-find memory": ("#c6dbef", ["input_link_per_window"], []),
+    "union-find busy with the window ahead": (
+        "#4292c6",
+        ["compute_wait"],
+        [],
     ),
-    "decoding (read, algorithm, write)": (
+    "union-find decode": ("#2171b5", ["fetch", "algorithm", "release"], []),
+    "confidence check": ("#08306b", ["confidence"], []),
+    "to the Pauli frame": (
         "#31a354",
-        ["fetch", "algorithm", "release"],
-    ),
-    "confidence check": ("#756bb1", ["confidence"]),
-    "moving data (into decoder, to Pauli frame)": (
-        "#3182bd",
-        ["input_link_per_window", "output_link_per_window", "frame_commit"],
+        ["selection_wait", "output_link_per_window", "frame_commit"],
+        [],
     ),
 }
-# Each tier's bar: the recorded span it draws, where that span starts,
-# and the points outside it. A kept window's bar starts when the window
-# is formed, so the wait for its rounds is left out.
-TIER_SPAN = {
-    "weak": ("buffer0_ready_to_frame", "window formed", {"buffer_fill"}),
-    "strong": ("buffer0_first_round_to_frame", "first round", set()),
+ESCALATED_PATH = {
+    "rounds arriving in the weak buffer": ("#d9d9d9", ["buffer_fill"], []),
+    "union-find queue": ("#9ecae1", ["admission_wait", "queue_wait"], []),
+    "union-find decode and confidence check": (
+        "#3182bd",
+        ["weak_attempt", "confidence"],
+        [],
+    ),
+    "extra rounds and link to Relay-BP-5": (
+        "#969696",
+        ["escalation_link_per_window"],
+        [],
+    ),
+    "Relay-BP-5 queue: both input slots full": (
+        "#fdae6b",
+        ["dep_block"],
+        ["escalation_link_per_window"],
+    ),
+    "into Relay-BP-5 memory": ("#fdd0a2", ["input_link_per_window"], []),
+    "Relay-BP-5 busy with the window ahead": (
+        "#e6550d",
+        ["compute_wait"],
+        [],
+    ),
+    "Relay-BP-5 decode": ("#a63603", ["fetch", "algorithm", "release"], []),
+    "to the Pauli frame": (
+        "#31a354",
+        ["selection_wait", "output_link_per_window", "frame_commit"],
+        [],
+    ),
+}
+# each tier's path, the recorded span it adds up to, and where it starts
+TIER_PATH = {
+    "weak": (KEPT_PATH, "buffer0_ready_to_frame", "window formed"),
+    "strong": (ESCALATED_PATH, "buffer0_first_round_to_frame", "first round"),
 }
 BREAKDOWN_ERROR_RATE = 0.003
 TIER_UNIT = {"weak": ("µs", 1.0), "strong": ("ms", 1e3)}
@@ -396,66 +428,61 @@ def stage_means_of(folder: pathlib.Path) -> dict:
 def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
     """Where a window's time goes at one error rate, kept and escalated.
 
-    Each bar is one distance's mean time per window, split into the
-    BREAKDOWN_PARTS. Means, unlike medians, add up, so a bar's length is
-    the mean of its tier's recorded span (TIER_SPAN): the number at its
-    end.
+    Each bar is one distance's mean time per window along its tier's
+    path (TIER_PATH). Means, unlike medians, add up, so a bar's length
+    is the mean of the path's recorded span: the number at its end.
     """
     tiers = list(TIER_WINDOWS)
     figure_width = len(tiers) * plots.PANEL_WIDTH_INCHES * 1.3
+    figure_height = plots.PANEL_HEIGHT_INCHES * 1.4
     figure, axes = pyplot.subplots(
         1,
         len(tiers),
-        figsize=(figure_width, plots.PANEL_HEIGHT_INCHES),
+        figsize=(figure_width, figure_height),
         layout="constrained",
     )
     for axis, tier in zip(axes, tiers, strict=True):
         draw_breakdown(axis, stage_means, BREAKDOWN_ERROR_RATE, tier)
-    legend_handles = []
-    for part_name, (color, _) in BREAKDOWN_PARTS.items():
-        part_patch = patches.Patch(color=color, label=part_name)
-        legend_handles.append(part_patch)
-    figure.legend(
-        handles=legend_handles,
-        loc="outside lower center",
-        ncols=3,
-    )
     plots.save(figure, path)
 
 
-def part_mean_us(stage_means: dict, point: tuple, stages: list) -> float:
-    """One part's mean time per window: its recorded points summed."""
+def segment_mean_us(stage_means: dict, point: tuple, segment: tuple) -> float:
+    """A segment's mean time per window: its points added, less any dropped."""
+    _, added_stages, subtracted_stages = segment
     total_us = 0.0
-    for stage in stages:
-        total_us += stage_means.get((*point, stage), 0.0)
+    for stage in added_stages:
+        total_us += stage_means[(*point, stage)]
+    for stage in subtracted_stages:
+        total_us -= stage_means[(*point, stage)]
     return total_us
 
 
 def draw_breakdown(
     axis, stage_means: dict, error_rate: float, tier: str
 ) -> None:
-    """One tier's stacked bars at one error rate, a bar per distance."""
+    """One tier's stacked bars at one rate, its path's legend underneath."""
     unit_name, unit_us = TIER_UNIT[tier]
-    span_stage, span_start, left_out_stages = TIER_SPAN[tier]
+    path_segments, span_stage, span_start = TIER_PATH[tier]
     distances = []
     for distance in DISTANCES:
         if (error_rate, distance, tier, span_stage) in stage_means:
             distances.append(distance)
     lefts = [0.0] * len(distances)
     positions = list(range(len(distances)))
-    for color, stages in BREAKDOWN_PARTS.values():
-        part_stages = [
-            stage for stage in stages if stage not in left_out_stages
-        ]
+    legend_handles = []
+    for segment_name, segment in path_segments.items():
+        color = segment[0]
         widths = []
         for distance in distances:
             point = (error_rate, distance, tier)
-            mean_us = part_mean_us(stage_means, point, part_stages)
+            mean_us = segment_mean_us(stage_means, point, segment)
             widths.append(mean_us / unit_us)
         axis.barh(positions, widths, left=lefts, height=0.6, color=color)
         lefts = [
             left + width for left, width in zip(lefts, widths, strict=True)
         ]
+        segment_patch = patches.Patch(color=color, label=segment_name)
+        legend_handles.append(segment_patch)
     for position, total in zip(positions, lefts, strict=True):
         axis.text(total, position, f" {total:.4g}", va="center", fontsize=8)
     distance_labels = [f"d={distance}" for distance in distances]
@@ -467,6 +494,14 @@ def draw_breakdown(
         f"mean time per window, {span_start} to Pauli frame ({unit_name})"
     )
     axis.set_title(f"{TIER_WINDOWS[tier]}, {X} = {error_rate:g}")
+    axis.legend(
+        handles=legend_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.18),
+        ncols=2,
+        fontsize=8,
+        frameon=False,
+    )
 
 
 def single_panel(title: str) -> tuple:

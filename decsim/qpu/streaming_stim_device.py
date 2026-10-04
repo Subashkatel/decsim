@@ -61,7 +61,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         seed: Optional[int] = None,
     ) -> None:
         self._seed = stim_device.validated_seed(seed)
-        self._initialize_run_seed_binding(self._seed)
+        seeding._AtomicRunSeedConsumer.__init__(self, self._seed)
         self._programs = _copied_programs(programs)
         self._streams_by_id: dict[Any, _Stream] = {}  # opaque identity keys
         self._models_by_stream_id: dict[  # opaque identity keys

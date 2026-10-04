@@ -127,7 +127,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self.engine = engine
         self.card = card
         self.trace = _TraceSources()
-        self._initialize_run_seed_state(self.card.seed)
+        seeding._RandomSeedConsumer.__init__(self, self.card.seed)
         self._reset_state(self.card.initial_store)
 
     def start(self) -> None:
@@ -374,7 +374,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self.levels = _with_the_papers_cycles(self.card.levels)
         self.preparation_ticks = _preparation_ticks(self.card, round_ticks)
         self.trace = _TraceSources()
-        self._initialize_run_seed_state(self.card.seed)
+        seeding._RandomSeedConsumer.__init__(self, self.card.seed)
         self._reset_state(round_ticks)
 
     def start(self) -> None:

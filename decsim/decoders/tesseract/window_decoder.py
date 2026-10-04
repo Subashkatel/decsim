@@ -56,7 +56,7 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         self, settings: "tesseract_decoder.TesseractDecoder.Settings"
     ) -> None:
         self.settings = settings
-        self._initialize_run_seed_binding(None)
+        seeding._AtomicRunSeedConsumer.__init__(self, None)
         self._installed_seed = None
         self.compiled_by_model: dict = {}
         self._worker_process_id = os.getpid()
@@ -122,14 +122,9 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         if fixed_seed is not None:
             return fixed_seed
         with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    "TesseractWindowDecoder cannot draw while a run-seed "
-                    "reservation is pending"
-                )
+            self._begin_draw()
             if self._installed_seed is None:
                 self._installed_seed = secrets.randbits(64)
-            self._stochastic_use_started = True
             return self._installed_seed
 
     def _claim_worker(self) -> None:

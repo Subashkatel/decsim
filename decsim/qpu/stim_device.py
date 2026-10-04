@@ -83,7 +83,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         measurement_rounds: Optional[dict] = None,
     ) -> None:
         self._seed = validated_seed(seed)
-        self._initialize_run_seed_binding(self._seed)
+        seeding._AtomicRunSeedConsumer.__init__(self, self._seed)
         detector_rounds_override = _rounds_by_key(detector_rounds)
         terminal_ids = _detector_ids_by_key(terminal_detector_ids)
         measurement_rounds_override = _rounds_by_key(measurement_rounds)

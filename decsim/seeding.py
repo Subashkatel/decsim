@@ -111,7 +111,7 @@ class _AtomicRunSeedConsumer:
     A subclass installs its random state in _install_run_seed_state.
     """
 
-    def _initialize_run_seed_binding(self, explicit_seed) -> None:
+    def __init__(self, explicit_seed) -> None:
         self._explicit_seed = explicit_seed
         self._run_seed_lock = threading.Lock()
         self._pending_run_seed = None
@@ -158,6 +158,21 @@ class _AtomicRunSeedConsumer:
         with self._run_seed_lock:
             self._stochastic_use_started = True
 
+    def _begin_draw(self) -> None:
+        """Mark stochastic use for a caller that holds the run-seed lock.
+
+        A draw while a reservation is pending would use a seed the commit
+        then replaces, so it is refused.
+        """
+        if self._pending_run_seed is not None:
+            component_type = type(self)
+            component_name = component_type.__name__
+            raise RuntimeError(
+                f"{component_name} cannot draw while a run-seed reservation "
+                "is pending"
+            )
+        self._stochastic_use_started = True
+
     def _refuse_second_binding(self, seed) -> None:
         component_type = type(self)
         component_name = component_type.__name__
@@ -191,8 +206,8 @@ class _AtomicRunSeedConsumer:
 class _RandomSeedConsumer(_AtomicRunSeedConsumer):
     """Atomic run-seed ownership for a component drawing from random.Random."""
 
-    def _initialize_run_seed_state(self, seed) -> None:
-        self._initialize_run_seed_binding(seed)
+    def __init__(self, seed) -> None:
+        _AtomicRunSeedConsumer.__init__(self, seed)
         self._rng = random.Random(seed)
 
     def _prepare_run_seed_state(self, effective_seed):

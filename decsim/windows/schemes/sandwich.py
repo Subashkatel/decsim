@@ -145,7 +145,7 @@ def _check_step_and_buffer(step: int, buffer: int) -> None:
     """
     if step < 2:
         raise ValueError(
-            f"windows.commit_rounds {step}: the sandwich row lays each "
+            f"windows.scheme.commit_rounds {step}: the sandwich row lays each "
             "step as one seam round and s - 1 core rounds, so it needs a "
             "step of at least 2"
         )

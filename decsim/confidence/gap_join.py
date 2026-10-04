@@ -14,6 +14,7 @@ comparator, Mukherjee et al. ISCA 2002).
 
 import dataclasses
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
@@ -39,7 +40,7 @@ class WindowGapJoin:
     verdict = ports.Port(ports.WindowVerdict)
     decode_queue = ports.Port(ports.DecodeQueue)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         # window key -> the solves of that window that have finished
         self.held_by_window: dict[tuple, list] = {}

@@ -121,7 +121,7 @@ class ClusterGap:
         return gap, ticks
 
 
-def require_one_logical_row(graph) -> None:
+def require_one_logical_row(graph: evidence_records.UnionFindGraph) -> None:
     """The gap is defined for exactly one logical-observable row."""
     row_count = graph.logical_observable_count
     if row_count != 1:

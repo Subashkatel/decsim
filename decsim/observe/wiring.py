@@ -9,8 +9,14 @@ loads and a later listener would miss its lines and stamps.
 """
 
 import functools
-from typing import Any, Optional
+from typing import Optional
 
+import decsim.build.control as control_part
+import decsim.build.decoders as decoders_part
+import decsim.build.escalation as escalation_build
+import decsim.build.qpu as qpu_part
+import decsim.build.readout as readout_part
+import decsim.build.windows as windows_part
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
 import decsim.observe.command_events as command_events_module
@@ -40,20 +46,19 @@ def observe(
     engine: engine_module.Engine,
     *,
     links: ports.Link,
-    qpu: Any,
-    control: Any,
-    readout: Any,
-    windows: Any,
-    decoders: Any,
-    switching: Any,
+    qpu: qpu_part.Qpu,
+    control: control_part.Control,
+    readout: readout_part.Readout,
+    windows: windows_part.Windows,
+    decoders: decoders_part.Decoders,
+    switching: Optional[escalation_build.Switching],
     process_name: str,
     traffic_ledger: link_traffic.TrafficLedger,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
-    The parts sit above this package, so they arrive untyped; a component a
-    run lacks reads as None. It is the run's one list of listeners in
-    pipeline order, so it stays whole past the size prompt.
+    A component a run lacks reads as None. It is the run's one list of
+    listeners in pipeline order, so it stays whole past the size prompt.
     """
     window_manager = windows.window_manager
     decoder_managers = _decoder_managers(decoders)

@@ -8,7 +8,10 @@ only when the observation section asks for backlog_trace.
 
 from collections.abc import Mapping
 
+import decsim.decoders.decoder_unit as decoder_unit_module
+import decsim.engine as engine_module
 import decsim.observe.run_views as run_views
+import decsim.windows.window_manager as window_manager_module
 
 
 class DecoderUtilization:
@@ -20,7 +23,9 @@ class DecoderUtilization:
     1024-1031).
     """
 
-    def __init__(self, engine, units_by_pool: Mapping[str, int]) -> None:
+    def __init__(
+        self, engine: engine_module.Engine, units_by_pool: Mapping[str, int]
+    ) -> None:
         self.engine = engine
         self.total_by_pool = dict(units_by_pool)
         self.busy_by_pool = dict.fromkeys(self.total_by_pool, 0)
@@ -29,12 +34,12 @@ class DecoderUtilization:
         for pool in self.total_by_pool:
             self._per_pool[pool] = _StepIntegral()
 
-    def unit_busy(self, unit) -> None:
+    def unit_busy(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """One unit's compute left its pool's free list."""
         self.busy_by_pool[unit.pool] += 1
         self._observe(self.engine.now)
 
-    def unit_freed(self, unit) -> None:
+    def unit_freed(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """One unit's compute went back to its pool's free list."""
         self.busy_by_pool[unit.pool] -= 1
         self._observe(self.engine.now)
@@ -78,7 +83,11 @@ class DecodeBacklog:
     the window manager and the queues and no one source reports them.
     """
 
-    def __init__(self, window_manager, decoder_managers) -> None:
+    def __init__(
+        self,
+        window_manager: window_manager_module.WindowManager,
+        decoder_managers: tuple,
+    ) -> None:
         self.window_manager = window_manager
         self.decoder_managers = decoder_managers
         self.peak = 0

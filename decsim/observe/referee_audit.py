@@ -17,7 +17,7 @@ class RefereeAudit:
         """How many checked windows the referee decoded differently."""
         return len(self.disagreeing_windows)
 
-    def window_checked(self, window_key, is_agreement: bool) -> None:
+    def window_checked(self, window_key: tuple, is_agreement: bool) -> None:
         """One window re-decoded, and whether the referee reached the same."""
         self.windows_checked += 1
         if is_agreement:

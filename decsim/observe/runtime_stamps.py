@@ -19,27 +19,29 @@ class RuntimeStamps:
         self.last_finish = 0
         self.magic_state_wait: dict = {}
 
-    def operation_issued(self, operation_id, tick: int) -> None:
+    def operation_issued(self, operation_id: int, tick: int) -> None:
         """The issuer took the operation; its QPU start replaces this stamp."""
         self.op_start[operation_id] = tick
 
-    def operation_started(self, operation_id, tick: int) -> None:
+    def operation_started(self, operation_id: int, tick: int) -> None:
         """The QPU started the operation's body on this boundary."""
         self.op_start[operation_id] = tick
 
-    def body_finished(self, operation_id, tick: int) -> None:
+    def body_finished(self, operation_id: int, tick: int) -> None:
         """The operation's body is physically complete."""
         self.body_done[operation_id] = tick
         self.last_finish = max(self.last_finish, tick)
 
-    def decode_released(self, operation_id, tick: int) -> None:
+    def decode_released(self, operation_id: int, tick: int) -> None:
         """The blocked operation's release reached the controller."""
         self.decode_release[operation_id] = tick
 
-    def result_returned(self, operation_id, tick: int) -> None:
+    def result_returned(self, operation_id: int, tick: int) -> None:
         """The operation's result return reached the controller."""
         self.result_return[operation_id] = tick
 
-    def magic_state_delivered(self, operation_id, waited_ticks: int) -> None:
+    def magic_state_delivered(
+        self, operation_id: int, waited_ticks: int
+    ) -> None:
         """The factory handed the operation its state after that wait."""
         self.magic_state_wait[operation_id] = waited_ticks

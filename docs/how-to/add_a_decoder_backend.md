@@ -23,16 +23,28 @@ class MyDecoder(decoder.WindowDecoderBase):
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.PHYSICAL
 
-    def compile(self, faults, model):
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> Any:
         """The backend for one window model, built once while it lives."""
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: Any,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """One backend call: the fault columns it selects."""
 ```
 
 `faults.check` is the window's detector-by-fault matrix and
-`faults.priors` each fault's probability. The matrix is read-only, so a
-backend that writes into its input gets a copy,
+`faults.priors` each fault's probability; `syndrome` is the window's
+detection events, one 0 or 1 per row of the matrix. The matrix is
+read-only, so a backend that writes into its input, or refuses a
+read-only one as `ldpc` does, gets a copy,
 `scipy.sparse.csr_matrix(faults.check)`. `decode_window` returns
 `decoding_records.WindowDecode(selected)`, where `selected` is a 0 or 1
 per fault column. Return the columns; the base builds the correction,
@@ -42,6 +54,15 @@ hands the next window.
 A row priced by a number instead of a measured call inherits
 `DecoderBase` from the same file and gives `decode` and `latency`. It is
 charged its `latency`, never the host's clock.
+
+A real decoder is timed on the host's clock, which is no hardware's
+time: a Python backend takes hundreds of microseconds a window. To
+charge it a fixed price instead, hand the base a latency model,
+`decoder.WindowDecoderBase.__init__(self, latency_model)`, built from a
+field of your record, as `PyMatchingDecoder.Settings` builds
+`decoders.PresetLatencyDecoder(preset_latency_microseconds)`
+(`decsim/decoders/minimum_weight_perfect_matching/decoder.py`). The
+decode still runs; only its time is the price.
 
 ## 2. Say what fault model you need
 
@@ -92,8 +113,10 @@ wrong. A backend that holds the shot's seed sets `backend_is_seeded =
 True` and compiles once a shot.
 
 Put the class in its own folder under `decsim/decoders/`, named by the
-algorithm spelled out, as `belief_propagation_osd/` is. A short form in
-a name needs a row in `docs/reference/glossary.md` (STYLE.md rule 2).
+algorithm, spelled out as far as the field spells it, as
+`belief_propagation_osd/` is. Every short form in a folder, a class or
+the record's `name` (such as `osd` and `bposd`) needs a row in
+`docs/reference/glossary.md` (STYLE.md rule 2).
 
 If your backend is an optional dependency, import it inside the function
 that builds the backend, as `decsim/decoders/tesseract/window_decoder.py`
@@ -120,13 +143,15 @@ machine = dataclasses.replace(base, weak_decoder=weak_decoder)
 and make a run file of it, as `examples/my_first_sweep.py` is. To check
 its answers, add a second point whose algorithm is
 `PyMatchingDecoder.Settings()`: at one seed both points draw the same
-shot (their `sample_digest` cells in `shots.csv` are equal), so a seed
-where their `predictions` differ is a shot the two decoders answered
-apart. A backend that is correct and different from matching will
-disagree on some shots; a backend that is broken disagrees on most.
-Even two matching decoders disagree on a few when their windows differ,
-since a window commits without the later rounds a whole-circuit decode
-reads.
+shot (their `sample_digest` cells in `shots.csv` are equal), and the
+`algorithm` column tells the two points apart. Compare their failures
+shot by shot: on the shots where only one of the two fails, a decoder
+about as strong as matching fails about as often as matching does,
+and an exact McNemar test (a two-sided binomial test at one half on
+those shots) says whether a gap is more than chance. A broken decoder
+fails far more often. Check too that `invalid_correction_windows` is 0
+and `is_scored` is `True` on every shot: a backend that returns no
+correction is counted there, not as a failure.
 
 For a second opinion per window rather than per shot, wrap your record
 in `TesseractCheckedDecoder.Settings(inner=...)`
@@ -147,7 +172,9 @@ BP-OSD.
 ## 6. Read the worked examples
 
 `decsim/decoders/belief_propagation_osd/decoder.py` is a whole real
-decoder in under a hundred lines.
+decoder in under a hundred lines; its constructor takes `ldpc`'s keyword
+arguments rather than the settings record of step 3, which
+`decsim/decoders/union_find/decoder.py` shows.
 `tests/machine/test_machine.py::test_a_new_decoder_is_one_class_and_its_settings_record`
 plugs a priced decoder in from outside decsim in a few lines, and
 `tests/machine/test_machine.py::test_a_second_table_row_runs_gate_point_one`

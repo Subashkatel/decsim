@@ -172,6 +172,7 @@ In the papers' symbols, `r_com` is the commit region's round count,
 | `ExtraClusterGap` in `decsim/confidence/extra_cluster.py` | the extra-cluster gap: decode the window once, then grow every cluster on until the two boundaries join or the threshold's worth of growth is spent | Kishi, Toshio, Fujisaki, Oshima, Sato and Fujii, arXiv:2602.03336, Algorithm 1 and Theorems 1 and 2 |
 | threshold, `threshold_decibels` on a threshold record | `g_th`, the value of the soft output below which a window is escalated. The record is in decibels and a gap is compared in natural-log weight, the record's `threshold_nats`: nats are decibels times ln(10) over 10 (`decsim/escalation/threshold_sources.py`, `decibels_to_nats`) | Toshio Sec. III A, step 3 |
 | osd | ordered statistics decoding, the post-processing step after belief propagation in BP-OSD. decsim calls the `ldpc` package's `BpOsdDecoder` | `decsim/decoders/belief_propagation_osd/decoder.py`, which names `ldpc`'s own `osd.hpp` and `stimbposd`'s `bp_osd.py` |
+| bp, `bposd`, `relay_bp` | belief propagation. `bposd` and `relay_bp` are the BP-OSD and Relay-BP rows' words in the results' `algorithm` column | `decsim/decoders/belief_propagation_osd/decoder.py`; `decsim/decoders/relay_belief_propagation/decoder.py`, after Müller et al., arXiv:2506.01779 |
 
 ## The two stores
 

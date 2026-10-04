@@ -321,27 +321,6 @@ def experiment_one_links() -> link_settings.FabricSettings:
     )
 
 
-def _fridge_path(links, path_name, latency_cycles, bits_per_lane_cycle):
-    """One path in cycles of the chip clock, four lanes when it has a rate."""
-    lane_count = 4
-    if bits_per_lane_cycle is None:
-        lane_count = 1
-    return link_profiles.path_card(
-        links,
-        path_name,
-        clock=machine_settings.FRIDGE_CLOCK,
-        latency_cycles=latency_cycles,
-        bits_per_cycle=bits_per_lane_cycle,
-        source=EXPERIMENT_ONE_LINKS_SOURCE,
-        lane_count=lane_count,
-    )
-
-
-def _with_receiver(path: link_settings.PathSettings):
-    """The path whose latency holds its receiver's processing too."""
-    return dataclasses.replace(path, excludes_receiver_processing=False)
-
-
 def switching_baseline_points() -> list:
     """Every switching point, then every weak-alone point.
 
@@ -376,6 +355,27 @@ def switching_baseline_points() -> list:
         )
         weak_alone_points.append(weak_alone_point)
     return switching_points + weak_alone_points
+
+
+def _fridge_path(links, path_name, latency_cycles, bits_per_lane_cycle):
+    """One path in cycles of the chip clock, four lanes when it has a rate."""
+    lane_count = 4
+    if bits_per_lane_cycle is None:
+        lane_count = 1
+    return link_profiles.path_card(
+        links,
+        path_name,
+        clock=machine_settings.FRIDGE_CLOCK,
+        latency_cycles=latency_cycles,
+        bits_per_cycle=bits_per_lane_cycle,
+        source=EXPERIMENT_ONE_LINKS_SOURCE,
+        lane_count=lane_count,
+    )
+
+
+def _with_receiver(path: link_settings.PathSettings):
+    """The path whose latency holds its receiver's processing too."""
+    return dataclasses.replace(path, excludes_receiver_processing=False)
 
 
 def _metadata(distance: int, physical_error_probability: float) -> dict:

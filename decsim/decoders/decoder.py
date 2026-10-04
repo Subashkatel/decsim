@@ -174,13 +174,13 @@ class WindowDecoderBase(DecoderBase):
         self,
         faults: fault_models.PlacedFaultModel,
         model: fault_models.WindowErrorModel,
-    ) -> Any:
+    ) -> Any:  # an opaque identity only the row reads
         """The backend for one window model, built once while it lives."""
 
     @abc.abstractmethod
     def decode_window(
         self,
-        backend: Any,
+        backend: Any,  # an opaque identity only the row reads
         model: fault_models.WindowErrorModel,
         faults: fault_models.PlacedFaultModel,
         syndrome: numpy.ndarray,
@@ -189,7 +189,7 @@ class WindowDecoderBase(DecoderBase):
 
     def decode_forced_window(
         self,
-        backend: Any,
+        backend: Any,  # an opaque identity only the row reads
         model: fault_models.WindowErrorModel,
         faults: fault_models.PlacedFaultModel,
         syndrome: numpy.ndarray,
@@ -282,7 +282,7 @@ class WindowDecoderBase(DecoderBase):
         self,
         faults: fault_models.PlacedFaultModel,
         model: fault_models.WindowErrorModel,
-    ) -> Any:
+    ) -> Any:  # an opaque identity only the row reads
         """The placed model's backend, compiled once and kept while it lives.
 
         A task's shots share their window models

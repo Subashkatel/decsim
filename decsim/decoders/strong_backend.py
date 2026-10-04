@@ -294,7 +294,7 @@ class _Walk:
 
     job: decoding_records.DecodeJob
     on_result: decoder_module.OnResult
-    ticket: Any = None
+    ticket: Any = None  # an opaque identity only the backend reads
     steps: tuple = ()
     # the step to run next, and the resource the decode holds now
     index: int = 0

@@ -52,7 +52,7 @@ class DecoderMemoryCapacityError(RuntimeError):
 class MaterializedSyndromeRound:
     """One immutable syndrome round owned by the decoder side."""
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     round_index: int
     fragments: tuple[round_records.RetainedSyndromeFragment, ...]
 

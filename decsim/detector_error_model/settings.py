@@ -46,7 +46,7 @@ STRONG_SIDE_SEATS = ("strong_syndrome_buffer", "strong_decoder")
 
 @dataclasses.dataclass(frozen=True)
 class DetectionEventSettings:
-    """The seats that form a round's detection events, and what it costs.
+    """How a round's detection events are formed.
 
     formed_at lists the seats, each once; every path a round takes to a
     decoder crosses exactly one (build/readout.py). One conversion costs

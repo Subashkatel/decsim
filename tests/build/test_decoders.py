@@ -149,7 +149,8 @@ def test_a_weak_decoder_short_of_the_signals_evidence_is_named_by_its_record():
         preset_latency_microseconds=0.5
     )
     tier = decoder_settings.DecoderPoolSettings(algorithm=matching)
-    signal = cluster.ClusterGap.Settings().build(matching, 4.6)
+    signal_settings = cluster.ClusterGap.Settings()
+    signal = signal_settings.build(matching, 4.6)
 
     refusal = "weak_decoder PyMatchingDecoder.Settings cannot serve"
     with pytest.raises(ValueError, match=refusal):

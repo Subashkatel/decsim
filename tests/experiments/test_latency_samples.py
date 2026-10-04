@@ -31,9 +31,8 @@ def wall_clock_axes(distances: tuple) -> dict:
 
 
 def test_every_decoded_window_contributes_one_latency_sample():
-    measurement = run_files.measured_shot(
-        axes=wall_clock_axes((3,)), **WALL_CLOCK
-    )
+    axes = wall_clock_axes((3,))
+    measurement = run_files.measured_shot(axes=axes, **WALL_CLOCK)
     samples = measurement.samples["algorithm"]
     assert len(samples) == measurement.decoded_windows
     assert all(sample > 0 for sample in samples)
@@ -41,9 +40,8 @@ def test_every_decoded_window_contributes_one_latency_sample():
 
 def test_a_latency_sample_names_the_tier_that_decoded_its_window():
     """A weak-only run's windows are all the weak tier's."""
-    measurement = run_files.measured_shot(
-        axes=wall_clock_axes((3,)), **WALL_CLOCK
-    )
+    axes = wall_clock_axes((3,))
+    measurement = run_files.measured_shot(axes=axes, **WALL_CLOCK)
     rows = report.latency_sample_rows([measurement])
     tiers = [row["tier"] for row in rows]
     assert tiers == ["weak"] * measurement.decoded_windows
@@ -59,9 +57,8 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
     times the round period: 3 us at d 3 and 5 us at d 5.
     """
     monkeypatch.chdir(tmp_path)
-    run_path = run_files.write_run_file(
-        tmp_path, axes=wall_clock_axes((3, 5)), **WALL_CLOCK
-    )
+    axes = wall_clock_axes((3, 5))
+    run_path = run_files.write_run_file(tmp_path, axes=axes, **WALL_CLOCK)
     run_dir, rows = collect_command.run_experiment(run_path)
     samples_path = run_dir / "latency_samples.csv"
     with open(samples_path, newline="") as handle:
@@ -89,7 +86,8 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
 def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):
     """The fixed-latency card is flat by construction: no raw samples."""
     monkeypatch.chdir(tmp_path)
-    card_path = run_files.write_run_file(tmp_path, axes=wall_clock_axes((3, 5)))
+    axes = wall_clock_axes((3, 5))
+    card_path = run_files.write_run_file(tmp_path, axes=axes)
     card_run_dir, rows = collect_command.run_experiment(card_path)
     assert not (card_run_dir / "latency_samples.csv").exists()
 

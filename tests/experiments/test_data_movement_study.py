@@ -54,7 +54,8 @@ def block_points(block: str) -> list:
 
 def block_settings(block: str):
     """One block's settings, at its first point."""
-    first_point = block_points(block)[0]
+    points = block_points(block)
+    first_point = points[0]
     return first_point.machine
 
 

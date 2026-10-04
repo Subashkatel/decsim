@@ -71,6 +71,7 @@ def test_a_switching_record_builds_the_policy_its_run_binds():
     settings = _switching(_OwnPolicySwitching)
     engine = engine_module.Engine()
 
-    switching = escalation_build.Switching.build(settings, _weak(), engine)
+    weak = _weak()
+    switching = escalation_build.Switching.build(settings, weak, engine)
 
     assert isinstance(switching.policy, _OwnPolicy)

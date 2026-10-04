@@ -206,7 +206,8 @@ def test_a_run_file_rewritten_within_its_second_runs_its_new_text(tmp_path):
     study = experiment.load(run_path)
 
     first_point = study.points[0]
-    assert study.collection_of(first_point).max_shots == 4
+    collection = study.collection_of(first_point)
+    assert collection.max_shots == 4
 
 
 def test_a_run_file_that_defines_no_experiment_is_refused(tmp_path):

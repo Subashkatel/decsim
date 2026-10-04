@@ -450,8 +450,12 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
 
     completed = _decsim(tmp_path, arguments, environment)
 
-    run_lines = (results_dir / "run.sbatch").read_text().splitlines()
-    fold_lines = (results_dir / "fold.sbatch").read_text().splitlines()
+    run_script = results_dir / "run.sbatch"
+    run_text = run_script.read_text()
+    run_lines = run_text.splitlines()
+    fold_script = results_dir / "fold.sbatch"
+    fold_text = fold_script.read_text()
+    fold_lines = fold_text.splitlines()
     decsim_run = [sys.executable, "-m", "decsim", "run"]
     run_path = config_path.resolve()
     assert completed.returncode == 0, completed.stderr
@@ -482,7 +486,9 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
         "--out",
         str(results_dir),
     ]
-    assert len(list(results_dir.glob("points/*/machine.json"))) == 2
+    point_records = results_dir.glob("points/*/machine.json")
+    point_record_paths = list(point_records)
+    assert len(point_record_paths) == 2
     assert not (tmp_path / "submissions.txt").exists()
 
 

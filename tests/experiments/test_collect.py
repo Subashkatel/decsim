@@ -625,7 +625,8 @@ def _link_means(shot_link_rows: list) -> list:
     """
     rows_by_link = {}
     for row in shot_link_rows:
-        rows_by_link.setdefault(row["link"], []).append(row)
+        link_rows = rows_by_link.setdefault(row["link"], [])
+        link_rows.append(row)
     mean_rows = []
     for link in sorted(rows_by_link):
         rows = rows_by_link[link]

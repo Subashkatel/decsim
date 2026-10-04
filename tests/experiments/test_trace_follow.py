@@ -250,7 +250,8 @@ def test_the_command_prints_the_table(trace_path, capsys):
 
     command.main(["trace", "follow", str(trace_path), "--round", "1:1"])
 
-    printed = capsys.readouterr().out
+    captured = capsys.readouterr()
+    printed = captured.out
     assert printed.startswith("round 1:1 of ")
     assert "d3 seed0" in printed
     assert "copies 4, references 1 job and 1 hold, moves 3" in printed
@@ -261,12 +262,16 @@ def test_a_run_folders_trace_is_named_by_its_points_name(tmp_path):
     point_dir = tmp_path / "points" / "t_minus_1"
     point_dir.mkdir(parents=True)
     record = {"id": "a1b2", "name": "t_minus_1"}
-    (point_dir / "machine.json").write_text(json.dumps(record))
+    record_path = point_dir / "machine.json"
+    record_text = json.dumps(record)
+    record_path.write_text(record_text)
     trace_dir = tmp_path / "trace"
     trace_dir.mkdir()
+    named_trace = trace_dir / "a1b2_seed0.trace.json"
+    other_trace = trace_dir / "c3d4_seed0.trace.json"
 
-    named = trace_follow.point_named_by(trace_dir / "a1b2_seed0.trace.json")
-    other = trace_follow.point_named_by(trace_dir / "c3d4_seed0.trace.json")
+    named = trace_follow.point_named_by(named_trace)
+    other = trace_follow.point_named_by(other_trace)
 
     assert named == "t_minus_1"
     assert other is None

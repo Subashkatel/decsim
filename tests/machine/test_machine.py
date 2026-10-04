@@ -1776,8 +1776,10 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     later_by = []
     paired = zip(decodes.finished, longer_decodes.finished, strict=True)
     for finished, longer in paired:
-        later_by.append(longer.finish_ticks - finished.finish_ticks)
-    walks_before_and_own = range(1, window_count + 1)
+        lag_ticks = longer.finish_ticks - finished.finish_ticks
+        later_by.append(lag_ticks)
+    last_walk = window_count + 1
+    walks_before_and_own = range(1, last_walk)
     assert later_by == [
         one_microsecond * walks for walks in walks_before_and_own
     ]

@@ -87,7 +87,9 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
+THIS_FILE = pathlib.Path(__file__)
+THIS_PATH = THIS_FILE.resolve()
+REPOSITORY = THIS_PATH.parents[2]
 # the detection events of one round of the swept distance-three patch,
 # and of its readout round, which compares the data qubits as well
 BITS_PER_ROUND = 8
@@ -151,6 +153,7 @@ def fridge_hops(hops: dict, setup_cycles: Optional[dict] = None):
     links = link_profiles.logical_reference_profile()
     cards = {}
     for path_name, latency_cycles in hops.items():
+        path_setup_cycles = setup_cycles.get(path_name, 0)
         cards[path_name] = link_profiles.path_card(
             links,
             path_name,
@@ -158,7 +161,7 @@ def fridge_hops(hops: dict, setup_cycles: Optional[dict] = None):
             latency_cycles=latency_cycles,
             bits_per_cycle=None,
             source=HOPS_SOURCE,
-            setup_cycles_per_transfer=setup_cycles.get(path_name, 0),
+            setup_cycles_per_transfer=path_setup_cycles,
         )
     return dataclasses.replace(links, **cards)
 
@@ -283,21 +286,24 @@ def switching_settings(
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=gap_threshold_db
     )
+    confidence = complementary.ComplementaryGap.Settings()
     switching = escalation_settings.SwitchingSettings(
-        confidence=complementary.ComplementaryGap.Settings(),
+        confidence=confidence,
         threshold=threshold,
         run_both_at_once=run_both_at_once,
         strong_window=strong_window,
     )
     windows = window_settings.switching_windows(windows, strong_window)
-    weak_decoder = ten_cycle_release_pool(charged(weak_microseconds))
+    weak_algorithm = charged(weak_microseconds)
+    weak_decoder = ten_cycle_release_pool(weak_algorithm)
     strong_algorithm = strong_algorithm or charged(10.0)
     strong_decoder = ten_cycle_release_pool(strong_algorithm, strong_units)
     flags = dict.fromkeys(observation, True)
     watched = dataclasses.replace(base.observation, **flags)
+    links = fridge_hops(TWO_TIER_HOPS)
     return dataclasses.replace(
         base,
-        links=fridge_hops(TWO_TIER_HOPS),
+        links=links,
         workload=workload,
         windows=windows,
         weak_decoder=weak_decoder,
@@ -342,7 +348,8 @@ def bounded_store_settings() -> machine_settings.MachineSettings:
 
 def bounded_store_shot() -> measure.ShotMeasurement:
     """That machine's shot at seed 0, measured."""
-    task = point_task(bounded_store_settings())
+    settings = bounded_store_settings()
+    task = point_task(settings)
     return measured(task)
 
 
@@ -624,7 +631,8 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
 
 def test_patches_named_by_an_int_and_a_str_are_measured():
     """Windows are ordered by records/identity.py, not Python's comparison."""
-    task = point_task(run_files.minimal_machine(POINT))
+    minimal = run_files.minimal_machine(POINT)
+    task = point_task(minimal)
     workload = producers.memory_patches(
         "surface_code:rotated_memory_z", 3, 2, 3, 0.001
     )
@@ -1274,7 +1282,8 @@ def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it():
     no window owes anything and none waits before its input hop.
     """
     settings = input_setup_settings()
-    measurement = measured(point_task(settings))
+    task = point_task(settings)
+    measurement = measured(task)
 
     assert measurement.samples["input_link_per_window"] == [0.024] * 9
     assert measurement.samples["dep_block"] == [0.0] * 9
@@ -1585,7 +1594,8 @@ def two_patch_burst_settings() -> machine_settings.MachineSettings:
 
 def _two_patch_burst_shot(*, seed: int) -> collect.Shot:
     """One seed of two_patch_burst_settings."""
-    task = point_task(two_patch_burst_settings())
+    settings = two_patch_burst_settings()
+    task = point_task(settings)
     return collect.run_shot(task, seed)
 
 
@@ -1774,7 +1784,8 @@ def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):
 
 def test_a_source_that_samples_no_shot_is_refused_with_a_sentence():
     """timing_only draws no shot, so the loop has no truth to be judged by."""
-    task = point_task(timing_only_settings())
+    settings = timing_only_settings()
+    task = point_task(settings)
 
     with pytest.raises(refusal.RefusalError, match="sampled none"):
         measured(task)
@@ -1849,7 +1860,9 @@ def test_the_status_columns_count_the_statuses_the_decoder_returned(
     """
     pytest.importorskip("relay_bp")
     returned = recorded_relay_statuses(monkeypatch)
-    measurement = measured(point_task(one_iteration_relay_settings(), 0.003))
+    settings = one_iteration_relay_settings()
+    task = point_task(settings, 0.003)
+    measurement = measured(task)
     record = report.record_of([measurement])
     rows, _run_dir = run_files.folded_run(tmp_path, [measurement])
     expected = collections.Counter(
@@ -1867,7 +1880,8 @@ def test_the_status_columns_count_the_statuses_the_decoder_returned(
 
 def one_iteration_relay_settings() -> machine_settings.MachineSettings:
     """The minimal machine on Relay-BP held to one iteration, no relay."""
-    base = run_files.minimal_machine(cells_at(0.003))
+    cells = cells_at(0.003)
+    base = run_files.minimal_machine(cells)
     relay = run_files.RELAY_BP.Settings(
         pre_iterations=1, relay_set_count=0, iterations_per_set=1
     )
@@ -1877,7 +1891,8 @@ def one_iteration_relay_settings() -> machine_settings.MachineSettings:
 
 def decoder_row_shot(kind: str, seed: int):
     """One seeded shot of the minimal machine with its weak row named."""
-    settings = run_files.minimal_machine(cells_at(0.01), weak_decoder=kind)
+    cells = cells_at(0.01)
+    settings = run_files.minimal_machine(cells, weak_decoder=kind)
     task = point_task(settings, 0.01)
     return measured(task, seed)
 
@@ -2024,7 +2039,8 @@ def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
     windows, and the summary adds them up over the point's shots.
     """
     pytest.importorskip("tesseract_decoder")
-    task = point_task(refereed_settings(), 0.01)
+    settings = refereed_settings()
+    task = point_task(settings, 0.01)
     shot = collect.run_shot(task, 0)
 
     measurement = measure.measure_shot(shot)
@@ -2240,7 +2256,8 @@ def test_a_windows_confidence_is_the_gap_its_verdict_request_ended_with():
     confidence the verdict read (Toshio et al. 2510.25222 Sec. III A
     step 3).
     """
-    switching = run_files.switching_machine(cells_at(0.003))
+    cells = cells_at(0.003)
+    switching = run_files.switching_machine(cells)
     task = point_task(switching, 0.003)
     settings = task.settings
     machine = machine_module.Machine.build(settings, 0)

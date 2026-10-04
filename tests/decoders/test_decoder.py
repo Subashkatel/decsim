@@ -217,7 +217,8 @@ def test_a_window_result_carries_the_detection_events_its_decode_read():
     shot = detection_events[0]
     job = windows.job_for(model, shot)
 
-    result = NoFaultRow().decode(job)
+    row = NoFaultRow()
+    result = row.decode(job)
 
     expected = windows.row_syndrome(model, shot)
     assert expected.any()

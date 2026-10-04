@@ -80,12 +80,12 @@ READOUT_SOURCE = "a run-side test's readout: one fridge cycle"
 # The decoders a test names in a run file, each run for real.
 PYMATCHING = minimum_weight_perfect_matching.PyMatchingDecoder
 RELAY_BP = relay_belief_propagation.RelayBeliefPropagationDecoder
+UNION_FIND = union_find.UnionFindDecoder
+HOST_TIME = cycle_count.HostMeasuredTime()
 ALGORITHMS = {
     "pymatching": PYMATCHING.Settings(),
     "relay_bp": RELAY_BP.Settings(),
-    "union_find": union_find.UnionFindDecoder.Settings(
-        timing=cycle_count.HostMeasuredTime()
-    ),
+    "union_find": UNION_FIND.Settings(timing=HOST_TIME),
 }
 # reference_machine's hops: (path, latency cycles, bits a cycle a lane,
 # lanes), each on the fridge clock
@@ -197,10 +197,12 @@ def switching_machine(
         threshold = threshold_sources.OnlineThreshold.Settings(
             threshold_decibels=ONLINE_THRESHOLD_DECIBELS, **online
         )
+    confidence = complementary.ComplementaryGap.Settings()
+    strong_window = strong_window_shapes.RedoWindow.Settings()
     switching = escalation_settings.SwitchingSettings(
-        confidence=complementary.ComplementaryGap.Settings(),
+        confidence=confidence,
         threshold=threshold,
-        strong_window=strong_window_shapes.RedoWindow.Settings(),
+        strong_window=strong_window,
     )
     windows = window_settings.switching_windows(
         base.windows, switching.strong_window
@@ -305,7 +307,8 @@ def sweep(
     collection = collection or DEFAULT_COLLECTION
     machine_arguments = machine_arguments or {}
     settings = collection_module.CollectionSettings(**collection)
-    options = collect.RecordOptions(**(record_options or {}))
+    record_options = record_options or {}
+    options = collect.RecordOptions(**record_options)
     build = MACHINES[machine]
     points = []
     for cells in experiment.grid(**axes):

@@ -56,7 +56,9 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
+THIS_FILE = pathlib.Path(__file__)
+THIS_PATH = THIS_FILE.resolve()
+REPOSITORY = THIS_PATH.parents[2]
 # The run files examples/ ships, each run with `decsim run`.
 EXAMPLES_DIR = REPOSITORY / "examples"
 EXAMPLES = (
@@ -1134,9 +1136,12 @@ def test_an_online_points_threshold_summary_is_its_end_counters(tmp_path):
 
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    (summary,) = _csv_rows(out_dir / "threshold_summary.csv")
-    (sweep_row,) = _csv_rows(out_dir / "sweep.csv")
-    shots = _csv_rows(out_dir / "shots.csv")
+    summary_path = out_dir / "threshold_summary.csv"
+    sweep_path = out_dir / "sweep.csv"
+    shots_path = out_dir / "shots.csv"
+    (summary,) = _csv_rows(summary_path)
+    (sweep_row,) = _csv_rows(sweep_path)
+    shots = _csv_rows(shots_path)
     trajectory = _online_trajectory_rows(out_dir)
     decoded = sum(int(shot["decoded_windows"]) for shot in shots)
     escalated = sum(int(shot["escalated_windows"]) for shot in shots)
@@ -1144,7 +1149,8 @@ def test_an_online_points_threshold_summary_is_its_end_counters(tmp_path):
     labeled = events.count("audit_clean") + events.count("audit_bad")
     audits_started = int(summary["audited"]) + int(summary["pending_audits"])
     columns = list(summary)
-    assert columns[:5] == list(sweep_row)[:5]
+    sweep_columns = list(sweep_row)
+    assert columns[:5] == sweep_columns[:5]
     assert summary["point_id"] == sweep_row["point_id"]
     assert int(summary["windows"]) == decoded == 20
     assert int(summary["escalated"]) + audits_started == escalated
@@ -1386,15 +1392,18 @@ def test_a_shot_replayed_into_a_collection_keeps_its_records(tmp_path):
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     out_dir = tmp_path / "out"
     collect_command.run_experiment(config_path, out_dir)
-    record_paths = sorted(out_dir.glob("points/*/machine.json"))
+    point_records = out_dir.glob("points/*/machine.json")
+    record_paths = sorted(point_records)
     records_before = [path.read_bytes() for path in record_paths]
-    points_before = _manifest_of(out_dir)["points"]
+    manifest_before = _manifest_of(out_dir)
+    points_before = manifest_before["points"]
 
     _run_one_shot(config_path, seed=0, out_dir=out_dir)
 
     records_after = [path.read_bytes() for path in record_paths]
     assert records_after == records_before
-    assert _manifest_of(out_dir)["points"] == points_before
+    manifest_after = _manifest_of(out_dir)
+    assert manifest_after["points"] == points_before
     assert (out_dir / "result.json").exists()
 
 
@@ -1408,7 +1417,7 @@ def test_a_replay_of_a_point_recorded_with_other_settings_is_refused(
     study = experiment.load_one_point(config_path)
     (point,) = study.points
     record_path = out_dir / "points" / point.name / "machine.json"
-    record = json.loads(record_path.read_text())
+    record = run_folder.read_json(record_path)
     record["id"] = "0" * 64
     record_text = json.dumps(record)
     record_path.write_text(record_text)
@@ -1432,7 +1441,7 @@ def test_a_record_class_names_settings_and_not_results(tmp_path):
     _run_one_shot(config_path, seed=0, out_dir=out_dir)
 
     (record_path,) = out_dir.glob("points/*/machine.json")
-    record = json.loads(record_path.read_text())
+    record = run_folder.read_json(record_path)
     result_text = (out_dir / "result.json").read_text()
     assert record["settings"]["class"] == "decsim.settings.MachineSettings"
     assert '"class"' not in result_text
@@ -1488,19 +1497,24 @@ def test_two_dirty_trees_of_one_commit_are_two_trees(
 
     with pytest.raises(SystemExit):
         command.main(["run", str(config_path), "--out", str(first_dir)])
-    run_refusal = capsys.readouterr().err
+    run_captured = capsys.readouterr()
+    run_refusal = run_captured.err
     (first_piece,) = first_dir.glob("pieces/*/1-1")
     (second_piece,) = second_dir.glob("pieces/*/1-1")
     shutil.rmtree(first_piece)
     shutil.copytree(second_piece, first_piece)
     with pytest.raises(SystemExit):
         command.main(["run", "--fold", "--out", str(first_dir)])
-    fold_refusal = capsys.readouterr().err
+    fold_captured = capsys.readouterr()
+    fold_refusal = fold_captured.err
 
-    first_git = _manifest_of(first_dir)["git"]
-    second_git = _manifest_of(second_dir)["git"]
+    first_manifest = _manifest_of(first_dir)
+    second_manifest = _manifest_of(second_dir)
+    first_git = first_manifest["git"]
+    second_git = second_manifest["git"]
     first_patch = (first_dir / "code_state.patch").read_bytes()
-    first_patch_sha256 = hashlib.sha256(first_patch).hexdigest()
+    first_patch_hash = hashlib.sha256(first_patch)
+    first_patch_sha256 = first_patch_hash.hexdigest()
     assert first_git["patch_sha256"] == first_patch_sha256
     assert first_git["commit"] == second_git["commit"]
     assert first_git["patch_sha256"] != second_git["patch_sha256"]
@@ -1547,7 +1561,8 @@ def test_a_fold_of_two_points_saved_by_two_trees_is_refused(tmp_path, capsys):
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     out_dir = tmp_path / "out"
     command.main(["run", str(config_path), "--out", str(out_dir)])
-    first_point_dir = min(out_dir.glob("pieces/*"))
+    point_dirs = out_dir.glob("pieces/*")
+    first_point_dir = min(point_dirs)
     other_commit = "b" * 40
     piece_paths = first_point_dir.glob("*/piece.json")
     _as_pieces_run_at_commit(piece_paths, other_commit)
@@ -1576,15 +1591,16 @@ def test_a_record_with_no_patch_hash_stops_a_run_before_a_shot(
     out_dir = tmp_path / "out"
     first_config = _capped_noisy_config(tmp_path, 2, 15)
     command.main(["run", str(first_config), "--out", str(out_dir)])
+    piece_paths = out_dir.glob("pieces/*/*/piece.json")
     records = {
         "run.json": [out_dir / run_folder.RUN_FILE],
-        "piece.json": list(out_dir.glob("pieces/*/*/piece.json")),
+        "piece.json": list(piece_paths),
     }
     for record_path in records[record]:
-        written = json.loads(record_path.read_text())
+        written = run_folder.read_json(record_path)
         identity = written.get("git", written)
         del identity["patch_sha256"]
-        record_path.write_text(json.dumps(written))
+        run_folder.write_json(record_path, written)
     raised_config = _capped_noisy_config(tmp_path, 3, 15)
 
     with pytest.raises(KeyError, match="patch_sha256"):
@@ -1605,11 +1621,12 @@ def test_a_fold_of_a_folder_whose_run_json_has_no_patch_hash_stops(
     out_dir = tmp_path / "out"
     config_path = _capped_noisy_config(tmp_path, 2, 15)
     command.main(["run", str(config_path), "--out", str(out_dir)])
-    shutil.rmtree(out_dir / pieces.PIECES_FOLDER)
+    pieces_dir = out_dir / pieces.PIECES_FOLDER
+    shutil.rmtree(pieces_dir)
     run_path = out_dir / run_folder.RUN_FILE
-    record = json.loads(run_path.read_text())
+    record = run_folder.read_json(run_path)
     del record["git"]["patch_sha256"]
-    run_path.write_text(json.dumps(record))
+    run_folder.write_json(run_path, record)
     before = _run_folder_bytes(out_dir)
 
     with pytest.raises(KeyError, match="patch_sha256"):
@@ -1621,9 +1638,9 @@ def test_a_fold_of_a_folder_whose_run_json_has_no_patch_hash_stops(
 def _as_pieces_run_at_commit(piece_paths, commit: str) -> None:
     """The pieces as a process at another commit would have saved them."""
     for piece_path in piece_paths:
-        piece = json.loads(piece_path.read_text())
+        piece = run_folder.read_json(piece_path)
         piece["commit"] = commit
-        piece_path.write_text(json.dumps(piece))
+        run_folder.write_json(piece_path, piece)
 
 
 def _as_a_tree_with_the_patch(monkeypatch, patch_text: str) -> None:
@@ -1937,7 +1954,8 @@ def test_a_run_with_no_folder_writes_a_new_dated_one(tmp_path, monkeypatch):
     second_dir, _rows = collect_command.run_experiment(run_file)
 
     today = datetime.date.today()
-    expected = pathlib.Path("results") / f"{today.isoformat()}_reference"
+    day = today.isoformat()
+    expected = pathlib.Path("results") / f"{day}_reference"
     assert first_dir == expected
     assert second_dir == expected.with_name(f"{expected.name}_2")
     assert (first_dir / "sweep.csv").is_file()

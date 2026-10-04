@@ -390,8 +390,9 @@ needs a design note saying why, the way a golden move does.
 ## Rule 11. Branches are a liability
 
 A function decides at most five times: `if`, `elif`, a loop, an `and`
-or `or` in a condition, an `except`, each count one, and a function with
-six or more is split before it lands. Savoia and Evans (the CRAP metric,
+or `or` in a condition, an `except`, each count one (a comprehension's
+`for` is a loop, its `if` an `if`), and a function with six or more is
+split before it lands. Savoia and Evans (the CRAP metric,
 2007) fit this on real code: the risk of a method grows with the square
 of its branch count and falls with the cube of its test coverage, and a
 method with many branches and few tests is the one nobody dares to
@@ -410,9 +411,9 @@ plainly.
 Every function that branches has a test that reaches each branch through
 the public surface, or a gate point that does. A branch no test and no
 gate point reaches is either removed under rule 4 or given its test in
-the same commit. `tools/check.sh` fails on every function over the line
-(ruff's mccabe rule at six, since mccabe counts the decisions plus one),
-so the count stays at zero.
+the same commit. `tools/check_one_action.py` counts the decisions as
+listed above, a nested function apart from the one around it, and fails
+every function over the line, so the count stays at zero.
 
 ## Tests
 

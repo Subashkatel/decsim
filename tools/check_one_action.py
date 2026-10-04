@@ -1,6 +1,7 @@
 """Check that every line of Python does one thing (STYLE.md, rule 1).
 
-In the package it also checks rule 6's signatures and order.
+It also holds every function to rule 11's five decisions, and in the
+package it checks rule 6's signatures and order.
 
 Usage:
     python tools/check_one_action.py <file or directory> ...
@@ -27,6 +28,8 @@ What is reported, by kind:
     walrus              an assignment hiding inside an expression
     long function       a function longer than MAX_FUNCTION_LINES
     deep nesting        blocks nested deeper than MAX_BLOCK_DEPTH
+    over five decisions a function that decides more than MAX_DECISIONS
+                        times, counted as rule 11 counts
     wide state          a class whose __init__ sets more attributes than
                         MAX_ATTRIBUTES, unless STYLE.md rule 1 names it
     unannotated signature
@@ -89,6 +92,7 @@ EXCLUDED_PARTS = frozenset(
 MAX_FUNCTION_LINES = 40
 MAX_BLOCK_DEPTH = 2
 MAX_ATTRIBUTES = 6
+MAX_DECISIONS = 5
 # STYLE.md rule 1 names the classes whose width is one responsibility with
 # genuinely many collaborators. The list lives there, not here, so a
 # reader of the rule sees every exemption and its one sentence.
@@ -102,6 +106,11 @@ EXEMPTION_LINE = re.compile(r"^- `(\w+)` \(`([^`]+)`\):")
 BLOCK_STATEMENTS = (ast.For, ast.While, ast.If, ast.With, ast.Try)
 ARITHMETIC = (ast.BinOp, ast.Compare, ast.BoolOp)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+# rule 11: a nested function or class decides for itself, a lambda for the
+# function around it
+COUNTED_APART = (*FUNCTIONS, ast.ClassDef)
+TESTED_DECISIONS = (ast.If, ast.While, ast.IfExp)
+UNTESTED_DECISIONS = (ast.For, ast.AsyncFor, ast.ExceptHandler)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 # a lambda's body and a comprehension are checked where they are visited
 UNCHECKED_ARGUMENTS = (ast.Lambda, *COMPREHENSIONS)
@@ -299,6 +308,50 @@ def block_depth(node, depth=0):
     return deepest
 
 
+def decision_count(function):
+    """How many times a function decides, counted as STYLE.md rule 11 counts.
+
+    A comprehension's `for` is a loop and its `if` an `if`.
+    """
+    count = 0
+    for child in ast.iter_child_nodes(function):
+        count += decisions_below(child)
+    return count
+
+
+def decisions_below(node):
+    """The decisions of a node and everything below it, minus definitions."""
+    if isinstance(node, COUNTED_APART):
+        return 0
+    count = own_decisions(node)
+    for child in ast.iter_child_nodes(node):
+        count += decisions_below(child)
+    return count
+
+
+def own_decisions(node):
+    """The decisions one node makes, with the operators in its condition."""
+    if isinstance(node, TESTED_DECISIONS):
+        return tested_decisions(node.test)
+    if isinstance(node, UNTESTED_DECISIONS):
+        return 1
+    if not isinstance(node, ast.comprehension):
+        return 0
+    count = 1
+    for test in node.ifs:
+        count += tested_decisions(test)
+    return count
+
+
+def tested_decisions(test):
+    """One decision, and one more for each `and` or `or` in its test."""
+    count = 1
+    for inner in ast.walk(test):
+        if isinstance(inner, ast.BoolOp):
+            count += len(inner.values) - 1
+    return count
+
+
 def init_method(class_node):
     """The class's __init__, or None."""
     for statement in class_node.body:
@@ -407,6 +460,12 @@ class Checker(ast.NodeVisitor):
         finding = Finding(self.path, node.lineno, kind, stripped)
         self.findings.append(finding)
 
+    def report_decisions(self, node, decisions):
+        """Record a function over rule 11's line, naming its count."""
+        text = f"{node.name} decides {decisions} times"
+        finding = Finding(self.path, node.lineno, "over five decisions", text)
+        self.findings.append(finding)
+
     def check_package_rules(self, tree):
         """Report rule 6's unannotated signatures and out-of-order names."""
         for function in public_functions(tree.body):
@@ -416,13 +475,16 @@ class Checker(ast.NodeVisitor):
             self.report(node, "public after private")
 
     def visit_FunctionDef(self, node):
-        """Report long functions and deep nesting."""
+        """Report long functions, deep nesting and too many decisions."""
         length = node.end_lineno - node.lineno + 1
         if length > MAX_FUNCTION_LINES:
             self.report(node, "long function")
         depth = block_depth(node)
         if depth > MAX_BLOCK_DEPTH:
             self.report(node, "deep nesting")
+        decisions = decision_count(node)
+        if decisions > MAX_DECISIONS:
+            self.report_decisions(node, decisions)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node):

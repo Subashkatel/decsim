@@ -364,23 +364,39 @@ def test_a_weak_store_narrower_than_a_round_stops_the_run():
         )
 
 
-def test_a_strong_store_narrower_than_a_round_stops_the_run(monkeypatch):
-    """The strong-primary run writes every round into the strong store."""
+def strong_store_of(monkeypatch, store_settings) -> None:
+    """Every declared run from here on sizes its strong store so."""
     run_machine = declared_run.run_machine
 
-    def run_with_a_narrow_strong_store(settings, seed=0, probes=()):
-        narrowed = dataclasses.replace(
-            settings, strong_syndrome_buffer=NARROWER_THAN_A_ROUND
+    def run_with_the_strong_store(settings, seed=0, probes=()):
+        sized = dataclasses.replace(
+            settings, strong_syndrome_buffer=store_settings
         )
-        return run_machine(narrowed, seed, probes)
+        return run_machine(sized, seed, probes)
 
-    monkeypatch.setattr(
-        declared_run, "run_machine", run_with_a_narrow_strong_store
-    )
+    monkeypatch.setattr(declared_run, "run_machine", run_with_the_strong_store)
+
+
+def test_a_strong_store_narrower_than_a_round_stops_the_run(monkeypatch):
+    """The strong-primary run writes every round into the strong store."""
+    strong_store_of(monkeypatch, NARROWER_THAN_A_ROUND)
     operations = blocked_successor()
 
     with pytest.raises(RuntimeError, match="no round leaving it makes room"):
         declared_run.strong_only_run(operations=operations)
+
+
+def test_a_strong_store_too_small_for_a_region_stops_the_run(monkeypatch):
+    """An escalated region cannot wait for room, so it must fit at once.
+
+    Each 6-round region is 48 bits against a store of 8.
+    """
+    store_of_8_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=8)
+    strong_store_of(monkeypatch, store_of_8_bits)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="strong_syndrome_buffer.bits"):
+        declared_run.switching_run(escalates=True, operations=operations)
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():

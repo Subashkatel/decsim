@@ -121,9 +121,13 @@ class SyndromeBuffer:
         """Keep one landed round, readable at that tick; None publishes none."""
         packet_bits = round_records.fragment_wire_bits(packet.fragments)
         round_key = (packet.operation_id, packet.round_index)
-        assert self.has_room(round_key, packet_bits, {}), (
-            "a round was written into a full store"
-        )
+        if not self.has_room(round_key, packet_bits, {}):
+            raise RuntimeError(
+                f"round {round_key!r} of {packet_bits} bits does not fit a "
+                f"syndrome buffer of {self.settings.bits} bits; an escalated "
+                "region lands whole, so strong_syndrome_buffer.bits must "
+                "hold it"
+            )
         assert round_key not in self.round_by_key, (
             f"round {round_key!r} was written twice"
         )

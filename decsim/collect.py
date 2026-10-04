@@ -199,7 +199,12 @@ def imported_module_versions() -> dict:
     return versions
 
 
-def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
+def run_shot(
+    task: Task,
+    seed: int,
+    *,
+    built_models: Optional[built_window_models.BuiltWindowModels] = None,
+) -> Shot:
     """Build the task's machine for the seed and run it, timed.
 
     built_models is the task's window model cache, most of a shot's build

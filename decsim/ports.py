@@ -156,7 +156,8 @@ class SyndromeBuffer(Protocol):
         memories answers for the one the round goes to.
         reserved_bits_by_round is the bits each round still crossing
         toward the store will take, by its key. A bounded store raises on
-        a round that states no size.
+        a round that states no size, and on a round no round leaving it
+        can ever make room for.
         """
 
     def accept_packed_round(
@@ -209,7 +210,8 @@ class RetainedRounds(Protocol):
 
     A hold names the rounds its holder will read from the moment it is
     placed, so the store may hold a round it has not received yet; the
-    holder is any record that answers referenced_operation_ids.
+    holder is any record that answers referenced_operation_ids and
+    operation_ids_read_at_once (records/decoding.py).
     """
 
     def register_hold(self, holder, round_keys: tuple) -> None:

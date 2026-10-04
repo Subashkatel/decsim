@@ -37,9 +37,11 @@ class SyndromeBufferSettings:
     controller hold the finished round and write it in order once a slot
     frees, the backpressure real systems apply to their source (Caune et
     al. 2410.05202: the sequencer stalls on the decoder's status
-    register). A write costs write_cycles and a read of a job's rounds
-    read_cycles, on clock, whatever their width, and no access waits for
-    another: SimpleMemory's latency with no bandwidth term (gem5
+    register); a store that cannot hold a window's rounds at once stops
+    the run at the first round that can never enter. A write costs
+    write_cycles and a read of a job's rounds read_cycles, on clock,
+    whatever their width, and no access waits for another:
+    SimpleMemory's latency with no bandwidth term (gem5
     src/mem/SimpleMemory.py:49, simple_mem.cc:174). clock None is the
     machine's clock.
     """
@@ -100,17 +102,21 @@ class SyndromeBuffer:
 
         The reserved bits are the room the crossing rounds have already
         taken, gem5's `_reserved` in `avail() = _maxsize - _size -
-        _reserved` (src/dev/net/pktfifo.hh).
+        _reserved` (src/dev/net/pktfifo.hh). A round that does not fit
+        and never can stops the run (_refuse_round_never_admitted).
         """
         capacity = self.settings.bits
         if capacity is None:
             return True
-        if bits > capacity:
-            self._refuse_round_wider_than_store(round_key, bits, capacity)
         reserved_widths = reserved_bits_by_round.values()
         reserved_bits = sum(reserved_widths)
         taken = self.occupied_bits + reserved_bits
-        return taken + bits <= capacity
+        if taken + bits <= capacity:
+            return True
+        self._refuse_round_never_admitted(
+            round_key, bits, reserved_bits_by_round
+        )
+        return False
 
     def accept_packed_round(
         self,
@@ -378,20 +384,73 @@ class SyndromeBuffer:
             if round_key in self.round_by_key:
                 self._free_round(round_key)
 
-    def _refuse_round_wider_than_store(
-        self, round_key, bits: int, capacity: int
+    def _refuse_round_never_admitted(
+        self, round_key, bits: int, reserved_bits_by_round: Mapping
     ) -> None:
-        """A round wider than the whole store waits for room forever.
+        """Stop the run when no round leaving can ever make this one's room.
 
-        gem5 refuses a message wider than the block that must hold it
-        (src/mem/ruby/network/Network.cc:64-65); round widths come from
-        the source as it runs, so the refusal comes at the first ask.
+        A reader that waits for the round (operation_ids_read_at_once)
+        keeps its other rounds of the round's operation, stored or
+        crossing, until all of them are stored with this one, so their
+        bits and the round's own are a floor on the room it needs at
+        once; with no such reader the floor is the round's own. Past
+        capacity the round, and every round queued behind it, waits
+        forever while the QPU keeps measuring. The store sees this the
+        moment the round is refused, as Ciw looks for a knot at each new
+        blockage (ciw/simulation.py:238-241) and gem5 refuses a message
+        wider than its block (src/mem/ruby/network/Network.cc:64-65);
+        widths come from the source as it runs, so no plan sees it at
+        build.
         """
-        raise RuntimeError(
-            f"the syndrome buffer holds {capacity} bits and round "
-            f"{round_key!r} states {bits}: no round leaving it makes room, "
-            "so a bounded syndrome buffer holds at least its widest round"
+        reader, kept_bits = self._widest_reader(
+            round_key, reserved_bits_by_round
         )
+        needed_bits = bits + kept_bits
+        capacity = self.settings.bits
+        if needed_bits <= capacity:
+            return
+        raise RuntimeError(
+            f"round {round_key!r} needs {needed_bits} bits of the syndrome "
+            f"buffer's {capacity} at once: its own {bits} and {kept_bits} "
+            f"for the rounds {reader!r} reads with it; no round leaving it "
+            "makes room, so a bounded syndrome buffer holds at least a "
+            "window's rounds at once"
+        )
+
+    def _widest_reader(
+        self, round_key, reserved_bits_by_round: Mapping
+    ) -> tuple:
+        """The holder waiting for the round with the most bits kept, and them.
+
+        (None, 0) when no holder waits to have the round stored with
+        others of its operation.
+        """
+        operation_id = round_key[0]
+        widest_reader = None
+        widest_bits = 0
+        holders = self.holds.holders_by_round.get(round_key, ())
+        for holder in holders:
+            if operation_id not in holder.operation_ids_read_at_once():
+                continue
+            kept_bits = self._kept_bits_of(
+                holder, operation_id, reserved_bits_by_round
+            )
+            if widest_reader is None or kept_bits > widest_bits:
+                widest_reader = holder
+                widest_bits = kept_bits
+        return widest_reader, widest_bits
+
+    def _kept_bits_of(
+        self, holder, operation_id, reserved_bits_by_round: Mapping
+    ) -> int:
+        """The bits of its rounds of the operation, stored or crossing."""
+        round_keys = self.holds.round_keys_of(holder)
+        own_keys = [key for key in round_keys if key[0] == operation_id]
+        crossing_bits = 0
+        for own_key in own_keys:
+            crossing_bits += reserved_bits_by_round.get(own_key, 0)
+        stored_bits = self._stored_bits_of(own_keys)
+        return stored_bits + crossing_bits
 
     def _free_round(self, round_key) -> None:
         self.round_by_key.pop(round_key)

@@ -71,6 +71,11 @@ class WindowConfidence:
 # open beyond the ones the rounds it names belong to. A store asks the
 # token rather than reading its type, so a token added later is counted
 # by the liveness check like every other one.
+#
+# Every token also answers operation_ids_read_at_once: the operations
+# whose rounds, among those it names, the window side waits to see all
+# stored at once before it starts the decode. A bounded store asks it of
+# a round it has no room for (syndrome_buffer.py).
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,16 @@ class WindowReads:
         """None: the rounds held are the reading window's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """The window's operation: its decode waits for every round of it.
+
+        A buffer past the operation's end is filled by memory rounds or
+        by any one successor (windows/schemes/window_data.py), so the
+        rounds of other operations it names are not waited for at once.
+        """
+        operation_id = self.window_key[0]
+        return (operation_id,)
+
 
 @dataclass(frozen=True)
 class PotentialStrong:
@@ -92,6 +107,10 @@ class PotentialStrong:
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the held window's own."""
+        return ()
+
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold ends at a weak verdict that keeps the window."""
         return ()
 
 
@@ -111,6 +130,10 @@ class PotentialRestart:
         """None: the rounds held are the held window's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold ends when the window before it commits."""
+        return ()
+
 
 @dataclass(frozen=True)
 class LaterStreamReads:
@@ -126,6 +149,10 @@ class LaterStreamReads:
         """None: the rounds held are the stream's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold moves on as the stream's windows register."""
+        return ()
+
 
 @dataclass(frozen=True)
 class PendingStrong:
@@ -135,6 +162,10 @@ class PendingStrong:
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the requested window's own."""
+        return ()
+
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the escalation, not the window side, starts its decode."""
         return ()
 
 
@@ -148,6 +179,10 @@ class StrongInputInFlight:
         """None: the rounds held are the requested window's own."""
         return ()
 
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: its decode has started on rounds already stored."""
+        return ()
+
 
 @dataclass(frozen=True)
 class DecoderInputHold:
@@ -157,6 +192,10 @@ class DecoderInputHold:
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the job's own."""
+        return ()
+
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: its decode has started on rounds already stored."""
         return ()
 
 
@@ -169,6 +208,10 @@ class RephaseGuard:
     def referenced_operation_ids(self) -> tuple:
         """The guarded request's operation, which the suffix may outlive."""
         return (self.request_key.operation_id,)
+
+    def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold ends when the strong plan lands."""
+        return ()
 
 
 @dataclass(frozen=True)

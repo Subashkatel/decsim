@@ -246,7 +246,10 @@ def random_hold_program(generator: random.Random) -> list:
     """Holds, releases and in-order writes of rounds of unequal width.
 
     The last round of a memory is the widest (it closes on the data
-    readout), so it is drawn wider than the rest.
+    readout), so it is drawn wider than the rest. A hold here may end
+    before its rounds are all stored, as a potential strong read does;
+    a window's read never does, and the store stops on one it cannot
+    hold.
     """
     round_count = 12
     past_the_last_round = round_count + 1
@@ -258,7 +261,7 @@ def random_hold_program(generator: random.Random) -> list:
         steps.append(("write", (1, round_index), bits))
     reader_count = generator.randint(1, 5)
     for reader in range(reader_count):
-        holder = decoding_records.WindowReads((1, reader))
+        holder = decoding_records.PotentialStrong((1, reader))
         first = generator.randint(1, round_count)
         span = generator.randint(1, 6)
         past_the_span = first + span
@@ -361,6 +364,21 @@ def test_a_weak_store_narrower_than_a_round_stops_the_run():
     with pytest.raises(RuntimeError, match="no round leaving it makes room"):
         declared_run.weak_only_run(
             operations=operations, weak_syndrome_buffer=NARROWER_THAN_A_ROUND
+        )
+
+
+def test_a_weak_store_too_small_for_a_window_stops_the_run():
+    """Window (1, 0) reads mem1's six rounds; 8 bits hold round 1 alone.
+
+    Round 2's 8 bits must sit beside the 4 of round 1, which the window
+    keeps until it reads both, so no round leaving makes its room.
+    """
+    operations = blocked_successor()
+    store_of_8_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=8)
+
+    with pytest.raises(RuntimeError, match=r"round \(1, 2\) needs 12 bits"):
+        declared_run.weak_only_run(
+            operations=operations, weak_syndrome_buffer=store_of_8_bits
         )
 
 

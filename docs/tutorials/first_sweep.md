@@ -57,9 +57,9 @@ finishes:
 ```
 run dir: results/first_sweep
 
-{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
-{"qpu.distance": 5, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
-{"qpu.distance": 7, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.003}: 400 shots done (cap)
+d3: 400 shots done (cap)
+d5: 400 shots done (cap)
+d7: 400 shots done (cap)
 ```
 
 Its `sweep.csv`, which step 3 reads, counts sixteen failures out of 400

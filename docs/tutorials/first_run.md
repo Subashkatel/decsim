@@ -132,7 +132,7 @@ point finishes:
 ```
 run dir: results/d3
 
-{"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001}: 20 shots done (cap)
+d3: 20 shots done (cap)
 ```
 
 The numbers are in the folder's `sweep.csv`, one row per point. These

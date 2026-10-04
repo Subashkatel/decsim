@@ -89,7 +89,10 @@ class TransferAttribution:
 
     @classmethod
     def for_round(
-        cls, operation_id, patch_ids: tuple, round_index: int
+        cls,
+        operation_id: Any,  # an opaque identity
+        patch_ids: tuple,
+        round_index: int,
     ) -> "TransferAttribution":
         """One round of one operation, its patches in stable order."""
         ordered_patch_ids = tuple(
@@ -109,7 +112,7 @@ class TransferAttribution:
         cls,
         window: window_records.Window,
         operation: program_records.Operation,
-        request_key,
+        request_key: window_records.DecoderRequestKey,
         round_keys: tuple,
     ) -> "TransferAttribution":
         """A window's transfer: the operation's patches, the rounds it reads."""
@@ -130,7 +133,10 @@ class TransferAttribution:
 
     @classmethod
     def for_job(
-        cls, job: decoding_records.DecodeJob, request_key, round_keys: tuple
+        cls,
+        job: decoding_records.DecodeJob,
+        request_key: window_records.DecoderRequestKey,
+        round_keys: tuple,
     ) -> "TransferAttribution":
         """A job's transfer: its payloads' patches, its window's rounds."""
         payloads = job.payloads or ()

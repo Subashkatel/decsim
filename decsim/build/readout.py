@@ -247,7 +247,7 @@ class Readout:
 def build_detection_events(
     detection_event_settings: event_settings.DetectionEventSettings,
     machine_clock: Optional[config.Clock],
-    device,
+    device: ports.SyndromeSource,
     window_tier: window_records.DecoderTier,
     escalates: bool,
 ) -> ports.DetectionEventPlacement:

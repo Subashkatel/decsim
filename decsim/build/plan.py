@@ -8,7 +8,7 @@ system before it wires a single port.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 import stim
 
@@ -20,6 +20,7 @@ import decsim.escalation.settings as escalation_settings
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
 import decsim.ports as ports
+import decsim.qpu.layouts as layouts
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
@@ -34,12 +35,12 @@ import decsim.windows.window_interactions as window_interactions
 class Plan:
     """Everything the wiring reads that the planner and the workload fix."""
 
-    code: Any
-    layout: Any
-    scheme: Any
-    boundary_policy: Any
-    window_interaction: Any
-    idle_policy: Any
+    code: ports.CodeModel
+    layout: layouts.UniformLayout
+    scheme: ports.WindowingScheme
+    boundary_policy: ports.BoundaryPolicy
+    window_interaction: window_interactions.DefaultWindowInteraction
+    idle_policy: ports.IdlePolicy
     operations: tuple
     decode_operations: tuple
     dynamic_streams: tuple
@@ -48,8 +49,8 @@ class Plan:
     planned_operations: tuple
     run_plan: planner.RunPlan
     resource_claims: dict
-    device: Any
-    error_model_provider: Any
+    device: ports.SyndromeSource
+    error_model_provider: ports.WindowModelSource
     formation_reads: window_records.FormationReads
 
     @property

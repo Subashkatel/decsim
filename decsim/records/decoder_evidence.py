@@ -111,7 +111,7 @@ class UnionFindHardEvidence:
 
 
 def normalized_weight_step(
-    weight_step, key: str = "Union-Find weight_step"
+    weight_step: object, key: str = "Union-Find weight_step"
 ) -> float:
     """The weight step as a positive finite float; anything else is refused.
 

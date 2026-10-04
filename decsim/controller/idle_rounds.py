@@ -11,26 +11,12 @@ every generated syndrome bit (Terhal 1302.3428; Battistel et al.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.ports as ports
 import decsim.records.program as program_records
 import decsim.trace_source as trace_source
-
-
-@dataclasses.dataclass
-class _PatchIdle:
-    """One patch's idle rounds: since the last claim, since the last job.
-
-    operation, the one that left the patch idle, labels a job charged at
-    the workload's end.
-    """
-
-    operation: Optional[program_records.Operation] = None
-    unclaimed: int = 0
-    uncharged: int = 0
-    last_round_index: int = 0
 
 
 class IdleRoundAccounting:
@@ -41,19 +27,26 @@ class IdleRoundAccounting:
     qpu = ports.Port(ports.Qpu)
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self, policy: ports.IdlePolicy, geometry_by_patch) -> None:
+    def __init__(
+        self, policy: ports.IdlePolicy, geometry_by_patch: dict
+    ) -> None:
         self.policy = policy
         self.geometry_by_patch = geometry_by_patch
         self.operation_by_id: dict = {}
         self.idle_by_patch: dict = {}
         self.trace = _TraceSources()
 
-    def load(self, program) -> None:
+    def load(self, program: program_records.ExecutionProgram) -> None:
         """Know the operations an idle patch names."""
         for operation in program.operations:
             self.operation_by_id[operation.id] = operation
 
-    def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
+    def emit_idle_round(
+        self,
+        operation_id: Any,  # an opaque identity
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """One idle cycle of a patch nobody is operating on.
 
         A patch on a live protected stream emits through that stream, and one
@@ -88,7 +81,7 @@ class IdleRoundAccounting:
             self.windows.prepend_idle_rounds(operation.id, idle_round_count)
         return self.streams.bind_at_start(command)
 
-    def claim(self, operation) -> int:
+    def claim(self, operation: program_records.Operation) -> int:
         """The idle cycles on the operation's patches since the last claim.
 
         A code cycle measures every check of every patch once (Litinski
@@ -118,11 +111,21 @@ class IdleRoundAccounting:
 
     # ---- what a policy may do with a round
 
-    def emit_memory_round(self, operation, patch, round_index: int) -> None:
+    def emit_memory_round(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """The round travels as a feedback-memory round of the operation."""
         self.qpu.emit_feedback_memory_round(operation.id, patch, round_index)
 
-    def submit_idle_decode_if_due(self, operation, patch, round_index) -> None:
+    def submit_idle_decode_if_due(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """Count one idle round; charge a job at each full commit region."""
         geometry = self.geometry_by_patch[patch].code_geometry
         idle = self._idle(patch)
@@ -134,7 +137,11 @@ class IdleRoundAccounting:
             idle.uncharged = 0
         idle.last_round_index = round_index
 
-    def submit_idle_decode_for_remaining_rounds(self, operation, patch) -> None:
+    def submit_idle_decode_for_remaining_rounds(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+    ) -> None:
         """Charge the rounds after the last full commit region as one job."""
         idle = self._idle(patch)
         uncharged = idle.uncharged
@@ -161,12 +168,26 @@ class IdleRoundAccounting:
             label=f"mem({operation.name},r{round_index})",
         )
 
-    def _idle(self, patch) -> _PatchIdle:
+    def _idle(self, patch) -> "_PatchIdle":
         idle = self.idle_by_patch.get(patch)
         if idle is None:
             idle = _PatchIdle()
             self.idle_by_patch[patch] = idle
         return idle
+
+
+@dataclasses.dataclass
+class _PatchIdle:
+    """One patch's idle rounds: since the last claim, since the last job.
+
+    operation, the one that left the patch idle, labels a job charged at
+    the workload's end.
+    """
+
+    operation: Optional[program_records.Operation] = None
+    unclaimed: int = 0
+    uncharged: int = 0
+    last_round_index: int = 0
 
 
 def _ignore_completion() -> None:

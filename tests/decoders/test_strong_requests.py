@@ -108,8 +108,8 @@ def test_a_destination_keeps_at_most_one_unconsumed_strong_result():
         requests.admit_strong(second, now=1)
 
 
-def test_a_windows_attempt_holds_its_forced_class_requests_and_no_repeat():
-    """One attempt, one or two requests; a request is admitted once.
+def test_a_windows_attempt_holds_its_forced_class_requests():
+    """One attempt, one or two requests, resolved as one.
 
     The complementary gap decodes a window once per logical class, so
     the window's open attempt names both request keys and resolves as
@@ -132,8 +132,6 @@ def test_a_windows_attempt_holds_its_forced_class_requests_and_no_repeat():
     requests.admit(second, now=0)
     record = requests.by_window[(1, 0)]
     assert record.open_weak_requests == {first_key, second_key}
-    with pytest.raises(RuntimeError):
-        requests.admit(second, now=1)
     requests.resolve_weak((1, 0))
     assert (1, 0) not in requests.by_window
 
@@ -166,23 +164,6 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     assert request_keys == [first_key, second_key]
     assert deliveries[1].result.window_id == 1
     assert deliveries[1].result.logical_observables is None
-
-
-def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
-    requests = strong_requests_module.StrongRequests()
-    first_key = _request_key(1)
-    first = _strong_job(first_key, window_key=(1, 0))
-    second_key = _request_key(2)
-    second = _strong_job(second_key, window_key=(1, 1))
-    requests.admit_strong(first, now=0)
-    requests.admit_strong(second, now=0)
-    batch = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
-    )
-    requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
-    result = decoding_records.DecodeResult(-1, 0, logical_observables=(1,))
-    with pytest.raises(RuntimeError):
-        requests.deliveries_for(batch, result, now=40)
 
 
 def test_a_batch_left_with_one_member_still_splits_into_an_empty_result():

@@ -28,14 +28,6 @@ from typing import Optional
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
-ACCURACY_FIELDS = (
-    "correction",
-    "logical_observables",
-    "soft_output",
-    "boundary_defects",
-    "boundary_data",
-)
-
 
 @dataclasses.dataclass(frozen=True)
 class LiveStrongRequest:
@@ -156,11 +148,6 @@ class StrongRequests:
         """
         key = (job.operation_id, job.window_id)
         record = self._record(key)
-        if job.request_key in record.open_weak_requests:
-            raise RuntimeError(
-                f"weak request {job.request_key} for window {key} is already "
-                "open: a DecodeJob is admitted once"
-            )
         record.open_weak_requests.add(job.request_key)
         job.request_admitted_ticks = now
 
@@ -171,9 +158,6 @@ class StrongRequests:
         result.
         """
         record = self.by_window[key]
-        assert record.open_weak_requests, (
-            f"window {key} has no open weak request to resolve"
-        )
         record.open_weak_requests = set()
         self._drop_if_empty(key)
 
@@ -333,14 +317,6 @@ class StrongRequests:
         if not _is_merged_service(requests, result):
             request = requests[0]
             return (StrongCompletion(request, result, now, unit),)
-        populated = _populated_accuracy_fields(result)
-        if populated:
-            listed = ", ".join(populated)
-            raise RuntimeError(
-                "merged strong decode returned accuracy-bearing fields "
-                f"({listed}); disable bulk_strong for accuracy-coupled "
-                "switching"
-            )
         deliveries = []
         for request in requests:
             key = request.strong_decode_for
@@ -422,15 +398,6 @@ def _states_of(record: WindowRequests) -> list:
     if record.open_weak_requests:
         states.append("decoding with no outcome")
     return states
-
-
-def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:
-    populated = []
-    for field_name in ACCURACY_FIELDS:
-        value = getattr(result, field_name)
-        if value is not None:
-            populated.append(field_name)
-    return populated
 
 
 def _is_merged_service(

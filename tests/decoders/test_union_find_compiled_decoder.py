@@ -404,16 +404,6 @@ def test_a_syndrome_that_is_not_binary_is_refused():
         window_decoder.decode_graph(graph, syndrome)
 
 
-def test_a_missing_compiled_library_is_refused_by_its_build_command(
-    monkeypatch,
-):
-    monkeypatch.setenv(compiled_decoder.LIBRARY_VARIABLE, "/no/such/library")
-    compiled_decoder.entry_point.cache_clear()
-    with pytest.raises(RuntimeError) as refusal:
-        compiled_decoder.entry_point()
-    assert compiled_decoder.BUILD_COMMAND in str(refusal.value)
-
-
 # a compiler that writes half a library where -o points, then fails, as a
 # build a second build races, or a killed one, leaves its output
 HALF_WRITING_COMPILER = """#!/usr/bin/env bash

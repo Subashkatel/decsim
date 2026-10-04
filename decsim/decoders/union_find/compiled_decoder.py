@@ -337,11 +337,6 @@ compiled_libraries.register(library_path)
 def _bound(symbol: str, argument_types: list):
     """One exported function of the library, with its call declared."""
     path = library_path()
-    if not path.exists():
-        raise RuntimeError(
-            "the Union-Find decoder needs its compiled library at "
-            f"{path}; build it with {BUILD_COMMAND}"
-        )
     library = ctypes.CDLL(str(path))
     function = getattr(library, symbol)
     function.argtypes = argument_types

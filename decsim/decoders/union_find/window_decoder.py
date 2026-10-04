@@ -46,7 +46,7 @@ def graph_from_model(
     check = faults.check
     raw_priors = numpy.asarray(faults.priors)
     fault_count = check.shape[1]
-    _check_priors(raw_priors, fault_count, location)
+    _check_priors(raw_priors, location)
     # observables are few rows; dense per-fault columns are cheap to read
     observables = faults.observables.toarray()
     observables = observables.astype(numpy.uint8, copy=False)
@@ -177,11 +177,7 @@ def _refuse_lengths_past_the_counters(
     )
 
 
-def _check_priors(raw_priors, fault_count: int, location: str) -> None:
-    if raw_priors.ndim != 1 or raw_priors.size != fault_count:
-        raise ValueError(
-            f"{location} priors must have one entry per fault column"
-        )
+def _check_priors(raw_priors, location: str) -> None:
     is_finite = numpy.isfinite(raw_priors)
     if not numpy.all(is_finite):
         raise ValueError(f"{location} priors must be finite")

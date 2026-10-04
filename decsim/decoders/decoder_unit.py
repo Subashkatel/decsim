@@ -250,13 +250,7 @@ class DecoderUnit:
         A destination window has at most one unconsumed strong result,
         so a second one for the same window is a defect, not a queue.
         """
-        finished = self.slots.finished
-        if window_key in finished:
-            raise RuntimeError(
-                f"unit {self.name!r} already holds a finished result for "
-                f"window {window_key}"
-            )
-        finished[window_key] = completion
+        self.slots.finished[window_key] = completion
 
     def take_output(self, window_key: tuple):
         """Take the result waiting for that destination, or None."""

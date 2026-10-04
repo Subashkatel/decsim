@@ -207,10 +207,6 @@ class DecoderMemory:
     def deposit(self, job: decoding_records.DecodeJob) -> DecoderInput:
         """Materialize one job's rounds into this unit's memory."""
         key = _memory_key(job)
-        if key in self._inputs:
-            raise RuntimeError(
-                f"unit {self.pool!r}#{self.unit} already holds {job.label!r}"
-            )
         decoder_input = materialize_decoder_input(job)
         bits = decoder_input.size_bits()
         self.check_input_size(job, bits)

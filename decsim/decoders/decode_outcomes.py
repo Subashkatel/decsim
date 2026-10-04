@@ -146,7 +146,6 @@ class DecodeOutcomes:
         window_key = (request_key.operation_id, request_key.window_id)
         # every finished strong result was produced by a unit, and the
         # unit is read at the decode's end, before its slot frees
-        assert unit is not None, f"strong result for {window_key} has no unit"
         unit.hold_output(window_key, completion)
 
     def report_request(

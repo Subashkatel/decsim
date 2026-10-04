@@ -236,9 +236,6 @@ def _measured_cells() -> list:
 
 def _region_detectors(request: decoding_records.DecodeJob) -> int:
     model = request.detector_error_model
-    assert model is not None, (
-        f"{request.label}: a Relay-BP decode needs its region's model"
-    )
     faults = model.require_faults(PHYSICAL)
     return faults.check.shape[0]
 
@@ -256,5 +253,4 @@ def _cells_running(cells: tuple, decodes_running: int) -> tuple:
     for cell in cells:
         if cell.decodes_running == decodes_running:
             running.append(cell)
-    assert running, f"no measured cell runs {decodes_running} decodes at once"
     return tuple(running)

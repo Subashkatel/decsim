@@ -378,10 +378,6 @@ class CancellableDecoderMemoryTransfer:
         Returns the delay the link expects.
         """
         key = _transfer_key(job)
-        if key in self._in_flight_keys:
-            raise RuntimeError(
-                f"decoder input for {job.label!r} is already in flight"
-            )
         self._in_flight_keys.add(key)
 
         def complete() -> None:

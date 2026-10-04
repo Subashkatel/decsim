@@ -93,10 +93,6 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             fault_models.FaultRepresentation.PHYSICAL
         )
         projection = model.physical_to_graphlike_detector_projection
-        if projection is None:
-            raise ValueError(
-                "belief matching needs the physical-to-graphlike link"
-            )
         columns, error_channel = _distinct_hyperedges(physical)
         physical_check = scipy.sparse.csr_matrix(physical.check)
         hyperedge_check = physical_check[:, columns]

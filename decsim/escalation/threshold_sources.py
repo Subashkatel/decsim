@@ -522,14 +522,21 @@ class OnlineThreshold:
 
 
 def _check_online_numbers(online) -> None:
-    """Every knob of the online card is a finite number."""
-    for field in dataclasses.fields(online):
-        value = getattr(online, field.name)
+    """Every knob past the starting threshold is a finite number.
+
+    checked_decibels checks the starting threshold, which also may not
+    be negative.
+    """
+    knobs = [
+        field.name
+        for field in dataclasses.fields(online)
+        if field.name != "threshold_decibels"
+    ]
+    for knob in knobs:
+        value = getattr(online, knob)
         is_finite = config.is_number(value) and math.isfinite(value)
         if not is_finite:
-            raise ValueError(
-                f"{field.name} must be a finite number (got {value!r})"
-            )
+            raise ValueError(f"{knob} must be a finite number (got {value!r})")
 
 
 def _check_online_steps(online) -> None:

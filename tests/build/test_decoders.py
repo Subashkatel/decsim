@@ -10,7 +10,10 @@ since both tick at 250 MHz.
 
 import dataclasses
 
+import pytest
+
 import decsim.build.decoders as decoder_build
+import decsim.confidence.cluster as cluster
 import decsim.config as config
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
@@ -134,3 +137,20 @@ def test_each_managers_scheduler_is_seeded_on_its_own_path():
     assert len(chip_scheduler.reserved_seeds) == 1
     assert len(host_scheduler.reserved_seeds) == 1
     assert chip_scheduler.reserved_seeds != host_scheduler.reserved_seeds
+
+
+def test_a_weak_decoder_short_of_the_signals_evidence_is_named_by_its_record():
+    """The refusal names the record the run wrote, not its results word.
+
+    A priced matching row's word is its latency, which names no decoder,
+    and matching grows no clusters for the cluster gap to read.
+    """
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=0.5
+    )
+    tier = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    signal = cluster.ClusterGap.Settings().build(matching, 4.6)
+
+    refusal = "weak_decoder PyMatchingDecoder.Settings cannot serve"
+    with pytest.raises(ValueError, match=refusal):
+        decoder_build.build_decoder_unit(tier, "weak", None, None, signal)

@@ -128,8 +128,11 @@ def build_decoder_unit(
     algorithm_settings = tier_settings.algorithm
     algorithm = algorithm_settings.build()
     if signal is not None:
+        # the record the run wrote: a priced row's results word is its
+        # latency, which names no decoder
+        record = type(algorithm_settings)
         _check_serves_the_confidence(
-            algorithm, algorithm_settings.name, tier, signal
+            algorithm, record.__qualname__, tier, signal
         )
     return _staged_unit(tier_settings, algorithm, formation, machine_clock)
 
@@ -219,7 +222,7 @@ def _tier_formation(
 
 
 def _check_serves_the_confidence(
-    algorithm, row_name: str, tier: str, signal: ports.ConfidenceSignal
+    algorithm, record_name: str, tier: str, signal: ports.ConfidenceSignal
 ) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
@@ -233,7 +236,7 @@ def _check_serves_the_confidence(
     reason = _missing_evidence_reason(algorithm, missing, signal)
     signal_name = signal.source.method
     raise ValueError(
-        f"{tier}_decoder {row_name!r} cannot serve the confidence "
+        f"{tier}_decoder {record_name} cannot serve the confidence "
         f"{signal_name}: {reason}"
     )
 

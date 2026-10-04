@@ -243,7 +243,7 @@ class _ResourceLedger:
 
 
 class _OperationSchedule:
-    """The program's dependency graph and every operation's readiness.
+    """Each operation's readiness under the program's dependency graph.
 
     The graph and the object that runs it are split, as gem5 keeps the
     workload's process list apart from the system that runs it
@@ -297,7 +297,7 @@ class _StartGates:
 
 @dataclasses.dataclass
 class _OperationLifecycle:
-    """Where each operation is in its life, and what it holds.
+    """Where each operation is in its life.
 
     The ledger holds an operation's resources from its issue to the end of
     its body.

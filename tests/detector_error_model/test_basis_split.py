@@ -164,15 +164,11 @@ def test_a_detector_of_neither_type_is_refused():
 def _restricted_columns(model, faults, basis: str, detectors_of) -> set:
     """Each column as (its type's detectors, observables, owned, flips)."""
     bases = model.detector_bases
-    kept_observables = {
-        index
-        for index, observable_basis in enumerate(model.observable_bases)
-        if observable_basis == basis
-    }
+    kept_observables = _observables_of_basis(model, basis)
     columns = set()
     for column in range(faults.check.shape[1]):
         detectors = detectors_of(column)
-        typed = frozenset(d for d in detectors if bases[d] == basis)
+        typed = _detectors_of_basis(detectors, bases, basis)
         if not typed:
             continue
         flipped = _column(faults.observables, column)
@@ -180,10 +176,26 @@ def _restricted_columns(model, faults, basis: str, detectors_of) -> set:
         observables = frozenset(kept)
         owned = bool(faults.owned[column])
         flips = faults.boundary_flips.get(column, ())
-        typed_flips = frozenset(d for d in flips if bases[d] == basis)
+        typed_flips = _detectors_of_basis(flips, bases, basis)
         restricted = (typed, observables, owned, typed_flips)
         columns.add(restricted)
     return columns
+
+
+def _observables_of_basis(model, basis: str) -> set:
+    """The indices of the observables a basis's detectors detect."""
+    return {
+        index
+        for index, observable_basis in enumerate(model.observable_bases)
+        if observable_basis == basis
+    }
+
+
+def _detectors_of_basis(detectors, bases, basis: str) -> frozenset:
+    """The detectors of one type."""
+    return frozenset(
+        detector for detector in detectors if bases[detector] == basis
+    )
 
 
 @pytest.mark.parametrize("basis", ["X", "Z"])

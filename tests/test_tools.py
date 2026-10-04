@@ -167,6 +167,47 @@ def test_rule_six_checks_bind_the_package_and_nothing_else(tmp_path, capsys):
     assert "2 findings in 1 of 3 files checked" in captured.out
 
 
+def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
+    """Five decisions pass and six fail, under rule 11's own count.
+
+    An `and`, an `or` and a comprehension's `for` and `if` each count
+    one, and the nested `inner` is counted apart from `outer`.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def five(values):\n"
+        "    kept = [value for value in values if value]\n"
+        "    while kept:\n"
+        "        kept.pop()\n"
+        "    if values or kept:\n"
+        "        return values\n"
+        "\n"
+        "def six(values):\n"
+        "    kept = [value for value in values if value]\n"
+        "    while kept and values:\n"
+        "        kept.pop()\n"
+        "    if values or kept:\n"
+        "        return values\n"
+        "\n"
+        "def outer(values):\n"
+        "    kept = [value for value in values if value]\n"
+        "    def inner():\n"
+        "        while kept and values:\n"
+        "            kept.pop()\n"
+        "        if values or kept:\n"
+        "            return values\n"
+        "    return inner\n"
+    )
+    exit_code = tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "decisions.py:8: over five decisions: six decides 6 times" in (
+        captured.out
+    )
+    assert "1 findings in 1 of 1 files checked" in captured.out
+
+
 def _classes_tested_against(tool, root) -> set:
     tested = set()
     for path in tool.source_paths(root):
@@ -191,27 +232,15 @@ def test_every_class_on_the_tools_list_is_still_tested_against_somewhere():
     assert stale == set()
 
 
-def _stub_python(tmp_path, checkout=None):
-    """An interpreter that writes down the command line it was given.
-
-    It answers the runner's question about where decsim was imported
-    from with the checkout it is given, so the test never runs a sweep
-    and chooses which tree the runner reads.
-    """
-    if checkout is None:
-        checkout = tmp_path
+def _stub_python(tmp_path):
+    """An interpreter that writes down every command line it is given."""
     recorded = tmp_path / "argv.txt"
     stub = tmp_path / "python"
     stub.write_text(
-        "#!/usr/bin/env bash\n"
-        'if [ "$1" = "-c" ]; then\n'
-        f'  echo "{checkout}"\n'
-        "  exit 0\n"
-        "fi\n"
-        f'printf "%s\\n" "$@" > "{recorded}"\n'
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" >> "{recorded}"\n'
     )
     stub.chmod(0o755)
-    return stub, recorded
+    return recorded
 
 
 def test_the_check_script_runs_the_active_environments_python(tmp_path):
@@ -219,7 +248,7 @@ def test_the_check_script_runs_the_active_environments_python(tmp_path):
 
     A fresh clone has no .venv of its own, so the default names none.
     """
-    _stub, recorded = _stub_python(tmp_path)
+    recorded = _stub_python(tmp_path)
     environment = dict(os.environ)
     environment.pop("DECSIM_PYTHON", None)
     environment.pop("DECSIM_PYDEPS", None)

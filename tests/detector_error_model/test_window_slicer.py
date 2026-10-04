@@ -108,6 +108,15 @@ def columns_reaching_outside(model):
     return reaching_count
 
 
+def window_rows(detectors, row_by_detector):
+    """The window's rows among a fault's detectors; one outside has none."""
+    return [
+        row_by_detector[detector_id]
+        for detector_id in detectors
+        if detector_id in row_by_detector
+    ]
+
+
 def expected_check(catalog, model):
     """The check matrix the catalog implies for the window's rows, columns."""
     row_by_detector = {}
@@ -118,11 +127,7 @@ def expected_check(catalog, model):
     dense = [list(zero_row) for _ in model.detector_ids]
     for column, fault_index in enumerate(faults.source_fault_ids):
         detectors = catalog.detector_sets[fault_index]
-        local_rows = [
-            row_by_detector[detector_id]
-            for detector_id in detectors
-            if detector_id in row_by_detector
-        ]
+        local_rows = window_rows(detectors, row_by_detector)
         for row in local_rows:
             dense[row][column] = 1
     return dense

@@ -26,12 +26,7 @@ def same_stable_identity(left: object, right: object) -> bool:
     if type(left) is not type(right):
         return False
     if type(left) is tuple:
-        if len(left) != len(right):
-            return False
-        return all(
-            same_stable_identity(left_item, right_item)
-            for left_item, right_item in zip(left, right, strict=True)
-        )
+        return _same_stable_items(left, right)
     if type(left) is int or type(left) is str:
         return left == right
     return False
@@ -96,6 +91,16 @@ def stable_identity_from_json(recorded: dict) -> Union[int, str, tuple]:
         return recorded["value"]
     items = [stable_identity_from_json(item) for item in recorded["items"]]
     return tuple(items)
+
+
+def _same_stable_items(left: tuple, right: tuple) -> bool:
+    """Whether two tuples hold the same identities, item by item."""
+    if len(left) != len(right):
+        return False
+    return all(
+        same_stable_identity(left_item, right_item)
+        for left_item, right_item in zip(left, right, strict=True)
+    )
 
 
 def _is_stable_string(value: object) -> bool:

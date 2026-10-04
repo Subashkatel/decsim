@@ -68,18 +68,18 @@ class PointCollection:
         a point whose saved pieces reach its stop starts nothing. An
         adaptive point hands out one piece at a time.
         """
-        if self.task.online_threshold is not None:
-            wanted = 1
+        unit_count = self._unit_count(wanted)
         units = []
-        while self.tracker.stop_kind is None and len(units) < wanted:
+        while self.tracker.stop_kind is None and len(units) < unit_count:
             count = self._next_piece_count()
             if count == 0:
                 break
             unit = self._hand_out(run_dir, count)
-            if unit is None and not units:
-                self.count_the_pending(run_dir)
             if unit is not None:
                 units.append(unit)
+                continue
+            if not units:
+                self.count_the_pending(run_dir)
         return units
 
     def count_the_pending(self, run_dir: pathlib.Path) -> None:
@@ -116,6 +116,12 @@ class PointCollection:
         first_seed, count = self.last_piece
         folder = pieces.piece_dir(run_dir, point_id, first_seed, count)
         return _task_as_the_piece_left_it(self.task, folder)
+
+    def _unit_count(self, wanted: int) -> int:
+        """The units to hand out now: one at a time on an adaptive point."""
+        if self.task.online_threshold is not None:
+            return 1
+        return wanted
 
     def _hand_out(
         self, run_dir: pathlib.Path, count: int
@@ -527,7 +533,10 @@ def _operation_line(row) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class _ResolvedPoint:
-    """One point, its task and collection, its record built and not written."""
+    """One fully resolved experiment point.
+
+    Its task, its collection and its record, built and not yet written.
+    """
 
     task: collect.Task
     settings: collection_module.CollectionSettings
@@ -537,7 +546,8 @@ class _ResolvedPoint:
 def _resolved_points(study: experiment.Experiment) -> list:
     """Each point checked and its record built, in the experiment's order.
 
-    Two points of one id would share their pieces, so they are refused.
+    Two points of one id would share their pieces, so they are refused,
+    and so is a point whose shot runs no round, which sizes no piece.
     """
     resolved = []
     names_by_id = {}
@@ -550,6 +560,7 @@ def _resolved_points(study: experiment.Experiment) -> list:
         settings = study.collection_of(point)
         facts = _experiment_facts(task, settings)
         record = run_folder.point_record(point.name, task, None, facts)
+        _refuse_a_point_that_runs_no_round(record)
         resolved_point = _ResolvedPoint(task, settings, record)
         resolved.append(resolved_point)
     return resolved
@@ -561,6 +572,23 @@ def _refuse_two_points_of_one_id(first_name: str, second_name: str) -> None:
         f"the points {first_name} and {second_name} run the same settings "
         "with the same metadata, so they would share their shots; give "
         "them metadata that tells them apart"
+    )
+
+
+def _refuse_a_point_that_runs_no_round(record: dict) -> None:
+    """A shot with no round to decode has nothing to collect.
+
+    A piece holds a point's piece_rounds over its rounds per shot, so a
+    shot of no rounds sizes no piece, and its shots decode nothing.
+    """
+    if record["rounds_per_shot"] > 0:
+        return
+    name = record["name"]
+    raise refusal.RefusalError(
+        f"the point {name} runs no QEC round: no operation of its workload "
+        "runs a round that emits detector data, so its shots would decode "
+        "nothing; give it a workload, as decsim.settings.memory_workload "
+        "makes one"
     )
 
 

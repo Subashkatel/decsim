@@ -207,14 +207,12 @@ def test_a_full_history_point_reproduces_the_retired_direct_columns(
     sliding = _shots_by_seed(shots, "null")
     full_history = _shots_by_seed(shots, "16")
     reference = _csv_rows(DIRECT_REFERENCE)
-    seeds = [int(row["seed"]) for row in reference]
-    expected = [_frozen_columns(row) for row in reference]
-    reproduced = [
-        _retired_columns(sliding[seed], full_history[seed]) for seed in seeds
-    ]
-    sliding_digests = [sliding[seed]["sample_digest"] for seed in seeds]
-    full_digests = [full_history[seed]["sample_digest"] for seed in seeds]
-    mismatches = [columns[2] for columns in expected]
+    seeds = _integer_column(reference, "seed")
+    expected = _frozen_columns(reference)
+    reproduced = _retired_columns_by_seed(sliding, full_history, seeds)
+    sliding_digests = _sample_digests(sliding, seeds)
+    full_digests = _sample_digests(full_history, seeds)
+    mismatches = _integer_column(reference, "direct_mismatch")
     assert reproduced == expected
     assert sliding_digests == full_digests
     assert sum(mismatches) == 2
@@ -776,12 +774,34 @@ def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
     return by_seed
 
 
-def _frozen_columns(row: dict) -> tuple:
-    """A frozen row's logical_failure, direct_failure, direct_mismatch."""
-    logical_failure = int(row["logical_failure"])
-    direct_failure = int(row["direct_failure"])
-    direct_mismatch = int(row["direct_mismatch"])
-    return (logical_failure, direct_failure, direct_mismatch)
+def _integer_column(rows: list, name: str) -> list:
+    """One column of csv rows, each cell read as an integer."""
+    return [int(row[name]) for row in rows]
+
+
+def _frozen_columns(reference: list) -> list:
+    """Each frozen row's logical_failure, direct_failure, direct_mismatch."""
+    logical_failures = _integer_column(reference, "logical_failure")
+    direct_failures = _integer_column(reference, "direct_failure")
+    direct_mismatches = _integer_column(reference, "direct_mismatch")
+    columns = zip(
+        logical_failures, direct_failures, direct_mismatches, strict=True
+    )
+    return list(columns)
+
+
+def _sample_digests(shots_by_seed: dict, seeds: list) -> list:
+    """One point's sample digests, seed by seed."""
+    return [shots_by_seed[seed]["sample_digest"] for seed in seeds]
+
+
+def _retired_columns_by_seed(
+    sliding: dict, full_history: dict, seeds: list
+) -> list:
+    """The three columns as the pair of points gives them, seed by seed."""
+    return [
+        _retired_columns(sliding[seed], full_history[seed]) for seed in seeds
+    ]
 
 
 def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:

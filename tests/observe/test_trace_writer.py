@@ -831,12 +831,17 @@ def test_a_counter_row_carries_one_series_and_the_tick_stays_in_ts(traced):
     _machine, _result, document = traced
     counters = _by_phase(document, "C")
     series_counts = {len(row["args"]) for row in counters}
-    series_names = {name for row in counters for name in row["args"]}
-    values = [value for row in counters for value in row["args"].values()]
-    value_is_whole = {isinstance(value, int) for value in values}
+    series = _counter_series(counters)
+    series_names = {name for name, _value in series}
+    value_is_whole = {isinstance(value, int) for _name, value in series}
     assert series_counts == {1}
     assert "tick" not in series_names
     assert value_is_whole == {True}
+
+
+def _counter_series(counters) -> list:
+    """Every counter row's series, as (name, value) pairs in document order."""
+    return [pair for row in counters for pair in row["args"].items()]
 
 
 def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):

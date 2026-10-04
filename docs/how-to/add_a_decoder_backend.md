@@ -68,7 +68,7 @@ decode still runs; only its time is the price.
 ## 2. Say what fault model you need
 
 `fault_model_requirement` is one of the four contracts in
-`decsim/detector_error_model/fault_model_contracts.py`. It says whether
+`decsim/records/fault_model_contracts.py`. It says whether
 your decoder wants a graphlike model, where every fault flips at most
 two detectors, or the physical model with hyperedges, or both;
 `fault_representation` is the one your `compile` reads. Get this wrong

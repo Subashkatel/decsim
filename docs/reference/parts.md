@@ -505,7 +505,7 @@ receive_buffer_frames is C; credit_latency_cycles is L_c on clock, the card's do
 
 | Field | Type | Default |
 | --- | --- | --- |
-| `framing` | `framings.FramingSettings` | required |
+| `framing` | `link_settings.FramingSettings` | required |
 | `receive_buffer_frames` | `int` | required |
 | `credit_latency_cycles` | `int` | required |
 | `clock` | `config.Clock` | required |
@@ -558,7 +558,7 @@ window_packets is the most unacknowledged packets in flight; ack_every_packets b
 
 | Field | Type | Default |
 | --- | --- | --- |
-| `framing` | `framings.FramingSettings` | required |
+| `framing` | `link_settings.FramingSettings` | required |
 | `receive_buffer_frames` | `int` | required |
 | `credit_latency_cycles` | `int` | required |
 | `window_packets` | `int` | required |
@@ -588,12 +588,29 @@ Parallel lanes are one wire with aggregate bandwidth (a PCIe x4 link stripes one
 | `input_bits` | `int` | required |
 | `source` | `str` | required |
 
+### `FramingSettings`
+
+`decsim/links/settings.py`. A framing row's settings record (framings.py), which builds it.
+
+has_acknowledgement_packet says whether the framing has a packet of its own for an acknowledgement, which the reliable protocol needs.
+
+| Member | Type |
+| --- | --- |
+| `has_acknowledgement_packet` | `bool` |
+| `build(self)` | `ports.Framing` |
+
 ### `PacketProtocolSettings`
 
 `decsim/links/settings.py`. A packet protocol's settings record, which builds its channel.
 
+Every packet protocol cuts a message into frames and credits them from a receive buffer (credit_channel.py): framing cuts the frames, receive_buffer_frames is the buffer's C frames, and credit_latency_cycles is a credit's return L_c on clock.
+
 | Member | Type |
 | --- | --- |
+| `framing` | `FramingSettings` |
+| `receive_buffer_frames` | `int` |
+| `credit_latency_cycles` | `int` |
+| `clock` | `config.Clock` |
 | `build(self, channel_settings: 'ChannelSettings', engine: decsim.engine.Engine)` | `ports.Channel` |
 
 ### `ChannelSettings`

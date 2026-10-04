@@ -127,7 +127,7 @@ A card is numbers, not a class: a `FabricSettings` record, one
   - `source`: `SoftOutputSource(method=...)`, the signal's name;
   - `fault_model_requirement`: what a window model must offer,
     `NO_FAULT_MODEL_REQUIRED` for nothing
-    (`decsim/detector_error_model/fault_model_contracts.py`);
+    (`decsim/records/fault_model_contracts.py`);
   - `decoder_evidence_requirement`: what the decode must show,
     `NO_DECODER_EVIDENCE` for nothing (`decsim/records/decoding.py`);
   - `evidence_refusal`: the sentence the build prints when the weak
@@ -191,7 +191,7 @@ A card is numbers, not a class: a `FabricSettings` record, one
   (`decsim/windows/settings.py`).
 - **Record:** `name`, `commit_rounds` and `buffer_rounds` (None is the
   code distance) and `build(terminal_policy)`. Check the sizes with
-  `window_data.check_window_sizes(self)`
+  `window_data.check_window_sizes(self.commit_rounds, self.buffer_rounds)`
   (`decsim/windows/schemes/window_data.py`) in `__post_init__`, and add
   your row to `SCHEME_ROWS` in `tests/windows/test_settings.py`.
 - **Component:** fills `ports.WindowingScheme`. Set its three flags;

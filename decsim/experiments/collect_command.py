@@ -533,7 +533,10 @@ def _operation_line(row) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class _ResolvedPoint:
-    """One point, its task and collection, its record built and not written."""
+    """One fully resolved experiment point.
+
+    Its task, its collection and its record, built and not yet written.
+    """
 
     task: collect.Task
     settings: collection_module.CollectionSettings

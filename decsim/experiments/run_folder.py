@@ -164,11 +164,14 @@ def refuse_another_tree(run_dir: pathlib.Path) -> None:
     this_git = _git_state()
     if is_one_tree(recorded_git, this_git):
         return
-    raise refusal.RefusalError(
-        f"{run_dir} holds a run of {tree_text(recorded_git)}, and this is "
-        f"{tree_text(this_git)}; a folder holds one tree's results, so "
+    recorded_text = tree_text(recorded_git)
+    this_text = tree_text(this_git)
+    message = (
+        f"{run_dir} holds a run of {recorded_text}, and this is "
+        f"{this_text}; a folder holds one tree's results, so "
         "give --out a new folder"
     )
+    raise refusal.RefusalError(message)
 
 
 def is_one_tree(one: dict, other: dict) -> bool:

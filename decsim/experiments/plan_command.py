@@ -70,9 +70,11 @@ def launch(
     files and submits nothing.
     """
     refuse_an_unnamed_tree()
-    run_path = pathlib.Path(run_file).resolve()
+    given_path = pathlib.Path(run_file)
+    run_path = given_path.resolve()
     study = experiment.load(run_path)
-    run_dir = run_folder.run_dir_for(study.name, out_dir).resolve()
+    named_dir = run_folder.run_dir_for(study.name, out_dir)
+    run_dir = named_dir.resolve()
     collect_command.start_the_folder(study, study, run_dir, run_path)
     logs_dir = run_dir / LOGS_FOLDER
     logs_dir.mkdir(exist_ok=True)
@@ -158,10 +160,8 @@ def _run_lines(
     log = run_dir / LOGS_FOLDER / "%a.log"
     literal = [sys.executable, "-m", "decsim", "run", str(run_path)]
     literal += ["--out", str(run_dir)]
-    command = (
-        f"{shlex.join(literal)} "
-        f"--task $SLURM_ARRAY_TASK_ID --processes {job.cores}"
-    )
+    quoted = shlex.join(literal)
+    command = f"{quoted} --task $SLURM_ARRAY_TASK_ID --processes {job.cores}"
     output = shlex.quote(f"--output={log}")
     lines = ["#!/bin/bash", f"#SBATCH {shape}", f"#SBATCH {output}"]
     lines.append(command)
@@ -192,9 +192,13 @@ def _submitted(arguments: list) -> str:
         check=False,
     )
     if completed.returncode != 0:
-        raise refusal.RefusalError(
-            f"sbatch {' '.join(arguments)} exited {completed.returncode}: "
-            f"{completed.stderr.strip()}"
+        argument_text = " ".join(arguments)
+        error_text = completed.stderr.strip()
+        message = (
+            f"sbatch {argument_text} exited {completed.returncode}: "
+            f"{error_text}"
         )
+        raise refusal.RefusalError(message)
     answer = completed.stdout.strip()
-    return answer.split(";")[0]
+    fields = answer.split(";")
+    return fields[0]

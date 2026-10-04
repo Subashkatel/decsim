@@ -121,6 +121,9 @@ class PathSettings:
     measured end to end includes the receiver turning the arrival into
     bits; a card that times the wire alone lets the receiving component
     price that processing. It has no default, so every card says which.
+    The build reads it on the readout hops alone, where the controller's
+    readout_to_bits_cycles needs a card that leaves that cost out; on
+    every other hop it records what the number means.
     """
 
     channel: ChannelSettings

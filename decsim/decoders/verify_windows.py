@@ -76,24 +76,31 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         self.referee = tesseract_window_decoder.TesseractWindowDecoder(
             referee_settings
         )
-        # The referee reads the physical view, the tier the graphlike one.
-        self.fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
+        # The referee reads the physical view and the inner decoder its
+        # own. Neither reads a link, and a linked build keeps faults of
+        # other decompositions apart, which would hand a physical-view
+        # inner decoder another problem than an unchecked run gives it.
+        inner_requirement = inner.fault_model_requirement
+        self.fault_model_requirement = inner_requirement.joined(
+            fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+        )
         self.decoder_evidence = inner.decoder_evidence
         self.missing_evidence_reasons = inner.missing_evidence_reasons
         self.window_checked = trace_source.TraceSource()
 
     def run_seed_children(self) -> tuple:
-        """The referee under its own path, the inner decoder's under inner."""
+        """The referee under its own path, the inner decoder's under theirs.
+
+        The inner decoder's children keep the paths they have unchecked,
+        so a checked run draws what the unchecked run draws.
+        """
         referee_path = (seed_records.RunSeedPathSegment("field", "referee"),)
         children = [seed_records.RunSeedChild(referee_path, self.referee)]
         inner_children = getattr(self.inner, "run_seed_children", None)
         if inner_children is None:
             return tuple(children)
-        inner_segment = (seed_records.RunSeedPathSegment("field", "inner"),)
-        for child in inner_children():
-            path = inner_segment + child.relative_path
-            inner_child = seed_records.RunSeedChild(path, child.child)
-            children.append(inner_child)
+        inner_seeded = inner_children()
+        children.extend(inner_seeded)
         return tuple(children)
 
     def latency(self, job: decoding_records.DecodeJob) -> int:

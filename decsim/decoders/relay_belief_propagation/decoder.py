@@ -23,7 +23,7 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own keys in its tier section.
+        """The relay_bp row's settings.
 
         Eight keys are relay-bp 0.2.2's RelayDecoderF32 arguments: alpha
         (null leaves relay-bp its own choice) and

@@ -9,6 +9,9 @@ the [reference](../reference/README.md) pages.
 - [How to add a decoder backend](add_a_decoder_backend.md): a class
   that fills the decoder port, its settings record, and the check
   against PyMatching.
+- [How to add a store, a link card, a signal, a policy or a scheme](add_a_store_card_signal_policy_or_scheme.md):
+  a record of your own in a field the machine already has, with the
+  component it builds.
 - [How to add a component to a part](add_a_component_to_a_part.md): a
   new kind of component, built and wired in the part that holds its
   stage of the loop.

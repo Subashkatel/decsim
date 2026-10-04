@@ -46,6 +46,7 @@ class PointCollection:
     pieces run one at a time, each from the state the piece before saved.
     """
 
+    name: str
     task: collect.Task
     settings: collection_module.CollectionSettings
     piece_shots: int
@@ -626,7 +627,12 @@ def _point_collection(
     point_folders = pieces.folders_of(run_dir, [point_id])
     saved = pieces.saved_counts(point_folders)
     return PointCollection(
-        resolved.task, settings, piece_shots, rounds_per_shot, saved
+        resolved.record["name"],
+        resolved.task,
+        settings,
+        piece_shots,
+        rounds_per_shot,
+        saved,
     )
 
 
@@ -692,14 +698,14 @@ def _next_share_of_the_pool(
 def _say_the_point_stopped(point: PointCollection) -> None:
     """The progress line of a point that stopped, and why.
 
+    The line names the point, since two points may share their metadata.
     A piece runs whole, so the shots of the stop's piece past its stop,
     and of any piece handed out beside it, ran and count nowhere; the
     line says how many.
     """
-    metadata = collect.metadata_text(point.task.metadata)
     shots = point.tracker.counts.shots
     reason = point.tracker.stop_kind.value
-    line = f"{metadata}: {shots} shots done ({reason})"
+    line = f"{point.name}: {shots} shots done ({reason})"
     past_the_stop = point.next_seed - shots
     if past_the_stop > 0:
         line += f"; {past_the_stop} more ran past the stop"

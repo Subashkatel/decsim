@@ -48,7 +48,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
-| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
+| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `confidence_shot_count` shots of a point (its `record_options`, a `decsim.collect.RecordOptions`, 100 by default), written only when a confidence signal decides the escalation |
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on. A point's mean per shot on a path or a memory class is a counter's sum over those rows divided by the point's distinct seeds; `references` and `referenced_rounds` repeat on every row of a shot, so they count once per seed |
@@ -58,7 +58,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `points/<name>/machine.json` | `decsim/experiments/run_folder.py`, `record_point` | one per point, in a folder named by the point's name: its content `id`, its `name`, its metadata, the seeds this folder ran of it (ranges of first and how many, joined from its pieces), every setting, each record under its `class` (module and qualified name) beside its fields, as gem5's `config.json` writes each object's type, so two records with the same fields are two points, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
 | `points/<name>/inputs/` | `decsim/experiments/run_folder.py`, `record_point` | the workload the point ran, as the `files` workload row reads it (`operations.json`, and `circuit.stim` with `measurement_rounds.json` or `fragments/`), and `hashes.json`, each file's sha256 |
 | `result.json` | `decsim/experiments/run_folder.py`, `write_shot` | `decsim run --seed` and the two Deltakit examples only: every field of the shot's result |
-| `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file. How long the data sat is read from it: a structure's stays are the complete events on its lane whose `cat` holds `residence`, each from `args.tick` for `dur` microseconds, and a link path's waits are the `args.queue_wait_ticks` of the complete events on its lane, whose `cat` holds `link` |
+| `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file. How long the data sat is read from it: a structure's stays are the complete events on its lane whose `cat` holds `residence`, each from `args.tick` for `dur` microseconds, a link path's waits are the `args.queue_wait_ticks` of the complete events on its lane, whose `cat` holds `link`, and a store's accesses are the complete events on its `<store> port <i>` lanes whose `cat` holds `access`, a write or a read each, with the tick it asked for the port in `args.arrival` and its wait for the port in `args.waited_ticks`. A decode's time on a unit is the complete event `W<n> service` on that unit's lane, and each verdict the escalation gives is an instant `verdict` on the `Window planner` lane, its `args.verdict` `keep` or `escalate` |
 | `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_folder.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
 | `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when the point's `switching.threshold` is an `OnlineThreshold.Settings`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |
 | `threshold_summary.csv` | `decsim/experiments/collect_command.py`, `_threshold_summary_row` | one row per online point, the counters its stderr line prints and the rest of the calibrator's summary at the end of its prefix: `point_id`, the swept paths and `algorithm`, then `windows`, `escalated`, `escalation_rate`, `target_escalation_rate`, `audited`, `audited_bad`, `kept_bad_rate`, `raises`, `relaxes`, `pending_audits` and `threshold_db` |
@@ -88,7 +88,10 @@ metadata holds (`qpu.distance`,
 `workload.arguments.physical_error_probability`), in the order the
 points first set them (`decsim/experiments/run_folder.py`,
 `swept_values`). Every other file below names its point by the same
-columns, and `algorithm` follows them. The values the design fixed come
+columns, and `algorithm` follows them: the `name` of the decoder record
+of the tier that decodes the plan's windows, such as `pymatching`, or a
+priced row's latency in microseconds in its place
+(`decsim/experiments/measure.py`, `active_decoder_kind`). The values the design fixed come
 first and what was measured after, one variable per column, which is
 Wickham's tidy table (Tidy Data, J. Stat. Softw. 59(10), 2014, section
 2.3), so a reader groups, filters and plots by a column with no parsing.
@@ -105,14 +108,14 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the sweep point and the seed, which together name the shot |
 | `decoded_windows` | how many windows this shot decoded |
-| `logical_failure` | 1 when any scored owner's decoded observable did not match its truth, else 0; a scored owner is an operation the source sampled a truth for, and a live stream's segments and the operations that only hold or resume its patch are scored through the stream's owner. A `memory_patches` shot fails when any patch does. An unscored shot is never a failure, as sinter never counts an error on a discarded shot |
+| `logical_failure` | `True` when any scored owner's decoded observable did not match its truth, else `False`; a scored owner is an operation the source sampled a truth for, and a live stream's segments and the operations that only hold or resume its patch are scored through the stream's owner. A `memory_patches` shot fails when any patch does. An unscored shot is never a failure, as sinter never counts an error on a discarded shot |
 | `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the most jobs that waited in the ready queue at once; a depth counts only when time passes at it, so a job that joins and leaves in one tick never waited |
 | `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_sum_us` | the windows the strong tier committed, the rounds its decodes read, and their service added up; a sweep point divides the sum by the windows |
-| `commit_rounds` | r_com, the rounds a window commits, as the code card the QPU ran sizes it: `windows.commit_rounds`, or the card's own when it is null (the code distance for both shipped cards) |
+| `commit_rounds` | r_com, the rounds a window commits, as the code card the QPU ran sizes it: `windows.scheme.commit_rounds`, or the card's own when it is null (the code distance for both shipped cards) |
 | `window_period_us` | a window's inter-arrival, `commit_rounds` times the round period the QPU ran (the card's own when it has one): what `load` divides by, and the deadline a window's decode must beat |
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
 | `weak_syndrome_weight_mean`, `weak_syndrome_weight_max` | the set bits of each weak decode's input, its detection events when they are formed ahead of the decoder; only when `observation.record_switching_windows` is on |
@@ -120,9 +123,9 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from its enqueue to its compute start, for a unit and for the unit's compute; the same switch |
 | `strong_held_in_units_max` | the most strong decodes held in the units' memory at once, landed and free to compute but waiting for a unit's compute, by the rule of the queue peaks. A unit takes the next decode into its memory while it computes, so this wait never shows in `strong_queue_max`; the same switch |
 | `backlog_peak_rounds` | the most rounds produced and not yet decoded at once; only when `observation.backlog_trace` is on |
-| `referee_windows_checked`, `referee_window_disagreements` | the referee's count, when `observation.check_windows_with` asked for one |
+| `referee_windows_checked`, `referee_window_disagreements` | the referee's count, when the decoder's record is wrapped in `TesseractCheckedDecoder.Settings` |
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
-| `is_scored` | whether every decode a window committed, provisional or final, got a correction from its backend. A backend that produced none (it raised, returned a vector that is not a correction, or found no correction at all) commits an empty correction in its place, and its shot is unscored. An escalated window's weak answer is committed provisionally before the strong one replaces it, and the replacement does not undo what the provisional commit fed forward: its boundary, when `windows.boundaries` ships provisional boundaries (a shipped one is never revised), and its crossing commit, which the strong result keeps. decsim does not trace which of those reached a later decode, so a replaced provisional decode with no correction unscores the shot too. A provisional result never reaches the Pauli frame |
+| `is_scored` | whether every decode a window committed, provisional or final, got a correction from its backend. A backend that produced none (it raised, returned a vector that is not a correction, or found no correction at all) commits an empty correction in its place, and its shot is unscored. An escalated window's weak answer is committed provisionally before the strong one replaces it, and the replacement does not undo what the provisional commit fed forward: its boundary, when `windows.boundary_policy` ships provisional boundaries (a shipped one is never revised), and its crossing commit, which the strong result keeps. decsim does not trace which of those reached a later decode, so a replaced provisional decode with no correction unscores the shot too. A provisional result never reaches the Pauli frame |
 | `provisional_no_correction_windows` | how many windows committed a provisional decode with no correction that the strong answer then replaced; the status columns below count final decodes and do not show these |
 | `unscored_reason` | the backends' reasons for the windows committed with no correction, each once, sorted and joined by `;` (`BackendFailureReason` in `decsim/records/decoding.py`: `upstream_exception`, `correction_not_binary`, `correction_wrong_arity`, `nonzero_syndrome_without_faults`, `no_perfect_matching`); empty on a scored shot |
 | `executed_rounds` | the rounds the scored owners read out this shot, each patch's rounds added up; a live stream's include the rounds it idled through while its feedback waited |
@@ -159,8 +162,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `dd_per_window` | one decoder to the next: the boundary handoff |
 | `output_link_per_window` | the decoder to the Pauli frame |
 | `frame_commit` | the frame accepting a correction, to it being committed |
-| `buffer0_ready_to_frame` | the window complete in the weak syndrome buffer, to the frame |
-| `buffer0_first_round_to_frame` | the window's first round in the weak syndrome buffer, to the frame |
+| `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |
+| `buffer0_first_round_to_frame` | the window's first round in that syndrome buffer, to the frame |
 | `qpu_last_round_to_frame` | the last round the window needs leaving the QPU, to the frame |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
 
@@ -192,7 +195,7 @@ to one decode.
   the verdict's selection to reach it.
 - `frame_commit` closes it.
 
-On a serial path those ten add
+On a serial path those eleven add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 
@@ -282,8 +285,9 @@ with no rows writes no file.
 ### `window_confidence.csv`
 
 One row per window whose confidence the escalation verdict read, for
-the shots of seed 0 up to `observation.confidence_shot_count` (all of them
-for `all`). A run whose escalation reads no confidence writes no file.
+the shots of seed 0 up to the point's `confidence_shot_count`, 100 by
+default; `decsim.Point(..., record_options=decsim.collect.RecordOptions(
+confidence_shot_count=None))` writes every scored shot's (`all`). A run whose escalation reads no confidence writes no file.
 A window has no truth of its own, so a row carries its shot's failure
 and whether the strong decode changed the window's answer. An unscored
 shot writes no row: it is sinter's discard, neither a failure nor a
@@ -292,7 +296,7 @@ success, and sweep.csv's `unscored_shots` counts it.
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the shot |
-| `signal` | the confidence the verdict read, `switching.confidence` (`complementary_gap`, `cluster_gap`, `extra_cluster_gap`) |
+| `signal` | the confidence the verdict read, the `name` of the run's `switching.confidence` record (the signals are under `decsim/confidence` in [parts.md](parts.md)) |
 | `operation_id`, `window_index` | the window: its operation and its index within it |
 | `gap_nats` | the window's gap, ln of the likelihood ratio; empty when the signal gave none, a window the escalation then escalates |
 | `escalated` | whether the verdict sent the window to the strong tier |

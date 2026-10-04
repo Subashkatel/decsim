@@ -36,7 +36,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own keys in its tier section.
+        """The union-find row's settings.
 
         weight_step is the growth resolution, the natural-log weight one
         tick of edge length is (Huang, Newman and Brown 2004.04693): the

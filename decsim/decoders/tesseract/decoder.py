@@ -24,7 +24,7 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row's own keys in its tier section: Tesseract's search.
+        """The Tesseract row's settings: its search.
 
         detector_beam, beam_climbing, no_revisit_detectors,
         priority_queue_limit and merge_errors are tesseract_decoder's

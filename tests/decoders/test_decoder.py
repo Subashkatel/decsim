@@ -14,6 +14,7 @@ import decsim.decoders.decoders as decoders
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+from tests.decoders import windows
 
 MEASURED_NS = 2500
 
@@ -64,6 +65,24 @@ class EmptyWindowRow(decoder_module.WindowDecoderBase):
         del faults
         del syndrome
         raise AssertionError("no model, nothing to decode")
+
+
+class NoFaultRow(decoder_module.WindowDecoderBase):
+    """A window row that selects no fault, whatever events it reads."""
+
+    fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
+
+    def compile(self, faults, model):
+        del faults
+        del model
+
+    def decode_window(self, backend, model, faults, syndrome):
+        del backend
+        del model
+        del syndrome
+        fault_count = faults.check.shape[1]
+        selected = numpy.zeros(fault_count, dtype=numpy.uint8)
+        return decoding_records.WindowDecode(selected)
 
 
 def _job(**fields) -> decoding_records.DecodeJob:
@@ -187,3 +206,20 @@ def test_a_committed_fault_reaching_behind_the_window_is_a_crossing_commit():
     assert result.boundary_data.detector_ids == (0, 1, 2)
     assert result.crossing_commit.residual.detector_ids == (0, 2)
     assert result.crossing_commit.logical_observables == (1,)
+
+
+def test_a_window_result_carries_the_detection_events_its_decode_read():
+    """A confidence signal reads the window's events off its result."""
+    circuit = windows.memory_circuit(3, 3, 0.05)
+    requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
+    model = windows.whole_circuit_window(circuit, 3, requirement)
+    detection_events, _observables = windows.sampled_shots(circuit, 1, 5)
+    shot = detection_events[0]
+    job = windows.job_for(model, shot)
+
+    result = NoFaultRow().decode(job)
+
+    expected = windows.row_syndrome(model, shot)
+    assert expected.any()
+    assert numpy.array_equal(result.detection_events, expected)
+    assert not result.detection_events.flags.writeable

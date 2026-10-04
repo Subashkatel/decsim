@@ -961,7 +961,7 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
     settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
     point_folders = pieces.folders_of(tmp_path, [point_id])
     saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection(task, settings, 1, 15, saved)
+    point = collect_command.PointCollection("d3", task, settings, 1, 15, saved)
 
     units = point.next_units(tmp_path, 1)
 
@@ -984,7 +984,7 @@ def test_a_new_piece_ends_where_the_next_saved_piece_starts(tmp_path):
     settings = collection_module.CollectionSettings(max_shots=6)
     point_folders = pieces.folders_of(tmp_path, [point_id])
     saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection(task, settings, 3, 15, saved)
+    point = collect_command.PointCollection("d3", task, settings, 3, 15, saved)
 
     units = point.next_units(tmp_path, 2)
 
@@ -1011,7 +1011,7 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     )
     point_folders = pieces.folders_of(tmp_path, [point_id])
     saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection(task, settings, 4, 15, saved)
+    point = collect_command.PointCollection("d3", task, settings, 4, 15, saved)
 
     units = point.next_units(tmp_path, 1)
 
@@ -1019,8 +1019,8 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     assert units == []
     assert point.tracker.stop_kind is failure_statistics.StopKind.MINIMUM
     assert point.tracker.counts.shots == 2
-    assert printed.err.endswith(
-        ": 2 shots done (minimum); 2 more ran past the stop\n"
+    assert (
+        printed.err == "d3: 2 shots done (minimum); 2 more ran past the stop\n"
     )
 
 

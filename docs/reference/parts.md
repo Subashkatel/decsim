@@ -8,9 +8,45 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ## decsim
 
+### `SyndromeBufferSettings`
+
+`decsim/ports.py`. A weak syndrome buffer's settings record, which builds its store.
+
+bits bounds the store, None for no bound; clock None is the machine's. prices_read_bits says whether the store prices a read's bits itself, in which case the link out of it may not charge them again.
+
+| Member | Type |
+| --- | --- |
+| `bits` | `Optional[int]` |
+| `clock` | `Optional[config.Clock]` |
+| `prices_read_bits` | `bool` |
+| `build(self, engine)` | `SyndromeBuffer` |
+
+### `DecoderSettings`
+
+`decsim/ports.py`. A decoder's settings record, as a tier and a confidence see it.
+
+A decoder that grows clusters also holds a weight_step and a timing, which a cluster confidence reads.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `build(self)` | `Decoder` |
+
+### `BoundaryPolicySettings`
+
+`decsim/ports.py`. A boundary policy's settings record, which builds the policy.
+
+| Member | Type |
+| --- | --- |
+| `build(self)` | `BoundaryPolicy` |
+
 ### `MachineSettings`
 
 `decsim/settings.py`. One settings record per part of the machine.
+
+Every field has a default: a timing-only run of distance-three surface code patches with no decoder. clock is the machine's clock, the one every part that names none of its own counts its cycles on.
+
+The decode side is three slots, each None when the run has no such part: weak_decoder alone, strong_decoder alone, or both with switching, which decodes weak first and escalates a window to the strong decoder. None of the three plans no decoding.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -20,7 +56,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 | `idle_policy` | `Union[idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings]` | `idle_policies.SeparateDecodeJobsSettings()` |
 | `detection_events` | `detection_event_settings.DetectionEventSettings` | `detection_event_settings.DetectionEventSettings()` |
 | `links` | `link_settings.FabricSettings` | `link_profiles.logical_reference_profile()` |
-| `weak_syndrome_buffer` | `Union[syndrome_buffer_module.SyndromeBufferSettings, ported_syndrome_buffer.PortedSyndromeBufferSettings]` | `syndrome_buffer_module.SyndromeBufferSettings()` |
+| `weak_syndrome_buffer` | `ports.SyndromeBufferSettings` | `syndrome_buffer_module.SyndromeBufferSettings()` |
 | `strong_syndrome_buffer` | `syndrome_buffer_module.SyndromeBufferSettings` | `syndrome_buffer_module.SyndromeBufferSettings()` |
 | `windows` | `window_settings.WindowSettings` | `window_settings.WindowSettings()` |
 | `weak_decoder` | `Optional[decoder_settings.DecoderPoolSettings]` | `None` |
@@ -54,6 +90,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/confidence/extra_cluster.py`. Its settings: walk_microseconds prices the growth, or None.
 
+None charges the weak row's own timing: its loop's cycle count on the unit that decoded (cycle_count.py), or the host's measured time.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `walk_microseconds` | `Optional[float]` | `None` |
@@ -72,6 +110,12 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/controller/settings.py`. The controller's costs, in cycles of its clock.
 
+Readout to bits and packing are charged per round on the way in, decision to pulse per decision on the way out. Zero means the work sits inside the round period, as Google's 921 ns cycle holds its 500 ns measurement (2207.06431). Points: 40 ns in-FPGA discrimination (Fermilab 2406.18807); 20 ns to compute a syndrome (Yang 2605.04892); 125 ns at USTC (2110.07965); 155 ns root to leaf (Liu et al. 2603.16203).
+
+decision_to_pulse is the control processor's issue pipeline: 8 cycles traced on QubiC's core (Fruitwala 2404.15260 Sec. III and IV), with gem5 MinorCPU stage delays where the paper is silent (1 latch, 1 compare, 1 jump redirect, 3 fetch to execute, 1 pulse register, 1 strobe). The taken branch is the cost because both paths are padded to it (Caune 2410.05202), and one core per qubit runs the same branch, so it does not grow with the patch. QICK measures 36 clocks on its deeper tProcessor (2110.00557).
+
+packing_rounds_in_flight bounds the rounds in the packing stage (round_assembly.RoundsInFlight); None is unbounded. clock is the domain all three costs are charged on, None the machine's; a zero cost is not rounded up to an edge.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `clock` | `Optional[config.Clock]` | `None` |
@@ -85,6 +129,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `PoolSettings`
 
 `decsim/decoders/decoder_pool.py`. One pool as the root derives it from its tier's settings.
+
+As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). name is "default" for the tier that decodes the plan's windows and "strong" for a switching run's strong tier; unit_count is <tier>.units; capacity_bits is one unit's memory (None unbounded); copies_input is <tier>.input; blocks_unit is result_blocks_unit on the default pool and false on the strong one; formation is the tier's event-detection logic when detection_events.formed_at seats it at the tier's decoder, else None.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -111,6 +157,10 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/decoders/settings.py`. The input memory of one decoder unit.
 
+A window's rounds are copied into it before the unit decodes them and freed when the decode ends. bits is one unit's capacity in bits, None for an ideal memory nothing fills; it is declared on the memory, as gem5 declares a cache's size (src/mem/cache/Cache.py) and gem5-Aladdin a scratchpad's (src/systolic_array/SystolicArray.py). The unit is bits because a syndrome round is not byte aligned.
+
+word_bits is what one read of the memory moves: the fetch stage reads each round in whole words, one a cycle, as gem5's crossbar charges divCeil(size, width) per packet (src/mem/xbar.cc:135) and Helios loads a round a byte a clock (control_node_single_FPGA.v lines 35-36 and 152-167). None keeps the fetch at its per-round cycles. A tier that reads in place has no memory of its own.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `bits` | `Optional[int]` | `None` |
@@ -119,6 +169,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `EngineSettings`
 
 `decsim/decoders/settings.py`. One tier's engine card: the stages around the algorithm.
+
+clock is the domain the stages count on, None for the machine's; the four stage costs price the fetch and release stages once a job and once a round, in cycles of that clock.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -132,6 +184,14 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/decoders/settings.py`. One tier's pool of decoder units.
 
+algorithm is a decoder row's Settings record (decsim/decoders/); its build makes the unit's decoder, and the card prices the algorithm stage only. The fetch and release stages are cycles of the engine's clock, priced once a job and once a round, because a unit's load and write-out carry a header beside their per-round bytes (Helios 2301.08419v2's controller takes one header byte, then a round's bytes).
+
+unit_count is the count of identical engines on the tier's one chip, gem5's FUDesc.count (src/cpu/FuncUnit.py); each has its own input memory and all share the tier's links. AFS uses L/N decoder blocks for L logical qubits (2001.06598 lines 1049-1052), and Yang et al. put an X-type and a Z-type decoder on one FPGA (2605.04892 lines 986-988).
+
+unit_memory is one unit's input SRAM (UnitMemorySettings); a unit overlaps input transfer with compute only when two windows fit. copies_input says whether the unit is given a copy of the rounds or reads them where the store keeps them. copies_boundary_fold says whether the boundary mask is XORed into a duplicate of the landed input or into the unit's own memory, which needs that copy.
+
+result_blocks_unit says when a unit's compute goes back to its pool: False at the decode's end or when the confidence walk charged on it ends, as Chen's frame manager takes the correction without blocking the decoder (2605.30765 lines 1618-1620); True when the result is read, a unit with no output buffer stalled until its output is taken (Bascones et al. 2605.01035 lines 607-609 add FIFOs to avoid that stall). It is read on the tier that decodes the plan's windows.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `algorithm` | `ports.DecoderSettings` | required |
@@ -142,9 +202,19 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 | `copies_boundary_fold` | `bool` | `True` |
 | `result_blocks_unit` | `bool` | `False` |
 
+### `SchedulerSettings`
+
+`decsim/decoders/settings.py`. A ready-queue rule's settings record (schedulers.py), which builds it.
+
+| Member | Type |
+| --- | --- |
+| `build(self)` | `schedulers.Scheduler` |
+
 ### `DecoderManagerSettings`
 
 `decsim/decoders/settings.py`. The decoder manager's knobs.
+
+bulk_strong serves the strong pool's queued re-decodes as one merged batch (Toshio 2510.25222 Sec. III C, the strong decoder processes its assigned data in bulk); timing-only and serial only. dispatch_cycles prices the manager's own work per dispatch on its clock, before the job's input is asked for; Caune et al. 2410.05202 lines 519-526 and 636-641 measure 250 to 370 control cycles per decode. Zero by default. scheduler is the settings record of the rule that orders a ready queue (FifoScheduler by default); each manager builds its own, since the chip's and the host's queues are separate hardware (LATTE 2509.03954 lines 20-25 and 718-722).
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -156,6 +226,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `TesseractCheckedDecoder.Settings`
 
 `decsim/decoders/verify_windows.py`. The referee written around the record of the decoder it checks.
+
+It reads as that record: the results name the inner decoder, and a confidence signal reads the inner decoder's weight step and timing, since the referee changes no result and costs no time.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -190,7 +262,9 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `DispatchStepsSettings`
 
-`decsim/decoders/dispatch_steps/decoder.py`. The dispatch_steps row's keys in its tier section.
+`decsim/decoders/dispatch_steps/decoder.py`. The dispatch_steps row's settings.
+
+device names the GPU measured, path the dispatcher's (device or host), workers the host path's graph workers, each with its own stream. The device and path must have a measured card (measurements.py).
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -204,6 +278,10 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/decoders/measured_table/decoder.py`. The measured_table row's settings.
 
+The relay_bp row's nine fields set the row's own Relay-BP decode, so the answer, its iterations and the line that prices them come from one setting; bases says whether a region is decoded whole or as its X and Z parts. device names the GPU and partition how it was shared. Together they must name measured cells: a decode is priced only by a line measured at its own keys.
+
+It extends `measurements.RelaySettings`, and holds its fields.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `device` | `str` | `'a100'` |
@@ -214,6 +292,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `PyMatchingDecoder.Settings`
 
 `decsim/decoders/minimum_weight_perfect_matching/decoder.py`. The row as a run names it: measured, or at a preset latency.
+
+preset_latency_microseconds prices every decode at one fixed core latency (decoders.py PresetLatencyDecoder) instead of the host clock; the matching still decodes every window.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -227,7 +307,11 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `RelayBeliefPropagationDecoder.Settings`
 
-`decsim/decoders/relay_belief_propagation/decoder.py`. The row's own keys in its tier section.
+`decsim/decoders/relay_belief_propagation/decoder.py`. The relay_bp row's settings.
+
+Eight keys are relay-bp 0.2.2's RelayDecoderF32 arguments: alpha (null leaves relay-bp its own choice) and alpha_iteration_scaling_factor; gamma0, the first leg's memory strength; pre_iterations, pre_iter, the first leg's iteration limit T0; relay_set_count, num_sets, the legs after the first, so the paper's leg count R is relay_set_count + 1; iterations_per_set, set_max_iter, each later leg's limit Tr; gamma_interval, gamma_dist_interval, the range each later leg's memory strengths are drawn from; converged_solution_count, stop_nconv, the solutions S sought before stopping (Mueller et al. 2506.01779 lines 255-260). Their defaults are RelayDecoderF32's own, and the interval SinterDecoder_RelayBP's (relay_bp/stim/sinter/decoders.py), the paper's gross-code interval (line 332); T0 80 and Tr 60 are the paper's (lines 304-305). The paper's surface code values are gamma0 0.35 (line 307), the interval [-0.254, 0.985] (line 332), and Relay-BP-1, R 301 and S 1, or Relay-BP-5, R 601 and S 5 (line 343). The gamma table is drawn from the run seed (decsim/seeding.py), so no key sets it.
+
+bases names a row of strong_backend.BASIS_DECODES, read as the measured_table row reads it: together decodes the window's X and Z detectors as one problem, the paper's XYZ-decoding; apart decodes them as two, the paper's default XZ-decoding (lines 289-298), cut and joined by the strong backend's own split (strong_backend.part_jobs and joined_result).
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -245,7 +329,9 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `TesseractDecoder.Settings`
 
-`decsim/decoders/tesseract/decoder.py`. The row's own keys in its tier section: Tesseract's search.
+`decsim/decoders/tesseract/decoder.py`. The Tesseract row's settings: its search.
+
+detector_beam, beam_climbing, no_revisit_detectors, priority_queue_limit and merge_errors are tesseract_decoder's TesseractConfig det_beam, beam_climbing, no_revisit_dets, pqlimit and merge_errors; detector_order_count and detector_order_method are the num_det_orders and DetOrder its utils.build_det_orders takes. The defaults are the package's tesseract-short-beam profile (tesseract-decoder src/tesseract_sinter_compat.pybind.h, the profile the Tesseract paper 2503.10988 runs); its tesseract-long-beam is beam 20, queue 1,000,000 and 21 orders, and both profiles merge errors and fix the order seed at 2384753. merge_errors off by default keeps every physical column a search choice of its own; on, the backend searches one error per set of columns with the same detectors and observables and answers with the set's first column (src/tesseract.cc:153-168, 461-465), so the correction still names physical columns and flips the same detectors and observables. detector_order_seed is the seed build_det_orders draws the orders from; None draws them from the run seed (decsim/seeding.py).
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -262,7 +348,9 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `UnionFindDecoder.Settings`
 
-`decsim/decoders/union_find/decoder.py`. The row's own keys in its tier section.
+`decsim/decoders/union_find/decoder.py`. The union-find row's settings.
+
+weight_step is the growth resolution, the natural-log weight one tick of edge length is (Huang, Newman and Brown 2004.04693): the smaller it is, the longer every edge and the more growth iterations a decode spans. timing prices the decode: a cycle count (cycle_count.CycleCount) or cycle_count.HostMeasuredTime(). A run names one; none is refused, since the host's time is no hardware's and is never assumed.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -275,6 +363,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/detector_error_model/settings.py`. The seats that form a round's detection events, and what it costs.
 
+formed_at lists the seats, each once; every path a round takes to a decoder crosses exactly one (build/readout.py). One conversion costs latency_cycles, plus cycles_per_round for each further round a seat forms together, on the clock of the forming logic: a pipelined stage takes a round a cycle after its fixed latency (Yang et al. 2605.04892: syndrome calculation "at 20 ns (5 FPGA clock cycles)", "fully pipelined operation"). No source publishes a controller-side or buffer-side figure, so both costs default to zero. clock None is the machine's.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `formed_at` | `tuple` | `('controller',)` |
@@ -284,9 +374,46 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ## decsim/escalation
 
+### `ConfidenceSettings`
+
+`decsim/escalation/settings.py`. A confidence row's settings record, which builds the signal.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `build(self, weak_algorithm: ports.DecoderSettings, threshold_nats: Optional[float])` | `ports.ConfidenceSignal` |
+
+### `ThresholdSettings`
+
+`decsim/escalation/settings.py`. A threshold row's settings record: decibels in, nats out.
+
+| Member | Type |
+| --- | --- |
+| `threshold_decibels` | `Optional[float]` |
+| `threshold_nats(self)` | `Optional[float]` |
+| `at_point(self, facts: Mapping)` | `'ThresholdSettings'` |
+| `for_point(self, facts: Mapping)` | `Optional[ports.ThresholdSource]` |
+| `build(self)` | `ports.ThresholdSource` |
+
+### `StrongWindowSettings`
+
+`decsim/escalation/settings.py`. A strong window row's settings record (strong_window_shapes.py).
+
+restart_reread_buffer_regions is the double window's re-read width.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `absorbs_weak_windows` | `bool` |
+| `boundary_policy` | `ports.BoundaryPolicySettings` |
+| `restart_reread_buffer_regions` | `int` |
+| `build(self, engine: engine_module.Engine)` | `strong_window_shapes.StrongWindowShape` |
+
 ### `SwitchingSettings`
 
 `decsim/escalation/settings.py`. The machine's switching slot: weak first, escalate on low confidence.
+
+Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier reports (decsim/confidence/), and the build refuses a weak decoder that cannot produce its evidence. threshold is a threshold row (threshold_sources.py); a weak result whose gap is at or above it is kept (the paper uses 20 dB). run_both_at_once is Step 1, the strong decoder started with the weak one and cancelled on confidence; False is the same section's on-demand variant (lines 631-640). strong_window is the shape the strong tier re-decodes (strong_window_shapes.py): redo_window, the default, or double_window, Sec. III C. clock, threshold_cycles and switch_cycles price the verdict's threshold and switch logic; clock None is the machine's clock. The complementary gap's two solves are two jobs of the weak pool, so its unit_count decides whether they overlap.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -306,6 +433,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/escalation/strong_window_shapes.py`. The double window and how far its restart window re-reads.
 
+restart_reread_buffer_regions is how many of the strong region's buffer regions the restarted weak window re-reads (Toshio 2510.25222 Sec. III C, lines 1229-1235). 1, the default, is Fig. 12 step 5: the region's last buffer region is the restart window's past context. 0 reads nothing inside the region.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `restart_reread_buffer_regions` | `int` | `1` |
@@ -322,6 +451,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/escalation/threshold_sources.py`. The csv and its column, and the threshold they give the point.
 
+table is a label and no part of a point's id: the number the table gives names the point. threshold_decibels is that number, None until the point's row is read (at_point), which the point's task does before it names the point.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `table` | `pathlib.Path` | required |
@@ -331,6 +462,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `OnlineThreshold.Settings`
 
 `decsim/escalation/threshold_sources.py`. The starting threshold and the calibrator's knobs.
+
+threshold_decibels is where the rate tracker starts; it steps toward target_escalation_rate by step_decibels per window. The audit lane strong-decodes audit_rate of the kept windows; one revised audit multiplies the target by adjust_factor, and ceil(3 / kept_bad_budget) clean audits divide it back, inside [min_escalation_rate, max_escalation_rate - audit_rate]. The defaults are the drift-replay configuration it was validated on.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -365,6 +498,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `CreditChannel.Settings`
 
 `decsim/links/credit_channel.py`. The framing, the buffer, the credit's return, and their clock.
+
+receive_buffer_frames is C; credit_latency_cycles is L_c on clock, the card's domain, from the receiver taking a frame to its credit being usable. Every field is written, since each is a sourced hardware number.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -417,6 +552,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/links/reliable_channel.py`. The credit protocol's fields, the connection's, and their clock.
 
+window_packets is the most unacknowledged packets in flight; ack_every_packets bounds the packets between acknowledgement requests; retransmit_timeout_cycles is on clock, the card's domain; retry_count is rxe's retry_cnt, 0 to 7; bit_error_rate is the probability one wire bit is wrong.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `framing` | `framings.FramingSettings` | required |
@@ -433,6 +570,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/links/settings.py`. Bandwidth of one whole channel in bits per microsecond.
 
+Parallel lanes are one wire with aggregate bandwidth (a PCIe x4 link stripes one transfer over four), so a card folds its lane count in. The rate is one exact Fraction of the number as written, so an int, a float or a Fraction is one value with one point id, and a whole-tick duration is never inflated by float error, as ns-3's integer DataRate arithmetic.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `input_bits_per_microsecond` | `fractions.Fraction` | required |
@@ -447,9 +586,19 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 | `input_bits` | `int` | required |
 | `source` | `str` | required |
 
+### `PacketProtocolSettings`
+
+`decsim/links/settings.py`. A packet protocol's settings record, which builds its channel.
+
+| Member | Type |
+| --- | --- |
+| `build(self, channel_settings: 'ChannelSettings', engine: decsim.engine.Engine)` | `ports.Channel` |
+
 ### `ChannelSettings`
 
 `decsim/links/settings.py`. One physical channel: its name, a propagation latency, a bandwidth.
+
+No capacity is an unbounded wire that charges its latency only. The name is the identity a fabric wires by. protocol None is the ideal wire, the whole transfer, an unbounded buffer, nothing lost. A packet protocol cuts messages into frames of known size, so it needs a bounded wire.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -463,6 +612,10 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/links/settings.py`. One path: its channel, its payload rule, and its setup cost.
 
+At least one of the default payload and the actual payload source is given. setup_ticks is paid on the channel's setup engine before every transfer; header_bits_per_transfer is serialized with every payload and counted apart. CUDA-Q's real-time messages are the worked case: a 24 byte RPCHeader per request, a 24 byte RPCResponse per reply, and 32 bytes of fields before an enqueue's syndromes (cudaqx decoder_rpc_wire_format.h lines 41-43, 62-69). Those bytes hold CUDA-Q's ids, which decsim's 64-bit request name already stands for (records/windows.py REQUEST_KEY_WIRE_BITS), so pricing that framing leaves the id out.
+
+excludes_receiver_processing says what the latency covers: a number measured end to end includes the receiver turning the arrival into bits; a card that times the wire alone lets the receiving component price that processing. It has no default, so every card says which. The build reads it on the readout hops alone, where the controller's readout_to_bits_cycles needs a card that leaves that cost out; on every other hop it records what the number means.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `channel` | `ChannelSettings` | required |
@@ -475,6 +628,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `FabricSettings`
 
 `decsim/links/settings.py`. A fabric card: one path setting per hop and a profile name.
+
+Every hop of the reaction path is priced, so a card names all eleven. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -498,6 +653,10 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/observe/settings.py`. What a run records beside its results.
 
+log is the engine narrator: print, file (each shot's lines next to the results) or both. trace is the Chrome trace: off, chrome, or a path; the experiments layer writes it for trace_shots. log_component_io adds each component's I/O lines.
+
+The log and the trace are labels (compare=False) and no part of a point's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `log` | `str` | `'off'` |
@@ -514,6 +673,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/pauli_frame/pauli_frame.py`. The frame's settings: what one write costs.
 
+A write is one XOR into a register, one cycle of the frame unit: Yang et al. (2605.04892 Table I, line 1051) measure 4 ns per frame update inside a 550 ns loop, one cycle at 250 MHz. Writes to different windows are charged in parallel. clock None is the machine's clock.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `write_cycles` | `int` | `0` |
@@ -528,6 +689,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `BivariateBicycleCodeModel.Settings`
 
 `decsim/qpu/code_geometry.py`. The card's own keys: n and k of the [[n, k, d]] code.
+
+The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines 180-184); its distance is twelve when the run names none.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -563,6 +726,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/qpu/magic_state_factories.py`. The level chain's card, checked where it enters.
 
+levels runs from the first level up. preparation_logical_cycles 2 and preparation_distance 3 are project coefficients: Silva et al. 2411.04270 Sec. II B fixes neither for the injection stage. No correction decode by default: Silva line 249 counts it inside a level's 13 logical cycles.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `levels` | `tuple` | required |
@@ -582,6 +747,10 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/qpu/settings.py`. The QPU: its syndrome source, its code card and its round period.
 
+source is a source row's Settings record, which builds the device over the run's card and the workload's circuits. code_card is a card row's record, built at distance (None is the card's own) with the windows record's commit and buffer sizes. layout maps patches to codes, uniform by default. error_model_provider is a circuit source whose window models the decoders read in place of the source's own; None is the source's own.
+
+The round period is the device's physical cadence, not a classical clock's cycles: Google 921 ns (2207.06431) and 1.1 us (2408.13687), Krinner 1.1 us (2112.03708), Yang 1.25 us (2605.04892). The card provisions the links and sizes circuit-less rounds, while a circuit source's payloads carry the circuit's widths, so a card and a circuit at different distances run links provisioned for the wrong code.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `source` | `SourceSettings` | `syndrome_devices.TimingOnlyDevice.Settings()` |
@@ -599,9 +768,13 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/qpu/stim_device.py`. The replay row: the measurements are an array no record holds.
 
+Its build stops on the missing measurements, so a replay runs from a record of the caller's own that hands the source its array.
+
 ### `BurstStimDevice.Settings`
 
 `decsim/qpu/stim_device.py`. The burst: its rise and decay, where, how strong, which noise.
+
+burst_onset_round is the first one-based round with extra noise. It climbs to burst_error_probability over burst_rise_rounds, (i + 1) / rise of it in the i-th round, then decays as exp(-(rounds since the peak) / burst_decay_rounds), McEwen's "typical ~25 ms exponential decay" (2104.05219) and qecburst exponential_decay_profile; None holds the peak to the shot's end. A rise of 1 is McEwen's step; the six largest bursts in the 2408.13687 repetition-code data peak about 3 rounds after onset, as Kurilovich's T1 transient of about 10 us would (2506.18228). The region is every qubit whose first two Stim coordinates lie within burst_radius of burst_center (the qubits' midpoint when None); a radius of None is every qubit. burst_channels names the noise raised. A probability of 0 is no burst.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -631,6 +804,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/syndrome_buffer/ported_syndrome_buffer.py`. The ported store: its capacity, its ports, its word and its timing.
 
+bits bounds the store; None is unbounded. read_ports, write_ports and read_write_ports count OpenRAM's three port kinds. word_bits is what one access moves, cycles_per_access how long one access holds its port, and access_latency_cycles how long after its last access the data is usable, both on clock; clock None is the machine's clock. AFS's memory read, "a readout time of four cycles to read 32-bit data" per read (2001.06598 lines 529-531, 1107-1110), is word_bits 32, cycles_per_access 4 and access_latency_cycles 0. The defaults are the sky130 pseudo dual port byte FIFO (VLSIDA sky130_sram_macros at 965df150, sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 14-16), a word a clock with no added latency as Helios's fall-through FIFO (design/generics/fifo_fwft.v lines 95, 105 and 115).
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `bits` | `Optional[int]` | `None` |
@@ -645,6 +820,8 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 ### `SyndromeBufferSettings`
 
 `decsim/syndrome_buffer/syndrome_buffer.py`. The plain store: its capacity, and a flat cost per write and per read.
+
+bits bounds the store; None is unbounded. A full store makes the controller hold the finished round and write it in order once a slot frees, the backpressure real systems apply to their source (Caune et al. 2410.05202: the sequencer stalls on the decoder's status register); a store that cannot hold a window's rounds at once stops the run at the first round that can never enter. A write costs write_cycles and a read of a job's rounds read_cycles, on clock, whatever their width, and no access waits for another: SimpleMemory's latency with no bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174). clock None is the machine's clock.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -671,9 +848,32 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 `decsim/windows/boundary_policies.py`. The held row, which takes no setting.
 
+### `SchemeSettings`
+
+`decsim/windows/settings.py`. A windowing scheme row's settings record (windows/schemes/).
+
+It holds the window sizes, None being the code distance, and builds the scheme with the terminal policy that drains a finite stream.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `commit_rounds` | `Optional[int]` |
+| `buffer_rounds` | `Optional[int]` |
+| `build(self, terminal_policy: str)` | `ports.WindowingScheme` |
+
+### `BoundaryPayloadSettings`
+
+`decsim/windows/settings.py`. A payload row's settings record (windows/boundary_payloads.py).
+
+| Member | Type |
+| --- | --- |
+| `build(self)` | `ports.BoundaryPayload` |
+
 ### `WindowSettings`
 
 `decsim/windows/settings.py`. How the rounds are cut into decode windows, and what a window ships.
+
+scheme is a windowing scheme row's Settings record (windows/schemes/: sliding, parallel, sandwich, naive_online), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py: eager or held), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py: dense or sparse), how the hand-off between windows is written on decoder_to_decoder. clock and decision_cycles price issuing one decode request; clock None is the machine's clock.
 
 | Field | Type | Default |
 | --- | --- | --- |

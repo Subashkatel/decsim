@@ -76,6 +76,8 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
         row_count, column_count = faults.check.shape
         window_rank = column_count - row_count
         window_osd_order = max(0, min(self.osd_order, window_rank))
+        # a writable copy: ldpc writes into its input, and a window's
+        # check is read-only
         check = scipy.sparse.csr_matrix(faults.check)
         error_channel = list(faults.priors)
         return ldpc.BpOsdDecoder(

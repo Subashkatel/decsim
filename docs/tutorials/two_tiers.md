@@ -173,7 +173,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:0 of decsim switching d3 seed1
+window 1:0 of point d3, decsim switching d3 seed1
 
 tick (us)  where                        what                                                          dur (us)  transfer  bits
 7.004      Window planner               W0 ready
@@ -234,7 +234,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:3 of decsim switching d3 seed1
+window 1:3 of point d3, decsim switching d3 seed1
 
 tick (us)  where                            what                                                           dur (us)  transfer  bits
 16.004     Window planner                   W3 ready
@@ -337,7 +337,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:4 of decsim switching d3 seed1
+window 1:4 of point d3, decsim switching d3 seed1
 
 tick (us)  where                            what                                                            dur (us)  transfer  bits
 19.004     Window planner                   W4 ready
@@ -355,7 +355,11 @@ tick (us)  where                            what                                
 Window 4 has its rounds at 19.004 and they are staged in the decoder
 unit's memory at 19.008, but its first solve starts at 88.424, the tick
 window 3's boundary lands. Staging goes on while window 3 is escalated;
-decoding the next window waits on the held boundary.
+decoding the next window waits on the held boundary. So under the redo
+window one stream has at most one strong decode in flight: the next
+window gets no verdict, and cannot escalate, until the strong answer
+lands. The double window keeps the weak chain committing, so one
+stream's escalations can overlap there.
 
 That last number is the whole trade in one line. Window 3's strong
 answer was more likely to be right, and it arrived about 70

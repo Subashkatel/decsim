@@ -10,10 +10,12 @@ by clicking through flow arrows.
 
 import argparse
 import dataclasses
+import pathlib
 from typing import Optional
 
 import decsim.config as config
 import decsim.experiments.refusal as refusal
+import decsim.experiments.run_folder as run_folder
 import decsim.experiments.trace_file as trace_file
 
 ROUND = "round"
@@ -123,14 +125,34 @@ def main(argv: list) -> None:
     document = trace_file.load(parsed.file)
     _refuse_a_key_the_trace_does_not_carry(document, kind, key)
     path = follow(document, kind, key)
-    lines = _report_lines(path)
+    trace_path = pathlib.Path(parsed.file)
+    point_name = point_named_by(trace_path)
+    lines = _report_lines(path, point_name)
     text = "\n".join(lines)
     print(text)
 
 
-def _report_lines(path: FollowedPath) -> list:
+def point_named_by(trace_path: pathlib.Path) -> Optional[str]:
+    """The name of the point a run folder's trace is of; None outside one.
+
+    A run folder names a trace by its point's id and seed
+    (measure.shot_label) and keeps each point's record under points/,
+    so two points of one experiment are told apart by name.
+    """
+    run_dir = trace_path.parent.parent
+    records = run_folder.point_records(run_dir)
+    for point_id, record in records.items():
+        if trace_path.name.startswith(f"{point_id}_seed"):
+            return record["name"]
+    return None
+
+
+def _report_lines(path: FollowedPath, point_name: Optional[str]) -> list:
     """The table and the counts, as the command prints them."""
-    lines = [f"{path.kind} {path.key} of {path.process_name}", ""]
+    machine = path.process_name
+    if point_name is not None:
+        machine = f"point {point_name}, {machine}"
+    lines = [f"{path.kind} {path.key} of {machine}", ""]
     table = table_lines(path.hops)
     lines.extend(table)
     lines.append("")

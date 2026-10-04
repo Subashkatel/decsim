@@ -204,6 +204,23 @@ class SyndromeBuffer(Protocol):
         """At the end of a run no round is stored and no hold is live."""
 
 
+class SyndromeBufferSettings(Protocol):
+    """A weak syndrome buffer's settings record, which builds its store.
+
+    bits bounds the store, None for no bound; clock None is the
+    machine's. prices_read_bits says whether the store prices a read's
+    bits itself, in which case the link out of it may not charge them
+    again.
+    """
+
+    bits: Optional[int]
+    clock: Optional[config.Clock]
+    prices_read_bits: bool
+
+    def build(self, engine) -> SyndromeBuffer:
+        """A fresh store on these settings."""
+
+
 @runtime_checkable
 class RetainedRounds(Protocol):
     """The same store, as the window side that reads and holds it sees it.
@@ -1685,19 +1702,33 @@ class EscalationPolicy(Protocol):
     def tiers_for_ready_window(
         self, window: window_records.Window
     ) -> tuple[window_records.DecoderTier, ...]:
-        """The tiers that decode the complete window now, primary first."""
+        """The tiers that decode the complete window now, primary first.
+
+        Asked once per window, when its rounds are complete and its
+        decision cycles have passed (windows/decode_requests.py).
+        """
 
     def verdict_for_weak_result(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> decoding_records.Verdict:
-        """Keep the weak result as final, or escalate its window."""
+        """Keep the weak result as final, or escalate its window.
+
+        Asked once per window, when its weak result arrives
+        (windows/window_commits.py).
+        """
 
     def learn_from_strong_result(
         self, window_key: tuple, result: decoding_records.DecodeResult
     ) -> None:
-        """The strong tier answered for the window; a source may learn."""
+        """The strong tier answered for the window; a source may learn.
+
+        Told once per strong decode, when it ends
+        (decoders/decode_outcomes.py). Under bulk_strong one merged
+        decode ends several escalations and is told once, under its
+        first window's key.
+        """
 
 
 @runtime_checkable

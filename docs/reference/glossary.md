@@ -48,7 +48,9 @@ These are not from the papers. The pages use them everywhere.
 - **experiment**: one Python run file that names its points and how
   each stops (`decsim.Experiment`).
 - **point**: one machine at one set of values (`decsim.Point`). It has a
-  name and an id, a hash of its record.
+  name and an id, a hash of its record. Its optional `collection`
+  replaces the experiment's stop rule for it, and its `record_options`
+  say how many shots write their windows' confidence.
 - **shot**: one run of a point's machine at one seed.
 - **seed**: a shot's index, 0, 1, 2 and so on. Every random draw in the
   shot follows from it.
@@ -157,7 +159,7 @@ In the papers' symbols, `r_com` is the commit region's round count,
 | restart window, `PotentialRestart` | the window the weak decoder restarts on after an escalation | Toshio Sec. III C, Fig. 12 (2510.25222.txt lines 1232-1251) |
 | re-read width, `restart_reread_buffer_regions` | how far back into the strong region the restarted weak decode reads | Toshio Sec. III C |
 | boundary, `boundary_in`, artificial defects | the previous window's correction folded into this one. qLDPC calls it `net_error`, cuda-q QEC calls it `syndrome_mods` | Skoric Sec. I B, which calls them artificial defects (2209.08552.txt lines 269-281) |
-| seam window, sandwich schedule | Tan's type-2 window, the block between two independent type-1 windows | Tan, arXiv:2209.09219, supplementary material, the sandwich decoder section, p.14 of the arXiv pdf, and Fig. S4(b) |
+| seam window, sandwich schedule | Tan's type-2 window, the block between two independent type-1 windows. decsim's `sandwich` row is Tan's seam offset t = 0, a seam one round thick | Tan, arXiv:2209.09219, supplementary material, the sandwich decoder section, p.14 of the arXiv pdf, and Fig. S4(b) |
 
 ## The two tiers and the confidence
 
@@ -170,6 +172,7 @@ In the papers' symbols, `r_com` is the commit region's round count,
 | `ExtraClusterGap` in `decsim/confidence/extra_cluster.py` | the extra-cluster gap: decode the window once, then grow every cluster on until the two boundaries join or the threshold's worth of growth is spent | Kishi, Toshio, Fujisaki, Oshima, Sato and Fujii, arXiv:2602.03336, Algorithm 1 and Theorems 1 and 2 |
 | threshold, `threshold_decibels` on a threshold record | `g_th`, the value of the soft output below which a window is escalated. The record is in decibels and a gap is compared in natural-log weight, the record's `threshold_nats`: nats are decibels times ln(10) over 10 (`decsim/escalation/threshold_sources.py`, `decibels_to_nats`) | Toshio Sec. III A, step 3 |
 | osd | ordered statistics decoding, the post-processing step after belief propagation in BP-OSD. decsim calls the `ldpc` package's `BpOsdDecoder` | `decsim/decoders/belief_propagation_osd/decoder.py`, which names `ldpc`'s own `osd.hpp` and `stimbposd`'s `bp_osd.py` |
+| bp, `bposd`, `relay_bp` | belief propagation. `bposd` and `relay_bp` are the BP-OSD and Relay-BP rows' words in the results' `algorithm` column | `decsim/decoders/belief_propagation_osd/decoder.py`; `decsim/decoders/relay_belief_propagation/decoder.py`, after Müller et al., arXiv:2506.01779 |
 
 ## The two stores
 

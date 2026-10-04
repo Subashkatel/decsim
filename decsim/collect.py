@@ -218,7 +218,7 @@ def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
 def metadata_text(metadata: Mapping[str, Any]) -> str:
     """A point's metadata as one line of json, its keys sorted.
 
-    The text a progress line and a refusal name a point by, sinter's
+    The text a shot's narration names its point by, sinter's
     json_metadata form (sinter/_data/_csv_out.py:35-37).
     """
     value = json_value(metadata)

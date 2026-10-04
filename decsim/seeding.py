@@ -11,7 +11,7 @@ import hashlib
 import random
 import threading
 from collections.abc import Iterable
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 import decsim.records.seeds as seed_records
 
@@ -279,7 +279,7 @@ def _encode_path(path) -> bytes:
     return b"".join(pieces)
 
 
-def _render(path: tuple[Any, ...]) -> str:
+def _render(path: tuple[seed_records.RunSeedPathSegment, ...]) -> str:
     """The path as text for a refusal: fields dotted, keys in brackets."""
     words = []
     for segment in path:

@@ -89,14 +89,78 @@ def test_every_window_commits_once_across_both_output_links():
     )
 
 
-def test_zero_threshold_never_escalates():
+def never_escalating_settings():
+    """The gate's card at 0 dB, its weak tier clocked and its gap free.
+
+    Union-find on its cycle count prices every weak decode in whole
+    cycles of the fridge clock, and the cluster gap walked in no time
+    adds nothing to it, so a window costs what it costs the weak tier
+    alone.
+    """
     settings = switching_settings(0.0)
+    cycle_count_law = cycle_count.CycleCount(clock=shape_tests.FRIDGE_CLOCK)
+    union_find_decoder = union_find.UnionFindDecoder.Settings(
+        timing=cycle_count_law
+    )
+    weak_decoder = dataclasses.replace(
+        settings.weak_decoder, algorithm=union_find_decoder
+    )
+    cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=0.0)
+    switching = dataclasses.replace(settings.switching, confidence=cluster_gap)
+    return dataclasses.replace(
+        settings, weak_decoder=weak_decoder, switching=switching
+    )
+
+
+def predictions(result) -> list:
+    """Each operation's predicted observables."""
+    predicted = []
+    for operation_result in result.operation_results:
+        predicted.append(operation_result.logical_observables)
+    return predicted
+
+
+def weak_decode_stages(machine) -> list:
+    """Every decode stage the run timed: window, stage, unit and ticks."""
+    stages = []
+    for record in machine.observation.stages.records:
+        window_key = (record.operation_id, record.window_id)
+        stages.append(
+            (
+                window_key,
+                record.stage,
+                record.unit_name,
+                record.start_ticks,
+                record.end_ticks,
+            )
+        )
+    return stages
+
+
+def test_a_run_that_never_escalates_is_the_weak_tier_alone_shot_for_shot():
+    """At 0 dB nothing escalates and the run is weak-only, tick for tick.
+
+    No gap is below 0 dB, so every window keeps its weak result (Toshio
+    2510.25222 Sec. III A). The weak-only twin is the same machine with no
+    switching slot and no strong tier, on the same windows, so both plan
+    one set of windows; the switching run makes its predictions and times
+    every weak decode stage exactly as the twin does.
+    """
+    settings = never_escalating_settings()
+    weak_only = dataclasses.replace(
+        settings, switching=None, strong_decoder=None
+    )
+
     machine, result = run_shot(settings, 0)
+    twin, twin_result = run_shot(weak_only, 0)
+
     transfers = transfers_by_path(result)
     windows = len(machine.observation.windows.windows)
     assert transfers.get("weak_decoder_to_strong_decoder", 0) == 0
     assert transfers.get("strong_decoder_to_frame", 0) == 0
     assert transfers["weak_decoder_to_frame"] == windows
+    assert predictions(result) == predictions(twin_result)
+    assert weak_decode_stages(machine) == weak_decode_stages(twin)
 
 
 def test_unreachable_threshold_escalates_every_window():

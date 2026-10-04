@@ -1,13 +1,14 @@
 """The two decoder tiers as units: the mode picks one and it decodes.
 
 The weak tier's real MWPM must reach whole-circuit PyMatching's answer
-on the same events; the strong tier's belief matching must run and
-decode a d=3 memory shot. Toshio arXiv 2510.25222: lightweight decoders
+on the same events, and the strong tier's belief matching whole-circuit
+beliefmatching's. Toshio arXiv 2510.25222: lightweight decoders
 decode constantly, a separate accurate decoder is invoked on demand.
 """
 
 import dataclasses
 
+import beliefmatching
 import numpy
 import pymatching
 import pytest
@@ -91,12 +92,43 @@ def test_weak_unit_loop_matches_direct_pymatching(seed):
     assert loop == whole_circuit_predictions(machine, result)
 
 
-def test_strong_unit_runs_belief_matching():
-    settings = machine_settings.strong_decoder_baseline(3, 0.001, 1.0)
-    machine, result = _run(settings)
+def whole_circuit_belief_matching(machine, result) -> list:
+    """Each operation's observables, beliefmatching on its whole circuit.
+
+    BeliefMatching.decode (.pydeps/beliefmatching/belief_matching.py
+    lines 344-358) at the strong base's own settings, 30 product-sum
+    iterations, on the events the source drew, decoded offline in one
+    piece.
+    """
+    sampled = machine.observation.sampled_shots.shots_by_operation
+    predictions = []
+    for operation_result in result.operation_results:
+        sampled_shot = sampled[operation_result.operation_id]
+        model = sampled_shot.circuit.detector_error_model(decompose_errors=True)
+        offline = beliefmatching.BeliefMatching(
+            model, max_bp_iters=30, bp_method="product_sum"
+        )
+        events = numpy.asarray(sampled_shot.detection_events, dtype=bool)
+        predicted = offline.decode(events)
+        prediction = tuple(int(bit) for bit in predicted)
+        predictions.append(prediction)
+    return predictions
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_strong_unit_loop_matches_offline_belief_matching(seed):
+    """Strong-only predicts what its decoder predicts offline, shot for shot.
+
+    The strong base's windowed loop, belief matching on the host, reaches
+    the observables beliefmatching reaches on the whole circuit's events,
+    so its accuracy is the offline decoder's on the same shots.
+    """
+    settings = machine_settings.strong_decoder_baseline(3, 0.01, 1.0)
+    machine, result = _run(settings, seed)
     windows = machine.observation.windows.windows
+    loop = loop_predictions(result)
     assert len(windows) > 0
-    assert result.operation_results[0].logical_failure is False
+    assert loop == whole_circuit_belief_matching(machine, result)
 
 
 def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count():

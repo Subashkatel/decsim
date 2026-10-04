@@ -17,7 +17,7 @@ every component runs with no observer.
 """
 
 from collections.abc import Callable, Mapping
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, Union, runtime_checkable
 
 import decsim.config as config
 import decsim.engine as engine_module
@@ -26,6 +26,7 @@ import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.trace_source as trace_source
 
 
 class Port:
@@ -555,7 +556,11 @@ class WindowPlan(Protocol):
     ) -> window_records.Window:
         """Move a window's read start and install the model it reads with."""
 
-    def later_windows(self, operation_id: Any, window_index: int) -> list:
+    def later_windows(
+        self,
+        operation_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> list:
         """The operation's windows past that index, in index order."""
 
     def check_absorbable(self, window_keys: tuple) -> None:
@@ -670,7 +675,7 @@ class WindowRetention(Protocol):
 
     def read_keys_for_bounds(
         self,
-        operation_id: Any,
+        operation_id: Any,  # an opaque identity
         start_round: int,
         buffer_hi: int,
         window: Optional[window_records.Window] = None,
@@ -678,7 +683,10 @@ class WindowRetention(Protocol):
         """The retained round keys of a possibly cross-operation range."""
 
     def strong_rounds_before(
-        self, operation_id: Any, first_round: int, last_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
+        last_round: int,
     ) -> list:
         """The raw rounds before these that a strong read of them carries.
 
@@ -729,11 +737,11 @@ class WindowRounds(Protocol):
 class WindowJobBuilder(Protocol):
     """Where a strong window shape gets a job's identity and its gate."""
 
-    gate: Any
+    gate: "WindowInputGate"
 
     def new_request_key(
         self,
-        operation_id: Any,
+        operation_id: Any,  # an opaque identity
         window_id: int,
         tier: window_records.DecoderTier,
     ) -> window_records.DecoderRequestKey:
@@ -1059,9 +1067,11 @@ class Decoder(Protocol):
     """
 
     fault_model_requirement: Any
-    stage_recorded: Any
-    window_checked: Any
-    forced_solve_unavailable: Any
+    stage_recorded: Union[trace_source.TraceSource, trace_source.SilentSource]
+    window_checked: Union[trace_source.TraceSource, trace_source.SilentSource]
+    forced_solve_unavailable: Union[
+        trace_source.TraceSource, trace_source.SilentSource
+    ]
     decoder_evidence: frozenset
     missing_evidence_reasons: dict
 
@@ -1139,10 +1149,16 @@ class StrongBackend(Protocol):
     def submit(self, request: decoding_records.DecodeJob, running: int) -> Any:
         """Start one region's decode with running others on the device."""
 
-    def steps(self, ticket: Any) -> tuple[decoding_records.Step, ...]:
+    def steps(
+        self,
+        ticket: Any,  # an opaque identity
+    ) -> tuple[decoding_records.Step, ...]:
         """The decode's steps beyond the echo on the same path, in order."""
 
-    def result(self, ticket: Any) -> decoding_records.DecodeResult:
+    def result(
+        self,
+        ticket: Any,  # an opaque identity
+    ) -> decoding_records.DecodeResult:
         """The correction and observables; decode_status marks unconverged."""
 
 
@@ -1276,7 +1292,11 @@ class Qpu(Protocol):
     def finish(self) -> None:
         """The program is complete: idle patches stop after this cycle."""
 
-    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+    def are_patches_idle(
+        self,
+        operation_id: Any,  # an opaque identity
+        patches: tuple,
+    ) -> bool:
         """Every patch is idle after this same operation, as the QPU owns it.
 
         Asked before a joint stream advances; a busy member must not run.
@@ -1285,7 +1305,7 @@ class Qpu(Protocol):
     def emit_idle_stream_round(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -1296,7 +1316,10 @@ class Qpu(Protocol):
         """
 
     def emit_feedback_memory_round(
-        self, operation_id: Any, patch: Any, round_index: int
+        self,
+        operation_id: Any,  # an opaque identity
+        patch: Any,  # an opaque identity
+        round_index: int,
     ) -> None:
         """Deliver the timing-only round of an idle patch."""
 
@@ -1328,7 +1351,7 @@ class SyndromeSource(Protocol):
     # require removal when an independent model provider needs the circuit.
     operation_circuit_scope: str
     emits_bit_values: bool
-    shot_sampled: Any
+    shot_sampled: Union[trace_source.TraceSource, trace_source.SilentSource]
 
     def declare_stream(
         self,
@@ -1383,7 +1406,7 @@ class SyndromeSource(Protocol):
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -1397,7 +1420,8 @@ class SyndromeSource(Protocol):
         """
 
     def logical_observable_truth(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> Optional[tuple[int, ...]]:
         """The observable flips the source drew, or None when it draws none."""
 
@@ -1433,7 +1457,10 @@ class DetectionEventFormer(Protocol):
     2108.06569 lines 499-510).
     """
 
-    def formation_table(self, operation_id: Any):
+    def formation_table(
+        self,
+        operation_id: Any,  # an opaque identity
+    ):
         """The operation's formation table, the rounds executed so far."""
 
 
@@ -1474,7 +1501,11 @@ class DetectionEventPlacement(Protocol):
         """
 
     def rounds_needed_before(
-        self, seat: str, operation_id: Any, first_round: int, last_round: int
+        self,
+        seat: str,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
+        last_round: int,
     ) -> tuple:
         """The raw rounds before a read's first round the seat must be given.
 
@@ -1483,7 +1514,9 @@ class DetectionEventPlacement(Protocol):
         """
 
     def earlier_rounds_read(
-        self, operation_id: Any, first_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
     ) -> tuple[int, ...]:
         """The raw rounds before first_round it or any later round reads.
 
@@ -1534,7 +1567,9 @@ class WindowModelSource(Protocol):
         """One model per window of a planned operation, in window order."""
 
     def window_model_for_stream(
-        self, stream_id: Any, window: window_records.Window
+        self,
+        stream_id: Any,  # an opaque identity
+        window: window_records.Window,
     ):
         """The model of one window of a dynamic stream, laid at runtime."""
 

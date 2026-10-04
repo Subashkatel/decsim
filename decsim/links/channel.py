@@ -60,15 +60,13 @@ class FramedPayload:
 class FrameTiming:
     """One frame's trip across a wire.
 
-    The frame could go at queue_ticks (its message ready and the wire
-    free), waited credit_wait_ticks for a receive-buffer credit, held
+    The frame waited credit_wait_ticks for a receive-buffer credit, held
     the wire from start_ticks to end_ticks, and landed at the receiver
     at landed_ticks. bits is None for a payload of unknown size on an
     unbounded wire.
     """
 
     bits: Optional[int]
-    queue_ticks: int
     credit_wait_ticks: int
     start_ticks: int
     end_ticks: int
@@ -245,7 +243,7 @@ class IdealWire:
         if self._capacity is None:
             landed_ticks = ready_ticks + self._propagation_ticks
             timing = FrameTiming(
-                None, ready_ticks, 0, ready_ticks, ready_ticks, landed_ticks
+                None, 0, ready_ticks, ready_ticks, landed_ticks
             )
             return (timing,)
         start_ticks = max(ready_ticks, self._free_ticks)
@@ -254,9 +252,7 @@ class IdealWire:
         end_ticks = start_ticks + serialization
         self._free_ticks = end_ticks
         landed_ticks = end_ticks + self._propagation_ticks
-        timing = FrameTiming(
-            wire_bits, start_ticks, 0, start_ticks, end_ticks, landed_ticks
-        )
+        timing = FrameTiming(wire_bits, 0, start_ticks, end_ticks, landed_ticks)
         return (timing,)
 
 

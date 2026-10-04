@@ -162,7 +162,6 @@ class CreditWire:
         credit_wait_ticks = start_ticks - queue_ticks
         return channel_module.FrameTiming(
             bits,
-            queue_ticks,
             credit_wait_ticks,
             start_ticks,
             end_ticks,

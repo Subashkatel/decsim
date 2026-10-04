@@ -874,12 +874,16 @@ class DecoderInputFold(Protocol):
     """
 
     def fold_into_a_copy(
-        self, job: decoding_records.DecodeJob, masked_input
+        self,
+        job: decoding_records.DecodeJob,
+        masked_input: decoding_records.DecoderInput,
     ) -> None:
         """Give the job a masked duplicate; the unit's rounds stay raw."""
 
     def fold_in_place(
-        self, job: decoding_records.DecodeJob, masked_input
+        self,
+        job: decoding_records.DecodeJob,
+        masked_input: decoding_records.DecoderInput,
     ) -> None:
         """Write the masked input into the unit's own memory."""
 

@@ -16,7 +16,6 @@ import json
 from typing import Any, Optional, Union
 
 import decsim.config as config
-import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.engine as engine_module
@@ -630,7 +629,7 @@ class TraceWriter:
         self,
         memory_name: str,
         _job: decoding_records.DecodeJob,
-        decoder_input: decoder_memory_module.DecoderInput,
+        decoder_input: decoding_records.DecoderInput,
     ) -> None:
         """One job's rounds landed in a unit's memory."""
         unit_name = _unit_of_memory(memory_name)
@@ -643,7 +642,7 @@ class TraceWriter:
         self,
         memory_name: str,
         job: decoding_records.DecodeJob,
-        decoder_input: decoder_memory_module.DecoderInput,
+        decoder_input: decoding_records.DecoderInput,
     ) -> None:
         """The unit's memory freed the job's rounds."""
         unit_name = _unit_of_memory(memory_name)

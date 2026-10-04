@@ -115,7 +115,7 @@ class DecoderInputStaging:
     def fold_into_a_copy(
         self,
         job: decoding_records.DecodeJob,
-        masked_input: decoder_memory_module.DecoderInput,
+        masked_input: decoding_records.DecoderInput,
     ) -> None:
         """The job reads a masked duplicate; the unit's rounds stay raw.
 
@@ -131,7 +131,7 @@ class DecoderInputStaging:
     def fold_in_place(
         self,
         job: decoding_records.DecodeJob,
-        masked_input: decoder_memory_module.DecoderInput,
+        masked_input: decoding_records.DecoderInput,
     ) -> None:
         """The mask is written into the unit's own memory, nothing copied.
 

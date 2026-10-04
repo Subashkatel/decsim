@@ -15,6 +15,7 @@ import numpy
 
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.fault_model_contracts as fault_models
+import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 
@@ -334,6 +335,52 @@ class RequestProcessingOutcome(Enum):
     WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
 
 
+@dataclass(frozen=True)
+class MaterializedSyndromeRound:
+    """One immutable syndrome round owned by the decoder side."""
+
+    operation_id: Any  # an opaque identity
+    round_index: int
+    fragments: tuple[round_records.RetainedSyndromeFragment, ...]
+
+
+@dataclass(frozen=True)
+class DecoderInput:
+    """Immutable local input for one decoder request.
+
+    Rounds are ordered by operation identity and round index.
+    """
+
+    operation_id: int
+    window_id: int
+    request_key: Optional[window_records.DecoderRequestKey]
+    rounds: tuple[MaterializedSyndromeRound, ...]
+
+    def fragments(self) -> list:
+        """The landed fragments, round by round."""
+        fragments = []
+        for round_input in self.rounds:
+            fragments.extend(round_input.fragments)
+        return fragments
+
+    def size_bits(self) -> Optional[int]:
+        """The bits this input occupies; None when a fragment states none.
+
+        An input with no rounds is no bits at all.
+        """
+        fragments = self.fragments()
+        return round_records.fragment_wire_bits(fragments)
+
+    def held_bits(self) -> int:
+        """The bits this input holds in a memory.
+
+        Rounds that state no size hold none; only a bounded memory needs
+        a size, and it refuses such an input before it lands.
+        """
+        bits = self.size_bits()
+        return round_records.stated_bits(bits)
+
+
 def distinct_round_count(payloads: list) -> int:
     """The distinct (operation_id, round_index) rounds of the payloads.
 
@@ -367,7 +414,8 @@ class DecodeJob:
     payloads: list = field(
         default_factory=list
     )  # transfer-source view; cleared after materialization
-    decoder_input: Optional[Any] = None  # materialized decoder memory value
+    # the rounds as they sit in the unit's memory, once they have landed
+    decoder_input: Optional[DecoderInput] = None
     # the raw rounds before the first payload, in round order, read out
     # of the store with them when the tier's decoder forms the events
     # and has not formed that first round (detection_events,

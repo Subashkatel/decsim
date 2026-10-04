@@ -256,8 +256,8 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
     assert fixture.gate.may_start(job) is False
     raw = job.payloads[4]
     assert raw.bits is None
-    landed = decoder_memory.MaterializedSyndromeRound(1, 5, (raw,))
-    job.decoder_input = decoder_memory.DecoderInput(
+    landed = decoding_records.MaterializedSyndromeRound(1, 5, (raw,))
+    job.decoder_input = decoding_records.DecoderInput(
         1, 0, job.request_key, (landed,)
     )
     job.memory = decoder_memory.DecoderMemory("default", 0, None)
@@ -283,8 +283,8 @@ def test_a_boundary_that_flipped_nothing_is_still_folded():
     _arrive_all(fixture, (1, 2, 3, 4, 5))
     (job, _send_input) = fixture.queue.enqueued[0]
     raw = _fragment(5, bits=(1, 0, 1))
-    landed = decoder_memory.MaterializedSyndromeRound(1, 5, (raw,))
-    job.decoder_input = decoder_memory.DecoderInput(
+    landed = decoding_records.MaterializedSyndromeRound(1, 5, (raw,))
+    job.decoder_input = decoding_records.DecoderInput(
         1, 0, job.request_key, (landed,)
     )
     job.memory = decoder_memory.DecoderMemory("default", 0, None)

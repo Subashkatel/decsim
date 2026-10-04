@@ -486,7 +486,12 @@ def check_file(path):
     source_lines = source.splitlines()
     checker = Checker(path, source_lines)
     checker.visit(tree)
-    return checker.findings
+    # one line nested three deep is one line to fix, so it is reported once
+    unique = {}
+    for finding in checker.findings:
+        unique.setdefault(str(finding), finding)
+    unique_findings = unique.values()
+    return list(unique_findings)
 
 
 def is_excluded(path, target):

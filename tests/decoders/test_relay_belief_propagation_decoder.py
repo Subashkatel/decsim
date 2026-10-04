@@ -79,6 +79,15 @@ def _reference_decoder(relay_bp, faults, settings):
     )
 
 
+def _decode_a_fresh_window(row, circuit, shot) -> None:
+    """One shot through a window model built anew, as a shot builds it."""
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    job = windows.job_for(model, shot)
+    row.decode(job)
+
+
 class _RelayDevice:
     """A strong backend that answers at once with the row decoding together."""
 
@@ -134,12 +143,9 @@ def test_two_windows_with_one_model_share_one_backend(monkeypatch):
         return build(*arguments)
 
     monkeypatch.setattr(relay_window, "_construct_backend", counted_build)
-    for _ in range(2):
-        model = windows.whole_circuit_window(
-            circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
-        )
-        job = windows.job_for(model, detection_events[0])
-        row.decode(job)
+    shot = detection_events[0]
+    _decode_a_fresh_window(row, circuit, shot)
+    _decode_a_fresh_window(row, circuit, shot)
     assert len(builds) == 1
 
 

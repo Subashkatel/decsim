@@ -42,6 +42,8 @@ VIOLIN_HALF_WIDTH = 0.8
 VIOLIN_BINS = 40
 # A window's path through the machine, one segment per place in the
 # order the window passes it, after Liu et al. 2603.16203 Fig. 8. Each
+# segment has its own hue, from the Okabe-Ito and Paul Tol palettes; a
+# segment in both paths keeps one color. Each
 # segment is the recorded points of decsim/experiments/measure.py it
 # adds, less any it subtracts, and a path's segments add up to its
 # span. A kept window's path starts when the window is formed, an
@@ -54,49 +56,49 @@ VIOLIN_BINS = 40
 # after it. On a kept path it is the wait for the previous window's
 # boundary.
 KEPT_PATH = {
-    "union-find queue": ("#9ecae1", ["admission_wait", "queue_wait"], []),
-    "wait for previous window's boundary": ("#6baed6", ["dep_block"], []),
-    "into union-find memory": ("#c6dbef", ["input_link_per_window"], []),
+    "union-find queue": ("#f0e442", ["admission_wait", "queue_wait"], []),
+    "wait for previous window's boundary": ("#e69f00", ["dep_block"], []),
+    "into union-find memory": ("#88ccee", ["input_link_per_window"], []),
     "union-find busy with the window ahead": (
-        "#4292c6",
+        "#332288",
         ["compute_wait"],
         [],
     ),
-    "union-find decode": ("#2171b5", ["fetch", "algorithm", "release"], []),
-    "confidence check": ("#08306b", ["confidence"], []),
+    "union-find decode": ("#0072b2", ["fetch", "algorithm", "release"], []),
+    "confidence check": ("#882255", ["confidence"], []),
     "to the Pauli frame": (
-        "#31a354",
+        "#009e73",
         ["selection_wait", "output_link_per_window", "frame_commit"],
         [],
     ),
 }
 ESCALATED_PATH = {
-    "rounds arriving in the weak buffer": ("#d9d9d9", ["buffer_fill"], []),
-    "union-find queue": ("#9ecae1", ["admission_wait", "queue_wait"], []),
+    "rounds arriving in the weak buffer": ("#bbbbbb", ["buffer_fill"], []),
+    "union-find queue": ("#f0e442", ["admission_wait", "queue_wait"], []),
     "union-find decode and confidence check": (
-        "#3182bd",
+        "#0072b2",
         ["weak_attempt", "confidence"],
         [],
     ),
     "extra rounds and link to Relay-BP-5": (
-        "#969696",
+        "#44aa99",
         ["escalation_link_per_window"],
         [],
     ),
     "Relay-BP-5 queue: both input slots full": (
-        "#fdae6b",
+        "#cc79a7",
         ["dep_block"],
         ["escalation_link_per_window"],
     ),
-    "into Relay-BP-5 memory": ("#fdd0a2", ["input_link_per_window"], []),
+    "into Relay-BP-5 memory": ("#ddcc77", ["input_link_per_window"], []),
     "Relay-BP-5 busy with the window ahead": (
-        "#e6550d",
+        "#d55e00",
         ["compute_wait"],
         [],
     ),
-    "Relay-BP-5 decode": ("#a63603", ["fetch", "algorithm", "release"], []),
+    "Relay-BP-5 decode": ("#6a3d9a", ["fetch", "algorithm", "release"], []),
     "to the Pauli frame": (
-        "#31a354",
+        "#009e73",
         ["selection_wait", "output_link_per_window", "frame_commit"],
         [],
     ),

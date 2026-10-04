@@ -828,11 +828,11 @@ class StrongRedecode(Protocol):
     """The strong tier's window side, as the weak windows see it.
 
     The requester asks it for the speculative strong decode that starts
-    beside a weak one (2510.25222 Step 1, lines 598-601); the committer,
-    the verdict and the window manager ask it to escalate, release and
-    cancel. A kept weak result halts the strong request it made unnecessary,
-    held here or on the strong side's manager (Toshio et al. 2510.25222
-    lines 606-614).
+    beside a weak one (Toshio et al. 2510.25222 lines 598-601); the
+    committer, the verdict and the window manager ask it to escalate,
+    release and cancel. A kept weak result halts the strong request it
+    made unnecessary, held here or on the strong side's manager (lines
+    606-614).
     """
 
     def parallel_strong_submission(

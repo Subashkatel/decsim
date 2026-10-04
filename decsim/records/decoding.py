@@ -1,9 +1,10 @@
-"""One decode: the job, the result, and the holds that keep its rounds.
+"""One decode: its job, input, stages and result, and the holds on its rounds.
 
 A weak decode runs first and fast; an escalated strong decode re-decodes
 the same window (Toshio et al. 2510.25222 Sec. III A). The confidence,
 the request outcome and the run's shape live here too, because the
-escalation policy reads them with the result.
+escalation policy reads them with the result, and so does the frame's
+record of the correction it accepted, which closes the decode.
 """
 
 from collections.abc import Callable

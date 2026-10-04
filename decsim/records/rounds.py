@@ -117,12 +117,9 @@ class SyndromeRoundPacket:
         The set detection-event indices across the fragments in order,
         sparse so d=11 lines stay readable.
         """
-        round_bits = []
-        for fragment in self.fragments:
-            bits = fragment.bits
-            if bits is None:
-                return "timing-only"
-            round_bits.extend(bits)
+        round_bits = self._round_bits()
+        if round_bits is None:
+            return "timing-only"
         defects = []
         for position, bit in enumerate(round_bits):
             if bit:
@@ -131,6 +128,16 @@ class SyndromeRoundPacket:
             return "no defects"
         indices = ", ".join(str(defect) for defect in defects)
         return f"defects {{{indices}}}"
+
+    def _round_bits(self) -> Optional[list]:
+        """The fragments' bits in order; None when one carries timing only."""
+        round_bits = []
+        for fragment in self.fragments:
+            bits = fragment.bits
+            if bits is None:
+                return None
+            round_bits.extend(bits)
+        return round_bits
 
 
 @dataclass(frozen=True)

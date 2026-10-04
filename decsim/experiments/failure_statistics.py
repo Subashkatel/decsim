@@ -37,9 +37,10 @@ class StopKind(enum.Enum):
 
 @dataclasses.dataclass(frozen=True)
 class Estimate:
-    """A failure probability and its exact 95 percent interval.
+    """An estimate of one failure probability.
 
-    None where the stop gives no value: a cap with no failure has an upper
+    low and high bound its exact 95 percent interval. A field is None
+    where the stop gives no value: a cap with no failure has an upper
     limit alone, and a point with no scored shot has nothing.
     """
 

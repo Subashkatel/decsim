@@ -1026,7 +1026,7 @@ class _CommittedDecode:
 
 @dataclasses.dataclass(frozen=True)
 class _Throughput:
-    """Decoded windows and QEC rounds per microsecond of the shot's span."""
+    """The shot's throughput, per microsecond of its span."""
 
     windows_per_microsecond: float
     rounds_per_microsecond: float
@@ -1034,7 +1034,7 @@ class _Throughput:
 
 @dataclasses.dataclass(frozen=True)
 class _RefereeCounts:
-    """What the window referee re-decoded and where it disagreed."""
+    """The window referee's tally over the shot."""
 
     windows_checked: int
     window_disagreements: int
@@ -1042,7 +1042,7 @@ class _RefereeCounts:
 
 @dataclasses.dataclass(frozen=True)
 class _PoolMeasures:
-    """Each tier's deepest ready queue and busy fraction over the shot."""
+    """Each tier's pool load over the shot."""
 
     weak_queue_max: int
     strong_queue_max: int
@@ -1071,7 +1071,7 @@ class _DecodeLife:
 
 @dataclasses.dataclass(frozen=True)
 class _TierRecords:
-    """The switching records' weak inputs and services and strong waits."""
+    """Each tier's summary from the switching records."""
 
     weak_syndrome_weight_mean: Optional[float] = None
     weak_syndrome_weight_max: Optional[int] = None

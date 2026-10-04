@@ -10,4 +10,7 @@ ValueError, as STYLE.md rule 4 asks of a boundary refusal.
 
 
 class RefusalError(ValueError):
-    """What was asked for, and why the experiments layer will not do it."""
+    """A request the experiments layer will not carry out.
+
+    Its message says what was asked for and why.
+    """

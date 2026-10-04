@@ -35,11 +35,12 @@ TIME_CAP_STATE = "time cap"
 
 @dataclasses.dataclass(frozen=True)
 class CollectionSettings:
-    """One point's collection: when it stops and the rounds of a piece.
+    """The settings of one point's collection.
 
     max_failures is the target, None for none; min_shots the scored shots
     run whatever the failures; max_shots and max_core_seconds the caps, at
-    least one set. Python input enters here, so it checks its own values.
+    least one set; piece_rounds the rounds of one piece. Python input
+    enters here, so it checks its own values.
     """
 
     max_shots: Optional[int] = None

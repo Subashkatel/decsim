@@ -258,7 +258,7 @@ decsim trace follow \
 ```
 
 ```
-round 1:1 of decsim weak_baseline d3 seed0
+round 1:1 of point d3, decsim weak_baseline d3 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
 0.000      weak syndrome buffer         hold registered                                                                reference

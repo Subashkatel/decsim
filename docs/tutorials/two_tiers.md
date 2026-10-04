@@ -173,7 +173,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:0 of decsim switching d3 seed1
+window 1:0 of point d3, decsim switching d3 seed1
 
 tick (us)  where                        what                                                          dur (us)  transfer  bits
 7.004      Window planner               W0 ready
@@ -234,7 +234,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:3 of decsim switching d3 seed1
+window 1:3 of point d3, decsim switching d3 seed1
 
 tick (us)  where                            what                                                           dur (us)  transfer  bits
 16.004     Window planner                   W3 ready
@@ -337,7 +337,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:4 of decsim switching d3 seed1
+window 1:4 of point d3, decsim switching d3 seed1
 
 tick (us)  where                            what                                                            dur (us)  transfer  bits
 19.004     Window planner                   W4 ready

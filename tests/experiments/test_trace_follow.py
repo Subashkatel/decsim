@@ -8,6 +8,7 @@ not the link's 8.
 """
 
 import dataclasses
+import json
 
 import pytest
 
@@ -253,6 +254,22 @@ def test_the_command_prints_the_table(trace_path, capsys):
     assert printed.startswith("round 1:1 of ")
     assert "d3 seed0" in printed
     assert "copies 4, references 1 job and 1 hold, moves 3" in printed
+
+
+def test_a_run_folders_trace_is_named_by_its_points_name(tmp_path):
+    """Two points of one experiment share a machine description."""
+    point_dir = tmp_path / "points" / "t_minus_1"
+    point_dir.mkdir(parents=True)
+    record = {"id": "a1b2", "name": "t_minus_1"}
+    (point_dir / "machine.json").write_text(json.dumps(record))
+    trace_dir = tmp_path / "trace"
+    trace_dir.mkdir()
+
+    named = trace_follow.point_named_by(trace_dir / "a1b2_seed0.trace.json")
+    other = trace_follow.point_named_by(trace_dir / "c3d4_seed0.trace.json")
+
+    assert named == "t_minus_1"
+    assert other is None
 
 
 def test_a_command_line_naming_neither_a_round_nor_a_window_is_refused():

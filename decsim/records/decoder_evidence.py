@@ -1,20 +1,15 @@
 """The evidence a decode returns beside its correction, for a signal to read.
 
 A confidence signal reads the decoder's own numbers rather than running
-a second decode, so the record that carries them crosses the Decoder
-port (decoding.CLUSTER_GROWTH_EVIDENCE) and lives here rather than
-inside a decoder package. Lampson's "don't hide power" is the reason the
-window exists at all: "the client of an abstraction ... should not be
-denied the ability to use the power of the implementation"
-(lampson1983.txt 298-303); STYLE.md rule 6 is the reason it lives here.
+a second decode, so the record crosses the Decoder port and lives here,
+not inside a decoder package: "the client of an abstraction ... should
+not be denied the ability to use the power of the implementation"
+(Lampson 1983).
 
-The weighted union-find growth is the one family so far. Its shape is
-Delfosse and Nickerson 1709.06218 as weighted by Huang, Newman and Brown
-2004.04693: an edge of log-odds weight w has integer length round(w /
-weight_step), and a growing front covers it half a tick at a time, so
-what a decode leaves behind is an interval per edge, open where the
-growth did not reach and closed where it did. The algorithm that grows
-them stays in decsim/decoders/union_find/window_decoder.py.
+The weighted union-find growth is Delfosse and Nickerson 1709.06218 as
+weighted by Huang, Newman and Brown 2004.04693: an edge of log-odds
+weight w has integer length round(w / weight_step), and a front covers
+it half a tick at a time, so a decode leaves an interval per edge.
 """
 
 import dataclasses
@@ -49,19 +44,14 @@ class Closed:
 class GrowthStep:
     """One growth step's cycle count inputs: its work and its critical path.
 
-    edge_count is the boundary edges the step advanced. hop_count is the
-    deepest flood over closed edges from the lowest detector of any
-    cluster the step fused, the boundary left out: the stages a cluster
-    identifier and its parity take to cross the cluster (Helios
-    2301.08419 lines 623-629); zero when the step fused nothing.
-    growth_ticks is the ticks the step spanned, which is the one-unit
-    growth iterations a unit that grows one unit of weight at a time
-    spends on it (lines 1242-1254, latency growing with the
-    weight resolution). fusion is the strongest kind among the step's
-    own fusions, one of FUSION_KINDS: none when the closing edges united
-    no two clusters, roots when clusters united and only roots and the
-    touching-boundary flag moved, parity when the survivor's parity took
-    an odd absorbed root's and has to cross the cluster it fused.
+    hop_count is the deepest flood over closed edges from the lowest
+    detector of any cluster the step fused, the boundary left out: the
+    stages a cluster identifier and parity take to cross it (Helios
+    2301.08419 lines 623-629). growth_ticks is the one-unit growth
+    iterations a unit spends (lines 1242-1254). fusion is the strongest
+    kind among the step's fusions: none, roots (only roots and the boundary
+    flag moved), or parity (an odd absorbed root's parity must cross the
+    fused cluster).
     """
 
     edge_count: int

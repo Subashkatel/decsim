@@ -1,13 +1,10 @@
 """One decoder window: its geometry, its plan, its boundaries, its state.
 
-A window is a range of an operation's rounds that one decode covers, so
-a request for it is a window key plus the tier that serves it and a
-run-wide ordinal; DecoderTier and DecoderRequestKey live here because a
-window records which request finally published its correction. The
-window itself is the window manager's live bookkeeping, so it and the
-plan records that carry live state are the folder's unfrozen ones.
-FormationReads says which reads also hold the raw rounds before them;
-the plan builder and the planner share it.
+A request is a window key plus the tier that serves it and a run-wide
+ordinal; DecoderTier and DecoderRequestKey live here because a window
+records which request published its correction. The window is the
+window manager's live bookkeeping, so it and the plan records with live
+state are unfrozen.
 """
 
 from collections.abc import Mapping
@@ -130,7 +127,7 @@ class Window:
     t_queued: Optional[int] = None  # tick the job entered the decode queue
     # The three ticks below are the window's own decodes as they happen,
     # so a window decoded more than once (the two forced-class solves of
-    # a complementary gap, decision D2) keeps the last one's dispatch
+    # a complementary gap) keeps the last one's dispatch
     # and the last one's compute start, and t_done is the tick its last
     # weak answer arrived. A reader that needs one decode's own ticks
     # reads the stage records, which carry the run ordinals they served
@@ -264,13 +261,11 @@ class DependencyResidual:
 class CrossingCommit:
     """What one decode committed of the faults crossing its near seam.
 
-    A window that owns the faults touching the round before its commit
-    region hands that part of its correction on twice: as the boundary
-    condition of the region ending there, and, when it escalates, to its
-    own strong redo, which owns none of those faults. The residual is
-    their complete detector effect, and logical_observables the
-    observables they flip, which stay with the window when the strong
-    result replaces its prediction.
+    A window owning the faults touching the round before its commit region
+    hands that part of its correction on twice: as the boundary of the
+    region ending there and, when it escalates, to its own strong redo,
+    which owns none of them. logical_observables stay with the window when
+    the strong result replaces its prediction.
     """
 
     residual: DependencyResidual
@@ -304,15 +299,11 @@ class BoundaryDelivery:
 class BoundarySeam:
     """What one boundary message updates: the destination's oldest layer.
 
-    A window hands its neighbour the detectors its committed correction
-    flips on the one round layer the neighbour starts with: Tan et al.
-    2209.09219 lines 936-946 ("the detectors on the oldest layer of the
-    next window are updated"), quits `syn_update` sized by one check
-    layer (sliding_window.py:164-174) and cuda-q QEC's `syndrome_mods`
-    written only between the next window's round bounds
-    (sliding_window.cpp:325-344). detector_count is that layer's
-    detectors, d*d-1 on a bulk layer of a rotated surface code;
-    flip_count is how many of them the message flips.
+    Tan et al. 2209.09219 lines 936-946 ("the detectors on the oldest layer
+    of the next window are updated"), quits syn_update
+    (sliding_window.py:164-174) and cuda-q QEC's syndrome_mods
+    (sliding_window.cpp:325-344). detector_count is d*d-1 on a rotated
+    surface code's bulk layer; flip_count how many the message flips.
     """
 
     detector_count: int
@@ -350,16 +341,12 @@ def strong_region_round_count(
 def strong_context_bounds(window: "Window") -> tuple:
     """(context_lo, commit_lo, commit_hi, context_hi) a strong redo reads.
 
-    A strong redo of this window reads its commit rounds and one buffer
-    region past them, and no round before them: every row pins its past
-    face on the earlier neighbour's committed correction, and a fixed
-    boundary condition replaces the buffer that would otherwise open
-    that face (Bombin et al. 2303.04846 lines 1456-1458), while the
-    future face stays open over one buffer region of raw context (lines
-    850-852). The redo window reads exactly this; the double window
-    reads from the same first round on, further forward
-    (escalation/strong_regions.py). The round retention keeps this span
-    for a window the strong tier may redo.
+    Its commit rounds and one buffer past them, none before: every row pins
+    its past face on the earlier neighbour's committed correction, a fixed
+    boundary in place of a buffer (Bombin et al. 2303.04846 lines
+    1456-1458), while the future face stays open over one buffer region
+    (lines 850-852). The round retention keeps this span for a window the
+    strong tier may redo.
     """
     buffer_span = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, buffer_span)
@@ -413,15 +400,11 @@ class WindowReadiness:
 class FormationReads:
     """How far before its first round a planned strong read holds.
 
-    A seat past the weak syndrome buffer that forms the events joins a
-    region mid-stream and is given every raw round before its first
-    that its rounds' recipes read (FormationTable
-    rounds_read_before_first), so the window's potential strong read
-    holds them, as an HEVC decoder keeps each picture the current
-    reference set names (FFmpeg hevc/refs.c:486-517).
-    strong_side_seat is that seat, None when none forms. tables maps an
-    operation id to its formation table; an operation with none reads
-    nothing before its first round.
+    A seat past the weak syndrome buffer that forms events joins a region
+    mid-stream and is given every raw round before its first that its
+    recipes read (FormationTable rounds_read_before_first), as an HEVC
+    decoder keeps its reference set (FFmpeg hevc/refs.c:486-517).
+    strong_side_seat is None when no such seat forms.
     """
 
     strong_side_seat: Optional[str] = None

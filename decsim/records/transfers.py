@@ -20,9 +20,7 @@ import decsim.records.windows as window_records
 class LinkPath(str, Enum):
     """The hops of the reaction path, one per pair of components.
 
-    In the order the reports list them. The weak buffer is the weak
-    syndrome buffer, the strong buffer the strong syndrome buffer; a
-    fabric card prices every hop here, so none of them is ever free.
+    In report order; a fabric card prices every hop, so none is free.
     """
 
     QPU_TO_CONTROLLER = "qpu_to_controller"  # a readout
@@ -72,12 +70,9 @@ class BoundaryTransferRelation:
 class TransferAttribution:
     """Whose transfer this is.
 
-    The operation, its patches, the window or the inclusive round range
-    the bits belong to, and the relation the path's rule asks for. The
-    range counts past the operation's end the way its window does;
-    round_keys names every round the bits carry as (operation id, round
-    index), a lookahead window's next-operation rounds under their own
-    operation, and is empty when the bits carry no round.
+    The range counts past the operation's end the way its window does;
+    round_keys names every round the bits carry, a lookahead window's
+    next-operation rounds under their own operation.
     """
 
     # An operation id is whatever the front end chose; the links never
@@ -214,21 +209,13 @@ class PayloadSelection(Enum):
 class Transfer:
     """One transfer's timing on its channel, complete at delivery.
 
-    The sender asked at request_ticks. The transfer waited
-    setup_wait_ticks for the channel's setup engine to finish the setups
-    ahead of it, paid its own path's setup_ticks, and reached the wire's
-    queue at send_ticks; the wire took it at serializer_start_ticks
-    (queue_wait_ticks later) and let its last bit go at
-    serializer_end_ticks; the receiver has it at delivery_ticks, one
-    propagation later. total_delay_ticks counts from the request and is
-    the sum of the two setup spans, the queue wait, the serialization
-    and the propagation. header_bits is the path's framing, which the
-    wire serialized with the payload and which is no part of it. On a
-    packet protocol the transfer is its frames: serializer_start_ticks
-    is the first frame's start and serializer_end_ticks the last
-    frame's end, serialization_ticks the time its frames held the wire,
-    lost and resent ones included, and queue_wait_ticks the rest of
-    that span, the credit waits and the recovery with the queue.
+    total_delay_ticks counts from the request and is the sum of the two
+    setup spans, the queue wait, the serialization and the propagation.
+    header_bits is the path's framing, serialized with the payload and no
+    part of it. On a packet protocol serialization_ticks is the time the
+    frames held the wire, lost and resent ones included, and
+    queue_wait_ticks the rest of the span from first frame start to last
+    frame end.
     """
 
     payload_bits: Optional[int]

@@ -132,6 +132,7 @@ CHAIN = (
     "queue_wait",
     "weak_attempt",
     "input_link_per_window",
+    "store_read",
     "dep_block",
     "compute_wait",
     "service",
@@ -1287,6 +1288,33 @@ def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it():
 
     assert measurement.samples["input_link_per_window"] == [0.024] * 9
     assert measurement.samples["dep_block"] == [0.0] * 9
+
+
+def test_a_stores_read_is_its_own_point_and_not_in_the_park():
+    """A weak store whose read of a window costs 25 fridge cycles, 0.1 us.
+
+    Each window's input read takes the store's 0.1 us after the dispatch
+    and before the input hop, so store_read is 0.1 on all nine windows.
+    The 0.1 us unit keeps pace with the rounds, so no window owes
+    anything and dep_block is zero; the chain still adds up to each
+    window's reaction time.
+    """
+    settings = store_read_settings()
+    task = point_task(settings)
+    measurement = measured(task)
+
+    assert measurement.samples["store_read"] == [0.1] * 9
+    assert measurement.samples["dep_block"] == [0.0] * 9
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+
+
+def store_read_settings() -> machine_settings.MachineSettings:
+    """A 0.1 us unit behind a weak store that reads in 25 fridge cycles."""
+    base = one_tier_machine(0.1)
+    store = dataclasses.replace(
+        base.weak_syndrome_buffer, read_cycles=25, clock=FRIDGE_CLOCK
+    )
+    return dataclasses.replace(base, weak_syndrome_buffer=store)
 
 
 def input_setup_settings() -> machine_settings.MachineSettings:

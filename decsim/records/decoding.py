@@ -372,6 +372,10 @@ class DecodeJob:
     # carries its own stage ticks (src/cpu/o3/dyn_inst.hh:1017-1028);
     # zero on a decoder with no queue of its own
     backend_queue_wait_ticks: int = 0
+    # the ticks this decode's input read took in its tier's store, from
+    # the dispatch that asked for it to the read's end, its port waits
+    # included; zero on a store that prices no read
+    store_read_ticks: int = 0
     memory: Optional[Any] = (
         None  # that unit's DecoderMemory while it holds this job's input
     )

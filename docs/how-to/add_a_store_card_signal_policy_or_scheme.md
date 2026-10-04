@@ -56,8 +56,9 @@ same kind of job, with a page of its own:
   the trace row).
 - **Worked example:** `decsim/syndrome_buffer/ported_syndrome_buffer.py`.
   **Tests:** `tests/syndrome_buffer/`.
-- **Where the time lands:** a read's time is in the `dep_block`
-  latency point. A write's time is in no per-stage point: it delays
+- **Where the time lands:** a decode's input read is the `store_read`
+  latency point; an escalation's read of its rounds out of the weak
+  store is in `dep_block`, beside the escalation hop. A write's time is in no per-stage point: it delays
   the round's publication, so it shows in the `qpu_*` totals and not
   in the `buffer0_*` ones.
 

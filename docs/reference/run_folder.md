@@ -146,7 +146,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `csb_stall_per_round` | the same wait in front of the strong syndrome buffer, one sample per round that reached it |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
 | `admission_wait` | the window's data complete in the weak syndrome buffer, to its decode job entering the queue: the window side's decision (`windows.decision_cycles`), and any earlier request of the window that was withdrawn, as a restart window's is when a `double_window` strong window re-slices it; zero otherwise |
-| `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, and a timed store's read of the window's rounds, which comes before the input hop; zero when nothing was owed and the read took no time |
+| `store_read` | the committing decode's dispatch, to the end of its input's read in its tier's syndrome buffer, before the input hop: a store that prices reads, its port waits included; zero for a store that prices none |
+| `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, the escalated rounds' read out of the weak syndrome buffer included; zero when nothing was owed |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
 | `queue_wait` | queued, to a unit assigned |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |
@@ -185,6 +186,8 @@ to one decode.
 - `weak_attempt` runs from there to the verdict that sent the window to
   the strong tier. It is zero when the first decode is the one that
   committed.
+- `store_read` is the committing decode's read of its input in its
+  tier's store, before that hop.
 - `input_link_per_window` is the committing decode's own hop in.
 - `dep_block` and `compute_wait` are the two halves of its park, the
   wait between its input landing and its compute starting.
@@ -195,7 +198,7 @@ to one decode.
   the verdict's selection to reach it.
 - `frame_commit` closes it.
 
-On a serial path those eleven add
+On a serial path those twelve add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 

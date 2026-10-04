@@ -77,6 +77,7 @@ class SyndromeBufferOutput:
         carried = job.rounds_before + tuple(job.payloads)
         round_keys = _payload_round_keys(carried)
         read_tick = self.store.book_read(round_keys)
+        job.store_read_ticks = read_tick - self.engine.now
         if self.reads_in_place:
             return self._land_at(read_tick, on_landed)
         if read_tick == self.engine.now:

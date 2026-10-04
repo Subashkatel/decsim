@@ -52,13 +52,17 @@ POINTS = (
     # visit that left the queue unserved as its own record (ciw
     # data_record.py lines 3-21, node.py write_reneging_record)
     "admission_wait",
+    # the committing decode's input read in its tier's store: the
+    # dispatch that asked for it -> the read's end, its port waits
+    # included, before the input hop
+    "store_read",
     # the dependency wait around the committing decode's own hop: from
     # where its path started, the dispatch or the verdict that escalated
     # the window, to the first tick it may compute, less the input hop
-    # itself. It is the wait for the escalated rounds to land in the
-    # strong store before the input hop, the predecessor's boundary and
-    # the escalation's selection after it, and zero when nothing was
-    # owed
+    # and the store's read. It is the wait for the escalated rounds to
+    # land in the strong store before the input hop, the predecessor's
+    # boundary and the escalation's selection after it, and zero when
+    # nothing was owed
     "dep_block",
     # that first startable tick -> the compute started: the wait for the
     # unit's own compute, busy with another decode (gem5's fuBusy)
@@ -549,6 +553,7 @@ def window_points_us(
     startable = _startable_ticks(decode, input_landed)
     park = _span_microseconds(startable, input_landed)
     rounds_wait = _span_microseconds(input_sent, attempt_end)
+    store_read = config_module.ticks_to_microseconds(decode.store_read_ticks)
     confidence_ticks = _confidence_ticks(window, decode)
     output_sent = frame_record.accepted_ticks - output_ticks
     answered = max(window.t_done, decode.done_ticks)
@@ -561,7 +566,8 @@ def window_points_us(
         "admission_wait": _span_microseconds(
             window.t_queued, window.t_data_complete
         ),
-        "dep_block": rounds_wait + park,
+        "store_read": store_read,
+        "dep_block": rounds_wait + park - store_read,
         "compute_wait": _span_microseconds(
             decode.compute_start_ticks, startable
         ),
@@ -987,6 +993,7 @@ class _CommittedDecode:
     run_sequence: int  # the run ordinal of the request it committed
     round_count: int  # the rounds it read, its job's own count
     backend_queue_wait_ticks: int  # its waits inside a strong backend
+    store_read_ticks: int  # its input's read in its tier's store
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1409,8 +1416,9 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     run_sequence = frame_record.run_sequence
     rounds = _rounds_read(records)
     waited = _backend_queue_wait_ticks(records)
+    read = _store_read_ticks(records)
     return _CommittedDecode(
-        tier, first, last, ready, run_sequence, rounds, waited
+        tier, first, last, ready, run_sequence, rounds, waited, read
     )
 
 
@@ -1420,6 +1428,14 @@ def _backend_queue_wait_ticks(records: list) -> int:
     for record in records:
         waits.append(record.backend_queue_wait_ticks)
     return max(waits, default=0)
+
+
+def _store_read_ticks(records: list) -> int:
+    """The decode's input read in its store, carried on every stage."""
+    reads = []
+    for record in records:
+        reads.append(record.store_read_ticks)
+    return max(reads, default=0)
 
 
 def _rounds_read(records: list) -> int:

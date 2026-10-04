@@ -149,6 +149,9 @@ class DecoderStageRecord:
     # stage closed (DecodeJob.backend_queue_wait_ticks), all of it by the
     # algorithm stage's end
     backend_queue_wait_ticks: int = 0
+    # the ticks the decode's input read took in its store
+    # (DecodeJob.store_read_ticks)
+    store_read_ticks: int = 0
 
 
 class StagedDecoder(decoder_module.DecoderBase):
@@ -320,6 +323,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             job.ready_ticks,
             round_count=job.round_count,
             backend_queue_wait_ticks=job.backend_queue_wait_ticks,
+            store_read_ticks=job.store_read_ticks,
         )
         self.stage_recorded.fire(record)
 

@@ -64,7 +64,9 @@ matplotlib==3.11.2 ; python_full_version >= '3.11'
     #   pymatching
     #   sinter
 mpmath==1.3.0
-    # via sympy
+    # via
+    #   decsim (pyproject.toml)
+    #   sympy
 networkx==3.4.2 ; python_full_version < '3.11'
     # via
     #   ciw

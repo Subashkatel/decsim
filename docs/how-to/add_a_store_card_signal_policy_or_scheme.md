@@ -44,13 +44,20 @@ same kind of job, with a page of its own:
 - **Component:** inherit `SyndromeBuffer`
   (`decsim/syndrome_buffer/syndrome_buffer.py`) and override
   `book_write(round_key, bits)` and `book_read(round_keys)`. Each
-  returns the tick its access completes.
+  returns the tick its access completes. `book_write` is called once
+  per round as it lands, and the round is published at the tick it
+  returns. `book_read` is called once per decode job, with every round
+  the job reads, at the tick the job asks. A round is always written
+  before it is read.
 - **Trace:** fire `self.trace.access_served` on each access to get the
   store's `port <i>` lanes ([the run folder](../reference/run_folder.md),
   the trace row).
 - **Worked example:** `decsim/syndrome_buffer/ported_syndrome_buffer.py`.
   **Tests:** `tests/syndrome_buffer/`.
-- A read's time today lands in the `dep_block` latency point.
+- **Where the time lands:** a read's time is in the `dep_block`
+  latency point. A write's time is in no per-stage point: it delays
+  the round's publication, so it shows in the `qpu_*` totals and not
+  in the `buffer0_*` ones.
 
 ## A link card
 

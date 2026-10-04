@@ -146,7 +146,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `csb_stall_per_round` | the same wait in front of the strong syndrome buffer, one sample per round that reached it |
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
 | `admission_wait` | the window's data complete in the weak syndrome buffer, to its decode job entering the queue: the window side's decision (`windows.decision_cycles`), and any earlier request of the window that was withdrawn, as a restart window's is when a `double_window` strong window re-slices it; zero otherwise |
-| `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, and zero when nothing was owed at the landing |
+| `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, and a timed store's read of the window's rounds, which comes before the input hop; zero when nothing was owed and the read took no time |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
 | `queue_wait` | queued, to a unit assigned |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |

@@ -6,8 +6,7 @@
   unbiasedness: exact enumeration of one small plan, with scipy's nbinom
   and binom as the outcome probabilities.
 - Per-round rate: sinter 1.16.0 shot_error_rate_to_piece_error_rate, and
-  the root at 60 digits in mpmath 1.3.0 (installed with the test extra,
-  through qldpc's sympy).
+  the root at 60 digits in mpmath 1.3.0, which the test extra pins.
 """
 
 import mpmath

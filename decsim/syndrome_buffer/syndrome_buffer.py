@@ -1,30 +1,20 @@
 """A syndrome buffer: finished rounds held until their last hold releases.
 
-The plain store, built from SyndromeBufferSettings. The store's own
-round receiver writes each round once at its landing
-(accept_packed_round) after asking has_room, the window side keeps it
-alive with holds (RoundHolds), and the slot is freed when the last hold
-releases; the waiting line then hears it, so a round held for room
-enters in order. Capacity is bits, gem5's packet
-store: its size is declared on the store itself
-(`rx_fifo_size = Param.MemorySize("384KiB", ...)`,
-src/dev/net/Ethernet.py) and the room test takes the packet's own
-length, `avail()` over the reserved bytes and `reserve(len)` before the
-data lands (src/dev/net/pktfifo.hh). The blocked port is gem5's too
-(src/mem/cache/base.cc clearBlocked schedules the retry): the store
-never refuses a write, it answers room first. A round's status (its
-packet, the bits it holds, its publication tick) lives on its record,
-gem5's CacheBlk.
+The store's receiver writes each round once at its landing, after asking
+has_room; the window side keeps it alive with holds, and the slot frees
+when the last hold releases, which tells the waiting line, so a round
+held for room enters in order. Capacity is bits on the store itself,
+gem5's packet store (`rx_fifo_size`, src/dev/net/Ethernet.py; `avail()`
+and `reserve(len)`, src/dev/net/pktfifo.hh). The store never refuses a
+write; it answers room first, as gem5's blocked port does
+(src/mem/cache/base.cc clearBlocked).
 
-The store reports through trace sources (trace_source.py) and
-runs with no listener: round_stored(round_key, packet) when a slot is
-taken, round_published(round_key, tick) when the round's data is ready
-for the windows, round_released(round_key) when the slot frees;
+Trace sources: round_stored(round_key, packet),
+round_published(round_key, tick), round_released(round_key),
 hold_registered(holder, round_keys), hold_transferred(old_holder,
-new_holder) and hold_released(holder) for the consumers' tokens;
-access_served(direction, port_index, round_keys, arrival_tick,
-start_tick, completion_tick) for every write and read a store with ports
-books (ported_syndrome_buffer.py). This store holds no port and fires none.
+new_holder), hold_released(holder), and access_served(direction,
+port_index, round_keys, arrival_tick, start_tick, completion_tick),
+which only the ported store fires.
 """
 
 import dataclasses
@@ -43,22 +33,14 @@ import decsim.trace_source as trace_source
 class SyndromeBufferSettings:
     """The plain store: its capacity, and a flat cost per write and per read.
 
-    bits bounds the store, the capacity a memory is declared in; None is
-    unbounded. gem5 sizes its packet store the same way, in bytes on the
-    store itself (`rx_fifo_size = Param.MemorySize("384KiB", ...)`,
-    src/dev/net/Ethernet.py) and answers room against the packet's own
-    size (`avail()` over the reserved bytes, `reserve(len)` before the
-    data lands, src/dev/net/pktfifo.hh). A full store makes the
+    bits bounds the store; None is unbounded. A full store makes the
     controller hold the finished round and write it in order once a slot
     frees, the backpressure real systems apply to their source (Caune et
     al. 2410.05202: the sequencer stalls on the decoder's status
-    register).
-    A write of a round costs write_cycles and a read of a decode's
-    rounds, or of an idle round leaving for the decoder, read_cycles, on
-    clock, whatever their width, and no access waits for another:
-    SimpleMemory's latency with no bandwidth term (gem5
-    src/mem/SimpleMemory.py:49, simple_mem.cc:174). A zero cost runs
-    synchronously without clock-edge alignment. clock None is the
+    register). A write costs write_cycles and a read of a job's rounds
+    read_cycles, on clock, whatever their width, and no access waits for
+    another: SimpleMemory's latency with no bandwidth term (gem5
+    src/mem/SimpleMemory.py:49, simple_mem.cc:174). clock None is the
     machine's clock.
     """
 
@@ -82,11 +64,7 @@ class SyndromeBufferSettings:
 
 
 class SyndromeBuffer:
-    """The store: rounds by key, their holds, and the operations it serves.
-
-    Its state is the settings, the engine its accesses are timed on,
-    the rounds, the holds, the operations and its events (trace).
-    """
+    """The store: rounds by key, their holds, and the operations it serves."""
 
     # a store built with no waiting line in front of it frees its slots
     # with nobody to tell
@@ -160,20 +138,13 @@ class SyndromeBuffer:
     def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
         """The tick this round's write completes: write_cycles on its clock.
 
-        This store holds no port, so a write never waits for another
-        access: it takes write_cycles from the clock edge at or after
-        now, gem5 SimpleMemory's latency with no bandwidth term
-        (src/mem/simple_mem.cc:174), and a zero cost completes now.
+        A zero cost completes now.
         """
         del round_key, bits
         return self._access_completion_tick(self.settings.write_cycles)
 
     def book_read(self, round_keys: tuple) -> int:
-        """The tick a read of these rounds completes: read_cycles on its clock.
-
-        One read of a job's rounds costs read_cycles whatever their
-        width, and never waits for another access (book_write).
-        """
+        """When a read of these rounds completes: read_cycles on its clock."""
         del round_keys
         return self._access_completion_tick(self.settings.read_cycles)
 
@@ -182,12 +153,7 @@ class SyndromeBuffer:
         self._free_round(round_key)
 
     def capacity_bits(self) -> Optional[int]:
-        """The bits this store is bounded to, or None for unbounded.
-
-        The trace lane and the two round receivers ask this instead of
-        reading the settings record, so a store bounded some other way
-        answers for itself.
-        """
+        """The bits this store is bounded to, or None for unbounded."""
         return self.settings.bits
 
     # ---- reads
@@ -199,11 +165,7 @@ class SyndromeBuffer:
 
     @property
     def occupied_bits(self) -> int:
-        """The bits stored now; a round that states no size holds none.
-
-        Summed over the stored rounds on each ask, as the decoder memory
-        sums its inputs, so the rounds are the one record of what is held.
-        """
+        """The bits stored now; a round that states no size holds none."""
         return self._stored_bits_of(self.round_by_key)
 
     def retained_fragments(self, round_key) -> Optional[tuple]:
@@ -216,9 +178,8 @@ class SyndromeBuffer:
     def is_round_held(self, round_key) -> bool:
         """Whether a consumer keeps this round, stored or still expected.
 
-        A hold names the rounds its holder reads from the moment it is
-        placed, so a round with a hold and no fragments is one the store
-        expects and has not received.
+        A hold names its rounds from the moment it is placed, so a held
+        round may not be stored yet.
         """
         return self.holds.is_held(round_key)
 
@@ -297,13 +258,9 @@ class SyndromeBuffer:
         """At the end of a run nothing may still be held: a leak is a bug.
 
         A bounded store that ends with rounds under a live hold is too
-        small for that hold: the hold waits for a round that needs the
-        room its own stored rounds keep, so nothing ever frees. The stop
-        names the widest such hold, as gem5 stops a run on a deadlock it
-        detects rather than let it idle ("Possible Deadlock detected",
-        src/mem/ruby/system/Sequencer.cc:236-239); the size a store needs
-        is its widest hold's rounds together, and restart and seam
-        re-reads place holds only at run time.
+        small for that hold, so the stop names the widest one, as gem5
+        stops on a deadlock it detects
+        (src/mem/ruby/system/Sequencer.cc:236-239).
         """
         if self.round_by_key:
             self._refuse_rounds_left()
@@ -396,8 +353,8 @@ class SyndromeBuffer:
     def _hold_record(self, holder, round_keys) -> round_holds.HoldRecord:
         """The record of a hold; a hold may name rounds not yet written.
 
-        A hold keeps open the operations its rounds belong to and the
-        ones its token names beyond them, which the token answers.
+        It keeps open the operations of its rounds and those its token
+        names.
         """
         unique = dict.fromkeys(round_keys)
         keys = tuple(unique)
@@ -427,13 +384,7 @@ class SyndromeBuffer:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the store reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through store.trace.
-    """
+    """Every event the store reports, as one member (gem5's stats Group)."""
 
     round_stored: trace_source.TraceSource = trace_source.new_source()
     round_published: trace_source.TraceSource = trace_source.new_source()

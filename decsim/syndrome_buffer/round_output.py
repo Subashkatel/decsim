@@ -1,30 +1,19 @@
 """A syndrome buffer's outgoing port: it sends the rounds that leave the store.
 
-Whoever executes a send is an end of that hop, and the end a round
-leaves from is the store that holds it. OMNeT++ enforces the rule at
-runtime, that a module may only send a message it owns:
-cSimpleModule::send refuses one whose owner is another module
-(`omnetpp src/sim/csimplemodule.cc:333-334`, omnetpp-6.1.0,
-the diagnostic at 506-508). And gem5 bills a transfer to the port it left
-by, never to whoever arranged it (`coherent_xbar.cc:354-357`). Two kinds
-of round leave here. A decode job's input: the window side plans the
-decode and the decoder manager says when the input moves (the
-accelerator's invoke, then DMA into the unit's memory, then compute),
-and this port executes the move, so the link a store's rounds ride is
-the store's own fact and not the window side's. And a timing-only
-feedback-memory round, which the controller packs and asks for: the
-store reads it, sends it and frees its own slot at the delivery. What
-lands in the store is the round receiver's
-(weak_syndrome_round_receiver.py); this one sends.
+The end a round leaves from is the store that holds it, so the store
+executes the send: OMNeT++ refuses a module that sends a message it does
+not own (src/sim/csimplemodule.cc:333-334), and gem5 bills a transfer to
+the port it left by (coherent_xbar.cc:354-357). Two kinds of round leave
+here: a decode job's input, which the decoder manager moves at dispatch,
+and a timing-only feedback-memory round, whose slot the store frees at
+the delivery.
 
-A job's input is read out of the store when its bits leave, at
-dispatch: the store is asked when the read of the job's rounds
-completes (book_read) and the move starts then. A tier that reads its
-input in place (<tier>.input in_place) has its unit read the store's
-words where they sit, so the same read is booked and the input lands
-at its completion with no link crossed: one read, priced once, by the
-memory the bits leave (gem5 prices an access where the memory serves it,
-src/mem/simple_mem.cc:154-174).
+A job's input is read when its bits leave: the store is asked when the
+read of the job's rounds completes (book_read), and the move starts
+then. A tier that reads in place (<tier>.input in_place) books the same
+read and has its input at the read's end with no link crossed (gem5
+prices an access where the memory serves it, src/mem/simple_mem.cc
+154-174).
 """
 
 import functools
@@ -42,8 +31,8 @@ import decsim.records.transfers as transfer_records
 class SyndromeBufferOutput:
     """One store's link to the decoders it feeds, bound once by the root.
 
-    reads_in_place is the input row of the tier this store feeds: True
-    when that tier's unit reads the rounds where the store keeps them.
+    reads_in_place is True when the fed tier's unit reads the rounds
+    where the store keeps them.
     """
 
     transfers = ports.Port(ports.WindowTransfers)
@@ -77,11 +66,10 @@ class SyndromeBufferOutput:
     ) -> int:
         """Read one job's rounds, then move them; the delay expected.
 
-        The bits are the job's payloads, which the staging clears when
-        the input lands, so they are read here while they are still the
-        job's. The strong re-decode calls this send without asking for
-        one first, so this names the store too. Under in_place the read
-        is the landing: nothing crosses the link.
+        The bits are read here while they are still the job's payloads,
+        which the staging clears at the landing. It names the store too,
+        since the strong redo sends without asking first. Under in_place
+        the read is the landing.
         """
         self.name_this_store(job)
         self._read_the_rounds_before(job)
@@ -98,13 +86,11 @@ class SyndromeBufferOutput:
     def _read_the_rounds_before(self, job: decoding_records.DecodeJob) -> None:
         """Add the raw rounds before the job's first that its reader needs.
 
-        A decoder that forms the events needs every round before the
-        job's first that its unformed rounds' recipes read, less those
-        it holds (rounds_needed_before). They leave the store in
-        the job's own read and ride its one transfer, priced with its
-        rounds, as a gem5 DMA request covers its whole range and one
-        Garnet message is cut into flits by its size alone
-        (src/dev/dma_device.cc:195-207, NetworkInterface.cc:386-387).
+        A decoder that forms the events needs the rounds before the
+        job's first that its recipes read, less those it holds
+        (rounds_needed_before). They leave in the job's own read and
+        ride its one transfer, as a gem5 DMA request covers its whole
+        range (src/dev/dma_device.cc:195-207).
         """
         if self.detection_events is None or not job.payloads:
             return
@@ -122,12 +108,7 @@ class SyndromeBufferOutput:
         job.rounds_before = tuple(rounds_before)
 
     def _retained_round_before(self, round_key: tuple) -> list:
-        """A round the job reads before its first, in fragment order.
-
-        The holds keep every round the declared fragments read, so a
-        round missing from the store is one a round_circuit reaching
-        further back lost; the read stops there by name.
-        """
+        """A round the job reads before its first, in fragment order."""
         fragments = self.store.retained_fragments(round_key)
         by_fragment_index = operator.attrgetter("fragment_index")
         return sorted(fragments, key=by_fragment_index)
@@ -139,10 +120,8 @@ class SyndromeBufferOutput:
     ) -> int:
         """A job resubmitted after a withdrawal: its rounds never left.
 
-        The input rides no link: nothing is sent and no delay is charged.
-        Which inputs ride nothing is this store's own decision (the
-        decoder input row, copy against in_place), so the landing happens
-        here rather than in the link fabric.
+        Nothing is sent and no delay is charged; which inputs ride
+        nothing is this store's decision (copy against in_place).
         """
         # the send is bound to its job by input_send_for, which is also
         # where this store names itself on it; the landing reads nothing
@@ -157,13 +136,9 @@ class SyndromeBufferOutput:
     ) -> None:
         """Read one timing-only round, then send it to the decoder side.
 
-        The controller packs the round and asks; the store executes the
-        send, because it is the end the round leaves from, and the round
-        leaves by a read of the store like any other (gem5 prices an
-        access where the memory serves it, src/mem/simple_mem.cc:154-174),
-        so it waits its turn on the store's ports. The slot the round
-        held is this store's, so the store frees it at the delivery and
-        the asker hears of the landing after that.
+        It leaves by a read of the store like any other round, so it
+        waits its turn on the store's ports; the store frees its slot at
+        the delivery, then the asker hears.
         """
         landed = functools.partial(
             self._free_memory_round, packed, on_delivered
@@ -204,12 +179,8 @@ class SyndromeBufferOutput:
     def name_this_store(self, job: decoding_records.DecodeJob) -> None:
         """Stamp the job with this store's name, where its rounds sit.
 
-        The naming happens where the job is bound to this store and not
-        only where its send runs, because a resubmitted job whose rounds
-        never left runs no send (land_held_input) and would otherwise
-        reach the observers with no source at all. Whoever records the
-        landing then reads where the rounds came from rather than
-        deriving it from the job's tier.
+        It happens where the job is bound to this store, not where it
+        sends, because a resubmitted job runs no send (land_held_input).
         """
         job.input_source_name = self.name
 
@@ -242,9 +213,7 @@ class SyndromeBufferOutput:
     ) -> int:
         """Start the move when the read completes; the delay expected.
 
-        The link is asked what a send at the read's end would pay, the
-        same estimate a send made now answers (links/channel.py
-        expected_delay_ticks).
+        The link is asked what a send at the read's end would pay.
         """
         move = functools.partial(self._move, job, payload_bits, on_landed)
         read_delay = read_tick - self.engine.now

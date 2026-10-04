@@ -1,36 +1,24 @@
 """The ported syndrome buffer: the store of rounds behind memory ports.
 
-Built from PortedSyndromeBufferSettings. The same store of rounds, holds
-and room as the plain store (syndrome_buffer.py), whose accesses take
-words on ports. A round is stored in whole words, so a request of rounds
-needs k = sum over its rounds of ceil(bits / word_bits) accesses, one
-word per round part: gem5's crossbar charges
-`divCeil(pkt->getSize(), width)` per packet (src/mem/xbar.cc:135), and
-Helios reads its syndrome FIFO a byte a clock with every round starting
-on a byte boundary (Helios_scalable_QEC
+The plain store's rounds, holds and room, with accesses that take words
+on ports. A round is stored in whole words, so a request needs k = sum
+over its rounds of ceil(bits / word_bits) accesses: gem5's crossbar
+charges `divCeil(pkt->getSize(), width)` per packet
+(src/mem/xbar.cc:135), and Helios reads its syndrome FIFO a byte a clock
+with every round on a byte boundary (Helios_scalable_QEC
 design/stage_controller/control_node_single_FPGA.v lines 35-36 and
-152-167). Requests are served in the order they reach the store, each on
-the port that frees first among those its direction may use: gem5's
-crossbar layer queues a refused requester at the back and retries the
-front (src/mem/xbar.cc:206 and 288-289). A request holds its port for
-k x cycles_per_access cycles from the clock edge at or after its arrival,
-or from the tick the port frees, whichever is later, SimpleMemory's
-busy time `pkt->getSize() * bandwidth` (src/mem/simple_mem.cc:154-161);
-its data is usable access_latency_cycles after that, SimpleMemory's
-latency beside its bandwidth (src/mem/simple_mem.cc:174,
-src/mem/SimpleMemory.py:49-55). Because service is in arrival order, no
-later request overtakes a booked one, so the completion tick is known
-when the access is booked.
+152-167). Requests are served in arrival order on the first free port
+their direction may use (gem5 src/mem/xbar.cc:206 and 288-289). A
+request holds its port for k x cycles_per_access cycles from the later
+of the clock edge at or after its arrival and the tick the port frees,
+SimpleMemory's busy time (src/mem/simple_mem.cc:154-161), and its data
+is usable access_latency_cycles after that (simple_mem.cc:174). No later
+request overtakes a booked one, so the completion is known at booking.
 
-The port kinds are OpenRAM's: read ports, write ports and read/write
-ports (compiler/options.py num_r_ports, num_w_ports, num_rw_ports). The
-default shape is the sky130 catalogue's pseudo dual port FIFO
-configuration, "Useful as a byte FIFO between two devices", one read and
-one write port of an 8-bit word (sky130_sram_1kbyte_1r1w_8x1024_8.py
-lines 1-17), and Helios's fall-through FIFO, one 8-bit word a clock with
-no added latency (design/generics/fifo_fwft.v lines 95, 105 and 115).
-IBM's decoder FPGA puts the syndrome "into a FIFO" (2510.21600 lines
-506-509) and states no width.
+The port kinds are OpenRAM's read, write and read/write ports
+(compiler/options.py num_r_ports, num_w_ports, num_rw_ports). IBM's
+decoder FPGA puts the syndrome "into a FIFO" (2510.21600 lines 506-509)
+and states no width.
 """
 
 import dataclasses
@@ -51,22 +39,19 @@ _READ_WRITE = "read_write"
 class PortedSyndromeBufferSettings:
     """The ported store: its capacity, its ports, its word and its timing.
 
-    bits bounds the store as the plain store's does; None is unbounded.
-    read_ports, write_ports and read_write_ports count OpenRAM's three
-    port kinds; one read/write port with the other two at zero is a
-    single-port memory. word_bits is what one access moves.
-    cycles_per_access is how long one access holds its port, and
-    access_latency_cycles how long after its last access a request's
-    data is usable, both on clock; clock None is the machine's clock.
-    AFS's one number for a memory read, "a readout time of four cycles
-    to read 32-bit data" multiplied by the count of reads (2001.06598
-    lines 529-531, 1107-1110), is an occupancy: word_bits 32,
-    cycles_per_access 4, access_latency_cycles 0. The defaults are the
-    sky130 catalogue's pseudo dual port byte FIFO (VLSIDA
+    bits bounds the store; None is unbounded. read_ports, write_ports
+    and read_write_ports count OpenRAM's three port kinds. word_bits is
+    what one access moves, cycles_per_access how long one access holds
+    its port, and access_latency_cycles how long after its last access
+    the data is usable, both on clock; clock None is the machine's
+    clock. AFS's memory read, "a readout time of four cycles to read
+    32-bit data" per read (2001.06598 lines 529-531, 1107-1110), is
+    word_bits 32, cycles_per_access 4 and access_latency_cycles 0. The
+    defaults are the sky130 pseudo dual port byte FIFO (VLSIDA
     sky130_sram_macros at 965df150, sky130_sram_1kbyte_1r1w_8x1024_8.py
-    lines 6 and 14-16), taking a word a clock with no added latency as a
-    fall-through FIFO does (Helios design/generics/fifo_fwft.v lines 95,
-    105 and 115).
+    lines 6 and 14-16), a word a clock with no added latency as Helios's
+    fall-through FIFO (design/generics/fifo_fwft.v lines 95, 105 and
+    115).
     """
 
     bits: Optional[int] = None
@@ -106,7 +91,6 @@ class PortedSyndromeBufferSettings:
         return PortedSyndromeBuffer(self, engine)
 
     def _check_both_directions_have_a_port(self) -> None:
-        """A store no round can enter or leave is a mistake in the file."""
         reading_ports = self.read_ports + self.read_write_ports
         writing_ports = self.write_ports + self.read_write_ports
         if reading_ports >= 1 and writing_ports >= 1:
@@ -119,10 +103,7 @@ class PortedSyndromeBufferSettings:
 
 
 class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
-    """The store whose writes and reads take words on ports in arrival order.
-
-    Its state over the store's is the ports, each with the tick it frees.
-    """
+    """The store whose writes and reads take words on ports in arrival order."""
 
     def __init__(
         self,
@@ -158,11 +139,7 @@ class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
         return word_count
 
     def _serve(self, direction: str, round_keys: tuple, word_count: int) -> int:
-        """Book one request on the port that frees first; its completion.
-
-        The port is held from the later of the clock edge at or after now
-        and the tick the port frees, for word_count accesses.
-        """
+        """Book one request on the port that frees first; its completion."""
         period_ticks = self.settings.clock.period_ticks
         arrival_ticks = self.engine.now
         port_index = self._first_free_port(direction)

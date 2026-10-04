@@ -239,7 +239,7 @@ class RoceV2:
 
 
 class EthernetUdp:
-    """UDP datagrams of at most mtu_bytes, IPv4 and UDP headers inside it.
+    """UDP datagrams over IPv4 of at most mtu_bytes, headers included.
 
     NVQLink chose an unreliable connection over UDP on purpose (2510.25213
     lines 376-388).

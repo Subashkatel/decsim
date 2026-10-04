@@ -46,7 +46,7 @@ class CreditChannel(channel_module.Channel):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The framing, the buffer, the credit's return, and their clock.
+        """The credit protocol's settings.
 
         receive_buffer_frames is C; credit_latency_cycles is L_c on clock, the
         card's domain, from the receiver taking a frame to its credit being

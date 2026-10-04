@@ -253,17 +253,26 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         if is_waiting_to_resend:
             self._restart_timer_if_out()
             return
+        self._advance_unacked_psn(is_nak, psn)
+        is_retry = is_nak and self._error_retry(is_timeout=False)
+        if not is_retry:
+            self._restart_timer_if_out()
+        self._send_next()
+        self._retire_acknowledged()
+
+    def _advance_unacked_psn(self, is_nak: bool, psn: int) -> None:
+        """Move the first unacknowledged PSN past what the answer covers.
+
+        An ACK covers its PSN and every one before and refills the retries;
+        a NAK covers every PSN before its own (rxe_comp.c:303-322, 752-792).
+        """
+        sending = self._sending
         if not is_nak and psn >= sending.unacked_psn:
             sending.unacked_psn = psn + 1
             sending.is_retry_started = False
             sending.retries_left = self._connection.retry_count
         if is_nak and psn > sending.unacked_psn:
             sending.unacked_psn = psn
-        is_retry = is_nak and self._error_retry(is_timeout=False)
-        if not is_retry:
-            self._restart_timer_if_out()
-        self._send_next()
-        self._retire_acknowledged()
 
     def _retire_acknowledged(self) -> None:
         """Let go of the packets no send can reach again.

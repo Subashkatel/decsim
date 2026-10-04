@@ -22,7 +22,7 @@ class TraceSource:
         """Hear every fire from now on, after the listeners already there."""
         self._listeners.append(listener)
 
-    def fire(self, *values) -> None:
+    def fire(self, *values: object) -> None:
         """Tell every listener, in connection order."""
         for listener in self._listeners:
             listener(*values)
@@ -50,7 +50,7 @@ class SilentSource:
         return False
 
 
-def new_source():
+def new_source() -> TraceSource:
     """A dataclass field default that gives each record its own source.
 
     A component's events are one frozen record, as gem5 groups a

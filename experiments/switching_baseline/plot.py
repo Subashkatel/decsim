@@ -3,13 +3,15 @@
 `python plot.py <results folder>` writes the folder's plots/, one
 figure per question: the share of windows escalated, the formed-to-
 commit latency, the logical error rate of switching against union-find
-alone, whether the strong decoder keeps up, and each decoder's decode
-time per window by distance. The folder holds status.csv, as `decsim
-status` writes it, configurations.csv, each configuration's id and
-name, and decode_time.csv, the "algorithm" counts of each
-configuration's window_samples.csv. In the rate figure a point with no
-failures is a hollow marker at its upper bound, and a point failing more
-than half its shots is left out, as decsim.plots.error_rate draws them.
+alone, whether the strong decoder keeps up, each decoder's decode time
+per window by distance, and where a window's time goes. The folder
+holds status.csv, as `decsim status` writes it, configurations.csv,
+each configuration's id and name, and two tables of each
+configuration's window_samples.csv: decode_time.csv, the "algorithm"
+counts, and stage_means.csv, each stage's mean time per window. In
+the rate figure a point with no failures is a hollow marker at its
+upper bound, and a point failing more than half its shots is left
+out, as decsim.plots.error_rate draws them.
 """
 
 import csv
@@ -38,6 +40,32 @@ TIER_COLOR = {"weak": "C0", "strong": "C1"}
 TIER_NAME = {"weak": "union-find (weak)", "strong": "Relay-BP-5 (strong)"}
 VIOLIN_HALF_WIDTH = 0.8
 VIOLIN_BINS = 40
+# A window's stages, first round readable to correction committed, in
+# the order they happen; they add up to TOTAL_STAGE
+# (decsim/experiments/measure.py window_points).
+STAGES = {
+    "buffer_fill": "buffer fill",
+    "admission_wait": "admission wait",
+    "queue_wait": "queue wait",
+    "weak_attempt": "weak attempt",
+    "dep_block": "dependency wait",
+    "input_link_per_window": "input link",
+    "compute_wait": "unit busy wait",
+    "fetch": "fetch",
+    "algorithm": "algorithm",
+    "release": "release",
+    "confidence": "confidence",
+    "selection_wait": "selection wait",
+    "output_link_per_window": "output link",
+    "frame_commit": "frame commit",
+}
+TOTAL_STAGE = "buffer0_first_round_to_frame"
+# the weak tier's windows take microseconds, the strong tier's milliseconds
+TIER_UNIT = {"weak": ("us", 1.0), "strong": ("ms", 1e3)}
+TIER_WINDOWS = {
+    "weak": "windows union-find kept",
+    "strong": "windows escalated to Relay-BP-5",
+}
 
 
 def main(folder: pathlib.Path) -> None:
@@ -55,8 +83,11 @@ def main(folder: pathlib.Path) -> None:
     latency_figure(rows, latency_path)
     error_rate_figure(rows, rate_path)
     strong_figure(switching_rows, strong_path)
+    breakdown_path = plots_folder / "latency_breakdown.png"
     histograms = decode_time_histograms(folder)
     decode_time_figure(histograms, decode_time_path)
+    stage_means = stage_means_of(folder)
+    breakdown_figure(stage_means, breakdown_path)
 
 
 def rows_of(folder: pathlib.Path) -> list:
@@ -327,6 +358,111 @@ def decode_time_legend(round_period: float) -> list:
     )
     handles.extend([median_line, slowest_mark, window_line])
     return handles
+
+
+def stage_means_of(folder: pathlib.Path) -> dict:
+    """The switching run's mean time per window of each stage, in us.
+
+    The key is (physical error rate, distance, tier, stage).
+    """
+    stage_means_path = folder / "stage_means.csv"
+    with open(stage_means_path) as handle:
+        stage_rows = list(csv.DictReader(handle))
+    stage_means = {}
+    for row in stage_rows:
+        if SHOWN_NAME[row["configuration"]] != SWITCHING:
+            continue
+        error_rate = float(row["physical_error_rate"])
+        distance = int(row["distance"])
+        key = (error_rate, distance, row["tier"], row["stage"])
+        stage_means[key] = float(row["mean_us"])
+    return stage_means
+
+
+def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
+    """Where a window's time goes: a row per error rate, a column per tier.
+
+    Each bar is one distance's mean time per window, split into the
+    stages in the order they happen. Means, unlike medians, add up, so
+    a bar's length is the mean time from the window's first round
+    readable to its correction committed, the number at its end.
+    """
+    drawn_stages = stages_with_time(stage_means)
+    tiers = list(TIER_WINDOWS)
+    row_count = len(ERROR_RATES)
+    column_count = len(tiers)
+    figure_width = column_count * plots.PANEL_WIDTH_INCHES * 1.3
+    figure_height = row_count * plots.PANEL_HEIGHT_INCHES * 0.6
+    figure, axes = pyplot.subplots(
+        row_count,
+        column_count,
+        figsize=(figure_width, figure_height),
+        layout="constrained",
+        squeeze=False,
+    )
+    for row_index, error_rate in enumerate(ERROR_RATES):
+        for column_index, tier in enumerate(tiers):
+            axis = axes[row_index][column_index]
+            draw_breakdown(axis, stage_means, error_rate, tier, drawn_stages)
+    legend_handles = []
+    for stage_index, stage in enumerate(drawn_stages):
+        color = stage_color(stage_index)
+        stage_patch = patches.Patch(color=color, label=STAGES[stage])
+        legend_handles.append(stage_patch)
+    figure.legend(
+        handles=legend_handles,
+        loc="outside lower center",
+        ncols=min(len(legend_handles), 6),
+    )
+    plots.save(figure, path)
+
+
+def stages_with_time(stage_means: dict) -> list:
+    """The stages some window spent time in, in the order they happen."""
+    timed_stages = set()
+    for (_, _, _, stage), mean in stage_means.items():
+        if mean > 0:
+            timed_stages.add(stage)
+    return [stage for stage in STAGES if stage in timed_stages]
+
+
+def stage_color(stage_index: int):
+    """A stage's color, one of twenty, the same in every panel."""
+    colors = pyplot.get_cmap("tab20").colors
+    return colors[stage_index % len(colors)]
+
+
+def draw_breakdown(
+    axis, stage_means: dict, error_rate: float, tier: str, drawn_stages: list
+) -> None:
+    """One tier's stacked bars at one error rate, a bar per distance."""
+    unit_name, unit_us = TIER_UNIT[tier]
+    distances = []
+    for distance in DISTANCES:
+        if (error_rate, distance, tier, TOTAL_STAGE) in stage_means:
+            distances.append(distance)
+    lefts = [0.0] * len(distances)
+    positions = list(range(len(distances)))
+    for stage_index, stage in enumerate(drawn_stages):
+        widths = []
+        for distance in distances:
+            key = (error_rate, distance, tier, stage)
+            mean_us = stage_means.get(key, 0.0)
+            widths.append(mean_us / unit_us)
+        color = stage_color(stage_index)
+        axis.barh(positions, widths, left=lefts, height=0.6, color=color)
+        lefts = [
+            left + width for left, width in zip(lefts, widths, strict=True)
+        ]
+    for position, total in zip(positions, lefts, strict=True):
+        axis.text(total, position, f" {total:.4g}", va="center", fontsize=8)
+    distance_labels = [f"d={distance}" for distance in distances]
+    axis.set_yticks(positions, distance_labels)
+    axis.invert_yaxis()
+    widest = max(lefts, default=1.0)
+    axis.set_xlim(0, widest * 1.2)
+    axis.set_xlabel(f"mean time per window ({unit_name})")
+    axis.set_title(f"{TIER_WINDOWS[tier]}, {X} = {error_rate:g}")
 
 
 def single_panel(title: str) -> tuple:

@@ -48,7 +48,9 @@ These are not from the papers. The pages use them everywhere.
 - **experiment**: one Python run file that names its points and how
   each stops (`decsim.Experiment`).
 - **point**: one machine at one set of values (`decsim.Point`). It has a
-  name and an id, a hash of its record.
+  name and an id, a hash of its record. Its optional `collection`
+  replaces the experiment's stop rule for it, and its `record_options`
+  say how many shots write their windows' confidence.
 - **shot**: one run of a point's machine at one seed.
 - **seed**: a shot's index, 0, 1, 2 and so on. Every random draw in the
   shot follows from it.

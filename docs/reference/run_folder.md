@@ -48,7 +48,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per sweep point, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
-| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `observation.confidence_shot_count` shots of a point, written only when a confidence signal decides the escalation |
+| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `confidence_shot_count` shots of a point (its `record_options`, a `decsim.collect.RecordOptions`, 100 by default), written only when a confidence signal decides the escalation |
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on. A point's mean per shot on a path or a memory class is a counter's sum over those rows divided by the point's distinct seeds; `references` and `referenced_rounds` repeat on every row of a shot, so they count once per seed |
@@ -282,8 +282,9 @@ with no rows writes no file.
 ### `window_confidence.csv`
 
 One row per window whose confidence the escalation verdict read, for
-the shots of seed 0 up to `observation.confidence_shot_count` (all of them
-for `all`). A run whose escalation reads no confidence writes no file.
+the shots of seed 0 up to the point's `confidence_shot_count`, 100 by
+default; `decsim.Point(..., record_options=decsim.collect.RecordOptions(
+confidence_shot_count=None))` writes every scored shot's (`all`). A run whose escalation reads no confidence writes no file.
 A window has no truth of its own, so a row carries its shot's failure
 and whether the strong decode changed the window's answer. An unscored
 shot writes no row: it is sinter's discard, neither a failure nor a
@@ -292,7 +293,7 @@ success, and sweep.csv's `unscored_shots` counts it.
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the shot |
-| `signal` | the confidence the verdict read, `escalation.confidence` (`complementary_gap`, `cluster_gap`, `extra_cluster_gap`) |
+| `signal` | the confidence the verdict read, the `name` of the run's `switching.confidence` record (the signals are under `decsim/confidence` in [parts.md](parts.md)) |
 | `operation_id`, `window_index` | the window: its operation and its index within it |
 | `gap_nats` | the window's gap, ln of the likelihood ratio; empty when the signal gave none, a window the escalation then escalates |
 | `escalated` | whether the verdict sent the window to the strong tier |

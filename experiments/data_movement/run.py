@@ -159,7 +159,6 @@ def switching(distance: int) -> machine_settings.MachineSettings:
     )
 
 
-# Each block: its name and its machine.
 BLOCKS = (
     ("every_hop_copies", every_hop_copies),
     ("weak_input_in_place", weak_input_in_place),

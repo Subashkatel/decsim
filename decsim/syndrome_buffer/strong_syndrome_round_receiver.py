@@ -27,8 +27,6 @@ import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
 
 
-# _Hop comes before the public class because the two hops below are
-# built when the module loads.
 @dataclasses.dataclass(frozen=True)
 class _Hop:
     """One of the two hops that land here: its row, and where its bits sat."""
@@ -189,7 +187,7 @@ class StrongSyndromeRoundReceiver:
         rounds_before: tuple,
         packets: tuple,
         packet_bits,
-        hop: _Hop,
+        hop: "_Hop",
         on_stored: Callable[[], None],
     ) -> None:
         """Land the rounds once this seat has formed them, if it forms them.
@@ -217,7 +215,7 @@ class StrongSyndromeRoundReceiver:
         rounds_before: tuple,
         packets: tuple,
         packet_bits,
-        hop: _Hop,
+        hop: "_Hop",
         on_stored: Callable[[], None],
     ) -> None:
         """Each round as the store holds it; its copy reports the hop's bits.
@@ -275,7 +273,7 @@ class StrongSyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: _Hop,
+        hop: "_Hop",
     ) -> None:
         """Store the round, or drop it when its operation already closed.
 
@@ -295,7 +293,7 @@ class StrongSyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: _Hop,
+        hop: "_Hop",
     ) -> None:
         self.store.accept_packed_round(packet, publication_tick=self.engine.now)
         round_key = (packet.operation_id, packet.round_index)
@@ -319,7 +317,7 @@ class StrongSyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: _Hop,
+        hop: "_Hop",
     ) -> None:
         """The operation closed while the round crossed: it has no reader.
 
@@ -337,7 +335,7 @@ class StrongSyndromeRoundReceiver:
         )
 
     def _received_text(
-        self, packet: round_records.SyndromeRoundPacket, hop: _Hop
+        self, packet: round_records.SyndromeRoundPacket, hop: "_Hop"
     ) -> str:
         defects = packet.defects_text()
         holds = self.store.held_rounds_description()
@@ -347,7 +345,7 @@ class StrongSyndromeRoundReceiver:
         )
 
     def _dropped_text(
-        self, packet: round_records.SyndromeRoundPacket, hop: _Hop
+        self, packet: round_records.SyndromeRoundPacket, hop: "_Hop"
     ) -> str:
         holds = self.store.held_rounds_description()
         return (

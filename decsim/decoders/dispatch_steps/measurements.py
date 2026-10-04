@@ -1,32 +1,26 @@
 """A CUDA-Q dispatcher's steps on NVIDIA GPUs, each timed on its own.
 
-KERNEL_TIMES are the Relay-BP kernels alone. The decodes measured_table's
-lines were timed on (the same decoder, keys, regions and shots) were
-traced under Nsight Systems 2025.3, each decode an NVTX range; a decode
-runs one cooperative kernel, _bp_decoder_gpu_decode_csr_relay, and its
-kernel time is a line in the Relay-BP iterations it ran with r2 0.9995
-to 1.0 on every region, floored at the fastest traced kernel as
-measured_table floors its lines. The line's slope is measured_table's
-per-iteration slope to within 3 percent on the GH200 and 11 percent on
-the A100; what the kernels and copies leave out of one decode() call,
-52 to 278 microseconds at the median, is the Python binding's host
-work between the calls, which a dispatcher does not run.
+KERNEL_TIMES are the Relay-BP kernels alone. The decodes
+measured_table's lines were timed on (the same decoder, keys, regions
+and shots) were traced under Nsight Systems 2025.3, each decode an NVTX
+range; a decode runs one cooperative kernel,
+_bp_decoder_gpu_decode_csr_relay, whose time is a line in the Relay-BP
+iterations with r2 0.9995 to 1.0 on every region, floored at the fastest
+traced kernel. The rest of one decode() call, 52 to 278 microseconds at
+the median, is the Python binding's host work, which a dispatcher does
+not run.
 
-CARDS are the rest of a path, from a CUDA microbenchmark that times
-each piece alone with a stream sync after it (the medians of 2,000
-timings). On the host path, launch is an empty graph's launch and sync,
-the one sync a worker pays per decode, and each copy is the GPU's own
-time for the smallest copy the trace saw in that direction: inside a
-graph a copy is a node with no sync of its own. A request or an answer
-through d = 13 is under 1 kB, and in the microbenchmark a copy's time
-is flat to within 0.1 microseconds from 16 bytes to 1 kB, so a copy is
-one number. On the device path the dispatcher reads the ring in place,
-so nothing is copied. Fire is two round trips from a mapped 16-byte
-slot on the GH200 apart, both through cuda-quantum's dispatch_kernel.cu
-with a handler that answers at once: the dispatcher firing a child
-graph whose one kernel answers, 10.112 microseconds at the median, less
-the dispatcher calling the same answer in place, the echo, 4.576
-microseconds, which the link card prices (the StrongBackend rule).
+CARDS are the rest of a path, from a CUDA microbenchmark that times each
+piece alone with a stream sync after it (the medians of 2,000 timings).
+On the host path, launch is an empty graph's launch and sync, the one
+sync a worker pays per decode, and each copy is the GPU's own time for
+the smallest copy the trace saw in that direction; a copy's time is flat
+to within 0.1 microseconds from 16 bytes to 1 kB, and a request or
+answer through d = 13 is under 1 kB. On the device path the dispatcher
+reads the ring in place, so nothing is copied. Fire is the dispatcher
+firing a child graph whose one kernel answers, 10.112 microseconds at
+the median on the GH200, less the echo of the same answer called in
+place, 4.576 microseconds, which the link card prices.
 
 Devices: an NVIDIA A100-SXM4-80GB (x86 host) and a GH200 144G HBM3e
 (Grace host, NVLink-C2C), as measured_table names them.

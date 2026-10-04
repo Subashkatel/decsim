@@ -1,14 +1,12 @@
 """Dispatch: startable jobs first, in scheduler order, onto an offered unit.
 
-gem5 O3 issues from its ready set oldest-first and non-ready work never
-displaces ready work (src/cpu/o3/inst_queue.hh scheduleReadyInsts): the
-scan passes over jobs with no eligible unit, and a boundary-blocked job
-is placed only when no startable job can be. The loop is not reentrant:
-an admission continuation or a compute return that happens inside it
-returns immediately and the outer loop keeps running while the queue
-has work, so no event boundary leaves a pool holding both free compute
-and a waiting request that fits, and no drain needs its own engine
-event.
+gem5 O3 issues from its ready set oldest-first and never lets non-ready
+work displace ready work (src/cpu/o3/inst_queue.hh scheduleReadyInsts):
+the scan passes over jobs with no eligible unit, and a boundary-blocked
+job is placed only when no startable job can be. The loop is not
+reentrant: a call from inside it returns at once and the outer loop runs
+while the queue has work, so no event leaves a pool holding both free
+compute and a waiting request that fits.
 """
 
 from typing import Optional
@@ -87,15 +85,13 @@ class DecodeDispatcher:
         """(unit, claim_compute) for this job, or None.
 
         A startable job takes any unit with a free input slot and claims
-        compute when that unit's compute is free. A boundary-blocked job
-        takes an input slot only (its DMA overlaps other work, Tomasulo's
+        compute when that unit's is free. A boundary-blocked job takes
+        an input slot only (its DMA overlaps other work, Tomasulo's
         reservation station), and only once its gate
         (WindowInputGate.may_stage) says its release is already
-        resolving, so parked work can never squat a slot against the
-        decode that must free it. The pool offers a startable job a free
-        unit first, the one its rounds are already on when there is
-        one; any other job carrying input is staged on the unit with
-        the least work left (decoder_pool.py).
+        resolving, so parked work never squats a slot against the decode
+        that must free it. The unit is the pool's offer
+        (decoder_pool.py).
         """
         startable = decoder_unit_module.is_startable(job)
         if not startable and _is_staging_refused(job):

@@ -1,16 +1,13 @@
 """The decoder side's end for a timing-only round that lands here.
 
 A feedback-memory round carries no syndrome a decoder reads: it is an
-idle patch's round travelling so that its primary buffer's slot, the link
-and the decoder's own stream stage are charged for it
-(controller/idle_rounds.py). The stage is real in both stream decoders
-read for it, which take every round of the stream as it arrives, idle or
-not: LILLIPUT decodes on a block of rounds as the stream fills it
-(2108.06569) and Yang et al. run one stage per round of the readout
-stream (2605.04892). So this hop has a far end after all, and it is
-here: nothing is deposited in a unit's memory, and what the end does is
-count the round it was handed, narrate it on the decoder side's line and
-tell the window side, which keeps its own count for window readiness.
+idle patch's round, travelling so that its buffer slot, the link and the
+decoder's stream stage are charged for it (controller/idle_rounds.py).
+The stage is real in both stream decoders: LILLIPUT decodes a block of
+rounds as the stream fills it (2108.06569) and Yang et al. run one stage
+per round of the readout stream (2605.04892). Nothing is deposited in a
+unit's memory; this end counts the round, logs it on the decoder side's
+line and tells the window side.
 """
 
 import decsim.ports as ports

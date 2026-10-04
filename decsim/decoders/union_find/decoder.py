@@ -19,20 +19,15 @@ import decsim.records.decoding as decoding_records
 class UnionFindDecoder(decoder_module.WindowDecoderBase):
     """Prior-weighted graphlike Union-Find hard decoder.
 
-    Faults must be graphlike; detector hyperedges are rejected. Initial
-    erasure side information is not implemented. Growth rounds natural
-    log-odds to the configured weight step; a probability of one half
-    has zero log-odds, so its edge has length zero and starts closed,
-    as an erased edge does (Delfosse and Nickerson 1709.06218). Every
-    logical observable row is kept in the hard result. Host runtime is
-    not simulated service latency, and the decoder does not claim the
-    paper's almost-linear bound: the cycle count's flood lays the closed
-    edges out again at every growth step.
-
-    The row is priced the way its timing names: its own cycle count
-    (cycle_count.py), which reads the growth steps and the peel depth of
-    the decode just run and holds the unit for their cycles on the
-    count's clock, or the host's measured time.
+    Faults must be graphlike, and initial erasure side information is
+    not implemented. A probability of one half has zero log-odds, so its
+    edge starts closed, as an erased edge does (Delfosse and Nickerson
+    1709.06218). Every logical observable row is kept in the hard
+    result. The decoder does not claim the paper's almost-linear bound:
+    the cycle count's flood lays the closed edges out again at every
+    growth step. The row is priced by its own cycle count
+    (cycle_count.py), from the growth steps and the peel depth of the
+    decode just run, or by the host's measured time.
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -43,15 +38,14 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     class Settings:
         """The row's own keys in its tier section.
 
-        weight_step is the growth resolution, the natural-log units of
-        weight one tick of an edge length is (Huang, Newman and Brown
-        2004.04693): the smaller it is, the longer every edge and the
-        more growth iterations a decode spans, which under a cycle count
-        is the engine's own time. timing prices the decode: a cycle count
-        (cycle_count.CycleCount), the growth steps in cycles of a named
-        clock, or cycle_count.HostMeasuredTime(), the host's measured
-        time. A run names one; none is refused, since the host's time is
-        no hardware's and is never assumed.
+        weight_step is the growth resolution, the natural-log weight one
+        tick of edge length is (Huang, Newman and Brown 2004.04693): the
+        smaller it is, the longer every edge and the more growth
+        iterations a decode spans. timing prices the decode: a cycle
+        count (cycle_count.CycleCount) or
+        cycle_count.HostMeasuredTime(). A run names one; none is
+        refused, since the host's time is no hardware's and is never
+        assumed.
         """
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP

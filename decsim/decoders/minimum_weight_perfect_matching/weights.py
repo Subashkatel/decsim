@@ -6,14 +6,12 @@ import numpy
 def finite_priors(priors):
     """Priors moved strictly inside (0, 1) so their log-odds are finite.
 
-    Malformed priors (NaN, inf, or outside [0, 1]) are model-construction
-    bugs and raise. Exact 0 and 1 priors are legitimate degenerate inputs
-    (a deterministic injected fault), but their infinite raw weights
-    cannot be passed to PyMatching. The referents disagree on the bound:
-    beliefmatching 0.2.0 clips its edge probabilities into
-    [1e-14, 1 - 1e-14] before it takes the log (belief_matching.py,
-    decode), and PyMatching 2.4.0's add_edge documents the weight as
-    log((1-p)/p) and names no bound. The 1e-12 here is decsim's own.
+    NaN, infinite or out-of-range priors raise. Exact 0 and 1 are
+    legitimate (a deterministic injected fault) but give infinite
+    weights PyMatching cannot take. beliefmatching 0.2.0 clips into
+    [1e-14, 1 - 1e-14] before the log (belief_matching.py, decode), and
+    PyMatching 2.4.0's add_edge names no bound; the 1e-12 here is
+    decsim's own.
     """
     priors = numpy.asarray(priors, dtype=float)
     if not _are_probabilities(priors):

@@ -1,15 +1,14 @@
 """The PyMatching adapter: minimum-weight perfect matching on one window.
 
 PyMatching's Matching.from_check_matrix on the window's graphlike faults
-with log-odds weights, parallel faults merged as independent errors
-(the convention of Stim detector error models and of PyMatching's DEM
-loader), one matching per live window model, warmed on three columns
-before the first timed call. Higgott and Gidney, Sparse Blossom
-(2303.15933) is the algorithm behind
-the call. The same graph with the observable row appended as one more
-check answers a forced-class job: the appended detector's bit pins the
-observable's parity, so the solve is the minimum weight inside that
-logical class (Gidney et al. 2312.04522 Sec. "Complementary gap").
+with log-odds weights, parallel faults merged as independent errors (the
+convention of Stim detector error models and PyMatching's DEM loader),
+one matching per live window model. Sparse Blossom (Higgott and Gidney
+2303.15933) is the algorithm behind the call. The same graph with the
+observable row appended as one more check answers a forced-class job:
+the appended detector's bit pins the observable's parity, so the solve
+is the minimum weight inside that logical class (Gidney et al.
+2312.04522 Sec. "Complementary gap").
 """
 
 import dataclasses
@@ -49,9 +48,8 @@ class MatchingGraphs:
 class PyMatchingDecoder(decoder_module.WindowDecoderBase):
     """Decode one window with PyMatching.
 
-    Measured mode times ``matching.decode`` only, not syndrome extraction
-    or result construction. Measurements are of one call on one thread:
-    with several units they do not prove parallel hardware.
+    Measured mode times ``matching.decode`` alone, one call on one
+    thread: with several units it does not prove parallel hardware.
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -124,10 +122,10 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
     def decode_window(self, backend, model, faults, syndrome):
         """The matching's correction, or an empty one marked invalid.
 
-        PyMatching raises when a syndrome has odd parity in a boundaryless
-        component; no valid plan produces one, so that case is reported as
-        an empty correction with INVALID_CORRECTION and no correction's
-        reason, which leaves its shot unscored, rather than ending the run.
+        PyMatching raises on a syndrome with odd parity in a
+        boundaryless component; no valid plan produces one, so it is
+        reported as an empty correction with INVALID_CORRECTION, which
+        leaves its shot unscored, rather than ending the run.
         """
         del model
         try:
@@ -143,16 +141,13 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
     ):
         """The lightest correction whose observable parity is the class.
 
-        The appended detector carries the class bit, so the matching
-        must flip the observable an even or an odd number of times
-        (Gidney et al. 2312.04522 Sec. "Complementary gap"). A window
-        that pins no observable has no forced solve, and the plain
-        decode answers it with no weight, which leaves the confidence
-        without a gap and escalates the window. A class no matching
-        reaches raises in PyMatching as the plain decode does; it has no
-        correction and probability zero, so its weight is +inf, the
-        complementary gap being the log-likelihood ratio of the two
-        classes' best hypotheses (Gidney et al. 2312.04522 Sec. 4).
+        The appended detector carries the class bit (Gidney et al.
+        2312.04522 Sec. "Complementary gap"). A window that pins no
+        observable has no forced solve: the plain decode answers with no
+        weight, and the window escalates. A class no matching reaches
+        has no correction and probability zero, so its weight is +inf,
+        the gap being the log-likelihood ratio of the two classes' best
+        hypotheses (Sec. 4).
         """
         if backend.forced is None:
             return self.decode_window(backend, model, faults, syndrome)
@@ -195,10 +190,9 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
 class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     """Weight-oblivious MWPM: same matching graph, every edge at weight 1.
 
-    A deliberately coarse weak tier (a hardware matcher without
-    weighted-edge support): at circuit-level noise it decodes measurably
-    worse than weighted MWPM because hook-error paths are no longer
-    penalized.
+    A deliberately coarse weak tier, a hardware matcher without weighted
+    edges: at circuit-level noise it decodes worse than weighted MWPM
+    because hook-error paths are no longer penalized.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -243,13 +237,10 @@ def _no_matching_decode(faults) -> decoding_records.WindowDecode:
 def _warm_up(matching, faults) -> None:
     """Decode a few one-column syndromes so the graph is built and warm.
 
-    PyMatching builds its internal graph lazily and finishes warming
-    only once it has matched real defects; a running software decoder
-    has the window graph prebuilt and warm, so decode a few defects
-    before the first timed call. Each warm-up syndrome is the detector
-    set of one column, which that column alone explains, so it is
-    satisfiable on any graph (a boundaryless toric component would
-    reject an arbitrary detector pair).
+    PyMatching builds its graph lazily and warms only once it has
+    matched real defects, while a running decoder has it prebuilt. Each
+    warm-up syndrome is one column's detector set, which that column
+    alone explains, so it is satisfiable on any graph.
     """
     syndromes = _warm_up_syndromes(faults.check)
     for _column, syndrome in syndromes:
@@ -276,12 +267,10 @@ def _warm_up_syndromes(check) -> list:
 def _unpinnable_observable_reason(faults) -> Optional[str]:
     """Why this model pins no logical class, or None when it pins one.
 
-    A forced-class solve appends the observable row to the check matrix
-    as one more detector, and the appended detector's bit is the class
-    (Gidney et al. 2312.04522 lines 828-833 attach that virtual detector
-    to the boundary edges the observable runs along). The append needs
-    one nonzero observable row, and it needs every observable-flipping
-    fault to touch at most one detector.
+    The observable row is appended as one more detector whose bit is the
+    class (Gidney et al. 2312.04522 lines 828-833), which needs one
+    nonzero observable row and every observable-flipping fault to touch
+    at most one detector.
     """
     observables = faults.observables
     row_count = observables.shape[0]

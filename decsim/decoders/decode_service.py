@@ -1,17 +1,15 @@
 """One decode on one unit: staged, started once landed and allowed, freed.
 
-gem5's IEW stage (src/cpu/o3/iew.hh:70-87) executes what the queue
-issued and writes the result back; here the service takes the unit the
-dispatcher chose, moves the job's rounds into that unit's memory (the
-accelerator pattern: invoke the unit, then DMA its input into the
-unit's memory, then compute; gem5-Aladdin aladdin_sys_connection.h and
-dma_interface.h), starts the manager's decoder when every transfer landed
-and the window owes no boundary, and frees the unit when the manager
-says the decode, and any confidence walk charged on it, has ended.
-A landed job whose window still owes a boundary parks in its slot and
-releases its compute claim (Tomasulo's rule at the boundary hazard), so
-a dependent that fills early never deadlocks the unit against its own
-predecessor.
+As gem5's IEW stage executes what the queue issued
+(src/cpu/o3/iew.hh:70-87), the service takes the unit the dispatcher
+chose, moves the job's rounds into that unit's memory (invoke the unit,
+DMA its input, then compute; gem5-Aladdin aladdin_sys_connection.h and
+dma_interface.h), starts the decoder when every transfer landed and the
+window owes no boundary, and frees the unit when the decode, and any
+confidence walk charged on it, has ended. A landed job whose window
+still owes a boundary parks in its slot and releases its compute claim
+(Tomasulo's rule at the boundary hazard), so a dependent that fills
+early never deadlocks the unit against its own predecessor.
 """
 
 import dataclasses
@@ -37,17 +35,12 @@ if TYPE_CHECKING:
 class DecodeService:
     """Stages, starts, prices and frees every decode on its unit.
 
-    Six attributes: the engine, the pool that holds the units, the
-    staging, the manager that owns the service, the manager's dispatch
-    cost, and the trace. Through the manager it reads the decoder and
-    the strong requests (a merged batch's members are the ledger's
-    knowledge), hands every decode's end to decode_completed, and calls
-    dispatch wherever compute frees inside an engine event, so the
-    non-reentrant dispatch loop runs from the same points it always did.
-    Four trace sources, each carrying (job, unit):
-    job_dispatched when the job takes its slot, input_landed when every
-    transfer of its input has landed, job_started when its decode
-    begins, job_finished when its compute ends.
+    Every decode's end goes to the manager's decode_completed, and
+    dispatch runs wherever compute frees inside an engine event. Four
+    trace sources, each carrying (job, unit): job_dispatched when the
+    job takes its slot, input_landed when every transfer of its input
+    has landed, job_started when its decode begins, job_finished when
+    its compute ends.
     """
 
     def __init__(
@@ -99,10 +92,9 @@ class DecodeService:
         """The bits a job's input occupies in unit memory.
 
         The bits of the payloads that land for it, at the width they
-        cross the input link. None when a payload states no size. A
-        tier that forms its own detection events forms them after they
-        land, so its memory holds the rounds at this same width
-        (detection_events.formed_at naming the tier's decoder).
+        cross the input link; None when a payload states no size. A tier
+        that forms its own detection events holds the rounds at this
+        same width.
         """
         demand = 0
         for input_job in self._input_jobs(job):
@@ -144,14 +136,14 @@ class DecodeService:
         """The job takes a slot of the unit; its input starts moving.
 
         The unit is assigned at DMA start (gem5-Aladdin's invocation
-        model: invoke the unit, then DMA its input); compute is claimed
-        only when this unit's compute is actually free.
+        model); compute is claimed only when this unit's compute is
+        free.
         """
         job.pool = self.pool.name
         self._assign_service_key(job)
         unit.admit(job)
         # kept past the job's eviction: the confidence its evidence
-        # feeds is charged on this unit and names it (decision D8)
+        # feeds is charged on this unit and names it
         job.decoding_unit_name = unit.name
         if claim_compute:
             self.pool.claim(unit, job)
@@ -171,9 +163,9 @@ class DecodeService:
         """The manager's own work, before this job's input is asked for.
 
         Caune et al. 2410.05202 (lines 519-526 and 636-641) measure 250
-        to 370 cycles of the control system's own clock between a
-        decode's arrival and its dispatch;
-        decoder_manager.dispatch_cycles prices that, zero by default.
+        to 370 cycles of the control system's clock between a decode's
+        arrival and its dispatch; decoder_manager.dispatch_cycles prices
+        that, zero by default.
         """
         cycles = self.dispatch_cost.cycles
         if cycles == 0:
@@ -243,10 +235,7 @@ class DecodeService:
     # ------------------------------------------------------- the unit's end
 
     def free(self, job: decoding_records.DecodeJob) -> None:
-        """Compute finished: drop the job from its slot and offer the compute.
-
-        The ping-pong swap at compute end.
-        """
+        """Compute finished: free the job's slot and offer the compute."""
         unit = job.unit
         unit.evict(job)
         if unit.holder is job:
@@ -315,9 +304,8 @@ class DecodeService:
     def take_strong_output(self, window_key: tuple):
         """Take the finished result waiting for that destination, if any.
 
-        The result waits in the output slot of the unit that produced
-        it, and a destination has at most one, so the first unit holding
-        one for this window is the one.
+        A destination has at most one, so the first unit holding one for
+        this window is the one.
         """
         for unit in self.pool.units:
             completion = unit.take_output(window_key)
@@ -481,10 +469,10 @@ class DecodeService:
         """The window's boundary is in: its landed decodes may start now.
 
         The tick a decode may start is the tick its dependency was met,
-        whether or not a unit is free to run it then. gem5's queue
-        wakes an instruction when its operands arrive (inst_queue.cc
+        whether or not a unit is free then: gem5's queue wakes an
+        instruction when its operands arrive (inst_queue.cc
         wakeDependents at 1074, addIfReady at 1536-1562) and counts the
-        wait for a functional unit apart from it (NoFreeFU and fuBusy,
+        wait for a functional unit apart (NoFreeFU and fuBusy,
         inst_queue.cc:1009-1014).
         """
         for job in self.resident_jobs():
@@ -526,11 +514,10 @@ class DecodeService:
     def _offer_compute(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """Free compute goes to the oldest startable resident.
 
-        Or it stays reserved for the oldest one still in flight, or it
-        returns to the pool. gem5 O3's scheduleReadyInsts is the reference
-        rule: only a ready instruction acquires a functional unit
-        (fu_pool->getUnit at issue), and blocked work waits in the queue,
-        never on the unit.
+        Otherwise it stays reserved for the oldest one still in flight,
+        or returns to the pool. As in gem5 O3's scheduleReadyInsts, only
+        ready work acquires a functional unit, and blocked work waits in
+        the queue, never on the unit.
         """
         if unit.holder is not None:
             return
@@ -568,11 +555,7 @@ class DecodeService:
 
 
 def job_defects_text(job: decoding_records.DecodeJob) -> str:
-    """The landed window input's cargo, sparse, for the I/O trace.
-
-    The set detection-event indices of the rounds now in this unit's
-    memory (the algorithm stage reads the same fragments).
-    """
+    """The landed window input's set detection-event indices, for the trace."""
     fragments = _landed_fragments(job)
     bit_arrays = []
     for fragment in fragments:
@@ -633,13 +616,7 @@ def _landed_fragments(job: decoding_records.DecodeJob) -> list:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the decode service reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the decode service reports, as one member."""
 
     job_dispatched: trace_source.TraceSource = trace_source.new_source()
     input_landed: trace_source.TraceSource = trace_source.new_source()
@@ -649,11 +626,7 @@ class _TraceSources:
 
 @dataclasses.dataclass(frozen=True)
 class _DispatchCost:
-    """The manager's own work per dispatch, in cycles of its clock.
-
-    Charged before the job's input is asked for
-    (decoder_manager.dispatch_cycles).
-    """
+    """The manager's own work per dispatch, in cycles of its clock."""
 
     clock: Optional[config.Clock]
     cycles: int

@@ -2,11 +2,10 @@
 
 One backend call's correction, its disposition and its diagnostics;
 window_decode_of turns it into the correction the row commits and the
-status the result carries. A backend
-that produced a correction has it committed as it stands, best effort
-or not. A backend that produced none commits an empty correction marked
-with its reason, and the shot it belongs to is unscored: sinter's
-discard, counted apart and never as an error
+status the result carries. A backend that produced a correction has it
+committed as it stands, best effort or not. A backend that produced none
+commits an empty correction marked with its reason, and its shot is
+unscored: sinter's discard, counted apart and never as an error
 (sinter/_decoding/_decoding.py:123-125).
 """
 

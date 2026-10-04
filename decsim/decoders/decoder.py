@@ -1,17 +1,12 @@
 """The Decoder port's defaults, and the template every window decoder shares.
 
-sinter's abstract class with defaults
-(sinter/_decoding/_decoding_decoder_class.py:58-102: `Decoder` raises
-NotImplementedError where a row has nothing to say, and
-`decode_via_files` is written once in terms of
-`compile_decoder_for_dem`). DecoderBase gives a row the port's timing
-methods from its latency; WindowDecoderBase gives a real decoder its
-frame (the model's faults, the payload syndrome, the size check, the
-result built from the selected faults), one compiled backend per live
-window model (sinter's CompiledDecoder), and the measured clock when it
-carries no latency model. The helpers after the classes are that frame:
-the payload syndrome, the size check, the result from the selected
-faults, and the status a best-effort result carries.
+As sinter's abstract Decoder has defaults
+(sinter/_decoding/_decoding_decoder_class.py:58-102), DecoderBase gives
+a row the port's timing methods from its latency, and WindowDecoderBase
+gives a real decoder its frame: the model's faults, the payload syndrome
+and its size check, one compiled backend per live window model (sinter's
+CompiledDecoder), the result built from the selected faults, and the
+measured clock when it has no latency model.
 """
 
 import abc
@@ -35,18 +30,14 @@ OnResult = Callable[[Optional[decoding_records.DecodeResult]], None]
 class DecoderBase(abc.ABC):
     """A row of the decoder table: decode and latency, timing from those.
 
-    start prices the job with latency and decodes when that time ends;
-    a decoder whose occupancy is None is measured instead: decode_timed
-    runs now and the result is delivered after the ticks the decode
-    says, the host clock's by default (ticks_after_decode), or a row's
-    own cycle count of it. cancel does nothing, and occupancy is latency:
-    the unit holds compute for the whole decode. stage_recorded is the
-    port's stage source (data_path.md section 5's data-side callback): a
-    row with internal stages replaces it with one of its own and fires a
-    record per stage, and a row without leaves this silent one, so the
-    machine connects the stage listeners to every row by name.
-    window_checked is the same shape for a row that audits its own
-    answer against a referee.
+    start prices the job with latency and decodes when that time ends; a
+    decoder whose occupancy is None is measured instead, its result
+    delivered after the ticks the decode says (ticks_after_decode).
+    cancel does nothing, and occupancy is latency. stage_recorded is the
+    port's stage source: a row with internal stages replaces it and
+    fires a record per stage, and a row without leaves this silent one,
+    so the machine connects every row by name. window_checked is the
+    same shape for a row that audits its answer against a referee.
     """
 
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
@@ -148,11 +139,10 @@ class WindowDecoderBase(DecoderBase):
 
     A row names its fault representation and implements compile(faults,
     model), the backend for one placed model, and decode_window(backend,
-    model, faults, syndrome), one call on it returning (selected faults,
-    decode status). With a latency model the manager prices the decode; with
-    none (latency_model=None, the shipped rows) the decode is measured
-    on this host, timing the backend call only: the compile, the payload
-    syndrome and the result construction are setup the hardware does not
+    model, faults, syndrome), one call returning (selected faults,
+    decode status). With no latency model (the shipped rows) the decode
+    is measured on this host, timing the backend call only: the compile,
+    the payload syndrome and the result are setup the hardware does not
     pay per window.
     """
 
@@ -189,11 +179,10 @@ class WindowDecoderBase(DecoderBase):
     ) -> decoding_records.WindowDecode:
         """One solve pinned to one logical class, with that class's weight.
 
-        The minimum-weight correction inside one logical class, the
-        weight a complementary gap subtracts (Gidney et al. 2312.04522
-        Sec. "Complementary gap"). The weight is None when the window
-        pins no observable and the class cannot be forced. A row that
-        does not declare the forced-class solve never reaches this.
+        The weight a complementary gap subtracts (Gidney et al.
+        2312.04522 Sec. "Complementary gap"); None when the window pins
+        no observable. A row that does not declare the forced-class
+        solve never reaches this.
         """
         del backend, model, faults, syndrome, forced_logical_class
         row = type(self)
@@ -266,12 +255,11 @@ class WindowDecoderBase(DecoderBase):
     def compiled_for(self, faults, model):
         """The placed model's backend, compiled once and kept while it lives.
 
-        A task's shots share their window models (built_window_models.py)
-        but build their rows afresh, so a row with a compile key keeps its
-        backend for every row of that key, every shot. The cache entry
-        lives exactly as long as the placed model: id() values are
-        recycled by CPython, and a dead entry would otherwise accumulate
-        once per distinct window model of a long run.
+        A task's shots share their window models
+        (built_window_models.py) but build their rows afresh, so a row
+        with a compile key keeps its backend for every row of that key.
+        The entry lives exactly as long as the placed model, since
+        CPython recycles id() values.
         """
         cache = self.compiled_by_model
         if self.compile_key is not None and not self.backend_is_seeded:

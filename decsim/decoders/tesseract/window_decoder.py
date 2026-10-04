@@ -1,11 +1,11 @@
 """Tesseract decoding over one explicitly physical window fault model.
 
 The official tesseract_decoder package (Google Quantum AI's Tesseract, a
-search-based most-likely-error decoder; its paper is not on disk) is
-compiled once per live window model from a Stim detector error model
-rebuilt out of the window's physical check, observables, priors and
-detector coordinates; one decode is one decode_to_errors call, whose
-indices are physical columns whether the backend merges or not.
+search-based most-likely-error decoder) is compiled once per live window
+model from a Stim detector error model rebuilt out of the window's
+physical check, observables, priors and detector coordinates; one decode
+is one decode_to_errors call, whose indices are physical columns whether
+the backend merges or not.
 """
 
 import math

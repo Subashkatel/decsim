@@ -1,14 +1,12 @@
 """Relay-BP over one placed physical window model.
 
 The official relay-bp package (Maurer et al. 2510.21600, the qLDPC
-real-time baseline; the bb-decoders extra) is compiled once per
-distinct model with a fixed gamma table drawn from the run seed, and
-decode_detailed is called once per syndrome. The paper assumes
-0 < p < 1/2; this adapter also accepts exactly p = 1/2 as a tested
-software-profile extension with a zero prior log ratio. Decided,
-majority-one and non-finite priors are refused instead of silently
-transformed. Backend wall time is diagnostic only and never becomes
-simulated time.
+real-time baseline; the bb-decoders extra) is compiled once per distinct
+model with a fixed gamma table drawn from the run seed, and
+decode_detailed is called once per syndrome. The paper assumes 0 < p <
+1/2; this adapter also accepts p = 1/2, with a zero prior log ratio.
+Decided, majority-one and non-finite priors are refused rather than
+silently transformed. Backend wall time never becomes simulated time.
 """
 
 import dataclasses
@@ -75,10 +73,9 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
     def compiled_model(self, faults) -> "_CompiledRelayModel":
         """The backend for one check matrix and priors, built once.
 
-        A shot builds each window afresh, but its windows repeat a few
-        shapes, so the backend is kept by the model's content, not by
-        the object. With the fixed gamma table a kept backend answers
-        each syndrome as a fresh one does.
+        A shot's windows repeat a few shapes, so the backend is kept by
+        the model's content; with the fixed gamma table a kept backend
+        answers each syndrome as a fresh one does.
         """
         cache = self._thread_cache()
         key = _model_key(faults)

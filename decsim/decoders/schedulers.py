@@ -24,9 +24,9 @@ class Scheduler(Protocol):
 class FifoScheduler:
     """Dispatch ready jobs in admission order within each decoder pool.
 
-    The manager models each pool as identical non-preemptive service
-    units. FIFO is the minimal pool-locally work-conserving baseline: it
-    makes no unsupported deadline, cost, or microarchitecture claim.
+    FIFO is the minimal work-conserving baseline over identical
+    non-preemptive units: it claims no deadline, cost or
+    microarchitecture.
     """
 
     @dataclasses.dataclass(frozen=True)

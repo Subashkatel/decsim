@@ -6,24 +6,19 @@ measured_table does, and states the decode as the steps a CUDA-Q
 dispatcher takes, each timed on its own (measurements.py).
 
 On the device path (cuda-quantum releases/v0.15.2
-realtime/lib/daemon/dispatcher/dispatch_kernel.cu) one persistent
-kernel notices a filled ring slot, checks its header, runs the handler,
-fires the decode graph and holds until the fired decode ends, so every
-step holds the dispatcher. The device fire is compiled only for compute
-capability 9.0 and up (`#if __CUDA_ARCH__ >= 900`, line 491), so the
-A100 has no device path. On the host path (host_api.md lines
-1065-1113) a CPU monitor notices the slot, "acquires an idle worker"
-(line 1090), launches that worker's graph on its stream and moves on;
-the worker copies the syndrome in, decodes and copies the answer out,
-and is idle again when its stream is done (line 1112).
+realtime/lib/daemon/dispatcher/dispatch_kernel.cu) one persistent kernel
+notices a filled ring slot, checks its header, runs the handler, fires
+the decode graph and holds until the decode ends, so every step holds
+the dispatcher. The device fire is compiled only for compute capability
+9.0 and up (line 491), so the A100 has no device path. On the host path
+(host_api.md lines 1065-1113) a CPU monitor notices the slot, acquires
+an idle worker, launches that worker's graph on its stream and moves on;
+the worker copies the syndrome in, decodes and copies the answer out.
 
 Notice, check, handle and respond are inside the echo round trip the
-link card prices (the StrongBackend rule), so they are zero-tick steps
-naming it.
-
+link card prices (the StrongBackend rule), so they are zero-tick steps.
 The row decodes a region's X and Z detectors together only: its kernel
-lines were traced on whole regions, and a part is priced on a line
-measured on parts (measured_table's bases rows) or not at all.
+lines were traced on whole regions.
 """
 
 import dataclasses

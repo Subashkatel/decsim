@@ -1,26 +1,21 @@
 """Moves a job's rounds from the weak syndrome buffer into the unit's memory.
 
 The transport (the job's input link, made cancellable), the landing into
-DecoderMemory, the release, the cancel. DecoderInputStaging is the sole
-writer of job.decoder_input, job.memory and job.input_hold; the
-transport owns the in-flight delivery and its cancellation only, so a
+DecoderMemory, the release and the cancel. DecoderInputStaging is the
+sole writer of job.decoder_input, job.memory and job.input_hold; the
+transport owns only the delivery in flight and its cancellation, so a
 supplied transport cannot bypass decoder memory.
 
-A unit reads one copy of one input: a job whose rounds this unit holds
-reads them, and a job staged while their transfer is still in flight
-joins that landing instead of sending them again, which is gem5's MSHR
-with several targets on one fill (src/mem/cache/mshr.hh).
-
-That is the copy rule, and it is a tier's setting: with
-<tier>.input in_place the unit reads the rounds where the store keeps
-them, so nothing is deposited in the unit's memory, nothing crosses the
-input link, and the store's hold is kept for the whole decode; the
-store's read still takes its time. AFS's
+A unit reads one copy of one input: a job whose rounds the unit holds
+reads them, and a job staged while their transfer is in flight joins
+that landing, as gem5's MSHR serves several targets with one fill
+(src/mem/cache/mshr.hh). With <tier>.input in_place the unit reads the
+rounds where the store keeps them: nothing is deposited or crosses the
+input link, and the store's hold lasts the whole decode. AFS's
 processing elements "can directly access the data stored on-chip"
 (2001.06598 lines 528-531); Collision Clustering's Init unit loads the
-syndrome into the storage elements instead (2309.05558 lines 268-271),
-which is the copy row, and the strong hop is a transfer of the assigned
-data (Toshio 2510.25222 lines 1248-1250).
+syndrome into its storage elements instead (2309.05558 lines 268-271),
+the copy row.
 """
 
 import dataclasses
@@ -39,11 +34,10 @@ SendInput = Callable[[Callable[[], None]], int]
 class DecoderInputStaging:
     """Stages a job's input into a unit's memory and frees it again.
 
-    Trace sources: copy_made(job, bits, store_name, memory_name) at every
-    landing that deposits rounds, the copy out of the store into the
-    unit's own memory (data_path.md hops 5 and 9), and at every boundary
-    folded into a masked duplicate the unit reads; hold_registered(job,
-    round_keys) instead, for a tier whose input is read in place.
+    Trace sources: copy_made(job, bits, store_name, memory_name) at
+    every landing that deposits rounds and at every boundary folded into
+    a masked duplicate; hold_registered(job, round_keys) instead, for a
+    tier whose input is read in place.
     """
 
     def __init__(
@@ -73,12 +67,12 @@ class DecoderInputStaging:
     ) -> None:
         """Send the input over its link, then land it in the unit's memory.
 
-        At the landing the rounds are deposited, the weak syndrome buffer hold
-        is dropped and the landing is reported. Until the landing,
+        At the landing the rounds are deposited, the store's hold is
+        dropped and the landing is reported; until then
         input_landing_ticks is the tick the link expects. A job whose
-        rounds this unit already holds becomes one more reader of them
-        and moves nothing. A tier that reads its input in place deposits
-        nothing and sends nothing.
+        rounds the unit already holds becomes one more reader and moves
+        nothing, and a tier that reads its input in place deposits and
+        sends nothing.
         """
         self._claim_formation(job)
         if not self.copies_input:
@@ -122,9 +116,9 @@ class DecoderInputStaging:
     ) -> None:
         """The job reads a masked duplicate; the unit's rounds stay raw.
 
-        The duplicate is the decoder side's own working copy, so it is
-        made and booked here (<tier>.boundary_fold copy, cudaq-x keeps
-        raw rounds and applies syndrome_mods at window assembly).
+        The duplicate is the decoder side's own working copy, made and
+        booked here (<tier>.boundary_fold copy; cudaq-x keeps raw rounds
+        and applies syndrome_mods at window assembly).
         """
         job.decoder_input = masked_input
         bits = _input_bit_count(masked_input)
@@ -136,20 +130,12 @@ class DecoderInputStaging:
     ) -> None:
         """The mask is written into the unit's own memory, nothing copied.
 
-        The memory that holds the input performs the write and keeps it
-        single-writer itself (DecoderMemory.rewrite, Helios 2301.08419
-        lines 632-640); the destination takes what it is handed before
-        it acts (OMNeT++ csimplemodule.cc:782-783).
-
-        The mask is written once per input, not once per job. The jobs
-        that share one landed input are the forced-class solves of one
-        window's request (decision D2), so they share one window and one
-        boundary, final before any of them starts: the solve that starts
-        first writes the mask into the unit's memory and every solve
-        after it reads exactly those rounds, which is what the copy fold
-        gives each of them too. A job whose input another has already
-        written takes the written rounds, whether it joined them before
-        the write or after.
+        The memory keeps itself single-writer (DecoderMemory.rewrite,
+        Helios 2301.08419 lines 632-640). The mask is written once per
+        input: the jobs that share one landed input are the forced-class
+        solves of one window's request, with one boundary final before
+        any starts, so the first solve writes the mask and every later
+        one reads those rounds, as the copy fold would give it.
         """
         memory = job.memory
         if memory.is_rewritten(job):
@@ -160,11 +146,11 @@ class DecoderInputStaging:
     def _form_detection_events(self, job: decoding_records.DecodeJob) -> None:
         """This tier's event-detection logic runs on the rounds it received.
 
-        The landing is the first demand for them. The rounds before them,
-        when the store sent them, are held by the logic and not
+        The landing is the first demand for them; the rounds before
+        them, when the store sent them, are held by the logic and not
         deposited. A tier whose decoder is not a seat of
-        detection_events.formed_at holds no logic, and its rounds arrived
-        formed.
+        detection_events.formed_at holds no logic, and its rounds
+        arrived formed.
         """
         rounds_before = job.rounds_before
         job.rounds_before = ()
@@ -207,9 +193,8 @@ class DecoderInputStaging:
     ) -> None:
         """The unit reads the rounds where the store keeps them.
 
-        No deposit, and the store's hold is kept until the decode
-        releases the job, because the rounds it reads are the store's
-        own (<tier>.input in_place). The store's end reads them and
+        Nothing is deposited, and the store's hold is kept until the
+        decode releases the job (<tier>.input in_place). The store's end
         lands the job at the read's end with no link crossed
         (syndrome_buffer/round_output.py), so a cancel before then
         suppresses the landing as it does a transfer's.
@@ -275,12 +260,10 @@ class DecoderInputStaging:
     def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Drop one job from transport and storage, then free its hold.
 
-        Every step is idempotent, so a request in transport, waiting for
-        round credits, already stored or already cleared is safe to
-        cancel. This is the one place every cancellation passes through,
-        so it is also where the job's tier takes back the rounds it had
-        claimed to form: a withdrawn or cancelled decode never reached
-        the stage that charges them.
+        Every step is idempotent, so a request at any stage is safe to
+        cancel. Every cancellation passes here, so this is also where
+        the tier takes back the rounds it had claimed to form: a
+        cancelled decode never reached the stage that charges them.
         """
         self._release_formation_claim(job)
         self.transport.cancel(job)
@@ -356,11 +339,8 @@ class DecoderInputStaging:
 class CancellableDecoderMemoryTransfer:
     """Delivers one admitted job to its receiver when its link delivers.
 
-    Unless it is cancelled first. The decoder cannot read the input
-    before the landing. One in-flight key per request makes cancellation
-    observable: a request cancelled before its landing never reaches the
-    receiver, and cancelling an unknown or already landed request does
-    nothing.
+    A request cancelled before its landing never reaches the receiver,
+    and cancelling an unknown or landed request does nothing.
     """
 
     def __init__(self, engine) -> None:
@@ -429,13 +409,7 @@ def _is_among(member: decoding_records.DecodeJob, released: list) -> bool:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the decoder input staging reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the decoder input staging reports, as one member."""
 
     copy_made: trace_source.TraceSource = trace_source.new_source()
     hold_registered: trace_source.TraceSource = trace_source.new_source()

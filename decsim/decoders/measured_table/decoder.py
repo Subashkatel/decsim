@@ -1,29 +1,24 @@
 """Relay-BP on a measured GPU: decsim's own answer, the device's time.
 
 MeasuredTable is the first row of the StrongBackend port
-(decsim/ports.py). It answers with decsim's own Relay-BP decode (the
-relay_bp row, at the relay_bp keys its tier section sets) and prices it
-from a line measured on the device at those keys (measurements.py):
-intercept plus slope times the iterations decsim's decode ran, and
-never less than the fastest decode the cell measured.
-The measured time is one decode call with the syndrome's copies to and
-from the device and the launch inside it, and no link, so it is the
-time beyond the echo the port asks for with the launch folded in.
+(decsim/ports.py). It answers with decsim's own Relay-BP decode at the
+relay_bp keys its tier sets, and prices it from a line measured on the
+device at those keys (measurements.py): intercept plus slope times the
+iterations decsim's decode ran, never less than the cell's fastest
+decode. A measured time is one decode call with the syndrome's copies
+and the launch inside it and no link.
 
-The time follows decsim's own iteration count rather than a draw from
-the measured samples, so a hard region is slow on the device exactly
-when it is hard for decsim's decode. The two implementations agree on a
-region's iteration count in distribution: on the measured regions, the
-same count for 98 percent of them at d = 5 and 79 percent at d = 13, and
-for every region that needed 20 iterations or fewer. On a long decode
-the two differ as much as two GPU runs of the same region do, so the
-law matches the distribution of times, not each long decode.
+The time follows decsim's own iteration count, so a hard region is slow
+on the device exactly when it is hard for decsim's decode. The two
+implementations agree on a region's iteration count in distribution (the
+same count for 98 percent of the measured regions at d = 5 and 79
+percent at d = 13, and for every region of 20 iterations or fewer), so
+the law matches the distribution of times, not each long decode.
 
 The row is "bound": one chip's regions reach one dispatcher, which runs
 one decode at a time (a CUDA-Q dispatcher's decode holds it, cudaqx
-docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50), so the
-decode is one step on the dispatcher, and the dispatcher's count is the
-most decodes a measured cell ran at once, which is one.
+docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50), so the decode
+is one step on the dispatcher.
 """
 
 import dataclasses
@@ -47,11 +42,10 @@ class MeasuredTableSettings(measurements.RelaySettings):
 
     The relay_bp row's nine fields set the row's own Relay-BP decode, so
     the answer, its iterations and the line that prices them come from
-    one setting; bases among them says whether a region is decoded whole
-    or as its X and Z parts. device names the GPU measured and partition
-    how it was shared. Together they must name measured cells
-    (measurements.py): a decode is priced only by a line measured at its
-    own keys, and a part only by parts measured on the device.
+    one setting; bases says whether a region is decoded whole or as its
+    X and Z parts. device names the GPU and partition how it was shared.
+    Together they must name measured cells: a decode is priced only by a
+    line measured at its own keys.
     """
 
     device: str = "a100"
@@ -72,11 +66,8 @@ class MeasuredTable:
     """A GPU's Relay-BP time from its measured line; decsim's answer.
 
     A region is priced by the measured region nearest to it in detector
-    count, the smaller on a tie. decsim's regions are not exactly the
-    measured ones (a strong window with context holds a few rounds more
-    or less than 3d), and the nearest measured region is the simplest
-    rule the table can state; a region far from every measured size is
-    priced by the nearest all the same.
+    count, the smaller on a tie, however far it is: decsim's strong
+    windows hold a few rounds more or less than the measured 3d.
     """
 
     def __init__(self, settings: MeasuredTableSettings) -> None:
@@ -113,11 +104,7 @@ class MeasuredTable:
         return decoding_records.Ticket(result, decode_ticks)
 
     def steps(self, ticket: decoding_records.Ticket) -> tuple:
-        """One step, the measured decode, holding the dispatcher throughout.
-
-        The measured line is one decode() call with its copies and its
-        launch inside it, so it is not split here.
-        """
+        """One step, the measured decode, holding the dispatcher throughout."""
         decode = decoding_records.Step(
             "decode", ticket.decode_ticks, strong_backend.DISPATCHER
         )
@@ -203,7 +190,7 @@ def _decode_settings(
     """The relay_bp row's keys each decode runs at, X and Z together.
 
     The strong backend cuts a region into its parts itself
-    (strong_backend.part_jobs), so the decode takes each request whole.
+    (strong_backend.part_jobs).
     """
     relay_keys = {}
     for field in dataclasses.fields(measurements.RelaySettings):

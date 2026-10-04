@@ -1,24 +1,21 @@
 """Which destination window waits for which strong result.
 
 The decoder side of the strong tier: the strong request live for each
-destination window and the physical job serving it (itself, or a merged
-batch), how far each destination's demand for a strong result has
-travelled, and the weak decodes still open. A run without strong
-escalation keeps this ledger too: only its weak side (one open decode
-per destination) is ever touched, and every strong query answers
-"nothing".
+destination window and the job serving it (itself, or a merged batch),
+how far each destination's demand has travelled, and the weak decodes
+still open. A run without escalation touches only the weak side, and
+every strong query answers nothing.
 
-The ledger holds no result. A finished result nobody has asked for yet
-waits in the output slot of the unit that produced it
-(decoders/decoder_unit.py), the way a sender keeps the packet until the
-far side accepts it (gem5 port.hh:244-255); this ledger only says
-whether a destination takes one now.
+The ledger holds no result: a finished result nobody has asked for waits
+in the output slot of the unit that produced it (decoder_unit.py), as a
+sender keeps a packet until the far side accepts it (gem5
+port.hh:244-255).
 
 Invariants: a destination window has at most one unconsumed strong
 result; a destination decodes weakly once at a time, so a strong result
 reaches the attempt that asked; a strong result with no possible
-consumer is an error, never dropped silently (Toshio et al. 2510.25222,
-one strong re-decode per escalated window).
+consumer is an error, never dropped (Toshio et al. 2510.25222, one
+strong re-decode per escalated window).
 """
 
 import dataclasses
@@ -45,9 +42,8 @@ class LiveStrongRequest:
 class StrongCompletion:
     """A finished strong result, per request, with the tick its decode ended.
 
-    The request job carries the request key the result answers, and the
-    unit is the one that produced it: its output slot keeps the result
-    until the destination asks for it.
+    The unit is the one that produced it; its output slot keeps the
+    result until the destination asks for it.
     """
 
     request_job: decoding_records.DecodeJob
@@ -142,9 +138,8 @@ class StrongRequests:
     def admit_weak(self, job: decoding_records.DecodeJob, now: int) -> None:
         """Open one request of a destination window's decode attempt.
 
-        A window's attempt is the forced-class requests its window side
-        submits together, so an attempt holds one or two request keys;
-        each of them is admitted once.
+        An attempt is the forced-class requests its window side submits
+        together, one or two request keys.
         """
         key = (job.operation_id, job.window_id)
         record = self._record(key)
@@ -307,10 +302,9 @@ class StrongRequests:
     ) -> tuple:
         """Per-request completions of one finished strong decode.
 
-        A merged batch may only carry timing: no accuracy-bearing field.
-        The unit is read here, before the decode's end frees the job's
-        slot, because it is the unit whose output slot holds a result
-        nobody has asked for yet.
+        A merged batch carries timing only, so each member gets an empty
+        result. The unit is read here, before the decode's end frees the
+        job's slot, since its output slot holds the result.
         """
         unit = service_job.unit
         requests = self.members_of(service_job)

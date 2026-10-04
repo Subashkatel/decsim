@@ -1,26 +1,21 @@
 """The strong decoder on a device: FIFO queues in front of its resources.
 
 StrongBackendDecoder answers the Decoder port for a row whose decode
-runs on a StrongBackend (decsim/ports.py). The decoder manager's units
-hand it decodes once their input has landed. A decode walks the steps
-the device states, each holding a resource, the dispatcher or a
-worker; each resource serves up to its count at once and the rest
-wait in arrival order. Arrival order is what every referent here
-serves in: an IonQ decoding core
-"processes those blocks sequentially" (2608.25027 lines 509-511), and a
-CUDA-Q dispatcher serves its ring's slots in turn, `current_slot =
-(current_slot + 1) % num_slots` (cuda-quantum
+runs on a StrongBackend (decsim/ports.py), once its input has landed. A
+decode walks the steps the device states, each holding a resource, the
+dispatcher or a worker; each resource serves up to its count at once and
+the rest wait in arrival order, as an IonQ decoding core "processes
+those blocks sequentially" (2608.25027 lines 509-511) and a CUDA-Q
+dispatcher serves its ring's slots in turn (cuda-quantum
 realtime/lib/daemon/dispatcher/dispatch_kernel.cu:213-265).
 
 A region decoded with its X and Z parts apart is two requests to that
 queue, each priced by its own size, and its answer is ready when both
-are. Whether the two overlap is the backend's capacity, as it is on a
-real dispatcher: one CUDA-Q dispatcher's decode holds it until the
-decode ends, so two run in series (dispatch_kernel.cu v0.15.2 lines
-575-589), while the host path gives each graph entry "its own worker,
-enabling pipelined execution" (cuda-quantum host_api.md lines
-1104-1106), and IBM runs an X decoder and a Z decoder side by side
-(2510.21600 line 451).
+are. Whether they overlap is the backend's capacity: one CUDA-Q
+dispatcher's decode holds it to the end, so two run in series
+(dispatch_kernel.cu v0.15.2 lines 575-589), the host path gives each
+graph entry its own worker (cuda-quantum host_api.md lines 1104-1106),
+and IBM runs an X and a Z decoder side by side (2510.21600 line 451).
 """
 
 import collections
@@ -59,18 +54,13 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
     """The Decoder port served by a StrongBackend, FIFO past its capacity.
 
     A decode's time is known only once the device has it, so the unit
-    declares no occupancy in advance, the measured decoder's shape
-    (DecoderBase). A cancelled decode still waiting for the dispatcher
-    leaves the queue. A cancelled running decode walks its steps to the
-    end and its result is dropped: a GPU does not stop a running
-    kernel, it schedules other work "as the currently running ...
-    kernel's thread blocks finish" (CUDA C++ Programming Guide,
-    preemption).
-
-    The row is transparent to the seed walk: the backend's seeded parts
-    sit at the paths they would hold without it, so a backend that
-    answers with decsim's own decoder draws what that decoder's row
-    draws under the same run seed.
+    declares no occupancy in advance. A cancelled decode still waiting
+    for the dispatcher leaves the queue; a cancelled running one walks
+    its steps to the end and its result is dropped, since a GPU does not
+    stop a running kernel (CUDA C++ Programming Guide, preemption). The
+    row is transparent to the seed walk: a backend that answers with
+    decsim's own decoder draws what that decoder's row draws under the
+    same run seed.
     """
 
     def __init__(
@@ -242,10 +232,8 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
 def part_jobs(job: decoding_records.DecodeJob) -> dict:
     """The region's X part and Z part as jobs of their own.
 
-    Each carries its part's model and its part's rows of the region's
-    syndrome, as one fragment, which is all a backend reads of a job.
-    The relay_bp row splits a weak window the same way, so the two tiers
-    decode apart by one split.
+    Each carries its part's model and its rows of the region's syndrome
+    as one fragment. The relay_bp row splits a weak window the same way.
     """
     model = job.detector_error_model
     syndrome = decoder_module.payload_syndrome(job)

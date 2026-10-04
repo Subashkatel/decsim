@@ -26,7 +26,7 @@ import resource
 import sys
 import time
 from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from typing import Optional, Union
 
 import numpy
 import stim
@@ -87,7 +87,7 @@ class Task:
     """
 
     settings: machine_settings.MachineSettings
-    metadata: Mapping[str, Any]
+    metadata: Mapping[str, object]
     online_threshold: Optional[ports.ThresholdSource] = None
     record_options: RecordOptions = RecordOptions()
 
@@ -142,7 +142,7 @@ class Shot:
 
 def run_units(
     units: list,
-    measure: Callable[[Shot], Any],
+    measure: Callable[[Shot], object],
     *,
     on_unit_done: Callable[[Unit, result_records.UnitOutcome], None],
     processes: int = 1,
@@ -161,7 +161,7 @@ def run_units(
 
 
 def run_unit(
-    unit: Unit, measure: Callable[[Shot], Any]
+    unit: Unit, measure: Callable[[Shot], object]
 ) -> result_records.UnitOutcome:
     """Every seed of one unit, measured, the task that ran them, the memory.
 
@@ -220,7 +220,7 @@ def run_shot(
     return Shot(task, seed, machine, result, wall_seconds)
 
 
-def metadata_text(metadata: Mapping[str, Any]) -> str:
+def metadata_text(metadata: Mapping[str, object]) -> str:
     """A point's metadata as one line of json, its keys sorted.
 
     The text a shot's narration names its point by, sinter's
@@ -231,8 +231,8 @@ def metadata_text(metadata: Mapping[str, Any]) -> str:
 
 
 def json_value(
-    value: Any, *, keep_labels: bool = True, record_classes: bool = True
-) -> Any:
+    value: object, *, keep_labels: bool = True, record_classes: bool = True
+) -> Union[dict, list, str, int, float, bool, None]:
     """A settings record as plain json: every value by its content.
 
     A dataclass appears as its class and fields; numbers exactly (a json
@@ -265,7 +265,9 @@ class _JsonForm:
     record_classes: bool
 
 
-def _json_in(value: Any, form: _JsonForm) -> Any:
+def _json_in(
+    value: object, form: _JsonForm
+) -> Union[dict, list, str, int, float, bool, None]:
     """One value walked in the form json_value was asked for."""
     if dataclasses.is_dataclass(value):
         return _json_record(value, form)
@@ -305,7 +307,9 @@ def _module_version(
     return importlib.metadata.version(distributions[0])
 
 
-def _unit_outcomes(units: list, measure: Callable[[Shot], Any], processes: int):
+def _unit_outcomes(
+    units: list, measure: Callable[[Shot], object], processes: int
+):
     """Each unit's position and outcome as it ends, run here or in a pool."""
     if processes <= 1:
         for position, unit in enumerate(units):
@@ -316,7 +320,7 @@ def _unit_outcomes(units: list, measure: Callable[[Shot], Any], processes: int):
 
 
 def _pooled_outcomes(
-    units: list, measure: Callable[[Shot], Any], processes: int
+    units: list, measure: Callable[[Shot], object], processes: int
 ):
     """Each unit's position and outcome as it ends, `processes` at a time.
 
@@ -350,7 +354,7 @@ def _ended_outcomes(running: dict):
 
 
 def _submit_up_to(
-    pool, running: dict, queued, measure: Callable[[Shot], Any], limit: int
+    pool, running: dict, queued, measure: Callable[[Shot], object], limit: int
 ) -> None:
     """Queued units handed to the pool until `limit` of them run."""
     while len(running) < limit:
@@ -362,7 +366,7 @@ def _submit_up_to(
         running[future] = position
 
 
-def _json_record(record: Any, form: _JsonForm) -> dict:
+def _json_record(record: object, form: _JsonForm) -> dict:
     """A dataclass as its class and fields, each one walked; labels when kept.
 
     The class sits beside the fields, as gem5's config.json writes each
@@ -394,7 +398,7 @@ def _json_mapping(mapping: Mapping, form: _JsonForm) -> dict:
     return items
 
 
-def _refuse_a_key_that_is_not_text(value: Any, where: str) -> None:
+def _refuse_a_key_that_is_not_text(value: object, where: str) -> None:
     """The id is json of the metadata, whose keys are text, at any depth.
 
     A point's metadata enters here, so 1 and "1" cannot name one point.
@@ -424,7 +428,9 @@ def _json_list(sequence, form: _JsonForm) -> list:
     return items
 
 
-def _json_scalar(value: Any, form: _JsonForm) -> Any:
+def _json_scalar(
+    value: object, form: _JsonForm
+) -> Union[dict, list, str, int, float, bool, None]:
     """A number exactly, a string, flag or path as written; others named."""
     if isinstance(value, (numbers.Number, numpy.generic)):
         return _json_number(value)
@@ -439,7 +445,7 @@ def _json_scalar(value: Any, form: _JsonForm) -> Any:
     return _json_object(value, form)
 
 
-def _json_object(value: Any, form: _JsonForm) -> Any:
+def _json_object(value: object, form: _JsonForm) -> Union[list, str, dict]:
     """A Python-built component: its class, and its attributes walked.
 
     The id is taken before a shot binds neighbours onto it. An array is its
@@ -460,7 +466,7 @@ def _json_object(value: Any, form: _JsonForm) -> Any:
     return {"class": class_name, "attributes": content}
 
 
-def _attributes_of(value: Any) -> dict:
+def _attributes_of(value: object) -> dict:
     """Its __dict__, and every __slots__ name its classes declare and set."""
     own = getattr(value, "__dict__", {})
     attributes = dict(own)
@@ -483,7 +489,9 @@ def _slot_names(value_type: type) -> list:
     return [name for name in names if name not in ("__dict__", "__weakref__")]
 
 
-def _json_number(value: Any) -> Any:
+def _json_number(
+    value: Union[numbers.Number, numpy.generic],
+) -> Union[bool, int, float, str]:
     """A number as json holds it, or as its exact text when json cannot.
 
     A numpy scalar is its Python number. Any non-json number (a Fraction

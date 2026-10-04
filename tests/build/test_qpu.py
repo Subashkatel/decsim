@@ -43,6 +43,8 @@ def test_every_factory_builds_and_takes_the_decode_queue_it_is_handed(
     """The qpu part hands every factory the run's decoder manager.
 
     A factory whose card asks for no correction decode runs beside it.
+    What a factory sends through the port is
+    tests/qpu/test_magic_state_factories.py's.
     """
     settings = machine_settings.MachineSettings(
         magic_state_factory=factory_settings
@@ -51,6 +53,8 @@ def test_every_factory_builds_and_takes_the_decode_queue_it_is_handed(
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
 
+    factory = machine.qpu.factory
+    assert factory.decode_queue is machine.decoders.decoder_manager
     assert result.terminal_status == "complete"
 
 

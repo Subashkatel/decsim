@@ -106,9 +106,11 @@ EXEMPTION_LINE = re.compile(r"^- `(\w+)` \(`([^`]+)`\):")
 BLOCK_STATEMENTS = (ast.For, ast.While, ast.If, ast.With, ast.Try)
 ARITHMETIC = (ast.BinOp, ast.Compare, ast.BoolOp)
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
-# rule 11: a nested function or class decides for itself, a lambda for the
-# function around it
-COUNTED_APART = (*FUNCTIONS, ast.ClassDef)
+# rule 11: a decision counts toward the innermost function whose text holds
+# it, so a nested function's, lambda's or class's body decides for itself,
+# while its decorators, defaults, annotations and bases, which sit outside
+# that body, decide for the function around it
+DEFINITIONS = (*FUNCTIONS, ast.Lambda, ast.ClassDef)
 TESTED_DECISIONS = (ast.If, ast.While, ast.IfExp)
 UNTESTED_DECISIONS = (ast.For, ast.AsyncFor, ast.ExceptHandler)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
@@ -322,13 +324,48 @@ def decision_count(function):
 
 
 def decisions_below(node):
-    """The decisions of a node and everything below it, minus definitions."""
-    if isinstance(node, COUNTED_APART):
-        return 0
+    """The decisions of a node and everything below it, bodies apart."""
+    if isinstance(node, DEFINITIONS):
+        return definition_decisions(node)
     count = own_decisions(node)
     for child in ast.iter_child_nodes(node):
         count += decisions_below(child)
     return count
+
+
+def definition_decisions(node):
+    """What a definition decides where it is defined, its body left out."""
+    count = 0
+    for part in definition_parts(node):
+        count += decisions_below(part)
+    return count
+
+
+def definition_parts(node):
+    """A definition's decorators, defaults, annotations or bases."""
+    if isinstance(node, ast.ClassDef):
+        return [*node.decorator_list, *node.bases, *node.keywords]
+    defaults = argument_defaults(node.args)
+    if isinstance(node, ast.Lambda):
+        return defaults
+    annotations = signature_annotations(node)
+    return [*node.decorator_list, *defaults, *annotations]
+
+
+def argument_defaults(arguments):
+    """The default values a signature evaluates where it is defined."""
+    keyword_defaults = [
+        default for default in arguments.kw_defaults if default is not None
+    ]
+    return [*arguments.defaults, *keyword_defaults]
+
+
+def signature_annotations(function):
+    """What a definition evaluates for its types, the return's included."""
+    parameters = signature_parameters(function.args)
+    annotations = [parameter.annotation for parameter in parameters]
+    annotations.append(function.returns)
+    return [annotation for annotation in annotations if annotation]
 
 
 def own_decisions(node):
@@ -337,12 +374,28 @@ def own_decisions(node):
         return tested_decisions(node.test)
     if isinstance(node, UNTESTED_DECISIONS):
         return 1
-    if not isinstance(node, ast.comprehension):
-        return 0
+    if isinstance(node, ast.comprehension):
+        return comprehension_decisions(node)
+    if isinstance(node, ast.Assert):
+        return condition_operators(node.test)
+    if isinstance(node, ast.match_case):
+        return guard_decisions(node)
+    return 0
+
+
+def comprehension_decisions(comprehension):
+    """A comprehension's loop, and each of its filters."""
     count = 1
-    for test in node.ifs:
+    for test in comprehension.ifs:
         count += tested_decisions(test)
     return count
+
+
+def guard_decisions(case):
+    """A match case's guard is an `if`; a case without one decides nothing."""
+    if case.guard is None:
+        return 0
+    return tested_decisions(case.guard)
 
 
 def tested_decisions(test):

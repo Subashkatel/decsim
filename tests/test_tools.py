@@ -171,11 +171,7 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
     """Five decisions pass and six fail, under rule 11's own count.
 
     An `and`, an `or` and a comprehension's `for` and `if` each count
-    one, and the nested `inner` is counted apart from `outer`. In
-    `filtered`, the filter's `and` counts once, and the default value is
-    no part of the body. In `chosen`, the `and` of a conditional
-    expression that is a whole test counts once; rule 1 reports that
-    expression as an inline conditional.
+    one, and the nested `inner` is counted apart from `outer`.
     """
     tool = _tool("check_one_action")
     module = tmp_path / "decisions.py"
@@ -202,7 +198,27 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
         "        if values or kept:\n"
         "            return values\n"
         "    return inner\n"
-        "\n"
+    )
+    exit_code = tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "decisions.py:8: over five decisions: six decides 6 times" in (
+        captured.out
+    )
+    assert "1 findings in 1 of 1 files checked" in captured.out
+
+
+def test_rule_eleven_counts_each_condition_operator_once(tmp_path, capsys):
+    """An operator inside a nested condition counts for that condition only.
+
+    In `filtered`, the filter's `and` counts once, and the default value
+    sits outside the body. In `chosen`, the `and` of a conditional
+    expression that is a whole test counts once; rule 1 reports that
+    expression as an inline conditional.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
         "def filtered(values, enabled, kept=tuple(v for v in () if v)):\n"
         "    if any(value for value in values if value and enabled):\n"
         "        return True\n"
@@ -215,14 +231,10 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
         "    if b or c:\n"
         "        return b\n"
     )
-    exit_code = tool.main([str(tmp_path)])
+    tool.main([str(tmp_path)])
     captured = capsys.readouterr()
-    assert exit_code == 1
-    assert "decisions.py:8: over five decisions: six decides 6 times" in (
-        captured.out
-    )
+    assert "filtered decides" not in captured.out
     assert "chosen decides" not in captured.out
-    assert "2 findings in 1 of 1 files checked" in captured.out
 
 
 def test_rule_eleven_counts_the_operators_that_decide_a_condition(
@@ -261,6 +273,56 @@ def test_rule_eleven_counts_the_operators_that_decide_a_condition(
     captured = capsys.readouterr()
     assert "over five decisions: branch decides 6 times" in captured.out
     assert "element decides" not in captured.out
+
+
+def test_rule_eleven_counts_a_definitions_outer_parts_in_the_function_around_it(
+    tmp_path, capsys
+):
+    """A nested definition's decorator and defaults sit in the outer body.
+
+    `defined` holds its inner function's decorator and default, and its
+    assert's `and` is in a condition: six. `deferred`'s lambda body is a
+    function of its own, so `deferred` decides twice.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def defined(values, a):\n"
+        "    @decorate([value for value in values if value])\n"
+        "    def inner(kept=[value for value in values if value and a]):\n"
+        "        return kept\n"
+        "    assert values and a\n"
+        "    return inner\n"
+        "\n"
+        "def deferred(a, b, c):\n"
+        "    if a:\n"
+        "        return None\n"
+        "    if b:\n"
+        "        return None\n"
+        "    return lambda: (a if b and c else 0, b if a or c else 1)\n"
+    )
+    tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert "over five decisions: defined decides 6 times" in captured.out
+    assert "deferred decides" not in captured.out
+
+
+def test_rule_eleven_counts_a_case_guard_as_an_if(tmp_path, capsys):
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def guarded(value, a, b):\n"
+        "    match value:\n"
+        "        case 1 if a and b:\n"
+        "            return 1\n"
+        "        case 2 if a and b:\n"
+        "            return 2\n"
+        "        case 3 if a and b:\n"
+        "            return 3\n"
+    )
+    tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert "over five decisions: guarded decides 6 times" in captured.out
 
 
 def _classes_tested_against(tool, root) -> set:

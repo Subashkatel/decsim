@@ -16,6 +16,8 @@ import pytest
 import stim
 
 import decsim.config as config
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.planner as planner
 import decsim.machine as machine_module
@@ -354,6 +356,63 @@ def test_an_operation_blocked_by_itself_is_refused():
     blocked = operation_of(1, blocked_by=1)
     with pytest.raises(ValueError):
         planner.check_operation_graph([blocked], validate_blockers=True)
+
+
+memory = declared_run.memory_operation
+CYCLE_AFTER_A_ROOT = (
+    memory(0),
+    memory(1, predecessors=(0, 2)),
+    memory(2, predecessors=(1,)),
+)
+SELF_BLOCK_AFTER_A_ROOT = (
+    memory(0),
+    memory(1, predecessors=(0,), blocked_by=1),
+)
+BOUNDARY_CYCLE = (
+    memory(1, decoder_boundary_predecessors=(2,)),
+    memory(2, decoder_boundary_predecessors=(1,)),
+    memory(3, predecessors=(1,), blocked_by=1),
+)
+BOUNDARY_EDGE_TWICE = (
+    memory(1),
+    memory(2, decoder_boundary_predecessors=(1, 1)),
+    memory(3, predecessors=(2,), blocked_by=2),
+)
+
+
+@pytest.mark.parametrize(
+    "operations, message",
+    [
+        (CYCLE_AFTER_A_ROOT, "cycle"),
+        (SELF_BLOCK_AFTER_A_ROOT, "blocked by itself"),
+        (BOUNDARY_CYCLE, "cycle"),
+        (BOUNDARY_EDGE_TWICE, "more than once"),
+    ],
+    ids=[
+        "cycle after a root",
+        "self block after a root",
+        "boundary cycle",
+        "boundary edge twice",
+    ],
+)
+def test_a_graph_that_waits_forever_after_a_root_is_refused_at_build(
+    operations, message
+):
+    """A first operation finishes, then another waits forever.
+
+    Idle patches keep scheduling rounds, so the run never empties its
+    queue and never reaches the end-of-run check: the build must refuse.
+    """
+    workload = declared_run.declared_workload(list(operations), 2)
+    algorithm = decoders.PresetLatencyDecoder.Settings(0.1)
+    weak_decoder = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    settings = machine_settings.MachineSettings(
+        workload=workload, weak_decoder=weak_decoder
+    )
+    with pytest.raises(ValueError, match=message):
+        machine_module.Machine.build(settings)
 
 
 def test_two_objects_with_one_id_in_one_role_are_refused_naming_it():

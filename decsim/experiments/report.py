@@ -1,37 +1,20 @@
 """Shot measurements -> a run folder's additive facts -> the summaries.
 
-A run folder records only facts that add up: one row per shot (its
-scalar fields, and each latency point's mean and max over the shot's
-windows), one row per shot per link (that shot's own ledger counters),
-and one row per distinct microsecond value of each latency point with
-how many of the point's windows carried it. Every summary column is
-derived from those rows at read time, which is sinter's shape
-(sinter/_data/_task_stats.py: TaskStats holds shots, errors, discards,
-seconds and a Counter of custom counts, __add__ sums them, and every
-rate or interval is computed from the summed row); gem5 keeps its
-Distribution statistics the same way, as counts per bucket summed
-across simulations. So sweep.csv reads the same whether one process
-ran every shot or many ran a piece each: a run's shots are pieces too,
-and the fold of the pieces builds it.
+A run folder records only facts that add up: one row per shot, one per
+shot per link, and one per distinct microsecond value of each latency
+point with its count. Every summary is derived from those rows at read
+time, sinter's shape (sinter/_data/_task_stats.py: TaskStats.__add__
+sums, rates come from the summed row), and gem5's Distribution counts
+per bucket. So sweep.csv reads the same whether one process ran every
+shot or many ran a piece each. The fold (experiments/fold.py) is the one
+code path that produces every summary; this module says which field
+plays which role.
 
-What a summary needs off those rows is a count, a true count, a sum, a
-max and an exact mean per sweep point, and none of those grows with the
-shots, so the rows reach them one at a time: the accumulators, the row
-streams and the merge that orders them are in experiments/fold.py, and
-this module says which field plays which role. The fold is the one
-code path that produces every summary.
-
-The per-value counts file stays small because every sample is a whole
-number of ticks divided by the ticks in a microsecond
-(config.ticks_to_microseconds). Under a fixed-latency decoder card,
-which is what an LER sweep of a million shots runs, a point's windows
-take one of a handful of tick spans, so the file's length follows the
-spread of the values and not the shot count. A wall-clock decoder
-prices its measured decode into the simulated clock and spreads the
-values wide, and those runs are the timing sweeps of hundreds of shots,
-which already write one row per window in latency_samples.csv.
-
-Nothing here runs a simulation.
+The per-value counts file stays small because every sample is whole
+ticks over the ticks in a microsecond: under a fixed-latency card a
+point's windows take a handful of spans. A wall-clock decoder spreads
+values wide, and those timing sweeps of hundreds of shots already write
+a row per window in latency_samples.csv.
 """
 
 import csv
@@ -155,16 +138,10 @@ SHOT_MINIMUM_HISTOGRAM = "shot_minimum"
 
 @dataclasses.dataclass(frozen=True)
 class RunRecord:
-    """The additive facts one or more run folders hold.
+    """The additive facts one or more run folders hold, one list per file.
 
-    Each field is a list of csv rows and each list is one file of the
-    run folder: shots.csv, shot_links.csv, shot_data_movement.csv,
-    window_samples.csv, latency_samples.csv, window_confidence.csv and
-    confidence_histogram.csv. No field holds a summary, so two folders'
-    records join by concatenation (the window samples' and the
-    histogram's counts add), and the summaries derived from the join
-    are the summaries a single run over the same shots would have
-    written.
+    No field holds a summary, so two folders' records join by concatenation
+    and the summaries of the join are those of one run over the same shots.
     """
 
     shots: list
@@ -177,18 +154,12 @@ class RunRecord:
 
 
 def percentile_of_counts(multiset: dict, fraction: float) -> float:
-    """The value at `fraction` of the samples, numpy's nearest method.
+    """The value at fraction of the samples, numpy's nearest method.
 
-    The index is round((n - 1) * fraction) into the sorted samples, which
-    is numpy.percentile(method="nearest"); a position half way between
-    two samples takes the even index, so the median of an even count is
-    the lower middle for 2 or 6 samples and the upper for 4. It is not
-    the classical nearest rank, ceil(n * fraction).
-
-    multiset maps a microsecond value to how many samples carry it.
-    Expanding it and sorting gives the list this walks in place, so a
-    point's percentile is the same however its shots were split across
-    processes or pieces.
+    The index is round((n - 1) * fraction) into the sorted samples,
+    numpy.percentile(method="nearest"), half way rounding to the even index;
+    not the classical nearest rank ceil(n * fraction). multiset maps a value
+    to its count, so a percentile is the same however the shots were split.
     """
     total = _total_count(multiset)
     if total == 0:
@@ -203,13 +174,9 @@ def percentile_of_counts(multiset: dict, fraction: float) -> float:
 def sweep_point_of(row: dict) -> tuple:
     """The point a row belongs to: its id and its algorithm.
 
-    The id is the point's strong id, sinter's strong_id column, so two
-    points apart in any setting are two points; the algorithm rides
-    with it so every derived row says what it is of, and write_csv adds
-    the point's swept values. A row read back off a csv file holds text
-    and a row this process measured holds numbers, so the algorithm is
-    read as the value it was written from: one streamed row and one
-    measured row of the same shot name the same point.
+    The id is sinter's strong_id. A row read back off csv holds text and a
+    measured row numbers, so the algorithm is read as the value it was
+    written from, and both name the same point.
     """
     return (row["point_id"], fold.number_of(row["algorithm"]))
 
@@ -293,10 +260,8 @@ def summary_rows(totals: dict, counts: dict, prefixes: dict) -> list:
 def write_csv(rows: list, path: Path, swept: Optional[dict] = None) -> None:
     """The rows as a csv file, every column any row holds, first seen first.
 
-    swept maps a point id to its value at each swept name
-    (run_folder.swept_values), and a row of that point takes one column
-    per name right after its point_id: the values the design fixed
-    first, then what was measured, Wickham's order (Tidy Data, J. Stat.
+    A point's swept values follow its point_id: the design's fixed values
+    first, then the measured ones, Wickham's order (Tidy Data, J. Stat.
     Softw. 59(10), 2014, section 2.3).
     """
     if swept is not None:
@@ -315,13 +280,8 @@ def write_csv(rows: list, path: Path, swept: Optional[dict] = None) -> None:
 def shot_data_movement_rows(measurements: list) -> list:
     """One row per shot per path: that shot's own copy and move counters.
 
-    A path is a copy's source and target (`controller assembler -> weak
-    syndrome buffer`) or a link's own name, and each row names the
-    memory class that path crosses, which observe/data_movement.py
-    places from the sources. A shot whose run had
-    observation.data_movement off writes no row at all: a run that
-    counted nothing has no counts, which is not the same fact as a run
-    whose counts were zero.
+    A run with observation.data_movement off writes no row: counting
+    nothing is not counting zero.
     """
     rows = []
     for measurement in measurements:
@@ -372,11 +332,8 @@ def shot_link_rows(measurements: list) -> list:
 def window_sample_rows(measurements: list) -> list:
     """One row per point, latency point, tier and distinct value: its count.
 
-    The multiset of a point's window samples, which is all its median
-    and p99 columns need and all a piece has to record for another
-    process to reach the same numbers. Each window's samples sit under
-    the tier that committed it, so kept and escalated windows are two
-    multisets; a round's sample has no window and names no tier.
+    That multiset is all a median or p99 needs. Kept and escalated windows
+    are two multisets; a round's sample names no tier.
     """
     counts = _counts_of_samples(measurements)
     points = []
@@ -389,15 +346,10 @@ def window_sample_rows(measurements: list) -> list:
 def latency_sample_rows(measurements: list) -> list:
     """One row per decoded window: the algorithm stage's time.
 
-    Only algorithms named by a table row produce rows, and the time is
-    what held the unit: the measured wall clock, or the row's own cycle
-    count. A number instead of a name is a fixed latency and produces
-    none. These are the inputs a latency figure is drawn from, so a
-    reader draws one from run folders alone; each row carries the tier
-    that decoded its window and the window's inter-arrival, the
-    deadline a decode must beat. What such a figure computes (log
-    times, densities, medians) is computed when it is drawn, not
-    stored.
+    Only algorithms named by a table row produce rows, the measured wall
+    clock or the row's cycle count; a fixed latency produces none. Each row
+    carries its tier and the window's inter-arrival, the deadline a decode
+    must beat, so a latency figure is drawn from run folders alone.
     """
     rows = []
     for measurement in measurements:
@@ -420,11 +372,8 @@ def window_confidence_rows(measurements: list) -> list:
     """One row per window of each sampled shot: its gap and its verdict.
 
     Toshio et al. keep each shot's gap with whether the decode was right
-    (2510.25222 lines 722-731); a window has no truth of its own, so a
-    row carries the shot's failure and whether the strong decode
-    revised the window's answer. Only the scored shots of those
-    observation.confidence_shot_count names write rows; a run with no
-    confidence signal writes none.
+    (2510.25222 lines 722-731); a window has no truth of its own, so a row
+    carries the shot's failure and whether the strong decode revised it.
     """
     rows = []
     for measurement in measurements:
@@ -443,10 +392,8 @@ def confidence_histogram_rows(measurements: list) -> list:
     """Every scored shot's window gaps and smallest gap, per 0.1 dB bin.
 
     The counts add across pieces as sinter's custom_counts do
-    (sinter/_data/_task_stats.py:51-71), so the histogram covers every
-    scored shot however many window_confidence.csv lists. From it come
-    Toshio's p(g) and P(e|g) and the brute-force cutoff (2510.25222
-    lines 807-841, 863-900).
+    (sinter/_data/_task_stats.py:51-71). Toshio's p(g), P(e|g) and the
+    brute-force cutoff come from it (2510.25222 lines 807-841, 863-900).
     """
     counts = {}
     for measurement in measurements:
@@ -458,11 +405,8 @@ def confidence_histogram_rows(measurements: list) -> list:
 def gap_bin_low_decibels(gap_nats: float) -> float:
     """The lower edge, in decibels, of the 0.1 dB bin holding the gap.
 
-    A gap in nats is ln of the likelihood ratio and a decibel is
-    10 log10 of it (threshold_sources.py nats_to_decibels); Toshio et
-    al. histogram their gaps in decibels (2510.25222 main.tex:564). An
-    infinite gap, a window whose other class has no fault set, keeps
-    its own bin.
+    Toshio et al. histogram gaps in decibels (2510.25222 main.tex:564). An
+    infinite gap keeps its own bin.
     """
     decibels = threshold_sources.nats_to_decibels(gap_nats)
     if math.isinf(decibels):
@@ -475,11 +419,7 @@ def gap_bin_low_decibels(gap_nats: float) -> float:
 def confidence_shot_count_of(measurements: list):
     """The shots a piece's confidence rows cover, for its piece.json.
 
-    The first shots' count, the word all for every shot, or None when no
-    confidence signal ran and the piece wrote neither confidence file.
-    A piece saved before the confidence files has no such line, and the
-    fold refuses to join it to one that has
-    (_refuse_pieces_that_recorded_confidence_apart).
+    The first shots' count, all, or None when no confidence signal ran.
     """
     for measurement in measurements:
         confidence = measurement.confidence
@@ -541,19 +481,11 @@ def fold_pieces(
 ) -> list:
     """Pieces' additive files folded into out_dir; the sweep rows.
 
-    A piece holds the additive files for a range of one point's seeds.
-    Every folded row takes its point's swept values from the point's
-    record in run_dir. The rows come back in the order
-    one run over every piece would write them: its points in task order,
-    then its seeds. Two pieces may not share a shot, which would be
-    counted twice. rules maps a point id to the collection.PointRule
-    its estimate is read by.
-
-    An experiment's pieces can hold more rows than a process can: 500
-    pieces of a million-shot sweep are 115 million link rows. So the
-    pieces are read in a stream, one row of each at a time, and what
-    stands between reading and writing is the totals of
-    experiments/fold.py and not a list of the rows.
+    A piece holds the files for a range of one point's seeds; rows come back
+    in the order one run over every piece would write them. Two pieces may
+    not share a shot. 500 pieces of a million-shot sweep are 115 million
+    link rows, so pieces are streamed one row at a time and only fold.py's
+    totals stand between reading and writing.
     """
     order = _refused_or_ordered(folders, point_ids)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -674,11 +606,8 @@ def _fold_one_file(
 def _folded_columns(paths: list, swept: dict) -> list:
     """Every column a folded file's rows hold, first seen first.
 
-    That is write_csv's header: point_id, the swept paths, then each
-    file's columns. Two points of one grid can measure different
-    columns, and a point's cell for a column it did not measure is
-    empty, as a swept name a point's metadata does not hold is
-    (run_folder.swept_values).
+    Points of one grid can measure different columns; a cell a point did not
+    measure is empty.
     """
     columns = {"point_id": None}
     for values in swept.values():
@@ -863,13 +792,9 @@ def _add_load_columns(row: dict, totals) -> None:
 def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
     """The point's strong service over its strong decodes; None for none.
 
-    A ratio of two sums, gem5's Formula avgMissLatency = missLatency /
-    misses (src/mem/cache/base.cc:2187-2188), whose nonan flag prints
-    nothing for a zero count (src/base/stats/text.cc:288-290); sinter
-    likewise sums counts and divides at read time
-    (sinter/_data/_anon_task_stats.py:57-78). A mean of each shot's
-    mean would weigh a shot of one decode like a shot of ten. A folder
-    whose shots hold no sum gets no mean, the rule of _points_held.
+    A ratio of two sums, as gem5's avgMissLatency = missLatency / misses
+    (src/mem/cache/base.cc:2187-2188) and sinter divide at read time; a mean
+    of shot means would weigh a one-decode shot like a ten-decode one.
     """
     escalated_windows = totals.sums["escalated_windows"]
     if escalated_windows == 0:
@@ -880,19 +805,14 @@ def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
 def strong_service_bound_us(totals: fold.RowTotals) -> float:
     """Toshio's Theorem 1 bound on one strong decode's time, in us.
 
-    Eq. (6) bounds the strong decoder's time per round, tau_strong <=
-    (1 / gamma_switch)(d / r_strong) tau_gen, for one weak and one
-    strong decoder on one patch (2510.25222 lines 1272-1304), with
-    gamma_switch the switching rate per d rounds (lines 185-188). A
-    decode reads r_strong rounds, so one decode's time is bounded by
-    d tau_gen / gamma_switch. The proof counts the escalations against
-    the rounds generated (lines 1335-1350), so gamma_switch is the
-    escalated windows over the generated rounds over d, and the bound is
-    tau_gen times the generated rounds over the escalated windows. The
-    rounds are the shots' executed rounds, not their committed windows
-    times r_com: a double window absorbs windows whose rounds were still
-    generated. tau_gen is the shots' window_period_us over their
-    commit_rounds; infinite when nothing escalated.
+    Eq. (6): tau_strong <= (1 / gamma_switch)(d / r_strong) tau_gen per round
+    (2510.25222 lines 1272-1304), gamma_switch the switching rate per d
+    rounds (lines 185-188). A decode reads r_strong rounds, so one decode is
+    bounded by d tau_gen / gamma_switch. The proof counts escalations against
+    rounds generated (lines 1335-1350), so the bound is tau_gen times the
+    generated rounds over the escalated windows. The rounds are the executed
+    ones, since a double window absorbs windows whose rounds were still
+    generated. Infinite when nothing escalated.
     """
     escalated_windows = totals.sums["escalated_windows"]
     if escalated_windows == 0:
@@ -937,19 +857,11 @@ def _held_by(row: dict, columns: tuple) -> list:
 def _points_held(fields) -> list:
     """The latency points a shot row or its totals hold, in POINTS order.
 
-    A run folder is read by the columns it holds and not by the columns
-    the reading tree would write: the 500 folders of one weak_ler
-    sweep hold the sixteen latency points the tree that wrote them
-    measured, and this tree measures twenty-three, so a summary that asked
-    for its own could not read those folders at all. It is the rule that
-    lets a fold read a folder an older tree wrote, which is the same
-    rule sinter's counter table keeps, where a counter a file does not
-    carry is simply not in the folded row: custom_counts is declared
-    Counter[str] with collections.Counter as its default factory
-    (.pydeps/sinter/_data/_task_stats.py:71) and folded by adding the
-    two counters (:117-150). A point a folder did not measure gets no
-    column, because a column of zeros would say its windows took no
-    time.
+    A folder is read by the columns it holds, not those the reading tree
+    writes, so a fold reads a folder an older tree wrote, as sinter folds
+    custom_counts by adding Counters (sinter/_data/_task_stats.py:71,
+    117-150). A point a folder did not measure gets no column, since zeros
+    would say its windows took no time.
     """
     held = []
     for name in measure.POINTS:
@@ -1124,12 +1036,8 @@ def _refuse_folders_of_different_columns(run_dirs: list) -> None:
 def _refuse_one_files_different_columns(run_dirs: list, name: str) -> None:
     """One folded file's columns, the same in every piece of one point.
 
-    A point's pieces were measured by one tree, so they carry the same
-    columns; a folder that wrote no row of this kind has none to carry.
-    Two trees' pieces differ when a column was added between them, and
-    folding them would leave that column empty for the older piece's
-    shots rather than say so. Two points may differ, since a grid's
-    points can measure different things (_folded_columns).
+    Pieces from two trees differ when a column was added between them, and
+    folding them would leave it silently empty for the older shots.
     """
     first_by_point = {}
     for run_dir in run_dirs:
@@ -1191,13 +1099,8 @@ def _refuse_the_columns(
 def _refuse_a_repeated_shot(run_dirs: list, order) -> None:
     """One seeded run in two folders would be counted twice.
 
-    A point may be split across folders now, since its summary is
-    derived from additive rows, but a shot may not: the same seed of
-    the same point is the same run. The folders' shots.csv rows arrive
-    merged, one row per shot, so a point's rows come in seed order and
-    the check holds the last seed of each point rather than every shot
-    of the experiment. It runs before anything is written, so a refused
-    fold leaves no folder behind.
+    Rows arrive merged in seed order per point, so the check keeps each
+    point's last seed. It runs before anything is written.
     """
     paths = _folder_files(run_dirs, "shots.csv")
     seen = {}
@@ -1212,11 +1115,8 @@ def _refuse_a_repeated_shot(run_dirs: list, order) -> None:
 def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
     """A point's pieces must have recorded confidence for the same shots.
 
-    A piece saved before the confidence files, or with another
-    observation.confidence_shot_count, holds its shots in shots.csv but
-    other or no rows in the confidence files, so their fold would count
-    fewer shots there than in the sweep row. A piece.json without the
-    line is such an older piece, and it reads as None.
+    Otherwise the confidence files would count fewer shots than the sweep
+    row. A piece.json without the line reads as None.
     """
     coverage_by_point = _pieces_by_point_and_value(
         run_dirs, _confidence_coverage_of
@@ -1441,15 +1341,11 @@ def _count_the_shots_gaps(
 
 
 def _has_counted_confidence(measurement: measure.ShotMeasurement) -> bool:
-    """Whether the shot's gaps belong in the confidence files.
+    """Whether the shot's gaps belong in the confidence files: scored only.
 
-    Only a scored shot's: an unscored shot is sinter's discard, whose
-    logical_failure reads False, and sinter keeps a discard out of every
-    count it conditions on failure (sinter/_decoding/_decoding.py:
-    120-128) as out of the rate (sinter/_plotting.py:389). Every row of
-    both files carries shot_failed, so a row of an unscored shot would
-    count as a success. sweep.csv's unscored_shots counts the shots
-    left out.
+    An unscored shot is sinter's discard, kept out of every count
+    conditioned on failure (sinter/_decoding/_decoding.py:120-128); its row
+    would count as a success. sweep.csv's unscored_shots counts them.
     """
     if measurement.confidence is None:
         return False

@@ -1,18 +1,13 @@
 """`decsim run --slurm`: one array task per point, then one fold.
 
-The run design's D7, gem5 MultiSim's list-then-run-one-id pattern. The
-launcher records every point, which runs each point's build, so a point
-the build refuses queues nothing, and writes two sbatch files into the
-results folder. run.sbatch is one array: task i runs point i of the
-folder's copy of the run file to its stop, from the pieces the folder
-already holds. fold.sbatch waits on the array with afterany, so it runs
-whatever the tasks did, and folds every saved piece. Submitting again
-resumes: a point that stopped runs nothing, and the fold runs again.
+gem5 MultiSim's list-then-run-one-id pattern. The launcher records every
+point, which runs each build, so a refused point queues nothing, and
+writes run.sbatch, one array whose task i runs point i to its stop from
+the saved pieces, and fold.sbatch, which waits on the array with
+afterany and folds every saved piece. Submitting again resumes.
 
-No account, partition or QOS is written: sbatch reads them from
-SBATCH_ACCOUNT, SBATCH_PARTITION and SBATCH_QOS in the environment
-(sbatch(1), "INPUT ENVIRONMENT VARIABLES"), and every job inherits the
-submitting environment and folder.
+No account, partition or QOS is written: sbatch reads SBATCH_ACCOUNT,
+SBATCH_PARTITION and SBATCH_QOS from the environment (sbatch(1)).
 """
 
 import dataclasses
@@ -102,16 +97,11 @@ def launch(
 def refuse_an_unnamed_tree() -> None:
     """A tree git does not vouch for is refused, unless ALLOW_DIRTY is set.
 
-    Every task imports the tree as it stands when that task starts, so
-    an edit or a commit landing while an array is still queued gives
-    different tasks different code, and the pieces would name a commit
-    none of them ran; a tree git cannot read cannot name its code at
-    all. The reading is taken fresh, at submission and again in every
-    task, and handed to the run records through TREE_DIRTY_VARIABLE and
-    TREE_PATCH_VARIABLE, since a job's interpreter may have no git of
-    its own. gem5 prints its version, build date, host and command line
-    at every start for the same reason
-    (gem5 src/python/m5/main.py:524-537).
+    Every task imports the tree as it stands when it starts, so an edit
+    while the array is queued gives tasks different code, and the pieces
+    would name a commit none ran. The reading is taken at submission and in
+    every task, and passed through TREE_DIRTY_VARIABLE and
+    TREE_PATCH_VARIABLE, since a job's interpreter may have no git.
     """
     checkout, commit, is_dirty = run_folder.fresh_tree_reading()
     dirty_text = _dirty_text(is_dirty)

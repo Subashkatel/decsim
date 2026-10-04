@@ -1,16 +1,11 @@
 """`decsim trace follow`: one round's or one window's path, hop by hop.
 
-The reader of one round's or one window's path through a trace: it
-indexes a shot's Chrome trace by the identity keys in `args`, orders the
-hops by `args.tick` and then by the lane the pipeline puts each thread
-on, and prints where the thing sat, for how long, whether the hop copied
-the bits or referenced them, and how many bits crossed. Below the table
-come the counts (copies, references as jobs and holds, moves, the
-longest residence and the longest queue wait), which is sinter's one
-flat row per thing counted (_data/_task_stats.py) applied per hop.
-
-Perfetto draws the timeline; this is the per-round path Perfetto would
-make the reader assemble by clicking through flow arrows.
+Hops are ordered by args.tick, then by pipeline lane, and printed with
+where the thing sat, how long, whether the hop copied or referenced the
+bits, and how many bits crossed; the counts follow, sinter's one flat
+row per thing counted (_data/_task_stats.py) applied per hop. Perfetto
+draws the timeline; this is the path it would make the reader assemble
+by clicking through flow arrows.
 """
 
 import argparse

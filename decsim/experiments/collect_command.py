@@ -1,18 +1,13 @@
 """`decsim run`: every point of one experiment, each until it stops.
 
-The experiment says what runs; this module only orchestrates. It runs
-each point's seeds in order, a piece at a time (decsim.collect), and
-saves each piece's additive facts in the results folder the moment it
-ends (pieces). A point stops by its collection's rule on the contiguous
-prefix of its seeds (collection), and no piece past the stop is
-started. Then the pieces are folded into the results folder, one row
-per point (report, run_folder). A piece already saved is counted and
-not run again, so a killed collect resumes where it stopped; rerunning
-the same experiment reproduces the same rows (only the wall-clock
-column varies), and so does running it with a process pool, as long as
-each point stops at the same piece. On Slurm each array task collects
-one point and folds nothing, and one fold job folds them all
-(plan_command).
+Each point's seeds run in order, a piece at a time, each piece saved the
+moment it ends. A point stops by its collection's rule on the
+contiguous prefix of its seeds, and no piece past the stop starts. Then
+the pieces are folded, one row per point. A saved piece is counted, not
+rerun, so a killed collect resumes; the same experiment reproduces the
+same rows (only the wall-clock column varies), with a pool too, as long
+as each point stops at the same piece. On Slurm each array task collects
+one point and one fold job folds them all.
 """
 
 import dataclasses
@@ -42,20 +37,13 @@ import decsim.settings as machine_settings
 class PointCollection:
     """One point's collection as it runs: its next seed and its prefix.
 
-    tracker reads the prefix shot by shot off the saved pieces'
-    shots.csv, as the report does (collection.PrefixTracker), so the
-    collector stops on the shot the report's row stops on. saved maps
-    the first seed of each piece saved before this collect to its
-    count, whatever collection cut it. pending holds the (first seed,
-    count) of the pieces handed out past the counted prefix, in seed
-    order; they are counted once they are all saved, so the prefix
-    stays contiguous whatever order the pool ends them in. last_piece
-    is the (first seed, count) of the piece handed out last.
+    tracker reads the prefix shot by shot off the saved shots.csv, as the
+    report does, so the collector stops on the report's shot. pending holds
+    pieces handed out past the counted prefix, counted once all are saved,
+    so the prefix stays contiguous whatever order a pool ends them in.
 
-    An adaptive point's calibrator learns over its shots in order, so
-    its pieces run one at a time, each from the calibrator state the
-    piece before it saved (design 6.5), whether that one ran in this
-    collect or in one that was killed.
+    An adaptive point's calibrator learns over its shots in order, so its
+    pieces run one at a time, each from the state the piece before saved.
     """
 
     task: collect.Task
@@ -202,12 +190,8 @@ def collect_experiment(
 ) -> list:
     """One experiment: pieces until every point stops, then the fold.
 
-    run_dir is the results folder, and only names the one point to
-    collect, every point when None. Each piece is saved when it ends,
-    and a piece already saved is counted and skipped, so a killed
-    run started again runs only what it had not saved. run.json lists
-    every point of the experiment, the order the fold writes its rows
-    in whichever points ran. Returns the folded rows.
+    only names the one point to collect, every point when None. Returns the
+    folded rows.
     """
     chosen = _chosen_points(study, only)
     every_id, points, started_utc = start_the_folder(
@@ -251,11 +235,9 @@ def run_task(
 ) -> None:
     """One array task: the experiment's index-th point to its stop.
 
-    The launcher recorded every point and wrote run.json, so a task
-    checks that the folder ran this tree, records its point again, the
-    same record, and collects it from its saved pieces on. It folds
-    nothing: the fold job folds every task's pieces once the array has
-    ended (plan_command).
+    The launcher wrote run.json, so a task checks the folder ran this tree,
+    records its point again and collects from its saved pieces. It folds
+    nothing.
     """
     _check_processes(processes)
     study = experiment.load(run_file)
@@ -291,15 +273,9 @@ def run_one_shot(
 ) -> list:
     """The experiment's first point at one seed, run and narrated.
 
-    log and trace override the point's observation for this shot, as
-    gem5's --debug-flags and --debug-file set what the config script did
-    not (src/python/m5/main.py:280, 299). The shot writes its results
-    folder: run.json, the run file, the point's machine.json and
-    workload, and the shot's files (run_folder.write_shot). A shot
-    replayed into a folder that recorded its point keeps that record,
-    which holds what the collection knew of it, and a point the folder
-    recorded with other settings is refused. Returns the lines the
-    command prints.
+    log and trace override the point's observation for this shot, as gem5's
+    --debug-flags (src/python/m5/main.py:280, 299). A point the folder
+    recorded with other settings is refused. Returns the lines to print.
     """
     point = study.points[0]
     task = experiment.task_of(point)
@@ -327,17 +303,9 @@ def fold_the_folder(
 ) -> list:
     """The points' saved pieces folded into the folder; the rows they give.
 
-    point_ids are every recorded point, in the rows' order
-    (run_folder.recorded_point_ids), and folders their pieces, read
-    once (pieces.folders_of), so a piece saved while the fold runs is
-    in none of the files. Every file comes from what the folder
-    recorded, not from what this run ran or what a run file makes now:
-    each point's collection and rounds from its machine.json, the rest
-    from its pieces. The
-    fold is built whole in a staging folder and moved in only then, in
-    place of the last fold, so a fold that is refused (two pieces of a
-    point with different columns) leaves the last one as it was. Then
-    each record names the seeds its pieces hold.
+    Every file comes from what the folder recorded, not from what this run
+    ran. The fold is built in a staging folder and moved in only then, so a
+    refused fold leaves the last one as it was.
     """
     pieces.refuse_pieces_of_another_tree(run_dir, folders)
     with tempfile.TemporaryDirectory(dir=run_dir, prefix=".") as staged:
@@ -366,12 +334,9 @@ def recorded_points(
 ) -> list:
     """Every point of the experiment, recorded once all are accepted.
 
-    Every point's record is built first, which runs its build, so a
-    point the build refuses stops the run before any shot, and a point
-    whose name the folder holds for another machine is refused. Only
-    then are the records written, so a refused launch or run leaves
-    the results folder as it was. Returns each point's collection
-    state, in the experiment's order.
+    Every record is built first, which runs its build, so a refused point
+    stops the run before any shot and before anything is written. Returns
+    each point's collection state, in order.
     """
     resolved = _resolved_points(study)
     for resolved_point in resolved:
@@ -783,11 +748,8 @@ def _write_online_threshold_record(
 ) -> None:
     """One online point's csv of its threshold's trajectory.
 
-    Every audit and target move, plus every 100th window, and a summary
-    line on stderr. The gap unit inside the calibrator is nats; the csv
-    converts to the paper's decibels. The file is named by the point's
-    id, and its rows carry the point's id, swept values and algorithm,
-    as every other csv's rows do.
+    Every audit and target move plus every 100th window; the calibrator's
+    nats are converted to the paper's decibels.
     """
     _say_the_threshold(calibrator)
     summary = calibrator.summary()

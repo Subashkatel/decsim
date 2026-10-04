@@ -29,7 +29,7 @@ import decsim.ports as ports
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
-# an adaptive point's calibrator as its piece left it (design 6.5)
+# an adaptive point's calibrator as its piece left it
 STATE_FILE = "state.pickle"
 
 
@@ -52,11 +52,9 @@ def write(
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
-    facts are the piece's own lines of piece.json, beside the confidence
-    it recorded (report.confidence_shot_count_of). state is an adaptive point's
-    calibrator after the piece's last shot, which the point's next piece
-    starts from; it is pickled beside the files and its sha256 goes in
-    piece.json.
+    state is an adaptive point's calibrator after the piece's last shot,
+    which its next piece starts from; it is pickled beside the files with
+    its sha256 in piece.json.
     """
     count = len(measurements)
     folder = piece_dir(experiment_dir, point_id, first_seed, count)
@@ -108,12 +106,9 @@ def every_folder(experiment_dir: pathlib.Path) -> list:
 def refuse_pieces_of_another_tree(run_dir: pathlib.Path, folders: list) -> None:
     """Every piece ran the tree the folder's run.json names.
 
-    A folder's rows pool its pieces under its one run.json, so a piece
-    another tree saved would be skipped as done, folded, and reported
-    as this tree's. A collect asks before it records a point or runs a
-    shot, and the fold asks again of the pieces it folds. run.json's
-    tree is read first, so a fold of a folder with no piece yet still
-    stops on a run.json an older tree wrote.
+    A piece another tree saved would be skipped as done, folded and reported
+    as this tree's. run.json's tree is read first, so a fold with no piece
+    yet still stops on a run.json an older tree wrote.
     """
     run_path = run_dir / run_folder.RUN_FILE
     run_record = run_folder.read_json(run_path)

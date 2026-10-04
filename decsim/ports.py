@@ -2021,6 +2021,38 @@ class MagicStateFactory(Protocol):
 
 
 @runtime_checkable
+class IdleRounds(Protocol):
+    """The idle accounting, as an idle policy carries a round through it.
+
+    The policy decides how a round travels and whether it is charged as
+    decode work; the accounting sends it and keeps the counts.
+    """
+
+    def emit_memory_round(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
+        """The round travels as a feedback-memory round of the operation."""
+
+    def submit_idle_decode_if_due(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
+        """Count one idle round; charge a job at each full commit region."""
+
+    def submit_idle_decode_for_remaining_rounds(
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+    ) -> None:
+        """Charge the rounds after the last full commit region as one job."""
+
+
+@runtime_checkable
 class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 
@@ -2031,7 +2063,7 @@ class IdlePolicy(Protocol):
 
     def relay(
         self,
-        idle_rounds,
+        idle_rounds: IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
         round_index: int,
@@ -2040,7 +2072,7 @@ class IdlePolicy(Protocol):
 
     def end_idle_period(
         self,
-        idle_rounds,
+        idle_rounds: IdleRounds,
         operation: program_records.Operation,
         patch: Any,  # an opaque identity
     ) -> None:

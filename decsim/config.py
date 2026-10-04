@@ -51,7 +51,7 @@ def check_microseconds(name: str, value: object) -> None:
     raise ValueError(f"{name} must be finite and not negative (got {value!r})")
 
 
-def check_capacity_bits(key: str, value) -> None:
+def check_capacity_bits(key: str, value: object) -> None:
     """A memory's capacity in bits, or None for an unbounded memory.
 
     One owner for every memory a settings record sizes: a decoder unit's

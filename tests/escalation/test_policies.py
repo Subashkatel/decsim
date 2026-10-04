@@ -17,7 +17,6 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -76,10 +75,10 @@ BOTH_TIERS = (
 )
 
 
-def _result(gap, source=SOURCE) -> decoding_records.DecodeResult:
+def _result(gap) -> decoding_records.DecodeResult:
     soft_output = None
     if gap is not None:
-        soft_output = decoding_records.SoftOutput(gap=gap, source=source)
+        soft_output = decoding_records.SoftOutput(gap=gap, source=SOURCE)
     return decoding_records.DecodeResult(
         1, 1, logical_observables=(0,), soft_output=soft_output
     )
@@ -87,9 +86,7 @@ def _result(gap, source=SOURCE) -> decoding_records.DecodeResult:
 
 def _switching(**arguments) -> policies.Switching:
     fixed = threshold_sources.FixedThreshold(2.0)
-    return policies.Switching(
-        threshold=fixed, expected_source=SOURCE, **arguments
-    )
+    return policies.Switching(threshold=fixed, **arguments)
 
 
 def _always_auditing_online_threshold(
@@ -219,7 +216,7 @@ def test_switching_decodes_both_tiers_at_once_when_asked():
 
 def test_a_strong_result_teaches_the_online_source():
     online = _always_auditing_online_threshold(threshold=0.0)
-    switching = policies.Switching(threshold=online, expected_source=SOURCE)
+    switching = policies.Switching(threshold=online)
     confident = _result(5.0)
     # the kept window is audited, so its verdict escalates
     verdict = switching.verdict_for_weak_result(JOB, confident)
@@ -309,9 +306,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
 def test_an_online_source_beside_run_both_at_once_is_refused():
     online = _always_auditing_online_threshold(threshold=2.0)
     with pytest.raises(ValueError):
-        policies.Switching(
-            threshold=online, expected_source=SOURCE, run_both_at_once=True
-        )
+        policies.Switching(threshold=online, run_both_at_once=True)
 
 
 class _KeepEverything:
@@ -574,20 +569,6 @@ def test_a_weak_result_with_no_soft_output_escalates_its_window():
     assert verdict is decoding_records.Verdict.ESCALATE
 
 
-def test_a_soft_output_from_another_signal_is_refused():
-    """The threshold means one thing, so it reads one signal's gap."""
-    policy = _switching_policy(20.0)
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
-    cluster_source = cluster.union_find_cluster_gap_source()
-    result = decoding_records.DecodeResult(1, 0)
-    result.soft_output = decoding_records.SoftOutput(
-        gap=9.0, source=cluster_source
-    )
-
-    with pytest.raises(ValueError):
-        policy.verdict_for_weak_result(job, result)
-
-
 def test_the_papers_twenty_decibels_is_the_threshold_in_nats():
     """Toshio 2510.25222 line 1623: "fix the gap threshold to be gth = 20 dB".
 
@@ -610,9 +591,9 @@ def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
 
     a_hair_under = threshold - 1e-9
     well_over = threshold + 1.0
-    at_the_threshold = _result_with_gap(policy, threshold)
-    just_below = _result_with_gap(policy, a_hair_under)
-    well_above = _result_with_gap(policy, well_over)
+    at_the_threshold = _result(threshold)
+    just_below = _result(a_hair_under)
+    well_above = _result(well_over)
 
     assert (
         policy.verdict_for_weak_result(job, at_the_threshold)
@@ -626,12 +607,3 @@ def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
         policy.verdict_for_weak_result(job, well_above)
         is decoding_records.Verdict.KEEP
     )
-
-
-def _result_with_gap(policy, gap: float):
-    """One weak result carrying the policy's own expected signal source."""
-    result = decoding_records.DecodeResult(1, 0)
-    result.soft_output = decoding_records.SoftOutput(
-        gap=gap, source=policy.expected_source
-    )
-    return result

@@ -25,7 +25,6 @@ class Switching:
     def __init__(
         self,
         threshold: ports.ThresholdSource,
-        expected_source: decoding_records.SoftOutputSource,
         run_both_at_once: bool = False,
     ) -> None:
         if run_both_at_once and threshold.audits_by_escalating:
@@ -35,7 +34,6 @@ class Switching:
                 "for every window, so there is nothing to audit"
             )
         self.threshold = threshold
-        self.expected_source = expected_source
         self.run_both_at_once = run_both_at_once
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
@@ -74,11 +72,6 @@ class Switching:
         soft_output = result.soft_output
         if soft_output is None:
             return decoding_records.Verdict.ESCALATE
-        if soft_output.source != self.expected_source:
-            raise ValueError(
-                "decoder confidence source does not match the switching "
-                "threshold source"
-            )
         if self.threshold.decide_keep(job, result):
             # a kept result cancels the speculative strong decode
             return decoding_records.Verdict.KEEP

@@ -65,7 +65,6 @@ class Switching:
         threshold = _threshold_source(settings, online_threshold)
         policy = escalation_policies.Switching(
             threshold=threshold,
-            expected_source=signal.source,
             run_both_at_once=settings.run_both_at_once,
         )
         regions = strong_regions.StrongRegions()

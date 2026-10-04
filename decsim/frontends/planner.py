@@ -11,7 +11,6 @@ from collections.abc import Callable, Iterable
 
 import decsim.config as config
 import decsim.ports as ports
-import decsim.qpu.layouts as layouts
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
@@ -34,7 +33,7 @@ def plan_execution(
     operations: tuple[program_records.OperationPlanningView, ...],
     planned_operation_ids: tuple[int, ...],
     code: ports.CodeModel,
-    layout: layouts.LayoutModel,
+    layout: ports.LayoutModel,
     scheme: ports.WindowingScheme,
     rounds_policy: ports.RoundsPolicy,
     fallback_round_microseconds: float,

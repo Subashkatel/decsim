@@ -2115,3 +2115,43 @@ class CodeModel(Protocol):
 
     def data_bits_per_readout(self, patch_count: int) -> int:
         """Data-qubit bits the final readout of this many patches adds."""
+
+
+@runtime_checkable
+class LayoutModel(Protocol):
+    """Which code every patch and every operation runs on, and its claims."""
+
+    def code_for_op(
+        self, operation: program_records.OperationPlanningView
+    ) -> CodeModel:
+        """The code the operation runs on."""
+
+    def code_for_patch(
+        self,
+        patch_id: Any,  # an opaque identity
+    ) -> CodeModel:
+        """The code the patch runs on."""
+
+    def codes(self) -> list:
+        """Every code the layout declares."""
+
+    def spatial_nodes_for(
+        self,
+        operation: program_records.OperationPlanningView,
+        *,
+        base_spatial_node_count: int,
+    ) -> int:
+        """Decoding-graph nodes per round of the operation."""
+
+    def patch_spatial_nodes_for(
+        self,
+        patch_identity: Any,  # an opaque identity
+        *,
+        base_spatial_node_count: int,
+    ) -> int:
+        """Decoding-graph nodes per round of the patch."""
+
+    def resources_for(
+        self, operation: program_records.OperationPlanningView
+    ) -> list[program_records.ResourceClaim]:
+        """The resources the operation holds while it runs."""

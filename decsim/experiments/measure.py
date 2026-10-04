@@ -542,7 +542,7 @@ def window_points_us(
     park = _span_microseconds(startable, input_landed)
     rounds_wait = _span_microseconds(input_sent, attempt_end)
     store_read = config_module.ticks_to_microseconds(decode.store_read_ticks)
-    dep_block_with_read = rounds_wait + park
+    dependency_block_with_read = rounds_wait + park
     confidence_ticks = _confidence_ticks(window, decode)
     output_sent = frame_record.accepted_ticks - output_ticks
     answered = max(window.t_done, decode.done_ticks)
@@ -556,7 +556,7 @@ def window_points_us(
             window.t_queued, window.t_data_complete
         ),
         "store_read": store_read,
-        "dep_block": dep_block_with_read - store_read,
+        "dep_block": dependency_block_with_read - store_read,
         "compute_wait": _span_microseconds(
             decode.compute_start_ticks, startable
         ),

@@ -83,7 +83,12 @@ class PointCollection:
         return units
 
     def count_the_pending(self, run_dir: pathlib.Path) -> None:
-        """The pending pieces' shots onto the prefix, until it stops."""
+        """The pending pieces' shots onto the prefix, until it stops.
+
+        A stopped point counts nothing more, so its line is said once.
+        """
+        if self.tracker.stop_kind is not None:
+            return
         point_id = self.task.strong_id()
         for first_seed, count in self.pending:
             if self.tracker.stop_kind is not None:

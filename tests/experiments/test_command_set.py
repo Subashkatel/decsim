@@ -1018,6 +1018,24 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     )
 
 
+def test_a_stopped_point_says_so_once(tmp_path, capsys):
+    """The collector counts every point after each share; one line a stop."""
+    task = run_files.first_task()
+    point_id = task.strong_id()
+    _write_a_saved_piece(tmp_path, point_id, 0, [True, False])
+    settings = collection_module.CollectionSettings(max_shots=2)
+    point_folders = pieces.folders_of(tmp_path, [point_id])
+    saved = pieces.saved_counts(point_folders)
+    point = collect_command.PointCollection("d3", task, settings, 2, 15, saved)
+    point.next_units(tmp_path, 1)
+    capsys.readouterr()
+
+    point.count_the_pending(tmp_path)
+
+    printed = capsys.readouterr()
+    assert printed.err == ""
+
+
 def _write_a_saved_piece(
     experiment_dir, point_id: str, first_seed: int, failed: list
 ):

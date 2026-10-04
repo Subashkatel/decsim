@@ -82,7 +82,6 @@ class OneDecoder:
     name = "test_decoder"
 
     def build(self):
-        """The test's instance."""
         return self.decoder
 
 

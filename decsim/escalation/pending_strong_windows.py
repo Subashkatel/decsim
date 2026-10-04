@@ -12,7 +12,31 @@ geometry, so the condition is a declaration rather than a hook per row.
 import dataclasses
 from typing import Any, Optional
 
+import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
+import decsim.records.windows as window_records
+
+
+@dataclasses.dataclass(frozen=True)
+class StrongAssignment:
+    """A strong window assigned to an escalated weak window.
+
+    job is the strong job when the row builds it now, None when the row
+    holds it until its conditions fire; held_plan is then the row's own
+    record, handed back when the redecode asks for the job, and
+    round_count the strong window's rounds. folded_boundaries names the
+    neighbours whose committed boundaries the row folds into the job's
+    input (Bombin et al. 2303.04846 lines 775-788). first_round is the
+    strong window's first round, so the carried rounds before it are the
+    raw rounds a forming strong side reads.
+    """
+
+    request_key: window_records.DecoderRequestKey
+    job: Optional[decoding_records.DecodeJob]
+    held_plan: Any = None  # an opaque identity
+    round_count: int = 0
+    folded_boundaries: tuple = ()
+    first_round: int = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -36,7 +60,7 @@ class PendingStrongWindow:
     """One held strong window: what was assigned, and what releases it."""
 
     key: tuple
-    assignment: Any
+    assignment: StrongAssignment
     conditions: ReleaseConditions
     selection_arrival_ticks: int
 

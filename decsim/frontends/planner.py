@@ -98,19 +98,35 @@ def plan_execution(
     )
 
 
-def check_blockers(
-    operations: list[program_records.Operation], external_blocker_ids=()
+def check_operation_graph(
+    operations: list[program_records.Operation],
+    *,
+    validate_blockers: bool = False,
+    external_blocker_ids=(),
+    dependency_field: str = "predecessors",
 ) -> None:
-    """Refuse a blocker that names no operation.
+    """Refuse a dependency graph a dictionary or an empty queue would hide.
 
-    No decision would ever release the blocked operation, and its
-    patches would idle on with nothing to stop them.
+    Operation ids are the graph's stable keys: no id twice, no edge
+    twice, no cycle (an edge to itself is one); an edge to an unknown id
+    stops at its lookup; a blocker, when checked, names a known
+    operation.
     """
-    valid_blocker_ids = set(external_blocker_ids)
+    by_id = _index_by_id(operations)
+    external_ids = set(external_blocker_ids)
+    valid_blocker_ids = set(by_id) | external_ids
+    successors = {}
+    indegree = {}
+    for operation_id in by_id:
+        successors[operation_id] = []
+        indegree[operation_id] = 0
     for operation in operations:
-        valid_blocker_ids.add(operation.id)
-    for operation in operations:
-        _check_blocker(operation, valid_blocker_ids)
+        predecessor_ids = getattr(operation, dependency_field)
+        _check_predecessors(operation, predecessor_ids, successors)
+        indegree[operation.id] = len(predecessor_ids)
+        if validate_blockers:
+            _check_blocker(operation, valid_blocker_ids)
+    _check_acyclic(by_id, successors, indegree)
 
 
 def check_workload_identity(operations, decode_operations, dynamic_streams):
@@ -281,6 +297,9 @@ def _check_decode_owner_rounds(planned_resolved: list) -> None:
 def _plan_windows(
     planned_views, planned_resolved, scheme, geometry
 ) -> window_records.WindowPlan:
+    check_operation_graph(
+        list(planned_views), dependency_field="decoder_boundary_predecessors"
+    )
     window_ledgers = []
     for planning in planned_resolved:
         ledger = scheme.plan_operation(
@@ -621,13 +640,75 @@ def _protocol_of(resolved, operation_plan):
     return operation_plan.protocol
 
 
+def _index_by_id(operations) -> dict:
+    by_id = {}
+    for operation in operations:
+        if operation.id in by_id:
+            earlier = by_id[operation.id]
+            raise ValueError(
+                f"duplicate operation id {operation.id}: "
+                f"{earlier.name!r} and {operation.name!r}"
+            )
+        by_id[operation.id] = operation
+    return by_id
+
+
+def _check_predecessors(operation, predecessor_ids, successors: dict) -> None:
+    seen = set()
+    for predecessor_id in predecessor_ids:
+        if predecessor_id in seen:
+            raise ValueError(
+                f"operation {operation.id} lists predecessor "
+                f"{predecessor_id} more than once"
+            )
+        seen.add(predecessor_id)
+        successors[predecessor_id].append(operation.id)
+
+
 def _check_blocker(operation, valid_blocker_ids: set) -> None:
     blocker = operation.blocked_by
-    if blocker is None or blocker in valid_blocker_ids:
+    if blocker is None:
         return
-    raise ValueError(
-        f"operation {operation.id} has unknown blocking operation {blocker}"
-    )
+    if blocker == operation.id:
+        raise ValueError(f"operation {operation.id} is blocked by itself")
+    if blocker not in valid_blocker_ids:
+        raise ValueError(
+            f"operation {operation.id} has unknown blocking operation {blocker}"
+        )
+
+
+def _check_acyclic(by_id: dict, successors: dict, indegree: dict) -> None:
+    """Kahn's topological order; what it never reaches is a cycle."""
+    ready = []
+    for operation_id, degree in indegree.items():
+        if degree == 0:
+            ready.append(operation_id)
+    visited = 0
+    while ready:
+        operation_id = ready.pop()
+        visited += 1
+        _release_successors(operation_id, successors, indegree, ready)
+    if visited != len(by_id):
+        cycle_ids = _stuck_ids(indegree)
+        raise ValueError(
+            f"operation dependency cycle involving IDs {cycle_ids}"
+        )
+
+
+def _stuck_ids(indegree: dict) -> list:
+    """The operations a topological order never reached, in id order."""
+    stuck = []
+    for operation_id, degree in indegree.items():
+        if degree > 0:
+            stuck.append(operation_id)
+    return sorted(stuck)
+
+
+def _release_successors(operation_id, successors, indegree, ready) -> None:
+    for successor_id in successors[operation_id]:
+        indegree[successor_id] -= 1
+        if indegree[successor_id] == 0:
+            ready.append(successor_id)
 
 
 def _note_role(role: str, members, operation_by_id: dict, roles_by_object):

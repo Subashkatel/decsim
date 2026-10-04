@@ -90,7 +90,11 @@ def build_plan(
     external_blocker_ids = []
     for operation in external_decode_operations:
         external_blocker_ids.append(operation.id)
-    planner.check_blockers(list(operations), external_blocker_ids)
+    planner.check_operation_graph(
+        list(operations),
+        validate_blockers=True,
+        external_blocker_ids=external_blocker_ids,
+    )
     scheme = _scheme(windows)
     boundary_policy = _boundary_policy(windows)
     # the refusals print the strong window's row name, and only a window

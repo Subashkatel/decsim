@@ -314,11 +314,46 @@ def test_an_operation_nobody_plans_may_run_for_no_rounds():
     assert round_counts == [2, 0]
 
 
-def test_a_blocker_must_name_an_operation_of_the_run_or_an_external_one():
+@pytest.mark.parametrize(
+    "graph, error",
+    [
+        (((1, ()), (1, ())), ValueError),
+        (((1, (1,)),), ValueError),
+        (((1, (9,)),), KeyError),
+        (((1, ()), (2, (1, 1))), ValueError),
+        (((1, (2,)), (2, (1,))), ValueError),
+    ],
+    ids=["duplicate id", "self edge", "unknown edge", "edge twice", "cycle"],
+)
+def test_a_workload_graph_that_cannot_run_is_refused(graph, error):
+    """The graph is checked once, at build: a run cannot repair it.
+
+    A self edge is a cycle, and an unknown predecessor stops at its
+    lookup.
+    """
+    operations = [
+        operation_of(operation_id, predecessors=predecessor_ids)
+        for operation_id, predecessor_ids in graph
+    ]
+    with pytest.raises(error):
+        planner.check_operation_graph(operations)
+
+
+def test_a_blocking_operation_is_checked_only_when_the_run_asks():
+    """A blocker may be external, so its check is the caller's to ask for."""
     blocked = operation_of(1, blocked_by=99)
-    planner.check_blockers([blocked], external_blocker_ids=(99,))
+    planner.check_operation_graph([blocked])
+    planner.check_operation_graph(
+        [blocked], validate_blockers=True, external_blocker_ids=(99,)
+    )
     with pytest.raises(ValueError):
-        planner.check_blockers([blocked])
+        planner.check_operation_graph([blocked], validate_blockers=True)
+
+
+def test_an_operation_blocked_by_itself_is_refused():
+    blocked = operation_of(1, blocked_by=1)
+    with pytest.raises(ValueError):
+        planner.check_operation_graph([blocked], validate_blockers=True)
 
 
 def test_two_objects_with_one_id_in_one_role_are_refused_naming_it():
@@ -684,3 +719,19 @@ def test_a_double_windows_strong_hold_ends_at_the_operations_end():
 
     held_rounds = buffering.potential_holds[0][1]
     assert held_rounds == tuple((1, index) for index in range(3, 8))
+
+
+def test_the_boundary_graph_is_checked_on_the_boundary_edges():
+    """The decode graph is the boundary edges, not the workload's order.
+
+    Two operations that name each other at a boundary would wait for
+    each other forever, and one operation planned twice would decode
+    twice, so the plan refuses both before a window is built.
+    """
+    first = operation_of(1, decoder_boundary_predecessors=(2,))
+    second = operation_of(2, decoder_boundary_predecessors=(1,))
+    with pytest.raises(ValueError):
+        compiled_plan((first, second), (1, 2))
+    only = operation_of(1)
+    with pytest.raises(ValueError):
+        compiled_plan((only,), (1, 1))

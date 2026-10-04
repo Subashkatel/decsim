@@ -29,6 +29,7 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import tests.declared_run as declared_run
 
 # every round this file stores carries one fragment of two bits
 BITS_PER_ROUND = 2
@@ -336,6 +337,18 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
 
     with pytest.raises(RuntimeError):
         the_store.check_settled()
+
+
+def test_a_run_whose_store_is_narrower_than_a_round_stops_at_its_end():
+    """No free makes room for the round (gem5 Network.cc:64-65).
+
+    The controller holds the round for room, so the run ends with it
+    held and its settlement stops the run.
+    """
+    narrow = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
+
+    with pytest.raises(RuntimeError, match="held for store room"):
+        declared_run.weak_only_run(weak_syndrome_buffer=narrow)
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():

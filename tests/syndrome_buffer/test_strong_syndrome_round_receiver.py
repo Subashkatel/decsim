@@ -278,6 +278,20 @@ def test_the_rounds_before_a_region_land_raw_and_cost_no_formation():
     assert receiver.store.occupancy == 4
 
 
+def test_a_region_the_store_cannot_hold_stops_when_it_lands():
+    """An escalation cannot wait for room, so the store must hold it."""
+    engine = engine_module.Engine()
+    receiver = room_side(engine, bits=BITS_PER_ROUND)
+    reads = decoding_records.WindowReads((1, 0))
+    receiver.store.register_hold(reads, [(1, 1), (1, 2)])
+    carried = region(1, 2)
+    receiver.reserve_region(carried)
+
+    with pytest.raises(AssertionError, match="full store"):
+        receiver.receive_region(carried, lambda: None)
+        engine.run()
+
+
 def test_a_region_formed_here_is_reported_stored_once_every_round_is():
     """Five cycles of a 10-tick clock: the store holds both rounds at 50.
 

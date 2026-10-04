@@ -200,14 +200,7 @@ class WindowErrorModel:
         self, representation: FaultRepresentation
     ) -> PlacedFaultModel:
         """The requested view; asking for one the window lacks is a bug."""
-        if representation is FaultRepresentation.GRAPHLIKE:
-            faults = self.graphlike_faults
-        elif representation is FaultRepresentation.PHYSICAL:
-            faults = self.physical_faults
-        else:
-            raise RuntimeError(
-                "representation must be a FaultRepresentation value"
-            )
+        faults = self._faults_or_none(representation)
         if faults is None:
             raise RuntimeError(
                 f"window model does not contain {representation.value} faults"

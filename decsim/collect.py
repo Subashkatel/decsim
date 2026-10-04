@@ -1,24 +1,17 @@
 """The experiments layer: tasks, and the shots collected from them.
 
-sinter's shape (sinter/_data/_task.py Task, sinter/_collection/
-_collection.py collect, sinter/_data/_task_stats.py the rows) adapted
-to a work unit of one seeded run. A Task is one settings record at one
-sweep point with json metadata; a unit runs its seeds serially, builds
-and runs a Machine per seed, and hands each Shot to the caller's
-measure, which returns the caller's row.
-Two tasks with the same strong id (sinter's content hash, _task.py
-strong_id_value: the json text of the values, sha256) are one task. The
+sinter's shape (sinter/_data/_task.py Task, _collection/_collection.py,
+_data/_task_stats.py) with a work unit of one seeded run. A Task is one
+settings record at one sweep point with json metadata; two tasks with
+one strong id (sinter's sha256 of the values' json) are one task. The
 online threshold calibrator lives on the task so every shot of a point
-shares it, which is why shots stay serial inside their unit.
+shares it, which is why shots stay serial inside a unit.
 
-The work unit is one task's range of seeds, sinter's shape (a task's
-shots are split into batches its workers take,
-sinter/_collection/_collection_worker_state.py, capped by
---max_batch_size), and the pool (sinter's --processes,
-_main_collect.py:83) runs whole units. A unit's window error models are
-built by its first shot and read by the rest, as sinter compiles its
-decoder once per task. A pool hands each unit on the moment it ends, so
-a caller saves it while slower units run.
+A unit is one task's range of seeds, as sinter splits a task's shots
+into batches (_collection_worker_state.py), and the pool runs whole
+units (sinter's --processes). A unit's window models are built by its
+first shot, as sinter compiles its decoder once per task. A unit is
+handed on the moment it ends, so a caller saves it while others run.
 """
 
 import concurrent.futures
@@ -57,11 +50,10 @@ EVERY_SHOT = "all"
 class RecordOptions:
     """What the run records of a point's shots beside their results.
 
-    confidence_shot_count is how many shots of the point, from seed 0,
-    write their windows' confidence gaps to window_confidence.csv when a
-    confidence signal decides the escalation; None writes every scored
-    shot's. The machine does not read it, so it is no part of a point's
-    id, as sinter keeps its output options out of a task's strong id
+    confidence_shot_count is how many shots, from seed 0, write their
+    windows' gaps to window_confidence.csv; None writes every scored shot's.
+    The machine does not read it, so it is no part of a point's id, as
+    sinter keeps output options out of a strong id
     (sinter/_data/_task.py:167-204).
     """
 
@@ -86,17 +78,12 @@ class RecordOptions:
 class Task:
     """One machine settings record, a sweep point, to run seeds of.
 
-    settings are the point's, its threshold read at the point
-    (MachineSettings.at_point: a calibration table's row), so the strong
-    id covers the number a table gives the point. metadata is the json
-    the caller wants to see beside every row (the
-    sweep point). online_threshold is the point's calibrator when its
-    switching threshold learns across shots: point state, built here
-    once from the threshold record (for_point) and handed to every
-    shot's Machine.build, as the window models are. A task given one,
-    the state a resumed piece saved, keeps it. record_options are what
-    the run records of the shots, which the strong id leaves out with
-    the calibrator.
+    settings are read at the point (MachineSettings.at_point), so the strong
+    id covers the number a calibration table gives it. online_threshold is
+    the point's calibrator when its threshold learns across shots, built
+    once here and handed to every shot's build; a resumed piece's saved
+    state is kept. The strong id leaves out the calibrator and
+    record_options.
     """
 
     settings: machine_settings.MachineSettings
@@ -115,11 +102,9 @@ class Task:
     def strong_id(self) -> str:
         """sha256 of the json text of the settings and the metadata.
 
-        A settings field declared compare=False is a label, a name or a
-        source that changes nothing the machine does, and is left out,
-        as sinter leaves a task's circuit_path out of its strong id
-        (sinter/_data/_task.py:157, 167-204). The point's resolved
-        record keeps every label (run_folder.record_point).
+        A compare=False field is a label that changes nothing the machine does
+        and is left out, as sinter leaves circuit_path out of its strong id
+        (sinter/_data/_task.py:157, 167-204).
         """
         value = {
             "settings": json_value(self.settings, keep_labels=False),
@@ -164,12 +149,9 @@ def run_units(
 ) -> None:
     """Every unit run, each handed on the moment it ends.
 
-    on_unit_done takes each unit with its outcome, so a caller saves a
-    unit while slower ones run, and a job killed at its time limit
-    loses only the units still running. The unit it takes holds the
-    task as it ran, whose online calibrator learned over the unit's
-    shots, in a worker process when there is a pool. With processes
-    above one, whole units run in a worker pool, `processes` at a time.
+    A job killed at its time limit loses only the units still running. The
+    unit carries the task as it ran, its calibrator having learned, in a
+    worker process when there is a pool.
     """
     outcomes = _unit_outcomes(units, measure, processes)
     for position, outcome in outcomes:
@@ -183,10 +165,9 @@ def run_unit(
 ) -> result_records.UnitOutcome:
     """Every seed of one unit, measured, the task that ran them, the memory.
 
-    The task comes back because its online threshold calibrator learned
-    over these shots, and in a pool that learning happened in another
-    process. The window error models are built here and not on the task,
-    so a worker's models never travel back through a pickle.
+    The task comes back because its calibrator learned over these shots,
+    maybe in another process. The window models are built here, not on the
+    task, so they never travel back through a pickle.
     """
     built_models = built_window_models.BuiltWindowModels()
     rows = []
@@ -205,11 +186,9 @@ def run_unit(
 def imported_module_versions() -> dict:
     """Each third-party top-level module this process imported, its version.
 
-    A module's own __version__ is read first, since a folder of packages
-    can hold a dist-info stale against the module beside it; a module
-    that states none is named by the distribution that installed it
-    (relay_bp states none). The standard library, submodules and a
-    module neither names are left out.
+    A module's own __version__ comes first, since a dist-info can be stale
+    against the module beside it; one that states none (relay_bp) is named
+    by its distribution.
     """
     distributions_by_module = importlib.metadata.packages_distributions()
     versions = {}
@@ -223,10 +202,8 @@ def imported_module_versions() -> dict:
 def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
     """Build the task's machine for the seed and run it, timed.
 
-    built_models is the task's window error model cache: the first shot
-    fills it and the rest read it, which is most of a shot's build time
-    at a large distance. A shot run on its own passes none and builds
-    its own models.
+    built_models is the task's window model cache, most of a shot's build
+    time at a large distance; a lone shot passes none.
     """
     wall_start = time.perf_counter()
     machine = machine_module.Machine.build(
@@ -253,17 +230,12 @@ def json_value(
 ) -> Any:
     """A settings record as plain json: every value by its content.
 
-    A dataclass (a settings record, a round policy) appears as its class
-    and its fields. Every number appears exactly (a json number, or a Fraction's
-    exact text), every string and flag as written, and an enum member as
-    its name. A Stim circuit appears as its text, as sinter's strong id
-    carries the task's circuit (sinter/_data/_task.py:193), so two tasks
-    that run different circuits are two tasks. A Python-built component
-    (a decoder, a device) has no record form and appears by its content
-    too (_json_object). keep_labels False leaves out every dataclass
-    field declared compare=False, the labels a strong id does not hash.
-    record_classes False leaves out each record's class, which names a
-    setting's identity and not a result's.
+    A dataclass appears as its class and fields; numbers exactly (a json
+    number, or a Fraction's exact text); an enum member by name; a Stim
+    circuit as its text, as sinter's strong id carries the circuit
+    (sinter/_data/_task.py:193); a Python-built component by its content.
+    keep_labels False leaves out compare=False fields; record_classes False
+    leaves out each record's class.
     """
     form = _JsonForm(keep_labels, record_classes)
     return _json_in(value, form)
@@ -343,10 +315,8 @@ def _pooled_outcomes(
 ):
     """Each unit's position and outcome as it ends, `processes` at a time.
 
-    A unit is handed to the pool only when one ends, so what a killed
-    job loses is at most the units then running (concurrent.futures.wait
-    with FIRST_COMPLETED). The pool's queued work is dropped if the
-    caller stops reading.
+    A unit is handed to the pool only when one ends (FIRST_COMPLETED), so a
+    killed job loses at most the running units.
     """
     queued = enumerate(units)
     running = {}
@@ -467,14 +437,10 @@ def _json_scalar(value: Any, form: _JsonForm) -> Any:
 def _json_object(value: Any, form: _JsonForm) -> Any:
     """A Python-built component: its class, and its attributes walked.
 
-    Two instances that hold different values are two tasks. The id is
-    taken before a shot binds the component's neighbours onto it. An
-    array (recorded measurements) is its values; a value with no
-    attributes of its own (a lock) is its class. A class given as a value
-    (the scheduler rule) is its module and qualified name, the identity
-    pickle writes for a class (Lib/pickle.py save_global, 1056-1113): its
-    attributes are code, and Python adds __annotations__ to a class the
-    first time it is read.
+    The id is taken before a shot binds neighbours onto it. An array is its
+    values; a value with no attributes (a lock) is its class. A class value
+    is its module and qualified name, pickle's identity for a class
+    (Lib/pickle.py save_global, 1056-1113).
     """
     if isinstance(value, numpy.ndarray):
         return value.tolist()
@@ -515,13 +481,10 @@ def _slot_names(value_type: type) -> list:
 def _json_number(value: Any) -> Any:
     """A number as json holds it, or as its exact text when json cannot.
 
-    A numpy scalar is the Python number it holds. A bool, int or float
-    is a json number already; any other number (a Fraction link rate, a
-    Decimal) is its exact text, "80/11" or "1.10", the value Python's
-    own pickle keeps (Fraction.__reduce__ is the numerator and the
-    denominator, Decimal.__reduce__ its string) and the text Fraction
-    and Decimal read back. sinter's json.dumps refuses such a value and
-    dask's tokenize pickles it; neither lets two values share an id.
+    A numpy scalar is its Python number. Any non-json number (a Fraction
+    link rate, a Decimal) is its exact text, "80/11" or "1.10", the value
+    pickle keeps and the text Fraction and Decimal read back, so no two
+    values share an id.
     """
     if isinstance(value, numpy.generic):
         value = value.item()

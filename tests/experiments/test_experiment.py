@@ -51,20 +51,22 @@ def _online_point_at_distance_5(workload) -> experiment.Point:
 
 
 def test_a_grid_runs_the_last_axis_fastest_in_the_order_given():
-    points = experiment.grid(d=(3, 5), p=(0.1, 0.2))
+    points = experiment.grid(
+        distance=(3, 5), physical_error_probability=(0.1, 0.2)
+    )
 
     assert points == [
-        {"d": 3, "p": 0.1},
-        {"d": 3, "p": 0.2},
-        {"d": 5, "p": 0.1},
-        {"d": 5, "p": 0.2},
+        {"distance": 3, "physical_error_probability": 0.1},
+        {"distance": 3, "physical_error_probability": 0.2},
+        {"distance": 5, "physical_error_probability": 0.1},
+        {"distance": 5, "physical_error_probability": 0.2},
     ]
 
 
 def test_two_points_of_one_name_are_refused():
     settings = _minimal_settings()
-    first = experiment.Point("d3", settings, {"d": 3})
-    second = experiment.Point("d3", settings, {"d": 5})
+    first = experiment.Point("d3", settings, {"distance": 3})
+    second = experiment.Point("d3", settings, {"distance": 5})
 
     with pytest.raises(ValueError) as refused:
         experiment.Experiment("study", [first, second], CAPPED)
@@ -103,8 +105,8 @@ def test_a_point_no_collection_stops_is_refused():
 def test_a_points_own_collection_wins_over_the_experiments():
     settings = _minimal_settings()
     own = collection.CollectionSettings(max_shots=9)
-    first = experiment.Point("own", settings, {"d": 3}, own)
-    second = experiment.Point("shared", settings, {"d": 5})
+    first = experiment.Point("own", settings, {"distance": 3}, own)
+    second = experiment.Point("shared", settings, {"distance": 5})
     study = experiment.Experiment("study", [first, second], CAPPED)
 
     assert study.collection_of(first) == own

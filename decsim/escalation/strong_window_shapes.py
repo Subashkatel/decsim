@@ -869,7 +869,6 @@ def _strong_redecode_job(
         code=weak_job.code,
         detector_error_model=model,
         payloads=payloads,
-        attempt=1,
         window=strong_window,
         strong_decode_for=key,
         request_key=request_key,

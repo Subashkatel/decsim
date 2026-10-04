@@ -58,7 +58,12 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
 # The run files examples/ ships, each run with `decsim run`.
 EXAMPLES_DIR = REPOSITORY / "examples"
-EXAMPLES = ("my_first_sweep.py", "priced_cards_example.py", "two_tiers.py")
+EXAMPLES = (
+    "my_first_sweep.py",
+    "priced_cards_example.py",
+    "recipes.py",
+    "two_tiers.py",
+)
 FOUR_POINTS = {
     "axes": run_files.FOUR_POINT_AXES,
     "collection": {"max_shots": 2},

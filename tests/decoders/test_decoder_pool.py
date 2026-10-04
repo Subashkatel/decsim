@@ -279,5 +279,5 @@ def test_a_tier_with_no_unit_is_refused():
     """
     algorithm = decoders.PresetLatencyDecoder.Settings(1.0)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="whole number of engines"):
         decoder_settings.DecoderPoolSettings(algorithm=algorithm, unit_count=0)

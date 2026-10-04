@@ -253,12 +253,11 @@ def weak_decoder_baseline(
     links = _one_cycle_paths(
         reference, _WEAK_BASELINE_PATH_CLOCKS, "the weak base's hops"
     )
-    unit_memory = decoder_settings.UnitMemorySettings(bits=None, word_bits=None)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=_TIMED_MATCHING,
         unit_count=1,
         engine=_ESTIMATED_ENGINE,
-        unit_memory=unit_memory,
+        unit_memory=_UNBOUNDED_UNIT_MEMORY,
         copies_input=True,
         copies_boundary_fold=True,
         result_blocks_unit=False,

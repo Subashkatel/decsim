@@ -1,9 +1,8 @@
 """The switching settings: when a window is decoded again, and on what.
 
-SwitchingSettings is the machine's switching slot, filled on a run that
-decodes weak first and escalates a window to the strong decoder. Its
-strong window is the geometry the strong tier re-decodes
-(strong_window_shapes.py, Toshio et al. arXiv 2510.25222).
+SwitchingSettings fills the machine's switching slot on a run that
+decodes weak first and escalates a window to the strong decoder (Toshio
+et al. 2510.25222).
 """
 
 import dataclasses
@@ -17,11 +16,7 @@ import decsim.ports as ports
 
 
 class ConfidenceSettings(Protocol):
-    """A confidence row's settings record, which builds the signal.
-
-    ComplementaryGap.Settings, ClusterGap.Settings and
-    ExtraClusterGap.Settings (decsim/confidence/) are the three.
-    """
+    """A confidence row's settings record, which builds the signal."""
 
     name: str
 
@@ -34,10 +29,7 @@ class ConfidenceSettings(Protocol):
 
 
 class ThresholdSettings(Protocol):
-    """A threshold row's settings record (threshold_sources.py).
-
-    It takes its threshold in decibels and hands it out in nats.
-    """
+    """A threshold row's settings record: decibels in, nats out."""
 
     threshold_decibels: Optional[float]
 
@@ -58,7 +50,6 @@ class ThresholdSettings(Protocol):
 class StrongWindowSettings(Protocol):
     """A strong window row's settings record (strong_window_shapes.py).
 
-    absorbs_weak_windows and boundary_policy are its row's declarations;
     restart_reread_buffer_regions is the double window's re-read width.
     """
 
@@ -77,40 +68,19 @@ class StrongWindowSettings(Protocol):
 class SwitchingSettings:
     """The machine's switching slot: weak first, escalate on low confidence.
 
-    Weak first, escalate serially on a small complementary gap (Toshio
-    2510.25222 Sec. III A without the parallel head start).
-    threshold is the Settings record of a threshold row
-    (threshold_sources.py), which keeps the weak result when its gap is
-    at or above the threshold (the paper uses 20 dB): fixed
-    holds it as given, table holds the one an offline calibration csv
-    gives the sweep point (threshold_column, calibrated for this run's
-    window geometry), online starts there and adapts it across a point's
-    shots, serial switching only; run_both_at_once is Sec. III A's Step
-    1, the strong decoder started with the weak one and cancelled on
-    confidence (false, the default, is the same section's on-demand
-    variant, lines 631-640); strong_window is the Settings record of the
-    shape of the window the strong tier re-decodes
-    (decsim/escalation/strong_window_shapes.py): redo_window, the
-    default, re-decodes the escalated window's commit region with its
-    past face pinned on the earlier neighbour's committed correction and
-    one buffer ahead (Bombin et al. 2303.04846 lines 775-788 and
-    1456-1458); double_window is the paper's Sec. III C scheme as
-    it is stated, an r_com + 2 r_buf extent read with no context, both
-    faces pinned (lines 1248-1259), whose record holds how many of the
-    strong region's buffer regions the restarted weak window re-reads.
-    confidence is the Settings record of the signal the weak tier
-    reports and the threshold decides on (decsim/confidence/), and the
-    build refuses a weak decoder whose decode cannot produce that
-    signal's evidence; walk_microseconds, the card that prices the
-    signal's own computation on the weak unit, is a field of that
-    record, None leaving each row on its own cost model.
-    The complementary gap's two forced-class solves are two ordinary
-    jobs of the weak pool, so weak_decoder.units alone decides whether
-    they overlap. clock, threshold_cycles and switch_cycles price the
-    verdict's threshold and switch logic; clock None is the machine's
-    clock. An online threshold's calibrator is no setting: it is the
-    point's state, built by the point's task (collect.Task) and handed
-    to Machine.build.
+    Toshio et al. 2510.25222 Sec. III A. confidence is the signal the
+    weak tier reports (decsim/confidence/), and the build refuses a weak
+    decoder that cannot produce its evidence. threshold is a threshold
+    row (threshold_sources.py); a weak result whose gap is at or above
+    it is kept (the paper uses 20 dB). run_both_at_once is Step 1, the
+    strong decoder started with the weak one and cancelled on
+    confidence; False is the same section's on-demand variant (lines
+    631-640). strong_window is the shape the strong tier re-decodes
+    (strong_window_shapes.py): redo_window, the default, or
+    double_window, Sec. III C. clock, threshold_cycles and switch_cycles
+    price the verdict's threshold and switch logic; clock None is the
+    machine's clock. The complementary gap's two solves are two jobs of
+    the weak pool, so its unit_count decides whether they overlap.
     """
 
     confidence: ConfidenceSettings

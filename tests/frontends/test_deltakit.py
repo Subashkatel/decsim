@@ -142,7 +142,11 @@ def test_one_seed_draws_the_same_samples_in_every_process() -> None:
 @pytest.mark.parametrize(
     "family,distance,sentence",
     [
-        ("unknown", 3, "code_family must be rotated_surface or repetition"),
+        (
+            "unknown",
+            3,
+            "code_family must be rotated_surface or repetition, not 'unknown'",
+        ),
         ("repetition", 0, "Code distance must be at least 2."),
     ],
 )

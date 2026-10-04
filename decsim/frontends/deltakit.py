@@ -157,7 +157,10 @@ def _memory_code(
         return codes.RotatedPlanarCode(width=distance, height=distance)
     if code_family == "repetition":
         return codes.RepetitionCode(distance=distance, stabiliser_type=basis)
-    raise ValueError("code_family must be rotated_surface or repetition")
+    raise ValueError(
+        "code_family must be rotated_surface or repetition, "
+        f"not {code_family!r}"
+    )
 
 
 def _measurement_rounds(code, round_count: int, basis: str) -> dict[int, int]:

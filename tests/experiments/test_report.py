@@ -121,10 +121,8 @@ def test_pieces_of_one_shot_fold_to_the_whole_runs_movement_rows(tmp_path):
     cut_dir = tmp_path / "cut"
     command.main(["run", str(whole_path), "--out", str(whole_dir)])
     command.main(["run", str(cut_path), "--out", str(cut_dir)])
-    whole_run_dir = whole_dir
-    cut_run_dir = cut_dir
-    whole_movement_path = whole_run_dir / "shot_data_movement.csv"
-    folded_movement_path = cut_run_dir / "shot_data_movement.csv"
+    whole_movement_path = whole_dir / "shot_data_movement.csv"
+    folded_movement_path = cut_dir / "shot_data_movement.csv"
     whole_rows = report.read_rows(whole_movement_path)
     folded_rows = report.read_rows(folded_movement_path)
     cut_pieces = cut_dir.glob("pieces/*/*")

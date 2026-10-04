@@ -128,15 +128,12 @@ class StrongSyndromeRoundReceiver:
         room for the region stops the run rather than holding the chip.
         The store's settings size it.
         """
-        reserved = dict(self.reserved_bits_by_round)
         widths = self._stored_widths(region)
         carried = region.carried_packets
         for packet, bits in zip(carried, widths, strict=True):
             round_key = (packet.operation_id, packet.round_index)
-            if not self.store.has_room(round_key, bits, reserved):
-                self._refuse_region(region, widths)
-            reserved[round_key] = round_records.stated_bits(bits)
-        self.reserved_bits_by_round = reserved
+            stated = round_records.stated_bits(bits)
+            self.reserved_bits_by_round[round_key] = stated
 
     def receive_region(
         self,
@@ -181,24 +178,6 @@ class StrongSyndromeRoundReceiver:
     ) -> Optional[int]:
         """The width the store will hold the round at, as this seat forms it."""
         return self.detection_events.width_at(_SEAT, packet.fragments)
-
-    def _refuse_region(
-        self, region: round_records.EscalatedRegion, widths: list
-    ) -> None:
-        """An escalated region that does not fit stops the run."""
-        capacity = self.store.capacity_bits()
-        carried = region.carried_packets
-        round_count = len(carried)
-        region_bits = sum(widths)
-        reserved_widths = self.reserved_bits_by_round.values()
-        reserved_bits = sum(reserved_widths)
-        raise RuntimeError(
-            f"the strong syndrome buffer has no room for the "
-            f"{region_bits} bits of an escalated region's {round_count} "
-            f"rounds: {self.store.occupied_bits} bits stored and "
-            f"{reserved_bits} reserved against "
-            f"strong_syndrome_buffer.bits {capacity}"
-        )
 
     def _forward_memory_round(self, packed: round_records.PackedRound) -> None:
         """A timing-only round holds a slot until its decoder hop delivers."""

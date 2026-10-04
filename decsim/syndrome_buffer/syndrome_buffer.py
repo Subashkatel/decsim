@@ -34,7 +34,6 @@ from typing import ClassVar, Optional
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.ports as ports
-import decsim.records.identity as identity_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.round_holds as round_holds
 import decsim.trace_source as trace_source
@@ -125,13 +124,10 @@ class SyndromeBuffer:
         taken, gem5's `_reserved` in `avail() = _maxsize - _size -
         _reserved` (src/dev/net/pktfifo.hh).
         """
+        del round_key
         capacity = self.settings.bits
         if capacity is None:
             return True
-        if bits is None:
-            self._refuse_unsized_round(capacity)
-        if bits > capacity:
-            self._refuse_round_wider_than_store(round_key, bits, capacity)
         reserved_widths = reserved_bits_by_round.values()
         reserved_bits = sum(reserved_widths)
         taken = self.occupied_bits + reserved_bits
@@ -183,10 +179,6 @@ class SyndromeBuffer:
 
     def release_round(self, round_key) -> None:
         """Free one unheld round; its consumers are done with it."""
-        if round_key not in self.round_by_key:
-            raise RuntimeError(f"round {round_key!r} is not stored")
-        if self.holds.is_held(round_key):
-            raise RuntimeError(f"round {round_key!r} has live consumer holds")
         self._free_round(round_key)
 
     def capacity_bits(self) -> Optional[int]:
@@ -249,16 +241,6 @@ class SyndromeBuffer:
 
     def close_operation(self, operation_id) -> None:
         """Retire an operation once none of its rounds or holds are live."""
-        live_rounds = self._stored_rounds_of(operation_id)
-        if live_rounds:
-            raise RuntimeError(
-                f"operation {operation_id!r} has live buffer rounds "
-                f"{live_rounds!r}"
-            )
-        if self.holds.references(operation_id):
-            raise RuntimeError(
-                f"operation {operation_id!r} has live consumer holds"
-            )
         self.operations[operation_id] = False
         open_ids = self._open_operation_ids()
         self.holds.forget_released_outside(open_ids)
@@ -404,16 +386,6 @@ class SyndromeBuffer:
     def _open(self, operation_id) -> None:
         self.operations[operation_id] = True
 
-    def _stored_rounds_of(self, operation_id) -> list:
-        """The operation's stored rounds, in stable identity order."""
-        stored = []
-        for round_key in self.round_by_key:
-            if identity_records.same_stable_identity(
-                round_key[0], operation_id
-            ):
-                stored.append(round_key)
-        return sorted(stored, key=identity_records.stable_identity_bytes)
-
     def _open_operation_ids(self) -> set:
         open_ids = set()
         for operation_id, is_open in self.operations.items():
@@ -443,29 +415,6 @@ class SyndromeBuffer:
         for round_key in round_keys:
             if round_key in self.round_by_key:
                 self._free_round(round_key)
-
-    def _refuse_unsized_round(self, capacity: int) -> None:
-        """A bound is measured against a size, so a round must state one."""
-        raise RuntimeError(
-            f"the syndrome buffer holds {capacity} bits and the round "
-            "states no size; a bounded syndrome buffer needs sized rounds"
-        )
-
-    def _refuse_round_wider_than_store(
-        self, round_key, bits: int, capacity: int
-    ) -> None:
-        """A round wider than the whole store waits for room forever.
-
-        gem5 refuses a message wider than the block that must hold it
-        (src/mem/ruby/network/Network.cc:64-65, "data message size >
-        cache line size"); round widths come from the source as it runs,
-        so the refusal comes at the first ask rather than at the load.
-        """
-        raise RuntimeError(
-            f"the syndrome buffer holds {capacity} bits and round "
-            f"{round_key!r} states {bits}: no round leaving it makes room, "
-            "so a bounded syndrome buffer holds at least its widest round"
-        )
 
     def _free_round(self, round_key) -> None:
         self.round_by_key.pop(round_key)

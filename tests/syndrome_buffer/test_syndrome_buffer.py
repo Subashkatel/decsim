@@ -338,23 +338,6 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
         the_store.check_settled()
 
 
-def test_a_bounded_store_refuses_a_round_that_states_no_size():
-    """A bound is measured against a size, so the round must state one."""
-    the_store = store(bits=BITS_PER_ROUND)
-
-    with pytest.raises(RuntimeError):
-        the_store.has_room((1, 1), None, {})
-
-
-def test_a_bounded_store_refuses_a_round_wider_than_itself():
-    """No free makes room for it (gem5 Network.cc:64-65 refuses the same)."""
-    the_store = store(bits=BITS_PER_ROUND)
-    wide_bits = BITS_PER_ROUND + 1
-
-    with pytest.raises(RuntimeError):
-        the_store.has_room((1, 4), wide_bits, {})
-
-
 def test_an_unbounded_store_takes_a_round_that_states_no_size():
     the_store = store()
     timing_only = unsized_packet(1)

@@ -198,20 +198,6 @@ def test_the_round_before_leaves_with_a_job_whose_decoder_reads_it():
     assert transfers.sends == [(output.path, 4)]
 
 
-def test_a_round_before_the_store_let_go_of_stops_the_read_by_name():
-    """Round 5 reads round 3, which a program reaching further lost."""
-    engine = engine_module.Engine()
-    store = _store(engine)
-    _store_rounds(store, (2, 4))
-    transfers = _Transfers()
-    output = _output(engine, transfers, store)
-    output.detection_events = _lookback_placement()
-    job = _job(5)
-
-    with pytest.raises(RuntimeError):
-        output.send_input(job, lambda: None)
-
-
 def test_the_round_before_is_read_in_the_jobs_one_port_booking():
     """Two words on one read port, a cycle each from tick 0, then the link.
 

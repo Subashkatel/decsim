@@ -61,7 +61,10 @@ class DecodeRecordLedger:
 
 
 class ConfidenceLedger:
-    """Each window's confidence gap, verdict and strong answer, as they end."""
+    """Each window's confidence record, kept as its requests end.
+
+    A record holds the confidence gap, the verdict and the strong answer.
+    """
 
     def __init__(self) -> None:
         self.verdict_results: dict = {}

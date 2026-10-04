@@ -76,7 +76,7 @@ class DecoderUtilization:
 
 
 class DecodeBacklog:
-    """The most rounds of syndrome data produced and not yet decoded.
+    """The peak count of syndrome rounds not yet decoded.
 
     Sampled after every action, since the rounds waiting are spread over
     the window manager and the queues and no one source reports them.

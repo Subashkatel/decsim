@@ -18,7 +18,9 @@ import decsim.records.seeds as seed_records
 _NAMESPACE = b"decsim.run-seed.v1"
 
 
-def derive_component_seed(root_seed: int, path) -> int:
+def derive_component_seed(
+    root_seed: int, path: tuple[seed_records.RunSeedPathSegment, ...]
+) -> int:
     """One unsigned 64-bit seed from the root seed and a framed path."""
     encoded_path = _encode_path(path)
     root_bytes = root_seed.to_bytes(8, "big")
@@ -47,7 +49,7 @@ def substream_seed(seed: int, keys: tuple) -> int:
     return derive_component_seed(seed, tuple(path))
 
 
-def bind_run_seed(root_seed: Optional[int], roots) -> None:
+def bind_run_seed(root_seed: Optional[int], roots: Iterable[tuple]) -> None:
     """Bind each stochastic leaf once, cancelling every claim on failure.
 
     Roots are (path, component) pairs; a composite's children are walked

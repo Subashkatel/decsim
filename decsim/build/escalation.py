@@ -8,7 +8,7 @@ prefetcher holds a NULL one (src/mem/cache/Cache.py:108).
 """
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
@@ -16,6 +16,7 @@ import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ class Switching:
     policy: ports.EscalationPolicy
     regions: strong_regions.StrongRegions
     # the strong window settings' shape
-    shape: Any
+    shape: strong_window_shapes.StrongWindowPorts
     pending_strong_windows: pending_strong_windows.PendingStrongWindows
     strong_redecode: strong_redecode_module.StrongRedecode
 

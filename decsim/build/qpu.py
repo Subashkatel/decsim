@@ -6,7 +6,6 @@ the magic state factory beside it supplies the non-Clifford operations.
 """
 
 import dataclasses
-from typing import Any
 
 import decsim.build.plan as plan_build
 import decsim.config as config
@@ -21,7 +20,7 @@ class Qpu:
     """The quantum side of the machine, as the controller meets it."""
 
     # the source the plan built for its code card, whichever row it is
-    syndrome_source: Any
+    syndrome_source: ports.SyndromeSource
     device: cycle_clock.QPUDevice
     factory: ports.MagicStateFactory
 

@@ -305,7 +305,7 @@ class RequestProcessingOutcome(Enum):
     WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
 
 
-def distinct_round_count(payloads) -> int:
+def distinct_round_count(payloads: list) -> int:
     """The distinct (operation_id, round_index) rounds of the payloads.
 
     A decode job is priced and admitted for these: a sliding-window

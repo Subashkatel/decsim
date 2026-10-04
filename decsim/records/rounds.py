@@ -31,7 +31,8 @@ class SyndromePacketRoute:
 
     @classmethod
     def feedback_memory_round(
-        cls, source_operation_id
+        cls,
+        source_operation_id: Any,  # an opaque identity
     ) -> "SyndromePacketRoute":
         """The route of a round that feeds a source operation's memory."""
         return cls(
@@ -267,7 +268,9 @@ class ControllerOutputEvent:
     payload: object
 
 
-def fragment_wire_bits(fragments) -> Optional[int]:
+def fragment_wire_bits(
+    fragments: Sequence[RetainedSyndromeFragment],
+) -> Optional[int]:
     """The fragments' wire size, None when any fragment has no known size."""
     fragment_sizes = [fragment.size_bits for fragment in fragments]
     if None in fragment_sizes:

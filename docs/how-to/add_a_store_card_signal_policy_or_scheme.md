@@ -107,9 +107,10 @@ A card is numbers, not a class: a `FabricSettings` record, one
   bits per microsecond, a `fractions.Fraction`.
 - **Write the paper's numbers in your run file**, each with its source
   in a comment (STYLE.md rule 2), not in decsim.
-- **Check the card** by pricing the paper's own transfer on it:
-  `decsim.links.fabric.LinkFabric(card, engine).expected_delay_ticks(
-  path, bits, engine.now)` is what one send costs on an idle wire
+- **Check the card** by pricing the paper's own transfer on it: with
+  `fabric = decsim.links.fabric.LinkFabric(card, engine)`,
+  `fabric.expected_delay_ticks(path, bits, engine.now)` is what one send
+  costs on an idle wire
   (`tests/links/test_fabric.py`). `tests/links/test_link_profiles.py`
   checks the measured cards against their papers' transfers. A card in
   an experiment's run file is tested the same way: load the file with
@@ -225,7 +226,8 @@ A card is numbers, not a class: a `FabricSettings` record, one
 - **On a machine:**
 
   ```python
-  windows = dataclasses.replace(base.windows, scheme=MyScheme.Settings())
+  scheme = MyScheme.Settings()
+  windows = dataclasses.replace(base.windows, scheme=scheme)
   machine = dataclasses.replace(base, windows=windows)
   ```
 

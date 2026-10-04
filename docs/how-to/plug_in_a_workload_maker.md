@@ -60,12 +60,15 @@ A maker that runs elsewhere writes its two outputs to disk, and
 `read_workload` (`decsim/frontends/workload_files.py`) reads them:
 
 ```python
+operations_path = pathlib.Path("merge.json")
+# a finite circuit with each measurement index's round, or
+# fragments_path, a folder of the four live fragments
+circuit_path = pathlib.Path("history.stim")
+measurement_rounds_path = pathlib.Path("rounds.json")
 workload = workload_files.read_workload(
-    pathlib.Path("merge.json"),
-    # a finite circuit with each measurement index's round, or
-    # fragments_path, a folder of the four live fragments
-    circuit_path=pathlib.Path("history.stim"),
-    measurement_rounds_path=pathlib.Path("rounds.json"),
+    operations_path,
+    circuit_path=circuit_path,
+    measurement_rounds_path=measurement_rounds_path,
 )
 ```
 

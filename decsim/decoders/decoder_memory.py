@@ -217,7 +217,9 @@ class DecoderMemory:
         resident.readers.append(job)
         return resident.decoder_input
 
-    def input_of(self, job: decoding_records.DecodeJob):
+    def input_of(
+        self, job: decoding_records.DecodeJob
+    ) -> Optional[DecoderInput]:
         """The input this job reads here, or None when nothing is held."""
         key = _memory_key(job)
         resident = self._inputs.get(key)

@@ -30,7 +30,10 @@ import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decode_service as decode_service
 import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
@@ -55,9 +58,9 @@ class DecoderManager:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         *,
-        scheduler,
+        scheduler: schedulers.Scheduler,
         pool_settings: decoder_pool_module.PoolSettings,
         bulk_strong: bool = False,
         clock: Optional[config.Clock] = None,
@@ -100,7 +103,9 @@ class DecoderManager:
         for row in decoder_pool_module.decoder_rows(decoders):
             row.forced_solve_unavailable.connect(self.report_unpinnable_model)
 
-    def report_unpinnable_model(self, model, reason: str) -> None:
+    def report_unpinnable_model(
+        self, model: fault_models.WindowErrorModel, reason: str
+    ) -> None:
         """Say once per model that its windows can pin no logical class.
 
         A confidence from forced-class solves reads no gap on such a
@@ -131,7 +136,7 @@ class DecoderManager:
         """
         return [self.service.staging.trace.hold_registered]
 
-    def input_fold(self):
+    def input_fold(self) -> staging_module.DecoderInputStaging:
         """The input a window's gate hands its boundary mask to.
 
         The manager owns the unit memory the fold writes, so the window
@@ -146,14 +151,19 @@ class DecoderManager:
         child = seed_records.RunSeedChild(path, scheduler)
         return (child,)
 
-    def input_transport(self):
+    def input_transport(
+        self,
+    ) -> staging_module.CancellableDecoderMemoryTransfer:
         """The transport that moves an input into a unit's memory."""
         return self.service.staging.transport
 
     # ---------------------------------------------------------- admission
 
     def enqueue(
-        self, job: decoding_records.DecodeJob, send_input=None, on_decoded=None
+        self,
+        job: decoding_records.DecodeJob,
+        send_input: Optional[staging_module.SendInput] = None,
+        on_decoded: Optional[Callable] = None,
     ) -> None:
         """Admit once and queue; the rounds stay in the weak syndrome buffer.
 
@@ -418,7 +428,11 @@ class DecoderManager:
 
     # ------------------------------------------------- the decode's end
 
-    def decode_completed(self, job: decoding_records.DecodeJob, result) -> None:
+    def decode_completed(
+        self,
+        job: decoding_records.DecodeJob,
+        result: Optional[decoding_records.DecodeResult],
+    ) -> None:
         """One decode finished: free the unit and settle by the job's kind."""
         if job.cancelled:
             self.service.release_input(job)

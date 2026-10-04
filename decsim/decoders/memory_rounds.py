@@ -10,6 +10,9 @@ unit's memory; this end counts the round, logs it on the decoder side's
 line and tells the window side.
 """
 
+from typing import Any
+
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 
@@ -19,12 +22,15 @@ class MemoryRoundArrivals:
 
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         # operation id -> the timing-only rounds of it that landed here
         self.landed_by_operation: dict = {}
 
-    def receive_memory_round(self, source_operation_id) -> None:
+    def receive_memory_round(
+        self,
+        source_operation_id: Any,  # an opaque identity
+    ) -> None:
         """Take one timing-only round: count it, then tell the windows."""
         landed = self.landed_by_operation.get(source_operation_id, 0)
         landed += 1

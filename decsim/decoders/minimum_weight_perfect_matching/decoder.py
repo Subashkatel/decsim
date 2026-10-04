@@ -13,7 +13,7 @@ is the minimum weight inside that logical class (Gidney et al.
 
 import dataclasses
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import numpy
 import pymatching
@@ -71,7 +71,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
             _check_preset_latency(self.preset_latency_microseconds)
 
         @property
-        def name(self):
+        def name(self) -> Union[str, float]:
             """The row's word, or its preset latency in its place."""
             if self.preset_latency_microseconds is None:
                 return "pymatching"
@@ -86,7 +86,9 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
             )
             return PyMatchingDecoder(latency_model)
 
-    def __init__(self, latency_model=None):
+    def __init__(
+        self, latency_model: Optional[decoder_module.DecoderBase] = None
+    ):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         # the latency model prices the decode and leaves the graph alone
         row = type(self)

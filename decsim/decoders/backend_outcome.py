@@ -49,7 +49,9 @@ class BackendDecodeOutcome:
         return self.status is _Status.SUCCEEDED
 
 
-def empty_fault_model_outcome(syndrome) -> BackendDecodeOutcome:
+def empty_fault_model_outcome(
+    syndrome: numpy.ndarray,
+) -> BackendDecodeOutcome:
     """Resolve a no-fault physical model without invoking a backend.
 
     A nonzero syndrome on a model with no fault columns is unsatisfiable.

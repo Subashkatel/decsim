@@ -50,7 +50,9 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         self._thread_state = threading.local()
 
     def decode(
-        self, window_model, syndrome
+        self,
+        window_model: fault_models.WindowErrorModel,
+        syndrome: numpy.ndarray,
     ) -> backend_outcome.BackendDecodeOutcome:
         """Call the official detailed API once and snapshot its evidence."""
         faults = window_model.require_faults(
@@ -70,7 +72,9 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
     def _install_run_seed_state(self, prepared_state) -> None:
         self._effective_gamma_table_seed = prepared_state
 
-    def compiled_model(self, faults) -> "_CompiledRelayModel":
+    def compiled_model(
+        self, faults: fault_models.PlacedFaultModel
+    ) -> "_CompiledRelayModel":
         """The backend for one check matrix and priors, built once.
 
         A shot's windows repeat a few shapes, so the backend is kept by

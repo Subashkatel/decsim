@@ -28,6 +28,7 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -114,7 +115,7 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
     def start(
         self,
         job: decoding_records.DecodeJob,
-        engine,
+        engine: engine_module.Engine,
         on_result: decoder_module.OnResult,
     ) -> None:
         """Queue the decode, or its two parts; each runs once there is room."""

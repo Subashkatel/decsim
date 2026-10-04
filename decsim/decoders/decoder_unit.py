@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
+import decsim.decoders.strong_requests as strong_requests_module
 import decsim.records.decoding as decoding_records
 
 # the decode computing and the next window's input landing beside it
@@ -229,7 +230,11 @@ class DecoderUnit:
 
     # -------------------------------------------------- the output slot
 
-    def hold_output(self, window_key: tuple, completion) -> None:
+    def hold_output(
+        self,
+        window_key: tuple,
+        completion: strong_requests_module.StrongCompletion,
+    ) -> None:
         """Keep one finished result until its destination asks for it.
 
         A destination has at most one unconsumed strong result
@@ -237,7 +242,9 @@ class DecoderUnit:
         """
         self.slots.finished[window_key] = completion
 
-    def take_output(self, window_key: tuple):
+    def take_output(
+        self, window_key: tuple
+    ) -> Optional[strong_requests_module.StrongCompletion]:
         """Take the result waiting for that destination, or None."""
         return self.slots.finished.pop(window_key, None)
 

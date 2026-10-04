@@ -25,6 +25,7 @@ from typing import Optional
 
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.detection_events as detection_events_module
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
 
@@ -42,8 +43,8 @@ class DecoderInputStaging:
 
     def __init__(
         self,
-        transport,
-        engine,
+        transport: "CancellableDecoderMemoryTransfer",
+        engine: engine_module.Engine,
         copies_input: bool = True,
         formation: Optional[detection_events_module.TierFormation] = None,
     ):
@@ -62,7 +63,7 @@ class DecoderInputStaging:
     def stage(
         self,
         job: decoding_records.DecodeJob,
-        memory,
+        memory: decoder_memory_module.DecoderMemory,
         on_landed: Callable[[decoding_records.DecodeJob], None],
     ) -> None:
         """Send the input over its link, then land it in the unit's memory.
@@ -112,7 +113,9 @@ class DecoderInputStaging:
         return landing_key in self.awaited_by_input
 
     def fold_into_a_copy(
-        self, job: decoding_records.DecodeJob, masked_input
+        self,
+        job: decoding_records.DecodeJob,
+        masked_input: decoder_memory_module.DecoderInput,
     ) -> None:
         """The job reads a masked duplicate; the unit's rounds stay raw.
 
@@ -126,7 +129,9 @@ class DecoderInputStaging:
         self.trace.copy_made.fire(job, bits, source_name, "masked view")
 
     def fold_in_place(
-        self, job: decoding_records.DecodeJob, masked_input
+        self,
+        job: decoding_records.DecodeJob,
+        masked_input: decoder_memory_module.DecoderInput,
     ) -> None:
         """The mask is written into the unit's own memory, nothing copied.
 
@@ -323,7 +328,7 @@ class DecoderInputStaging:
             hold()
             job.input_hold = None
 
-    def release_service_members(self, members) -> None:
+    def release_service_members(self, members: list) -> None:
         """Return the credits of every request one decode still serves.
 
         A batch service job holds none of its own. Release is idempotent.
@@ -343,7 +348,7 @@ class CancellableDecoderMemoryTransfer:
     and cancelling an unknown or landed request does nothing.
     """
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self._in_flight_keys = set()
 

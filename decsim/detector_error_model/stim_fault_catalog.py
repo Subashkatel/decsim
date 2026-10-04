@@ -282,26 +282,38 @@ def _catalog_from_detector_error_model(
         )
         _check_every_fault_is_graphlike(detector_sets, observable_sets)
     else:
-        merged: dict = {}
-        for record in canonical_error_instructions(detector_error_model):
-            key = (
-                record.aggregate_detectors,
-                record.aggregate_logical_observables,
-            )
-            current_probability = merged.get(key, 0.0)
-            merged[key] = merge_probability(
-                current_probability, record.probability
-            )
-        detector_sets = [key[0] for key in merged]
-        observable_sets = [key[1] for key in merged]
-        merged_priors = merged.values()
-        priors = list(merged_priors)
+        detector_sets, observable_sets, priors = _physical_faults(
+            detector_error_model
+        )
     return fault_model_contracts.FaultCatalog(
         representation=representation,
         detector_sets=tuple(tuple(values) for values in detector_sets),
         observable_sets=tuple(tuple(values) for values in observable_sets),
         priors=tuple(float(value) for value in priors),
     )
+
+
+def _physical_faults(
+    detector_error_model,
+) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]], list[float]]:
+    """The physical columns of a Stim model: detectors, observables, priors.
+
+    An instruction's whole identity is one column, whose prior merges
+    every instruction with that identity as independent errors.
+    """
+    merged: dict = {}
+    for record in canonical_error_instructions(detector_error_model):
+        key = (
+            record.aggregate_detectors,
+            record.aggregate_logical_observables,
+        )
+        current_probability = merged.get(key, 0.0)
+        merged[key] = merge_probability(current_probability, record.probability)
+    detector_sets = [key[0] for key in merged]
+    observable_sets = [key[1] for key in merged]
+    merged_priors = merged.values()
+    priors = list(merged_priors)
+    return detector_sets, observable_sets, priors
 
 
 def _check_every_fault_is_graphlike(

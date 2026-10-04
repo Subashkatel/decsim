@@ -393,13 +393,7 @@ class DecoderManager:
             if completion is not None:
                 self.strong_requests.counts.cancelled += 1
             return
-        job = live.service_job
-        if job.unit is not None and not job.service_started:
-            self._cancel_staged_strong(live)
-        elif job.pool is None:
-            self._cancel_queued_strong(live)
-        else:
-            self._cancel_running_strong(live)
+        self._cancel_live_strong(live)
         self.strong_requests.counts.cancelled += 1
         self.dispatcher.run()  # returned credits may admit a waiting head
 
@@ -508,6 +502,19 @@ class DecoderManager:
         self.dispatcher.run()
 
     # ------------------------------------------------- cancelling strong
+
+    def _cancel_live_strong(
+        self, live: strong_requests_module.LiveStrongRequest
+    ) -> None:
+        """Cancel the request where it is: staged, queued or running."""
+        job = live.service_job
+        if job.unit is not None and not job.service_started:
+            self._cancel_staged_strong(live)
+            return
+        if job.pool is None:
+            self._cancel_queued_strong(live)
+            return
+        self._cancel_running_strong(live)
 
     def _cancel_staged_strong(
         self, live: strong_requests_module.LiveStrongRequest

@@ -260,13 +260,7 @@ def joined_result(
     model = job.detector_error_model
     parts = [results[basis] for basis in sorted(results)]
     residuals = [part.boundary_data for part in parts]
-    crossings = [part.crossing_commit for part in parts]
-    crossing_residuals = [crossing.residual for crossing in crossings]
-    crossing_residual = _joined_residual(model, crossing_residuals)
-    crossing_observables = _joined_observables(crossings)
-    crossing = window_records.CrossingCommit(
-        crossing_residual, crossing_observables
-    )
+    crossing = _joined_crossing(model, parts)
     corrections = [part.correction for part in parts]
     correction = numpy.concatenate(corrections)
     iterations = [part.iterations or 0 for part in parts]
@@ -420,6 +414,17 @@ def _part_job(
     label = f"{job.label} {basis}"
     return dataclasses.replace(
         job, detector_error_model=part_model, payloads=[fragment], label=label
+    )
+
+
+def _joined_crossing(model, parts: list) -> window_records.CrossingCommit:
+    """The parts' crossing commits, joined by the rule their results are."""
+    crossings = [part.crossing_commit for part in parts]
+    crossing_residuals = [crossing.residual for crossing in crossings]
+    crossing_residual = _joined_residual(model, crossing_residuals)
+    crossing_observables = _joined_observables(crossings)
+    return window_records.CrossingCommit(
+        crossing_residual, crossing_observables
     )
 
 

@@ -253,9 +253,10 @@ class OperationResults:
         segment_end = self._stream_segment_end(
             operation, segment, stream_offset
         )
-        if segment_end is None or segment_end > committed_round_count:
-            return
-        if self._segment_waits_for_strong(stream_id, segment_end):
+        is_final = self._is_segment_final(
+            stream_id, segment_end, committed_round_count
+        )
+        if not is_final:
             return
         segment_start = stream_offset + 1
         logical_observables = self.ledger.observables_for_interval(
@@ -277,6 +278,18 @@ class OperationResults:
             return None
         round_count = self.planner.round_count_of(operation.id)
         return stream_offset + round_count
+
+    def _is_segment_final(
+        self,
+        stream_id,
+        segment_end: Optional[int],
+        committed_round_count: int,
+    ) -> bool:
+        """Its end is known and committed, and no strong redo may change it."""
+        if segment_end is None or segment_end > committed_round_count:
+            return False
+        is_waiting = self._segment_waits_for_strong(stream_id, segment_end)
+        return not is_waiting
 
     def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
         for key, window in self.planner.windows_by_key.items():

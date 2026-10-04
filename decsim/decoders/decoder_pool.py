@@ -134,19 +134,14 @@ class DecoderPool:
                 return unit, True
         if not carries_input:
             return None
-        with_room = _with_room(
-            self.units, job, resident_capacity, memory_demand_of
+        return self._staging_offer(
+            job,
+            now,
+            takes_free_compute,
+            resident_capacity,
+            memory_demand_of,
+            input_is_on_the_unit,
         )
-        if takes_free_compute:
-            with_room = self._freeing_first(with_room, now)
-        if not with_room:
-            return None
-        staging_rank = functools.partial(
-            self._staging_rank, job, now, input_is_on_the_unit
-        )
-        unit = min(with_room, key=staging_rank)
-        has_free_compute = self.is_free(unit)
-        return unit, has_free_compute
 
     def claim(
         self,
@@ -162,6 +157,30 @@ class DecoderPool:
         """The unit's compute goes back to the pool."""
         self.free.append(unit)
         self.trace.unit_freed.fire(unit)
+
+    def _staging_offer(
+        self,
+        job: decoding_records.DecodeJob,
+        now: int,
+        takes_free_compute: bool,
+        resident_capacity: int,
+        memory_demand_of: Callable[[decoding_records.DecodeJob], Optional[int]],
+        input_is_on_the_unit: InputIsOnTheUnit,
+    ) -> Optional[tuple]:
+        """(unit, has free compute) to stage the job's input on, or None."""
+        with_room = _with_room(
+            self.units, job, resident_capacity, memory_demand_of
+        )
+        if takes_free_compute:
+            with_room = self._freeing_first(with_room, now)
+        if not with_room:
+            return None
+        staging_rank = functools.partial(
+            self._staging_rank, job, now, input_is_on_the_unit
+        )
+        unit = min(with_room, key=staging_rank)
+        has_free_compute = self.is_free(unit)
+        return unit, has_free_compute
 
     def _freeing_first(self, with_room: list, now: int) -> list:
         """The units with room among those with the pool's least work left.
@@ -228,12 +247,20 @@ def decoder_rows(decoders: tuple) -> list:
         seen.add(identity)
         if isinstance(decoder, ports.Decoder):
             found.append(decoder)
-        if not isinstance(decoder, seeding.RunSeedComposite):
-            continue
-        children = decoder.run_seed_children()
-        for child in children:
-            pending.append(child.child)
+        inner_decoders = _inner_decoders(decoder)
+        pending.extend(inner_decoders)
     return found
+
+
+def _inner_decoders(decoder) -> list:
+    """The decoders a wrapping row names through the seeding protocol."""
+    if not isinstance(decoder, seeding.RunSeedComposite):
+        return []
+    children = decoder.run_seed_children()
+    inner_decoders = []
+    for child in children:
+        inner_decoders.append(child.child)
+    return inner_decoders
 
 
 def _with_room(

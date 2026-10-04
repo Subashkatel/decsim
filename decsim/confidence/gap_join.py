@@ -30,7 +30,7 @@ class HeldSolve:
 
 
 class WindowGapJoin:
-    """Every solve's on_decoded: the window's confidence and its answer.
+    """The join of each window's solves, as every solve's on_decoded.
 
     Trace source: solve_held(job, result) when a solve waits for the
     window's others, so the trace shows the held solve and the join.

@@ -174,6 +174,9 @@ def strong_decoder_pool() -> decoder_settings.DecoderPoolSettings:
     (decsim/decoders/measured_table/measurements.py, Slurm job
     14676845). The measured time holds the syndrome's copies to and
     from the device, so the engine charges no stage, on the chip clock.
+    The boundary folds into a copy of the rounds, as CUDA-Q QEC keeps
+    the raw rounds and applies the syndrome mods when it assembles a
+    window (cudaqx sliding_window.cpp:287-293).
     """
     algorithm = measured_table.MeasuredTableSettings(
         gamma0=0.35,

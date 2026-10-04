@@ -18,6 +18,7 @@ follow that packet store with a holder set per round.
 """
 
 import collections
+import dataclasses
 import functools
 import random
 
@@ -339,16 +340,47 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
         the_store.check_settled()
 
 
-def test_a_run_whose_store_is_narrower_than_a_round_stops_at_its_end():
-    """No free makes room for the round (gem5 Network.cc:64-65).
+def blocked_successor() -> list:
+    """mem1, then mem2 blocked by mem1's feedback.
 
-    The controller holds the round for room, so the run ends with it
-    held and its settlement stops the run.
+    mem1's patch keeps measuring while mem2 waits, so a run whose rounds
+    wait for room forever never reaches its end-of-run checks.
     """
-    narrow = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(2, predecessors=(1,), blocked_by=1)
+    return [first, second]
 
-    with pytest.raises(RuntimeError, match="held for store room"):
-        declared_run.weak_only_run(weak_syndrome_buffer=narrow)
+
+NARROWER_THAN_A_ROUND = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
+
+
+def test_a_weak_store_narrower_than_a_round_stops_the_run():
+    """No free makes room for the round (gem5 Network.cc:64-65)."""
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="no round leaving it makes room"):
+        declared_run.weak_only_run(
+            operations=operations, weak_syndrome_buffer=NARROWER_THAN_A_ROUND
+        )
+
+
+def test_a_strong_store_narrower_than_a_round_stops_the_run(monkeypatch):
+    """The strong-primary run writes every round into the strong store."""
+    run_machine = declared_run.run_machine
+
+    def run_with_a_narrow_strong_store(settings, seed=0, probes=()):
+        narrowed = dataclasses.replace(
+            settings, strong_syndrome_buffer=NARROWER_THAN_A_ROUND
+        )
+        return run_machine(narrowed, seed, probes)
+
+    monkeypatch.setattr(
+        declared_run, "run_machine", run_with_a_narrow_strong_store
+    )
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="no round leaving it makes room"):
+        declared_run.strong_only_run(operations=operations)
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():

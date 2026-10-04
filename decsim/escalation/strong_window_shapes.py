@@ -217,7 +217,7 @@ class DoubleWindow(StrongWindowPorts):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The double window and how far its restart window re-reads.
+        """The double window, as the switching slot names it.
 
         restart_reread_buffer_regions is how many of the strong region's
         buffer regions the restarted weak window re-reads (Toshio

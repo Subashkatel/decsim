@@ -25,7 +25,10 @@ import decsim.records.windows as window_records
 
 @dataclasses.dataclass(frozen=True)
 class RedoRegion:
-    """One strong redo of one window: the window, and the rounds it reads."""
+    """One strong redo of one window.
+
+    context_read_keys are the rounds it reads.
+    """
 
     window: window_records.Window
     context_read_keys: tuple
@@ -47,7 +50,7 @@ class DoubleWindowRegion:
 
 
 class StrongRegions:
-    """The strong region of a window, planned, checked and modelled."""
+    """Resolves a window's strong region against the live window graph."""
 
     planner = ports.Port(ports.WindowPlan)
     tracker = ports.Port(ports.WindowRounds)

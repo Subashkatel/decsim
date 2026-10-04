@@ -436,7 +436,7 @@ def _slurm_arguments(config_path, results_dir, *extra) -> list:
 
 
 def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
-    """Task i of the array runs point i of the folder's copy, then a fold.
+    """Task i of the array runs point i of the run file, then a fold.
 
     A dry run records the points and writes both files, and submits
     nothing. The folder's path holds a space, and each line still reads
@@ -452,8 +452,8 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
 
     run_lines = (results_dir / "run.sbatch").read_text().splitlines()
     fold_lines = (results_dir / "fold.sbatch").read_text().splitlines()
-    copied = results_dir / config_path.name
     decsim_run = [sys.executable, "-m", "decsim", "run"]
+    run_path = config_path.resolve()
     assert completed.returncode == 0, completed.stderr
     assert run_lines[1] == (
         "#SBATCH --array=0-1 --cpus-per-task=4 --mem=16384M --time=24:00:00"
@@ -464,7 +464,7 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
     ]
     assert shlex.split(run_lines[3]) == [
         *decsim_run,
-        str(copied),
+        str(run_path),
         "--out",
         str(results_dir),
         "--task",

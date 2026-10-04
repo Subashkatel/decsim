@@ -235,11 +235,12 @@ def run_task(
 ) -> None:
     """One array task: the experiment's index-th point to its stop.
 
-    The launcher wrote run.json, so a task checks the folder ran this tree,
-    records its point again and collects from its saved pieces. It folds
-    nothing.
+    The launcher wrote run.json and the run file's copy, so a task checks
+    the folder ran this tree and this run file, records its point again
+    and collects from its saved pieces. It folds nothing.
     """
     _check_processes(processes)
+    run_folder.copy_the_run_file(run_file, run_dir)
     study = experiment.load(run_file)
     _refuse_another_tree(run_dir)
     point = study.points[index]

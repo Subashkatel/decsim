@@ -240,7 +240,7 @@ def snapshot_code_state(
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     if run_file is not None:
-        _copy_the_run_file(run_file, run_dir)
+        copy_the_run_file(run_file, run_dir)
     checkout = _checkout()
     patch_text = _code_state_patch(checkout)
     if patch_text is not None:
@@ -308,7 +308,7 @@ def write_run_record(
 def copied_run_file(
     run_file: pathlib.Path, run_dir: pathlib.Path
 ) -> pathlib.Path:
-    """Where the folder keeps its copy of the run file, which a task loads."""
+    """Where the folder keeps its copy of the run file."""
     return run_dir / run_file.name
 
 
@@ -563,11 +563,12 @@ def _write_result(
     write_json(result_path, value)
 
 
-def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
+def copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
     """The run file beside the results, under its own name.
 
-    An array task loads the copy that made the rows. The copy is written
-    once (_copy_once), so a folder's copy is the file that made its rows.
+    The copy is written once (_copy_once), so a folder's copy is the file
+    that made its rows, and an array task refuses a run file edited since
+    the launch, whose task i may name another point.
     """
     target = copied_run_file(run_file, run_dir)
     _copy_once(run_file, target)

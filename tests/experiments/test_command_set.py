@@ -16,6 +16,7 @@ import json
 import pathlib
 import platform
 import resource
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1995,25 +1996,69 @@ def test_a_slurm_task_asking_for_no_core_hour_or_memory_is_refused(
 def test_array_tasks_then_the_fold_write_the_local_runs_rows(tmp_path):
     """The referent is one local run of the same four points.
 
-    The launcher records the points; each array task then collects its
-    point from the folder's copy of the run file, in whatever order the
-    array runs them, and the fold job's fold writes every file the local
-    run wrote, row for row but the wall clock.
+    The launcher records the points; each array task then runs the line
+    run.sbatch holds, in whatever order the array runs them, and the fold
+    job's fold writes every file the local run wrote, row for row but the
+    wall clock. The run file reads a file beside it, as a threshold table
+    is read, and every task finds it.
     """
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    _read_a_file_beside(config_path)
     local_dir = tmp_path / "local"
     split_dir = tmp_path / "split"
     command.main(["run", str(config_path), "--out", str(local_dir)])
     job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
-    copied = split_dir / config_path.name
 
     for index in ("3", "1", "0", "2"):
-        task = ["--out", str(split_dir), "--task", index]
-        command.main(["run", str(copied), *task])
+        task = _task_arguments(split_dir, index)
+        command.main(task)
     command.main(["run", "--fold", "--out", str(split_dir)])
 
     assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)
+
+
+def test_an_array_task_refuses_a_run_file_edited_since_the_launch(
+    tmp_path, capsys
+):
+    """Task i of an edited run file may name another point, so it stops."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    split_dir = tmp_path / "split"
+    job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
+    plan_command.launch(config_path, split_dir, job, dry_run=True)
+    with config_path.open("a") as run_file:
+        run_file.write("# edited after the launch\n")
+    task = _task_arguments(split_dir, "0")
+
+    with pytest.raises(SystemExit):
+        command.main(task)
+
+    printed = capsys.readouterr()
+    saved_pieces = split_dir.glob("pieces/*")
+    assert f"holds another {config_path.name} than" in printed.err
+    assert not any(saved_pieces)
+
+
+def _read_a_file_beside(run_path: pathlib.Path) -> None:
+    """The run file made to read a file written beside it."""
+    beside = run_path.with_name("beside.txt")
+    beside.write_text("read by the run file\n")
+    with run_path.open("a") as run_file:
+        run_file.write(
+            "import pathlib\n"
+            'pathlib.Path(__file__).with_name("beside.txt").read_text()\n'
+        )
+
+
+def _task_arguments(run_dir: pathlib.Path, index: str) -> list:
+    """The decsim arguments in run.sbatch's task line, at one task index."""
+    run_script = run_dir / plan_command.RUN_SCRIPT
+    script_text = run_script.read_text()
+    script_lines = script_text.splitlines()
+    task_line = script_lines[-1]
+    indexed_line = task_line.replace("$SLURM_ARRAY_TASK_ID", index)
+    words = shlex.split(indexed_line)
+    return words[3:]
 
 
 def _typed_sweep_rows(experiment_dir: pathlib.Path) -> list:

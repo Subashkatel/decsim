@@ -802,8 +802,8 @@ def _checkout() -> pathlib.Path:
     """The tree this code was imported from, which is the code that ran.
 
     A cluster task starts where its job was submitted and may import a
-    checkout pinned elsewhere (docs/how-to/run_a_sweep_on_slurm.md), so the
-    working directory's commit could name code the run never read.
+    checkout pinned elsewhere, so the working directory's commit could
+    name code the run never read.
     """
     this_file = pathlib.Path(__file__)
     here = this_file.resolve()

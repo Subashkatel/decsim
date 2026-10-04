@@ -227,10 +227,10 @@ class ShotMeasurement:
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
-    # what tells harder windows from an overloaded strong side (the
-    # paired run of docs/how-to/compare_two_runs.md): the set bits of each
-    # weak decode's input, its detection events when they are formed
-    # ahead of the decoder; each weak decode's compute, its stages' span;
+    # what tells harder windows from an overloaded strong side in a
+    # paired run: the set bits of each weak decode's input, its
+    # detection events when they are formed ahead of the decoder; each
+    # weak decode's compute, its stages' span;
     # each strong decode's wait from its enqueue to its compute start,
     # the queueing delay a queue splits from service; the most strong
     # decodes held in the units' memory at once, landed and free to

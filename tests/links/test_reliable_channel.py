@@ -103,16 +103,22 @@ def seed_losing(pattern):
     loses_any_below = loss_probability(ACK_TICKS)
     keeps_any_above = loss_probability(FIRST_PACKET_TICKS)
     for seed in range(2_000_000):
-        generator = random.Random(seed)
-        draws = [generator.random() for _ in pattern]
-        pairs = list(zip(draws, pattern, strict=True))
-        lost_draws = [draw for draw, is_lost in pairs if is_lost]
-        kept_draws = [draw for draw, is_lost in pairs if not is_lost]
+        lost_draws, kept_draws = lost_and_kept_draws(seed, pattern)
         highest_lost = max(lost_draws, default=0.0)
         lowest_kept = min(kept_draws, default=1.0)
         if highest_lost < loses_any_below and lowest_kept > keeps_any_above:
             return seed
     raise AssertionError("no seed draws the pattern")
+
+
+def lost_and_kept_draws(seed, pattern) -> tuple:
+    """A seed's draws for the frames the pattern loses, then for the rest."""
+    generator = random.Random(seed)
+    draws = [generator.random() for _ in pattern]
+    pairs = list(zip(draws, pattern, strict=True))
+    lost_draws = [draw for draw, is_lost in pairs if is_lost]
+    kept_draws = [draw for draw, is_lost in pairs if not is_lost]
+    return lost_draws, kept_draws
 
 
 def send_at(engine, channel, tick, payload_bytes, delivered):
@@ -124,6 +130,11 @@ def send_at(engine, channel, tick, payload_bytes, delivered):
         channel.send(framed, tick, 0, delivered.append)
 
     engine.schedule(delay, send)
+
+
+def delivery_ticks_of(delivered) -> list:
+    """The tick each delivered transfer landed at, in delivery order."""
+    return [transfer.delivery_ticks for transfer in delivered]
 
 
 def test_a_lost_frame_is_resent_after_the_sequence_nak_hand_traced():
@@ -253,7 +264,7 @@ def test_a_lost_ack_is_made_good_by_the_timer_and_a_duplicate_ack():
     engine.run()
 
     starts = [record.timing.start_ticks for record in frames]
-    assert [transfer.delivery_ticks for transfer in delivered] == [598]
+    assert delivery_ticks_of(delivered) == [598]
     assert starts == [0, TIMEOUT_TICKS]
     assert engine.now == TIMEOUT_TICKS + 298 + PROPAGATION + 86 + PROPAGATION
 
@@ -293,7 +304,7 @@ def test_an_ack_that_moves_the_psn_fills_the_retry_count_again():
 
     engine.run()
 
-    deliveries = [transfer.delivery_ticks for transfer in delivered]
+    deliveries = delivery_ticks_of(delivered)
     assert deliveries == [10_598, 30_598]
 
 
@@ -323,7 +334,7 @@ def test_an_answer_while_the_message_waits_to_be_resent_is_dropped():
     with pytest.raises(RuntimeError, match="after 1 retries without"):
         engine.run()
     assert engine.now == 1698
-    assert [transfer.delivery_ticks for transfer in delivered] == [598]
+    assert delivery_ticks_of(delivered) == [598]
 
 
 def test_the_run_ends_at_the_last_acknowledgement_not_at_the_timer():
@@ -387,7 +398,7 @@ def test_an_acknowledged_message_is_let_go_under_loss():
     engine.run()
     gc.collect()
 
-    delivery_ticks = [transfer.delivery_ticks for transfer in delivered]
+    delivery_ticks = delivery_ticks_of(delivered)
     assert delivery_ticks == [1880, 2178]
     assert first_reference() is None
     assert second_reference() is None
@@ -415,8 +426,8 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
             send_at(engine, reliable, arrival, payload, by_reliable)
             send_at(engine, credit, arrival, payload, by_credit)
         engine.run()
-        reliable_deliveries = [item.delivery_ticks for item in by_reliable]
-        credit_deliveries = [item.delivery_ticks for item in by_credit]
+        reliable_deliveries = delivery_ticks_of(by_reliable)
+        credit_deliveries = delivery_ticks_of(by_credit)
         assert reliable_deliveries == credit_deliveries
 
 
@@ -497,7 +508,7 @@ def test_every_message_arrives_once_in_order_under_loss_property():
             send_at(engine, channel, arrival, payload, delivered)
         engine.run()
         sequences = [transfer.physical_sequence for transfer in delivered]
-        deliveries = [transfer.delivery_ticks for transfer in delivered]
+        deliveries = delivery_ticks_of(delivered)
         assert sequences == list(range(count))
         assert deliveries == sorted(deliveries)
 

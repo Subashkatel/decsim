@@ -160,23 +160,6 @@ def _manifest_of(run_dir):
     return json.loads(text)
 
 
-def _commit_of_this_tree():
-    """This test file's own checkout at HEAD, read without git.
-
-    Walked up from this file rather than from the module under test, so
-    a manifest that named some other tree would fail here. The container
-    the suite runs in has no git binary, which is why the git files are
-    read directly; the reader knows a worktree's .git file and the refs
-    it shares with the repo.
-    """
-    this_file = pathlib.Path(__file__)
-    here = this_file.resolve()
-    checkout = here
-    while not (checkout / ".git").exists():
-        checkout = checkout.parent
-    return run_folder._commit_from_git_files(checkout)
-
-
 def test_an_unknown_verb_prints_the_verbs_and_fails():
     with pytest.raises(SystemExit):
         command.main(["decode-everything"])
@@ -1839,6 +1822,7 @@ def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_point(tmp_path):
     assert pooled_rows == whole_rows
 
 
+@requires_git
 def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     tmp_path, monkeypatch
 ):
@@ -1847,9 +1831,14 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     A cluster task starts in the folder its job was submitted from and
     may import a checkout pinned somewhere else, so the manifest reads
     the tree decsim came from. Here the run is made from a directory
-    that is no checkout at all, and the commit is still the one this
-    test's own tree is at.
+    that is no checkout at all, with git silenced as in the container,
+    which reads the tree's git files instead; the commit is still the
+    one git itself reads for this test's own tree.
     """
+    rev_parse = ["git", "-C", str(REPOSITORY), "rev-parse", "HEAD"]
+    head = subprocess.run(rev_parse, check=True, capture_output=True, text=True)
+    commit_of_this_tree = head.stdout.strip()
+    monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     out_dir = tmp_path / "run"
     monkeypatch.chdir(tmp_path)
@@ -1858,7 +1847,7 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     manifest = _manifest_of(run_dir)
     recorded = manifest["git"]
 
-    assert recorded["commit"] == _commit_of_this_tree()
+    assert recorded["commit"] == commit_of_this_tree
     assert "dirty" in recorded
 
 

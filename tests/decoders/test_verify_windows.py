@@ -17,6 +17,7 @@ import decsim.decoders.verify_windows as verify_windows
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.machine as machine_module
+import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
 import tests.decoders.windows as windows
 
@@ -100,3 +101,31 @@ def test_the_referee_record_builds_the_referee_around_its_decoder():
 
     assert isinstance(referee, verify_windows.TesseractCheckedDecoder)
     assert isinstance(referee.inner, decoders.PresetLatencyDecoder)
+
+
+class _SizeBlindDecoder(decoders.PresetLatencyDecoder):
+    """A user row that predicts without reading the syndrome's size."""
+
+    def decode(self, job):
+        return decoding_records.DecodeResult(
+            job.operation_id, job.window_id, logical_observables=(0,)
+        )
+
+
+def test_the_referee_refuses_a_syndrome_that_does_not_fit_its_model():
+    """A skipped window would leave the audit short with nothing said."""
+    circuit = windows.memory_circuit(3, 3, 0.001)
+    requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
+    model = windows.whole_circuit_window(circuit, 3, requirement)
+    events, _observables = windows.sampled_shots(circuit, 1, 3)
+    job = windows.job_for(model, events[0])
+    fragment = job.payloads[0]
+    short_bits = fragment.bits[:-1]
+    job.payloads[0] = dataclasses.replace(
+        fragment, bits=short_bits, size_bits=len(short_bits)
+    )
+    inner = _SizeBlindDecoder(1.0)
+    referee = verify_windows.TesseractCheckedDecoder(inner)
+
+    with pytest.raises(ValueError, match="do not match the window error"):
+        referee.decode(job)

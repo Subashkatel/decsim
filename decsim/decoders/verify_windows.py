@@ -159,13 +159,6 @@ def _owned_observable_flips(model, outcome) -> tuple:
     physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
     referee_correction = numpy.asarray(outcome.physical_correction, dtype=bool)
     owned_correction = referee_correction & physical.owned
-    observables = physical.observables.astype(numpy.int64)
-    corrections = owned_correction.astype(numpy.int64)
-    flip_counts = observables @ corrections
-    flip_counts = numpy.asarray(flip_counts)
-    flat_counts = flip_counts.ravel()
-    flips = []
-    for count in flat_counts:
-        parity = int(count) % 2
-        flips.append(parity)
-    return tuple(flips)
+    observables = physical.observables
+    flips = decoder_module.parity_product(observables, owned_correction)
+    return decoder_module.int_tuple(flips)

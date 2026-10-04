@@ -187,7 +187,6 @@ def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):
 
 
 def test_a_path_ending_in_gz_holds_the_same_trace_compressed(traced, tmp_path):
-    """A trace path ending in .gz is written compressed."""
     machine, _result, document = traced
     path = tmp_path / "point1.trace.json.gz"
 

@@ -26,7 +26,7 @@ import examples.live_memory_example as live_memory_example
 def test_the_memory_circuit_is_stims_generated_circuit():
     workload = producers.memory_circuit(
         "surface_code:rotated_memory_z",
-        "2d",
+        6,
         distance=3,
         physical_error_probability=0.002,
     )

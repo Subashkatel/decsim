@@ -2,7 +2,6 @@
 
 import dataclasses
 import math
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
@@ -13,7 +12,6 @@ import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
-import decsim.tables as tables
 
 
 class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
@@ -64,7 +62,7 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         gamma_interval: tuple[float, float] = (-0.24, 0.66)
         converged_solution_count: int = 1
         bases: str = "together"
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "relay_bp"
 
         def __post_init__(self) -> None:
@@ -78,26 +76,10 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
                 _hold_as_float(self, "alpha")
             interval = _ordered_interval(self.gamma_interval)
             object.__setattr__(self, "gamma_interval", interval)
-            tables.row(strong_backend.BASIS_DECODES, "bases", self.bases)
 
         def build(self) -> "RelayBeliefPropagationDecoder":
             """A fresh decoder of these settings."""
             return RelayBeliefPropagationDecoder(settings=self)
-
-        @classmethod
-        def from_yaml(
-            cls,
-            section: Mapping,
-            clocks: config.ClockSettings,
-            section_name: str,
-        ) -> "RelayBeliefPropagationDecoder.Settings":
-            """Every key the section writes; absent is the default.
-
-            section_name is the tier section the row sits in, which a
-            refusal names.
-            """
-            del clocks
-            return tables.section_record(section_name, cls, section)
 
     def __init__(
         self,

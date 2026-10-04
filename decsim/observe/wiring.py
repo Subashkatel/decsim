@@ -1,8 +1,8 @@
-"""Every listener of one run, built from the observation section and wired.
+"""Every listener of one run, built from the observation settings and wired.
 
 The Machine builds the parts; this module builds what watches them
 and connects each listener to the sources it hears, in pipeline order.
-It is the only place that knows which yaml key builds which listener, so
+It is the only place that knows which setting builds which listener, so
 a new listener is one class in observe/ and one connection here
 (STYLE.md rule 7: observation is reached through the callbacks a
 component fires, never through a port, so a component runs with nothing

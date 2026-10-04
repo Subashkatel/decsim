@@ -31,7 +31,7 @@ free-runs unless production_mode is "continuous".
 import dataclasses
 import functools
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Optional
 
 import decsim.config as config
@@ -39,7 +39,6 @@ import decsim.engine
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.seeding as seeding
-import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 
@@ -49,11 +48,6 @@ class InfiniteFactory:
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The infinite factory has no keys of its own."""
-
-        @classmethod
-        def from_yaml(cls, section: Mapping) -> "InfiniteFactory.Settings":
-            """The section holds no key of this record's, so it is empty."""
-            return cls(**section)
 
         def build(
             self, engine: decsim.engine.Engine, round_ticks: int
@@ -128,16 +122,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             _check_count("return_ticks", self.return_ticks, minimum=0)
             _check_count("initial_store", self.initial_store, minimum=0)
             _check_probability("success_probability", self.success_probability)
-
-        @classmethod
-        def from_yaml(cls, section: Mapping) -> "DistillationFactory.Settings":
-            """The keys the yaml wrote; the three with no default must be."""
-            required = ("unit_count", "attempt_ticks", "correction_round_count")
-            _check_required_keys("distillation", section, required)
-            fields = _with_numbers(
-                section, "magic_state_factory", ("success_probability",)
-            )
-            return cls(**fields)
 
         def build(
             self, engine: decsim.engine.Engine, round_ticks: int
@@ -389,20 +373,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
                 "preparation_success_probability",
                 self.preparation_success_probability,
             )
-
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping
-        ) -> "MultiLevelDistillationFactory.Settings":
-            """The keys the yaml wrote; levels is a list of level mappings."""
-            _check_required_keys("multi_level", section, ("levels",))
-            levels = _levels_from_yaml(section["levels"])
-            probability_keys = ("preparation_success_probability",)
-            fields = _with_numbers(
-                section, "magic_state_factory", probability_keys
-            )
-            fields["levels"] = levels
-            return cls(**fields)
 
         def build(
             self, engine: decsim.engine.Engine, round_ticks: int
@@ -754,52 +724,6 @@ def _check_probability(name: str, value) -> None:
     probability = float(value)
     if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
         raise ValueError(f"{name} must be finite and in [0, 1]")
-
-
-def _with_numbers(section: Mapping, section_name: str, keys: tuple) -> dict:
-    """YAML 1.1 loads 1e-3 as text, so each number is read before use."""
-    fields = dict(section)
-    for key in keys:
-        if key in fields:
-            fields[key] = config.finite_number(
-                section, section_name, key, fields[key]
-            )
-    return fields
-
-
-def _check_required_keys(kind: str, section: Mapping, required: tuple) -> None:
-    """A row's keys with no default are written, or named as missing."""
-    missing = []
-    for key in required:
-        if key not in section:
-            missing.append(key)
-    if missing:
-        raise ValueError(
-            f"magic_state_factory kind {kind} needs {missing}; "
-            "configs/reference.yaml lists every key"
-        )
-
-
-def _levels_from_yaml(level_sections) -> tuple:
-    """The yaml's list of level mappings as DistillLevel records."""
-    level_keys = _distill_level_keys()
-    levels = []
-    for index, level_section in enumerate(level_sections):
-        level_name = f"magic_state_factory.levels[{index}]"
-        tables.refuse_unknown_keys(level_name, level_section, level_keys)
-        level_fields = _with_numbers(
-            level_section, level_name, ("success_probability",)
-        )
-        level = DistillLevel(**level_fields)
-        levels.append(level)
-    return tuple(levels)
-
-
-def _distill_level_keys() -> tuple:
-    names = []
-    for field in dataclasses.fields(DistillLevel):
-        names.append(field.name)
-    return tuple(names)
 
 
 def _with_the_papers_cycles(levels: tuple) -> tuple:

@@ -8,7 +8,7 @@ parts basis_split cuts (checked against Stim's own decomposition in
 tests/detector_error_model/test_basis_split.py), and the strong
 backend's split of the same window is the second referent. The wheel is
 the bb-decoders extra; the reference tests skip until it is installed.
-The yaml refusals need no wheel.
+The settings refusals need no wheel.
 """
 
 import dataclasses
@@ -299,10 +299,7 @@ def test_a_memory_strength_that_is_not_a_number_is_refused():
     )
 
 
-def test_a_bases_value_off_its_table_is_refused():
-    with pytest.raises(ValueError) as caught:
-        relay.RelayBeliefPropagationDecoder.Settings(bases="xz")
-    assert str(caught.value) == (
-        "bases 'xz' is not a row of its table; the rows are "
-        "['apart', 'together']"
-    )
+def test_a_bases_value_off_its_table_stops_the_build():
+    settings = relay.RelayBeliefPropagationDecoder.Settings(bases="xz")
+    with pytest.raises(KeyError, match="xz"):
+        settings.build()

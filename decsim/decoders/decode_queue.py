@@ -3,7 +3,7 @@
 gem5's instruction queue holds ready work in priority order and hands
 it out through one scheduling rule (src/cpu/o3/inst_queue.hh:160-178,
 scheduleReadyInsts); here the scheduler's pop (schedulers.py) is that
-rule. Under the yaml's decoder_manager.bulk_strong the STRONG POOL alone
+rule. Under DecoderManagerSettings.bulk_strong the STRONG POOL alone
 is served as one merged batch: every queued strong job, timing-only,
 becomes one decode serving every member request. Toshio et al. 2510.25222
 lines 1253-1264 ask for bulk decoding of one escalation's own

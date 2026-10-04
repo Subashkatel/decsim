@@ -69,7 +69,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     class Settings:
         """The Stim source has no keys: the circuit states every width."""
 
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "stim_device"
 
         def build(
@@ -531,7 +531,7 @@ class RecordedStimDevice(StimDevice):
         the source its array.
         """
 
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "recorded_stim"
 
         def build(
@@ -635,7 +635,7 @@ class BurstStimDevice(StimDevice):
         burst_center: Optional[tuple] = None
         burst_error_probability: float = 0.0
         burst_channels: tuple = BURST_CHANNELS
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "burst_stim"
 
         def __post_init__(self) -> None:
@@ -646,19 +646,6 @@ class BurstStimDevice(StimDevice):
             _check_center(self.burst_center)
             _check_burst_probability(self.burst_error_probability)
             _check_channels(self.burst_channels)
-
-        @classmethod
-        def from_yaml(cls, section: Mapping) -> "BurstStimDevice.Settings":
-            """The qpu section's burst keys; an absent key is its default.
-
-            A yaml list, the centre or the channels, reads as a tuple.
-            """
-            values = dict(section)
-            for key in ("burst_center", "burst_channels"):
-                value = values.get(key)
-                if isinstance(value, list):
-                    values[key] = tuple(value)
-            return cls(**values)
 
         def build(
             self, code: ports.CodeModel, circuit_arguments: Mapping
@@ -1020,8 +1007,7 @@ def _check_burst_probability(value) -> None:
     if _is_finite_number(value) and 0 <= value <= 0.75:
         return
     raise ValueError(
-        "qpu.burst_error_probability is a number from 0 to 0.75 (YAML "
-        f"reads 1e-3 as text; write 1.0e-3); got {value!r}"
+        f"qpu.burst_error_probability is a number from 0 to 0.75; got {value!r}"
     )
 
 

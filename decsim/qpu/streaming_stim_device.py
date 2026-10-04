@@ -41,7 +41,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     class Settings:
         """The live source has no keys: the fragments state every width."""
 
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "streaming_stim"
 
         def build(

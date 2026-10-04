@@ -6,17 +6,14 @@ The growth evidence it returns on every result feeds the cluster gap
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
-import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
-import decsim.tables as tables
 
 
 class UnionFindDecoder(decoder_module.WindowDecoderBase):
@@ -59,10 +56,8 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
         timing: Optional[cycle_count_module.Timing] = None
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "union_find"
-        # the yaml's keys, its cycle_count block read into timing
-        yaml_keys = ("weight_step", "cycle_count")
 
         def __post_init__(self) -> None:
             weight_step = evidence_records.normalized_weight_step(
@@ -79,25 +74,6 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         def build(self) -> "UnionFindDecoder":
             """A fresh decoder of these settings."""
             return UnionFindDecoder(self)
-
-        @classmethod
-        def from_yaml(
-            cls,
-            section: Mapping,
-            clocks: config.ClockSettings,
-            section_name: str,
-        ) -> "UnionFindDecoder.Settings":
-            """Both keys; absent is the default.
-
-            The cycle_count block is the row's timing, and a tier with
-            none is timed by the host's measured time, named here.
-            section_name is the tier section the row sits in, which a
-            refusal names.
-            """
-            values = dict(section)
-            block = values.pop("cycle_count", None)
-            values["timing"] = _timing_of(block, clocks, section_name)
-            return tables.section_record(section_name, cls, values)
 
     def __init__(self, settings: "UnionFindDecoder.Settings") -> None:
         decoder_module.WindowDecoderBase.__init__(self)
@@ -141,15 +117,6 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             decode_status,
             cluster_evidence=evidence,
         )
-
-
-def _timing_of(
-    block: Optional[Mapping], clocks: config.ClockSettings, section_name: str
-) -> cycle_count_module.Timing:
-    """The yaml's cycle_count block as a timing; no block is the host's."""
-    if block is None:
-        return cycle_count_module.HostMeasuredTime()
-    return cycle_count_module.CycleCount.from_yaml(block, clocks, section_name)
 
 
 def _status_of(evidence: evidence_records.UnionFindHardEvidence):

@@ -1,10 +1,8 @@
 """The collection: how a point's shots are cut and stopped.
 
 sinter's CollectionOptions (sinter/_data/_collection_options.py:34-38):
-an experiment's default and a point's own, or, read from a yaml, the
-collection section at the top of a file or in one sweep block, whose
-keys override the top's one by one. None of its keys enters a point's
-id, as sinter's strong id leaves the collection options out
+an experiment's default and a point's own. None of its keys enters a
+point's id, as sinter's strong id leaves the collection options out
 (sinter/_data/_task.py:167-204): collecting longer is the same point
 run longer.
 
@@ -25,19 +23,11 @@ from typing import Optional
 
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
-import decsim.experiments.refusal as refusal
 
 # QEC rounds per piece, every patch's rounds added up: a shot's cost
 # grows with its rounds, so a piece sized in rounds takes about as long
 # at any history length.
 DEFAULT_PIECE_ROUNDS = 20000
-KEYS = (
-    "max_failures",
-    "max_shots",
-    "max_core_seconds",
-    "min_shots",
-    "piece_rounds",
-)
 # the state of a prefix its time cap stopped, whose limits assume a
 # shot's time is independent of its failure
 TIME_CAP_STATE = "time cap"
@@ -67,22 +57,6 @@ class CollectionSettings:
         _check_core_seconds(self.max_core_seconds)
         _check_minimum(self.min_shots)
         _check_count(self.piece_rounds, "piece_rounds")
-
-    @classmethod
-    def from_yaml(
-        cls, top: Optional[Mapping], block: Optional[Mapping], where: str
-    ) -> "CollectionSettings":
-        """The top section's keys, the block's written over them.
-
-        where names the block in a refusal, as the other block checks do.
-        """
-        merged = {}
-        _add_section(merged, top, "the collection section")
-        _add_section(merged, block, f"{where} collection")
-        try:
-            return cls(**merged)
-        except ValueError as refused:
-            raise refusal.RefusalError(f"{where} {refused}") from refused
 
     def text(self) -> str:
         """Every key the collection sets and its value, as one phrase."""
@@ -294,26 +268,6 @@ def _round_shape_of(row: Mapping) -> tuple:
     outputs = fold.number_of(row["scored_outputs"])
     rounds = fold.number_of(row["rounds_per_output"])
     return (outputs, rounds)
-
-
-def _add_section(merged: dict, section: Optional[Mapping], name: str) -> None:
-    """One collection mapping's keys into the merged ones, each one known."""
-    if section is None:
-        return
-    keys_text = ", ".join(KEYS)
-    if not isinstance(section, Mapping):
-        raise refusal.RefusalError(
-            f"{name} is {section!r}; it is a mapping of {keys_text}"
-        )
-    written = set(section)
-    unknown = written - set(KEYS)
-    if unknown:
-        listed = sorted(unknown)
-        raise refusal.RefusalError(
-            f"{name} names {listed}, which are no collection keys; the "
-            f"keys are {keys_text} (configs/reference.yaml)"
-        )
-    merged.update(section)
 
 
 def _check_caps(settings: CollectionSettings) -> None:

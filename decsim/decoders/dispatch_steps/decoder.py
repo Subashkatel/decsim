@@ -27,7 +27,6 @@ measured on parts (measured_table's bases rows) or not at all.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
@@ -36,7 +35,6 @@ import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
-import decsim.tables as tables
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )
@@ -60,7 +58,7 @@ class DispatchStepsSettings:
     device: str = "gh200"
     path: str = "device"
     workers: int = 1
-    # the word the yaml and the reports name this row by
+    # the word the reports name this row by
     name = "dispatch_steps"
 
     def __post_init__(self) -> None:
@@ -70,21 +68,6 @@ class DispatchStepsSettings:
     def build(self) -> "DispatchStepsDecoder":
         """A fresh decoder of these settings."""
         return DispatchStepsDecoder(settings=self)
-
-    @classmethod
-    def from_yaml(
-        cls,
-        section: Mapping,
-        clocks: config.ClockSettings,
-        section_name: str,
-    ) -> "DispatchStepsSettings":
-        """The three keys the section writes; absent is the default.
-
-        section_name is the tier section the row sits in, which a refusal
-        names.
-        """
-        del clocks
-        return tables.section_record(section_name, cls, section)
 
 
 class DispatchSteps:

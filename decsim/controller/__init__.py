@@ -14,6 +14,5 @@ stream that feeds back, idle_rounds.py routes the rounds of a waiting
 patch under one of the idle policies in policies.py,
 conditional_release.py lets go of the operations that waited on a
 result, and instruction_output.py sends the instruction to the QPU.
-settings.py holds the controller's per-round costs and reads the idle
-policy's yaml section.
+settings.py holds the controller's per-round costs.
 """

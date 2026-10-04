@@ -1,7 +1,7 @@
 """The link settings refuse what no card may say.
 
-The yaml and the number cards are where link numbers enter decsim, so
-each check here is a boundary check (STYLE.md rule 4). The arithmetic
+The number cards are where link numbers enter decsim, so each check
+here is a boundary check (STYLE.md rule 4). The arithmetic
 is ns-3's DataRate (point-to-point-net-device.cc): the wire's rate is
 read exactly as the card writes it.
 """

@@ -381,7 +381,7 @@ def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
     assert threshold.column == "gth_eq4_wilson"
 
 
-def test_a_yaml_path_header_is_refused_naming_its_fact_header(tmp_path):
+def test_a_settings_path_header_is_refused_naming_its_fact(tmp_path):
     """Read as a threshold column it would leave its key unmatched.
 
     Matched on distance alone, the point would take the first row's
@@ -453,7 +453,7 @@ def test_a_read_table_record_needs_its_file_no_more(tmp_path):
 
 
 def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
-    """The seed text is the one the experiments layer's yaml points use."""
+    """The seed text is the one the experiments layer's points use."""
     settings = threshold_sources.OnlineThreshold.Settings(20.0)
     facts = _facts(distance=5, physical_error_probability=0.003)
 

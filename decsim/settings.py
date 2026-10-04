@@ -1,19 +1,17 @@
-"""The whole machine's settings: one record per yaml section.
+"""The whole machine's settings: one record per part.
 
 The aggregate object model of a run, kept apart from the build script
 that reads it. gem5 draws the same line: a component's parameters are
 its own Python class (src/python/m5/SimObject.py:204-205) and the
 configuration script in configs/ reads them
 (configs/deprecated/example/se.py), never the other way round. Each
-section's record is built by the package that owns it, and `row`
-resolves a section's `kind` against that package's plug-in table.
+part's record is defined by the package that owns it.
 """
 
 import dataclasses
 from collections.abc import Mapping
 from typing import Optional, Union
 
-import decsim.confidence.signals as confidence_signals
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
@@ -35,7 +33,6 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.settings as syndrome_buffer_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.boundary_policies as boundary_policies
@@ -45,47 +42,10 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# The yaml sections, in the order MachineSettings reads them. Each
-# section's own package owns its settings record and its plug-in table;
-# the root looks a kind up in that table once and refuses one that is
-# not a row, naming the rows (decsim/tables.py).
-SECTIONS = (
-    "clocks",
-    "qpu",
-    "controller",
-    "idle_policy",
-    "detection_events",
-    "links",
-    "weak_syndrome_buffer",
-    "strong_syndrome_buffer",
-    "windows",
-    "weak_decoder",
-    "strong_decoder",
-    "decoder_manager",
-    "escalation",
-    "pauli_frame",
-    "workload",
-    "magic_state_factory",
-    "observation",
-)
-# The sections from_mapping reads without a default; the rest fall back
-# to their settings record's defaults when the yaml leaves them out.
-REQUIRED_SECTIONS = (
-    "clocks",
-    "qpu",
-    "controller",
-    "links",
-    "weak_syndrome_buffer",
-    "strong_syndrome_buffer",
-    "windows",
-    "pauli_frame",
-    "workload",
-)
-
 
 @dataclasses.dataclass(frozen=True)
 class MachineSettings:
-    """One settings record per yaml section, plus the Python-only knobs.
+    """One settings record per part of the machine.
 
     Every field has a default, so a Python caller names only what
     differs from a timing-only run of three-qubit surface code patches
@@ -148,7 +108,7 @@ class MachineSettings:
     def decoder_settings_for(
         self, tier: str
     ) -> Optional[decoder_settings.DecoderPoolSettings]:
-        """The card of one decoder tier, named the way the yaml names it."""
+        """The pool of one decoder tier, by its tier word, weak or strong."""
         if tier == "weak":
             return self.weak_decoder
         assert tier == "strong", f"no decoder tier named {tier!r}"
@@ -167,10 +127,10 @@ class MachineSettings:
 
     @property
     def escalation_kind(self) -> str:
-        """The yaml's escalation.kind for these slots, which a trace prints.
+        """The word a trace names these slots' run by.
 
         The trace's process name and the plots that read it name a run
-        by this word (escalation/settings.py ESCALATION_KINDS).
+        by it: switching, strong_only or weak_baseline.
         """
         if self.switching is not None:
             return "switching"
@@ -217,113 +177,6 @@ class MachineSettings:
             return self
         resolved = dataclasses.replace(switching, threshold=threshold)
         return dataclasses.replace(self, switching=resolved)
-
-    @classmethod
-    def from_mapping(
-        cls, sections: Mapping, *, name: str, section_folders: Mapping
-    ) -> "MachineSettings":
-        """One yaml's sections, each handed to the package that owns it.
-
-        name labels the links card in the run's description; section_folders
-        maps a section to the folder of the yaml that wrote it, which the
-        escalation section's relative table path and the workload's
-        relative files resolve against.
-        """
-        unknown = set(sections) - set(SECTIONS)
-        if unknown:
-            listed = sorted(unknown)
-            raise ValueError(
-                f"the yaml has no section {listed}; the sections are "
-                f"{list(SECTIONS)}"
-            )
-        _check_section_shapes(sections)
-        clocks = config.ClockSettings.from_yaml(sections["clocks"])
-        idle_policy_section = sections.get("idle_policy", {})
-        detection_events_section = sections.get("detection_events", {})
-        escalation_section = sections.get("escalation", {})
-        decoder_manager_section = sections.get("decoder_manager", {})
-        observation_section = sections.get("observation", {})
-        factory_section = sections.get("magic_state_factory", {})
-        qpu = qpu_settings.QpuSettings.from_yaml(sections["qpu"])
-        written_controller = controller_settings.ControllerSettings.from_yaml(
-            sections["controller"], clocks
-        )
-        # the yaml's controller clock is the machine's, stated once
-        machine_clock = written_controller.clock
-        controller = dataclasses.replace(written_controller, clock=None)
-        idle_policy = controller_settings.idle_policy_from_yaml(
-            idle_policy_section
-        )
-        event_settings = detection_event_settings.DetectionEventSettings
-        detection_events = event_settings.from_yaml(
-            detection_events_section, clocks
-        )
-        links = link_profiles.from_yaml(sections["links"], clocks, name)
-        weak_syndrome_buffer = syndrome_buffer_settings.from_yaml(
-            sections["weak_syndrome_buffer"], "weak_syndrome_buffer", clocks
-        )
-        strong_section = sections["strong_syndrome_buffer"]
-        strong_syndrome_buffer = syndrome_buffer_settings.from_yaml(
-            strong_section, "strong_syndrome_buffer", clocks
-        )
-        weak_decoder = _tier_settings(sections, "weak_decoder", clocks)
-        strong_decoder = _tier_settings(sections, "strong_decoder", clocks)
-        decoder_manager = decoder_settings.DecoderManagerSettings.from_yaml(
-            decoder_manager_section, clocks
-        )
-        escalation_folder = section_folders.get("escalation")
-        switching = escalation_settings.SwitchingSettings.from_yaml(
-            escalation_section,
-            clocks,
-            escalation_folder,
-            confidence_signals.confidence_settings,
-        )
-        windows = window_settings.WindowSettings.from_yaml(
-            sections["windows"], clocks, switching
-        )
-        kind = escalation_settings.escalation_kind(escalation_section)
-        kept_sections = escalation_settings.ESCALATION_KINDS[kind]
-        if "weak_decoder" not in kept_sections:
-            weak_decoder = None
-        if "strong_decoder" not in kept_sections:
-            strong_decoder = None
-        pauli_frame = pauli_frame_module.PauliFrameConfig.from_yaml(
-            sections["pauli_frame"], clocks
-        )
-        workload_folder = section_folders.get("workload")
-        workload = workload_settings.WorkloadSettings.from_yaml(
-            sections["workload"], workload_folder
-        )
-        magic_state_factory = qpu_settings.factory_from_yaml(factory_section)
-        observation = observe_settings.ObservationSettings.from_yaml(
-            observation_section
-        )
-        window_check = observe_settings.window_check_from_yaml(
-            observation_section
-        )
-        if weak_decoder is not None:
-            weak_decoder = _checked(weak_decoder, window_check)
-        elif strong_decoder is not None:
-            strong_decoder = _checked(strong_decoder, window_check)
-        return cls(
-            clock=machine_clock,
-            qpu=qpu,
-            controller=controller,
-            idle_policy=idle_policy,
-            detection_events=detection_events,
-            links=links,
-            weak_syndrome_buffer=weak_syndrome_buffer,
-            strong_syndrome_buffer=strong_syndrome_buffer,
-            windows=windows,
-            weak_decoder=weak_decoder,
-            strong_decoder=strong_decoder,
-            decoder_manager=decoder_manager,
-            switching=switching,
-            pauli_frame=pauli_frame,
-            workload=workload,
-            magic_state_factory=magic_state_factory,
-            observation=observation,
-        )
 
 
 # The shipped machines' two clock domains: the chip's, at 250 MHz
@@ -409,7 +262,7 @@ def weak_decoder_baseline(
     physical_error_probability: float,
     round_period_microseconds: float,
 ) -> MachineSettings:
-    """configs/bases/weak_decoder_baseline.yaml: the weak decoder alone.
+    """The weak decoder alone.
 
     Real PyMatching answers every window on one chip unit, charged
     LILLIPUT's 28 ns, and each hop it prices is one fridge cycle on an
@@ -442,7 +295,7 @@ def strong_decoder_baseline(
     physical_error_probability: float,
     round_period_microseconds: float,
 ) -> MachineSettings:
-    """configs/bases/strong_decoder_baseline.yaml: the strong decoder alone.
+    """The strong decoder alone.
 
     Belief matching answers every window on one host unit, charged its
     measured wall clock. Each hop it prices is one cycle on an unbounded
@@ -648,61 +501,6 @@ def _one_cycle_paths(
         )
     profile_name = f"{links.profile_name} with {hops} at one cycle"
     return dataclasses.replace(links, **cards, profile_name=profile_name)
-
-
-def _checked(
-    pool: decoder_settings.DecoderPoolSettings, window_check
-) -> decoder_settings.DecoderPoolSettings:
-    """The pool of the tier that decodes the windows, with its referee.
-
-    The referee wraps that tier's decoder only, the one window_tier names;
-    window_check None leaves the pool as it is.
-    """
-    if window_check is None:
-        return pool
-    checked = window_check.Settings(inner=pool.algorithm)
-    return dataclasses.replace(pool, algorithm=checked)
-
-
-def _check_section_shapes(sections: Mapping) -> None:
-    """Every section the machine reads is there, and each holds its keys."""
-    missing = set(REQUIRED_SECTIONS) - set(sections)
-    if missing:
-        listed = sorted(missing)
-        raise ValueError(
-            f"the yaml needs the sections {listed}; configs/reference.yaml "
-            "holds every section with its keys"
-        )
-    for name, section in sections.items():
-        if not isinstance(section, Mapping):
-            sentence = _not_a_mapping_sentence(name, section)
-            raise ValueError(sentence)
-
-
-def _not_a_mapping_sentence(name: str, section) -> str:
-    """The refusal of a section written as one value, with its mapping form.
-
-    A section written as a bare word is a row's name, so the sentence
-    shows that word under the section's kind key.
-    """
-    sentence = (
-        f"the yaml section {name} holds {section!r}; a section is a "
-        "mapping of its keys, as in configs/reference.yaml"
-    )
-    if not isinstance(section, str):
-        return sentence
-    return f"{sentence}, so write {name}: {{kind: {section}}}"
-
-
-def _tier_settings(
-    sections: Mapping, tier: str, clocks: config.ClockSettings
-) -> Optional[decoder_settings.DecoderPoolSettings]:
-    """A tier's section, or no decoder when the yaml leaves it out."""
-    if tier not in sections:
-        return None
-    return decoder_settings.DecoderPoolSettings.from_yaml(
-        sections[tier], clocks, tier
-    )
 
 
 def _check_decode_slots(settings: MachineSettings) -> None:

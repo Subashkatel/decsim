@@ -36,7 +36,6 @@ import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.records.workload as workload_records
 
 
 class Port:
@@ -58,8 +57,8 @@ class Port:
     None instead, which is the neighbour a run does not have.
 
     Whether the peer answers the Protocol is not asked. Every bind site
-    is decsim's own build code, so no yaml and no call on the
-    experiments layer can offer a stranger, and one that a change offered
+    is decsim's own build code, so no call on the experiments layer
+    can offer a stranger, and one that a change offered
     would raise at its first call naming the method it lacks. The
     Protocol is what the port promises its reader, and what a new
     component written for it must answer.
@@ -1067,7 +1066,7 @@ class DecodeQueue(Protocol):
 class Decoder(Protocol):
     """One decoder: correctness and timing from one object.
 
-    Table rows: pymatching, unweighted_pymatching, belief_matching,
+    Rows: pymatching, unweighted_pymatching, belief_matching,
     union_find, tesseract, relay_bp, bposd, or a number (a preset
     latency on the MWPM path). sinter's abstract class
     with defaults (decsim/decoders/decoder.py, DecoderBase) fills start,
@@ -1091,7 +1090,7 @@ class Decoder(Protocol):
     logical class with that class's minimum weight, the growth a
     cluster-based decode did, or neither (decsim/records/decoding.py
     DecoderEvidence). A confidence signal declares the same set as its
-    requirement, and the yaml refuses a pairing the row cannot serve.
+    requirement, and the build refuses a pairing the row cannot serve.
     missing_evidence_reasons is how a row that a reader would expect to
     produce some evidence says why it does not; the refusal quotes it
     instead of the signal's general sentence. The unit's insides stay
@@ -1153,7 +1152,7 @@ class Decoder(Protocol):
 class DecoderSettings(Protocol):
     """A decoder row's settings record, as a tier and a confidence see it.
 
-    Every row of DECODERS (decsim/decoders/settings.py) declares a frozen
+    Every decoder row (decsim/decoders/) declares a frozen
     Settings dataclass that checks its own values, names its row and
     builds the decoder. A row that grows clusters also holds a
     weight_step and a timing, which a cluster confidence reads.
@@ -1412,7 +1411,7 @@ class Qpu(Protocol):
 class SyndromeSource(Protocol):
     """What the QPU reads out each round for an operation.
 
-    Table rows: stim_device, timing_only, syndrome_bits, recorded_stim,
+    Rows: stim_device, timing_only, syndrome_bits, recorded_stim,
     streaming_stim.
     Payload bits are raw measurement bits per round; a source with a
     detector formation table also answers DetectionEventFormer below,
@@ -1898,8 +1897,8 @@ class Framing(Protocol):
 class BoundaryPolicy(Protocol):
     """When a committed window ships its boundary to the windows after it.
 
-    Table rows: eager, held (BOUNDARY_POLICIES, windows/settings.py),
-    named by windows.boundaries. Eager ships at every commit; held ships
+    Rows: Eager and Held (windows/boundary_policies.py), held by
+    WindowSettings.boundary_policy. Eager ships at every commit; held ships
     only once the committing result is final. A provisional boundary that
     ships is never revised, so a run that may revise a weak result needs
     a row that holds. ships_provisional_boundaries is that fact, declared
@@ -1979,24 +1978,14 @@ class EscalationPolicy(Protocol):
 class ThresholdSource(Protocol):
     """Where the switching policy's threshold comes from.
 
-    Table rows: fixed, table, online (THRESHOLD_SOURCES,
-    escalation/settings.py). A source that audits by escalating (the
-    online row labels a kept window by re-decoding it on the strong
-    tier) needs one serial strong re-decode per window, so Switching
-    refuses it beside run_both_at_once and the double window.
-    reads_a_calibration_table says the point's number comes from an
-    offline calibration csv rather than from the section's card, so the
-    settings demand threshold_table. built_per_sweep_point says the
-    row builds one instance of itself for a whole sweep point, which
-    the experiments layer hands to every shot, because the row learns
-    across the point's windows; every other row is built by the root
-    from the point's threshold in nats, which is its one constructor
-    argument.
+    Rows: FixedThreshold, TableThreshold and OnlineThreshold
+    (escalation/threshold_sources.py). A source that audits by
+    escalating (the online row labels a kept window by re-decoding it on
+    the strong tier) needs one serial strong re-decode per window, so
+    Switching refuses it beside run_both_at_once and the double window.
     """
 
     audits_by_escalating: bool
-    reads_a_calibration_table: bool
-    built_per_sweep_point: bool
 
     def decide_keep(
         self,
@@ -2015,14 +2004,14 @@ class ThresholdSource(Protocol):
 class ConfidenceSignal(Protocol):
     """The soft output one window's decodes report, as the join sees it.
 
-    Table rows: complementary_gap, cluster_gap and extra_cluster_gap
+    Rows: complementary_gap, cluster_gap and extra_cluster_gap
     (decsim/confidence/); each row's Settings record builds it from the
     weak decoder and the threshold.
     source names the signal so the switching policy can refuse another
     one's, fault_model_requirement is what a window model must offer,
     decoder_evidence_requirement is what the decode itself must show
     (decsim/records/decoding.py DecoderEvidence) and is held against the
-    weak row's own declaration at the yaml boundary, evidence_refusal is
+    weak row's own declaration when the machine is built, evidence_refusal is
     the cited sentence that refusal prints, and forced_logical_classes
     are the classes the window must be decoded in, one job each, empty
     for a signal that reads one ordinary decode.
@@ -2070,9 +2059,9 @@ class RegionProposer(Protocol):
 class BoundaryPayload(Protocol):
     """How a boundary message is written on decoder_to_decoder.
 
-    Table rows: dense_seam_mask and sparse_seam_list
-    (decsim/windows/boundary_payloads.py), named by
-    windows.boundary_payload. The seam is the destination's oldest round
+    Rows: DenseSeamMask and SparseSeamList
+    (decsim/windows/boundary_payloads.py), held by
+    WindowSettings.boundary_payload. The seam is the destination's oldest round
     layer and the row turns it into the bits the wire carries.
     """
 
@@ -2084,7 +2073,7 @@ class BoundaryPayload(Protocol):
 class WindowingScheme(Protocol):
     """How an operation's rounds are cut into windows.
 
-    Table rows: sliding, parallel, sandwich, naive_online. The static
+    Rows: sliding, parallel, sandwich, naive_online. The static
     window graph of an operation, and when a window has its data.
 
     Three facts about the layout are declared rather than read off the
@@ -2133,11 +2122,10 @@ class RoundsPolicy(Protocol):
     _check_decode_owner_rounds).
 
     The policies are FixedRounds, PerOperationRounds, CodeRounds and
-    GateRounds (qpu/round_policies.py), with no table
-    and no yaml key: the memory_circuit row fixes its rounds, a Python
-    workload may pass its own (a PerOperationRounds may give an operation
-    none), and GateRounds is the default. The lattice-surgery unit of d
-    rounds per step is Horsman 1111.4022 Sec. 3.1 and Litinski
+    GateRounds (qpu/round_policies.py): a memory circuit fixes its rounds, a
+    Python workload may pass its own (a PerOperationRounds may give an
+    operation none), and GateRounds is the default. The lattice-surgery unit
+    of d rounds per step is Horsman 1111.4022 Sec. 3.1 and Litinski
     1808.02892.
     """
 
@@ -2185,7 +2173,7 @@ class MagicStateFactory(Protocol):
 class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 
-    Table rows: separate_decode_jobs, ignore (controller/policies.py,
+    Rows: separate_decode_jobs, ignore (controller/policies.py,
     beside the accounting they serve). relay carries one idle round
     through the idle accounting it is given (controller/idle_rounds.py);
     end_idle_period runs when an operation starts on the patch and, for
@@ -2207,8 +2195,8 @@ class IdlePolicy(Protocol):
 class CodeModel(Protocol):
     """A code card: the numbers the machine reads off a QEC code.
 
-    Table rows: rotated_surface, bivariate_bicycle (CODE_CARDS,
-    qpu/settings.py), named by qpu.code_card. A card is a record of
+    Rows: SurfaceCodeModel and BivariateBicycleCodeModel
+    (qpu/code_geometry.py), held by QpuSettings.code_card. A card is a record of
     numbers, not a stabilizer code: the machine prices decoder timing,
     so it asks a card for its name and distance, its window sizes, its
     own round period, the graph size a latency model prices, and the
@@ -2243,51 +2231,3 @@ class CodeModel(Protocol):
 
     def data_bits_per_readout(self, num_patches: int) -> int:
         """Data-qubit bits the final readout of this many patches adds."""
-
-
-@runtime_checkable
-class RowSettings(Protocol):
-    """A table row's own yaml keys, read into one record.
-
-    A row with keys of its own declares a nested frozen dataclass named
-    Settings that fills this: its fields are the keys, and from_yaml
-    reads and checks the ones the yaml wrote, which are all it is
-    handed. context is whatever the row's section passes on, nothing
-    for most sections, and for a decoder tier the run's clocks
-    (config.ClockSettings), since its timing names a clock domain, then
-    the tier's section name, since both tiers take the same rows and a
-    refusal names the key by its whole yaml path. A row with no keys
-    declares no Settings. The section splits its keys from the row's
-    and refuses a key neither declares (decsim/tables.py row_settings);
-    how the record reaches the row is its table's build call. The shape
-    is gem5's: a SimObject's parameters declared on its class
-    (gem5 src/mem/SimpleMemory.py:43-53) and handed to
-    its constructor as one Params record (src/mem/simple_mem.cc:53).
-    """
-
-    @classmethod
-    def from_yaml(cls, section, *context) -> "RowSettings":
-        """The record, read from the row's own keys the yaml wrote."""
-
-
-@runtime_checkable
-class WorkloadRow(Protocol):
-    """A workload row: what makes the operations the machine runs.
-
-    Table rows: producer, files (WORKLOADS, frontends/settings.py),
-    named by workload.kind. The root never builds a workload row; it
-    reads the class. The workload is made once per sweep point, so
-    every shot of a point runs the same program. gem5's Workload is the
-    same shape: a SimObject whose parameters sit on its class and whose
-    few answers the system reads before it runs
-    (gem5 src/sim/Workload.py:46-52, src/sim/workload.hh:103-105).
-    """
-
-    def workload(self, settings) -> workload_records.Workload:
-        """The row's workload at one sweep point."""
-
-    def maker(self, settings) -> Optional[dict]:
-        """What made the workload: its function, arguments and version.
-
-        None for a row that reads a workload already made.
-        """

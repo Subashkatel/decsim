@@ -26,7 +26,7 @@ class Switching:
     2510.25222 Sec. III A); otherwise the strong re-decode starts at the
     verdict, after the weak_decoder_to_strong_decoder hop (the serial
     modification of the same section). How the strong window is laid out is the
-    run's shape (the row escalation.strong_window names in STRONG_WINDOW_SHAPES,
+    run's shape (the row SwitchingSettings.strong_window holds,
     strong_window_shapes.py, which every refusal here names back), and whether
     queued re-decodes are batched is the decoder manager's (bulk_strong);
     check_plan holds the policy's knobs and its threshold source against both

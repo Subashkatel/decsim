@@ -1,25 +1,20 @@
-"""The tick, the clock domains a yaml prices its cycles on, and yaml paths.
+"""The tick, and the clock domains a part prices its cycles on.
 
 One microsecond is TICKS_PER_MICROSECOND ticks; every duration in the
-machine is an integer count of them. A yaml states its costs in cycles
-of a named clock domain (XQsim's shape: domain labels with frequencies
-over one tick core); ClockSettings hands each component the Clock of the
-domain it names, and the component charges its cycles on that clock's
-edges. A part that names no clock runs on the machine's
-(with_machine_clock).
+machine is an integer count of them. A part states its costs in cycles
+of a clock domain (XQsim's shape: domain labels with frequencies over
+one tick core); its settings hold that domain's Clock, and the component
+charges its cycles on the clock's edges. A part that names no clock runs
+on the machine's (with_machine_clock).
 """
 
 import dataclasses
 import math
-import types
-from collections.abc import Iterator, Mapping
 from typing import Optional, TypeVar
 
 TICKS_PER_MICROSECOND = 1_000_000
 # A settings record with a clock field, which a part may leave None.
 ClockedSettings = TypeVar("ClockedSettings")
-# A clocks section that names no domain.
-_NO_DOMAINS = types.MappingProxyType({})
 
 
 def microseconds_to_ticks(microseconds: float) -> int:
@@ -40,7 +35,7 @@ def format_ticks(ticks: int) -> str:
 
 
 def check_duration(name: str, value: float) -> None:
-    """Refuse a duration the yaml or a decsim.experiments call cannot mean."""
+    """Refuse a duration a caller cannot mean."""
     if value < 0:
         raise ValueError(f"{name} must be a nonnegative number")
     ticks = microseconds_to_ticks(value)
@@ -57,17 +52,17 @@ def check_microseconds(name: str, value: object) -> None:
 
 
 def check_capacity_bits(key: str, value) -> None:
-    """A memory's capacity in bits, checked where the yaml enters.
+    """A memory's capacity in bits, or None for an unbounded memory.
 
-    One owner for every memory the yaml sizes: a decoder unit's input
-    memory and the two syndrome buffers.
+    One owner for every memory a settings record sizes: a decoder unit's
+    input memory and the two syndrome buffers.
     """
     if value is None:
         return
     if is_whole_count(value):
         return
     raise ValueError(
-        f"{key} must be at least one bit, or null for an unbounded "
+        f"{key} must be at least one bit, or None for an unbounded "
         f"memory (got {value!r})"
     )
 
@@ -80,20 +75,6 @@ def check_cycles(name: str, cycles: int) -> None:
         raise ValueError(
             f"{name} must not be negative: cycles must be nonnegative"
         )
-
-
-def whole_count(
-    section: Mapping,
-    section_name: str,
-    key: str,
-    default: int,
-    unit: str,
-    minimum: int = 1,
-) -> int:
-    """A count of at least minimum, read from a yaml section's key."""
-    value = section.get(key, default)
-    check_whole_count(f"{section_name}.{key}", value, unit, minimum)
-    return value
 
 
 def check_whole_count(
@@ -109,25 +90,16 @@ def check_whole_count(
 
 
 def is_whole_count(value: object, minimum: int = 1) -> bool:
-    """Whether a yaml value is a whole number of at least minimum.
+    """Whether a value is a whole number of at least minimum.
 
     A bool is refused though Python counts it an int (bool is a subtype
-    of int), so a yaml `true` never stands for one of anything.
+    of int), so True never stands for one of anything.
     """
     if isinstance(value, bool):
         return False
     if not isinstance(value, int):
         return False
     return value >= minimum
-
-
-def boolean(
-    section: Mapping, section_name: str, key: str, default: bool = False
-) -> bool:
-    """An on-or-off knob, the default when the yaml is silent."""
-    value = section.get(key, default)
-    check_boolean(f"{section_name}.{key}", value)
-    return value
 
 
 def check_boolean(name: str, value: object) -> None:
@@ -141,49 +113,9 @@ def check_boolean(name: str, value: object) -> None:
     raise ValueError(f"{name} must be true or false, got {value!r}")
 
 
-def finite_number(
-    section: Mapping, section_name: str, key: str, default: float
-) -> float:
-    """A finite number the yaml wrote, the default when it is silent.
-
-    YAML 1.1 loads `1e-3`, a number with no decimal point, as text, so
-    text that reads as a number is one; a bool is refused though float
-    takes it, since a flag is never a rate or a probability.
-    """
-    value = section.get(key, default)
-    sentence = f"{section_name}.{key} must be a finite number (got {value!r})"
-    if isinstance(value, bool):
-        raise ValueError(sentence)
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(sentence) from None
-    if not math.isfinite(number):
-        raise ValueError(sentence)
-    return number
-
-
 def is_number(value: object) -> bool:
-    """Whether a yaml value is a number; a bool is not one."""
+    """Whether a value is a number; a bool is not one."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def setting_at(sections: Mapping, path: str, reader: str) -> object:
-    """The value at a dotted yaml path, a step that is not there refused.
-
-    One lookup serves every reader of a point's resolved sections: a
-    sweep axis's section and a whole-value reference. reader names who
-    asked.
-    """
-    value = sections
-    walked = ()
-    for name in path.split("."):
-        if not isinstance(value, Mapping) or name not in value:
-            sentence = _missing_setting_sentence(reader, path, walked, value)
-            raise ValueError(sentence)
-        value = value[name]
-        walked += (name,)
-    return value
 
 
 @dataclasses.dataclass(frozen=True)
@@ -256,80 +188,13 @@ def with_machine_clock(
     return dataclasses.replace(settings, clock=machine_clock)
 
 
-class ClockSettings(Mapping):
-    """The clock domains of the yaml's `clocks` section: name to megahertz.
-
-    A link, a controller, a decoder engine or a frame prices its cycles
-    on the domain it names; more domains (an mK stage, a 4K SFQ decoder)
-    are one more entry. Both shipped domains start at LILLIPUT's 250 MHz
-    (2108.06569 Table 4). The yaml reader alone reads it: `clock` hands
-    each section the domain's Clock, which is what a component charges
-    cycles on, and a settings record holds that Clock.
-    """
-
-    def __init__(self, megahertz_of: Mapping = _NO_DOMAINS) -> None:
-        self._megahertz_of = dict(megahertz_of)
-
-    def __getitem__(self, name: str) -> float:
-        return self._megahertz_of[name]
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._megahertz_of)
-
-    def __len__(self) -> int:
-        return len(self._megahertz_of)
-
-    @classmethod
-    def from_yaml(cls, section: Mapping) -> "ClockSettings":
-        """The `clocks` section: every value a positive frequency."""
-        megahertz_of = {}
-        for name, megahertz in section.items():
-            if not _is_frequency(megahertz):
-                raise ValueError(
-                    f"clock {name} must be a positive frequency in "
-                    f"megahertz, got {megahertz!r}"
-                )
-            megahertz_of[name] = float(megahertz)
-        return cls(megahertz_of)
-
-    def megahertz(self, clock: str) -> float:
-        """The named domain's frequency."""
-        if clock not in self:
-            known = sorted(self)
-            raise ValueError(
-                f"clock {clock!r} is not a clocks entry; the clocks are {known}"
-            )
-        return self[clock]
-
-    def clock(self, clock: str) -> Clock:
-        """The named domain's clock."""
-        frequency = self.megahertz(clock)
-        return Clock.from_megahertz(frequency)
-
-
-def _missing_setting_sentence(
-    reader: str, path: str, walked: tuple, value
-) -> str:
-    """Why a path stops where it does: a key that is not there, or a leaf."""
-    where = ".".join(walked) or "the yaml"
-    if not isinstance(value, Mapping):
-        return f"{reader} names {path}, but {where} is {value!r}, not a section"
-    names = path.split(".")
-    missing = names[len(walked)]
-    keys = list(value)
-    return (
-        f"{reader} names {path}, but {where} has no key {missing}; its keys "
-        f"are {keys}"
-    )
-
-
 def _is_frequency(value) -> bool:
     """A clock's megahertz: a finite positive number, never a flag or a word.
 
-    YAML reads `true` as a boolean, and Python's bool is a subclass of
-    int (the language reference, "The standard type hierarchy"), so a
-    flag would otherwise pass as one megahertz; a quoted number is a
-    word, as check_cycles treats it.
+    Python's bool is a subclass of int (the language reference, "The
+    standard type hierarchy"), so a flag would otherwise pass as one
+    megahertz; a number written as text is a word, as check_cycles
+    treats it.
     """
     if isinstance(value, bool):
         return False

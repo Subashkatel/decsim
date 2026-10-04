@@ -53,9 +53,9 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per sweep point, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on. A point's mean per shot on a path or a memory class is a counter's sum over those rows divided by the point's distinct seeds; `references` and `referenced_rounds` repeat on every row of a shot, so they count once per seed |
 | `run.json` | `decsim/experiments/run_folder.py`, `write_run_record` | one object: what ran, where, and with which library versions |
-| `<run file>.py`, `config/` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of the run file: a Python run file under its own name beside the results, or every yaml file in the config chain in `config/`, each at its place relative to the others, so every `extends` still resolves. The copy is written once: a later run into the folder must bring the same text, or a run file whose points have the ids `run.json` recorded, which differs only in how far they run (a pilot's caps raised) and replaces the copy; any other run file is refused |
+| `<run file>.py` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | a verbatim copy of the run file, under its own name beside the results. The copy is written once: a later run into the folder must bring the same text, or a run file whose points have the ids `run.json` recorded, which differs only in how far they run (a pilot's caps raised) and replaces the copy; any other run file is refused |
 | `code_state.patch` | `decsim/experiments/run_folder.py`, `snapshot_code_state` | `git diff HEAD`, and a patch creating each untracked file git does not ignore, written only when there is either; its sha256 is `run.json`'s `git.patch_sha256` |
-| `points/<name>/machine.json` | `decsim/experiments/run_folder.py`, `record_point` | one per point, in a folder named by the point's name: its content `id`, its `name`, its metadata, the seeds this folder ran of it (ranges of first and how many, joined from its pieces), `sections`, the yaml the point resolved to with its axes placed and its references resolved (null for a point a Python caller built), `maker`, what the workload's row says made it for this point (the `producer` row answers its `function`, the point's own `arguments` and its package's `version`; the `files` row and a Python-built workload answer null), every setting, each record under its `class` (module and qualified name) beside its fields, as gem5's `config.json` writes each object's type, so two records with the same fields are two points, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
+| `points/<name>/machine.json` | `decsim/experiments/run_folder.py`, `record_point` | one per point, in a folder named by the point's name: its content `id`, its `name`, its metadata, the seeds this folder ran of it (ranges of first and how many, joined from its pieces), every setting, each record under its `class` (module and qualified name) beside its fields, as gem5's `config.json` writes each object's type, so two records with the same fields are two points, and the values the build derives from them (`built`: the code card, the window sizes a null resolves to, the rows the plan built, the run plan) |
 | `points/<name>/inputs/` | `decsim/experiments/run_folder.py`, `record_point` | the workload the point ran, as the `files` workload row reads it (`operations.json`, and `circuit.stim` with `measurement_rounds.json` or `fragments/`), and `hashes.json`, each file's sha256 |
 | `result.json` | `decsim/experiments/run_folder.py`, `write_shot` | `decsim run --seed` and the two Deltakit examples only: every field of the shot's result |
 | `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file. How long the data sat is read from it: a structure's stays are the complete events on its lane whose `cat` holds `residence`, each from `args.tick` for `dur` microseconds, and a link path's waits are the `args.queue_wait_ticks` of the complete events on its lane, whose `cat` holds `link` |
@@ -83,27 +83,23 @@ its maximum.
 A point is named by `point_id`, its content id, as sinter's csv names
 a task by its `strong_id` (`sinter/_data/_csv_out.py:69-77`); it is
 also the `id` in its `machine.json`. Right after it come the
-point's swept values, one column per yaml path the sweep sets, named
-by that path (`qpu.distance`,
+point's swept values, one column per swept path, a name the points'
+metadata holds (`qpu.distance`,
 `workload.arguments.physical_error_probability`), in the order the
-sweep first sets them (`decsim/experiments/run_folder.py`,
+points first set them (`decsim/experiments/run_folder.py`,
 `swept_values`). Every other file below names its point by the same
 columns, and `algorithm` follows them. The values the design fixed come
 first and what was measured after, one variable per column, which is
 Wickham's tidy table (Tidy Data, J. Stat. Softw. 59(10), 2014, section
 2.3), so a reader groups, filters and plots by a column with no parsing.
 
-Every cell is the value the point ran with, read from its resolved
-yaml: a swept reference such as `${windows.commit_rounds}` is written
-as the value it names, a mapping as its child axes changed it, and a
-point whose block did not set a path holds the value its yaml resolved
-to there. A path its yaml does not hold is an empty cell. A string or a number is written as itself, and
-any other value (a flag, a null, a whole decoder row an axis set) as one
-cell of compact json with its keys sorted, as sinter writes
-`json_metadata` (`sinter/_data/_csv_out.py:35-37`). The typed value is
-in the point's `machine.json`. A column's unit is in its name
-(`_us` microseconds, `_bits`, `_per_shot`), and a swept path's meaning
-and unit are its key's in `configs/reference.yaml`.
+Every cell is the point's metadata value at that name, and a point
+whose metadata does not hold the name has an empty cell. A string or a
+number is written as itself, and any other value (a flag, a null, a
+whole record) as one cell of compact json with its keys sorted, as
+sinter writes `json_metadata` (`sinter/_data/_csv_out.py:35-37`). The
+typed value is in the point's `machine.json`. A column's unit is in its
+name (`_us` microseconds, `_bits`, `_per_shot`).
 
 | Column | What it is |
 | --- | --- |
@@ -221,11 +217,9 @@ One run is outside that sum, and knowingly: under
 `escalation.run_both_at_once` the weak attempt and the strong decode
 overlap rather than follow each other, so adding both would count the
 same wall time twice. `tests/experiments/test_measure.py` asserts the
-identity window by window on `configs/bases/weak_decoder_baseline.yaml`,
-`configs/examples/two_tiers.yaml`,
-`configs/experiments/switching/redo_window_switching.yaml` and
-`configs/experiments/switching/cluster_gap_switching.yaml`, which are a
-run with no signal to compute, a run whose signal is a second
+identity window by window on `decsim.settings.weak_decoder_baseline`,
+`examples/two_tiers.py`, and the `redo_window_d3` and `cluster_gap_d3`
+points of `experiments/switching/run.py`, which are a run with no signal to compute, a run whose signal is a second
 forced-class solve, the same on a host-clock strong tier, and a run
 whose signal is a priced walk.
 
@@ -384,8 +378,8 @@ One object. Its keys, from `write_run_record` in
 
 | Key | What it is |
 | --- | --- |
-| `run_files` | the run file, or the yaml chain in the order it was read; empty for a run no file describes |
-| `points` | the experiment's point ids in its order, a point two yaml blocks name listed once: the order a fold writes its rows in |
+| `run_files` | the run file; empty for a run no file describes |
+| `points` | the experiment's point ids in its order: the order a fold writes its rows in |
 | `git` | the `commit`, whether the checkout was `dirty`, and `patch_sha256`, the sha256 of its `code_state.patch` (null when it has none), read once when the process started; a run or a fold stops on a `run.json` or `piece.json` without `patch_sha256`, which an older tree wrote |
 | `container` | the container image, when one was in use |
 | `versions` | the Python version, and `packages`: every installed package and its version |

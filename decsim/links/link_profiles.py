@@ -1,4 +1,4 @@
-"""The link number cards: the four shipped rows and the yaml's own.
+"""The link number cards decsim ships.
 
 logical_reference_profile is the default when no links card is given:
 each hop priced from a system of decsim's scale, a surface-code patch on
@@ -10,10 +10,8 @@ those latencies and provisions finite rates from the run's geometry so
 contention becomes measurable; capacity_scale sweeps the whole fabric.
 The roce_v2_cpu, roce_v2_gpu and nvqlink_gpu rows are the reference card
 with the strong tier's off-board path priced by a measured RoCE round
-trip. path_card
-prices one path in cycles of a clock, a per-transfer setup cost
-(setup_cycles_per_transfer) included, and from_yaml puts each of the
-yaml's own cards through it.
+trip. path_card prices one path in cycles of a clock, a per-transfer
+setup cost (setup_cycles_per_transfer) included.
 
 Every number carries a source string on the settings record it sets,
 and a payload's source also travels into the traffic report with every
@@ -24,16 +22,11 @@ it as the machine's links setting.
 
 import dataclasses
 import fractions
-import math
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
-import decsim.links.fabric as fabric
 import decsim.links.settings as settings
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.tables as tables
 
 # A decoder result reaches the frame as one bit per logical observable, the
 # logical-frame convention: Caune et al. 2410.05202 return one Boolean per
@@ -112,7 +105,7 @@ _REFERENCE_CYCLE_MICROSECONDS = 1 / _REFERENCE_CLOCK_MEGAHERTZ
 # control over further links to the pulse generators (lines 184-199).
 # The readout hop starts where Table I's acquisition window ends, which
 # decsim's round period already holds, and it includes turning the signal
-# into bits, which is why the card is the reference number a yaml's own
+# into bits, which is why the card is the reference number a caller's own
 # readout cost must not repeat. Each qubit has its own demodulation
 # channel (QubiC, Fruitwala et al. 2404.15260, lines 709-715), so a
 # round's bits arrive in parallel and the hop serializes nothing.
@@ -283,17 +276,6 @@ ROCE_V2_REPLY_LEG = (
     "the reply's one-sided write back to the controller, one half of the "
     "measured round trip less the echo payload's time on the cable; the "
     "paper gives no per-direction split"
-)
-
-
-# The keys a path's card writes: the first three on every card, the rest
-# only when the path has lanes, a setup, a header or a packet protocol.
-_REQUIRED_CARD_KEYS = ("latency_cycles", "clock", "bits_per_cycle")
-_CARD_KEYS = _REQUIRED_CARD_KEYS + (
-    "channels",
-    "setup_cycles_per_transfer",
-    "header_bits_per_transfer",
-    "protocol",
 )
 
 
@@ -629,45 +611,6 @@ def _measured_round_trip_card(
     return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
 
 
-class LogicalReferenceFabric:
-    """The default row: the reference card's latencies and rates.
-
-    A transfer costs its latency plus its bits over the hop's rate, and
-    transfers on one hop queue for its wire. This is the row a yaml gets
-    when it names no kind, and the numbers its per-path cards override.
-    """
-
-    @staticmethod
-    def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
-        return logical_reference_profile()
-
-
-class BandwidthLimitedFabric:
-    """The same fabric with finite rates, provisioned from the geometry.
-
-    Every channel carries exactly its nominal traffic in one commit
-    region (the readout and store hops: one round's bits in one round
-    period), so contention becomes measurable and capacity_scale sweeps
-    the whole fabric. Its numbers come from the run's own geometry, not from the
-    links section, which is why base_card refuses a yaml and names what
-    a caller has to give it.
-    """
-
-    @staticmethod
-    def base_card() -> settings.FabricSettings:
-        """Refused: this row provisions itself from the run's geometry."""
-        raise ValueError(
-            "links.kind bandwidth_limited provisions every channel from "
-            "the sweep point's own geometry (the syndrome bits per round, "
-            "the round period, the commit and buffer rounds), which the "
-            "links section does not carry and which is known only per "
-            "point; build the card with "
-            "link_profiles.bandwidth_limited_profile(...) and pass it as "
-            "the machine's links setting"
-        )
-
-
 class RoceV2CpuFabric:
     """The reference card with the strong path on Backline's CPU round trip.
 
@@ -681,7 +624,7 @@ class RoceV2CpuFabric:
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
+        """The reference card with this row's strong paths."""
         return _measured_round_trip_card(
             ROCE_V2_CPU_ROUND_TRIP_MICROSECONDS,
             ROCE_V2_CPU_SOURCE,
@@ -706,7 +649,7 @@ class RoceV2GpuFabric:
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override."""
+        """The reference card with this row's strong paths."""
         return _measured_round_trip_card(
             ROCE_V2_GPU_ROUND_TRIP_MICROSECONDS,
             ROCE_V2_GPU_SOURCE,
@@ -729,7 +672,7 @@ class NvqlinkGpuFabric:
 
     @staticmethod
     def base_card() -> settings.FabricSettings:
-        """The numbers a yaml's per-path cards override.
+        """The reference card with this row's strong paths.
 
         The connection is unreliable by choice (2510.25213 lines
         376-388), so no frame is retransmitted: the ideal protocol row,
@@ -745,52 +688,6 @@ class NvqlinkGpuFabric:
             NVQLINK_ECHO_PAYLOAD_BITS,
             "nvqlink_gpu",
         )
-
-
-# links.kind names one of these rows: which numbers the section's
-# per-path cards override. A row answers base_card at the yaml boundary.
-LINK_FABRICS = {
-    "logical_reference": LogicalReferenceFabric,
-    "bandwidth_limited": BandwidthLimitedFabric,
-    "roce_v2_cpu": RoceV2CpuFabric,
-    "roce_v2_gpu": RoceV2GpuFabric,
-    "nvqlink_gpu": NvqlinkGpuFabric,
-}
-
-
-def from_yaml(
-    section: Mapping, clocks: config.ClockSettings, name: str
-) -> settings.FabricSettings:
-    """The yaml's `links` section: a kind, and one card per path over it.
-
-    A card prices its path in cycles of a named clock domain: latency,
-    bits per cycle per lane (null is unbounded), the lane count, an
-    optional per-transfer setup cost, an optional per-transfer header
-    in bits, and an optional packet protocol (a PROTOCOLS row of
-    links/fabric.py, with its framing, buffer and recovery keys; none is
-    the ideal row). A null card keeps the chosen row's
-    numbers for that path. The config prices readout classification on
-    its own line, so its qpu_to_controller card is link propagation only,
-    and the fabric says so.
-    """
-    source = f"configs/{name}.yaml links"
-    kind = section.get("kind", "logical_reference")
-    row = tables.row(LINK_FABRICS, "links.kind", kind)
-    _check_section_names(section)
-    profile = row.base_card()
-    replacements = {}
-    for path_name, card in section.items():
-        if path_name == "kind":
-            continue
-        if card is None:
-            continue
-        _check_card(path_name, card)
-        replacements[path_name] = _carded_path(
-            profile, path_name, card, clocks, source
-        )
-    return dataclasses.replace(
-        profile, **replacements, profile_name=f"{name}.yaml"
-    )
 
 
 def path_card(
@@ -918,144 +815,6 @@ def _roce_v2_strong_paths(
         "strong_buffer_to_strong_decoder": strong_buffer_to_strong_decoder,
         "strong_decoder_to_frame": strong_decoder_to_frame,
     }
-
-
-def _check_section_names(section: Mapping) -> None:
-    """The links section names the kind and paths, and nothing else."""
-    path_names = []
-    for path in transfer_records.LinkPath:
-        path_names.append(path.value)
-    for section_name in section:
-        if section_name == "kind":
-            continue
-        if section_name not in path_names:
-            raise ValueError(
-                f"links names {section_name!r}, which is not a path; the "
-                f"paths are {path_names}"
-            )
-
-
-def _check_card(path_name: str, card) -> None:
-    """A path's card is a mapping of the card keys, the first three written.
-
-    Refused here, once, with the card's yaml name, so a card never reaches
-    the arithmetic below as a list or with a key missing, and a misspelt
-    key is never read as the default of the key it meant.
-    """
-    card_name = f"links.{path_name}"
-    if not isinstance(card, Mapping):
-        raise ValueError(
-            f"{card_name} holds {card!r}; a path's card is a mapping of "
-            f"{list(_CARD_KEYS)}, or null for the row's own numbers"
-        )
-    tables.refuse_unknown_keys(card_name, card, _CARD_KEYS)
-    missing = [key for key in _REQUIRED_CARD_KEYS if key not in card]
-    if missing:
-        raise ValueError(
-            f"{card_name} needs {missing}; a card writes "
-            f"{list(_REQUIRED_CARD_KEYS)}, with bits_per_cycle null for an "
-            f"unbounded wire"
-        )
-    _check_bits_per_cycle(card_name, card["bits_per_cycle"])
-    lane_count = card.get("channels", 1)
-    _check_lane_count(card_name, lane_count)
-    _check_cycle_counts(card_name, card)
-    header_bits = card.get("header_bits_per_transfer", 0)
-    _check_header_bits(card_name, header_bits)
-
-
-def _check_cycle_counts(card_name: str, card: Mapping) -> None:
-    """The latency and the setup, when written, are whole cycle counts."""
-    config.check_cycles(f"{card_name}.latency_cycles", card["latency_cycles"])
-    setup_cycles = card.get("setup_cycles_per_transfer")
-    if setup_cycles is None:
-        return
-    setup_name = f"{card_name}.setup_cycles_per_transfer"
-    config.check_cycles(setup_name, setup_cycles)
-
-
-def _check_bits_per_cycle(card_name: str, bits_per_cycle) -> None:
-    """A lane's rate is a positive finite number, or null for no bound.
-
-    A yaml `true` is a boolean, which Python would read as the number 1,
-    so it is refused with the rest rather than priced as one bit.
-    """
-    if bits_per_cycle is None:
-        return
-    if _is_positive_number(bits_per_cycle):
-        return
-    raise ValueError(
-        f"{card_name}.bits_per_cycle is {bits_per_cycle!r}; it is the "
-        f"positive number of bits each lane moves per cycle, or null for "
-        f"an unbounded wire"
-    )
-
-
-def _check_lane_count(card_name: str, lane_count) -> None:
-    """A card's lanes are a positive whole number, never a yaml boolean."""
-    if config.is_whole_count(lane_count):
-        return
-    raise ValueError(
-        f"{card_name}.channels is {lane_count!r}; it is the positive whole "
-        f"number of parallel lanes the path's wire has"
-    )
-
-
-def _check_header_bits(card_name: str, header_bits) -> None:
-    """A card's framing is a whole number of bits, zero or more."""
-    if config.is_whole_count(header_bits, 0):
-        return
-    raise ValueError(
-        f"{card_name}.header_bits_per_transfer is {header_bits!r}; it is "
-        f"the whole number of framing bits every transfer of the path "
-        f"carries, zero or more"
-    )
-
-
-def _is_positive_number(value) -> bool:
-    """A finite number above zero, never a yaml boolean."""
-    if isinstance(value, bool):
-        return False
-    if not isinstance(value, (int, float)):
-        return False
-    return 0 < value < math.inf
-
-
-def _carded_path(
-    links: settings.FabricSettings,
-    path_name: str,
-    card: Mapping,
-    clocks: config.ClockSettings,
-    source: str,
-) -> settings.PathSettings:
-    """The yaml card of one path, its clock named in the clocks section."""
-    clock = clocks.clock(card["clock"])
-    protocol = _card_protocol(path_name, card, clock)
-    lane_count = card.get("channels", 1)
-    setup_cycles = card.get("setup_cycles_per_transfer")
-    if setup_cycles is None:
-        setup_cycles = 0
-    header_bits = card.get("header_bits_per_transfer", 0)
-    return path_card(
-        links,
-        path_name,
-        clock=clock,
-        latency_cycles=card["latency_cycles"],
-        bits_per_cycle=card["bits_per_cycle"],
-        source=source,
-        lane_count=lane_count,
-        setup_cycles_per_transfer=setup_cycles,
-        header_bits_per_transfer=header_bits,
-        protocol=protocol,
-    )
-
-
-def _card_protocol(path_name: str, card: Mapping, clock: config.Clock):
-    """The card's protocol, counted on its clock; None when it names none."""
-    section = card.get("protocol")
-    if section is None:
-        return None
-    return fabric.protocol_settings_from_yaml(section, clock, path_name)
 
 
 class _Provisioning:

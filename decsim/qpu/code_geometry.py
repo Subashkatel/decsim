@@ -18,7 +18,6 @@ Z checks, the [[144, 12, 12]] gross code by default.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 
@@ -148,13 +147,6 @@ class BivariateBicycleCodeModel:
                     f"logical_qubit_count={self.logical_qubit_count!r}, "
                     f"qubit_count={self.qubit_count!r}"
                 )
-
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping
-        ) -> "BivariateBicycleCodeModel.Settings":
-            """The qpu section's qubit counts; absent is the gross code's."""
-            return cls(**section)
 
         def build(
             self,

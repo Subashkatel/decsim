@@ -1,4 +1,4 @@
-"""The yaml's `detection_events` section: where the former sits, and its cost.
+"""The detection events' settings: where the former sits, and its cost.
 
 A detection event is a parity of raw measurement outcomes
 (detector_formation.py), so its value is the same wherever the machine
@@ -9,16 +9,14 @@ published seats are four: the controller's workstation (Google
 2510.21600 lines 234-236), inside the decoder (Caune 2410.05202 lines
 1252-1255, LILLIPUT 2108.06569 lines 500-509, cudaqx
 libs/qec/lib/decoder.cpp:426-432) and offline (Deltakit through Stim's
-compile_m2d_converter). This section names the seats on decsim's path
+compile_m2d_converter). These settings name the seats on decsim's path
 that do it.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
-import decsim.tables as tables
 
 # The points on the path from the controller to a decoder where the
 # former may sit, in path order: the controller's assembler, the two
@@ -51,8 +49,6 @@ STRONG_PATH = ("controller", "strong_syndrome_buffer", "strong_decoder")
 # rounds of an escalated region reach them from a store the weak side
 # already read, so they read the raw round before the region too.
 STRONG_SIDE_SEATS = ("strong_syndrome_buffer", "strong_decoder")
-
-_KEYS = ("formed_at", "clock", "latency_cycles", "cycles_per_round")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,25 +85,6 @@ class DetectionEventSettings:
         )
         _check_seats(self.formed_at)
 
-    @classmethod
-    def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
-    ) -> "DetectionEventSettings":
-        """The section's seats and cost, on its clock when it names one."""
-        tables.refuse_unknown_keys("detection_events", section, _KEYS)
-        formed_at = _formed_at(section)
-        clock = None
-        if "clock" in section:
-            clock = clocks.clock(section["clock"])
-        latency_cycles = section.get("latency_cycles", 0)
-        cycles_per_round = section.get("cycles_per_round", 0)
-        return cls(
-            formed_at=formed_at,
-            clock=clock,
-            latency_cycles=latency_cycles,
-            cycles_per_round=cycles_per_round,
-        )
-
     def strong_side_seat(self) -> Optional[str]:
         """The seat past the weak syndrome buffer that forms; None for none.
 
@@ -125,17 +102,6 @@ class DetectionEventSettings:
             return 0
         after_the_first = round_count - 1
         return self.latency_cycles + self.cycles_per_round * after_the_first
-
-
-def _formed_at(section: Mapping) -> tuple:
-    """The formed_at list as a tuple; a single seat is refused as a list."""
-    formed_at = section.get("formed_at", ["controller"])
-    if not isinstance(formed_at, list):
-        raise ValueError(
-            f"detection_events.formed_at is a list of seats, as in "
-            f"[{formed_at}]; got {formed_at!r}"
-        )
-    return tuple(formed_at)
 
 
 def _check_seats(formed_at: tuple) -> None:

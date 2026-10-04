@@ -5,10 +5,9 @@ decoder copies its input and whether it copies the boundary fold, both
 copy in the control block, and its switching block adds the strong tier
 and its priced links. So the blocks of experiments/data_movement/run.py
 must differ in exactly those settings and in nothing else, and the pair
-a decoder pool refuses, both in place, must not be among them.
+that stops a run, both in place, must not be among them.
 """
 
-import dataclasses
 import pathlib
 
 import pytest
@@ -136,18 +135,3 @@ def test_the_study_holds_the_four_blocks_and_every_point_builds_its_task():
     tasks = [experiment.task_of(point) for point in study.points]
 
     assert len(tasks) == len(STUDY_BLOCKS) * 3
-
-
-def test_reading_the_input_in_place_and_folding_in_place_is_refused():
-    """Both in place, refused where the decoder pool is made.
-
-    Folding into the unit's memory needs the unit's own copy of the
-    rounds, and a tier that reads its input in place has none, so no
-    block of the study names that pair and the pool says why.
-    """
-    control = block_settings(CONTROL).weak_decoder
-
-    with pytest.raises(ValueError, match="boundary_fold in_place\\) needs"):
-        dataclasses.replace(
-            control, copies_input=False, copies_boundary_fold=False
-        )

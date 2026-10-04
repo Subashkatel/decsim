@@ -32,7 +32,7 @@ import pathlib
 import resource
 import sys
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Optional
 
 import numpy
@@ -48,8 +48,8 @@ import decsim.windows.built_window_models as built_window_models
 # The key a record's class is written under beside its fields. No field
 # can take it, since class is a Python keyword.
 RECORD_CLASS_KEY = "class"
-# confidence_shot_count's word for every shot of a point, in the yaml
-# and in a piece's record
+# confidence_shot_count's word for every shot of a point in a piece's
+# record
 EVERY_SHOT = "all"
 
 
@@ -218,21 +218,6 @@ def imported_module_versions() -> dict:
         if version is not None:
             versions[name] = version
     return versions
-
-
-def unique_tasks(tasks: Iterable[Task]) -> list:
-    """The tasks in first-seen order, same strong id merged to one.
-
-    The merged task keeps the first block's calibrator, so an online
-    switching point named in two blocks calibrates once over all its
-    shots.
-    """
-    task_by_id = {}
-    for task in tasks:
-        strong_id = task.strong_id()
-        task_by_id.setdefault(strong_id, task)
-    unique = task_by_id.values()
-    return list(unique)
 
 
 def run_shot(task: Task, seed: int, *, built_models=None) -> Shot:
@@ -437,8 +422,7 @@ def _json_mapping(mapping: Mapping, form: _JsonForm) -> dict:
 def _refuse_a_key_that_is_not_text(value: Any, where: str) -> None:
     """The id is json of the metadata, whose keys are text, at any depth.
 
-    A yaml point is refused by its reader; a Python caller's metadata
-    enters here, so 1 and "1" cannot name one point.
+    A point's metadata enters here, so 1 and "1" cannot name one point.
     """
     if isinstance(value, (list, tuple)):
         for item in value:

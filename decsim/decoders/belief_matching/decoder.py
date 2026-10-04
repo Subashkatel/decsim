@@ -57,7 +57,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
 
         max_iterations: int = 30
         belief_propagation_method: str = "product_sum"
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "belief_matching"
 
         def build(self) -> "BeliefMatchingDecoder":

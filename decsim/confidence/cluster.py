@@ -96,11 +96,11 @@ class ClusterGap:
     class Settings:
         """The row as a run names it: the card that prices its walk.
 
-        walk_microseconds is escalation.confidence_walk_microseconds.
+        walk_microseconds is that card, None for the row's own cost model.
         """
 
         walk_microseconds: Optional[float] = None
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "cluster_gap"
 
         def __post_init__(self) -> None:
@@ -179,8 +179,8 @@ def gap_half_ticks_to_natural_log_weight(
     """Half ticks of the growth as natural-log weight, exactly, rounded once.
 
     Every signal reports its gap in the units the switching threshold is
-    held in (escalation.gap_threshold_db is converted once, at the yaml
-    boundary, by escalation/threshold_sources.py decibels_to_nats), so a
+    held in (the threshold's decibels are converted once, by
+    escalation/threshold_sources.py decibels_to_nats), so a
     threshold means the same thing whichever signal a run names.
     """
     if gap_half_ticks == math.inf:

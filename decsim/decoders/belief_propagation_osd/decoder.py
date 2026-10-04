@@ -33,7 +33,7 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
         belief_propagation_method: str = "product_sum"
         schedule: str = "serial"
         osd_method: str = "osd_cs"
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "bposd"
 
         def build(self) -> "BeliefPropagationOsdDecoder":

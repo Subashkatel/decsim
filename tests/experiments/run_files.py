@@ -98,10 +98,10 @@ REFERENCE_HOPS = (
     ("frame_to_controller", 0, 32, 1),
     ("controller_to_qpu", 22, 128, 1),
 )
-REFERENCE_SOURCE = "configs/reference.yaml's hops, in fridge cycles"
-# the control processor's issue pipeline, configs/reference.yaml's count
+REFERENCE_SOURCE = "the reference machine's hops, in fridge cycles"
+# the control processor's issue pipeline, the reference machine's count
 REFERENCE_ISSUE_CYCLES = 8
-# configs/reference.yaml's sweep: one point, its axes in written order
+# the reference sweep: one point, its axes in written order
 REFERENCE = {
     "axes": {
         ERROR_RATE_PATH: (0.001,),
@@ -219,7 +219,7 @@ def switching_machine(
 def reference_machine(
     cells: Optional[Mapping] = None,
 ) -> machine_settings.MachineSettings:
-    """configs/reference.yaml's machine, the minimal one on priced hops.
+    """The reference machine, the minimal one on priced hops.
 
     PyMatching decodes for real; every hop is priced in fridge cycles
     (REFERENCE_HOPS); the controller issues in eight cycles; and the
@@ -436,7 +436,6 @@ def _write_a_bare_point_record(experiment_dir, point_id: str) -> None:
     point_dir = experiment_dir / run_folder.POINTS_FOLDER / point_id
     point_dir.mkdir(parents=True)
     record = {"id": point_id, "name": point_id, "metadata": {}}
-    record["sections"] = None
     record_path = point_dir / run_folder.RECORD_FILE
     run_folder.write_json(record_path, record)
 

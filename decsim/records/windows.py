@@ -30,7 +30,7 @@ class DecoderTier(Enum):
     STRONG = "strong"
 
 
-# windows.terminal_policy names one of these: how a finite serial stream
+# WindowSettings.terminal_policy names one of these: how a finite serial stream
 # drains its last buffered window. flush ends the last window at the
 # stream's last round, which is qLDPC's last window (qLDPC
 # src/qldpc/decoders/sinter.py:776-777); lookahead keeps the regular

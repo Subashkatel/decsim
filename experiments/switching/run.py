@@ -163,7 +163,7 @@ def _switching(
 
 
 def _metadata(distance: int) -> dict:
-    """The point's swept cells as the yaml named them, so its id is theirs."""
+    """The swept cells under the earlier runs' names, so the ids match."""
     return {
         "workload.arguments.physical_error_probability": (
             PHYSICAL_ERROR_PROBABILITY

@@ -126,7 +126,7 @@ class StrongSyndromeRoundReceiver:
         several memories answers for each. An escalation cannot wait:
         the weak result is already given up, so a strong store with no
         room for the region stops the run rather than holding the chip.
-        The yaml sizes the store.
+        The store's settings size it.
         """
         reserved = dict(self.reserved_bits_by_round)
         widths = self._stored_widths(region)
@@ -185,7 +185,7 @@ class StrongSyndromeRoundReceiver:
     def _refuse_region(
         self, region: round_records.EscalatedRegion, widths: list
     ) -> None:
-        """An escalated region that does not fit stops the run, by the yaml."""
+        """An escalated region that does not fit stops the run."""
         capacity = self.store.capacity_bits()
         carried = region.carried_packets
         round_count = len(carried)

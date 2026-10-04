@@ -10,7 +10,7 @@ syndrome updated"). Two rows say how that update is written on the wire:
 a dense mask over the layer, which is what both compiled
 implementations carry, and a sparse list of the flipped detectors, which
 is Skoric's artificial-defect list (2209.08552 lines 265-269, 1038-1040)
-and Bombin's small set. The row is named by windows.boundary_payload.
+and Bombin's small set. WindowSettings.boundary_payload holds the row.
 """
 
 import dataclasses
@@ -32,9 +32,6 @@ class DenseSeamMask:
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The dense row, which takes no setting."""
-
-        # the word the yaml names this row by
-        name = "dense_seam_mask"
 
         def build(self) -> "DenseSeamMask":
             """The one-bit-per-detector payload."""
@@ -59,9 +56,6 @@ class SparseSeamList:
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The sparse row, which takes no setting."""
-
-        # the word the yaml names this row by
-        name = "sparse_seam_list"
 
         def build(self) -> "SparseSeamList":
             """The one-index-per-flip payload."""

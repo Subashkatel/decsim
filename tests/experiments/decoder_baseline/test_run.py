@@ -1,7 +1,7 @@
 """The decoder baseline script against decsim's own workload.
 
 The referent for the circuit is decsim.producers.memory_circuit, the
-producer the machine's baseline yaml names, so the offline and the
+producer the machine's baseline run file calls, so the offline and the
 machine baselines sample one circuit. The rest pins the stop rule: 100
 errors a point, and a shot limit no time limit reaches, so Slurm's time
 limit is the budget; and the command line, gem5 MultiSim's, over

@@ -1,17 +1,17 @@
 """No construction decides by recognising a class (STYLE.md rule 10).
 
-A plug-in table maps a yaml kind to a row, and the caller asks the table
-for the row and calls it. Code that instead recognises the row it got
-back, `row is SomeClass` or `isinstance(row, SomeClass)`, moves the
-choice out of the table and into a chain of comparisons, so a row added
-to the table is reachable from yaml and still not built: gem5's params
-object gives every SimObject one constructor signature for exactly this
-reason (src/python/m5/SimObject.py:204-205).
+A caller hands a component in behind its port, and the code calls the
+port. Code that instead recognises the component it got,
+`part is SomeClass` or `isinstance(part, SomeClass)`, moves the choice
+out of the port and into a chain of comparisons, so a new component
+behind the port is accepted and still not used: gem5's params object
+gives every SimObject one constructor signature for exactly this reason
+(src/python/m5/SimObject.py:204-205).
 
 The check is name-based and deliberately blunt: every class a module
 tests against is held against the list below, and anything else fails.
 The list is short because recognising a class is rare in a tree that
-dispatches through tables, so a new name on it is a decision a reader
+dispatches through ports, so a new name on it is a decision a reader
 should see in the diff.
 
 An enum member is a value, not a class, so `tier is DecoderTier.STRONG`
@@ -23,9 +23,9 @@ import ast
 import pathlib
 import sys
 
-# Types the yaml boundary reads: a section's value is whatever the file
-# held, so the settings that parse it say what shape they accept.
-YAML_BOUNDARY = frozenset(
+# Types the input boundary reads: a value is whatever object the caller
+# passed, so the settings that check it say what shape they accept.
+INPUT_BOUNDARY = frozenset(
     {
         "bool",
         "float",
@@ -34,7 +34,6 @@ YAML_BOUNDARY = frozenset(
         "str",
         "tuple",
         "Mapping",
-        "Real",
         "numbers.Integral",
         "numbers.Real",
         "pathlib.Path",
@@ -50,7 +49,6 @@ RECORD_TYPES = frozenset(
         "transfer_records.BoundaryTransferRelation",
         "window_records.DependencyResidual",
         "workload_records.FiniteCircuit",
-        "workload_records.Workload",
     }
 )
 
@@ -83,7 +81,7 @@ FOREIGN_TYPES = frozenset(
     }
 )
 
-ALLOWED = YAML_BOUNDARY | RECORD_TYPES | PORTS | FOREIGN_TYPES
+ALLOWED = INPUT_BOUNDARY | RECORD_TYPES | PORTS | FOREIGN_TYPES
 
 # `x is None` and `x is True` test a value, not a class.
 SINGLETONS = frozenset({"None", "True", "False"})

@@ -587,9 +587,7 @@ def _resolved_points(study: experiment.Experiment) -> list:
             _refuse_two_points_of_one_id(earlier_name, point.name)
         settings = study.collection_of(point)
         facts = _experiment_facts(task, settings)
-        record = run_folder.point_record(
-            point.name, task, None, point.sections, facts
-        )
+        record = run_folder.point_record(point.name, task, None, facts)
         resolved_point = _ResolvedPoint(task, settings, record)
         resolved.append(resolved_point)
     return resolved
@@ -645,7 +643,7 @@ def _record_a_new_point(
     if record_path.is_file():
         return
     seeds = [(seed, 1)]
-    run_folder.record_point(run_dir, point.name, task, seeds, point.sections)
+    run_folder.record_point(run_dir, point.name, task, seeds)
 
 
 def _run_points(run_dir: pathlib.Path, point_id: str) -> list:

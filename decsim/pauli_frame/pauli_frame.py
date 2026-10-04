@@ -23,23 +23,16 @@ one clock cycle, 4 ns at 250 MHz (Yang et al. 2605.04892 Table I).
 """
 
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Optional
 
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
-import decsim.tables as tables
 import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
-
-# The pauli_frame section's keys.
-_PAULI_FRAME_KEYS = ("kind", "clock", "write_cycles")
-# The keys with no default: a frame card states the write's cost and the
-# clock it counts on.
-_REQUIRED_PAULI_FRAME_KEYS = ("clock", "write_cycles")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -60,21 +53,6 @@ class PauliFrameConfig:
 
     def __post_init__(self) -> None:
         config.check_cycles("pauli_frame.write_cycles", self.write_cycles)
-
-    @classmethod
-    def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
-    ) -> "PauliFrameConfig":
-        """The `pauli_frame` section: its kind's record and write cost."""
-        tables.refuse_unknown_keys("pauli_frame", section, _PAULI_FRAME_KEYS)
-        tables.refuse_missing_keys(
-            "pauli_frame", section, _REQUIRED_PAULI_FRAME_KEYS
-        )
-        kind = section.get("kind", "logical_register")
-        record = tables.row(FRAMES, "pauli_frame.kind", kind)
-        clock = clocks.clock(section["clock"])
-        write_cycles = section["write_cycles"]
-        return record(write_cycles=write_cycles, clock=clock)
 
     def build(self, engine: engine_module.Engine) -> "PauliFrame":
         """A fresh frame on these settings, on the run's engine."""
@@ -314,9 +292,3 @@ class _FrameState:
     pending_by_window: dict = dataclasses.field(default_factory=dict)
     committed_by_window: dict = dataclasses.field(default_factory=dict)
     windows_by_stream: dict = dataclasses.field(default_factory=dict)
-
-
-# pauli_frame.kind names one of these records; each builds the frame a
-# decoder's correction is committed into, which fills the Frame port
-# (decsim/ports.py).
-FRAMES = {"logical_register": PauliFrameConfig}

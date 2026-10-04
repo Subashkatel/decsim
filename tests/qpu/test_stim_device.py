@@ -886,7 +886,7 @@ def test_a_patch_the_burst_region_misses_is_not_refused_without_noise():
         ("burst_decay_rounds", 0, "burst_decay_rounds is a number of rounds"),
         ("burst_radius", -1.0, "burst_radius is a distance of 0 or more"),
         ("burst_center", [1.0], "burst_center is \\[x, y\\]"),
-        ("burst_error_probability", "1e-3", "YAML reads 1e-3 as text"),
+        ("burst_error_probability", "1e-3", "a number from 0 to 0.75"),
         ("burst_error_probability", 0.8, "a number from 0 to 0.75"),
         ("burst_channels", ["leakage"], "burst_channels is a non-empty list"),
         ("burst_channels", [], "burst_channels is a non-empty list"),

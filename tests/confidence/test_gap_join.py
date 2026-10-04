@@ -80,7 +80,7 @@ def _memory_patches(patch_count: int):
     """patch_count memory patches of the gate's card, 10 d rounds each."""
     patches = producers.memory_patches(
         "surface_code:rotated_memory_z",
-        "10d",
+        30,
         patch_count,
         3,
         test_strong_window_shapes.GATE_PHYSICAL_ERROR_PROBABILITY,

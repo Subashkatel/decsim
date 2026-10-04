@@ -1,14 +1,12 @@
 """The workload makers decsim ships: Stim's and Deltakit's memories.
 
-A maker is a plain function a yaml names as module:function under
-workload.kind producer. decsim calls it with the yaml's arguments as
-each sweep point resolves them, and it returns a
-records.workload.Workload. A maker written outside decsim has the same
-shape; these are the ones that ship.
+A maker is a plain function that returns a records.workload.Workload,
+which WorkloadSettings.running lowers for the machine. A maker written
+outside decsim has the same shape; these are the ones that ship.
 """
 
 import dataclasses
-from typing import Optional, Union
+from typing import Optional
 
 import stim
 
@@ -28,17 +26,16 @@ LIVE_STREAM_ID = 100
 
 def memory_circuit(
     code_task: str,
-    rounds_per_shot: Union[int, str],
+    rounds_per_shot: int,
     distance: int,
     physical_error_probability: float,
 ) -> workload_records.Workload:
     """Stim's generated memory circuit, one operation for the whole shot.
 
     One probability on all four of Stim's noise channels, as Stim's
-    guide does (frontends/settings.py memory_circuit); rounds_per_shot
-    is a round count or "<n>d", n rounds per unit of distance.
+    guide does (frontends/settings.py memory_circuit).
     """
-    circuit, rounds = _generated_memory(
+    circuit = workload_settings.memory_circuit(
         code_task, rounds_per_shot, distance, physical_error_probability
     )
     operation = program_records.Operation(
@@ -46,14 +43,14 @@ def memory_circuit(
     )
     return workload_records.Workload(
         operations=(operation,),
-        round_counts={1: rounds},
+        round_counts={1: rounds_per_shot},
         physical_error_probability=physical_error_probability,
     )
 
 
 def memory_patches(
     code_task: str,
-    rounds_per_shot: Union[int, str],
+    rounds_per_shot: int,
     patch_count: int,
     distance: int,
     physical_error_probability: float,
@@ -74,7 +71,7 @@ def memory_patches(
             f"workload.patch_count is at least 1, got {patch_count}; with "
             "no patch the run would finish having run nothing"
         )
-    circuit, rounds = _generated_memory(
+    circuit = workload_settings.memory_circuit(
         code_task, rounds_per_shot, distance, physical_error_probability
     )
     pitch = 2 * distance + 2
@@ -93,7 +90,7 @@ def memory_patches(
             circuit=placed,
         )
         operations.append(operation)
-        round_counts[operation_id] = rounds
+        round_counts[operation_id] = rounds_per_shot
     return workload_records.Workload(
         operations=tuple(operations),
         round_counts=round_counts,
@@ -198,18 +195,3 @@ def live_memory(
     operations = (prefix, protect, resume, readout)
     round_counts = {1: decode_after_rounds, 2: 0, 3: 1, 4: 0}
     return workload_records.Workload(operations, round_counts, program)
-
-
-def _generated_memory(
-    code_task: str,
-    rounds_per_shot: Union[int, str],
-    distance: int,
-    physical_error_probability: float,
-) -> tuple:
-    """Stim's memory circuit at the sweep's point, and its round count."""
-    shot_length = workload_settings.RoundsPerShot.from_yaml(rounds_per_shot)
-    rounds = shot_length.rounds_for(distance)
-    circuit = workload_settings.memory_circuit(
-        code_task, rounds, distance, physical_error_probability
-    )
-    return circuit, rounds

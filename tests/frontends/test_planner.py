@@ -58,7 +58,7 @@ def test_a_card_cadence_that_is_not_a_finite_number_still_stops():
 
 
 def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
-    """The card holds what the yaml said; the plan is where it must be a count.
+    """The card holds what it was given; the plan needs a count.
 
     A geometry that is zero or fractional never terminates: the round
     count, the window sizes and the node counts all derive from it.

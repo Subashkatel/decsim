@@ -5,7 +5,7 @@ its own registers: AFS's syndrome hold registers and STM (Das et al.
 2001.06598, lines 619-621, 836-839) and Collision Clustering's input
 syndrome registers beside its SRAM tables (Barber et al. 2309.05558,
 lines 460-462). decsim prices that as a per-unit memory with a capacity
-in bits (the yaml's unit_memory.bits), taken when a job's rounds land
+in bits (UnitMemorySettings.bits), taken when a job's rounds land
 and freed when the outcome leaves.
 
 The rounds are ordered here, once, so a decoder reads them in the order

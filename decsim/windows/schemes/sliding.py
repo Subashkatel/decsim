@@ -48,7 +48,7 @@ class SlidingWindowScheme:
         def __post_init__(self) -> None:
             window_data.check_window_sizes(self)
 
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "sliding"
 
         def build(self, terminal_policy: str) -> "SlidingWindowScheme":

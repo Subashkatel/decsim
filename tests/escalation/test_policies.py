@@ -347,8 +347,6 @@ class _KeepEverything:
     """
 
     audits_by_escalating = False
-    reads_a_calibration_table = False
-    built_per_sweep_point = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings(threshold_sources.FixedThreshold.Settings):

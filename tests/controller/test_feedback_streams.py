@@ -2,8 +2,8 @@
 
 A protected region keeps one live stream on a patch between a start and
 an end operation. The program declares the regions and this component
-indexes them at load, which is where decsim checks a yaml-shaped input
-once and loudly (STYLE.md rule 4). The refusals pinned here are all
+indexes them at load, which is where decsim checks the program once
+and loudly (STYLE.md rule 4). The refusals pinned here are all
 raised by that one index pass: a region whose stream nobody owns, two
 regions on one stream, an endpoint that is not an operation or does not
 hold the region's patch, and a feedback source that is not itself

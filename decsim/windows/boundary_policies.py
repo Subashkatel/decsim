@@ -22,9 +22,6 @@ class Eager:
     class Settings:
         """The eager row, which takes no setting."""
 
-        # the word the yaml names this row by
-        name = "eager"
-
         def build(self) -> "Eager":
             """A policy that ships at every commit."""
             return Eager()
@@ -44,9 +41,6 @@ class Held:
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The held row, which takes no setting."""
-
-        # the word the yaml names this row by
-        name = "held"
 
         def build(self) -> "Held":
             """A policy that ships once the committing result is final."""

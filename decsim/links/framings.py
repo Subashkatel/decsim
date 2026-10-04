@@ -16,11 +16,9 @@ values and builds it.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import ClassVar, Union
 
 import decsim.links.settings as link_settings
-import decsim.tables as tables
 
 BITS_PER_BYTE = 8
 
@@ -299,17 +297,6 @@ class EthernetUdp:
         return tuple(frames)
 
 
-# protocol.framing.kind names one of these records: how a packet channel
-# cuts a message into the frames its wire carries.
-FRAMINGS = {
-    "whole": Whole.Settings,
-    "flits": Flits.Settings,
-    "aurora_64b66b": Aurora64b66b.Settings,
-    "pcie_tlp": PcieTlp.Settings,
-    "roce_v2": RoceV2.Settings,
-    "ethernet_udp": EthernetUdp.Settings,
-}
-
 # the framing records, whichever a protocol cuts its messages with
 FramingSettings = Union[
     Whole.Settings,
@@ -319,26 +306,6 @@ FramingSettings = Union[
     RoceV2.Settings,
     EthernetUdp.Settings,
 ]
-
-
-def framing_settings_from_yaml(
-    section: object, path_name: str
-) -> FramingSettings:
-    """A card's framing mapping: its kind's record, every field written."""
-    section_name = f"links.{path_name}.protocol.framing"
-    if not isinstance(section, Mapping):
-        raise ValueError(
-            f"{section_name} holds {section!r}; it is a mapping with a kind, "
-            f"one of {sorted(FRAMINGS)}"
-        )
-    kind = section.get("kind")
-    record = tables.row(
-        FRAMINGS, f"links.{path_name}.protocol.framing.kind", kind
-    )
-    values = tables.record_fields(record, section_name, section, ("kind",))
-    for name in tables.required_fields(record):
-        link_settings.required_key(section, name, section_name)
-    return record(**values)
 
 
 def _roce_datagram_bytes(chunk_bytes: int, is_first: bool) -> int:

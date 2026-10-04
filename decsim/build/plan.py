@@ -439,12 +439,11 @@ def _refuse_bulk_strong_without_a_merge(
 ) -> None:
     """bulk_strong merges strong re-decodes that carry timing alone.
 
-    Only the strong pool of a switching run merges, so the key beside
+    Only the strong pool of a switching run merges, so the flag beside
     any other escalation is read by nothing. The merged decode reads no
-    bits and returns no correction (decoder_manager.bulk_strong in
-    configs/reference.yaml), so rounds that carry values, or windows
-    whose models come from a provider other than the source's own,
-    would be lost.
+    bits and returns no correction (DecoderManagerSettings.bulk_strong),
+    so rounds that carry values, or windows whose models come from a
+    provider other than the source's own, would be lost.
     """
     if not is_bulk_strong:
         return
@@ -461,9 +460,9 @@ def _refuse_bulk_strong_without_a_merge(
     source_name = source_settings.name
     raise ValueError(
         "decoder_manager.bulk_strong merges timing-only strong re-decodes, "
-        f"and qpu.kind {source_name} gives the decoders bits and "
-        "models the merged decode would drop; set bulk_strong false or "
-        "qpu.kind timing_only"
+        f"and the qpu source {source_name} gives the decoders bits and "
+        "models the merged decode would drop; set bulk_strong False or "
+        "use the timing_only source"
     )
 
 

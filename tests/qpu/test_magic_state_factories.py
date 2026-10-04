@@ -98,7 +98,7 @@ def test_every_factory_row_fills_the_port_it_is_built_behind():
     """The rows are in qpu and the port is in decsim/ports.py.
 
     The runtime that asks for a state never names a row, so the promise
-    is only real if every row of the table answers the whole port.
+    is only real if every row answers the whole port.
     """
     engine = decsim.engine.Engine()
     rows = [infinite(engine), single_stage(engine)]

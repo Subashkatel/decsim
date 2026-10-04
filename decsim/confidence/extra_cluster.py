@@ -18,7 +18,7 @@ The growth is the decoder's own grow and merge loop run on
 of the decoder"). decsim's graph has one boundary node, so "b1 meets
 b2" is an edge closing a walk of odd logical parity, the reading of
 Meister's quotient that cluster_gap.c also takes. The cost is a
-card's number when the yaml prices it, and otherwise the weak row's
+card's number when the settings price it, and otherwise the weak row's
 own timing: its loop's cycle count on the unit that decoded
 (cycle_count.py, extra_growth_cycles), or the host's measured time.
 
@@ -118,11 +118,11 @@ class ExtraClusterGap:
     class Settings:
         """The row as a run names it: the card that prices its growth.
 
-        walk_microseconds is escalation.confidence_walk_microseconds.
+        walk_microseconds is that card, None for the row's own cost model.
         """
 
         walk_microseconds: Optional[float] = None
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "extra_cluster_gap"
 
         def __post_init__(self) -> None:

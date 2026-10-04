@@ -293,9 +293,9 @@ def summary_rows(totals: dict, counts: dict, prefixes: dict) -> list:
 def write_csv(rows: list, path: Path, swept: Optional[dict] = None) -> None:
     """The rows as a csv file, every column any row holds, first seen first.
 
-    swept maps a point id to its value at each swept yaml path
+    swept maps a point id to its value at each swept name
     (run_folder.swept_values), and a row of that point takes one column
-    per path right after its point_id: the values the design fixed
+    per name right after its point_id: the values the design fixed
     first, then what was measured, Wickham's order (Tidy Data, J. Stat.
     Softw. 59(10), 2014, section 2.3).
     """
@@ -677,7 +677,7 @@ def _folded_columns(paths: list, swept: dict) -> list:
     That is write_csv's header: point_id, the swept paths, then each
     file's columns. Two points of one grid can measure different
     columns, and a point's cell for a column it did not measure is
-    empty, as a swept path a point's sections do not hold is
+    empty, as a swept name a point's metadata does not hold is
     (run_folder.swept_values).
     """
     columns = {"point_id": None}

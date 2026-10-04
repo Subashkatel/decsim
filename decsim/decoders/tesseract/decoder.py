@@ -5,7 +5,6 @@ decoder module is the backend this row compiles.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
@@ -14,7 +13,6 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
-import decsim.tables as tables
 
 
 class TesseractDecoder(decoder_module.WindowDecoderBase):
@@ -57,40 +55,18 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         detector_order_count: int = 16
         detector_order_seed: Optional[int] = None
         merge_errors: bool = False
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "tesseract"
 
         def __post_init__(self) -> None:
             for key, (unit, minimum) in _COUNT_KEYS.items():
                 value = getattr(self, key)
                 config.check_whole_count(key, value, unit, minimum)
-            tables.row(
-                window_decoder.DETECTOR_ORDER_METHODS,
-                "detector_order_method",
-                self.detector_order_method,
-            )
             _check_detector_order_seed(self.detector_order_seed)
 
         def build(self) -> "TesseractDecoder":
             """A fresh decoder of these settings."""
             return TesseractDecoder(settings=self)
-
-        @classmethod
-        def from_yaml(
-            cls,
-            section: Mapping,
-            clocks: config.ClockSettings,
-            section_name: str,
-        ) -> "TesseractDecoder.Settings":
-            """Every key the section writes; absent is the default.
-
-            section_name is the tier section the row sits in, which a
-            refusal names.
-            """
-            del clocks
-            switches = _switches(section, section_name)
-            values = {**section, **switches}
-            return tables.section_record(section_name, cls, values)
 
     def __init__(
         self,
@@ -150,18 +126,6 @@ _COUNT_KEYS = {
 # build_det_orders takes its seed as a uint64 (tesseract-decoder
 # src/utils.h:42-45)
 _LARGEST_SEED = 2**64 - 1
-
-# the on-or-off keys
-_SWITCH_KEYS = ("beam_climbing", "no_revisit_detectors", "merge_errors")
-
-
-def _switches(section: Mapping, section_name: str) -> dict:
-    """Beam climbing, no-revisit and merging, each true or false."""
-    switches = {}
-    for key in _SWITCH_KEYS:
-        default = getattr(TesseractDecoder.Settings, key)
-        switches[key] = config.boolean(section, section_name, key, default)
-    return switches
 
 
 def _check_detector_order_seed(seed) -> None:

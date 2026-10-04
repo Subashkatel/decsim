@@ -42,9 +42,15 @@ import decsim.collect as collect
 import decsim.confidence.complementary as complementary
 import decsim.config as config_module
 import decsim.decoders.backend_outcome as backend_outcome
+import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.dispatch_steps.decoder as dispatch_steps
+import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.tesseract.decoder as tesseract
+import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.verify_windows as verify_windows
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -2037,8 +2043,8 @@ def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
 def test_no_runner_module_names_a_row_of_the_decoder_table():
     """A new decoder is one table row and one axis value, no runner edit.
 
-    The referent is the decoder table itself (decoders/settings.py
-    DECODERS). The runner is every module below the experiments package,
+    The referent is the decoder rows themselves (DECODER_ROWS). The
+    runner is every module below the experiments package,
     with collect.py. None imports a row's package, or a
     package only the rows import (a decoder backend), under any alias,
     and no string constant in it is a row's key (NOTE section 9 item
@@ -2119,6 +2125,24 @@ def _row_names_of(source: str) -> list:
     return names
 
 
+# Every decoder row, by the name its reports carry (its Settings' name),
+# as sinter's BUILT_IN_DECODERS lists its own
+# (sinter/_decoding/_decoding_all_built_in_decoders.py:12).
+DECODER_ROWS = {
+    "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder,
+    "unweighted_pymatching": (
+        minimum_weight_perfect_matching.UnweightedPyMatchingDecoder
+    ),
+    "belief_matching": belief_matching.BeliefMatchingDecoder,
+    "union_find": union_find.UnionFindDecoder,
+    "tesseract": tesseract.TesseractDecoder,
+    "relay_bp": relay_decoder.RelayBeliefPropagationDecoder,
+    "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
+    "measured_table": measured_table.MeasuredTableDecoder,
+    "dispatch_steps": dispatch_steps.DispatchStepsDecoder,
+}
+
+
 @functools.cache
 def _decoder_rows() -> tuple:
     """The row keys, and the modules only a row may import.
@@ -2128,7 +2152,7 @@ def _decoder_rows() -> tuple:
     (pymatching, tesseract_decoder, relay_bp, ldpc). A package the rest
     of decsim shares, such as stim or numpy, is no row's.
     """
-    rows = decoder_settings.DECODERS
+    rows = DECODER_ROWS
     row_packages = set()
     for row in rows.values():
         package, _, _ = row.__module__.rpartition(".")

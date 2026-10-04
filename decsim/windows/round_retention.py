@@ -14,7 +14,7 @@ that an earlier window bounds also keeps the rounds its restart would
 read as a potential restart read (PotentialRestart, planned in
 frontends/planner.py), past its own request and landing: an earlier
 escalation may re-slice it as the restart window, which re-reads
-escalation.restart_reread_buffer_regions buffer regions of the strong
+restart_reread_buffer_regions buffer regions of the strong
 region (Toshio et al. 2510.25222 Sec. III C). When the strong side
 forms the detection events, a window's potential strong read also holds
 the raw rounds before its first that its or a later round's recipes

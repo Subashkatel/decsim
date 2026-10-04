@@ -74,7 +74,7 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
 
         @property
         def name(self):
-            """The yaml's word for the row, or the latency it writes instead."""
+            """The row's word, or its preset latency in its place."""
             if self.preset_latency_microseconds is None:
                 return "pymatching"
             return self.preset_latency_microseconds
@@ -205,7 +205,7 @@ class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     class Settings:
         """The row has no settings of its own."""
 
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "unweighted_pymatching"
 
         def build(self) -> "UnweightedPyMatchingDecoder":

@@ -10,7 +10,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `MachineSettings`
 
-`decsim/settings.py`. One settings record per yaml section, plus the Python-only knobs.
+`decsim/settings.py`. One settings record per part of the machine.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -70,7 +70,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `ControllerSettings`
 
-`decsim/controller/settings.py`. The yaml's `controller` section, in cycles of the clock it names.
+`decsim/controller/settings.py`. The controller's costs, in cycles of its clock.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -109,7 +109,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `UnitMemorySettings`
 
-`decsim/decoders/settings.py`. The yaml's `<tier>_decoder.unit_memory` section.
+`decsim/decoders/settings.py`. The input memory of one decoder unit.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -118,7 +118,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `EngineSettings`
 
-`decsim/decoders/settings.py`. The yaml's `<tier>_decoder.engine` card.
+`decsim/decoders/settings.py`. One tier's engine card: the stages around the algorithm.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -130,7 +130,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `DecoderPoolSettings`
 
-`decsim/decoders/settings.py`. One tier's pool of decoder units: the yaml's `<tier>_decoder` section.
+`decsim/decoders/settings.py`. One tier's pool of decoder units.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -144,7 +144,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `DecoderManagerSettings`
 
-`decsim/decoders/settings.py`. The yaml's `decoder_manager` section, and the manager's Python knobs.
+`decsim/decoders/settings.py`. The decoder manager's knobs.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -202,7 +202,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `MeasuredTableSettings`
 
-`decsim/decoders/measured_table/decoder.py`. The measured_table row's keys in its tier section.
+`decsim/decoders/measured_table/decoder.py`. The measured_table row's settings.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -312,7 +312,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `FixedThreshold.Settings`
 
-`decsim/escalation/threshold_sources.py`. The constant, in decibels (escalation.gap_threshold_db).
+`decsim/escalation/threshold_sources.py`. The constant, in decibels.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -351,7 +351,6 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 | Field | Type | Default |
 | --- | --- | --- |
-| `kind` | `Optional[str]` | `None` |
 | `operations` | `tuple` | `()` |
 | `decode_operations` | `Optional[tuple]` | `None` |
 | `dynamic_streams` | `tuple` | `()` |
@@ -360,27 +359,6 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 | `physical_circuits` | `tuple` | `()` |
 | `feedback_boundary_mode` | `str` | `'trailing_buffer'` |
 | `workload_record` | `Optional[workload_records.Workload]` | `None` |
-| `row_settings` | `Optional[Any]` | `None` |
-
-### `ProducerWorkload.Settings`
-
-`decsim/frontends/settings.py`. The maker's name and its own arguments.
-
-| Field | Type | Default |
-| --- | --- | --- |
-| `function` | `str` | required |
-| `arguments` | `Mapping` | required |
-
-### `FilesWorkload.Settings`
-
-`decsim/frontends/settings.py`. The workload's files, their paths resolved.
-
-| Field | Type | Default |
-| --- | --- | --- |
-| `operations` | `pathlib.Path` | required |
-| `circuit` | `Optional[pathlib.Path]` | `None` |
-| `measurement_rounds` | `Optional[pathlib.Path]` | `None` |
-| `fragments` | `Optional[pathlib.Path]` | `None` |
 
 ## decsim/links
 
@@ -518,7 +496,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `ObservationSettings`
 
-`decsim/observe/settings.py`. The yaml's `observation` section.
+`decsim/observe/settings.py`. What a run records beside its results.
 
 | Field | Type | Default |
 | --- | --- | --- |

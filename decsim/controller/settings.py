@@ -1,48 +1,18 @@
-"""The controller's settings, and the yaml's idle policy section.
+"""The controller's settings.
 
 The controller charges three per-round costs and bounds its packing
-workspace; the idle policy says how an idle patch's rounds are charged.
+workspace.
 """
 
 import dataclasses
-from collections.abc import Mapping
-from typing import Optional, Union
+from typing import Optional
 
 import decsim.config as config
-import decsim.controller.policies as policies
-import decsim.tables as tables
-
-# idle_policy.kind names one of these records: what the controller does
-# with the rounds of a patch that is idle.
-IDLE_POLICIES = {
-    "separate_decode_jobs": policies.SeparateDecodeJobsSettings,
-    "ignore": policies.IgnoreSettings,
-}
-# The key the idle_policy section reads for itself; any other key is a
-# field of the record its kind names.
-_IDLE_POLICY_KEYS = ("kind",)
-
-# The controller section's keys.
-_CONTROLLER_KEYS = (
-    "clock",
-    "readout_to_bits_cycles",
-    "packing_cycles_per_round",
-    "decision_to_pulse_cycles",
-    "packing_rounds_in_flight",
-)
-# The keys with no default: a controller card states its clock and its
-# three per-round costs.
-_REQUIRED_CONTROLLER_KEYS = (
-    "clock",
-    "readout_to_bits_cycles",
-    "packing_cycles_per_round",
-    "decision_to_pulse_cycles",
-)
 
 
 @dataclasses.dataclass(frozen=True)
 class ControllerSettings:
-    """The yaml's `controller` section, in cycles of the clock it names.
+    """The controller's costs, in cycles of its clock.
 
     The three costs are charged per round on the way in (readout to bits,
     packing) and per decision on the way out (decision to pulse); zero
@@ -54,12 +24,16 @@ class ControllerSettings:
     is the control processor's issue pipeline, the decision at the core
     to the pulse trigger: 8 cycles traced on QubiC's core (Fruitwala
     2404.15260 Sec. III and IV) with gem5's MinorCPU stage delays where
-    the paper is silent, the result latched, the compare, the taken
-    jump's redirect, the target fetched, decoded and executed, the pulse
-    register written, the strobe; QICK measures 16 clocks for the
-    conditional evaluation and the jump and 20 for the next pulse on its
-    deeper tProcessor (2110.00557 lines 893-900). The reference yaml
-    carries the trace.
+    the paper is silent: 1 the result latched with its ready signal, 1
+    the compare, 1 the taken jump's redirect, 3 the target fetched,
+    decoded and reaching execute, 1 the pulse register written, 1 the
+    strobe on the next edge. The taken branch is the cost because both
+    paths are padded to it (Caune 2410.05202: the qubit idles for the
+    gate's duration when the result is 0), and one core per qubit runs
+    the same branch on the broadcast bits, so the count does not grow
+    with the patch. QICK measures 16 clocks for the conditional
+    evaluation and the jump and 20 for the next pulse on its deeper
+    tProcessor (2110.00557 lines 893-900), 36 in all.
     packing_rounds_in_flight bounds the rounds in flight through the
     packing stage at once, each from its emission, in emission order,
     until the windows hear of it (round_assembly.RoundsInFlight); None is
@@ -89,30 +63,8 @@ class ControllerSettings:
         )
         self._check_rounds_in_flight()
 
-    @classmethod
-    def from_yaml(
-        cls, section: Mapping, clocks: config.ClockSettings
-    ) -> "ControllerSettings":
-        """The `controller` section: its cycle counts, and its clock."""
-        tables.refuse_unknown_keys("controller", section, _CONTROLLER_KEYS)
-        tables.refuse_missing_keys(
-            "controller", section, _REQUIRED_CONTROLLER_KEYS
-        )
-        clock = clocks.clock(section["clock"])
-        readout_cycles = section["readout_to_bits_cycles"]
-        packing_cycles = section["packing_cycles_per_round"]
-        decision_cycles = section["decision_to_pulse_cycles"]
-        packing_rounds_in_flight = section.get("packing_rounds_in_flight")
-        return cls(
-            clock=clock,
-            readout_to_bits_cycles=readout_cycles,
-            packing_cycles_per_round=packing_cycles,
-            decision_to_pulse_cycles=decision_cycles,
-            packing_rounds_in_flight=packing_rounds_in_flight,
-        )
-
     def _check_rounds_in_flight(self) -> None:
-        """The packing stage's bound is a whole count of rounds, or null.
+        """The packing stage's bound is a whole count of rounds, or None.
 
         A round enters the stage whole, so the bound counts whole rounds,
         and a bound below one admits no round, so every round would wait
@@ -127,24 +79,5 @@ class ControllerSettings:
             return
         raise ValueError(
             "controller.packing_rounds_in_flight must be a whole count of "
-            f"rounds, at least one, or null for no bound (got {bound!r})"
+            f"rounds, at least one, or None for no bound (got {bound!r})"
         )
-
-
-def idle_policy_from_yaml(
-    section: Mapping,
-) -> Union[policies.IgnoreSettings, policies.SeparateDecodeJobsSettings]:
-    """The `idle_policy` section: the settings record its kind names.
-
-    Idle rounds are decoder workload, because the backlog bound counts
-    every generated syndrome bit against the decoder's processing rate
-    (Terhal 1302.3428 lines 3151-3159; Battistel et al. 2303.00054 line
-    144), so separate_decode_jobs is the default; ignore is the
-    optimistic card for active-path latency studies.
-    """
-    kind = section.get("kind", "separate_decode_jobs")
-    record = tables.row(IDLE_POLICIES, "idle_policy.kind", kind)
-    values = tables.record_fields(
-        record, "idle_policy", section, _IDLE_POLICY_KEYS
-    )
-    return record(**values)

@@ -1,4 +1,4 @@
-"""The detection event former, seated at the points the yaml names.
+"""The detection event former, seated at the points the settings name.
 
 A detection event is a parity of raw measurement outcomes
 (detector_formation.py), so its value is the same wherever it is formed:

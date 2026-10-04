@@ -2,7 +2,7 @@
 
 A windowing scheme lays the windows of an operation and the rest of the
 package runs their life cycle. window_planner lays them from the scheme
-row (schemes/, one file per table row of WINDOWING_SCHEMES);
+row (schemes/, one file per row);
 round_tracker says when a window has its rounds and round_retention
 says which rounds it still holds; decode_requests asks the decode queue
 for one job per complete window; window_commits brings the correction

@@ -27,7 +27,6 @@ most decodes a measured cell ran at once, which is one.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
@@ -35,7 +34,6 @@ import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
-import decsim.tables as tables
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )
@@ -45,9 +43,9 @@ PHYSICAL = fault_models.FaultRepresentation.PHYSICAL
 
 @dataclasses.dataclass(frozen=True)
 class MeasuredTableSettings(measurements.RelaySettings):
-    """The measured_table row's keys in its tier section.
+    """The measured_table row's settings.
 
-    The relay_bp row's nine keys set the row's own Relay-BP decode, so
+    The relay_bp row's nine fields set the row's own Relay-BP decode, so
     the answer, its iterations and the line that prices them come from
     one setting; bases among them says whether a region is decoded whole
     or as its X and Z parts. device names the GPU measured and partition
@@ -58,7 +56,7 @@ class MeasuredTableSettings(measurements.RelaySettings):
 
     device: str = "a100"
     partition: str = "whole"
-    # the word the yaml and the reports name this row by
+    # the word the reports name this row by
     name = "measured_table"
 
     def __post_init__(self) -> None:
@@ -68,21 +66,6 @@ class MeasuredTableSettings(measurements.RelaySettings):
     def build(self) -> "MeasuredTableDecoder":
         """A fresh decoder of these settings."""
         return MeasuredTableDecoder(settings=self)
-
-    @classmethod
-    def from_yaml(
-        cls,
-        section: Mapping,
-        clocks: config.ClockSettings,
-        section_name: str,
-    ) -> "MeasuredTableSettings":
-        """Every key the section writes; absent is the default.
-
-        section_name is the tier section the row sits in, which a refusal
-        names.
-        """
-        del clocks
-        return tables.section_record(section_name, cls, section)
 
 
 class MeasuredTable:

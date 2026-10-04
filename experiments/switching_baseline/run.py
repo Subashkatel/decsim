@@ -345,8 +345,8 @@ def _with_receiver(path: link_settings.PathSettings):
 def switching_baseline_points() -> list:
     """Every switching point, then every weak-alone point.
 
-    Each set runs rate by distance, the distance fastest, as the yaml's
-    sweep did.
+    Each set runs rate by distance, the distance fastest, as its earlier
+    runs did.
     """
     grid = decsim.grid(
         physical_error_probability=PHYSICAL_ERROR_PROBABILITIES,
@@ -379,7 +379,7 @@ def switching_baseline_points() -> list:
 
 
 def _metadata(distance: int, physical_error_probability: float) -> dict:
-    """The point's swept cells as the yaml named them, so its id is theirs."""
+    """The swept cells under the earlier runs' names, so the ids match."""
     return {
         "workload.arguments.physical_error_probability": (
             physical_error_probability

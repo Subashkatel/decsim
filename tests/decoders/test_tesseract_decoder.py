@@ -11,7 +11,7 @@ profile (tesseract-decoder src/tesseract_sinter_compat.pybind.h:466-472)
 predicts on the model sinter hands a decoder
 (.pydeps/sinter/_collection/_collection_worker_state.py:28). The wheel
 is the bb-decoders extra; the reference tests skip until it is
-installed. The yaml refusals need no wheel.
+installed. The settings refusals need no wheel.
 """
 
 import numpy
@@ -248,7 +248,6 @@ def test_a_fixed_detector_order_seed_replaces_the_run_seed():
         ("detector_beam", -1, "at least 0"),
         ("priority_queue_limit", 0, "search states, at least 1"),
         ("detector_order_count", True, "orders, at least 1"),
-        ("detector_order_method", "random", "is not a row of its table"),
         ("detector_order_seed", -1, "must be None or a whole number from 0"),
         ("detector_order_seed", 1.5, "must be None or a whole number from 0"),
         ("detector_order_seed", True, "must be None or a whole number from 0"),
@@ -258,7 +257,7 @@ def test_a_fixed_detector_order_seed_replaces_the_run_seed():
 def test_a_search_key_of_the_wrong_type_or_range_is_refused(
     key: str, value, sentence: str
 ) -> None:
-    """A count is a whole number, a method a row.
+    """A count is a whole number.
 
     A detector-order seed is the uint64 build_det_orders takes
     (tesseract-decoder src/utils.h:42-45).
@@ -342,6 +341,22 @@ def test_a_measured_decode_charges_the_search_and_not_the_build(monkeypatch):
 
     assert (first_ns, second_ns) == (10, 10)
     assert clock.now_ns == 1020
+
+
+def test_a_detector_order_method_off_its_table_stops_the_first_decode():
+    pytest.importorskip("tesseract_decoder")
+    settings = tesseract.TesseractDecoder.Settings(
+        detector_order_method="random"
+    )
+    row = tesseract.TesseractDecoder(settings=settings)
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    detection_events, _ = windows.sampled_shots(circuit, 1, 3)
+    job = windows.job_for(model, detection_events[0])
+    with pytest.raises(KeyError, match="random"):
+        row.decode(job)
 
 
 def test_a_beam_the_backend_cannot_build_leaves_the_shot_unscored():

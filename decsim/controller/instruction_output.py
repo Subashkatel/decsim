@@ -6,7 +6,7 @@ instant it lands; a release starts its operation's command,
 a result return is reported to the QPU. Either payload then pays the
 decision-to-pulse cost, the control processor's issue pipeline from
 the decision at the core to the pulse trigger (traced on QubiC's core,
-Fruitwala 2404.15260 Sec. III and IV, in configs/reference.yaml; QICK
+Fruitwala 2404.15260 Sec. III and IV, in settings.py; QICK
 measures 16 clocks for the conditional evaluation and the jump and 20
 for the next pulse, 2110.00557 lines 893-900) and crosses
 controller_to_qpu, and the QPU starts a command on its next cycle

@@ -1,8 +1,8 @@
 """The experiments layer's referents: sinter's collect, and a recorded sweep.
 
-Referent one is a sweep of reference.yaml recorded before decsim.collect
-existed, rerun on its machine (run_files.REFERENCE), its sweep.csv
-and its per-link means kept in data/, each mean
+Referent one is a sweep of the reference machine recorded before
+decsim.collect existed, rerun on its machine (run_files.REFERENCE), its
+sweep.csv and its per-link means kept in data/, each mean
 the one shot_links.csv gives a link over the point's shots. Ten of its
 numbers
 were amended when the controller-to-store hop stopped being priced at
@@ -27,7 +27,8 @@ scored, none unscored and a zero rate counting them as failures, and
 one zero count of replaced provisional decodes
 without a correction, which a weak-only sweep never makes. The weak
 decoder of
-reference.yaml is pymatching, which prices its measured wall clock, so the
+the reference machine is pymatching, which prices its measured wall clock,
+so the
 columns that carry decode time (algorithm, service, queue wait, the park
 before the compute, the four totals, load, throughput, the queue peak and
 the wall seconds) vary between two runs of the same code; they are left
@@ -507,7 +508,7 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
 def test_a_metadata_key_that_is_not_text_is_refused_at_any_depth(
     metadata, sentence_start
 ):
-    """A Python caller's metadata, where a yaml reader cannot refuse it."""
+    """A point's metadata is checked where its id is made."""
     first_point = run_files.first_task()
     sentence = (
         f"{sentence_start} which is not text; a point's id is the json of "

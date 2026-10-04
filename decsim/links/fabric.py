@@ -19,32 +19,16 @@ fabric is the seed composite of its channels, so a channel that draws
 """
 
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Optional
 
-import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
-import decsim.links.credit_channel as credit_channel
-import decsim.links.framings as framings
-import decsim.links.reliable_channel as reliable_channel
 import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.seeds as seed_records
 import decsim.records.transfers as transfer_records
-import decsim.tables as tables
 import decsim.trace_source as trace_source
-
-# links.<path>.protocol.kind names one of these records: how the path's
-# channel moves a message. ideal is no packet protocol, the whole
-# transfer on an unbounded buffer with nothing lost; credit cuts it into
-# frames that wait for receive-buffer credits; reliable adds loss and
-# go-back-N recovery.
-PROTOCOLS = {
-    "ideal": None,
-    "credit": credit_channel.CreditChannel.Settings,
-    "reliable": reliable_channel.ReliableChannel.Settings,
-}
 
 
 def protocol_channel(
@@ -56,40 +40,6 @@ def protocol_channel(
     if protocol is None:
         return channel_module.Channel(channel_settings, engine)
     return protocol.build(channel_settings, engine)
-
-
-def protocol_settings_from_yaml(
-    section: object, clock: config.Clock, path_name: str
-) -> Optional[link_settings.PacketProtocolSettings]:
-    """A card's protocol mapping: its kind's record, None for ideal.
-
-    Every field but the clock is written in the mapping; the clock is
-    the card's own.
-    """
-    section_name = f"links.{path_name}.protocol"
-    if not isinstance(section, Mapping):
-        raise ValueError(
-            f"{section_name} holds {section!r}; it is a mapping with a kind, "
-            f"one of {sorted(PROTOCOLS)}"
-        )
-    kind = section.get("kind", "ideal")
-    record = tables.row(PROTOCOLS, f"links.{path_name}.protocol.kind", kind)
-    if record is None:
-        tables.refuse_unknown_keys(section_name, section, ("kind",))
-        return None
-    card_keys = []
-    for field in dataclasses.fields(record):
-        if field.name != "clock":
-            card_keys.append(field.name)
-    known_keys = ["kind"] + card_keys
-    tables.refuse_unknown_keys(section_name, section, known_keys)
-    values = {}
-    for key in card_keys:
-        values[key] = link_settings.required_key(section, key, section_name)
-    values["framing"] = framings.framing_settings_from_yaml(
-        values["framing"], path_name
-    )
-    return record(clock=clock, **values)
 
 
 class LinkFabric:

@@ -2,8 +2,8 @@
 
 sinter's shape (sinter/_command/_main.py:1-40): one command, one
 subcommand per word, and each verb's module imported only when that verb
-runs, so `decsim show` and `decsim trace` never load Stim. The console
-script and `python -m decsim` both land here.
+runs, so `decsim trace` never loads Stim. The console script and
+`python -m decsim` both land here.
 
     decsim run <run file> [--out DIR] [--processes N] [--only NAME]
         [--shots N]
@@ -13,7 +13,6 @@ script and `python -m decsim` both land here.
     decsim run <run file> --slurm [--cores C] [--hours H] [--memory-mb M]
         [--out DIR] [--dry-run]
     decsim run --fold --out DIR
-    decsim show <yaml>
     decsim trace follow <file> --round k:n | --window k:n
 
 What the experiments layer refuses reaches the user as one sentence and
@@ -169,7 +168,7 @@ def _run_parser():
         "run_file",
         nargs="?",
         default=None,
-        help="the experiment's run file, Python or yaml",
+        help="the experiment's run file",
     )
     parser.add_argument(
         "--out", default=None, help="the results folder to write"
@@ -292,31 +291,6 @@ def _check_the_slurm_arguments(parser, parsed) -> None:
         )
 
 
-def _show(argv: list) -> None:
-    """What one yaml resolves to, before anything runs.
-
-    The first point's machine is built and not run, so show refuses
-    whatever `decsim run` would refuse.
-    """
-    import argparse
-
-    import decsim.experiments.experiment as experiment
-
-    parser = argparse.ArgumentParser(prog="decsim show")
-    parser.add_argument("config", help="the experiment yaml to resolve")
-    parsed = parser.parse_args(argv)
-    config = experiment.load_experiment(parsed.config)
-    first_point = config.first_point_task()
-    config.built_machine(first_point, 0)
-    settings = first_point.settings
-    lines = experiment.resolved_description(config, settings)
-    lines.append("values:")
-    value_lines = experiment.value_lines(config, settings)
-    lines.extend(value_lines)
-    text = "\n".join(lines)
-    print(text)
-
-
 def _trace(argv: list) -> None:
     """One round's or one window's path through one shot's trace file."""
     import decsim.experiments.trace_follow as trace_follow
@@ -347,6 +321,5 @@ def _report_no_verb(verb: Optional[str]) -> None:
 # Each verb and the function that runs it, in the order usage lists them.
 _RUN_BY_VERB = {
     "run": _run,
-    "show": _show,
     "trace": _trace,
 }

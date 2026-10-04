@@ -30,7 +30,6 @@ import decsim.build.plan as plan_build
 import decsim.collect as collect
 import decsim.compiled_libraries as compiled_libraries
 import decsim.engine as engine_module
-import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
 import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
@@ -44,7 +43,6 @@ POINTS_FOLDER = "points"
 RECORD_FILE = "machine.json"
 INPUTS_FOLDER = "inputs"
 HASHES_FILE = "hashes.json"
-CONFIG_FOLDER = "config"
 # What the launcher saw of the tree it was about to run, for a process
 # whose interpreter has no git of its own (a job script exports it):
 # "1" dirty, "0" clean, unset means nobody looked.
@@ -135,12 +133,12 @@ def accept_raised_stop_rules(
     recorded = read_json(run_path)
     if recorded["points"] != list(point_ids):
         return
-    for source, target in _run_file_copies(run_file, run_dir):
-        if not target.exists():
-            continue
-        text = source.read_text()
-        with staged_replacement(target) as staging:
-            staging.write_text(text)
+    target = copied_run_file(run_file, run_dir)
+    if not target.exists():
+        return
+    text = run_file.read_text()
+    with staged_replacement(target) as staging:
+        staging.write_text(text)
 
 
 def finish_run(
@@ -303,15 +301,13 @@ def write_run_record(
 
     Sampling is deterministic from (stim version, circuit, distance,
     rounds, p, seed), so run.json plus the seeds are the raw data.
-    run_files are the run file and, for a yaml, the bases its extends
-    chain reads, none for a run no file describes (the examples/ scripts).
-    point_ids are the run's points in order, which is the order a fold
-    writes the rows in.
+    run_files is the run file, none for a run no file describes (the
+    examples/ scripts). point_ids are the run's points in order, which is
+    the order a fold writes the rows in.
     """
     run_files = []
     if run_file is not None:
-        for path in experiment.run_files(run_file):
-            run_files.append(str(path))
+        run_files.append(str(run_file))
     record = {"run_files": run_files, "points": point_ids}
     how_it_ran = _how_it_ran()
     record.update(how_it_ran)
@@ -326,9 +322,7 @@ def copied_run_file(
     run_file: pathlib.Path, run_dir: pathlib.Path
 ) -> pathlib.Path:
     """Where the folder keeps its copy of the run file, which a task loads."""
-    copies = _run_file_copies(run_file, run_dir)
-    _source, target = copies[0]
-    return target
+    return run_dir / run_file.name
 
 
 def recorded_point_ids(run_dir: pathlib.Path, first_ids: list) -> list:
@@ -356,15 +350,13 @@ def record_point(
     name: str,
     task: collect.Task,
     seeds: Optional[list] = None,
-    sections: Optional[Mapping] = None,
 ) -> str:
     """One point's values and workload, under points/<name>/.
 
     point_record says what machine.json holds; inputs/ holds the
-    workload as the files row reads it (write_point_record). Returns
-    the point's id.
+    workload's files (write_point_record). Returns the point's id.
     """
-    record = point_record(name, task, seeds, sections)
+    record = point_record(name, task, seeds)
     return write_point_record(run_dir, task, record)
 
 
@@ -372,32 +364,24 @@ def point_record(
     name: str,
     task: collect.Task,
     seeds: Optional[list] = None,
-    sections: Optional[Mapping] = None,
     experiment_facts: Optional[Mapping] = None,
 ) -> dict:
     """What a point's machine.json holds, built, not written.
 
-    Its id and name, the metadata, the seed ranges run, the sections a
-    yaml point resolved to (its axes placed and its references resolved,
-    as Hydra keeps each job's composed config in .hydra/config.yaml),
-    the maker the workload's row says it called with the point's own
-    arguments, every setting and the values the build derives, as gem5's
-    config.json holds every parameter (src/python/m5/SimObject.py:1175);
-    a point built in Python has no sections. An experiment's point also
+    Its id and name, the metadata, the seed ranges run, every setting
+    and the values the build derives, as gem5's config.json holds every
+    parameter (src/python/m5/SimObject.py:1175). An experiment's point also
     holds experiment_facts, what its fold needs besides its pieces
     (collect_command). Building runs the point's build, so a point the
     build refuses is refused here, before anything is written.
     """
     settings = task.settings
-    maker = settings.workload.maker()
     plan = _plan(task)
     record = {
         "id": task.strong_id(),
         "name": name,
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
-        "sections": collect.json_value(sections),
-        "maker": collect.json_value(maker),
         "settings": collect.json_value(settings),
         "built": _built_values(plan),
     }
@@ -505,14 +489,11 @@ def swept_values(run_dir: pathlib.Path, point_ids: list) -> dict:
     A swept name is a key of a point's metadata. One column per name is
     Wickham's tidy table, each variable a column and each observation a
     row (Tidy Data, J. Stat. Softw. 59(10), 2014, section 2.3); the
-    names come in the order the points first set them. A point built in
-    Python has its metadata's value there. A yaml point's metadata names
-    yaml paths, and its cell is the value its sections resolved to,
-    whether its block set the path or not, so a swept reference is the
-    value it names; a name the point does not hold is an empty cell. A
-    value other than a string or a number is one cell of compact json,
-    as sinter writes json_metadata (sinter/_data/_csv_out.py:35-37); the
-    typed value is in the record.
+    names come in the order the points first set them. A point's cell is
+    its metadata's value there, an empty cell for a name it does not
+    hold. A value other than a string or a number is one cell of compact
+    json, as sinter writes json_metadata (sinter/_data/_csv_out.py:35-37);
+    the typed value is in the record.
     """
     records = point_records(run_dir)
     paths = {}
@@ -602,35 +583,13 @@ def _write_result(
 
 
 def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
-    """The run file beside the results, or a yaml's whole chain in config/.
+    """The run file beside the results, under its own name.
 
-    A Python run file is copied under its own name, so an array task
-    loads the copy that made the rows. A yaml goes into config/ with
-    every base of its extends chain, each at its place relative to the
-    others, so every `extends` still resolves. Each copy is written once
-    (_copy_once), so a folder's copy is the file that made its rows.
+    An array task loads the copy that made the rows. The copy is written
+    once (_copy_once), so a folder's copy is the file that made its rows.
     """
-    for source, target in _run_file_copies(run_file, run_dir):
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _copy_once(source, target)
-
-
-def _run_file_copies(run_file: pathlib.Path, run_dir: pathlib.Path) -> list:
-    """Each file the run reads, paired with where its copy goes."""
-    run_files = experiment.run_files(run_file)
-    if len(run_files) == 1 and run_file.suffix == ".py":
-        target = run_dir / run_file.name
-        return [(run_file, target)]
-    config_dir = run_dir / CONFIG_FOLDER
-    chain_folder = _chain_folder(run_files)
-    copies = []
-    for config_file in run_files:
-        config_path = pathlib.Path(config_file)
-        source = config_path.resolve()
-        place = source.relative_to(chain_folder)
-        target = config_dir / place
-        copies.append((source, target))
-    return copies
+    target = copied_run_file(run_file, run_dir)
+    _copy_once(run_file, target)
 
 
 def _copy_once(source: pathlib.Path, target: pathlib.Path) -> None:
@@ -671,22 +630,6 @@ def _link_into_place(text: str, target: pathlib.Path) -> None:
             os.link(staging, target)
     finally:
         staging.unlink()
-
-
-def _chain_folder(config_files: tuple) -> pathlib.Path:
-    """The deepest folder that holds every file of the extends chain.
-
-    Each copy keeps its place below it, so two files of one name in two
-    folders stay two copies, and every copy's `extends` still names its
-    base's copy.
-    """
-    folders = []
-    for config_file in config_files:
-        config_path = pathlib.Path(config_file)
-        source = config_path.resolve()
-        folders.append(str(source.parent))
-    common_folder = os.path.commonpath(folders)
-    return pathlib.Path(common_folder)
 
 
 def _how_it_ran() -> dict:
@@ -796,39 +739,14 @@ def _write_inputs(inputs_dir: pathlib.Path, record) -> None:
 
 
 def _cells_of(record: dict, paths: list) -> dict:
-    """One point's cell at each swept name, the value it ran with.
-
-    A yaml point's resolved sections hold it: a swept reference as the
-    value it names, and a mapping as its child axes changed it. A point
-    built in Python has no sections, and its metadata holds it.
-    """
-    sections = record["sections"]
-    if sections is None:
-        return _metadata_cells(record["metadata"], paths)
-    cells = {}
-    for path in paths:
-        cells[path] = _resolved_cell(sections, path)
-    return cells
-
-
-def _metadata_cells(metadata: Mapping, paths: list) -> dict:
-    """A Python point's cells: its metadata, empty where it has none."""
+    """One point's cell at each swept name: its metadata, empty where none."""
+    metadata = record["metadata"]
     cells = {}
     for path in paths:
         cells[path] = ""
         if path in metadata:
             cells[path] = _cell_of(metadata[path])
     return cells
-
-
-def _resolved_cell(sections: Optional[dict], path: str):
-    """The cell of a value the point's sections hold, or an empty one."""
-    value = sections
-    for name in path.split("."):
-        if not isinstance(value, Mapping) or name not in value:
-            return ""
-        value = value[name]
-    return _cell_of(value)
 
 
 def _cell_of(value):

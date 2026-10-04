@@ -44,7 +44,7 @@ class StoreSlot:
 
     reads_in_place is the reading decoder's fact: its unit reads the
     rounds where the store keeps them rather than a copy of them
-    (decoders/settings.py DECODER_INPUTS).
+    (DecoderPoolSettings.copies_input False).
     """
 
     settings: Union[
@@ -405,10 +405,10 @@ def _check_readout_cost_is_priced(
 ) -> None:
     """A readout cost on the controller needs a card that leaves it out.
 
-    The claim belongs to the one card it is about: a yaml that leaves
-    qpu_to_controller null keeps the reference number, which already
-    covers the controller turning the readout into bits, so a second
-    charge for that work would count it twice.
+    The claim belongs to the one card it is about: a qpu_to_controller
+    card that keeps the reference number already covers the controller
+    turning the readout into bits, so a second charge for that work
+    would count it twice.
     """
     readout_cycles = controller_settings.readout_to_bits_cycles
     if readout_cycles == 0:

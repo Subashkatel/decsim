@@ -136,8 +136,6 @@ pytest==9.1.1
     #   ldpc
 python-dateutil==2.9.0.post0
     # via matplotlib
-pyyaml==6.0.3
-    # via decsim (pyproject.toml)
 qdldl==0.1.9.post1 ; python_full_version >= '3.11'
     # via cvxpy
 qldpc==0.3.3

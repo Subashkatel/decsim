@@ -125,9 +125,7 @@ def normalized_weight_step(
 ) -> float:
     """The weight step as a positive finite float; anything else is refused.
 
-    key is the name the refusal gives the value: the yaml reader passes
-    the whole path (weak_decoder.weight_step), since both tiers take the
-    union_find row; a Python caller keeps the row's name.
+    key is the name the refusal gives the value.
     """
     if isinstance(weight_step, bool) or not isinstance(
         weight_step, numbers.Real

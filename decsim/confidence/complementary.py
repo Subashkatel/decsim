@@ -60,11 +60,11 @@ class ComplementaryGap:
     class Settings:
         """The row as a run names it: the card that prices its computation.
 
-        walk_microseconds is escalation.confidence_walk_microseconds.
+        walk_microseconds is that card, None for the row's own cost model.
         """
 
         walk_microseconds: Optional[float] = None
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "complementary_gap"
 
         def __post_init__(self) -> None:
@@ -91,8 +91,8 @@ class ComplementaryGap:
         pins no observable has no forced solve, and the escalation
         policy then escalates it (escalation/policies.py). The
         computation is one subtraction of two numbers the decodes
-        already reported, so it charges no time unless the yaml prices
-        it (decision D8).
+        already reported, so it charges no time unless walk_microseconds
+        prices it (decision D8).
         """
         soft_output = self._gap_of(solves)
         ticks = self._walk_ticks()

@@ -1,4 +1,4 @@
-"""What the yaml and the number cards build for the links: settings only.
+"""What the number cards build for the links: settings only.
 
 A channel is one wire with a propagation latency and, optionally, a
 finite bandwidth: ns-3's point-to-point device, a DataRate and a delay
@@ -11,14 +11,13 @@ the payload (ns-3's device adds a header to every packet it sends,
 point-to-point-net-device.cc:528, and times the packet with it, :243).
 A fabric is one path setting per hop plus a profile name; two paths
 whose channels carry the same name share one wire and one setup engine.
-The values are checked here, once, because the yaml and the number cards
-are where they enter decsim.
+The values are checked here, once, because the number cards are where
+they enter decsim.
 """
 
 import dataclasses
 import fractions
 import math
-from collections.abc import Mapping
 from typing import Optional, Protocol
 
 import decsim.config as config
@@ -34,8 +33,8 @@ class CapacitySettings:
 
     A link of several parallel bit lanes is one wire with aggregate
     bandwidth (a PCIe x4 link stripes one transfer over four lanes), so
-    a yaml card folds its `channels` count into this rate before the
-    setting is built. The rate is held as one exact Fraction of the
+    a card folds its lane count into this rate before the setting is
+    built. The rate is held as one exact Fraction of the
     number as written (a float 0.20846 is the Fraction 10423/50000), so
     a rate written as an int, a float or a Fraction is one value with
     one point id. ns-3's DataRate does the serialization arithmetic in
@@ -140,8 +139,8 @@ class PathSettings:
     this framing leaves out the id the name stands for.
     excludes_receiver_processing says what the card's latency covers: a
     reference number measured end to end includes the receiver turning
-    the arrival into bits, and a card the run's own yaml wrote times the
-    wire alone, so only the second lets that processing be priced again
+    the arrival into bits, and a card the caller wrote times the wire
+    alone, so only the second lets that processing be priced again
     on the receiving component. It has no default, so every card says
     which it is.
     """
@@ -199,10 +198,9 @@ class FabricSettings:
     and a caller that leaves one out is refused where it constructs the
     card. A card whose QPU-to-controller latency leaves out the
     controller's readout processing says so, because the timing card
-    prices that processing on its own line. profile_name is the preset's
-    name, or the yaml's own file name for a card read from a yaml, which
-    the run's description prints. Python
-    callers can set readout_routes to choose a path card by the complete
+    prices that processing on its own line. profile_name is the card's
+    name, which the run's description prints. Callers can set
+    readout_routes to choose a path card by the complete
     contributing patch footprint.
     Unmatched footprints use qpu_to_controller. Equal channel names share
     the same setup engine and serializer, including across routed cards.
@@ -258,13 +256,6 @@ class FabricSettings:
         return tuple(bindings)
 
 
-def required_key(section: Mapping, key: str, section_name: str) -> object:
-    """A key a link card needs, refused by name when missing."""
-    if key not in section:
-        raise ValueError(f"{section_name} needs {key}")
-    return section[key]
-
-
 def check_positive_count(name: str, value) -> None:
     """A positive whole number, never a boolean, or a refusal naming it."""
     if config.is_whole_count(value):
@@ -276,7 +267,7 @@ def _as_whole_number(value, name: str) -> int:
     """A value as an exact int, or a ValueError naming the field.
 
     3.0 is fine; 3.5, NaN and None are not, nor a boolean, which Python
-    would read as 0 or 1 and a yaml writes as a flag.
+    would read as 0 or 1.
     """
     if isinstance(value, bool):
         raise ValueError(f"{name} must be a finite whole number")

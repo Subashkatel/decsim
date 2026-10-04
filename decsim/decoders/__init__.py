@@ -13,8 +13,8 @@ decoder_output.py sends it on: the correction to the Pauli frame, the
 committed boundary to the next window, and a selection to the strong
 tier that strong_requests.py is waiting on.
 
-The algorithm is one row of DECODERS in settings.py, one folder per
-row: minimum_weight_perfect_matching/, belief_matching/, union_find/,
+The algorithm is one decoder row, one folder per row:
+minimum_weight_perfect_matching/, belief_matching/, union_find/,
 relay_belief_propagation/, tesseract/ and belief_propagation_osd/.
 decoder.py holds the defaults every row shares, decoders.py the
 timing-only rows, detection_events.py the formation a tier does for

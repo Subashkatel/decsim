@@ -39,8 +39,7 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 
-# <tier>_decoder.bases names one of these rows on a strong backend row
-# and on the relay_bp row:
+# a strong backend row's and the relay_bp row's bases names one of these:
 # whether a region's X and Z detectors are decoded together, which keeps
 # the correlation a Y error makes between them, or apart, as two
 # smaller problems that model X and Z errors as independent (Relay-BP

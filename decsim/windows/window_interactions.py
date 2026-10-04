@@ -82,8 +82,8 @@ class DefaultWindowInteraction:
     the landed rounds when the decode starts; a same-operation A/B
     delivery is mapped by stable detector identity.
     `restart_reread_buffer_regions` is how many of the strong region's
-    buffer regions the restart window re-reads
-    (escalation.restart_reread_buffer_regions); `boundary_payload` is the
+    buffer regions the restart window re-reads (DoubleWindow.Settings);
+    `boundary_payload` is the
     representation its hand-off takes on the wire
     (windows.boundary_payload, decsim/windows/boundary_payloads.py).
     """

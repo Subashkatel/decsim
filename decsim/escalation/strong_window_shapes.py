@@ -1,7 +1,6 @@
 """The strong window's shape: which rounds the strong tier re-decodes, and when.
 
-Two rows of STRONG_WINDOW_SHAPES (escalation/settings.py), named by
-escalation.strong_window
+Two rows, one of which fills SwitchingSettings.strong_window
 (Toshio et al. 2510.25222). Both pin a face on a neighbour's committed
 correction, which is Bombin et al. 2303.04846's input adaptation (lines
 775-788): RedoWindow is the escalated window's commit region with
@@ -28,7 +27,7 @@ declares what releases it instead (pending_strong_windows.py), and the
 redecode holds the assignment until those conditions fire.
 
 The restart window's weak decode may read back into the strong region
-from the weak syndrome buffer (escalation.restart_reread_buffer_regions buffer
+from the weak syndrome buffer (restart_reread_buffer_regions buffer
 regions), so those rounds, the last absorbed window's commit rounds,
 must still be stored when the plan lands, whether the absorbed
 windows' inputs are in flight or already landed in a unit. Every
@@ -89,7 +88,7 @@ class StrongAssignment:
 class StrongWindowPorts:
     """The window components every strong window shape is built on.
 
-    One base so every row of STRONG_WINDOW_SHAPES has one constructor
+    One base so every strong window row has one constructor
     signature and the same wires, and the root builds and binds a row
     without asking which geometry it is; a row reads the components its
     own layout needs and ignores the rest. This is gem5's params object,
@@ -116,8 +115,8 @@ class StrongWindowPorts:
 class StrongWindowShape(Protocol):
     """How the strong tier's window is laid out, as the redecode sees it.
 
-    Every row of STRONG_WINDOW_SHAPES (escalation/settings.py)
-    implements it, and escalation.strong_window names one. A row that
+    Every strong window row implements it, and
+    SwitchingSettings.strong_window holds one. A row that
     cannot build its job at the escalation returns an
     assignment with no job and declares what releases it
     (release_conditions), and the redecode asks held_job for the job when
@@ -126,7 +125,7 @@ class StrongWindowShape(Protocol):
     strong region replaces the weak windows it covers, so the planner
     claims the rounds a restart would read and the weak chain keeps
     committing; a reader of the run's shape asks the row rather than a
-    yaml flag. boundary_policy is the boundary row's record a switching
+    flag. boundary_policy is the boundary row's record a switching
     run's windows take (ports.StrongWindowBoundaries): eager for an
     absorbing region, held for one that absorbs nothing.
     window_absorbed(key, owner_key) is the shape's one trace source: the
@@ -212,7 +211,7 @@ class RedoWindow(StrongWindowPorts):
     class Settings:
         """The redo window, as the switching slot names it."""
 
-        # the word the yaml and the refusals name this row by
+        # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
         # is handed is the double window's default, read by nothing
@@ -311,7 +310,7 @@ class DoubleWindow(StrongWindowPorts):
     there is no earlier commit to pin on.
 
     The restart window owns the faults crossing the far face at every
-    escalation.restart_reread_buffer_regions width, since this region
+    restart_reread_buffer_regions width, since this region
     reads no round past its commit (strong_regions.py,
     double_window_region). At width 1, the width Fig. 12 step 5 draws,
     the restart window reads the region's last buffer region raw as its
@@ -342,7 +341,7 @@ class DoubleWindow(StrongWindowPorts):
         """
 
         restart_reread_buffer_regions: int = 1
-        # the word the yaml and the refusals name this row by
+        # the word the refusals name this row by
         name = "double_window"
 
         def __post_init__(self) -> None:

@@ -4,12 +4,7 @@ Sources: the lattice-surgery unit of d rounds per step that
 decsim/qpu/round_policies.py takes from Horsman et al. 1111.4022 and
 Litinski 1808.02892; the section citations live in that module and are not
 verified here. The policies receive the OperationPlanningView the planner
-builds (decsim/frontends/planner.py). The yaml configs' "10d"
-rounds-per-shot rule is resolved by the workload settings
-(decsim/frontends/settings.py, RoundsPerShot.rounds_for: ten times the
-distance) and handed to the run as FixedRounds(rounds)
-(decsim/frontends/settings.py:147); CodeRounds(scale=10) gives the same
-count from the surface card and is not what the yaml configs use.
+builds (decsim/frontends/planner.py).
 """
 
 import pytest

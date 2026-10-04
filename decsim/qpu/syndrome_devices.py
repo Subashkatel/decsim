@@ -130,7 +130,7 @@ class TimingOnlyDevice(CircuitlessSource):
     class Settings:
         """The timing-only source has no keys: the card states every width."""
 
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "timing_only"
 
         def build(
@@ -217,7 +217,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     class Settings:
         """The random-bit source has no keys: the card states every width."""
 
-        # the word the yaml and the reports name this row by
+        # the word the reports name this row by
         name = "syndrome_bits"
 
         def build(

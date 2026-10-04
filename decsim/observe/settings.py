@@ -1,41 +1,21 @@
 """The observation settings: what a run records beyond its results."""
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
-import decsim.decoders.verify_windows as verify_windows
-import decsim.tables as tables
 
 LOG_MODES = ("off", "print", "file", "both")
-# observation.check_windows_with names one of these rows: the referee
-# the yaml reader writes around the decoder of the tier that decodes the
-# plan's windows, or none.
-WINDOW_CHECKS = {
-    "none": None,
-    "tesseract": verify_windows.TesseractCheckedDecoder,
-}
 # the trace's own word for "name the file yourself", so a study asks for
 # a Chrome trace without choosing a path
 CHROME_TRACE = "chrome"
 # the narrator's words: they name the log, never a trace file
 NARRATOR_MODES = ("print", "file", "both")
-OBSERVATION_KEYS = (
-    "log",
-    "log_component_io",
-    "check_windows_with",
-    "record_switching_windows",
-    "backlog_trace",
-    "trace",
-    "trace_shots",
-    "data_movement",
-)
 
 
 @dataclasses.dataclass(frozen=True)
 class ObservationSettings:
-    """The yaml's `observation` section.
+    """What a run records beside its results.
 
     log is the engine narrator: print shows it live, file writes each shot's
     full line record next to the results, both does both. trace is the
@@ -49,7 +29,7 @@ class ObservationSettings:
     pool columns read it); data_movement builds the copy, reference and move
     counters the RunResult carries.
 
-    The keys that only record the run, the log and the trace, are
+    The fields that only record the run, the log and the trace, are
     labels (compare=False) and no part of a
     point's id, as sinter keeps its output options out of a task's strong id
     (sinter/_data/_task.py:167-204): each writer schedules nothing and
@@ -70,7 +50,7 @@ class ObservationSettings:
     data_movement: bool = False
 
     def __post_init__(self) -> None:
-        """Every value checked, with the sentence a yaml user reads."""
+        """Every value checked, with the sentence the caller reads."""
         _check_log(self.log)
         _check_trace(self.trace)
         _check_trace_shots(self.trace_shots)
@@ -83,39 +63,6 @@ class ObservationSettings:
         )
         config.check_boolean("observation.backlog_trace", self.backlog_trace)
         config.check_boolean("observation.data_movement", self.data_movement)
-
-    @classmethod
-    def from_yaml(cls, section: Mapping) -> "ObservationSettings":
-        """The `observation` section, every key optional.
-
-        yaml 1.1 reads a bare `off` as False, so False is the word off
-        for the log and the trace, and a yaml list of shots is the
-        record's tuple; the record checks every value.
-        """
-        _refuse_a_section_that_is_not_a_block(section)
-        _refuse_an_unknown_key(section)
-        log_word = section.get("log", "off")
-        log = _off_word(log_word)
-        trace_word = section.get("trace", "off")
-        trace = _off_word(trace_word)
-        trace_shots = section.get("trace_shots", (0,))
-        if isinstance(trace_shots, list):
-            trace_shots = tuple(trace_shots)
-        log_component_io = section.get("log_component_io", False)
-        record_switching_windows = section.get(
-            "record_switching_windows", False
-        )
-        backlog_trace = section.get("backlog_trace", False)
-        data_movement = section.get("data_movement", False)
-        return cls(
-            log=log,
-            trace=trace,
-            trace_shots=trace_shots,
-            log_component_io=log_component_io,
-            record_switching_windows=record_switching_windows,
-            backlog_trace=backlog_trace,
-            data_movement=data_movement,
-        )
 
     @property
     def prints_log(self) -> bool:
@@ -140,68 +87,20 @@ class ObservationSettings:
         return self.trace
 
 
-def _refuse_a_section_that_is_not_a_block(section) -> None:
-    """The section is a block of keys; a bare value names none of them."""
-    if isinstance(section, Mapping):
-        return
-    raise ValueError(
-        f"the observation section must be a block of keys, got {section!r}; "
-        f"the observation keys are {OBSERVATION_KEYS}"
-    )
-
-
-def _refuse_an_unknown_key(section: Mapping) -> None:
-    """A key the section does not have is a stale or misspelled knob."""
-    for key in section:
-        if key not in OBSERVATION_KEYS:
-            raise ValueError(
-                f"observation.{key} is not an observation key; the "
-                f"observation section takes {OBSERVATION_KEYS}"
-            )
-
-
-def _off_word(value):
-    """The word off for yaml's False; any other value as written."""
-    if value is False:
-        return "off"
-    return value
-
-
 def _check_log(log) -> None:
     """The engine narrator's word is one of LOG_MODES."""
-    # a tuple of words, not a set: a yaml list or block is unhashable
+    # a tuple of words, not a set, so an unhashable value meets the
+    # sentence below rather than a TypeError
     if log in LOG_MODES:
         return
     raise ValueError(f"observation.log must be one of {LOG_MODES}, got {log!r}")
-
-
-def window_check_from_yaml(section: Mapping):
-    """The referee row observation.check_windows_with names; None for none.
-
-    tesseract re-decodes every window with the Tesseract referee and
-    counts disagreements, never priced.
-    """
-    check_windows_with = section.get("check_windows_with", "none")
-    # a list of names, not the table: a yaml list or block is unhashable
-    # and a dictionary lookup would raise TypeError before the sentence
-    rows = sorted(WINDOW_CHECKS)
-    if check_windows_with not in rows:
-        raise ValueError(
-            "observation.check_windows_with must be one of "
-            f"{rows}, got {check_windows_with!r}"
-        )
-    return tables.row(
-        WINDOW_CHECKS, "observation.check_windows_with", check_windows_with
-    )
 
 
 def _check_trace(trace) -> None:
     """The trace is off, chrome, or the path the Chrome trace is written to."""
     if not isinstance(trace, str):
         raise ValueError(
-            "observation.trace must be off, chrome, or a path, got "
-            f"{trace!r}; yaml reads a bare `on` as true, so quote a path "
-            "that looks like a word"
+            f"observation.trace must be off, chrome, or a path, got {trace!r}"
         )
     if not trace:
         raise ValueError(

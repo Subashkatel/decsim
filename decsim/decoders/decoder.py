@@ -57,10 +57,10 @@ class DecoderBase(abc.ABC):
     # forced solves hears the reason once instead of once per window
     forced_solve_unavailable = trace_source.SILENT
     # what this row's decode can show a confidence signal beyond the
-    # correction; the yaml refuses a signal whose requirement is not here
+    # correction; the build refuses a signal whose requirement is not here
     decoder_evidence = decoding_records.NO_DECODER_EVIDENCE
     # per evidence this row does not produce but a reader would expect
-    # of it, the sentence the yaml refusal quotes
+    # of it, the sentence the build's refusal quotes
     missing_evidence_reasons: dict = {}
 
     @abc.abstractmethod
@@ -150,7 +150,7 @@ class WindowDecoderBase(DecoderBase):
     model), the backend for one placed model, and decode_window(backend,
     model, faults, syndrome), one call on it returning (selected faults,
     decode status). With a latency model the manager prices the decode; with
-    none (latency_model=None, the table's rows) the decode is measured
+    none (latency_model=None, the shipped rows) the decode is measured
     on this host, timing the backend call only: the compile, the payload
     syndrome and the result construction are setup the hardware does not
     pay per window.

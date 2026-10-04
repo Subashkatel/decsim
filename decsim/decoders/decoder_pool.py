@@ -244,7 +244,7 @@ def decoder_rows(decoders: tuple) -> list:
     """Every decoder row inside these decoders, in the order the walk finds.
 
     A row is anything that answers the runtime-checkable Decoder port,
-    which every row of DECODERS does and a row written outside decsim
+    which every decoder row does and a row written outside decsim
     does too without inheriting decsim's base class; the port declares
     the sources a row reports on, so the walk asks nothing further about
     what a row has. The recursion asks the seeding protocol whether a

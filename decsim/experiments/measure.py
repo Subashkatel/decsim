@@ -300,7 +300,7 @@ def measure_shot(
     Chrome trace when trace names one and the shot is in trace_shots;
     None writes nothing beyond the returned measurement.
     only_traced_shot says the run traces this shot alone, so a trace
-    path the yaml names is written as it stands.
+    path the observation names is written as it stands.
     """
     settings = shot.task.settings
     point_id = shot.task.strong_id()
@@ -763,7 +763,7 @@ def active_decoder_kind(settings: machine_settings.MachineSettings):
 
 
 def trace_path_for_shot(path, label: str) -> str:
-    """The path a swept shot writes to: the label joins the yaml's path.
+    """The path a swept shot writes to: the label joins the given path.
 
     A sweep traces the shots trace_shots names at every point, so each
     file takes the shot's label, its point id and seed, before its

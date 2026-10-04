@@ -11,7 +11,6 @@ decodes the plan's windows, with weak_syndrome_round_receiver.py as its
 receiving end, its room and its landing, and the strong syndrome buffer
 when a tier reads from the room side, with
 strong_syndrome_round_receiver.py as its receiving end.
-settings.py reads both stores' yaml sections into those records.
 round_output.py is a store's face on the data path: every round that
 leaves leaves through it, so the link a decode's
 input rides is the store's own fact and not its reader's.

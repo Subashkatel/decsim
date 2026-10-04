@@ -242,9 +242,10 @@ def test_a_bases_row_off_the_table_is_refused():
     fields = {"device": "gh200", "bases": "xz"}
     with pytest.raises(ValueError) as refusal:
         measured_table.MeasuredTableSettings(**fields)
-    assert str(refusal.value) == (
-        "bases 'xz' is not a row of its table; the rows are "
-        "['apart', 'together']"
+    message = str(refusal.value)
+    assert message.startswith(
+        "device 'gh200' with partition 'whole', bases 'xz' and the "
+        "Relay-BP keys {} has no measurement in measured_table"
     )
 
 

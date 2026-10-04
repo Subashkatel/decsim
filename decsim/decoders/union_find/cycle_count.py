@@ -13,7 +13,7 @@ peel and busy); neighbor_link_internal_v2.v lines 78-102 and 130 (a
 front covers one half tick per tick per growing end, and an edge is
 grown at its weight). The steps come from the decode itself
 (records/decoder_evidence.py, GrowthStep); the row's constants come
-from the yaml's cycle_count block, one row per chip, and the cycles end
+from its CycleCount record, one per chip, and the cycles end
 on the named clock's edge as every stage of the decoder unit does.
 HostMeasuredTime is the other choice: the unit is held for what the
 decode took on the host, which is no hardware's time.
@@ -22,12 +22,10 @@ decode took on the host, which is no hardware's time.
 import dataclasses
 import math
 import numbers
-from collections.abc import Mapping
 from typing import Optional, Union
 
 import decsim.config as config
 import decsim.records.decoder_evidence as evidence_records
-import decsim.tables as tables
 
 CYCLE_FIELDS = (
     "setup_cycles",
@@ -55,7 +53,7 @@ JOIN_TEST_CYCLES = 1
 
 @dataclasses.dataclass(frozen=True)
 class CycleCount:
-    """The yaml's `cycle_count` block under a tier that names union_find.
+    """The union-find unit's cycle count, the timing of a union_find row.
 
     cycles = 1 + setup_cycles + setup_cycles_per_vertex x detectors
            + setup_cycles_per_edge x edges
@@ -126,24 +124,6 @@ class CycleCount:
             value = getattr(self, name)
             config.check_cycles(f"cycle_count.{name}", value)
         _check_cycles_per_edge(self.cycles_per_edge)
-
-    @classmethod
-    def from_yaml(
-        cls,
-        section: Mapping,
-        clocks: config.ClockSettings,
-        section_name: str,
-    ) -> "CycleCount":
-        """The block's fields, its clock resolved to that domain's Clock.
-
-        section_name is the tier section the block sits in. Every
-        refusal of the block leads with cycle_count, so the tier's name
-        before it is the key's whole yaml path.
-        """
-        _check_keys(section, section_name)
-        values = dict(section)
-        values["clock"] = clocks.clock(section["clock"])
-        return tables.section_record(section_name, cls, values)
 
     def cycles(
         self, evidence: Optional[evidence_records.UnionFindHardEvidence]
@@ -284,25 +264,6 @@ def _fusion_changes(step: evidence_records.GrowthStep) -> int:
         return max(1, step.hop_count)
     climbs = 2 * step.hop_count
     return 1 + climbs
-
-
-def _check_keys(section: Mapping, section_name: str) -> None:
-    """The block names its clock and no key the count does not read."""
-    known = set(CYCLE_FIELDS)
-    known.add("clock")
-    known.add("cycles_per_edge")
-    unknown = set(section) - known
-    if unknown:
-        listed = sorted(unknown)
-        raise ValueError(
-            f"{section_name}.cycle_count has no key {listed}; its keys are "
-            f"clock, cycles_per_edge and {list(CYCLE_FIELDS)}"
-        )
-    if "clock" not in section:
-        raise ValueError(
-            f"{section_name}.cycle_count needs clock, the domain its "
-            "cycles are counted in"
-        )
 
 
 def _check_cycles_per_edge(value) -> None:

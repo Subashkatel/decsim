@@ -60,8 +60,9 @@ that wait for a finite receive buffer's credits and loses nothing. The
 reliable row loses frames at the card's bit error rate and resends them
 by go-back-N until each message is delivered once and in order, so a
 component above a hop never sees a loss, a duplicate or a reordering
-on any row (decsim/links/fabric.py PROTOCOLS); when its retry count
-runs out, the link has failed and the run stops with an error.
+on any row (decsim/links/credit_channel.py and reliable_channel.py);
+when its retry count runs out, the link has failed and the run stops
+with an error.
 """
 
 import dataclasses
@@ -133,8 +134,8 @@ class Machine:
         point's calibrator when its switching threshold learns across
         shots (collect.Task builds it); like the models it is point
         state, never a setting. The settings are read at their point
-        first (MachineSettings.at_point), so a record whose table row no
-        task has read builds a shot as one whose row is read.
+        first (MachineSettings.at_point), so a record whose calibration
+        row no task has read builds a shot as one whose row is read.
         """
         settings = settings.at_point()
         if built_models is None:
@@ -456,7 +457,7 @@ def _process_name(
 ) -> str:
     """The machine the trace is of: its escalation, code distance and seed.
 
-    The escalation is the yaml's word for the filled decode slots
+    The escalation is the word for the filled decode slots
     (MachineSettings.escalation_kind). The machine knows no sweep, so the
     point's other values name the trace's file (experiments/measure.py
     shot_label) and not this line.

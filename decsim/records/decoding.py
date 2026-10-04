@@ -565,17 +565,17 @@ class RunShape:
     """What a run is made of, as the root checks it before planning.
 
     The escalation policy refuses a run it cannot serve from this
-    record, once, in Machine.build. strong_window is the row of
-    STRONG_WINDOW_SHAPES the escalation section named, so a refusal
-    names the shape the yaml chose; is_absorbing_strong_window is that
+    record, once, in Machine.build. strong_window is the name of the
+    strong window row the switching slot holds, so a refusal names the
+    shape the caller chose; is_absorbing_strong_window is that
     row's own declaration that its region replaces the weak windows it
     covers (the double window of Toshio et al. 2510.25222 Sec. III C;
     the redo window absorbs nothing); is_bulk_strong is the
     decoder manager's merging of queued strong re-decodes; operations
     are the workload's planning views; commit_round_count and
     buffer_round_count size every window (windows.commit_rounds and
-    windows.buffer_rounds, the code distance when the yaml leaves them
-    null).
+    windows.buffer_rounds, the code distance when they are left
+    None).
     """
 
     scheme: Any

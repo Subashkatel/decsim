@@ -32,7 +32,6 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.records.decoding as decoding_records
-import decsim.tables as tables
 
 # The point's facts a calibration table keys its rows on, each column
 # headed by the fact's name: the code, the noise, the round clock, and
@@ -47,15 +46,6 @@ POINT_FACTS = (
 # Decibels are 10 log10 of the likelihood ratio; matching weights are
 # its natural log: nats = decibels * ln(10) / 10.
 LN_TEN = math.log(10.0)
-ONLINE_KEYS = (
-    "target_escalation_rate",
-    "step_db",
-    "audit_rate",
-    "kept_bad_budget",
-    "adjust_factor",
-    "min_escalation_rate",
-    "max_escalation_rate",
-)
 
 
 def decibels_to_nats(decibels: float) -> float:
@@ -90,26 +80,16 @@ def checked_decibels(decibels: float, name: str) -> float:
 class FixedThreshold:
     """The paper's constant g_th: keep at gap >= threshold, escalate below.
 
-    The three declarations below are what the yaml boundary and the root
-    read off a row instead of its name (escalation/settings.py,
-    build/escalation.py): audits_by_escalating says the row learns from
-    strong results it forces, which is why such a row is serial-only;
-    reads_a_calibration_table says its number comes from a csv, which
-    opens threshold_table and threshold_column and closes
-    gap_threshold_db; built_per_sweep_point says the row builds its own
-    instance for a sweep point, through for_point, which is what the
-    online card configures, while a row that declares it False is built
-    by the root from the record's threshold in nats, its one constructor
-    argument.
+    audits_by_escalating says the row learns from strong results it
+    forces, which is why such a row is serial-only (escalation/policies.py
+    reads it off the row instead of its name).
     """
 
     audits_by_escalating = False
-    reads_a_calibration_table = False
-    built_per_sweep_point = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The constant, in decibels (escalation.gap_threshold_db)."""
+        """The constant, in decibels."""
 
         threshold_decibels: float
 
@@ -162,12 +142,8 @@ class TableThreshold(FixedThreshold):
     sets it (by brute force, or as Eq. (4)'s smallest g_th, line 890);
     the point is looked up and converted before the machine is built
     (Settings.at_point), so at run time this row decides on a constant
-    exactly as FixedThreshold does. What it declares that the fixed row
-    does not is where its number came from, which is what the settings
-    need to know to demand the csv.
+    exactly as FixedThreshold does.
     """
-
-    reads_a_calibration_table = True
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -363,8 +339,8 @@ class OnlineThresholdController:
     So the target stays inside [min_escalation_rate,
     max_escalation_rate - audit_rate], whatever accuracy would prefer,
     and the strong duty stays at or under max_escalation_rate, the
-    number the yaml writes for the theorem's bound. That number is the
-    yaml's, and nothing here derives it from the theorem's inputs.
+    number the settings give for the theorem's bound. That number is the
+    caller's, and nothing here derives it from the theorem's inputs.
     """
 
     def __init__(
@@ -427,8 +403,7 @@ class OnlineThresholdController:
 class OnlineThreshold:
     """Adapts the threshold during the run, from the escalation rate it sees.
 
-    The row of threshold_source online, asked at Switching's decision
-    point.
+    The online row, asked at Switching's decision point.
 
     One instance persists across every shot of a sweep point, so the
     controller learns over the point's whole window stream; its random
@@ -440,21 +415,18 @@ class OnlineThreshold:
     """
 
     audits_by_escalating = True
-    reads_a_calibration_table = False
-    built_per_sweep_point = True
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The starting threshold and the calibrator's knobs.
 
-        threshold_decibels is where the rate tracker starts
-        (escalation.gap_threshold_db). Two loops move it: a rate tracker
-        steps it toward target_escalation_rate on every window
-        (step_decibels per event), and a randomized audit lane
+        threshold_decibels is where the rate tracker starts. Two loops move
+        it: a rate tracker steps it toward target_escalation_rate on every
+        window (step_decibels per event), and a randomized audit lane
         strong-decodes audit_rate of the kept windows; one revised audit
         multiplies the target by adjust_factor, and only ceil(3 /
-        kept_bad_budget) consecutive clean audits divide it back. The
-        target stays inside [min_escalation_rate, max_escalation_rate -
+        kept_bad_budget) consecutive clean audits divide it back. The target
+        stays inside [min_escalation_rate, max_escalation_rate -
         audit_rate], because the audits reach the strong tier beside the
         target and max_escalation_rate bounds the strong duty they make
         together (OnlineThresholdController). Defaults are the validated
@@ -476,31 +448,6 @@ class OnlineThreshold:
             _check_online_numbers(self)
             _check_online_steps(self)
             _check_online_rates(self)
-
-        @classmethod
-        def from_yaml(
-            cls, section: Mapping, threshold_decibels: float
-        ) -> "OnlineThreshold.Settings":
-            """The `online` card, every key optional, from its start.
-
-            The card's step_db is the record's step_decibels.
-            """
-            if not isinstance(section, Mapping):
-                raise ValueError(
-                    "escalation.online must be a mapping of the "
-                    f"calibrator's knobs (got {section!r})"
-                )
-            tables.refuse_unknown_keys(
-                "escalation.online", section, ONLINE_KEYS
-            )
-            knobs = {}
-            for key, default in _ONLINE_DEFAULTS.items():
-                knobs[key] = config.finite_number(
-                    section, "escalation.online", key, default
-                )
-            knobs["step_decibels"] = knobs.pop("step_db")
-            values = {"threshold_decibels": threshold_decibels, **knobs}
-            return tables.section_record("escalation.online", cls, values)
 
         @property
         def threshold_nats(self) -> float:
@@ -640,19 +587,6 @@ class OnlineThreshold:
         self.trajectory.append((tracker.window_count, tracker.threshold, event))
 
 
-# The online card's knobs and their defaults, in the order the card
-# lists them.
-_ONLINE_DEFAULTS = {
-    "target_escalation_rate": 1e-3,
-    "step_db": 0.25,
-    "audit_rate": 0.01,
-    "kept_bad_budget": 2e-4,
-    "adjust_factor": 2.0,
-    "min_escalation_rate": 1e-5,
-    "max_escalation_rate": 0.30,
-}
-
-
 def _check_online_numbers(online) -> None:
     """Every knob of the online card is a finite number."""
     for field in dataclasses.fields(online):
@@ -732,7 +666,7 @@ def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
         reader = csv.DictReader(table_file)
         rows = list(reader)
         columns = reader.fieldnames or []
-    _refuse_a_yaml_path_header(columns, table_path)
+    _refuse_a_settings_path_header(columns, table_path)
     if column not in columns:
         raise ValueError(
             f"threshold_table {table_path} has no column {column!r}; its "
@@ -747,8 +681,8 @@ def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
     return columns, rows
 
 
-def _refuse_a_yaml_path_header(columns: list, table_path) -> None:
-    """A header that is a yaml path is refused, naming the fact to write.
+def _refuse_a_settings_path_header(columns: list, table_path) -> None:
+    """A header that is a settings path is refused, naming the fact to write.
 
     Read as a threshold column, it would leave its key unmatched, and the
     point would take another row's threshold with no sign of it.
@@ -756,14 +690,14 @@ def _refuse_a_yaml_path_header(columns: list, table_path) -> None:
     for column in columns:
         if "." not in column:
             continue
-        sentence = _yaml_path_header_sentence(column, table_path)
+        sentence = _settings_path_header_sentence(column, table_path)
         raise ValueError(sentence)
 
 
-def _yaml_path_header_sentence(column: str, table_path) -> str:
-    """The refusal of a yaml path header, with its fact when it names one."""
+def _settings_path_header_sentence(column: str, table_path) -> str:
+    """The refusal of a settings path header, with its fact if it names one."""
     sentence = (
-        f"threshold_table {table_path} heads a column with the yaml path "
+        f"threshold_table {table_path} heads a column with the settings path "
         f"{column}; a key column is headed by the point fact it matches, "
         f"one of {POINT_FACTS}"
     )

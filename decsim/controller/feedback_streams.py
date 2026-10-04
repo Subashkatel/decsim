@@ -18,8 +18,6 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 
-# Any denotes opaque operation, stream and patch identities in port calls.
-
 
 @runtime_checkable
 class Streams(Protocol):
@@ -60,7 +58,9 @@ class Streams(Protocol):
         """True when a live protected region already emits this patch."""
 
     def extend_live_stream(
-        self, operation: program_records.Operation, patch: Any
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
     ) -> bool:
         """Emit one more round of the stream the idle patch holds."""
 
@@ -127,7 +127,9 @@ class NoFeedbackStreams:
         return False
 
     def extend_live_stream(
-        self, operation: program_records.Operation, patch: Any
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
     ) -> bool:
         """No stream to extend."""
         del operation
@@ -308,7 +310,9 @@ class FeedbackStreams:
         return patch in live_patches
 
     def extend_live_stream(
-        self, operation: program_records.Operation, patch: Any
+        self,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
     ) -> bool:
         """Advance the stream the idle patch holds, once per tick.
 
@@ -810,13 +814,19 @@ class _StreamTable:
     def round_count_of(self, operation_id) -> int:
         return self.resolved_operation_by_id[operation_id].round_count
 
-    def round_ticks_of_stream(self, stream_id: Any) -> int:
+    def round_ticks_of_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> int:
         """The common cadence validated for the owner's physical group."""
         patches = self.patches_of_stream(stream_id)
         first_patch = patches[0]
         return self.resolved_patch_by_identity[first_patch].round_ticks
 
-    def patches_of_stream(self, stream_id: Any) -> tuple:
+    def patches_of_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> tuple:
         """The owner's authoritative physical patch footprint."""
         return self.owner_by_stream_id[stream_id].patches
 
@@ -826,7 +836,10 @@ class _StreamTable:
     def regions_ending_at(self, operation_id) -> tuple:
         return self.regions_by_endpoint.get(("end", operation_id), ())
 
-    def is_protected(self, stream_id: Any) -> bool:
+    def is_protected(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> bool:
         return any(region.stream_id == stream_id for region in self.regions)
 
     def owner_of(self, stream_id):

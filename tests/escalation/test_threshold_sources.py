@@ -413,6 +413,20 @@ def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
         table.at_point(facts)
 
 
+def test_a_table_with_no_row_for_the_point_is_refused(tmp_path):
+    table_path = _write_table(tmp_path, "distance,gth_eq4_wilson\n3,20\n")
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=5)
+
+    with pytest.raises(ValueError) as refusal:
+        table.at_point(facts)
+
+    assert str(refusal.value) == (
+        f"threshold_table {table_path} has no row for the point "
+        "{'distance': 5}"
+    )
+
+
 def test_an_integer_key_matches_its_row_exactly(tmp_path):
     """Only a float key reads back within a relative 1e-9 of its text.
 

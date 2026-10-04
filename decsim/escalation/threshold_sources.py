@@ -170,7 +170,7 @@ class TableThreshold(FixedThreshold):
                 return self
             columns, rows = _table_rows(self.table)
             point = _point_of(columns, facts, self.table)
-            row = _first_row_holding(rows, point)
+            row = _first_row_holding(rows, point, self.table)
             cell = row[self.column]
             threshold_decibels = _certified_decibels(
                 cell, self.table, self.column, point
@@ -659,12 +659,18 @@ def _point_of(columns: list, facts: Mapping, table_path) -> dict:
     return point
 
 
-def _first_row_holding(rows: list, point: dict) -> Optional[dict]:
-    """The first row whose key cells hold the point, or None."""
+def _first_row_holding(rows: list, point: dict, table_path) -> dict:
+    """The first row whose key cells hold the point.
+
+    A table with no such row gives the point no threshold, so it is
+    refused.
+    """
     for row in rows:
         if _is_point(row, point):
             return row
-    return None
+    raise ValueError(
+        f"threshold_table {table_path} has no row for the point {point}"
+    )
 
 
 def _is_point(row: dict, point: dict) -> bool:

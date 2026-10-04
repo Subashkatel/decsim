@@ -255,7 +255,7 @@ def test_a_growth_with_one_interval_per_edge_missing_is_refused():
     one_interval = evidence_records.Open(0, 1)
     short = (one_interval,)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="the Union-Find growth reads"):
         compiled_decoder.cluster_gap(graph, short)
 
 

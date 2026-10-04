@@ -1582,7 +1582,7 @@ def test_a_record_with_no_patch_hash_stops_a_run_before_a_shot(
         record_path.write_text(json.dumps(written))
     raised_config = _capped_noisy_config(tmp_path, 3, 15)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="patch_sha256"):
         command.main(["run", str(raised_config), "--out", str(out_dir)])
 
     assert _piece_names(out_dir) == ["0-0", "1-1"]
@@ -1607,7 +1607,7 @@ def test_a_fold_of_a_folder_whose_run_json_has_no_patch_hash_stops(
     run_path.write_text(json.dumps(record))
     before = _run_folder_bytes(out_dir)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="patch_sha256"):
         command.main(["run", "--fold", "--out", str(out_dir)])
 
     assert _run_folder_bytes(out_dir) == before
@@ -2206,7 +2206,7 @@ def test_a_fold_that_fails_part_way_leaves_the_last_run_folder_as_it_was(
     for piece_folder in out_dir.glob("pieces/*/*"):
         _with_a_renamed_point(piece_folder, "service", "park")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="x not in tuple"):
         command.main(["run", "--fold", "--out", str(out_dir)])
 
     assert _run_folder_bytes(out_dir) == before

@@ -84,7 +84,7 @@ def test_a_path_that_crosses_no_seat_or_two_is_refused(run_facts, formed_at):
     settings = _settings_forming_at(formed_at)
     device = _DeviceWithNoFormationTable()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="a path with none decodes raw"):
         readout_part.build_detection_events(
             settings.detection_events, None, device, *run_facts
         )
@@ -128,7 +128,7 @@ def test_a_ported_strong_store_is_refused_at_build():
     settings = _machine_settings(strong_syndrome_buffer=PORTED_STRONG_STORE)
     planned = _strong_only(settings)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the strong syndrome buffer takes"):
         machine_module.Machine.build(planned)
 
 
@@ -148,7 +148,7 @@ def test_a_cost_on_the_strong_store_is_refused_at_build(
     settings = _machine_settings(strong_syndrome_buffer=strong_syndrome_buffer)
     planned = _strong_only(settings)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the strong syndrome buffer stores"):
         machine_module.Machine.build(planned)
 
 
@@ -210,7 +210,7 @@ def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():
         readout_to_bits_cycles=6, card_excludes_it=False
     )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="a separate controller readout cost"):
         machine_module.Machine.build(settings)
 
 
@@ -246,7 +246,7 @@ def test_every_readout_route_must_exclude_separately_charged_processing(
     )
     settings = dataclasses.replace(settings, links=links)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="a separate controller readout cost"):
         machine_module.Machine.build(settings)
 
 
@@ -313,7 +313,7 @@ def test_a_rate_out_of_a_ported_store_is_refused_as_a_second_price():
     """The store's read port prices the bits; the link keeps its latency."""
     settings = _ported_run_with_a_rate(2000.0)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="weak_syndrome_buffer kind"):
         machine_module.Machine.build(settings)
 
 

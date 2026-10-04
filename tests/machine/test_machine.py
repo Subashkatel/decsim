@@ -959,7 +959,7 @@ def test_a_round_reaching_past_its_declared_fragments_stops_the_run():
     program = _first_round_read_by_the_fifth_program()
     settings = _settings(program, "live", "controller")
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="a detector compares a round"):
         _run(settings)
 
 
@@ -1810,7 +1810,7 @@ def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused(
     """
     settings = _switching_memory(weak_kind, confidence)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cannot serve the confidence"):
         machine_module.Machine.build(settings, 0)
 
 
@@ -2136,13 +2136,13 @@ def test_a_seed_outside_the_unsigned_64_bit_range_is_refused(seed):
     """A run with no seeded component would take any seed and run on."""
     settings = machine_settings.MachineSettings()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="seed"):
         machine_module.Machine.build(settings, seed)
 
 
 def test_a_seed_that_is_not_a_number_is_refused():
     settings = machine_settings.MachineSettings()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="invalid literal for int"):
         machine_module.Machine.build(settings, "x")
 
 
@@ -2718,7 +2718,7 @@ def test_a_plan_with_windows_and_no_decoder_still_stops():
     """The windows' decoder port is read unbound at build."""
     settings = strong_primary_settings()
     settings = dataclasses.replace(settings, strong_decoder=None)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="WindowModels.decoder was read"):
         machine_module.Machine.build(settings, 0)
 
 

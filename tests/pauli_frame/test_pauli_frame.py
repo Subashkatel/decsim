@@ -114,7 +114,7 @@ def test_a_snapshot_does_not_change_when_the_frame_does():
 def test_a_second_correction_for_a_window_is_refused():
     engine, frame = frame_with_commit_ticks(0)
     commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="already has a weak correction"):
         commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
     assert frame.frame_for_stream("stream") == (1,)
 
@@ -136,7 +136,7 @@ def test_a_stream_whose_corrections_change_width_is_refused_when_read():
     engine, frame = frame_with_commit_ticks(0)
     commit(frame, ("stream", 0), (1, 0))
     commit(frame, ("stream", 1), (0, 1, 0))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="changed its number of observables"):
         frame.frame_for_stream("stream")
 
 
@@ -149,7 +149,7 @@ def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
         continued.append(engine.now)
 
     commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="already has a weak correction"):
         commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
     engine.run()
     assert continued == [4]
@@ -172,7 +172,7 @@ def test_a_charged_write_with_no_clock_still_stops():
     )
     machine = machine_module.Machine.build(settings, 0)
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="has no attribute 'edge'"):
         machine.run()
 
 

@@ -353,7 +353,7 @@ def test_supplied_css_preserves_a_fault_beyond_the_first_observable(
 @pytest.mark.usefixtures("explorer")
 def test_supplied_css_refuses_extra_ancilla_preparation_time() -> None:
     code = _repetition_with_explicit_ancilla_preparation()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="CSS memory fragments must fit"):
         deltakit.css_memory_rounds(code, "Z", 0, round_period_microseconds=1)
 
 

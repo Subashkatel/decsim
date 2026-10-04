@@ -117,7 +117,7 @@ def test_window_lookahead_does_not_execute_physical_measurements() -> None:
 def test_a_finalized_stream_refuses_another_physical_round() -> None:
     source, owner = _source()
     _execute(source, owner, 1)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="live Stim stream is already"):
         source.idle_round_payloads(
             owner,
             owner.id,
@@ -156,7 +156,7 @@ def test_idle_first_refuses_a_measurement_closed_owner() -> None:
         patches=(0,),
         feedback_boundary_mode="measurement_closed",
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="live Stim memory requires"):
         source.declare_stream(owner, 0)
     assert source.logical_observable_truth(owner.id) is None
 
@@ -170,21 +170,21 @@ def test_a_segment_cannot_relabel_the_physical_patch() -> None:
         stream_offset=0,
         patches=("other",),
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="live Stim segment patches"):
         source.begin_operation(segment, 1, 0, round_period_ticks=1_100_000)
     assert source.sampled_measurements(owner.id) == ()
 
 
 def test_a_segment_refuses_a_one_tick_period_mismatch() -> None:
     source, owner = _source(1.1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="physical circuit period differs"):
         source.begin_operation(owner, 1, 0, round_period_ticks=1_100_001)
     assert source.sampled_measurements(owner.id) == ()
 
 
 def test_idle_first_refuses_a_period_mismatch_before_sampling() -> None:
     source, owner = _source(1.1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="physical circuit period differs"):
         source.idle_round_payloads(
             owner,
             owner.id,

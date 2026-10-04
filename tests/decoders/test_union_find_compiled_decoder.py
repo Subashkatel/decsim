@@ -393,14 +393,14 @@ def test_the_graph_emits_its_edges_in_increasing_fault_order():
 def test_a_syndrome_of_the_wrong_length_is_refused():
     graph = graph_of([[1, 0], [0, 1]], [0.1, 0.1], [[0, 0]])
     syndrome = numpy.asarray([1, 0, 1], dtype=numpy.uint8)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Union-Find syndrome"):
         window_decoder.decode_graph(graph, syndrome)
 
 
 def test_a_syndrome_that_is_not_binary_is_refused():
     graph = graph_of([[1, 0], [0, 1]], [0.1, 0.1], [[0, 0]])
     syndrome = numpy.asarray([2, 0], dtype=numpy.uint8)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Union-Find syndrome must contain"):
         window_decoder.decode_graph(graph, syndrome)
 
 

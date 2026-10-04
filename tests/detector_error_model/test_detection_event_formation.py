@@ -117,7 +117,7 @@ def test_a_source_with_no_recipes_and_no_stated_width_forms_nothing():
 def test_a_charged_cost_with_no_clock_is_refused():
     settings = event_settings.DetectionEventSettings(latency_cycles=5)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="a charged detection_events cost"):
         formation.SeatedFormation(None, settings)
 
 
@@ -255,7 +255,7 @@ def test_each_seat_forms_from_the_packets_it_was_given():
     second = rounds(2)
     placement.form_at("weak_decoder", first_two)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="a detector compares a round"):
         placement.form_at("strong_decoder", second)
 
 
@@ -325,7 +325,7 @@ def test_a_seat_given_fewer_rounds_than_it_needs_refuses_the_round():
     fifth = (fragment(5, bits=(0,)),)
     fourth = (fragment(4, bits=(0,)),)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="a detector compares a round"):
         placement.form_at("strong_decoder", fifth, fourth)
 
 
@@ -422,7 +422,7 @@ def test_a_seat_still_holding_a_raw_round_at_the_end_is_named():
     first = rounds(1)
     placement.form_at("strong_decoder", first)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="the strong_decoder seat still"):
         placement.check_settled()
 
 

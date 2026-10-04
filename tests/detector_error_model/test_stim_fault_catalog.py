@@ -106,13 +106,13 @@ def test_an_error_that_flips_nothing_is_left_out_but_still_counted():
 
 def test_an_error_that_flips_an_observable_but_no_detector_is_refused():
     model = stim.DetectorErrorModel("error(0.1) L0\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="error 0 is a detectorless logical"):
         stim_fault_catalog.canonical_error_instructions(model)
 
 
 def test_a_component_that_flips_an_observable_but_no_detector_is_refused():
     model = stim.DetectorErrorModel("error(0.1) D0 ^ L0\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="error 0 component 1"):
         stim_fault_catalog.canonical_error_instructions(model)
 
 
@@ -167,7 +167,7 @@ def test_a_linked_physical_column_is_the_parity_of_its_graphlike_columns():
 
 def test_two_stim_models_that_disagree_on_a_physical_fault_are_refused():
     circuit = StandInCircuit("error(0.1) D0 D1 ^ D1 D2\n", "error(0.1) D0 D1\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="decomposed and undecomposed Stim"):
         stim_fault_catalog.prepare_fault_catalogs(
             circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
         )
@@ -175,7 +175,7 @@ def test_two_stim_models_that_disagree_on_a_physical_fault_are_refused():
 
 def test_a_graphlike_catalog_refuses_a_hyperedge():
     circuit = StandInCircuit("error(0.1) D0 D1 D2\n", "error(0.1) D0 D1 D2\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="this graphlike decoder supports"):
         stim_fault_catalog.prepare_fault_catalogs(
             circuit, fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
         )
@@ -279,7 +279,7 @@ def test_a_prior_disagreement_just_above_the_bound_is_refused():
     circuit = StandInCircuit(
         "error(0.2) D1 D2 ^ D2 D3\n", f"error({perturbed!r}) D1 D3\n"
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="decomposed and undecomposed Stim"):
         stim_fault_catalog.prepare_fault_catalogs(
             circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
         )

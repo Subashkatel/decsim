@@ -69,7 +69,7 @@ def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
 
 
 def test_a_weight_step_that_is_not_finite_and_positive_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Union-Find weight_step"):
         union_find_adapter.UnionFindDecoder(weight_step=0.0)
 
 
@@ -78,7 +78,7 @@ def test_a_model_with_a_detector_hyperedge_is_refused():
     model = stim.DetectorErrorModel("error(0.1) D0 D1 D2 L0")
     decoder = union_find_adapter.UnionFindDecoder()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="fault 0 of sinter's detector error"):
         decoder.compile_decoder_for_dem(dem=model)
 
 
@@ -86,7 +86,7 @@ def test_a_logical_error_that_flips_no_detector_is_refused():
     model = stim.DetectorErrorModel("error(0.1) D0 D1\nerror(0.1) L0")
     decoder = union_find_adapter.UnionFindDecoder()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="error 1 is a detectorless logical"):
         decoder.compile_decoder_for_dem(dem=model)
 
 

@@ -339,7 +339,7 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
     reads = decoding_records.WindowReads((1, 0))
     the_store.register_hold(reads, [(1, 5)])
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="the syndrome buffer"):
         the_store.check_settled()
 
 

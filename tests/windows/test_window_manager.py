@@ -261,5 +261,5 @@ def test_a_round_arriving_after_the_last_window_committed_is_refused():
     )
     packet = round_records.SyndromeRoundPacket(0, 2, (fragment,))
     window_manager = machine.windows.window_manager
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="round 2 of M arrived after"):
         window_manager.accept_window_input(packet)

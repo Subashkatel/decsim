@@ -60,6 +60,6 @@ def test_switching_with_an_empty_decoder_slot_still_stops(empty_slot):
     settings = shape_tests.gate_switching()
     one_decoder = dataclasses.replace(settings, **{empty_slot: None})
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="object has no attribute"):
         machine = machine_module.Machine.build(one_decoder, 0)
         machine.run()

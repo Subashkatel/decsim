@@ -167,5 +167,5 @@ def test_a_mask_inside_the_destination_is_not_a_seam_and_is_refused():
     inside = destination.start_round + 1
     delivery = _delivery({inside: [1, 0]}, destination)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="a seam is one of the two layers"):
         interaction.merge_boundary(delivery, destination, None)

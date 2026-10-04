@@ -38,14 +38,14 @@ def test_a_correct_sandwich_plan_is_accepted():
 
 
 def test_a_sandwich_plan_needs_the_graphlike_representation():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Tan's validated zero-seam memory"):
         window_protocol_policy.validate_window_protocol(
             SANDWICH, TAN, SANDWICH_EDGES, (1,), PHYSICAL_REQUIRED
         )
 
 
 def test_every_seam_and_only_a_seam_is_closed():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="every Tan type-2 seam"):
         window_protocol_policy.validate_window_protocol(
             SANDWICH, TAN, SANDWICH_EDGES, (0, 1), GRAPHLIKE_REQUIRED
         )
@@ -53,7 +53,7 @@ def test_every_seam_and_only_a_seam_is_closed():
 
 def test_a_seam_wider_than_one_layer_is_refused():
     wide_seam = ((1, 1, 2, 3), (3, 3, 4, 4), (4, 5, 6, 6))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="a zero-offset Tan type-2 seam"):
         window_protocol_policy.validate_window_protocol(
             wide_seam, TAN, SANDWICH_EDGES, (1,), GRAPHLIKE_REQUIRED
         )
@@ -66,7 +66,7 @@ def test_a_sandwich_with_an_even_number_of_windows_is_refused():
         rounds=4,
         after_clifford_depolarization=0.001,
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Tan type-2 seam 1 has no type-1"):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 1, 3, 4), (4, 4, 4, 4)],
@@ -80,7 +80,7 @@ def test_a_sandwich_with_an_even_number_of_windows_is_refused():
 
 
 def test_a_seam_must_depend_on_exactly_its_two_neighbours():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="each Tan type-2 seam must depend"):
         window_protocol_policy.validate_window_protocol(
             SANDWICH, TAN, ((0, 1),), (1,), GRAPHLIKE_REQUIRED
         )
@@ -93,7 +93,7 @@ def test_a_closed_window_that_cuts_a_fault_of_the_circuit_is_refused():
         rounds=5,
         after_clifford_depolarization=0.001,
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="graphlike closed temporal boundary"):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 1, 2, 2), (3, 3, 4, 4)],
@@ -112,7 +112,7 @@ def test_a_closed_window_must_be_a_dependency_destination():
         rounds=4,
         after_clifford_depolarization=0.001,
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="closed temporal boundary window"):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 1, 2, 2), (3, 3, 4, 4)],

@@ -165,7 +165,7 @@ def test_a_feedback_wait_past_the_declared_horizon_exhausts_the_source() -> (
     None
 ):
     machine = _protected_machine(1.1, 100.0, 0.15)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="idle round is outside the finite"):
         machine.run()
 
 
@@ -215,7 +215,7 @@ def test_a_protected_stream_cannot_use_truth_from_a_later_final_readout() -> (
     workload = dataclasses.replace(protected, operations=operations)
     settings = _settings(workload, 3, 24)
     machine = machines.Machine.build(settings, 0)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="its Stim circuit was registered"):
         machine.run()
 
 
@@ -235,7 +235,7 @@ def test_a_circuit_without_logical_outputs_is_refused_before_decoding() -> None:
     kept = _without_observables(instructions)
     text = "\n".join(str(instruction) for instruction in kept)
     without_output = stim.Circuit(text)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the memory example requires"):
         _memory_machine(without_output, mapping, 3, 2)
 
 
@@ -245,7 +245,7 @@ def test_extending_a_finite_input_cannot_add_empty_rounds_after_readout() -> (
     circuit, mapping = deltakit.memory_circuit(
         "rotated_surface", 3, 2, "Z", 0.001
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the declared horizon must equal"):
         _memory_machine(circuit, mapping, 3, 24)
 
 

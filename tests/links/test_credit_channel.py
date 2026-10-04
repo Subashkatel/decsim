@@ -108,7 +108,7 @@ def test_a_buffer_of_no_frames_stops_at_its_first_frame():
     channel = credit_channel.CreditChannel(settings, engine)
     send_at(engine, channel, 0, 500, 0, [])
 
-    with pytest.raises(IndexError):
+    with pytest.raises(IndexError, match="deque index out of range"):
         engine.run()
 
 

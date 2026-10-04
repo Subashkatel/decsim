@@ -62,7 +62,7 @@ def test_a_round_without_an_owner_is_refused():
     ledger = _ledger()
     contribution = _contribution(3, 10, 11, (0, 0))
     ledger.install(contribution)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="8-11 has a contribution gap"):
         ledger.observables_for_interval("s", 8, 11, boundary_policy="strict")
 
 

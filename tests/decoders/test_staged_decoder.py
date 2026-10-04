@@ -349,7 +349,7 @@ def test_a_unit_clock_with_no_period_is_refused():
     """A period of no ticks would price every stage at nothing."""
     no_period = config.Clock(0)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the unit's clock period"):
         staged_decoder.UnitTiming((), (), no_period)
 
 

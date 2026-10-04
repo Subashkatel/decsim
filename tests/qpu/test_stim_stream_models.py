@@ -172,7 +172,7 @@ def test_a_closed_weak_window_is_refused_at_the_model_boundary(
     closed = window_records.Window(
         1, 0, 1, 3, 6, 6, closed_temporal_boundaries=True
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="live Stim streams require"):
         growing.for_window(closed)
 
 
@@ -183,7 +183,7 @@ def test_a_closed_strong_window_is_refused_at_the_model_boundary(
     closed = window_records.Window(
         1, 0, 1, 3, 6, 6, closed_temporal_boundaries=True
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="live Stim streams require"):
         growing.for_strong_window(closed, (), None)
 
 

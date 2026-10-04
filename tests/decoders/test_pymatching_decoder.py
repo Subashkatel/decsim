@@ -291,7 +291,7 @@ def test_a_row_that_declares_no_forced_solve_refuses_a_forced_job():
     faults = placed_faults([[1, 0], [0, 1]], [0.1, 0.1], [[1, 0]])
     model = window_of(faults, 2)
     syndrome = numpy.zeros(2, dtype=numpy.uint8)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="PyMatchingDecoder was asked"):
         decoder_module.WindowDecoderBase.decode_forced_window(
             row, None, model, faults, syndrome, 0
         )

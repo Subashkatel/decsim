@@ -45,7 +45,7 @@ def test_the_card_period_wins_over_the_run_period():
 def test_a_period_shorter_than_one_tick_is_refused():
     qpu = qpu_settings.QpuSettings(round_period_microseconds=0.0)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="resolved round cadence"):
         machine_module.Machine.build(settings)
 
 
@@ -55,7 +55,7 @@ def test_a_card_cadence_that_is_not_a_finite_number_still_stops():
     card_record = declared_run.GivenCard(card)
     qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(OverflowError):
+    with pytest.raises(OverflowError, match="cannot convert float infinity"):
         machine_module.Machine.build(settings)
 
 
@@ -69,7 +69,7 @@ def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
     card_record = declared_run.GivenCard(card)
     qpu = qpu_settings.QpuSettings(code_card=card_record)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="distance must be an int"):
         machine_module.Machine.build(settings)
 
 
@@ -300,7 +300,7 @@ def test_a_cadence_that_is_a_numpy_scalar_is_taken_as_its_value():
 def test_an_operation_planned_for_no_rounds_is_refused():
     rounds_policy = round_policies.PerOperationRounds(((1, 0),))
     only = operation_of(1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="decode owners must have at least"):
         compiled_plan((only,), (1,), rounds_policy=rounds_policy)
 
 
@@ -348,13 +348,13 @@ def test_a_blocking_operation_is_checked_only_when_the_run_asks():
     planner.check_operation_graph(
         [blocked], validate_blockers=True, external_blocker_ids=(99,)
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="operation 1 has unknown blocking"):
         planner.check_operation_graph([blocked], validate_blockers=True)
 
 
 def test_an_operation_blocked_by_itself_is_refused():
     blocked = operation_of(1, blocked_by=1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="operation 1 is blocked by itself"):
         planner.check_operation_graph([blocked], validate_blockers=True)
 
 
@@ -441,7 +441,7 @@ def test_one_operation_in_two_roles_is_refused():
 def test_a_decode_operation_outside_the_workload_is_refused():
     workload_operation = operation_of(3)
     decode_owner = operation_of(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="operation 3 must share static"):
         planner.check_workload_identity(
             (workload_operation,), (decode_owner,), ()
         )
@@ -450,7 +450,7 @@ def test_a_decode_operation_outside_the_workload_is_refused():
 def test_a_stream_whose_owner_is_not_declared_is_refused():
     producer = operation_of(5, stream_id=7)
     another_owner = operation_of(1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="operation 5 stream_id 7 does"):
         planner.check_workload_identity((producer,), (), (another_owner,))
 
 
@@ -789,8 +789,8 @@ def test_the_boundary_graph_is_checked_on_the_boundary_edges():
     """
     first = operation_of(1, decoder_boundary_predecessors=(2,))
     second = operation_of(2, decoder_boundary_predecessors=(1,))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="operation dependency cycle"):
         compiled_plan((first, second), (1, 2))
     only = operation_of(1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="duplicate operation id 1"):
         compiled_plan((only,), (1, 1))

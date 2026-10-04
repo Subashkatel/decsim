@@ -203,5 +203,5 @@ def test_a_record_with_no_measured_card_still_stops_at_build():
         device="a100", path="device"
     )
 
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="a100"):
         settings.build()

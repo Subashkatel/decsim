@@ -845,7 +845,7 @@ def test_a_burst_on_a_channel_with_no_noise_is_refused():
         "burst_channels": stim_device.BURST_CHANNELS,
     }
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the circuit has no gate or idle"):
         burst_of(circuit, 3, **settings)
 
 

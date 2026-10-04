@@ -186,7 +186,7 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     crossing = _packed(1)
     receiver.reserve_write(crossing)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="weak syndrome buffer ended with 1"):
         receiver.check_settled()
 
 
@@ -194,7 +194,7 @@ def test_a_weak_store_too_small_for_a_window_stops_the_run_at_its_hold():
     """The first round forms 4 events, the rest 8; the window reads six."""
     settings = syndrome_buffer_module.SyndromeBufferSettings(bits=16)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="no round leaving it makes room"):
         declared_run.weak_only_run(weak_syndrome_buffer=settings)
 
 

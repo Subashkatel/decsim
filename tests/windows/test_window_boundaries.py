@@ -338,7 +338,7 @@ def test_a_face_pinned_on_a_window_that_has_not_committed_is_refused():
     strong_request_key = window_records.DecoderRequestKey(
         1, 1, window_records.DecoderTier.STRONG, 3
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="which has not committed"):
         courier.pin_strong_face(
             (1, 0), strong_window, model, operation, strong_request_key
         )

@@ -180,7 +180,7 @@ def test_a_bounded_memory_refuses_rounds_that_state_no_size():
     memory = decoder_memory.DecoderMemory("default", 0, 64)
     job = unsized_job("w0", 3)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="#0 memory holds 64 bits"):
         memory.deposit(job)
 
 
@@ -259,7 +259,9 @@ def test_a_unit_too_small_for_its_window_stops_the_run():
     stabilizer_bits_per_round = 8
     settings = _two_patch_memory_run(stabilizer_bits_per_round, unit_count=1)
     machine = machine_module.Machine.build(settings)
-    with pytest.raises(decoder_memory.DecoderMemoryCapacityError):
+    with pytest.raises(
+        decoder_memory.DecoderMemoryCapacityError, match="the window needs 24"
+    ):
         machine.run()
 
 
@@ -361,7 +363,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
     memory.deposit(first)
     memory.add_reader(second)
     assert memory.rewrite(first, "the masked input") == "the masked input"
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="give this tier boundary_fold copy"):
         memory.rewrite(second, "a second mask")
 
 

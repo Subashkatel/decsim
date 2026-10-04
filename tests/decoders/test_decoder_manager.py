@@ -147,7 +147,7 @@ def test_a_spent_job_is_refused():
     manager = _manager(engine, row)
     job = _window_job()
     manager.enqueue(job, None, lambda _job, _result: None)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="has already been admitted"):
         manager.enqueue(job, None, lambda _job, _result: None)
 
 

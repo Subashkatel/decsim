@@ -9,7 +9,7 @@ on_started, so the issuer never calls the runtime.
 import dataclasses
 import types
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.idle_rounds as idle_rounds_module
@@ -27,7 +27,11 @@ class OperationIssuer:
     output = ports.Port(ports.InstructionReceiver)
 
     def __init__(
-        self, engine: engine_module.Engine, resolved_operations
+        self,
+        engine: engine_module.Engine,
+        resolved_operations: tuple[
+            program_records.ResolvedOperationPlanning, ...
+        ],
     ) -> None:
         self.engine = engine
         operation_by_id = {
@@ -81,7 +85,8 @@ class OperationIssuer:
             self.output.finish()
 
     def stream_binding_for(
-        self, operation_id
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> Optional[program_records.StreamBinding]:
         """The stream binding an operation was given, or None."""
         return self.streams.binding_for(operation_id)

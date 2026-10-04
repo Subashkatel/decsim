@@ -25,13 +25,16 @@ import decsim.records.program as program_records
 class Streams(Protocol):
     """The stream bookkeeping, as the rest of the controller sees it."""
 
-    def binding_for(self, operation_id):
+    def binding_for(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> Optional[program_records.StreamBinding]:
         """The stream and offset one operation is bound to, or None."""
 
-    def blocks_start(self, operation) -> bool:
+    def blocks_start(self, operation: program_records.Operation) -> bool:
         """True while a protected region holds this operation's patch."""
 
-    def begin(self, operation) -> None:
+    def begin(self, operation: program_records.Operation) -> None:
         """Open the region this operation starts, if it starts one."""
 
     def bind_at_start(
@@ -39,7 +42,7 @@ class Streams(Protocol):
     ) -> program_records.RunOperationBody:
         """The command as it starts, a continuation at its stream round."""
 
-    def request_closes(self, operation) -> None:
+    def request_closes(self, operation: program_records.Operation) -> None:
         """Ask the region this operation ends to close at its boundary."""
 
     def close_feedback_boundary(
@@ -50,7 +53,10 @@ class Streams(Protocol):
     def seal_finished_streams(self) -> None:
         """Seal every stream whose final round has been emitted."""
 
-    def is_live_protected_patch(self, patch) -> bool:
+    def is_live_protected_patch(
+        self,
+        patch: Any,  # an opaque identity
+    ) -> bool:
         """True when a live protected region already emits this patch."""
 
     def extend_live_stream(
@@ -76,17 +82,20 @@ class NoFeedbackStreams:
         """Nothing to index."""
         del program, source_round_limit_by_stream
 
-    def binding_for(self, operation_id):
+    def binding_for(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> Optional[program_records.StreamBinding]:
         """No operation is bound to a stream."""
         del operation_id
         return None
 
-    def blocks_start(self, operation) -> bool:
+    def blocks_start(self, operation: program_records.Operation) -> bool:
         """No stream holds any operation."""
         del operation
         return False
 
-    def begin(self, operation) -> None:
+    def begin(self, operation: program_records.Operation) -> None:
         """Nothing to activate."""
         del operation
 
@@ -96,7 +105,7 @@ class NoFeedbackStreams:
         """No stream to continue."""
         return command
 
-    def request_closes(self, operation) -> None:
+    def request_closes(self, operation: program_records.Operation) -> None:
         """Nothing to close."""
         del operation
 
@@ -109,7 +118,10 @@ class NoFeedbackStreams:
     def seal_finished_streams(self) -> None:
         """No stream to seal."""
 
-    def is_live_protected_patch(self, patch) -> bool:
+    def is_live_protected_patch(
+        self,
+        patch: Any,  # an opaque identity
+    ) -> bool:
         """No patch is protected."""
         del patch
         return False
@@ -135,9 +147,11 @@ class FeedbackStreams:
         self,
         engine: engine_module.Engine,
         *,
-        regions,
-        resolved_operations,
-        resolved_patches,
+        regions: tuple[program_records.ProtectedRegion, ...],
+        resolved_operations: tuple[
+            program_records.ResolvedOperationPlanning, ...
+        ],
+        resolved_patches: tuple[program_records.ResolvedPatchPlanning, ...],
     ) -> None:
         self.engine = engine
         self.table = _StreamTable(
@@ -169,7 +183,10 @@ class FeedbackStreams:
                     operation.id, operation.stream_id, operation.stream_offset
                 )
 
-    def binding_for(self, operation_id):
+    def binding_for(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> Optional[program_records.StreamBinding]:
         """The stream binding an operation was given, or None."""
         return self.bindings.get(operation_id)
 
@@ -199,7 +216,7 @@ class FeedbackStreams:
         open_patches = self._boundary_open_patches()
         return not active_patches.issubset(open_patches)
 
-    def begin(self, operation) -> None:
+    def begin(self, operation: program_records.Operation) -> None:
         """Activate the regions the operation starts; give it its rounds."""
         protected_stream_id = self._protected_feedback_stream(operation)
         self._activate_protected_regions(operation)
@@ -240,7 +257,7 @@ class FeedbackStreams:
 
     # ---- ending an operation
 
-    def request_closes(self, operation) -> None:
+    def request_closes(self, operation: program_records.Operation) -> None:
         """A body finished: its ending regions close on the current boundary."""
         ending_regions = self.table.regions_ending_at(operation.id)
         for region in ending_regions:
@@ -282,7 +299,10 @@ class FeedbackStreams:
 
     # ---- idle rounds
 
-    def is_live_protected_patch(self, patch) -> bool:
+    def is_live_protected_patch(
+        self,
+        patch: Any,  # an opaque identity
+    ) -> bool:
         """True while a protected stream is live on the patch."""
         live_patches = self._live_protected_patches()
         return patch in live_patches

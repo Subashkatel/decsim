@@ -233,7 +233,7 @@ class FabricSettings:
         return tuple(bindings)
 
 
-def check_positive_count(name: str, value) -> None:
+def check_positive_count(name: str, value: object) -> None:
     """A positive whole number, never a boolean, or a refusal naming it."""
     if config.is_whole_count(value):
         return

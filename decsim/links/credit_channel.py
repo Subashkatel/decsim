@@ -80,7 +80,7 @@ class CreditWire:
     def __init__(
         self,
         channel_settings: link_settings.ChannelSettings,
-        protocol_settings,
+        protocol_settings: link_settings.PacketProtocolSettings,
     ):
         self._channel_settings = channel_settings
         self._framing = protocol_settings.framing.build()
@@ -162,7 +162,9 @@ class CreditWire:
         return self._credit_returns[0]
 
 
-def check_credit_fields(protocol_settings) -> None:
+def check_credit_fields(
+    protocol_settings: link_settings.PacketProtocolSettings,
+) -> None:
     """The credit loop's latency, which the reliable protocol shares.
 
     A credit back before its frame lands would let more than C frames

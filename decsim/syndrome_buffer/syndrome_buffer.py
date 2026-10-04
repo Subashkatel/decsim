@@ -37,8 +37,8 @@ class SyndromeBufferSettings:
     controller hold the finished round and write it in order once a slot
     frees, the backpressure real systems apply to their source (Caune et
     al. 2410.05202: the sequencer stalls on the decoder's status
-    register); a store that cannot hold a window's rounds at once stops
-    the run at the first round that can never enter. A write costs
+    register); a run whose waiting round can never enter stops after
+    the action that makes it certain. A write costs
     write_cycles and a read of a job's rounds read_cycles, on clock,
     whatever their width, and no access waits for another:
     SimpleMemory's latency with no bandwidth term (gem5
@@ -89,6 +89,8 @@ class SyndromeBuffer:
         # closed; a closed identity never reopens
         self.operations: dict = {}
         self.trace = _TraceSources()
+        if settings.bits is not None:
+            engine.action_done.connect(self._ask_for_room_again)
 
     # ---- the port
 
@@ -102,8 +104,8 @@ class SyndromeBuffer:
 
         The reserved bits are the room the crossing rounds have already
         taken, gem5's `_reserved` in `avail() = _maxsize - _size -
-        _reserved` (src/dev/net/pktfifo.hh). A round that does not fit
-        and never can stops the run (_refuse_round_never_admitted).
+        _reserved` (src/dev/net/pktfifo.hh). A waiting round that does
+        not fit and never can stops the run (_stop_at_a_knot).
         """
         capacity = self.settings.bits
         if capacity is None:
@@ -113,9 +115,7 @@ class SyndromeBuffer:
         taken = self.occupied_bits + reserved_bits
         if taken + bits <= capacity:
             return True
-        self._refuse_round_never_admitted(
-            round_key, bits, reserved_bits_by_round
-        )
+        self._stop_at_a_knot(round_key, bits, reserved_bits_by_round)
         return False
 
     def accept_packed_round(
@@ -384,27 +384,46 @@ class SyndromeBuffer:
             if round_key in self.round_by_key:
                 self._free_round(round_key)
 
-    def _refuse_round_never_admitted(
+    def _ask_for_room_again(self, now: int) -> None:
+        """After every action, the line's head asks for room once more.
+
+        An action can tie a knot without freeing a slot: it places a
+        hold that waits, or a round a hold waits for joins the line.
+        Room grows only when a round leaves, which retries at once, so
+        the head is refused again and only the check below runs.
+        """
+        del now
+        if self.held_rounds is not None:
+            self.held_rounds.retry()
+
+    def _stop_at_a_knot(
         self, round_key, bits: int, reserved_bits_by_round: Mapping
     ) -> None:
-        """Stop the run when no round leaving can ever make this one's room.
+        """Stop the run when the refused head of the line can never enter.
 
-        A reader that waits for the round (operation_ids_read_at_once)
-        keeps its other rounds of the round's operation, stored or
-        crossing, until all of them are stored with this one, so their
-        bits and the round's own are a floor on the room it needs at
-        once; with no such reader the floor is the round's own. Past
-        capacity the round, and every round queued behind it, waits
-        forever while the QPU keeps measuring. The store sees this the
-        moment the round is refused, as Ciw looks for a knot at each new
-        blockage (ciw/simulation.py:238-241) and gem5 refuses a message
-        wider than its block (src/mem/ruby/network/Network.cc:64-65);
-        widths come from the source as it runs, so no plan sees it at
-        build.
+        A hold that reads at once a round still waiting for room, or
+        waits for a hold that does (records/decoding.py), keeps its
+        rounds until that round is stored, and no round passes the
+        line's head. When those bits and the head's own pass capacity,
+        no round leaving makes room and the QPU measures on forever.
+        The head asks again after every action, so the stop comes after
+        the action that tied the knot, as Ciw looks for a knot at each
+        new blockage (ciw/simulation.py:238-241).
         """
-        reader, kept_bits = self._widest_reader(
-            round_key, reserved_bits_by_round
-        )
+        if self.held_rounds is None:
+            return
+        waiting = self.held_rounds.waiting_round_keys()
+        if round_key not in waiting:
+            return
+        holders = self._holders_kept_waiting(waiting)
+        kept = set()
+        for holder in holders:
+            round_keys = self.holds.round_keys_of(holder)
+            kept.update(round_keys)
+        crossing_bits = 0
+        for round_key_kept in kept:
+            crossing_bits += reserved_bits_by_round.get(round_key_kept, 0)
+        kept_bits = self._stored_bits_of(kept) + crossing_bits
         needed_bits = bits + kept_bits
         capacity = self.settings.bits
         if needed_bits <= capacity:
@@ -412,45 +431,24 @@ class SyndromeBuffer:
         raise RuntimeError(
             f"round {round_key!r} needs {needed_bits} bits of the syndrome "
             f"buffer's {capacity} at once: its own {bits} and {kept_bits} "
-            f"for the rounds {reader!r} reads with it; no round leaving it "
-            "makes room, so a bounded syndrome buffer holds at least a "
-            "window's rounds at once"
+            f"kept by {holders}, which wait for rounds still waiting for "
+            "room; no round leaving it makes room, so the run can never "
+            "finish"
         )
 
-    def _widest_reader(
-        self, round_key, reserved_bits_by_round: Mapping
-    ) -> tuple:
-        """The holder waiting for the round with the most bits kept, and them.
-
-        (None, 0) when no holder waits to have the round stored with
-        others of its operation.
-        """
-        operation_id = round_key[0]
-        widest_reader = None
-        widest_bits = 0
-        holders = self.holds.holders_by_round.get(round_key, ())
-        for holder in holders:
-            if operation_id not in holder.operation_ids_read_at_once():
-                continue
-            kept_bits = self._kept_bits_of(
-                holder, operation_id, reserved_bits_by_round
-            )
-            if widest_reader is None or kept_bits > widest_bits:
-                widest_reader = holder
-                widest_bits = kept_bits
-        return widest_reader, widest_bits
-
-    def _kept_bits_of(
-        self, holder, operation_id, reserved_bits_by_round: Mapping
-    ) -> int:
-        """The bits of its rounds of the operation, stored or crossing."""
-        round_keys = self.holds.round_keys_of(holder)
-        own_keys = [key for key in round_keys if key[0] == operation_id]
-        crossing_bits = 0
-        for own_key in own_keys:
-            crossing_bits += reserved_bits_by_round.get(own_key, 0)
-        stored_bits = self._stored_bits_of(own_keys)
-        return stored_bits + crossing_bits
+    def _holders_kept_waiting(self, waiting: set) -> list:
+        """The live holds that end only after a waiting round is stored."""
+        records = self.holds.record_by_holder
+        reading = set()
+        for holder, record in records.items():
+            if _reads_a_waiting_round(holder, record.round_keys, waiting):
+                reading.add(holder)
+        kept_waiting = []
+        for holder in records:
+            waited_for = holder.holders_waited_for()
+            if holder in reading or not reading.isdisjoint(waited_for):
+                kept_waiting.append(holder)
+        return kept_waiting
 
     def _free_round(self, round_key) -> None:
         self.round_by_key.pop(round_key)
@@ -483,6 +481,15 @@ class _StoredRound:
         self.packet = packet
         self.held_bits = held_bits
         self.publication_tick: Optional[int] = None
+
+
+def _reads_a_waiting_round(holder, round_keys, waiting: set) -> bool:
+    """Whether the holder reads at once a round still waiting for room."""
+    read_at_once = holder.operation_ids_read_at_once()
+    for round_key in round_keys:
+        if round_key[0] in read_at_once and round_key in waiting:
+            return True
+    return False
 
 
 def _round_ranges_text(sorted_round_indices: list) -> str:

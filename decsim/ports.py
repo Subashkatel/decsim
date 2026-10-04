@@ -156,8 +156,8 @@ class SyndromeBuffer(Protocol):
         memories answers for the one the round goes to.
         reserved_bits_by_round is the bits each round still crossing
         toward the store will take, by its key. A bounded store raises on
-        a round that states no size, and on a round no round leaving it
-        can ever make room for.
+        a round that states no size; a refused round that no free can
+        ever make room for stops the run after the action.
         """
 
     def accept_packed_round(
@@ -210,8 +210,9 @@ class RetainedRounds(Protocol):
 
     A hold names the rounds its holder will read from the moment it is
     placed, so the store may hold a round it has not received yet; the
-    holder is any record that answers referenced_operation_ids and
-    operation_ids_read_at_once (records/decoding.py).
+    holder is any record that answers referenced_operation_ids,
+    operation_ids_read_at_once and holders_waited_for
+    (records/decoding.py).
     """
 
     def register_hold(self, holder, round_keys: tuple) -> None:
@@ -416,6 +417,9 @@ class HeldRounds(Protocol):
     def retry(self) -> None:
         """A slot freed: admit from the head, stop at the first refused."""
 
+    def waiting_round_keys(self) -> set:
+        """The keys of the rounds that wait, the head's among them."""
+
 
 # ------------------------------------------- the window manager closes a window
 
@@ -545,9 +549,13 @@ class WindowRetention(Protocol):
         """The room-side payloads of a strong window, first round stamped."""
 
     def hold_strong_context(
-        self, key: tuple, strong_request_key, context_keys
+        self, key: tuple, strong_request_key, context_keys, restart_key
     ) -> None:
-        """The rounds kept in case the window escalates pass to its request."""
+        """The rounds kept in case the window escalates pass to its request.
+
+        restart_key is the window whose weak commit releases the
+        request, or None.
+        """
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
         """The rounds the strong syndrome buffer lacks that the weak one has."""

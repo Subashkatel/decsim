@@ -86,6 +86,10 @@ class HeldRounds:
         """How many rounds wait."""
         return len(self.waiting)
 
+    def waiting_round_keys(self) -> set:
+        """The keys of the rounds that wait, the head's among them."""
+        return {held.round_key for held, _admit in self.waiting}
+
     def _released(self, held: WaitingRound) -> None:
         """The round left the waiting line: its wait ends at this tick."""
         operation_id, round_index = held.round_key

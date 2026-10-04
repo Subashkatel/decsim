@@ -265,7 +265,12 @@ class RoundRetention:
         them.
         """
         store = self.store_for(store)
-        owner = decoding_records.DecoderInputHold(job.request_key)
+        boundary_window_keys = ()
+        if job.window is not None:
+            boundary_window_keys = tuple(job.window.deps)
+        owner = decoding_records.DecoderInputHold(
+            job.request_key, boundary_window_keys
+        )
         if previous_owner != owner:
             _move_hold_to_input(store, previous_owner, owner, job)
         job.input_hold = functools.partial(store.release_hold, owner)
@@ -370,10 +375,13 @@ class RoundRetention:
         key: tuple,
         strong_request_key: window_records.DecoderRequestKey,
         context_keys: tuple,
+        restart_key: Optional[tuple],
     ) -> None:
         """The window's potential strong read becomes the request's hold."""
         potential_hold = decoding_records.PotentialStrong(key)
-        pending_hold = decoding_records.PendingStrong(strong_request_key)
+        pending_hold = decoding_records.PendingStrong(
+            strong_request_key, restart_key
+        )
         stores = self._strong_context_stores()
         for store in stores:
             store.transfer_hold(potential_hold, pending_hold)

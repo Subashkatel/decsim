@@ -323,6 +323,7 @@ class DoubleWindow(StrongWindowPorts):
                 key,
                 strong_request_key,
                 resolved_region.context_round_keys,
+                restart_key,
             )
             self._withdraw_stale_requests(resolved_region)
             pending_hold = decoding_records.PendingStrong(strong_request_key)

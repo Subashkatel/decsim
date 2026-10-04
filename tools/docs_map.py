@@ -7,7 +7,7 @@ gem5 generates its reference from its classes the same way, so the page
 cannot fall behind the code. The run side's records (decsim/experiments/)
 and the build's own (decsim/build/) are no part a user sets.
 
-Run from the checkout with no argument to write the page.
+Run it to write the page of the checkout it is in; it takes no argument.
 tests/test_docs.py generates it again and fails when the committed page
 differs.
 """
@@ -87,13 +87,10 @@ def first_sentence(text: str) -> str:
     return opening
 
 
-def main(arguments) -> int:
+def main() -> int:
     """Write the parts page under docs/reference/."""
-    checkout = CHECKOUT
-    if arguments:
-        checkout = pathlib.Path(arguments[0])
-    text = parts_page(checkout)
-    path = checkout / "docs" / "reference" / PAGE_NAME
+    text = parts_page(CHECKOUT)
+    path = CHECKOUT / "docs" / "reference" / PAGE_NAME
     path.write_text(text)
     print(f"wrote {path}")
     return 0
@@ -240,5 +237,5 @@ def _ends_a_sentence(sentence: str) -> bool:
 
 
 if __name__ == "__main__":
-    exit_code = main(sys.argv[1:])
+    exit_code = main()
     sys.exit(exit_code)

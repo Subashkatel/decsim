@@ -447,7 +447,9 @@ class OnlineThreshold:
             )
 
     def __init__(
-        self, controller: OnlineThresholdController, random_generator
+        self,
+        controller: OnlineThresholdController,
+        random_generator: random.Random,
     ) -> None:
         self.controller = controller
         self.random_generator = random_generator

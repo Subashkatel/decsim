@@ -63,7 +63,11 @@ class Switching:
             )
         return (window_records.DecoderTier.WEAK,)
 
-    def verdict_for_weak_result(self, job, result) -> decoding_records.Verdict:
+    def verdict_for_weak_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
         """Keep a confident weak result; otherwise escalate its window.
 
         The decision is made exactly once per window, since an online
@@ -77,7 +81,9 @@ class Switching:
             return decoding_records.Verdict.KEEP
         return decoding_records.Verdict.ESCALATE
 
-    def learn_from_strong_result(self, window_key: tuple, result) -> None:
+    def learn_from_strong_result(
+        self, window_key: tuple, result: decoding_records.DecodeResult
+    ) -> None:
         """The threshold source hears the strong tier's answer."""
         self.threshold.learn_from_strong_result(window_key, result)
 

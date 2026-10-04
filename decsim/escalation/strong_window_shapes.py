@@ -549,7 +549,7 @@ FOLDS_NO_BOUNDARY: tuple = ()
 def strong_job_payloads(
     shape: StrongWindowPorts,
     strong_window: window_records.Window,
-    model,
+    model: object,
     operation: program_records.Operation,
     request_key: window_records.DecoderRequestKey,
     folded_boundaries: tuple,

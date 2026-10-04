@@ -17,8 +17,9 @@ decodes.
 import dataclasses
 import functools
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
+import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
@@ -48,7 +49,7 @@ class StrongRedecode:
     # the strong job's return path
     verdict = ports.Port(ports.WindowVerdict)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.selections = _StrongSelections()
         # the rounds sent up and not landed yet, so a wake-up while a
@@ -137,7 +138,10 @@ class StrongRedecode:
         released = self.pending.released_by_commit(window_key)
         self._submit_released(released)
 
-    def submit_if_stored_data_releases(self, operation_id) -> None:
+    def submit_if_stored_data_releases(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> None:
         """A round is stored: a strong window waiting on that data leaves."""
         released = self.pending.released_by_stored_data(operation_id)
         self._submit_released(released)

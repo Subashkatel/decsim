@@ -16,7 +16,7 @@ region with its past face pinned (Bombin et al. 2303.04846 lines
 
 import copy
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.program as program_records
@@ -118,7 +118,7 @@ class StrongRegions:
         key: tuple,
         window: window_records.Window,
         pinned_source_keys: tuple,
-    ):
+    ) -> object:
         """The error model of one strong redo of a window.
 
         The redo owns the faults of its own rounds and none before its
@@ -219,17 +219,25 @@ class StrongRegions:
             near_source_key,
         )
 
-    def operation(self, operation_id) -> program_records.Operation:
+    def operation(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> program_records.Operation:
         """The operation record a strong window's transfers are named by."""
         return self.tracker.operation(operation_id)
 
     def round_count_for(
-        self, operation_id, window: window_records.Window
+        self,
+        operation_id: Any,  # an opaque identity
+        window: window_records.Window,
     ) -> int:
         """The rounds the operation runs, as this window is planned."""
         return self.tracker.round_count_for_window(operation_id, window)
 
-    def strong_rounds_stored(self, operation_id) -> int:
+    def strong_rounds_stored(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
         """How far the strong syndrome buffer is filled for the operation."""
         return self.tracker.strong_rounds_arrived(operation_id)
 

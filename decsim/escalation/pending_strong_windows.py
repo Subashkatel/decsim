@@ -88,7 +88,10 @@ class PendingStrongWindows:
             released.append(self.by_key[held_key])
         return tuple(released)
 
-    def released_by_stored_data(self, operation_id) -> tuple:
+    def released_by_stored_data(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> tuple:
         """The entries of this operation whose weak commits have landed."""
         waiting = _waiting_on(self.keys_by_stored_operation, operation_id)
         released = []
@@ -109,7 +112,7 @@ class PendingStrongWindows:
         if operation_id is not None:
             _unindex(self.keys_by_stored_operation, operation_id, held.key)
 
-    def held_for(self, window_key: tuple):
+    def held_for(self, window_key: tuple) -> Optional[PendingStrongWindow]:
         """The entry held for one escalated window, or None."""
         return self.by_key.get(window_key)
 

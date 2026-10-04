@@ -546,7 +546,8 @@ class _ResolvedPoint:
 def _resolved_points(study: experiment.Experiment) -> list:
     """Each point checked and its record built, in the experiment's order.
 
-    Two points of one id would share their pieces, so they are refused.
+    Two points of one id would share their pieces, so they are refused,
+    and so is a point whose shot runs no round, which sizes no piece.
     """
     resolved = []
     names_by_id = {}
@@ -559,6 +560,7 @@ def _resolved_points(study: experiment.Experiment) -> list:
         settings = study.collection_of(point)
         facts = _experiment_facts(task, settings)
         record = run_folder.point_record(point.name, task, None, facts)
+        _refuse_a_point_that_runs_no_round(record)
         resolved_point = _ResolvedPoint(task, settings, record)
         resolved.append(resolved_point)
     return resolved
@@ -570,6 +572,23 @@ def _refuse_two_points_of_one_id(first_name: str, second_name: str) -> None:
         f"the points {first_name} and {second_name} run the same settings "
         "with the same metadata, so they would share their shots; give "
         "them metadata that tells them apart"
+    )
+
+
+def _refuse_a_point_that_runs_no_round(record: dict) -> None:
+    """A shot with no round to decode has nothing to collect.
+
+    A piece holds a point's piece_rounds over its rounds per shot, so a
+    shot of no rounds sizes no piece, and its shots decode nothing.
+    """
+    if record["rounds_per_shot"] > 0:
+        return
+    name = record["name"]
+    raise refusal.RefusalError(
+        f"the point {name} runs no QEC round: no operation of its workload "
+        "runs a round that emits detector data, so its shots would decode "
+        "nothing; give it a workload, as decsim.settings.memory_workload "
+        "makes one"
     )
 
 

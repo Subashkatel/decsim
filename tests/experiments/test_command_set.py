@@ -1072,6 +1072,38 @@ def test_a_collect_of_no_processes_is_refused_before_its_folder(
     assert not out_dir.exists()
 
 
+def test_a_point_whose_shot_runs_no_round_is_refused_before_its_record(
+    tmp_path,
+):
+    """A shot of no round sizes no piece and decodes nothing.
+
+    MachineSettings() holds the empty workload, so the point is refused
+    where its record is built, before the folder holds any of it.
+    """
+    run_file = tmp_path / "empty.py"
+    run_file.write_text(
+        "import decsim\n"
+        "\n"
+        "experiment = decsim.Experiment(\n"
+        '    "empty",\n'
+        '    [decsim.Point("empty", decsim.MachineSettings())],\n'
+        "    decsim.CollectionSettings(max_shots=1),\n"
+        ")\n"
+    )
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(run_file, out_dir)
+
+    assert str(refused.value) == (
+        "the point empty runs no QEC round: no operation of its workload "
+        "runs a round that emits detector data, so its shots would decode "
+        "nothing; give it a workload, as decsim.settings.memory_workload "
+        "makes one"
+    )
+    assert not (out_dir / "points").exists()
+
+
 def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
     """An online point's shots are not independent, so no target stops it."""
     collection = {"max_shots": 1, "max_failures": 5}

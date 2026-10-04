@@ -111,7 +111,6 @@ FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 COUNTED_APART = (*FUNCTIONS, ast.ClassDef)
 TESTED_DECISIONS = (ast.If, ast.While, ast.IfExp)
 UNTESTED_DECISIONS = (ast.For, ast.AsyncFor, ast.ExceptHandler)
-OWN_CONDITIONS = (ast.comprehension, ast.IfExp)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 # a lambda's body and a comprehension are checked where they are visited
 UNCHECKED_ARGUMENTS = (ast.Lambda, *COMPREHENSIONS)
@@ -353,25 +352,40 @@ def tested_decisions(test):
 
 
 def condition_operators(node):
-    """The `and` and `or` operators of one condition.
+    """The `and` and `or` operators that decide one condition's value.
 
-    A comprehension or a conditional expression holds its own condition,
-    which is counted where that node is, even when it is the whole test.
+    They lie on the path from the test to its truth value, through `and`,
+    `or`, `not`, an assignment expression and both branches of a
+    conditional expression, whose own test is counted where it is. An
+    operator inside a call's arguments or a comprehension builds a value
+    and decides nothing here.
     """
-    if isinstance(node, OWN_CONDITIONS):
-        return 0
-    count = own_operators(node)
-    for child in ast.iter_child_nodes(node):
-        count += condition_operators(child)
+    if isinstance(node, ast.BoolOp):
+        return joined_operators(node)
+    count = 0
+    for branch in value_branches(node):
+        count += condition_operators(branch)
     return count
 
 
-def own_operators(node):
-    """How many `and` or `or` operators one node joins its values with."""
-    if not isinstance(node, ast.BoolOp):
-        return 0
+def joined_operators(node):
+    """One `and` or `or` node's operators, with those of its values."""
     value_count = len(node.values)
-    return value_count - 1
+    count = value_count - 1
+    for value in node.values:
+        count += condition_operators(value)
+    return count
+
+
+def value_branches(node):
+    """The parts of an expression whose truth value is its own."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return [node.operand]
+    if isinstance(node, ast.IfExp):
+        return [node.body, node.orelse]
+    if isinstance(node, ast.NamedExpr):
+        return [node.value]
+    return []
 
 
 def init_method(class_node):

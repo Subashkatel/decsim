@@ -225,6 +225,44 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
     assert "2 findings in 1 of 1 files checked" in captured.out
 
 
+def test_rule_eleven_counts_the_operators_that_decide_a_condition(
+    tmp_path, capsys
+):
+    """Only an `and` on the path to a test's truth value counts.
+
+    In `branch`, the `and` is the value of the `if` when `c` holds, so
+    it decides; in `element`, the `and` builds each item of a list whose
+    truth is only whether it is empty.
+    """
+    tool = _tool("check_one_action")
+    module = tmp_path / "decisions.py"
+    module.write_text(
+        "def branch(a, b, c, d):\n"
+        "    if (a and b) if c else d:\n"
+        "        pass\n"
+        "    if a:\n"
+        "        pass\n"
+        "    if b:\n"
+        "        pass\n"
+        "    if c:\n"
+        "        pass\n"
+        "\n"
+        "def element(values, enabled):\n"
+        "    if [value and enabled for value in values]:\n"
+        "        pass\n"
+        "    if values:\n"
+        "        pass\n"
+        "    if enabled:\n"
+        "        pass\n"
+        "    if not values:\n"
+        "        pass\n"
+    )
+    tool.main([str(tmp_path)])
+    captured = capsys.readouterr()
+    assert "over five decisions: branch decides 6 times" in captured.out
+    assert "element decides" not in captured.out
+
+
 def _classes_tested_against(tool, root) -> set:
     tested = set()
     for path in tool.source_paths(root):

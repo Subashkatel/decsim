@@ -95,14 +95,23 @@ def test_a_run_that_counted_no_movement_writes_no_rows(tmp_path, monkeypatch):
     assert not movement_path.exists()
 
 
+def _memory_classes_with(rows: list, column: str) -> set:
+    """The memory classes of the rows whose column holds a count."""
+    classes = set()
+    for row in rows:
+        if row[column]:
+            classes.add(row["memory_class"])
+    return classes
+
+
 def test_a_counting_run_writes_the_rows(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     run_path = run_files.write_run_file(tmp_path, **COUNTING)
     run_dir, _rows = collect_command.run_experiment(run_path)
     movement_path = run_dir / "shot_data_movement.csv"
     shot_rows = report.read_rows(movement_path)
-    copied = {row["memory_class"] for row in shot_rows if row["copy_bits"]}
-    moved = {row["memory_class"] for row in shot_rows if row["move_bits"]}
+    copied = _memory_classes_with(shot_rows, "copy_bits")
+    moved = _memory_classes_with(shot_rows, "move_bits")
 
     assert "on_chip" in copied
     assert "off_board" in moved

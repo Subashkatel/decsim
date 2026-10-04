@@ -135,6 +135,15 @@ def _rows_of_every_file(run_dir) -> dict:
     }
 
 
+def _rows_of_seed(rows: list, seed: str) -> list:
+    """The rows one seed's shots wrote, in file order."""
+    found = []
+    for row in rows:
+        if row["seed"] == seed:
+            found.append(row)
+    return found
+
+
 @pytest.fixture(autouse=True)
 def one_tree_reading_per_test(monkeypatch):
     """Every test here takes its own reading of the tree.
@@ -255,7 +264,7 @@ def test_run_shots_gives_the_first_shots_of_the_full_collection(tmp_path):
 
     full_rows = _rows_without_wall_clock(full_dir, "shots.csv")
     first_rows = _rows_without_wall_clock(first_dir, "shots.csv")
-    seed_zero_rows = [row for row in full_rows if row["seed"] == "0"]
+    seed_zero_rows = _rows_of_seed(full_rows, "0")
     assert len(full_rows) == 8
     assert first_rows == seed_zero_rows
 
@@ -1586,11 +1595,7 @@ def test_a_record_with_no_patch_hash_stops_a_run_before_a_shot(
         "run.json": [out_dir / run_folder.RUN_FILE],
         "piece.json": list(piece_paths),
     }
-    for record_path in records[record]:
-        written = run_folder.read_json(record_path)
-        identity = written.get("git", written)
-        del identity["patch_sha256"]
-        run_folder.write_json(record_path, written)
+    _as_records_with_no_patch_hash(records[record])
     raised_config = _capped_noisy_config(tmp_path, 3, 15)
 
     with pytest.raises(KeyError, match="patch_sha256"):
@@ -1623,6 +1628,15 @@ def test_a_fold_of_a_folder_whose_run_json_has_no_patch_hash_stops(
         command.main(["run", "--fold", "--out", str(out_dir)])
 
     assert _run_folder_bytes(out_dir) == before
+
+
+def _as_records_with_no_patch_hash(record_paths) -> None:
+    """The records as a tree from before the patch hash wrote them."""
+    for record_path in record_paths:
+        written = run_folder.read_json(record_path)
+        identity = written.get("git", written)
+        del identity["patch_sha256"]
+        run_folder.write_json(record_path, written)
 
 
 def _as_pieces_run_at_commit(piece_paths, commit: str) -> None:
@@ -2169,6 +2183,12 @@ def _capped_noisy_config(tmp_path, max_shots: int, piece_rounds: int):
     )
 
 
+def _drop_column(rows: list, column: str) -> None:
+    """Each row loses the column, as a csv measured without it reads."""
+    for row in rows:
+        del row[column]
+
+
 def _write_csv_rows(path: pathlib.Path, rows: list) -> None:
     """Rows written over a csv file, their keys the header."""
     first_row = rows[0]
@@ -2194,8 +2214,7 @@ def test_a_refused_fold_leaves_the_last_run_folder_as_it_was(tmp_path):
     second_piece = max(piece_folders, key=lambda folder: folder.name)
     shots_path = second_piece / "shots.csv"
     shot_rows = _csv_rows(shots_path)
-    for row in shot_rows:
-        del row["queue_wait_mean_us"]
+    _drop_column(shot_rows, "queue_wait_mean_us")
     _write_csv_rows(shots_path, shot_rows)
 
     with pytest.raises(SystemExit):

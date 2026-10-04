@@ -1055,11 +1055,14 @@ def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
+    later_solves = {
+        window_id: later_solve_ticks(shot, window_id) for window_id in gaps
+    }
+    zero_by_window = dict.fromkeys(gaps, 0)
     assert len(gaps) == 9
     assert measurement.samples["confidence"] == [0.0] * 9
-    for window_id, gap in gaps.items():
-        assert later_solve_ticks(shot, window_id) == 0
-        assert gap == 0
+    assert later_solves == zero_by_window
+    assert gaps == zero_by_window
 
 
 def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
@@ -1081,13 +1084,16 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
     escalated = [0, 1, 8, 9]
     with_a_later_solve = [2, 3, 4, 5, 6, 7]
     decoded = escalated + with_a_later_solve
-    assert sorted(gaps) == sorted(decoded)
-    for window_id in escalated:
-        assert later_solve_ticks(shot, window_id) == 0
-    for window_id in with_a_later_solve:
-        assert later_solve_ticks(shot, window_id) > 0
-    for gap in gaps.values():
-        assert gap == 0
+    escalated_later = [
+        later_solve_ticks(shot, window_id) for window_id in escalated
+    ]
+    kept_later = [
+        later_solve_ticks(shot, window_id) for window_id in with_a_later_solve
+    ]
+    zero_by_window = dict.fromkeys(decoded, 0)
+    assert gaps == zero_by_window
+    assert escalated_later == [0, 0, 0, 0]
+    assert min(kept_later) > 0
 
 
 def test_the_shipped_pinned_config_sums_to_its_reaction_time():
@@ -1103,14 +1109,16 @@ def test_the_shipped_pinned_config_sums_to_its_reaction_time():
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
-    assert gaps
     confidence = measurement.samples["confidence"]
     window_ids = decoded_window_ids(shot)
-    for window_id, gap in gaps.items():
-        assert gap == 0
-        index = window_ids.index(window_id)
-        later = later_solve_ticks(shot, window_id)
-        assert ticks_of(confidence[index]) == later
+    confidence_ticks = [ticks_of(value) for value in confidence]
+    later_ticks = [
+        later_solve_ticks(shot, window_id) for window_id in window_ids
+    ]
+    zero_by_window = dict.fromkeys(window_ids, 0)
+    assert gaps
+    assert gaps == zero_by_window
+    assert confidence_ticks == later_ticks
 
 
 def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
@@ -1151,16 +1159,12 @@ def test_the_stage_points_are_the_committing_decodes_own_stages():
     measurement = switching_shot(1000000.0)
 
     samples = measurement.samples
-    stage_totals = []
-    for index in range(len(samples["service"])):
-        total = ticks_of(samples["fetch"][index])
-        total += ticks_of(samples["algorithm"][index])
-        total += ticks_of(samples["release"][index])
-        stage_totals.append(total)
-    service_ticks = []
-    for sample in samples["service"]:
-        ticks = ticks_of(sample)
-        service_ticks.append(ticks)
+    fetch_ticks = [ticks_of(value) for value in samples["fetch"]]
+    algorithm_ticks = [ticks_of(value) for value in samples["algorithm"]]
+    release_ticks = [ticks_of(value) for value in samples["release"]]
+    service_ticks = [ticks_of(value) for value in samples["service"]]
+    stages = zip(fetch_ticks, algorithm_ticks, release_ticks, strict=True)
+    stage_totals = [sum(window_stages) for window_stages in stages]
     assert stage_totals == service_ticks
     assert samples["fetch"] == [0.024] * 9 + [0.012]
 
@@ -1193,6 +1197,15 @@ def test_a_second_forced_solve_is_not_the_windows_algorithm():
     assert measurement.samples["algorithm"] == [1.0] * 10
 
 
+def cancelled_stage_records(stages) -> list:
+    """The stage records a cancel closed, in record order."""
+    cancelled = []
+    for record in stages.records:
+        if record.cancelled:
+            cancelled.append(record)
+    return cancelled
+
+
 def test_a_cancelled_speculative_decode_ends_at_the_cancel():
     """The speculative strong decode stops where the weak verdict stopped it.
 
@@ -1207,20 +1220,12 @@ def test_a_cancelled_speculative_decode_ends_at_the_cancel():
 
     stages = shot.machine.observation.stages
     windows = shot.machine.observation.windows.windows
-    cancelled = []
-    for record in stages.records:
-        if record.cancelled:
-            cancelled.append(record)
-    ends = []
-    verdicts = []
-    for record in cancelled:
-        ends.append(record.end_ticks)
-        window = windows[(1, record.window_id)]
-        verdicts.append(window.t_done)
-    assert len(cancelled) == 10
+    cancelled = cancelled_stage_records(stages)
+    ends = [record.end_ticks for record in cancelled]
+    verdicts = [windows[(1, record.window_id)].t_done for record in cancelled]
+    cancelled_stages = [record.stage for record in cancelled]
     assert ends == verdicts
-    for record in cancelled:
-        assert record.stage == "algorithm"
+    assert cancelled_stages == ["algorithm"] * 10
 
 
 def test_a_full_buffer_0_holds_rounds_and_the_wait_is_a_point():
@@ -1240,14 +1245,11 @@ def test_a_full_buffer_0_holds_rounds_and_the_wait_is_a_point():
     assert stalls[15] == 0.144
     assert stalls[18:21] == [2.212, 1.212, 0.212]
     assert stalls[27] == 8.416
-    waiting = []
-    for stall in stalls:
-        if stall > 0.0:
-            waiting.append(stall)
-    total_ticks = 0
-    for stall in stalls:
-        total_ticks += ticks_of(stall)
-    assert len(waiting) == 13
+    is_waiting = [stall > 0.0 for stall in stalls]
+    waiting_count = sum(is_waiting)
+    stall_ticks = [ticks_of(stall) for stall in stalls]
+    total_ticks = sum(stall_ticks)
+    assert waiting_count == 13
     assert total_ticks == 51912000
 
 
@@ -1862,6 +1864,26 @@ def recorded_relay_statuses(monkeypatch) -> list:
     return returned
 
 
+def status_column_counts(statuses: list) -> collections.Counter:
+    """How many windows returned each status, by its csv column."""
+    counts = collections.Counter()
+    for status in statuses:
+        if status is None:
+            continue
+        column = f"{status.value}_windows"
+        counts[column] += 1
+    return counts
+
+
+def nonzero_counts(counts: dict) -> dict:
+    """The columns whose count is not zero."""
+    found = {}
+    for column, count in counts.items():
+        if count:
+            found[column] = count
+    return found
+
+
 def test_the_status_columns_count_the_statuses_the_decoder_returned(
     tmp_path, monkeypatch
 ):
@@ -1880,11 +1902,9 @@ def test_the_status_columns_count_the_statuses_the_decoder_returned(
     measurement = measured(task)
     record = report.record_of([measurement])
     rows, _run_dir = run_files.folded_run(tmp_path, [measurement])
-    expected = collections.Counter(
-        f"{status.value}_windows" for status in returned if status is not None
-    )
+    expected = status_column_counts(returned)
     statuses = measurement.window_statuses
-    counted = {column: count for column, count in statuses.items() if count}
+    counted = nonzero_counts(statuses)
     nonconverged = counted["nonconverged_windows"]
 
     assert expected["nonconverged_windows"] > 0

@@ -55,10 +55,8 @@ def test_every_point_stops_at_100_errors_or_a_billion_shots():
 
     points = run.baseline()
 
-    limits = set()
-    for point in points:
-        options = point.task.collection_options
-        limits.add((options.max_errors, options.max_shots))
+    options = [point.task.collection_options for point in points]
+    limits = {(option.max_errors, option.max_shots) for option in options}
     assert limits == {(100, 1_000_000_000)}
 
 
@@ -67,13 +65,14 @@ def test_a_relay_bp_point_decodes_with_decsims_row_built_on_its_circuit():
 
     points = run.baseline()
 
-    for point in points:
-        if point.task.decoder != run.RELAY_BP:
-            continue
-        assert isinstance(
-            point.decoder, relay_bp_adapter.RelayBeliefPropagationDecoder
-        )
-        assert point.decoder.circuit is point.task.circuit
+    relay_points = _points_decoded_by(points, run.RELAY_BP)
+    row = relay_bp_adapter.RelayBeliefPropagationDecoder
+    is_the_row = {isinstance(point.decoder, row) for point in relay_points}
+    is_on_its_circuit = {
+        point.decoder.circuit is point.task.circuit for point in relay_points
+    }
+    assert is_the_row == {True}
+    assert is_on_its_circuit == {True}
 
 
 def test_list_prints_each_points_id_decoder_and_labels(capsys):
@@ -181,6 +180,15 @@ def _tiny_baseline(run):
         return points
 
     return tiny
+
+
+def _points_decoded_by(points, decoder: str) -> list:
+    """The points whose task names the decoder."""
+    found = []
+    for point in points:
+        if point.task.decoder == decoder:
+            found.append(point)
+    return found
 
 
 def _saved_shots(run, folder: pathlib.Path, point_id: int) -> int:

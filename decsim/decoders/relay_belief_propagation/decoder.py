@@ -4,6 +4,8 @@ import dataclasses
 import math
 from typing import Optional
 
+import numpy
+
 import decsim.config as config
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
@@ -136,13 +138,23 @@ class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
         joined = strong_backend.joined_result(job, results)
         return joined, elapsed_nanoseconds
 
-    def compile(self, faults, model):
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> window_decoder.RelayBeliefPropagationWindowDecoder:
         """The window decoder, its backend for this model built untimed."""
         del model
         self.window_decoder.compiled_model(faults)
         return self.window_decoder
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: window_decoder.RelayBeliefPropagationWindowDecoder,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """One backend call; a produced correction is committed as it stands."""
         outcome = backend.decode(model, syndrome)
         fault_count = faults.check.shape[1]

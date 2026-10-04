@@ -30,7 +30,11 @@ class ConfidenceSettings(Protocol):
 
 
 class ThresholdSettings(Protocol):
-    """A threshold row's settings record: decibels in, nats out."""
+    """A threshold row's settings record: decibels in, nats out.
+
+    The facts at_point and for_point read are MachineSettings.point_facts,
+    keyed by threshold_sources.POINT_FACTS.
+    """
 
     threshold_decibels: Optional[float]
 

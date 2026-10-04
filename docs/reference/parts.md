@@ -387,6 +387,8 @@ formed_at lists the seats, each once; every path a round takes to a decoder cros
 
 `decsim/escalation/settings.py`. A threshold row's settings record: decibels in, nats out.
 
+The facts at_point and for_point read are MachineSettings.point_facts, keyed by threshold_sources.POINT_FACTS.
+
 | Member | Type |
 | --- | --- |
 | `threshold_decibels` | `Optional[float]` |
@@ -653,7 +655,7 @@ Every hop of the reaction path is priced, so a card names all eleven. A card who
 
 `decsim/observe/settings.py`. What a run records beside its results.
 
-log is the engine narrator: print, file (each shot's lines next to the results) or both. trace is the Chrome trace: off, chrome, or a path; the experiments layer writes it for trace_shots. log_component_io adds each component's I/O lines.
+log is the engine narrator: print, file (each shot's lines next to the results) or both. trace is the Chrome trace: off, chrome, or a path; trace_shots are the seeds whose shots a run traces. log_component_io adds each component's I/O lines.
 
 The log and the trace are labels (compare=False) and no part of a point's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows.
 
@@ -873,7 +875,7 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 
 `decsim/windows/settings.py`. How the rounds are cut into decode windows, and what a window ships.
 
-scheme is a windowing scheme row's Settings record (windows/schemes/: sliding, parallel, sandwich, naive_online), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py: eager or held), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py: dense or sparse), how the hand-off between windows is written on decoder_to_decoder. clock and decision_cycles price issuing one decode request; clock None is the machine's clock.
+scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on decoder_to_decoder. clock and decision_cycles price issuing one decode request; clock None is the machine's clock.
 
 | Field | Type | Default |
 | --- | --- | --- |

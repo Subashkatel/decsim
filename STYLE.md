@@ -63,6 +63,10 @@ When the value that would be hoisted has no honest name, keep the call in
 the condition: `if not math.isfinite(cost) or cost < 0:` is one decision
 and needs no `cost_is_a_number`.
 
+A base class's method is called through the class,
+`Base.method(self, ...)`, since `super().method()` takes an attribute
+from a call's result.
+
 This rule makes dense code longer. That is intended; "Size" below says
 which growth is right and which is not.
 

@@ -11,6 +11,7 @@ import dataclasses
 from typing import Optional
 
 import ldpc
+import numpy
 import scipy.sparse
 
 import decsim.decoders.decoder as decoder_module
@@ -70,7 +71,11 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
             osd_method,
         )
 
-    def compile(self, faults, model=None):
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> ldpc.BpOsdDecoder:
         """Ldpc's BP-OSD decoder over the window's physical check."""
         del model
         row_count, column_count = faults.check.shape
@@ -90,7 +95,13 @@ class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
             osd_order=window_osd_order,
         )
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: ldpc.BpOsdDecoder,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """One BP-OSD call; ldpc always returns a correction."""
         del model
         del faults

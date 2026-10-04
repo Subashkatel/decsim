@@ -213,8 +213,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         seed: Optional[int] = None,
         one_payload_per_patch: bool = False,
     ):
-        source = super()
-        source.__init__(code)
+        CircuitlessSource.__init__(self, code)
         self.one_payload_per_patch = one_payload_per_patch
         self._seed = seed
         self._initialize_run_seed_binding(seed)

@@ -116,8 +116,9 @@ POINTS = (
     "output_link_per_window",
     "frame_commit",  # the frame accepted the correction -> committed
     # Totals. The buffer0 pair starts the clock at the publication in the
-    # syndrome buffer the first decode reads; the qpu pair starts it when the round leaves the QPU (the QC
-    # send), so it includes QC, controller processing, packing and CWB.
+    # syndrome buffer the first decode reads; the qpu pair starts it when
+    # the round leaves the QPU (the QC send), so it includes QC,
+    # controller processing, packing and CWB.
     "buffer0_ready_to_frame",  # window complete in the buffer -> frame
     "buffer0_first_round_to_frame",  # first round in the buffer -> frame
     "qpu_last_round_to_frame",  # last required round off QPU -> frame
@@ -226,10 +227,10 @@ class ShotMeasurement:
     # Skoric's least count of parallel decoding processes, ceil(2 tau_W
     # / ((n_com + n_W) tau_rd)) (2209.08552 lines 429-438)
     parallel_processes_needed: int
-    # what tells harder windows from an overloaded strong side (the
-    # paired run of docs/how-to/compare_two_runs.md): the set bits of each
-    # weak decode's input, its detection events when they are formed
-    # ahead of the decoder; each weak decode's compute, its stages' span;
+    # what tells harder windows from an overloaded strong side in a
+    # paired run: the set bits of each weak decode's input, its
+    # detection events when they are formed ahead of the decoder; each
+    # weak decode's compute, its stages' span;
     # each strong decode's wait from its enqueue to its compute start,
     # the queueing delay a queue splits from service; the most strong
     # decodes held in the units' memory at once, landed and free to

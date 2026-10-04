@@ -98,6 +98,12 @@ reports print, checks its fields in `__post_init__` (the checks in
 builds your decoder in `build()`, and your constructor takes the record
 as `settings`. A knob of your backend's own (a step size, an iteration
 cap) is a field of it, as the union-find decoder's `weight_step` is.
+A field the library refuses itself, such as a method's name, needs no
+check of its own (STYLE.md rule 4). Take each default from the
+library's own example or the paper, with its source (STYLE.md rule 8),
+and pass every argument to the library: a library's default can differ
+from its signature's, as `ldpc`'s `BpLsdDecoder` runs `product_sum`
+when `bp_method` is left out.
 
 In the constructor, set the compile key to your class and every setting
 the backend is built from:
@@ -149,7 +155,22 @@ shot by shot: on the shots where only one of the two fails, a decoder
 about as strong as matching fails about as often as matching does,
 and an exact McNemar test (a two-sided binomial test at one half on
 those shots) says whether a gap is more than chance. A broken decoder
-fails far more often. Check too that `invalid_correction_windows` is 0
+fails far more often. With `shots.csv` read into `rows` by
+`csv.DictReader`, and your record's `name` in place of `"mine"`:
+
+```python
+failed = {}
+for row in rows:
+    failed[row["algorithm"], row["seed"]] = row["logical_failure"] == "True"
+only_mine = only_matching = 0
+for seed in {row["seed"] for row in rows}:
+    mine = failed["mine", seed]
+    matching = failed["pymatching", seed]
+    only_mine += mine and not matching
+    only_matching += matching and not mine
+test = scipy.stats.binomtest(only_mine, only_mine + only_matching, 0.5)
+```
+ Check too that `invalid_correction_windows` is 0
 and `is_scored` is `True` on every shot: a backend that returns no
 correction is counted there, not as a failure.
 
@@ -167,7 +188,10 @@ Put the test in `tests/decoders/test_<folder>_decoder.py`.
 shots and a job for each. Compare your row's correction with the
 library's own decoder on the same shots, column for column:
 `tests/decoders/test_belief_propagation_osd_decoder.py` does this for
-BP-OSD.
+BP-OSD, through qLDPC. Call the library itself when the `run` extra
+installs it, so the test runs without the `test` extra too; a test
+behind `pytest.importorskip` skips quietly where the package is
+missing.
 
 ## 6. Read the worked examples
 

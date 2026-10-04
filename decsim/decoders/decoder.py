@@ -13,7 +13,7 @@ import abc
 import time
 import weakref
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 import numpy
 
@@ -165,17 +165,30 @@ class WindowDecoderBase(DecoderBase):
         return (child,)
 
     @abc.abstractmethod
-    def compile(self, faults, model):
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> Any:
         """The backend for one window model, built once while it lives."""
 
     @abc.abstractmethod
     def decode_window(
-        self, backend, model, faults, syndrome
+        self,
+        backend: Any,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
     ) -> decoding_records.WindowDecode:
         """One backend call's answer on one window."""
 
     def decode_forced_window(
-        self, backend, model, faults, syndrome, forced_logical_class: int
+        self,
+        backend: Any,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+        forced_logical_class: int,
     ) -> decoding_records.WindowDecode:
         """One solve pinned to one logical class, with that class's weight.
 
@@ -255,7 +268,11 @@ class WindowDecoderBase(DecoderBase):
             backend, model, faults, syndrome, forced_class
         )
 
-    def compiled_for(self, faults, model):
+    def compiled_for(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> Any:
         """The placed model's backend, compiled once and kept while it lives.
 
         A task's shots share their window models

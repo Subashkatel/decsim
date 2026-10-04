@@ -18,9 +18,9 @@ class ObservationSettings:
     """What a run records beside its results.
 
     log is the engine narrator: print, file (each shot's lines next to the
-    results) or both. trace is the Chrome trace: off, chrome, or a path; the
-    experiments layer writes it for trace_shots. log_component_io adds each
-    component's I/O lines.
+    results) or both. trace is the Chrome trace: off, chrome, or a path;
+    trace_shots are the seeds whose shots a run traces. log_component_io
+    adds each component's I/O lines.
 
     The log and the trace are labels (compare=False) and no part of a
     point's id, as sinter keeps output options out of a task's strong id

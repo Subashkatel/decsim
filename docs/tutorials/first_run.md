@@ -157,7 +157,7 @@ The numbers are in the folder's `sweep.csv`, one row per point. These
 are the columns this step reads:
 
 ```bash
-cut -d, -f5,35,73,97,130,131 results/d3/sweep.csv
+cut -d, -f5,35,77,101,134,135 results/d3/sweep.csv
 ```
 
 ```

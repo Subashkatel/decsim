@@ -6,7 +6,8 @@ at sampling, since a streaming source forms its circuit only then.
 """
 
 import dataclasses
-from typing import Any
+
+import stim
 
 import decsim.records.program as program_records
 
@@ -15,8 +16,8 @@ import decsim.records.program as program_records
 class SampledShot:
     """One sampled shot: the circuit, and the events it produced."""
 
-    operation_id: Any
-    circuit: Any  # a stim.Circuit; the listener never reads inside it
+    operation_id: int
+    circuit: stim.Circuit  # the listener never reads inside it
     detection_events: tuple
 
 

@@ -74,8 +74,9 @@ class WindowConfidence:
 #
 # Every token also answers operation_ids_read_at_once: the operations
 # whose rounds, among those it names, the window side waits to see all
-# stored at once before it starts the decode. A bounded store asks it of
-# a round it has no room for (syndrome_buffer.py).
+# stored at once before it ends. Every token also answers
+# holders_waited_for: the holds that end before it can. A bounded store
+# asks both while a round waits for room (syndrome_buffer.py).
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,10 @@ class WindowReads:
         operation_id = self.window_key[0]
         return (operation_id,)
 
+    def holders_waited_for(self) -> tuple:
+        """None: its decode waits for rounds, not for another hold."""
+        return ()
+
 
 @dataclass(frozen=True)
 class PotentialStrong:
@@ -111,6 +116,10 @@ class PotentialStrong:
 
     def operation_ids_read_at_once(self) -> tuple:
         """None: the hold ends at a weak verdict that keeps the window."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """None: an absorbing strong window may end it unread."""
         return ()
 
 
@@ -134,6 +143,10 @@ class PotentialRestart:
         """None: the hold ends when the window before it commits."""
         return ()
 
+    def holders_waited_for(self) -> tuple:
+        """None: the window before it may be absorbed rather than read."""
+        return ()
+
 
 @dataclass(frozen=True)
 class LaterStreamReads:
@@ -153,6 +166,10 @@ class LaterStreamReads:
         """None: the hold moves on as the stream's windows register."""
         return ()
 
+    def holders_waited_for(self) -> tuple:
+        """None: the hold moves on as the stream's windows register."""
+        return ()
+
 
 @dataclass(frozen=True)
 class PendingStrong:
@@ -166,6 +183,10 @@ class PendingStrong:
 
     def operation_ids_read_at_once(self) -> tuple:
         """None: the escalation, not the window side, starts its decode."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
+        """None: the escalation, not the window side, releases it."""
         return ()
 
 
@@ -183,6 +204,10 @@ class StrongInputInFlight:
         """None: its decode has started on rounds already stored."""
         return ()
 
+    def holders_waited_for(self) -> tuple:
+        """None: it ends when its rounds land in unit memory."""
+        return ()
+
 
 @dataclass(frozen=True)
 class DecoderInputHold:
@@ -198,6 +223,10 @@ class DecoderInputHold:
         """None: its decode has started on rounds already stored."""
         return ()
 
+    def holders_waited_for(self) -> tuple:
+        """None: it ends when its rounds land in unit memory."""
+        return ()
+
 
 @dataclass(frozen=True)
 class RephaseGuard:
@@ -210,6 +239,10 @@ class RephaseGuard:
         return (self.request_key.operation_id,)
 
     def operation_ids_read_at_once(self) -> tuple:
+        """None: the hold ends when the strong plan lands."""
+        return ()
+
+    def holders_waited_for(self) -> tuple:
         """None: the hold ends when the strong plan lands."""
         return ()
 

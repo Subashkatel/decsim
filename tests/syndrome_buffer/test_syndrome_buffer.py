@@ -382,6 +382,28 @@ def test_a_weak_store_too_small_for_a_window_stops_the_run():
         )
 
 
+def test_interleaved_successors_waiting_for_room_stop_the_run():
+    """mem2 and mem3 follow mem1, their rounds interleave; mem4 waits on mem2.
+
+    The first window of each keeps rounds 1 to 5 until round 6 is
+    stored, and mem3's round 6 waits behind mem2's, so round (2, 6)'s 12
+    bits must sit beside 72, past an 80-bit store.
+    """
+    memory = declared_run.memory_operation
+    operations = [
+        memory(1),
+        memory(2, predecessors=(1,)),
+        memory(3, predecessors=(1,)),
+        memory(4, predecessors=(2,), blocked_by=2),
+    ]
+    store_of_80_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=80)
+
+    with pytest.raises(RuntimeError, match=r"round \(2, 6\) needs 84 bits"):
+        declared_run.weak_only_run(
+            operations=operations, weak_syndrome_buffer=store_of_80_bits
+        )
+
+
 def strong_store_of(monkeypatch, store_settings) -> None:
     """Every declared run from here on sizes its strong store so."""
     run_machine = declared_run.run_machine

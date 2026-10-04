@@ -15,12 +15,13 @@ caller is called back when the write lands on a clock edge.
 
 import dataclasses
 from collections.abc import Callable
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
+import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
@@ -75,7 +76,11 @@ class PauliFrame:
     """Keeps every committed correction and charges each write once."""
 
     def __init__(
-        self, engine, *, clock: Optional[config.Clock], write_cycles: int
+        self,
+        engine: engine_module.Engine,
+        *,
+        clock: Optional[config.Clock],
+        write_cycles: int,
     ) -> None:
         self.engine = engine
         self.clock = clock
@@ -84,7 +89,12 @@ class PauliFrame:
         self.trace = _TraceSources()
 
     def commit_correction(
-        self, *, window_key, logical_observables, request_key, on_committed
+        self,
+        *,
+        window_key: tuple,
+        logical_observables: Optional[ObservableBits],
+        request_key: window_records.DecoderRequestKey,
+        on_committed: Callable[[], None],
     ) -> None:
         """Accept a window's correction, charge the write, then call back."""
         if self._has_accepted(window_key):
@@ -113,7 +123,10 @@ class PauliFrame:
         self.trace.correction_accepted.fire(record)
         self._charge_write(window_key)
 
-    def frame_for_stream(self, stream_id) -> Optional[ObservableBits]:
+    def frame_for_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> Optional[ObservableBits]:
         """The XOR of every committed correction on one stream.
 
         None when any correction carries no observables, since a fold over an

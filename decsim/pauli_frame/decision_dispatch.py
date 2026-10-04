@@ -9,7 +9,9 @@ controller's decision-to-pulse cost stands.
 """
 
 import functools
+from collections.abc import Callable
 
+import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
@@ -24,10 +26,14 @@ class DecisionDispatch:
     link = ports.Port(ports.Link, optional=True)
     instruction_output = ports.Port(ports.InstructionReceiver)
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
 
-    def dispatch_decision(self, decision, deliver) -> None:
+    def dispatch_decision(
+        self,
+        decision: program_records.Decision,
+        deliver: Callable[[program_records.Decision], None],
+    ) -> None:
         """Send one decision to the controller; deliver runs at the QPU."""
         self._log_dispatch(decision)
         landed = functools.partial(self._at_the_controller, decision, deliver)

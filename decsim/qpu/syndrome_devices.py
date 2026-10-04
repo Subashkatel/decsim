@@ -59,7 +59,8 @@ class CircuitlessSource:
         self.round_count_by_identity: dict = {}
 
     def logical_observable_truth(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> Optional[tuple[int, ...]]:
         """This source draws no shot, so it knows no truth."""
         del operation_id
@@ -148,7 +149,7 @@ class TimingOnlyDevice(CircuitlessSource):
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -240,7 +241,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -268,14 +269,21 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         self._seed = prepared_state
 
     def _fake_bits(
-        self, target: Any, global_round: int, patches: tuple, bit_count: int
+        self,
+        target: Any,  # an opaque identity
+        global_round: int,
+        patches: tuple,
+        bit_count: int,
     ) -> list:
         self._mark_stochastic_use()
         generator = self._payload_generator(target, global_round, patches)
         return [generator.randint(0, 1) for _ in range(bit_count)]
 
     def _payload_generator(
-        self, target: Any, global_round: int, patches: tuple
+        self,
+        target: Any,  # an opaque identity
+        global_round: int,
+        patches: tuple,
     ) -> random.Random:
         """The generator of one payload; an unseeded device draws entropy."""
         if self._seed is None:
@@ -287,7 +295,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
     def _payloads(
         self,
         operation: program_records.Operation,
-        target: Any,
+        target: Any,  # an opaque identity
         global_round: int,
         has_data_readout: bool,
     ) -> list[round_records.QPUReadout]:
@@ -316,7 +324,11 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         return tuple(groups)
 
     def _payload(
-        self, target: Any, patches: tuple, global_round: int, widths: tuple
+        self,
+        target: Any,  # an opaque identity
+        patches: tuple,
+        global_round: int,
+        widths: tuple,
     ) -> round_records.QPUReadout:
         """Random raw bits at the (raw, event) widths, its events' stated."""
         raw_bits, event_bits = widths
@@ -372,7 +384,9 @@ class NoWindowModels:
         return []
 
     def window_model_for_stream(
-        self, stream_id: Any, window: window_records.Window
+        self,
+        stream_id: Any,  # an opaque identity
+        window: window_records.Window,
     ) -> None:
         """No circuit, so no stream window has an error model."""
 
@@ -456,7 +470,7 @@ def _reads_the_data_out(
 
 def _valueless_readout(
     code: ports.CodeModel,
-    target: Any,
+    target: Any,  # an opaque identity
     patches: tuple,
     global_round: int,
     has_data_readout: bool,

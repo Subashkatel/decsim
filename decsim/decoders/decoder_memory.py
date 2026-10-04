@@ -52,7 +52,7 @@ class DecoderMemoryCapacityError(RuntimeError):
 class MaterializedSyndromeRound:
     """One immutable syndrome round owned by the decoder side."""
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     round_index: int
     fragments: tuple[round_records.RetainedSyndromeFragment, ...]
 
@@ -217,7 +217,9 @@ class DecoderMemory:
         resident.readers.append(job)
         return resident.decoder_input
 
-    def input_of(self, job: decoding_records.DecodeJob):
+    def input_of(
+        self, job: decoding_records.DecodeJob
+    ) -> Optional[DecoderInput]:
         """The input this job reads here, or None when nothing is held."""
         key = _memory_key(job)
         resident = self._inputs.get(key)

@@ -161,6 +161,46 @@ class DecoderManagerSettings:
         )
 
 
+def linear_decoder_pool(
+    decode_microseconds_per_round: float,
+    clock: config.Clock,
+    *,
+    solves_per_window: int,
+) -> DecoderPoolSettings:
+    """One unit of Toshio et al.'s linear decoder: T_dec(r) = tau_dec r.
+
+    decode_microseconds_per_round is Toshio's tau_dec (2510.25222 lines
+    968-971, 1309-1311): one unit's whole time a round of a window, its
+    soft output included (lines 602-604). A window solved
+    solves_per_window times, two under the complementary gap, pays
+    tau_dec / solves_per_window a round on each solve. The fetch stage
+    carries it, as its cycles scale with the job's rounds; every other
+    stage costs nothing. T_comm (lines 1035-1036) is a link's. The
+    paper's values are at lines 1109-1114 and 1125-1133.
+    """
+    config.check_whole_count("solves_per_window", solves_per_window, "solves")
+    decode_ticks = config.microseconds_to_ticks(decode_microseconds_per_round)
+    solve_share_ticks = clock.period_ticks * solves_per_window
+    cycles, remainder_ticks = divmod(decode_ticks, solve_share_ticks)
+    if remainder_ticks:
+        raise ValueError(
+            f"a per-round decode time of "
+            f"{decode_microseconds_per_round} us over {solves_per_window} "
+            f"solves is not a whole number of cycles of a "
+            f"{clock.period_ticks}-tick clock"
+        )
+    engine = EngineSettings(
+        clock=clock,
+        fetch_cycles_per_round=cycles,
+        fetch_cycles_per_job=0,
+        release_cycles_per_job=0,
+        release_cycles_per_round=0,
+    )
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder
+    algorithm = matching.Settings(preset_latency_microseconds=0.0)
+    return DecoderPoolSettings(algorithm=algorithm, engine=engine)
+
+
 def _check_word_has_a_memory(pool: DecoderPoolSettings) -> None:
     """A word width prices reads of the unit's own memory, which in_place lacks.
 
@@ -207,43 +247,3 @@ def _check_unit_count(unit_count) -> None:
         "a decoder pool's unit_count must be a whole number of engines, "
         f"at least one (got {unit_count!r})"
     )
-
-
-def linear_decoder_pool(
-    decode_microseconds_per_round: float,
-    clock: config.Clock,
-    *,
-    solves_per_window: int,
-) -> DecoderPoolSettings:
-    """One unit of Toshio et al.'s linear decoder: T_dec(r) = tau_dec r.
-
-    decode_microseconds_per_round is Toshio's tau_dec (2510.25222 lines
-    968-971, 1309-1311): one unit's whole time a round of a window, its
-    soft output included (lines 602-604). A window solved
-    solves_per_window times, two under the complementary gap, pays
-    tau_dec / solves_per_window a round on each solve. The fetch stage
-    carries it, as its cycles scale with the job's rounds; every other
-    stage costs nothing. T_comm (lines 1035-1036) is a link's. The
-    paper's values are at lines 1109-1114 and 1125-1133.
-    """
-    config.check_whole_count("solves_per_window", solves_per_window, "solves")
-    decode_ticks = config.microseconds_to_ticks(decode_microseconds_per_round)
-    solve_share_ticks = clock.period_ticks * solves_per_window
-    cycles, remainder_ticks = divmod(decode_ticks, solve_share_ticks)
-    if remainder_ticks:
-        raise ValueError(
-            f"a per-round decode time of "
-            f"{decode_microseconds_per_round} us over {solves_per_window} "
-            f"solves is not a whole number of cycles of a "
-            f"{clock.period_ticks}-tick clock"
-        )
-    engine = EngineSettings(
-        clock=clock,
-        fetch_cycles_per_round=cycles,
-        fetch_cycles_per_job=0,
-        release_cycles_per_job=0,
-        release_cycles_per_round=0,
-    )
-    matching = minimum_weight_perfect_matching.PyMatchingDecoder
-    algorithm = matching.Settings(preset_latency_microseconds=0.0)
-    return DecoderPoolSettings(algorithm=algorithm, engine=engine)

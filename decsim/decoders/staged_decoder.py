@@ -17,6 +17,9 @@ from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
@@ -169,19 +172,21 @@ class StagedDecoder(decoder_module.DecoderBase):
     verdict (Toshio et al. 2510.25222 lines 598-601 and 610-612).
     """
 
-    def __init__(self, decoder, timing: UnitTiming):
+    def __init__(self, decoder: ports.Decoder, timing: UnitTiming):
         self.decoder = decoder
         self.timing = timing
         self._running: dict = {}
         self.stage_recorded = trace_source.TraceSource()
 
     @property
-    def fault_model_requirement(self):
+    def fault_model_requirement(
+        self,
+    ) -> fault_models.DecoderFaultModelRequirement:
         """What the wrapped decoder needs of the model; the stages add none."""
         return self.decoder.fault_model_requirement
 
     @property
-    def decoder_evidence(self):
+    def decoder_evidence(self) -> frozenset:
         """The evidence the wrapped decoder reports; the stages add none."""
         return self.decoder.decoder_evidence
 
@@ -223,7 +228,7 @@ class StagedDecoder(decoder_module.DecoderBase):
     def start(
         self,
         job: decoding_records.DecodeJob,
-        engine,
+        engine: engine_module.Engine,
         on_result: Callable[[Optional[decoding_records.DecodeResult]], None],
     ) -> None:
         """Walk the stages as engine events on the unit the manager granted."""

@@ -62,7 +62,9 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         self._worker_process_id = os.getpid()
         self._worker_thread_id = None
 
-    def decode(self, model, syndrome) -> backend_outcome.BackendDecodeOutcome:
+    def decode(
+        self, model: fault_models.WindowErrorModel, syndrome: numpy.ndarray
+    ) -> backend_outcome.BackendDecodeOutcome:
         """An immutable, parity-validated outcome from one backend call."""
         physical_faults = model.require_faults(
             fault_models.FaultRepresentation.PHYSICAL
@@ -173,7 +175,10 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         return compiled
 
 
-def detector_error_model_of(model, physical_faults) -> tuple:
+def detector_error_model_of(
+    model: fault_models.WindowErrorModel,
+    physical_faults: fault_models.PlacedFaultModel,
+) -> tuple:
     """(Stim detector error model, coordinates) of one physical view."""
     check = physical_faults.check
     # observables are few rows; dense per-fault columns are cheap to read

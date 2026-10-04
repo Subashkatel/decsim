@@ -22,6 +22,7 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.detector_error_model.basis_split as basis_split
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
 
 BOUNDARY = -1
@@ -30,7 +31,10 @@ _LARGEST_HALF_TICK_COUNT = 2**63 - 1
 
 
 def graph_from_model(
-    faults, *, location: str, weight_step: float
+    faults: fault_models.PlacedFaultModel,
+    *,
+    location: str,
+    weight_step: float,
 ) -> evidence_records.UnionFindGraph:
     """The weighted graph of one placed graphlike model.
 
@@ -67,7 +71,7 @@ def graph_from_model(
 
 
 def decode_graph(
-    graph: evidence_records.UnionFindGraph, syndrome
+    graph: evidence_records.UnionFindGraph, syndrome: numpy.ndarray
 ) -> evidence_records.UnionFindHardEvidence:
     """Decode one syndrome on the graph: grow, take the forest, peel, report."""
     syndrome_array = _checked_syndrome(graph, syndrome)

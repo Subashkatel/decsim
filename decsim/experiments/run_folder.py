@@ -20,7 +20,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Iterator, Mapping
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
@@ -30,6 +30,8 @@ import decsim.engine as engine_module
 import decsim.experiments.refusal as refusal
 import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
+import decsim.observe.observation as observation_module
+import decsim.observe.settings as observe_settings
 import decsim.records.program as program_records
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
@@ -62,7 +64,9 @@ PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
 CODE_PATHSPEC = ("--", ".", f":(exclude){RESULTS_DIR}")
 
 
-def run_dir_for(name: str, out_dir=None) -> pathlib.Path:
+def run_dir_for(
+    name: str, out_dir: Optional[pathlib.Path] = None
+) -> pathlib.Path:
     """Where this run writes: the folder asked for, or a new dated one.
 
     gem5's --outdir names the folder and makes it (src/python/m5/main.py:
@@ -185,28 +189,10 @@ def is_one_tree(one: dict, other: dict) -> bool:
     return _tree_of(one) == _tree_of(other)
 
 
-def _tree_of(record: dict) -> tuple:
-    return (record["commit"], record["dirty"], record["patch_sha256"])
-
-
 def tree_text(record: dict) -> str:
     """A run.json git block's or a piece.json's tree, for a refusal."""
     commit, is_dirty, patch_sha256 = _tree_of(record)
     return f"commit {commit} dirty {is_dirty} patch {patch_sha256}"
-
-
-def _refuse_an_unread_commit() -> None:
-    """A tree whose commit neither git nor its .git files can name."""
-    commit, _is_dirty, _patch_sha256 = _tree_reading()
-    if commit is not None or os.environ.get(ALLOW_DIRTY_VARIABLE):
-        return
-    checkout = _checkout()
-    message = (
-        f"the commit of the decsim tree at {checkout} cannot be read, so "
-        "run.json could not say what ran; run from a git checkout, whose "
-        f".git folder holds its HEAD, or set {ALLOW_DIRTY_VARIABLE}=1"
-    )
-    raise refusal.RefusalError(message)
 
 
 def piece_identity() -> dict:
@@ -259,27 +245,6 @@ def code_state_sha256(checkout: pathlib.Path) -> Optional[str]:
     patch_bytes = patch_text.encode("utf-8")
     digest = hashlib.sha256(patch_bytes)
     return digest.hexdigest()
-
-
-def _code_state_patch(checkout: pathlib.Path) -> Optional[str]:
-    """code_state.patch's text: git diff HEAD, then each untracked file.
-
-    None when the code is its commit's, or when git cannot answer.
-    """
-    diff = _git_output(
-        "git", "-C", str(checkout), "diff", "HEAD", *CODE_PATHSPEC
-    )
-    patches = []
-    if diff:
-        patches.append(diff)
-    untracked = _untracked_files(checkout) or []
-    for relative in untracked:
-        patch = _untracked_patch(checkout, relative)
-        patches.append(patch)
-    if not patches:
-        return None
-    patch_text = "\n".join(patches)
-    return patch_text + "\n"
 
 
 def write_run_record(
@@ -421,7 +386,11 @@ def write_shot(
     _write_result(result, run_dir)
 
 
-def write_log(observation, run_dir: pathlib.Path, label: str) -> None:
+def write_log(
+    observation: observation_module.Observation,
+    run_dir: pathlib.Path,
+    label: str,
+) -> None:
     """log/<label>.log: the engine narrator's full line record of a shot.
 
     The same lines log: print shows live.
@@ -435,7 +404,9 @@ def write_log(observation, run_dir: pathlib.Path, label: str) -> None:
 
 
 def trace_path_of(
-    observation, run_dir: pathlib.Path, label: str
+    observation: observe_settings.ObservationSettings,
+    run_dir: pathlib.Path,
+    label: str,
 ) -> pathlib.Path:
     """Where a shot's trace goes: the named path, or trace/ in the folder."""
     named = observation.trace_path
@@ -503,14 +474,14 @@ def seed_ranges(ranges: list) -> list:
     return joined
 
 
-def write_json(path: pathlib.Path, value) -> None:
+def write_json(path: pathlib.Path, value: dict) -> None:
     """A json file of the run folder: indented, ending in a newline."""
     text = json.dumps(value, indent=2)
     lines = text + "\n"
     path.write_text(lines)
 
 
-def read_json(path: pathlib.Path) -> Any:
+def read_json(path: pathlib.Path) -> dict:
     """One json file of the run folder."""
     text = path.read_text()
     return json.loads(text)
@@ -553,6 +524,69 @@ def utc_now() -> str:
     return now.isoformat()
 
 
+def copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
+    """The run file beside the results, under its own name.
+
+    The copy is written once (_copy_once), so a folder's copy is the file
+    that made its rows, and an array task refuses a run file edited since
+    the launch, whose task i may name another point.
+    """
+    target = copied_run_file(run_file, run_dir)
+    _copy_once(run_file, target)
+
+
+def fresh_tree_reading() -> tuple:
+    """(checkout, commit, dirty) of the tree, read now from git itself.
+
+    Not the cached reading and not the launcher's: a launcher and every
+    task it starts each look at the tree as they start. commit and dirty
+    are None where git could not answer.
+    """
+    checkout = _checkout()
+    commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
+    is_dirty = _code_is_dirty(checkout)
+    return checkout, commit, is_dirty
+
+
+def _tree_of(record: dict) -> tuple:
+    return (record["commit"], record["dirty"], record["patch_sha256"])
+
+
+def _refuse_an_unread_commit() -> None:
+    """A tree whose commit neither git nor its .git files can name."""
+    commit, _is_dirty, _patch_sha256 = _tree_reading()
+    if commit is not None or os.environ.get(ALLOW_DIRTY_VARIABLE):
+        return
+    checkout = _checkout()
+    message = (
+        f"the commit of the decsim tree at {checkout} cannot be read, so "
+        "run.json could not say what ran; run from a git checkout, whose "
+        f".git folder holds its HEAD, or set {ALLOW_DIRTY_VARIABLE}=1"
+    )
+    raise refusal.RefusalError(message)
+
+
+def _code_state_patch(checkout: pathlib.Path) -> Optional[str]:
+    """code_state.patch's text: git diff HEAD, then each untracked file.
+
+    None when the code is its commit's, or when git cannot answer.
+    """
+    diff = _git_output(
+        "git", "-C", str(checkout), "diff", "HEAD", *CODE_PATHSPEC
+    )
+    patches = []
+    if diff:
+        patches.append(diff)
+    untracked = _untracked_files(checkout) or []
+    for relative in untracked:
+        patch = _untracked_patch(checkout, relative)
+        patches.append(patch)
+    if not patches:
+        return None
+    patch_text = "\n".join(patches)
+    return patch_text + "\n"
+
+
 def _write_result(
     result: result_records.RunResult, run_dir: pathlib.Path
 ) -> None:
@@ -564,17 +598,6 @@ def _write_result(
     value = collect.json_value(result, record_classes=False)
     result_path = run_dir / "result.json"
     write_json(result_path, value)
-
-
-def copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
-    """The run file beside the results, under its own name.
-
-    The copy is written once (_copy_once), so a folder's copy is the file
-    that made its rows, and an array task refuses a run file edited since
-    the launch, whose task i may name another point.
-    """
-    target = copied_run_file(run_file, run_dir)
-    _copy_once(run_file, target)
 
 
 def _copy_once(source: pathlib.Path, target: pathlib.Path) -> None:
@@ -848,19 +871,6 @@ def _tree_reading() -> tuple:
     if not patch_sha256:
         patch_sha256 = code_state_sha256(checkout)
     return commit, is_dirty, patch_sha256
-
-
-def fresh_tree_reading() -> tuple:
-    """(checkout, commit, dirty) of the tree, read now from git itself.
-
-    Not the cached reading and not the launcher's: a launcher and every
-    task it starts each look at the tree as they start. commit and dirty
-    are None where git could not answer.
-    """
-    checkout = _checkout()
-    commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
-    is_dirty = _code_is_dirty(checkout)
-    return checkout, commit, is_dirty
 
 
 def _code_is_dirty(checkout: pathlib.Path) -> Optional[bool]:

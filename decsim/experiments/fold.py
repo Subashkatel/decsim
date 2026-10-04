@@ -24,11 +24,13 @@ import csv
 import heapq
 import math
 import pathlib
+from collections.abc import Callable, Iterator
+from typing import Union
 
 import decsim.experiments.refusal as refusal
 
 
-def typed_value(text: str):
+def typed_value(text: str) -> Union[bool, int, float, str]:
     """A csv field as the value it was written from.
 
     The algorithm column is a name or a latency card, so a field that
@@ -56,7 +58,7 @@ def typed_row(row: dict) -> dict:
     return typed
 
 
-def number_of(value):
+def number_of(value: Union[int, float, str]) -> Union[bool, int, float, str]:
     """One field of a row as the value it was written from.
 
     A row a folder was read from holds the text of its csv file; a row
@@ -76,7 +78,7 @@ def header_of(path: pathlib.Path) -> list:
         return next(reader, [])
 
 
-def row_stream(path: pathlib.Path):
+def row_stream(path: pathlib.Path) -> Iterator[dict]:
     """One csv file's rows, one alive at a time, values as their text.
 
     The values stay text because a fold writes most of them straight
@@ -87,7 +89,7 @@ def row_stream(path: pathlib.Path):
         yield from reader
 
 
-def merged_rows(paths: list, key):
+def merged_rows(paths: list, key: Callable[[dict], tuple]) -> Iterator[dict]:
     """Every file's rows in the run's order, a file open while its rows are due.
 
     `key` gives a row its place in that order. A path with no file is a
@@ -118,7 +120,7 @@ class ExactSum:
     def __init__(self) -> None:
         self.partials = []
 
-    def add(self, value) -> None:
+    def add(self, value: Union[int, float, str]) -> None:
         """One more value, the sum still exact.
 
         A zero changes no partial and is skipped, three quarters of the link

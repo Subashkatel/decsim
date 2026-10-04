@@ -3,7 +3,7 @@
 import numpy
 
 
-def finite_priors(priors):
+def finite_priors(priors: numpy.ndarray) -> numpy.ndarray:
     """Priors moved strictly inside (0, 1) so their log-odds are finite.
 
     NaN, infinite or out-of-range priors raise. Exact 0 and 1 are
@@ -27,7 +27,7 @@ def finite_priors(priors):
     return interior
 
 
-def matching_weights(priors):
+def matching_weights(priors: numpy.ndarray) -> numpy.ndarray:
     """Finite log-odds log((1 - p) / p) of the priors, PyMatching's weight."""
     interior = finite_priors(priors)
     log_survival = numpy.log1p(-interior)

@@ -22,9 +22,10 @@ is one step on the dispatcher.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.config as config
+import decsim.decoders.dispatch_steps.measurements as kernel_measurements
 import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -132,7 +133,9 @@ class MeasuredTableDecoder(strong_backend.StrongBackendDecoder):
         )
 
 
-def nearest_in_size(rows: tuple, detectors: int):
+def nearest_in_size(
+    rows: tuple, detectors: int
+) -> Union[measurements.MeasuredTime, kernel_measurements.KernelTime]:
     """The row whose region is nearest in detectors; the first on a tie.
 
     Rows are in region order, so the first is the smaller region.

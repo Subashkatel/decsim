@@ -15,7 +15,9 @@ run can be priced against, the floor of the tuning the paper leaves open
 import dataclasses
 from typing import TYPE_CHECKING, Optional
 
+import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
 
@@ -37,8 +39,8 @@ class WaitingJobs:
 
     def __init__(
         self,
-        engine,
-        scheduler,
+        engine: engine_module.Engine,
+        scheduler: schedulers.Scheduler,
         manager: "decoder_manager_module.DecoderManager",
         merges_strong: bool = False,
     ) -> None:

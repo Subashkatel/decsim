@@ -23,7 +23,7 @@ import functools
 import json
 import math
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import decsim.collect as collect
 import decsim.escalation.threshold_sources as threshold_sources
@@ -416,7 +416,7 @@ def gap_bin_low_decibels(gap_nats: float) -> float:
     return tenths / CONFIDENCE_BINS_PER_DECIBEL
 
 
-def confidence_shot_count_of(measurements: list):
+def confidence_shot_count_of(measurements: list) -> Optional[Union[int, str]]:
     """The shots a piece's confidence rows cover, for its piece.json.
 
     The first shots' count, all, or None when no confidence signal ran.
@@ -491,6 +491,29 @@ def fold_pieces(
     out_dir.mkdir(parents=True, exist_ok=True)
     swept = run_folder.swept_values(run_dir, point_ids)
     return _fold_the_folders(folders, order, out_dir, swept, rules)
+
+
+def strong_service_bound_us(totals: fold.RowTotals) -> float:
+    """Toshio's Theorem 1 bound on one strong decode's time, in us.
+
+    Eq. (6): tau_strong <= (1 / gamma_switch)(d / r_strong) tau_gen per round
+    (2510.25222 lines 1272-1304), gamma_switch the switching rate per d
+    rounds (lines 185-188). A decode reads r_strong rounds, so one decode is
+    bounded by d tau_gen / gamma_switch. The proof counts escalations against
+    rounds generated (lines 1335-1350), so the bound is tau_gen times the
+    generated rounds over the escalated windows. The rounds are the executed
+    ones, since a double window absorbs windows whose rounds were still
+    generated. Infinite when nothing escalated.
+    """
+    escalated_windows = totals.sums["escalated_windows"]
+    if escalated_windows == 0:
+        return math.inf
+    generated_rounds = totals.sums["executed_rounds"]
+    window_period_us = totals.maxes["window_period_us"]
+    commit_rounds = totals.maxes["commit_rounds"]
+    round_period_us = window_period_us / commit_rounds
+    generated_us = round_period_us * generated_rounds
+    return generated_us / escalated_windows
 
 
 def _refused_or_ordered(folders: list, point_ids: list):
@@ -800,29 +823,6 @@ def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
     if escalated_windows == 0:
         return None
     return totals.sums["strong_service_sum_us"] / escalated_windows
-
-
-def strong_service_bound_us(totals: fold.RowTotals) -> float:
-    """Toshio's Theorem 1 bound on one strong decode's time, in us.
-
-    Eq. (6): tau_strong <= (1 / gamma_switch)(d / r_strong) tau_gen per round
-    (2510.25222 lines 1272-1304), gamma_switch the switching rate per d
-    rounds (lines 185-188). A decode reads r_strong rounds, so one decode is
-    bounded by d tau_gen / gamma_switch. The proof counts escalations against
-    rounds generated (lines 1335-1350), so the bound is tau_gen times the
-    generated rounds over the escalated windows. The rounds are the executed
-    ones, since a double window absorbs windows whose rounds were still
-    generated. Infinite when nothing escalated.
-    """
-    escalated_windows = totals.sums["escalated_windows"]
-    if escalated_windows == 0:
-        return math.inf
-    generated_rounds = totals.sums["executed_rounds"]
-    window_period_us = totals.maxes["window_period_us"]
-    commit_rounds = totals.maxes["commit_rounds"]
-    round_period_us = window_period_us / commit_rounds
-    generated_us = round_period_us * generated_rounds
-    return generated_us / escalated_windows
 
 
 def _shot_totals(row: dict) -> fold.RowTotals:

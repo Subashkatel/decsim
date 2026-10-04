@@ -17,6 +17,11 @@ component reads.
 
 import dataclasses
 import enum
+from typing import Any, Optional, Union
+
+import decsim.records.decoding as decoding_records
+import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 
 
 class MemoryClass(enum.Enum):
@@ -128,14 +133,22 @@ class DataMovement:
         # seat -> the most raw bits one operation's history held there
         self.formation_state_bits_by_seat: dict = {}
 
-    def copy_made(self, key, bits, source_name: str, target_name: str) -> None:
+    def copy_made(
+        self,
+        key: Union[tuple, decoding_records.DecodeJob],
+        bits: Optional[int],
+        source_name: str,
+        target_name: str,
+    ) -> None:
         """One structure duplicated the bits into another."""
         path = f"{source_name}{PATH_SEPARATOR}{target_name}"
         rounds = _rounds(key)
         memory_class = memory_class_of_structure(target_name)
         self._add(self.copies, path, bits, rounds, memory_class)
 
-    def transfer_delivered(self, record) -> None:
+    def transfer_delivered(
+        self, record: transfer_records.TransferRecord
+    ) -> None:
         """One move landed on its link, its header with its payload.
 
         The wire serializes the framing beside the payload and the link ledger
@@ -151,25 +164,41 @@ class DataMovement:
         memory_class = memory_class_of_link_path(path)
         self._add(self.moves, path, bits, rounds, memory_class)
 
-    def hold_registered(self, holder, round_keys) -> None:
+    def hold_registered(
+        self,
+        holder: Any,  # an opaque identity
+        round_keys: tuple,
+    ) -> None:
         """One token referenced the rounds where they already sit."""
         del holder
         self.references.events += 1
         self.references.rounds += len(round_keys)
         self.holds.registered += 1
 
-    def hold_transferred(self, old_holder, new_holder) -> None:
+    def hold_transferred(
+        self,
+        old_holder: Any,  # an opaque identity
+        new_holder: Any,  # an opaque identity
+    ) -> None:
         """A live reference moved to a new token, copying nothing."""
         del old_holder
         del new_holder
         self.holds.transferred += 1
 
-    def hold_released(self, holder) -> None:
+    def hold_released(
+        self,
+        holder: Any,  # an opaque identity
+    ) -> None:
         """One reference ended."""
         del holder
         self.holds.released += 1
 
-    def formation_state_held(self, seat: str, operation_id, bits) -> None:
+    def formation_state_held(
+        self,
+        seat: str,
+        operation_id: Any,  # an opaque identity
+        bits: int,
+    ) -> None:
         """A seat's former holds these raw bits of one operation now.
 
         The most one history held at each seat is kept, reported because no
@@ -179,7 +208,7 @@ class DataMovement:
         held = self.formation_state_bits_by_seat.get(seat, 0)
         self.formation_state_bits_by_seat[seat] = max(held, bits)
 
-    def round_emitted(self, readout) -> None:
+    def round_emitted(self, readout: round_records.QPUReadout) -> None:
         """One more round exists, so a per-round rate has a denominator."""
         self.rounds_seen.add((readout.operation_id, readout.round_index))
 

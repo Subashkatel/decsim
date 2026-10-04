@@ -13,12 +13,14 @@ import abc
 import time
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy
+import scipy.sparse
 
 import decsim.config as config
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
@@ -65,7 +67,10 @@ class DecoderBase(abc.ABC):
         """The whole job's service time in ticks, known at dispatch."""
 
     def start(
-        self, job: decoding_records.DecodeJob, engine, on_result: OnResult
+        self,
+        job: decoding_records.DecodeJob,
+        engine: engine_module.Engine,
+        on_result: OnResult,
     ) -> None:
         """Run the job on the engine; on_result runs once at its output.
 
@@ -169,13 +174,13 @@ class WindowDecoderBase(DecoderBase):
         self,
         faults: fault_models.PlacedFaultModel,
         model: fault_models.WindowErrorModel,
-    ) -> Any:
+    ) -> Any:  # an opaque identity only the row reads
         """The backend for one window model, built once while it lives."""
 
     @abc.abstractmethod
     def decode_window(
         self,
-        backend: Any,
+        backend: Any,  # an opaque identity only the row reads
         model: fault_models.WindowErrorModel,
         faults: fault_models.PlacedFaultModel,
         syndrome: numpy.ndarray,
@@ -184,7 +189,7 @@ class WindowDecoderBase(DecoderBase):
 
     def decode_forced_window(
         self,
-        backend: Any,
+        backend: Any,  # an opaque identity only the row reads
         model: fault_models.WindowErrorModel,
         faults: fault_models.PlacedFaultModel,
         syndrome: numpy.ndarray,
@@ -258,7 +263,12 @@ class WindowDecoderBase(DecoderBase):
         return result, finished_ns - started_ns
 
     def window_answer(
-        self, job, backend, model, faults, syndrome
+        self,
+        job: decoding_records.DecodeJob,
+        backend: Any,  # an opaque identity only the row reads
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
     ) -> decoding_records.WindowDecode:
         """The backend call this job asks for: the window's, or one class's."""
         forced_class = job.forced_logical_class
@@ -272,7 +282,7 @@ class WindowDecoderBase(DecoderBase):
         self,
         faults: fault_models.PlacedFaultModel,
         model: fault_models.WindowErrorModel,
-    ) -> Any:
+    ) -> Any:  # an opaque identity only the row reads
         """The placed model's backend, compiled once and kept while it lives.
 
         A task's shots share their window models
@@ -307,7 +317,9 @@ class WindowDecoderBase(DecoderBase):
 _SHARED_BACKENDS: dict = {}
 
 
-def parity_product(matrix, vector):
+def parity_product(
+    matrix: scipy.sparse.csc_matrix, vector: numpy.ndarray
+) -> numpy.ndarray:
     """The matrix times the vector over GF(2), as a flat array."""
     matrix_integers = matrix.astype(numpy.int64)
     vector_integers = vector.astype(numpy.int64)
@@ -317,7 +329,7 @@ def parity_product(matrix, vector):
     return flat % 2
 
 
-def int_tuple(array) -> tuple:
+def int_tuple(array: numpy.ndarray) -> tuple:
     """The array's entries as a tuple of ints."""
     bits = []
     for bit in array:
@@ -325,7 +337,7 @@ def int_tuple(array) -> tuple:
     return tuple(bits)
 
 
-def payload_syndrome(job: decoding_records.DecodeJob):
+def payload_syndrome(job: decoding_records.DecodeJob) -> numpy.ndarray:
     """Concatenate payload bits into one syndrome vector."""
     if not job.payloads:
         return numpy.zeros(0, dtype=numpy.uint8)
@@ -339,7 +351,9 @@ def payload_syndrome(job: decoding_records.DecodeJob):
 
 
 def check_syndrome_size(
-    job: decoding_records.DecodeJob, syndrome, placed_faults
+    job: decoding_records.DecodeJob,
+    syndrome: numpy.ndarray,
+    placed_faults: fault_models.PlacedFaultModel,
 ) -> None:
     """Fail when payload bits and detector rows do not line up."""
     detector_count = placed_faults.check.shape[0]
@@ -354,10 +368,10 @@ def check_syndrome_size(
 
 def result_from_selected_faults(
     job: decoding_records.DecodeJob,
-    model,
-    placed_faults,
-    selected,
-    decode_status=None,
+    model: fault_models.WindowErrorModel,
+    placed_faults: fault_models.PlacedFaultModel,
+    selected: Union[tuple, numpy.ndarray],
+    decode_status: Optional[decoding_records.BackendDecodeStatus] = None,
 ) -> decoding_records.DecodeResult:
     """Keep the owned selected faults and convert them into a DecodeResult.
 
@@ -392,7 +406,7 @@ def result_from_selected_faults(
 
 
 def dependency_residual(
-    model, detector_ids: tuple
+    model: fault_models.WindowErrorModel, detector_ids: tuple
 ) -> window_records.DependencyResidual:
     """The detectors a commit flips, with their mask by round and position."""
     defects = _defects_from_detector_ids(model, detector_ids)

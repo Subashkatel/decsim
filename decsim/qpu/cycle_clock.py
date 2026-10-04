@@ -96,7 +96,11 @@ class QPUDevice:
         """The first cycle boundary not earlier than the tick."""
         return self.clock.edge(0, tick)
 
-    def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
+    def are_patches_idle(
+        self,
+        operation_id: Any,  # an opaque identity
+        patches: tuple,
+    ) -> bool:
         """Every group member is idle after the same completed operation."""
         for patch in patches:
             idle = self._live.idle_by_patch.get(patch)
@@ -109,7 +113,7 @@ class QPUDevice:
     def emit_idle_stream_round(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -135,7 +139,10 @@ class QPUDevice:
         )
 
     def emit_feedback_memory_round(
-        self, operation_id: Any, patch: Any, round_index: int
+        self,
+        operation_id: Any,  # an opaque identity
+        patch: Any,  # an opaque identity
+        round_index: int,
     ) -> None:
         """Deliver the timing-only round of an idle patch.
 

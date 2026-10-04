@@ -15,6 +15,7 @@ import functools
 import math
 import os
 import pathlib
+from collections.abc import Callable
 from typing import Optional, Union
 
 import numpy
@@ -144,7 +145,9 @@ class ExtraGrowthOutcome:
     growth_steps: tuple
 
 
-def decode(graph: evidence_records.UnionFindGraph, residual_syndrome):
+def decode(
+    graph: evidence_records.UnionFindGraph, residual_syndrome: numpy.ndarray
+) -> GrowthOutcome:
     """Grow, take the forest and peel one residual syndrome on one graph."""
     endpoint_a, endpoint_b, lengths = _graph_arrays(graph)
     edge_count = len(graph.edges)
@@ -245,7 +248,7 @@ def cluster_gap(
 def extra_growth(
     graph: evidence_records.UnionFindGraph,
     edge_intervals: tuple,
-    residual_syndrome,
+    residual_syndrome: tuple,
     growth_limit_ticks: int,
 ) -> ExtraGrowthOutcome:
     """Grow one decode's clusters on until the boundaries join or the limit.
@@ -302,19 +305,19 @@ def extra_growth(
 
 
 @functools.cache
-def entry_point():
+def entry_point() -> Callable[..., int]:
     """The decode, bound once per process."""
     return _bound(_DECODE_SYMBOL, _DECODE_ARGUMENT_TYPES)
 
 
 @functools.cache
-def cluster_gap_entry_point():
+def cluster_gap_entry_point() -> Callable[..., int]:
     """The cluster gap walk, bound once per process."""
     return _bound(_CLUSTER_GAP_SYMBOL, _CLUSTER_GAP_ARGUMENT_TYPES)
 
 
 @functools.cache
-def extra_growth_entry_point():
+def extra_growth_entry_point() -> Callable[..., int]:
     """The extra growth, bound once per process."""
     return _bound(_EXTRA_GROWTH_SYMBOL, _EXTRA_GROWTH_ARGUMENT_TYPES)
 

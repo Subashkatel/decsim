@@ -32,13 +32,14 @@ import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
+import decsim.ports as ports
 
 
 def observe(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
     *,
-    links: Any,
+    links: ports.Link,
     qpu: Any,
     control: Any,
     readout: Any,

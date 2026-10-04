@@ -7,6 +7,7 @@ action. The builder receives the owners it reads and writes nothing back.
 import dataclasses
 
 import decsim.records.identity as identity_records
+import decsim.windows.window_manager as window_manager_module
 
 
 @dataclasses.dataclass(frozen=True)
@@ -23,7 +24,10 @@ class BacklogView:
     total_rounds: int  # system-level depth
 
 
-def backlog_view(window_manager, decoder_managers) -> BacklogView:
+def backlog_view(
+    window_manager: window_manager_module.WindowManager,
+    decoder_managers: tuple,
+) -> BacklogView:
     """Snapshot the job queues and the per-op, per-patch, system backlog.
 
     The queues are every pool's over both sides' managers.

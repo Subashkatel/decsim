@@ -24,6 +24,7 @@ import decsim.decoders.decoder_memory_transfer as staging_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.trace_source as trace_source
@@ -45,7 +46,7 @@ class DecodeService:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         pool: decoder_pool_module.DecoderPool,
         staging: staging_module.DecoderInputStaging,
         manager: "decoder_manager_module.DecoderManager",
@@ -276,7 +277,7 @@ class DecodeService:
         """Drop the job from transport and storage, then free its hold."""
         self.staging.cancel(job)
 
-    def release_inputs(self, members) -> None:
+    def release_inputs(self, members: list) -> None:
         """Return the credits of every request one decode still serves."""
         self.staging.release_service_members(members)
 
@@ -301,7 +302,9 @@ class DecodeService:
             residents.extend(unit.residents)
         return residents
 
-    def take_strong_output(self, window_key: tuple):
+    def take_strong_output(
+        self, window_key: tuple
+    ) -> Optional[strong_requests_module.StrongCompletion]:
         """Take the finished result waiting for that destination, if any.
 
         A destination has at most one, so the first unit holding one for

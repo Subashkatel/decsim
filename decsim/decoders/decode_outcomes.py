@@ -14,6 +14,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Optional
 
 import decsim.decoders.strong_requests as strong_requests_module
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.trace_source as trace_source
 
@@ -31,7 +32,7 @@ class DecodeOutcomes:
 
     def __init__(
         self,
-        engine,
+        engine: engine_module.Engine,
         manager: "decoder_manager_module.DecoderManager",
     ) -> None:
         self.engine = engine

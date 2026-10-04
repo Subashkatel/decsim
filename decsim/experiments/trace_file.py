@@ -9,6 +9,8 @@ the viewer's `ts`, because `ts` is microseconds as a float
 
 import gzip
 import json
+import pathlib
+from typing import Union
 
 import decsim.config as config
 
@@ -25,7 +27,7 @@ class TraceDocument:
         self.process_name = process_name
 
 
-def load(path) -> TraceDocument:
+def load(path: Union[str, pathlib.Path]) -> TraceDocument:
     """Read one trace file, plain or gzipped, and index its events."""
     text = _read_text(path)
     document = json.loads(text)

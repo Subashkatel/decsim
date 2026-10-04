@@ -64,6 +64,7 @@ class Windows:
         workload: workload_settings.WorkloadSettings,
         switching_settings: Optional[escalation_settings.SwitchingSettings],
         window_decoder: Optional[decoder_settings.DecoderPoolSettings],
+        strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
         window_tier: window_records.DecoderTier,
         machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
@@ -88,8 +89,11 @@ class Windows:
         retention = _retention(plan, window_tier, is_switching)
         window_transfers = window_transfers_module.WindowTransfers(engine)
         decoder_output = decoder_output_module.DecoderOutput(engine)
-        copies_the_fold = _copies_the_boundary_fold(window_decoder)
-        gate = decode_requests.WindowInputGate(copies_the_fold)
+        copies_the_window_fold = _copies_the_boundary_fold(window_decoder)
+        copies_the_strong_fold = _copies_the_boundary_fold(strong_decoder)
+        gate = decode_requests.WindowInputGate(
+            copies_the_window_fold, copies_the_strong_fold
+        )
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
@@ -281,9 +285,9 @@ def _verdict(
 
 
 def _copies_the_boundary_fold(
-    window_decoder: Optional[decoder_settings.DecoderPoolSettings],
+    decoder: Optional[decoder_settings.DecoderPoolSettings],
 ) -> bool:
-    """Whether the tier that decodes the plan's windows folds into a copy."""
-    if window_decoder is None:
+    """Whether a tier folds its boundary mask into a copy of its input."""
+    if decoder is None:
         return True
-    return window_decoder.copies_boundary_fold
+    return decoder.copies_boundary_fold

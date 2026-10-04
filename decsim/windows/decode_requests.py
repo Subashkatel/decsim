@@ -44,10 +44,17 @@ class WindowInputGate:
     # the decoder side's input, which installs what this hands it
     input_fold = ports.Port(ports.DecoderInputFold)
 
-    def __init__(self, copies_the_fold: bool = True):
-        # weak_decoder.boundary_fold: copy duplicates the landed input,
-        # in_place XORs the mask into the unit's own memory
-        self.copies_the_fold = copies_the_fold
+    def __init__(
+        self,
+        copies_the_window_fold: bool = True,
+        copies_the_strong_fold: bool = True,
+    ):
+        # each tier's copies_boundary_fold: a copy duplicates the landed
+        # input, in place XORs the mask into the unit's own memory. A
+        # window job is decoded by the tier that decodes the plan's
+        # windows, a strong re-decode by the strong tier.
+        self.copies_the_window_fold = copies_the_window_fold
+        self.copies_the_strong_fold = copies_the_strong_fold
 
     def may_stage(self, job: decoding_records.DecodeJob) -> bool:
         """May this boundary-blocked job occupy an input slot yet?
@@ -102,12 +109,18 @@ class WindowInputGate:
         masked_input = dataclasses.replace(
             job.decoder_input, rounds=tuple(masked_rounds)
         )
-        if self.copies_the_fold:
+        if self._copies_the_fold(job):
             self.input_fold.fold_into_a_copy(job, masked_input)
             return
         self.input_fold.fold_in_place(job, masked_input)
 
     # ---- private
+
+    def _copies_the_fold(self, job: decoding_records.DecodeJob) -> bool:
+        """The fold of the tier that decodes this job."""
+        if job.kind is decoding_records.DecodeJobKind.WINDOW:
+            return self.copies_the_window_fold
+        return self.copies_the_strong_fold
 
     def _every_dependency_resolving(self, dependencies, visiting: set) -> bool:
         for dependency in dependencies:

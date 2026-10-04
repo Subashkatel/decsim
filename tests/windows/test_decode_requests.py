@@ -350,7 +350,7 @@ def _landed_job(fixture, folds_in_place: bool):
     job.decoder_input = memory.deposit(job)
     job.memory = memory
     if folds_in_place:
-        fixture.gate.copies_the_fold = False
+        fixture.gate.copies_the_window_fold = False
     return job, memory
 
 

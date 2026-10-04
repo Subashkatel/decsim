@@ -172,6 +172,7 @@ class Machine:
             settings.workload,
             settings.switching,
             window_decoder,
+            settings.strong_decoder,
             window_tier,
             settings.clock,
             engine,

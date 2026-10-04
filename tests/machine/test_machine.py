@@ -433,6 +433,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings.workload,
         settings.switching,
         window_decoder,
+        settings.strong_decoder,
         window_tier,
         settings.clock,
         engine,

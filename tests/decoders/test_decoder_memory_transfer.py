@@ -13,8 +13,6 @@ one writer, which is the memory's own rule (Helios 2301.08419 lines
 
 import dataclasses
 
-import pytest
-
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.decoders.detection_events as detection_events
@@ -132,8 +130,13 @@ def test_a_fold_in_place_is_written_by_the_memory_that_holds_the_input():
     assert job.decoder_input is masked
 
 
-def test_an_in_place_fold_on_a_tier_that_reads_in_place_still_stops():
-    """The weak tier folds in place; the strong tier keeps no copy to fold."""
+def test_each_tier_folds_its_boundary_where_its_own_setting_says():
+    """The weak tier folds in place; the strong tier, reading in place, copies.
+
+    A strong re-decode keeps no copy of its rounds to fold into, so it
+    folds into a duplicate as its own copies_boundary_fold says, and the
+    answers are the ones the copy fold gives on both tiers.
+    """
     reading_in_place = declared_run.switching_run(
         rounds=9, escalates=True, strong_copies_input=False
     )
@@ -142,10 +145,14 @@ def test_an_in_place_fold_on_a_tier_that_reads_in_place_still_stops():
         settings.weak_decoder, copies_boundary_fold=False
     )
     folding_in_place = dataclasses.replace(settings, weak_decoder=weak)
-    machine = machine_module.Machine.build(folding_in_place, 0)
+    in_place_machine = machine_module.Machine.build(folding_in_place, 0)
+    copying_machine = machine_module.Machine.build(settings, 0)
 
-    with pytest.raises(AttributeError, match="has no attribute 'is_rewritten'"):
-        machine.run()
+    in_place = in_place_machine.run()
+    copying = copying_machine.run()
+
+    assert in_place.terminal_status == "complete"
+    assert in_place.operation_results == copying.operation_results
 
 
 def test_a_companion_that_joins_after_the_fold_reads_the_written_rounds():

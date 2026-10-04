@@ -390,6 +390,20 @@ def test_a_settings_path_header_is_refused_naming_its_fact(tmp_path):
     assert "workload.arguments.physical_error_probability" in str(refusal.value)
 
 
+def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
+    tmp_path,
+):
+    """A missing fact would match a row whose cell reads "None"."""
+    table_path = _write_table(
+        tmp_path, "physical_error_probability,gth_eq4_wilson\nNone,10.0\n"
+    )
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    facts = _facts(distance=3)
+
+    with pytest.raises(ValueError, match="gives no physical_error_probability"):
+        table.at_point(facts)
+
+
 def test_an_integer_key_matches_its_row_exactly(tmp_path):
     """Only a float key reads back within a relative 1e-9 of its text.
 

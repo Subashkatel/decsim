@@ -169,7 +169,7 @@ class TableThreshold(FixedThreshold):
             if self.threshold_decibels is not None:
                 return self
             columns, rows = _table_rows(self.table)
-            point = _point_of(columns, facts)
+            point = _point_of(columns, facts, self.table)
             row = _first_row_holding(rows, point)
             cell = row[self.column]
             threshold_decibels = _certified_decibels(
@@ -632,11 +632,21 @@ def _key_columns(columns: list) -> list:
     return [column for column in columns if column in POINT_FACTS]
 
 
-def _point_of(columns: list, facts: Mapping) -> dict:
-    """The point's value at each of the table's key columns."""
+def _point_of(columns: list, facts: Mapping, table_path) -> dict:
+    """The point's value at each of the table's key columns.
+
+    A fact the point does not give is refused: its None would otherwise
+    match a row whose cell reads "None".
+    """
     point = {}
     for column in _key_columns(columns):
-        point[column] = facts[column]
+        value = facts[column]
+        if value is None:
+            raise ValueError(
+                f"threshold_table {table_path} keys its rows on {column}, "
+                f"and the point gives no {column}"
+            )
+        point[column] = value
     return point
 
 

@@ -4,7 +4,6 @@ Smith 1982 decoupled access-execute: the second slot holds the
 next window's input while the first computes.
 """
 
-
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_unit as decoder_unit
 import decsim.records.decoding as decoding_records

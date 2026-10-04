@@ -17,28 +17,17 @@ NARRATOR_MODES = ("print", "file", "both")
 class ObservationSettings:
     """What a run records beside its results.
 
-    log is the engine narrator: print shows it live, file writes each shot's
-    full line record next to the results, both does both. trace is the
-    Chrome trace of the data path: off, chrome (the experiments layer names
-    the file next to the results), or a path of its own; the experiments
-    layer writes it for the shots trace_shots names. log_component_io adds
-    component I/O lines (what each store and unit received, holds and
-    emitted). record_switching_windows keeps every request record for the
-    switching study; backlog_trace builds the sampler of the rounds waiting
-    to be decoded (the decoder utilization is always integrated, every run's
-    pool columns read it); data_movement builds the copy, reference and move
-    counters the RunResult carries.
+    log is the engine narrator: print, file (each shot's lines next to the
+    results) or both. trace is the Chrome trace: off, chrome, or a path; the
+    experiments layer writes it for trace_shots. log_component_io adds each
+    component's I/O lines.
 
-    The fields that only record the run, the log and the trace, are
-    labels (compare=False) and no part of a
-    point's id, as sinter keeps its output options out of a task's strong id
-    (sinter/_data/_task.py:167-204): each writer schedules nothing and
-    calls no component (observe/trace_writer.py), so the shots'
-    rows are the same with them or without. The others stay in the id
-    because they change a shot's row: record_switching_windows and
-    backlog_trace add the wait and backlog columns
-    (experiments/measure.py), and data_movement adds the shot_data_movement
-    rows.
+    The log and the trace are labels (compare=False) and no part of a
+    point's id, as sinter keeps output options out of a task's strong id
+    (sinter/_data/_task.py:167-204): the writers schedule nothing. The
+    others stay in the id because they add a shot's columns:
+    record_switching_windows and backlog_trace the wait and backlog
+    columns, data_movement the shot_data_movement rows.
     """
 
     log: str = dataclasses.field(compare=False, default="off")

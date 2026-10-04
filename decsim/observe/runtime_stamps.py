@@ -1,11 +1,6 @@
 """The ticks of every operation's life, heard from the execution runtime.
 
-A listener on the runtime's operation_issued, operation_started,
-body_finished, decode_released and result_returned sources, each carrying
-(operation_id, tick), and on the magic state factory's state_delivered
-(operation_id, waited_ticks). The runtime keeps which operations have
-started, finished and been released; the ticks live here, keyed by
-operation id, and last_finish is the latest body done.
+last_finish is the latest body done.
 """
 
 

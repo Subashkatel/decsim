@@ -1,14 +1,10 @@
 """The flight recorder of the readout path: what happened to every round.
 
-A listener on the round_event source of the QPU's cycle clock, the
-assembler, the held rounds, the transmitter and both syndrome round
-receivers, on the instruction output's output_event, and on the strong
-store's round_stored; the components never read it. The rows are append-only
-and passive; recording never schedules or decides. A finished run's
+Append-only and passive; the components never read it. A finished run's
 terminal states are PUBLISHED or FEEDBACK_MEMORY_DELIVERED. The
-controller's output events are read only by the run ledger the tests
-check (tests/observe/run_ledger.py), and are kept here because the
-instruction output's output_event has no other listener.
+controller's output events are read only by the tests' run ledger
+(tests/observe/run_ledger.py), and are kept here because output_event
+has no other listener.
 """
 
 import decsim.records.rounds as round_records

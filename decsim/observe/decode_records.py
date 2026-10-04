@@ -1,9 +1,6 @@
 """The switching study's terminal records: per request and per gap.
 
-Listeners on the decode outcomes' request_ended source; they never read
-the decoder. The request ledger is built only when the observation
-section asks for the switching windows, and the confidence ledger only
-when a confidence signal decides the escalation, so the decoder runs
+Each ledger is built only when a study asks for it, so the decoder runs
 with no record kept.
 """
 
@@ -126,10 +123,8 @@ def _window_order(key: tuple) -> tuple:
 def _decoded_syndrome_weight(job: decoding_records.DecodeJob) -> Optional[int]:
     """The set bits the job's decode read; None when it never started.
 
-    The decode reads its unit's memory into payloads as it starts
-    (decoders/decode_service.py), and the unit frees that memory at the
-    decode's end, before a confidence walk lets the verdict end the
-    request, so payloads is what still holds the input then.
+    The unit frees its memory at the decode's end, before a confidence walk
+    ends the request, so payloads still holds the input then.
     """
     if not job.service_started:
         return None

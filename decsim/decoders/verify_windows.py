@@ -76,8 +76,14 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         self.referee = tesseract_window_decoder.TesseractWindowDecoder(
             referee_settings
         )
-        # The referee reads the physical view, the tier the graphlike one.
-        self.fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
+        # The referee reads the physical view and the inner decoder its
+        # own. Neither reads a link, and a linked build keeps faults of
+        # other decompositions apart, which would hand a physical-view
+        # inner decoder another problem than an unchecked run gives it.
+        inner_requirement = inner.fault_model_requirement
+        self.fault_model_requirement = inner_requirement.joined(
+            fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+        )
         self.decoder_evidence = inner.decoder_evidence
         self.missing_evidence_reasons = inner.missing_evidence_reasons
         self.window_checked = trace_source.TraceSource()

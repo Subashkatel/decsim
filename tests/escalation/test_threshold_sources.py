@@ -283,6 +283,15 @@ def _observe_each(tracker, gaps: list) -> None:
         tracker.observe(gap)
 
 
+def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
+    """Decibels are 10 log10 of the ratio, the weight its natural log."""
+    weight_nats = math.log(100.0)
+
+    assert threshold_sources.nats_to_decibels(weight_nats) == pytest.approx(
+        20.0
+    )
+
+
 @pytest.mark.parametrize(
     "threshold_decibels", [float("nan"), math.inf, -1.0, True, "20"]
 )

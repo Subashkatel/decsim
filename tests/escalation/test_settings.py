@@ -1,7 +1,6 @@
 """The switching slot's record: its threshold, its costs, its slots."""
 
 import dataclasses
-import math
 
 import pytest
 
@@ -24,15 +23,6 @@ def _switching(**changes) -> escalation_settings.SwitchingSettings:
     )
     return escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, **changes
-    )
-
-
-def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
-    """Decibels are 10 log10 of the ratio, the weight its natural log."""
-    weight_nats = math.log(100.0)
-
-    assert threshold_sources.nats_to_decibels(weight_nats) == pytest.approx(
-        20.0
     )
 
 

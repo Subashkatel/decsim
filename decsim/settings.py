@@ -433,9 +433,9 @@ def _baseline_windows() -> window_settings.WindowSettings:
 
 def _baseline_decoder_manager() -> decoder_settings.DecoderManagerSettings:
     """First in, first out, one region a decode, dispatch unpriced."""
-    fifo = schedulers.FifoScheduler.Settings()
+    first_in_first_out = schedulers.FifoScheduler.Settings()
     return decoder_settings.DecoderManagerSettings(
-        scheduler=fifo,
+        scheduler=first_in_first_out,
         bulk_strong=False,
         dispatch_cycles=0,
         clock=None,

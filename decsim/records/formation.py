@@ -102,7 +102,8 @@ class FormationTable:
         the live_reach rounds before it, since a round not yet run may read that
         far.
         """
-        earliest_round = first_round - self._reach_from(first_round)
+        reach = self._reach_from(first_round)
+        earliest_round = first_round - reach
         earliest_round = max(1, earliest_round)
         read_rounds = range(earliest_round, first_round)
         return tuple(read_rounds)

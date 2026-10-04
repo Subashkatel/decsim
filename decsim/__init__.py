@@ -15,7 +15,6 @@ without the machine's imports.
 
 import importlib
 
-# Each name the root exports, and the module that defines it.
 _MODULE_OF = {
     "Experiment": "decsim.experiments.experiment",
     "Point": "decsim.experiments.experiment",
@@ -28,7 +27,6 @@ __all__ = tuple(_MODULE_OF)
 
 
 def __getattr__(name: str) -> object:
-    """An exported name, read from its module, which is imported now."""
     module_name = _MODULE_OF.get(name)
     if module_name is None:
         raise AttributeError(f"module 'decsim' has no attribute {name!r}")

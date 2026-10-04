@@ -62,7 +62,10 @@ for distance in DISTANCES:
 - `weak_decoder_baseline` returns a `MachineSettings`: one record for
   each part of one machine, the QPU, the controller, the links, the
   syndrome buffer, the windows, the decoder and the Pauli frame. It has
-  one decoder, which decodes everything.
+  one decoder, which decodes everything. Its shot is ten rounds for each
+  unit of distance, 30 at d = 3;
+  `dataclasses.replace(base, workload=machine_settings.memory_workload(3, 0.001, 300))`
+  makes it 300.
 - `dataclasses.replace` changes one field of a record and keeps the
   rest. Here the decoder's algorithm becomes a **priced card**:
   PyMatching still decodes every window, but each decode is charged

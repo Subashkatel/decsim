@@ -162,15 +162,24 @@ A card is numbers, not a class: a `FabricSettings` record, one
 
 - **Field:** `switching`, a `SwitchingSettings`. Subclass it as a
   frozen dataclass, add your own fields, and override
-  `build_policy(threshold)` to return your policy.
+  `build_policy(threshold)` to return your policy. A `__post_init__` of
+  your own calls the base's checks first,
+  `SwitchingSettings.__post_init__(self)` (STYLE.md rule 1).
 - **Component:** fills `ports.EscalationPolicy`. The port's docstrings
   say when each method is called: a verdict once per weak window, and
-  the strong answer once per strong decode.
+  the strong answer once per strong decode. Each `Verdict.ESCALATE` gets one
+  strong decode and so one `learn_from_strong_result`, except under
+  `bulk_strong` (one call for a merged decode) and under
+  `run_both_at_once` (the strong decode starts with the weak one,
+  before any verdict).
 - **Counts your policy keeps** are not columns of the results. Count
   them from `window_confidence.csv` or from the trace's `verdict`
   events instead.
 - Under the default redo window, one stream has at most one strong
-  decode in flight ([Two tiers](../tutorials/two_tiers.md)).
+  decode in flight ([Two tiers](../tutorials/two_tiers.md)). For strong
+  decodes that overlap, set `strong_window=DoubleWindow.Settings()`
+  (`decsim/escalation/strong_window_shapes.py`) and give the machine
+  `window_settings.switching_windows(base.windows, strong_window)`.
 - **Worked example:** `Switching` in `decsim/escalation/policies.py`.
   **Tests:** `tests/escalation/`.
 

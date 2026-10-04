@@ -32,7 +32,9 @@ class ParallelWindowScheme:
         buffer_rounds: Optional[int] = None
 
         def __post_init__(self) -> None:
-            window_data.check_window_sizes(self)
+            window_data.check_window_sizes(
+                self.commit_rounds, self.buffer_rounds
+            )
 
         # the word the reports name this row by
         name = "parallel"

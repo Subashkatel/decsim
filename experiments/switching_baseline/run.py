@@ -295,7 +295,9 @@ def experiment_one_links() -> link_settings.FabricSettings:
     Every other hop keeps the reference card.
     """
     links = link_profiles.logical_reference_profile()
-    leg_microseconds = 2.305 / 2 - 128 / 100_000
+    half_echo_microseconds = 2.305 / 2
+    echo_on_cable_microseconds = 128 / 100_000
+    leg_microseconds = half_echo_microseconds - echo_on_cable_microseconds
     for path_name in STRONG_CABLE_LEGS:
         links = link_profiles.with_path_latency(
             links, path_name, leg_microseconds
@@ -319,27 +321,6 @@ def experiment_one_links() -> link_settings.FabricSettings:
         strong_buffer_to_strong_decoder=poll,
         profile_name="roce_v2_cpu with the risc_q weak loop",
     )
-
-
-def _fridge_path(links, path_name, latency_cycles, bits_per_lane_cycle):
-    """One path in cycles of the chip clock, four lanes when it has a rate."""
-    lane_count = 4
-    if bits_per_lane_cycle is None:
-        lane_count = 1
-    return link_profiles.path_card(
-        links,
-        path_name,
-        clock=machine_settings.FRIDGE_CLOCK,
-        latency_cycles=latency_cycles,
-        bits_per_cycle=bits_per_lane_cycle,
-        source=EXPERIMENT_ONE_LINKS_SOURCE,
-        lane_count=lane_count,
-    )
-
-
-def _with_receiver(path: link_settings.PathSettings):
-    """The path whose latency holds its receiver's processing too."""
-    return dataclasses.replace(path, excludes_receiver_processing=False)
 
 
 def switching_baseline_points() -> list:
@@ -376,6 +357,27 @@ def switching_baseline_points() -> list:
         )
         weak_alone_points.append(weak_alone_point)
     return switching_points + weak_alone_points
+
+
+def _fridge_path(links, path_name, latency_cycles, bits_per_lane_cycle):
+    """One path in cycles of the chip clock, four lanes when it has a rate."""
+    lane_count = 4
+    if bits_per_lane_cycle is None:
+        lane_count = 1
+    return link_profiles.path_card(
+        links,
+        path_name,
+        clock=machine_settings.FRIDGE_CLOCK,
+        latency_cycles=latency_cycles,
+        bits_per_cycle=bits_per_lane_cycle,
+        source=EXPERIMENT_ONE_LINKS_SOURCE,
+        lane_count=lane_count,
+    )
+
+
+def _with_receiver(path: link_settings.PathSettings):
+    """The path whose latency holds its receiver's processing too."""
+    return dataclasses.replace(path, excludes_receiver_processing=False)
 
 
 def _metadata(distance: int, physical_error_probability: float) -> dict:

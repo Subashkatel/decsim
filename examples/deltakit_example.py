@@ -289,12 +289,12 @@ def _circuit(arguments) -> tuple[stim.Circuit, dict[int, int]]:
             arguments.basis,
             arguments.probability,
         )
-    points_dir = arguments.input / run_folder.POINTS_FOLDER
-    (point_folder,) = points_dir.iterdir()
-    inputs_dir = point_folder / run_folder.INPUTS_FOLDER
-    operations_path = inputs_dir / "operations.json"
-    circuit_path = inputs_dir / "circuit.stim"
-    rounds_path = inputs_dir / "measurement_rounds.json"
+    points_folder = arguments.input / run_folder.POINTS_FOLDER
+    (point_folder,) = points_folder.iterdir()
+    inputs_folder = point_folder / run_folder.INPUTS_FOLDER
+    operations_path = inputs_folder / "operations.json"
+    circuit_path = inputs_folder / "circuit.stim"
+    rounds_path = inputs_folder / "measurement_rounds.json"
     workload = workload_files.read_workload(
         operations_path, circuit_path, rounds_path
     )

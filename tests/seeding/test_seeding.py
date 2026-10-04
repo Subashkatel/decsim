@@ -68,7 +68,7 @@ class GeneratorLeaf(seeding._RandomSeedConsumer):
     """A stochastic leaf that draws from the generator its binding installs."""
 
     def __init__(self, seed):
-        self._initialize_run_seed_state(seed)
+        seeding._RandomSeedConsumer.__init__(self, seed)
 
 
 class RecordingComposite:

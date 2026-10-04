@@ -217,7 +217,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         CircuitlessSource.__init__(self, code)
         self.one_payload_per_patch = one_payload_per_patch
         self._seed = seed
-        self._initialize_run_seed_binding(seed)
+        seeding._AtomicRunSeedConsumer.__init__(self, seed)
 
     def run_seed_children(self) -> tuple[seed_records.RunSeedChild, ...]:
         """The code card, which shapes every payload."""

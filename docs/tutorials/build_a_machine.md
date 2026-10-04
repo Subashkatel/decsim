@@ -98,7 +98,8 @@ pool = decoders_part.build_decoder_pool(
 weak_store_slot, strong_store_slot = machine_module.store_slots(
     settings, window_tier, pool
 )
-print(type(switching.policy).__name__, plan.round_ticks)
+policy_type = type(switching.policy)
+print(policy_type.__name__, plan.round_ticks)
 ```
 
 It prints:
@@ -135,17 +136,19 @@ readout = readout_part.Readout.build(
     detection_events,
     links,
 )
+window_models = built_window_models.BuiltWindowModels()
 windows = windows_part.Windows.build(
     settings.windows,
     settings.workload,
     settings.switching,
     window_decoder,
+    settings.strong_decoder,
     window_tier,
     settings.clock,
     engine,
     plan,
     links,
-    built_window_models.BuiltWindowModels(),
+    window_models,
 )
 decoders = decoders_part.Decoders.build(
     settings.decoder_manager, settings.clock, engine, pool
@@ -156,7 +159,8 @@ Each part is now whole on the inside. The controller already hands its
 rounds to the readout part's own packing stage:
 
 ```python
-print(readout.controller.assembler is readout.assembler)
+is_shared_assembler = readout.controller.assembler is readout.assembler
+print(is_shared_assembler)
 ```
 
 ```text
@@ -194,8 +198,12 @@ machine = machine_module.Machine.assemble(
     decoders,
     switching,
 )
-print(readout.syndrome_round_sender.windows is windows.window_manager)
-print(windows.window_manager.requester.decode_queue is decoders.decoder_manager)
+window_manager = windows.window_manager
+is_sender_wired = readout.syndrome_round_sender.windows is window_manager
+print(is_sender_wired)
+decode_queue = window_manager.requester.decode_queue
+is_requester_wired = decode_queue is decoders.decoder_manager
+print(is_requester_wired)
 ```
 
 ```text

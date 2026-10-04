@@ -117,7 +117,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         engine: decsim.engine.Engine,
     ):
         channel_module.Channel.__init__(self, channel_settings, engine)
-        self._initialize_run_seed_state(None)
+        seeding._RandomSeedConsumer.__init__(self, None)
         self._connection = channel_settings.protocol
         self._sending = _SendState(retries_left=self._connection.retry_count)
         self._receiving = _ReceiveState()

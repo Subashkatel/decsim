@@ -1993,7 +1993,9 @@ def test_the_run_result_carries_the_factorys_supply_stall():
 
     assert result.magic_state_stall_ticks == attempt_ticks + return_ticks
     built_factory = machine.qpu.factory
-    assert result.magic_state_stall_ticks == built_factory.total_stall_ticks
+    assert (
+        result.magic_state_stall_ticks == built_factory.state.total_stall_ticks
+    )
 
 
 @dataclasses.dataclass(frozen=True)

@@ -82,7 +82,7 @@ STATS_FILE = "stats.csv"
 
 @dataclasses.dataclass(frozen=True)
 class BaselinePoint:
-    """One sinter task and the decoder object that decodes it.
+    """A sinter task paired with the decoder object that decodes it.
 
     decoder is None for sinter's built-in of the task's decoder name. It
     is kept per point because a decoder may be built from its point's
@@ -156,9 +156,12 @@ def main(arguments: Optional[list] = None) -> None:
     if parsed.list:
         _print_points(points)
         return
-    _refuse_no_workers(parser, parsed.workers)
-    point_ids = _point_ids(parser, parsed.target, len(points))
-    folder = _results_folder(parser, parsed)
+    try:
+        _refuse_no_workers(parsed.workers)
+        point_ids = _point_ids(parsed.target, len(points))
+        folder = _results_folder(parsed)
+    except ValueError as refusal:
+        parser.error(str(refusal))
     run_folder.refuse_another_tree(folder)
     every_id = list(range(len(points)))
     started_utc = run_folder.start_run(folder, SCRIPT, every_id)
@@ -223,20 +226,16 @@ def _print_points(points: list) -> None:
         print(f"{point_id} decoder={point.task.decoder} {labels_text}")
 
 
-def _refuse_no_workers(
-    parser: argparse.ArgumentParser, worker_count: int
-) -> None:
+def _refuse_no_workers(worker_count: int) -> None:
     """Sinter waits for its workers to answer, so none would hang it."""
     if worker_count < 1:
-        parser.error(
+        raise ValueError(
             f"--workers is {worker_count}; sinter needs at least one worker "
             "process"
         )
 
 
-def _point_ids(
-    parser: argparse.ArgumentParser, target: Optional[str], point_count: int
-) -> list:
+def _point_ids(target: Optional[str], point_count: int) -> list:
     """Every point for no target, none for combine, else the one named."""
     if target is None:
         return list(range(point_count))
@@ -244,23 +243,21 @@ def _point_ids(
         return []
     if not target.isdigit() or int(target) >= point_count:
         last_point_id = point_count - 1
-        parser.error(
+        raise ValueError(
             f"{target!r} is no point id; --list shows the {point_count} "
             f"points, 0 to {last_point_id}, or give combine"
         )
     return [int(target)]
 
 
-def _results_folder(
-    parser: argparse.ArgumentParser, parsed: argparse.Namespace
-) -> pathlib.Path:
+def _results_folder(parsed: argparse.Namespace) -> pathlib.Path:
     """--out, or a new dated folder for a run of every point.
 
     One point and combine name their folder, since every task of an
     array writes the one folder its points share.
     """
     if parsed.out is None and parsed.target is not None:
-        parser.error(
+        raise ValueError(
             "one point or combine writes the folder its array shares; "
             "name it with --out"
         )

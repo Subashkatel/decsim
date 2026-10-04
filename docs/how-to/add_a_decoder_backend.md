@@ -27,12 +27,12 @@ class MyDecoder(decoder.WindowDecoderBase):
         self,
         faults: fault_models.PlacedFaultModel,
         model: fault_models.WindowErrorModel,
-    ) -> Any:
+    ) -> MyBackend:
         """The backend for one window model, built once while it lives."""
 
     def decode_window(
         self,
-        backend: Any,
+        backend: MyBackend,
         model: fault_models.WindowErrorModel,
         faults: fault_models.PlacedFaultModel,
         syndrome: numpy.ndarray,
@@ -40,7 +40,8 @@ class MyDecoder(decoder.WindowDecoderBase):
         """One backend call: the fault columns it selects."""
 ```
 
-`faults.check` is the window's detector-by-fault matrix and
+`MyBackend` is your library's decoder class, as `ldpc.BpOsdDecoder` is
+BP-OSD's. `faults.check` is the window's detector-by-fault matrix and
 `faults.priors` each fault's probability; `syndrome` is the window's
 detection events, one 0 or 1 per row of the matrix. The matrix is
 read-only, so a backend that writes into its input, or refuses a
@@ -140,9 +141,8 @@ your record. Start from a base and replace it:
 
 ```python
 base = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
-weak_decoder = dataclasses.replace(
-    base.weak_decoder, algorithm=MyDecoder.Settings()
-)
+algorithm = MyDecoder.Settings()
+weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=algorithm)
 machine = dataclasses.replace(base, weak_decoder=weak_decoder)
 ```
 
@@ -155,24 +155,36 @@ shot by shot: on the shots where only one of the two fails, a decoder
 about as strong as matching fails about as often as matching does,
 and an exact McNemar test (a two-sided binomial test at one half on
 those shots) says whether a gap is more than chance. A broken decoder
-fails far more often. With `shots.csv` read into `rows` by
-`csv.DictReader`, and your record's `name` in place of `"mine"`:
+fails far more often. With `shots.csv` open as `shots_file`, and your
+record's `name` in place of `"mine"`:
 
 ```python
+rows = csv.DictReader(shots_file)
 failed = {}
+seeds = set()
 for row in rows:
     failed[row["algorithm"], row["seed"]] = row["logical_failure"] == "True"
-only_mine = only_matching = 0
-for seed in {row["seed"] for row in rows}:
+    seeds.add(row["seed"])
+only_mine_count = 0
+only_matching_count = 0
+for seed in seeds:
     mine = failed["mine", seed]
     matching = failed["pymatching", seed]
-    only_mine += mine and not matching
-    only_matching += matching and not mine
-test = scipy.stats.binomtest(only_mine, only_mine + only_matching, 0.5)
+    if mine and not matching:
+        only_mine_count += 1
+    if matching and not mine:
+        only_matching_count += 1
+discordant_count = only_mine_count + only_matching_count
+print(f"{discordant_count} shots fail one decoder alone")
+if discordant_count > 0:
+    test = scipy.stats.binomtest(only_mine_count, discordant_count, 0.5)
+    print(f"McNemar p-value {test.pvalue}")
 ```
- Check too that `invalid_correction_windows` is 0
-and `is_scored` is `True` on every shot: a backend that returns no
-correction is counted there, not as a failure.
+
+A `csv.DictReader` is read only once, so the same pass gathers the
+seeds. Check too that `invalid_correction_windows` is 0 and `is_scored`
+is `True` on every shot: a backend that returns no correction is counted
+there, not as a failure.
 
 For a second opinion per window rather than per shot, wrap your record
 in `TesseractCheckedDecoder.Settings(inner=...)`

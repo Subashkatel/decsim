@@ -45,7 +45,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         self, settings: "relay_decoder.RelayBeliefPropagationDecoder.Settings"
     ) -> None:
         self.settings = settings
-        self._initialize_run_seed_binding(None)
+        seeding._AtomicRunSeedConsumer.__init__(self, None)
         self._effective_gamma_table_seed = None
         self._thread_state = threading.local()
 
@@ -111,12 +111,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
 
     def _gamma_seed(self) -> int:
         with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    "RelayBeliefPropagationWindowDecoder cannot compile while "
-                    "a run-seed reservation is pending"
-                )
-            self._stochastic_use_started = True
+            self._begin_draw()
             if self._effective_gamma_table_seed is None:
                 self._effective_gamma_table_seed = secrets.randbits(64)
             return self._effective_gamma_table_seed

@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Optional
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
-import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
@@ -37,7 +36,7 @@ class Switching:
     """
 
     confidence_signal: ports.ConfidenceSignal
-    policy: escalation_policies.Switching
+    policy: ports.EscalationPolicy
     regions: strong_regions.StrongRegions
     # the strong window settings' shape
     shape: Any
@@ -63,10 +62,7 @@ class Switching:
             weak_decoder.algorithm, threshold_nats
         )
         threshold = _threshold_source(settings, online_threshold)
-        policy = escalation_policies.Switching(
-            threshold=threshold,
-            run_both_at_once=settings.run_both_at_once,
-        )
+        policy = settings.build_policy(threshold)
         regions = strong_regions.StrongRegions()
         shape = settings.strong_window.build(engine)
         pending = pending_strong_windows.PendingStrongWindows()

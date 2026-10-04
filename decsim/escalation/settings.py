@@ -11,6 +11,7 @@ from typing import Optional, Protocol
 
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
 
@@ -96,3 +97,9 @@ class SwitchingSettings:
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)
         config.check_cycles("switch_cycles", self.switch_cycles)
+
+    def build_policy(
+        self, threshold: ports.ThresholdSource
+    ) -> ports.EscalationPolicy:
+        """The policy that gives each weak result its verdict."""
+        return escalation_policies.Switching(threshold, self.run_both_at_once)

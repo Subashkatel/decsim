@@ -823,7 +823,7 @@ bits bounds the store; None is unbounded. read_ports, write_ports and read_write
 
 `decsim/syndrome_buffer/syndrome_buffer.py`. The plain store: its capacity, and a flat cost per write and per read.
 
-bits bounds the store; None is unbounded. A full store makes the controller hold the finished round and write it in order once a slot frees, the backpressure real systems apply to their source (Caune et al. 2410.05202: the sequencer stalls on the decoder's status register); a store that cannot hold a window's rounds at once stops the run at the first round that can never enter. A write costs write_cycles and a read of a job's rounds read_cycles, on clock, whatever their width, and no access waits for another: SimpleMemory's latency with no bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174). clock None is the machine's clock.
+bits bounds the store; None is unbounded. A full store makes the controller hold the finished round and write it in order once a slot frees, the backpressure real systems apply to their source (Caune et al. 2410.05202: the sequencer stalls on the decoder's status register); a run whose waiting round can never enter stops after the action that makes it certain. A write costs write_cycles and a read of a job's rounds read_cycles, on clock, whatever their width, and no access waits for another: SimpleMemory's latency with no bandwidth term (gem5 src/mem/SimpleMemory.py:49, simple_mem.cc:174). clock None is the machine's clock.
 
 | Field | Type | Default |
 | --- | --- | --- |

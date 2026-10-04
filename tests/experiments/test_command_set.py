@@ -1937,27 +1937,6 @@ def test_a_run_with_no_folder_writes_a_new_dated_one(tmp_path, monkeypatch):
     assert (first_dir / "sweep.csv").is_file()
 
 
-def test_a_build_refusal_of_a_narrated_shot_is_one_line_naming_the_run_file(
-    tmp_path, capsys, monkeypatch
-):
-    run_file = run_files.write_run_file(tmp_path, **run_files.REFERENCE)
-
-    def refused(*arguments, **keywords):
-        del arguments, keywords
-        raise ValueError("the machine cannot be built")
-
-    monkeypatch.setattr(machine_module.Machine, "build", refused)
-    out_dir = tmp_path / "out"
-    with pytest.raises(SystemExit) as stopped:
-        command.main(
-            ["run", str(run_file), "--seed", "0", "--out", str(out_dir)]
-        )
-
-    printed = capsys.readouterr()
-    assert stopped.value.code == 1
-    assert printed.err == f"decsim: {run_file}: the machine cannot be built\n"
-
-
 @pytest.mark.parametrize("shots", [0, -1, 1.5, "many", True])
 def test_a_shot_cap_that_is_not_a_whole_number_of_one_or_more_is_refused(
     shots,

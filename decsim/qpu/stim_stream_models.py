@@ -19,12 +19,9 @@ class GrowingStimModels:
     """Keep fault identities stable while a physical stream gains rounds.
 
     A window's model is sliced from a circuit assembled to one round past
-    the window's buffer, and that round is the terminal fragment: the
-    fragment that defines the logical observable, whose effect a data
-    error has whenever the readout happens, while the fragment's own
-    detectors lie past the window. Growth therefore leaves a queued
-    window's model as it was; tests/qpu/test_stim_stream_models.py pins
-    that.
+    its buffer, the terminal fragment that defines the logical observable,
+    whose detectors lie past the window. Growth therefore leaves a queued
+    window's model unchanged.
     """
 
     def __init__(
@@ -49,10 +46,9 @@ class GrowingStimModels:
     ) -> fault_models.WindowErrorModel:
         """One window's model, after the windows before it took theirs.
 
-        The slicer hands a boundary fault from one window to the next in
-        window order (the qLDPC rule window_planner.py cites), and every
-        call slices a circuit assembled to this window's horizon, so the
-        windows before this one are sliced again on it first.
+        The slicer hands a boundary fault on in window order (qLDPC's rule), and
+        each call slices a circuit assembled to this window's horizon, so the
+        earlier windows are sliced again on it first.
         """
         slicer, source_ids, round_count = self._build_slicer(window)
         self.windows_by_index[window.window_index] = window

@@ -1,29 +1,20 @@
 """One physical channel: a setup engine and a wire, driven by events.
 
-A transfer with a setup cost first waits for the channel's setup engine,
-which programs one transfer at a time in request order: gem5 keeps one
-transmitList per DmaPort (src/dev/dma_device.cc, dmaAction pushes, the
-front is sent first), and the DMA engine of Shao et al. (MICRO 2016,
-section III.C) services descriptors one by one while the processor is
-free to do other work. A transfer is ready when its setup ends, or at
-its request when it has no setup; a request with no setup never waits
-for another path's setup. The wire takes ready transfers in the order
-they became ready, one at a time, serializes each at the channel's rate,
-its path's header with it, and delivers it one propagation later: ns-3's
-point-to-point device (point-to-point-net-device.cc: Send adds the
-header and enqueues, TransmitStart runs when the transmitter is READY
-and times the whole packet, and the receiver has it txTime plus the
-channel delay later). A fractional tick of serialization rounds up,
-because a transfer never ends before its exact time. An unbounded
-channel serializes nothing and never queues.
+The setup engine programs one transfer at a time in request order, as
+gem5's DmaPort keeps one transmitList (src/dev/dma_device.cc) and the
+DMA engine of Shao et al. (MICRO 2016, section III.C) services
+descriptors one by one. A transfer with no setup is ready at its request
+and never waits for another path's setup. The wire takes ready transfers
+in order, serializes each with its path's header at the channel's rate,
+and delivers it one propagation later, as ns-3's point-to-point device
+does (point-to-point-net-device.cc). A fractional tick of serialization
+rounds up. An unbounded channel serializes nothing and never queues.
 
 This is the protocol row `ideal`: one whole frame, an unbounded receive
-buffer and nothing lost, the lossless reference gem5's SimpleNetwork
-gives with its default infinite buffers (src/mem/ruby/network/simple/
-SimpleNetwork.py:53-57) and ns-3's device with no error model
-(point-to-point-net-device.cc:55-59). The packet rows keep the setup
-engine and replace the wire (decsim/links/credit_channel.py,
-decsim/links/reliable_channel.py).
+buffer and nothing lost, the lossless reference of gem5's SimpleNetwork
+with infinite buffers (src/mem/ruby/network/simple/SimpleNetwork.py) and
+ns-3's device with no error model. The packet rows keep the setup engine
+and replace the wire.
 """
 
 import collections
@@ -47,9 +38,8 @@ OnDelivered = Callable[[transfer_records.Transfer], None]
 class FramedPayload:
     """What one transfer puts on the wire: its payload, and its path's header.
 
-    The two are kept apart because the ledger counts the payload a
-    component sent and the wire serializes both. A payload of unknown
-    size rides an unbounded channel only, which serializes nothing.
+    The ledger counts the payload and the wire serializes both. A payload of
+    unknown size rides an unbounded channel only.
     """
 
     payload_bits: Optional[int]
@@ -58,17 +48,12 @@ class FramedPayload:
 
 @dataclasses.dataclass(frozen=True)
 class FrameTiming:
-    """One frame's trip across a wire.
+    """One frame's trip across a wire, in ticks.
 
-    The frame could go at queue_ticks (its message ready and the wire
-    free), waited credit_wait_ticks for a receive-buffer credit, held
-    the wire from start_ticks to end_ticks, and landed at the receiver
-    at landed_ticks. bits is None for a payload of unknown size on an
-    unbounded wire.
+    bits is None for a payload of unknown size on an unbounded wire.
     """
 
     bits: Optional[int]
-    queue_ticks: int
     credit_wait_ticks: int
     start_ticks: int
     end_ticks: int
@@ -79,9 +64,7 @@ class FrameTiming:
 class FrameRecord:
     """One frame on one channel, reported when its message is delivered.
 
-    transfer_sequence is the channel's count of the message the frame
-    belongs to and frame_index its place in the message. A reliable
-    channel also reports each lost frame and each retransmission.
+    A reliable channel also reports each lost frame and each retransmission.
     """
 
     channel: str
@@ -93,11 +76,7 @@ class FrameRecord:
 
 
 class Channel:
-    """One channel at run time: a setup engine, then a wire moving each whole.
-
-    Trace source: frame_landed(record), one FrameRecord per frame when
-    its message is delivered.
-    """
+    """One channel at run time: a setup engine, then a whole-frame wire."""
 
     def __init__(
         self,
@@ -118,12 +97,7 @@ class Channel:
         setup_ticks: int,
         on_delivered: OnDelivered,
     ) -> None:
-        """Send one framed payload; on_delivered(transfer) runs at delivery.
-
-        The setup, when the path pays one, is queued on the setup engine
-        now and finishes at the ready tick; the wire takes the transfer
-        from that tick.
-        """
+        """Send one framed payload; on_delivered(transfer) runs at delivery."""
         payload_bits = framed.payload_bits
         assert payload_bits is None or payload_bits >= 0, (
             "a payload is never negative"
@@ -152,13 +126,9 @@ class Channel:
     ) -> int:
         """The delay a transfer would pay if nothing else reached the channel.
 
-        The setup engine's and the wire's queues as they stand now, the
-        serialization and the propagation. A transfer with a setup is
-        ready after every transfer now in setup, so each of those takes
-        the wire ahead of it. A scheduler's estimate: on the ideal and
-        credit rows it is exact whenever no later request overtakes it
-        on the wire; on the reliable row it is a lower bound, because a
-        packet's wait for the acknowledgement window is left out.
+        A scheduler's estimate: exact on the ideal and credit rows when no later
+        request overtakes it; a lower bound on the reliable row, which leaves
+        out the wait for the acknowledgement window.
         """
         ready_ticks = self._ready_ticks(now_ticks, setup_ticks)
         wire = self._wire_as_it_stands()
@@ -245,7 +215,7 @@ class IdealWire:
         if self._capacity is None:
             landed_ticks = ready_ticks + self._propagation_ticks
             timing = FrameTiming(
-                None, ready_ticks, 0, ready_ticks, ready_ticks, landed_ticks
+                None, 0, ready_ticks, ready_ticks, landed_ticks
             )
             return (timing,)
         start_ticks = max(ready_ticks, self._free_ticks)
@@ -254,9 +224,7 @@ class IdealWire:
         end_ticks = start_ticks + serialization
         self._free_ticks = end_ticks
         landed_ticks = end_ticks + self._propagation_ticks
-        timing = FrameTiming(
-            wire_bits, start_ticks, 0, start_ticks, end_ticks, landed_ticks
-        )
+        timing = FrameTiming(wire_bits, 0, start_ticks, end_ticks, landed_ticks)
         return (timing,)
 
 
@@ -265,11 +233,9 @@ def transfer_for(
 ) -> transfer_records.Transfer:
     """The transfer's record: its frames' span on the wire, as one move.
 
-    The wire held the transfer from its first frame's start to its last
-    frame's end; serialization_ticks is the time its frames held the
-    wire, and queue_wait_ticks everything else from the ready tick to
-    the last frame's end (the wire's queue, credit waits, recovery from
-    a loss), so the total is still the sum of the transfer's parts.
+    serialization_ticks is the time its frames held the wire, and
+    queue_wait_ticks everything else from the ready tick to the last frame's
+    end (queue, credit waits, loss recovery), so the parts still sum.
     """
     first_frame = timings[0]
     last_frame = timings[-1]
@@ -318,9 +284,8 @@ def serialization_ticks(
 ) -> int:
     """Whole ticks to put the bits on the wire at the channel's rate.
 
-    A fractional tick rounds up: serialization never ends before the exact
-    transmission time. Exact Fraction arithmetic keeps the card's rate
-    exact, so a whole-tick duration is never inflated by float error.
+    A fractional tick rounds up: serialization never ends early. Fraction
+    arithmetic keeps a whole-tick duration from float inflation.
     """
     rate = capacity.input_bits_per_microsecond
     bits = fractions.Fraction(wire_bits)

@@ -8,7 +8,6 @@ and the buffers read the plan and never change it.
 
 import dataclasses
 from collections.abc import Callable
-from typing import Optional
 
 import decsim.config as config
 import decsim.records.decoding as decoding_records
@@ -21,7 +20,6 @@ import decsim.records.windows as window_records
 class RunPlan:
     """Derived values consumed by one simulator run."""
 
-    code_geometry: program_records.ResolvedCodeGeometry
     resolved_operations: tuple[program_records.ResolvedOperationPlanning, ...]
     resolved_patches: tuple[program_records.ResolvedPatchPlanning, ...]
     round_ticks: int
@@ -33,16 +31,11 @@ class RunPlan:
 class SyndromeBufferingPlan:
     """The holds every window places on the stores.
 
-    A hold names the rounds a consumer keeps alive. The sufficient set
-    is the union of every hold, None when an open-ended dynamic stream
-    makes it unbounded. A store smaller than it can fill, and the run
-    then stops and says how many rounds were left held for store room.
+    A hold names the rounds a consumer keeps alive.
     """
 
     weak_holds: tuple
     potential_holds: tuple
-    sufficient_live_rounds: Optional[tuple]
-    strong_sufficient_live_rounds: Optional[tuple]
 
 
 def plan_execution(
@@ -57,7 +50,6 @@ def plan_execution(
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
-    has_open_ended_dynamic_streams: bool = False,
     formation_reads: window_records.FormationReads = (
         window_records.NO_FORMING_READER
     ),
@@ -67,7 +59,7 @@ def plan_execution(
     _check_geometry_counts(code)
     patch_count_by_id = _patch_count_by_operation_id(operations)
     base_nodes = _base_nodes_by_patch_count(code, patch_count_by_id)
-    geometry = _resolve_geometry(code, base_nodes[1])
+    geometry = _resolve_geometry(code)
     resolved = []
     patches_by_key = {}
     for operation in operations:
@@ -95,11 +87,9 @@ def plan_execution(
         retain_strong_context=retain_strong_context,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=restart_reread_buffer_regions,
-        has_open_ended_dynamic_streams=has_open_ended_dynamic_streams,
         formation_reads=formation_reads,
     )
     return RunPlan(
-        code_geometry=geometry,
         resolved_operations=tuple(resolved),
         resolved_patches=tuple(patches),
         round_ticks=round_ticks,
@@ -213,7 +203,7 @@ def _base_nodes_by_patch_count(code, patch_count_by_id: dict) -> dict:
     return base_nodes
 
 
-def _resolve_geometry(code, one_patch_node_count: int):
+def _resolve_geometry(code):
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     return program_records.ResolvedCodeGeometry(
@@ -221,7 +211,6 @@ def _resolve_geometry(code, one_patch_node_count: int):
         distance=code.distance,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
-        one_patch_spatial_node_count=one_patch_node_count,
     )
 
 
@@ -331,16 +320,12 @@ def _plan_syndrome_buffering(
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
     restart_reread_buffer_regions: int,
-    has_open_ended_dynamic_streams: bool = False,
     formation_reads: window_records.FormationReads = (
         window_records.NO_FORMING_READER
     ),
 ) -> SyndromeBufferingPlan:
     """Plan logical holds over one upstream round allocation.
 
-    Weak and possible-strong consumers may overlap, but overlapping holds
-    do not create another physical packet allocation, so the sufficient
-    witness is the union of round identities, not a sum of ledgers.
     formation_reads says which reads also hold the raw rounds before
     their first (windows/round_retention.py keeps the same rule for the
     reads it places while the run goes).
@@ -367,18 +352,7 @@ def _plan_syndrome_buffering(
                 absorbs_weak_windows,
                 formation_reads,
             )
-    weak_sufficient = weak.sufficient_live_rounds(
-        has_open_ended_dynamic_streams
-    )
-    strong_sufficient = strong.sufficient_live_rounds(
-        has_open_ended_dynamic_streams
-    )
-    return SyndromeBufferingPlan(
-        tuple(weak.holds),
-        tuple(strong.holds),
-        weak_sufficient,
-        strong_sufficient,
-    )
+    return SyndromeBufferingPlan(tuple(weak.holds), tuple(strong.holds))
 
 
 def _hold_window(
@@ -518,25 +492,14 @@ def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
 
 
 class _HoldSet:
-    """The holds one consumer places, and their union."""
+    """The holds one consumer places."""
 
     def __init__(self):
         self.holds = []
-        self._live_rounds = set()
 
     def add(self, owner, round_keys: tuple) -> None:
         """Record a hold and the rounds it keeps alive."""
         self.holds.append((owner, round_keys))
-        self._live_rounds.update(round_keys)
-
-    def sufficient_live_rounds(self, is_open_ended: bool) -> Optional[tuple]:
-        """Every round any hold names; None when a stream never ends."""
-        if is_open_ended:
-            return None
-        ordered = sorted(
-            self._live_rounds, key=identity_records.stable_identity_bytes
-        )
-        return tuple(ordered)
 
 
 def _materialize_execution_plan(

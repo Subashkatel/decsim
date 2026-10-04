@@ -1,18 +1,11 @@
 """Every listener of one run, built from the observation settings and wired.
 
-The Machine builds the parts; this module builds what watches them
-and connects each listener to the sources it hears, in pipeline order.
-It is the only place that knows which setting builds which listener, so
-a new listener is one class in observe/ and one connection here
-(STYLE.md rule 7: observation is reached through the callbacks a
-component fires, never through a port, so a component runs with nothing
-connected).
-
-The wiring runs after every component is built and before the workload
-is loaded, because the program's first operation is issued while it
-loads: the narrator's first line, the QPU's first command and the
-runtime's first stamps are all fired there, and a listener connected
-afterwards would miss them.
+The only place that knows which setting builds which listener, so a new
+listener is one class in observe/ and one connection here. Observation
+is reached through the sources a component fires, never through a port,
+so a component runs with nothing connected. The wiring runs before the
+workload is loaded, because the first operation is issued while it
+loads and a later listener would miss its lines and stamps.
 """
 
 import functools
@@ -57,15 +50,9 @@ def observe(
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
-    A listener reaches the component it hears through the machine's part
-    that holds it (decsim/build); the parts sit above this package in the
-    package order, so they arrive untyped. A component a run may not have
-    reads as None, and the listeners that hear it take None; the decoder
-    managers, one per side, are heard as one tuple by every listener of
-    the decode path. It stays whole past the size prompt: it is the run's
-    one list of listeners, in pipeline order, one built or connected per
-    line, and a split would only hand the list from one half to the
-    other.
+    The parts sit above this package, so they arrive untyped; a component a
+    run lacks reads as None. It is the run's one list of listeners in
+    pipeline order, so it stays whole past the size prompt.
     """
     window_manager = windows.window_manager
     decoder_managers = _decoder_managers(decoders)

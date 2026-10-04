@@ -1,9 +1,6 @@
 """The switching study's terminal records: per request and per gap.
 
-Listeners on the decode outcomes' request_ended source; they never read
-the decoder. The request ledger is built only when the observation
-section asks for the switching windows, and the confidence ledger only
-when a confidence signal decides the escalation, so the decoder runs
+Each ledger is built only when a study asks for it, so the decoder runs
 with no record kept.
 """
 
@@ -32,12 +29,8 @@ class TerminalRequestRecord:
     """One decode request at its end: identity, input, ticks, confidence."""
 
     request_key: window_records.DecoderRequestKey
-    input_round_count: int
     syndrome_weight: Optional[int]
     ready_ticks: int
-    dispatch_ticks: Optional[int]
-    decode_output_ticks: Optional[int]
-    service_key: Optional[decoding_records.DecoderServiceKey]
     soft_output: Optional[decoding_records.SoftOutput]
 
 
@@ -56,19 +49,13 @@ class DecodeRecordLedger:
     ) -> None:
         """One request reached its terminal outcome."""
         del outcome
+        del decode_output_ticks
         weight = _decoded_syndrome_weight(job)
         soft_output = None
         if result is not None:
             soft_output = result.soft_output
         record = TerminalRequestRecord(
-            job.request_key,
-            job.round_count,
-            weight,
-            job.ready_time,
-            job.service_dispatch_ticks,
-            decode_output_ticks,
-            job.service_key,
-            soft_output,
+            job.request_key, weight, job.ready_time, soft_output
         )
         self.requests.append(record)
 
@@ -136,10 +123,8 @@ def _window_order(key: tuple) -> tuple:
 def _decoded_syndrome_weight(job: decoding_records.DecodeJob) -> Optional[int]:
     """The set bits the job's decode read; None when it never started.
 
-    The decode reads its unit's memory into payloads as it starts
-    (decoders/decode_service.py), and the unit frees that memory at the
-    decode's end, before a confidence walk lets the verdict end the
-    request, so payloads is what still holds the input then.
+    The unit frees its memory at the decode's end, before a confidence walk
+    ends the request, so payloads still holds the input then.
     """
     if not job.service_started:
         return None

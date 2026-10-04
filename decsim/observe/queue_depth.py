@@ -1,21 +1,15 @@
 """The decode queues' depth over time, one sample per change.
 
-A listener on each manager's depth_changed(tick, depth), bound to the
-name of that manager's one pool, one manager per side, so a sample is
-the jobs waiting over both; the samples are what the gate pins as
-queue_log and what the switching study reads as the ready-queue's peak.
-Each pool's samples are also kept apart, for the max backlog per
-decoder instance DART-Q reports (2605.09142 lines 1101-1109), which the
-pool sweep reads per tier.
+One manager per side, so a sample is the jobs waiting over both; the
+gate pins the samples as queue_log. Each pool's samples are also kept
+apart, for DART-Q's max backlog per decoder instance (2605.09142 lines
+1101-1109).
 
-A peak counts a depth only when time passes at it. A job that joins and
-leaves the queue in one tick is dispatched without waiting, and a
-queue's length is weighed by the time spent at each length: gem5 adds
-current * (curTick() - last) when an average changes (gem5
-src/base/stats/storage.hh:153-159), and Ciw weighs each state by the
-time the system spent in it (Ciw ciw/trackers/state_tracker.py:55-102).
-A depth held for zero ticks weighs nothing, so the peak is the largest
-depth a tick ends at.
+A peak counts a depth only when time passes at it, since a queue's
+length is weighed by time: gem5 adds current * (curTick() - last)
+(src/base/stats/storage.hh:153-159) and Ciw weighs each state by its
+time (ciw/trackers/state_tracker.py:55-102). A job that joins and leaves
+in one tick never waited.
 """
 
 import collections

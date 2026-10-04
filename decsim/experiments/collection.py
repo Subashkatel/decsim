@@ -37,11 +37,9 @@ TIME_CAP_STATE = "time cap"
 class CollectionSettings:
     """One point's collection: when it stops and the rounds of a piece.
 
-    max_failures is the target, None for none; min_shots the scored
-    shots a point runs whatever its failures; max_shots and
-    max_core_seconds the caps, at least one of them set. The record is
-    where a Python experiment's input enters, so it checks its own
-    values and raises ValueError naming the key.
+    max_failures is the target, None for none; min_shots the scored shots
+    run whatever the failures; max_shots and max_core_seconds the caps, at
+    least one set. Python input enters here, so it checks its own values.
     """
 
     max_shots: Optional[int] = None
@@ -78,11 +76,9 @@ class CollectionSettings:
     ) -> Optional[failure_statistics.StopKind]:
         """Why a contiguous prefix with these counts has stopped, or None.
 
-        The rule is checked after every shot and its counts only grow, so
-        the first prefix it returns a kind for is the stop. The target
-        reached on the minimum's own shot is a minimum stop, and the
-        target comes before a cap reached on the same shot
-        (failure_statistics.StopKind).
+        The counts only grow, so the first prefix given a kind is the stop. The
+        target reached on the minimum's shot is a minimum stop, and the target
+        comes before a cap on the same shot.
         """
         if self._has_reached_the_target(counts):
             return self._target_or_minimum(counts)
@@ -227,11 +223,8 @@ class PrefixTracker:
     def round_shape(self) -> Optional[tuple]:
         """The (outputs, rounds per output) every prefix shot ran, or None.
 
-        A per-round rate inverts one shape (failure_statistics
-        per_output_round_rate). A live stream idles through its
-        feedback wait, so two of its shots can run different rounds, and
-        outputs that ran apart have no one length; no one shape converts
-        such a prefix's rate.
+        A live stream's shots can run different rounds, and outputs that ran
+        apart have no one length, so no one shape converts such a prefix.
         """
         if len(self.round_shapes) != 1:
             return None

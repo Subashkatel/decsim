@@ -1,8 +1,7 @@
 """The layout: which code every patch and every operation runs on.
 
-A uniform layout gives every patch the same code card and claims one
-qubit-exclusivity resource per operation. That is the only layout today;
-the seam it fills is LayoutModel below.
+The uniform layout, the only one, gives every patch the same card and
+claims one qubit-exclusivity resource per operation.
 """
 
 import dataclasses
@@ -16,11 +15,7 @@ import decsim.records.program as program_records
 
 @runtime_checkable
 class LayoutModel(Protocol):
-    """Which code every patch and every operation runs on, and its claims.
-
-    codes, code_for_op and code_for_patch stay stable for a build; every
-    selector returns the one declared run code.
-    """
+    """Which code every patch and every operation runs on, and its claims."""
 
     def code_for_op(self, operation: program_records.OperationPlanningView):
         """The code the operation runs on."""

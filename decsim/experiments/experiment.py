@@ -42,14 +42,10 @@ EXPERIMENT_NAME_IN_A_RUN_FILE = "experiment"
 class Point:
     """One machine to collect shots of, under a name.
 
-    name is the point's folder in the results and what `decsim run
-    --only` picks. machine is the settings every shot builds a fresh
-    machine from. metadata is sinter's json_metadata: the columns the
-    point's rows carry beside its results; it is part of the point's id,
-    as it is of a sinter task's strong id. collection overrides the
-    experiment's. record_options are what the run records of its shots,
-    no part of the point's id. An online threshold's calibrator is the
-    point's task's (task_of).
+    name is the point's results folder and what --only picks. metadata is
+    sinter's json_metadata, part of the point's id as of a sinter task's
+    strong id. collection overrides the experiment's. record_options are no
+    part of the id.
     """
 
     name: str
@@ -66,10 +62,8 @@ class Point:
 class Experiment:
     """A named set of points and the collection they stop by.
 
-    name names the results folder. collection is every point's unless
-    the point carries its own. A point's name is its folder, so two
-    points of one name are refused, as is a point no collection stops,
-    or an online point a collection stops by more than max_shots.
+    A point's name is its folder, so two points of one name are refused, as
+    is a point no collection stops.
     """
 
     name: str

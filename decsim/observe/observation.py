@@ -1,14 +1,7 @@
 """The listeners of one run, by name.
 
-The Machine builds each listener the observation section asks for,
-connects it to the sources it hears, and keeps it here so
-decsim.experiments, the gate and the experiments read a run's numbers
-from its listeners and never from a component. The log writer, the
-window ledger, the runtime stamps, the queue depth, the controller
-counters, the command events, the frame's corrections, the referee's
-audit and the sampled shots are always there; the ones a study asks
-for are None when the section did not ask, and the confidence ledger is
-None when no confidence signal decides the escalation.
+Experiments and the gate read a run's numbers from its listeners, never
+from a component. A listener a study did not ask for is None.
 """
 
 import dataclasses

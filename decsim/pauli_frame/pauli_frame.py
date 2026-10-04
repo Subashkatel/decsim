@@ -1,25 +1,16 @@
 """The Pauli frame remembers the corrections the decoders have made.
 
-Each window gets one correction: a few bits, one per logical observable.
-The frame stores that correction and refuses a second one for the same
-window. A stream's total correction is all of its window corrections
-XORed together.
-
-Every write costs a fixed number of cycles of the frame unit's clock.
-The caller is called back only when that write lands on a clock edge, so
-anything waiting on the write waits too.
-
-The XOR fold follows PECOS's Pauli frame accumulator, which XORs each
-decode's observable mask into a running frame (PECOS
-crates/pecos-decoder-core/src/pauli_frame.rs:82). One correction per
-window is the sliding-window commit: a window makes the final correction
-decision for its commit region once, in software, and hands on its
-effect on the logical operators (Skoric et al. 2209.08552 lines 102-105
-and 444-445). The frame never applies a correction to a qubit, so the
-flush a Pauli frame unit performs before a non-Clifford gate (Riesebos,
-"Pauli Frames for Quantum Computer Architectures", TU Delft MSc thesis
-CE-MS-2016, Sec. 3.2 Table 3.1) has no counterpart here. One write costs
-one clock cycle, 4 ns at 250 MHz (Yang et al. 2605.04892 Table I).
+Each window gets one correction, one bit per logical observable, and a
+second for the same window is refused. A stream's total correction is
+its window corrections XORed together, as PECOS's frame accumulator
+XORs each decode's observable mask
+(crates/pecos-decoder-core/src/pauli_frame.rs:82). One correction per
+window is the sliding-window commit: a window decides its commit region
+once and hands on its effect on the logical operators (Skoric et al.
+2209.08552 lines 102-105, 444-445). The frame never applies a correction
+to a qubit, so the flush before a non-Clifford gate (Riesebos, TU Delft
+MSc thesis CE-MS-2016, Sec. 3.2) has no counterpart here. A write's
+caller is called back when the write lands on a clock edge.
 """
 
 import dataclasses
@@ -39,13 +30,10 @@ ObservableBits = tuple[int, ...]
 class PauliFrameConfig:
     """The frame's settings: what one write costs.
 
-    A write is one XOR into a register, one clock cycle of the frame unit.
-    Yang et al. (2605.04892 Table I, line 1051) measure 4 ns per frame
-    update inside a 550 ns loop, one cycle at 250 MHz. Writes to different
-    windows are charged in parallel, never queued behind each other.
-
-    It builds the frame that XORs an observable bitmask per window. clock
-    None is the machine's clock.
+    A write is one XOR into a register, one cycle of the frame unit: Yang
+    et al. (2605.04892 Table I, line 1051) measure 4 ns per frame update
+    inside a 550 ns loop, one cycle at 250 MHz. Writes to different windows
+    are charged in parallel. clock None is the machine's clock.
     """
 
     write_cycles: int = 0
@@ -84,13 +72,7 @@ class PauliFrameSnapshot:
 
 
 class PauliFrame:
-    """Keeps every committed correction and charges each write once.
-
-    Trace sources: correction_accepted(record) when a window's
-    correction is taken and its write charged, correction_committed(
-    record) when the write has landed; the record is the frame's own
-    PauliFrameCommitRecord.
-    """
+    """Keeps every committed correction and charges each write once."""
 
     def __init__(
         self, engine, *, clock: Optional[config.Clock], write_cycles: int
@@ -134,9 +116,8 @@ class PauliFrame:
     def frame_for_stream(self, stream_id) -> Optional[ObservableBits]:
         """The XOR of every committed correction on one stream.
 
-        Empty when the stream has no corrections yet. None when any of its
-        corrections carries no observables, since a fold over an unknown
-        value is unknown.
+        None when any correction carries no observables, since a fold over an
+        unknown value is unknown.
         """
         window_keys = self._state.windows_by_stream.get(stream_id, ())
         records = [self._state.committed_by_window[key] for key in window_keys]
@@ -264,13 +245,7 @@ def _fold_by_xor(
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the pauli frame reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the pauli frame reports, as one member."""
 
     correction_accepted: trace_source.TraceSource = trace_source.new_source()
     correction_committed: trace_source.TraceSource = trace_source.new_source()
@@ -280,12 +255,10 @@ class _TraceSources:
 class _FrameState:
     """What the frame holds: its records and its two registries.
 
-    records is every accepted correction in the order the frame
-    accepted it, a write still landing included;
-    pending_by_window is the writes charged and not yet landed;
-    committed_by_window is the window that already has a correction, so
-    a second one is refused. A stream id is whatever the front end
-    chose, and the frame never looks inside it.
+    records is every accepted correction in acceptance order, a write still
+    landing included; pending_by_window the writes not yet landed;
+    committed_by_window the windows already corrected. A stream id is
+    opaque to the frame.
     """
 
     records: list = dataclasses.field(default_factory=list)

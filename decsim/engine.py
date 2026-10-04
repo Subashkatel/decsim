@@ -1,21 +1,14 @@
 """The simulation clock and the queue of actions scheduled on it.
 
-Time is a count of ticks; one microsecond is one million ticks
-(config.TICKS_PER_MICROSECOND). Time never runs backwards. When two
-actions are due at the same tick, the one with the lower priority number
-runs first; when they share a priority, the one scheduled first runs
-first. That is SimPy's ordering (simpy.core.Environment): time, then
-priority, then arrival. A caller names the priority it wants out of
-Priority below rather than passing a number.
+Time is a count of ticks (config.TICKS_PER_MICROSECOND) and never runs
+backwards. Actions due at the same tick run by priority, then in the
+order they were scheduled: SimPy's ordering (simpy.core.Environment).
 
-The engine reports through three trace sources (trace_source.py)
-and holds no observer: line carries each narrated line's text, io_line
-carries a component's I/O line and fires only when someone listens, so
-a store never walks its contents for a line nobody records, and
-action_done carries the tick after every action, SimPy's callbacks on
-the event (simpy/core.py step()). The line text is built here, as gem5
-builds curTick() and name() before the flag's text (src/base/trace.hh
-DPRINTF), so the narrator's listeners write the text they are given.
+The engine holds no observer and reports through three trace sources:
+line, each narrated line; io_line, a component's I/O line, which fires
+only when someone listens; and action_done, the tick after every action
+(simpy/core.py step()). The line text is built here, as gem5 builds
+curTick() and name() before the flag's text (src/base/trace.hh DPRINTF).
 """
 
 import dataclasses
@@ -33,18 +26,11 @@ Action = Callable[[], None]
 class Priority(enum.IntEnum):
     """The order two actions due at the same tick run in; lower first.
 
-    gem5 names each priority beside the reason for it rather than
-    passing a number at the call
-    (gem5 src/sim/eventq.hh lines 138-244), where
-    Default_Pri is zero and every other name orders one kind of event
-    against the rest of the tick's work. DEFAULT is every event whose
-    tick alone fixes its place. The other two order one protected
-    cycle inside its boundary tick: the boundary opens and the
-    operations held for it may start, then the stream's round is
-    emitted, then a region whose close was requested releases its patch.
-    Final model metadata is sealed during emission, before zero-delay
-    readouts can queue decoding; resource release waits until every
-    protected round at this tick has emitted (controller/feedback_streams.py).
+    gem5 names each priority beside its reason (src/sim/eventq.hh lines
+    138-244). The other two order one protected cycle inside its
+    boundary tick: the boundary opens and held operations may start,
+    then the stream's round is emitted, then a region whose close was
+    requested releases its patch (controller/feedback_streams.py).
     """
 
     DEFAULT = 0
@@ -118,9 +104,7 @@ class Engine:
     ) -> None:
         """Narrate what a component received, holds, or emitted.
 
-        `describe_state` runs only when the io_line source has a
-        listener, so a store never walks its contents for a line nobody
-        records.
+        `describe_state` runs only when the io_line source has a listener.
         """
         if not self.io_line.has_listeners:
             return

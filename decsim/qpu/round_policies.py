@@ -1,15 +1,10 @@
 """The round policies: how many syndrome rounds an operation occupies.
 
-Every policy fills the RoundsPolicy port (decsim/ports.py): given an
-operation and its code card, return the round count, one or more for
-an operation the plan decodes. The lattice-surgery unit of d rounds per
-step comes from Horsman et al.
-(arXiv 1111.4022v3, Sec. 3.1, 3.2 and 6: d rounds of error correction per
-merge, per split, and per operation) and Litinski (arXiv 1808.02892v3,
-"Translation to surface codes": a two-patch or multi-patch measurement is
-one time step of d code cycles). A policy is a frozen record, so its
-arguments are its content: two tasks whose policies differ in them have
-two strong ids (decsim/collect.py json_value).
+The lattice-surgery unit of d rounds per step is Horsman et al.'s
+(1111.4022v3, Secs. 3.1, 3.2 and 6: d rounds per merge, per split, per
+operation) and Litinski's (1808.02892v3: a multi-patch measurement is
+one time step of d code cycles). A policy is a frozen record, so two
+tasks whose policies differ in an argument have two strong ids.
 """
 
 import dataclasses
@@ -61,12 +56,9 @@ class CodeRounds:
 class PerOperationRounds:
     """A round count per operation id, with a fallback policy for the rest.
 
-    rounds_by_operation pairs each operation id with its count, as a
-    tuple so the record is plain data: tuple(counts.items()) turns a
-    dict into it. A Python workload fills this with its own counts
-    (protection_workload in examples/deltakit_example.py does); a zero
-    count is allowed, because an operation may finalize a stream round
-    without occupying the QPU.
+    rounds_by_operation is a tuple of (id, count) pairs so the record is
+    plain data. A zero count is allowed: an operation may finalize a stream
+    round without occupying the QPU.
     """
 
     rounds_by_operation: tuple
@@ -95,17 +87,13 @@ class GateRounds:
     """Lattice-surgery round counts by operation kind, proportional to d.
 
     A merge costs merge_step_count steps of d rounds, two by default: a
-    merge and the split that follows it. Horsman et al. 1111.4022 merge
-    two surfaces by "performing d rounds of error correction, treating
-    the entire system as a single data surface" (Sec. 3.1, text lines
-    253-255), and after a split the two surfaces "are then individually
-    stabilized, as before for a total of d rounds of error correction"
-    (Sec. 3.2, lines 358-363), so merge plus split is 2d. Idle and
-    memory cost d rounds; a generic operation on two or more qubits
-    counts as a merge, on one qubit as memory; a measurement or an
-    injection costs one round. The qubit-count convention for GENERIC
-    and the one-round MEASURE and INJECT cost are project coefficients
-    that the cited sections do not establish.
+    merge, "d rounds of error correction, treating the entire system as a
+    single data surface" (Horsman et al. 1111.4022 Sec. 3.1), and the split,
+    "a total of d rounds of error correction" (Sec. 3.2). Idle and memory
+    cost d rounds; a generic operation on two or more qubits counts as a
+    merge, on one as memory; a measurement or injection costs one round. The
+    GENERIC convention and the one-round MEASURE and INJECT are project
+    coefficients the cited sections do not establish.
     """
 
     merge_step_count: int = 2
@@ -138,11 +126,7 @@ class GateRounds:
 
 
 def _check_round_count(name: str, value, minimum: int) -> None:
-    """A round count is a whole number, at least minimum.
-
-    numbers.Integral takes numpy's integers as well as Python's; a bool
-    is refused though Python counts it an int.
-    """
+    """A round count is a whole number, at least minimum; not a bool."""
     is_whole = isinstance(value, numbers.Integral)
     if not is_whole or isinstance(value, bool):
         raise ValueError(

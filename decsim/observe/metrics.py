@@ -1,14 +1,9 @@
 """The integrated metrics: step functions of time over one run.
 
-Each holds one quantity as a step function and integrates it, so a peak
-and a time average come out exact. A time average runs over the whole
-run, from tick 0 to the tick it is read, as gem5's AvgStor integrates
-from its last reset to curTick() (src/base/stats/storage.hh:130-213).
-DecoderUtilization steps where the quantity changes, on the decoder
-pool's own sources; DecodeBacklog keeps only its peak, sampled after
-every action. DecoderUtilization is always built, since every run's
-pool columns read each tier's busy fraction off it; DecodeBacklog is
-built only when the observation section asks for backlog_trace.
+A step function integrated exactly gives an exact peak and time average,
+over the whole run, as gem5's AvgStor integrates from its reset to
+curTick() (src/base/stats/storage.hh:130-213). DecodeBacklog is built
+only when the observation section asks for backlog_trace.
 """
 
 from collections.abc import Mapping
@@ -19,11 +14,10 @@ import decsim.observe.run_views as run_views
 class DecoderUtilization:
     """Time-weighted fraction of decoder units whose compute was busy.
 
-    A listener on the pool's unit_busy and unit_freed sources: a unit is
-    busy from the tick its compute leaves the pool's free list until the
-    tick it goes back, so the integral steps exactly where the occupancy
-    changes and no state is sampled. The pool sweep reads each tier's
-    fraction, Triage's utilization rate (2605.04459 lines 1024-1031).
+    A unit is busy from leaving the pool's free list to going back, so the
+    integral steps exactly where occupancy changes. The pool sweep reads
+    each tier's fraction, Triage's utilization rate (2605.04459 lines
+    1024-1031).
     """
 
     def __init__(self, engine, units_by_pool: Mapping[str, int]) -> None:
@@ -101,12 +95,10 @@ class DecodeBacklog:
 class _StepIntegral:
     """The integral of a step function from tick 0, sampled at every change.
 
-    The quantity is zero when the run starts, AvgStor's reset (gem5
-    src/base/stats/storage.hh:143-146), so the span always begins at
-    tick 0; a reader observes at the tick it reads, as AvgStor's
-    prepare integrates to curTick() before a dump (:198-203). gem5
-    divides by curTick() - lastReset + 1, counting both end ticks; a
-    step here holds over [tick, next tick), so the span is the last tick.
+    The quantity is zero at start, AvgStor's reset (storage.hh:143-146),
+    and a reader integrates to the tick it reads (:198-203). gem5 divides by
+    curTick() - lastReset + 1; a step here holds over [tick, next tick), so
+    the span is the last tick.
     """
 
     def __init__(self) -> None:

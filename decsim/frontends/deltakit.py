@@ -1,8 +1,7 @@
 """Deltakit memory circuits exported into the supplied-circuit frontend.
 
 Explorer's css_code_memory_circuit and CSSStage define the physical
-history and measurement order. Canonical Stim circuits, measurement
-schedules and declared cadence leave this optional provider.
+history and measurement order. Deltakit is imported only here.
 """
 
 import itertools
@@ -43,21 +42,17 @@ def memory_circuit(
 ) -> tuple[stim.Circuit, dict[int, int]]:
     """Export one single-patch memory with standard depolarising noise.
 
-    Families are rotated_surface and repetition. X or Z selects the
-    prepared and measured logical basis, and repetition uses checks of
-    that basis. SD6 applies the supplied probability to gates, resets,
-    measurements and idle locations; it is not a calibrated device model.
+    Families are rotated_surface and repetition; X or Z selects the
+    prepared and measured logical basis. SD6 puts the supplied probability
+    at gates, resets, measurements and idle locations; it is not a
+    calibrated device model. The map gives every measurement a one-based
+    round, the final data readout in the last packet.
 
-    The map assigns every absolute measurement index to a one-based
-    round. The final destructive data readout joins the last packet.
-    Deltakit is imported only here; simulation uses the existing source.
-    Circuit and schedule are exported together to keep their order explicit.
-
-    The native gates and the qubit numbering are memory_rounds', so one
-    memory at one round count has one error model on both paths. SD6
-    charges every idle location, and the Explorer's default gate set
-    decomposes CZ and MX into more layers, so more idle locations, than
-    its exhaustive set (Explorer qpu/_native_gate_set.py).
+    The native gates and qubit numbering are memory_rounds', so one memory
+    at one round count has one error model on both paths. SD6 charges every
+    idle location, and the Explorer's default gate set decomposes CZ and MX
+    into more layers than its exhaustive set (Explorer
+    qpu/_native_gate_set.py).
     """
     import deltakit_circuit.gates as gates
     import deltakit_explorer.qpu as qpu
@@ -92,13 +87,11 @@ def memory_rounds(
 ) -> circuit_records.RepeatedStimCircuit:
     """Export protection rounds whose declared cadence matches the QPU period.
 
-    Native gates have equal duration, calibrated by the CSS schedule to the
-    QPU round period, including preparation and destructive final readout.
-
-    SD6 uses physical_error_probability at gates, resets, readout and idle
-    locations. Physical noise uses it at gates, resets and measurement, with
-    T1/T2 noise applied only to idle intervals. Physical requires relaxation
-    and dephasing times; SD6 rejects them. T1/T2 use a Pauli approximation.
+    Native gates have equal duration, calibrated to the QPU round period.
+    SD6 puts physical_error_probability at gates, resets, readout and idle
+    locations. Physical noise puts it at gates, resets and measurement, with
+    T1/T2 noise (a Pauli approximation) on idle intervals only; it requires
+    the relaxation and dephasing times, and SD6 refuses them.
     """
     import deltakit_circuit.gates as gates
 
@@ -127,12 +120,9 @@ def css_memory_rounds(
 ) -> circuit_records.RepeatedStimCircuit:
     """Export a supplied CSS code with every declared logical observable.
 
-    The public Explorer code stays at this producer boundary. Its observable
-    indices retain the supplied generator definitions, which need not be
-    canonically paired X/Z logicals. All four physical fragments must fit the
-    declared cadence. Noise follows memory_rounds, including its T1/T2 units.
-    This function keeps setup together so its noise, indexing and physical
-    timing are visibly shared by both finite templates.
+    Observable indices keep the supplied generator definitions, which need
+    not be canonically paired X/Z logicals. All four physical fragments must
+    fit the declared cadence. Noise follows memory_rounds.
     """
     import deltakit_circuit.gates as gates
 
@@ -214,8 +204,7 @@ def _memory_noise(
 def _check_finite(duration: float, name: str) -> None:
     """Refuse an infinite time: it runs, but the run's json cannot hold it.
 
-    The Explorer builds the T1 to infinity limit from it, but json.dumps
-    writes it as Infinity, which RFC 8259 JSON readers refuse.
+    json.dumps writes it as Infinity, which RFC 8259 readers refuse.
     """
     if not math.isfinite(duration):
         raise ValueError(f"{name} must be finite")
@@ -228,13 +217,12 @@ def _physical_noise(
 ) -> "qpu.PhysicalNoise":
     """The Explorer's T1/T2 idle noise with one probability at every gate.
 
-    Idle noise per interval is the Pauli channel of Ghosh et al.
-    1210.5799 equation 10 (Explorer qpu/_noise/_noise_parameters.py,
-    which also refuses a T2 of twice T1 or more). The Explorer takes a
-    separate probability for one-qubit gates, two-qubit gates, resets,
+    Idle noise per interval is the Pauli channel of Ghosh et al. 1210.5799
+    equation 10 (Explorer qpu/_noise/_noise_parameters.py). The Explorer
+    takes separate probabilities for one- and two-qubit gates, resets,
     measurement and readout flips; this frontend puts the one supplied
-    probability at all five, a simplification of its own, so the T1/T2
-    times are the only place the two models differ.
+    probability at all five, so T1/T2 are the only difference between the
+    two models.
     """
     import deltakit_explorer.qpu as qpu
 
@@ -272,12 +260,10 @@ def _calibrated_device(
 ) -> "qpu.QPU":
     """A device whose native schedule of one round fills the round period.
 
-    Every gate family gets the same duration, the period divided by the
-    layers of the reference round, so a round of the schedule takes the
-    declared period. A real cycle is dominated by measurement and reset,
-    not by the gate layers (Google 2408.13687: a 1.1 us cycle), so this
-    even split is the frontend's simplification, and it decides how the
-    physical model's idle noise is spread over the round.
+    Every gate family gets the period divided by the reference round's
+    layers. A real cycle is dominated by measurement and reset (Google
+    2408.13687: a 1.1 us cycle), so this even split is a simplification,
+    and it decides how idle noise spreads over the round.
     """
     import deltakit_explorer.qpu as qpu
 

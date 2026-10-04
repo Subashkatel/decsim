@@ -1,10 +1,9 @@
 """One decode: the job, the result, and the holds that keep its rounds.
 
 A weak decode runs first and fast; an escalated strong decode re-decodes
-the same window (Toshio et al. 2510.25222 Sec. III A). The confidence a
-decoder reports, the outcome one request ended in, and the shape of the
-whole run that the root checks before planning are here too, because the
-escalation policy reads them together with the result.
+the same window (Toshio et al. 2510.25222 Sec. III A). The confidence,
+the request outcome and the run's shape live here too, because the
+escalation policy reads them with the result.
 """
 
 from collections.abc import Callable
@@ -42,11 +41,10 @@ class SoftOutput:
 class SoftOutputComputation:
     """One window's soft output and what computing it cost.
 
-    ticks are the weak tier's clock ticks the signal's own computation
-    took: zero for a subtraction, the measured or declared time of a
-    walk over the decode's growth (decision D8, Meister et al.
-    2405.07433 Algorithm 2). The unit that produced the evidence is
-    charged for them, because the evidence and its reader are the same
+    ticks are the weak tier's clock ticks the signal's own computation took:
+    zero for a subtraction, the time of a walk over the decode's growth
+    (Meister et al. 2405.07433 Algorithm 2). The unit that produced the
+    evidence is charged them, since the evidence and its reader are the same
     hardware (Toshio et al. 2510.25222 lines 152-160).
     """
 
@@ -58,15 +56,13 @@ class SoftOutputComputation:
 class WindowConfidence:
     """One window's confidence gap as the verdict read it.
 
-    gap_nats is None when the signal gave no gap, a window whose model
-    pins no observable or whose decode grew no cluster, and the policy
-    escalates such a window (decsim/escalation/policies.py).
+    gap_nats is None when the signal gave no gap (no observable pinned, no
+    cluster grown), and the policy escalates such a window.
     is_strong_revised says whether the strong decode predicted other
-    observables than the weak one it replaced, None for a window that
-    did not escalate or whose strong answer never came: a window has no
-    truth of its own, so this is the one per-window answer to whether
-    the weak decode was wrong (Toshio et al. 2510.25222 lines 807-841
-    sign the gap by exactly that).
+    observables than the weak one, None when it did not escalate or no
+    strong answer came: a window has no truth of its own, so this is the
+    per-window answer to whether the weak decode was wrong (Toshio et al.
+    2510.25222 lines 807-841).
     """
 
     window_key: tuple
@@ -109,11 +105,10 @@ class PotentialStrong:
 class PotentialRestart:
     """A hold in the weak syndrome buffer: a window's reads and one before them.
 
-    Under the double window an earlier escalation may re-slice
-    this window as its restart window, whose weak decode re-reads one
-    buffer into the strong region (Toshio 2510.25222 Sec. III C); the
-    rounds stay past the window's own request and landing, until the
-    window before it commits.
+    Under the double window an earlier escalation may re-slice this window
+    as its restart window, which re-reads one buffer into the strong region
+    (Toshio 2510.25222 Sec. III C); the rounds stay until the window before
+    it commits.
     """
 
     window_key: tuple
@@ -127,9 +122,8 @@ class PotentialRestart:
 class LaterStreamReads:
     """A hold: the raw rounds a stream's windows still to come read early.
 
-    A strong read of a window carries the raw rounds before its first
-    that its recipes read, and a stream's window registers only as its
-    rounds arrive, so the stream keeps them for it until then.
+    A stream's window registers only as its rounds arrive, so the stream
+    keeps the raw rounds its strong read will need until then.
     """
 
     stream_id: Any
@@ -193,16 +187,11 @@ class DecoderServiceKey:
 class DecodeJobKind(Enum):
     """What one decode job is, declared once and read by everyone.
 
-    The manager, the queue and the request ledger all need to know what
-    a job is before they read it, and a declared kind is how a
-    heterogeneous runtime says so: StarPU declares one codelet per
-    architecture and Legion one processor kind per task, and the
-    scheduler reads the declaration rather than inferring it. WINDOW is
-    one window's decode on the tier that owns it, forced-class solves
-    included; STRONG_REDECODE is one escalated window on the strong
-    tier; STRONG_BATCH is the merged timing-only decode that serves
-    several of those under bulk_strong; SELF_CONTAINED is a decode with
-    no window and no syndrome, a factory correction or an idle region.
+    A heterogeneous runtime declares a task's kind rather than inferring it,
+    as StarPU declares a codelet per architecture and Legion a processor
+    kind per task. STRONG_BATCH is the merged timing-only decode of several
+    re-decodes under bulk_strong; SELF_CONTAINED has no window and no
+    syndrome (a factory correction or an idle region).
     """
 
     WINDOW = "window"
@@ -229,15 +218,12 @@ class RequestProcessingOutcome(Enum):
 
 
 def distinct_round_count(payloads) -> int:
-    """The distinct syndrome rounds a set of payloads carries.
+    """The distinct (operation_id, round_index) rounds of the payloads.
 
-    The number of (operation_id, round_index) identities, the rounds a
-    decode job is priced and admitted for, the rounds the decoder reads:
-    a sliding-window decoder's work scales with the rounds in its window
-    (Skoric et al. 2209.08552, tau_W over n_W), a final window can be
-    smaller than a regular one with the whole window as core (Tan et al.
-    2209.09219), and no window implementation feeds rounds beyond the
-    data (Gong et al. sliding-window decoder; cudaq-qec sliding_window).
+    A decode job is priced and admitted for these: a sliding-window
+    decoder's work scales with its window's rounds (Skoric et al.
+    2209.08552), a final window may be smaller (Tan et al. 2209.09219), and
+    no window implementation feeds rounds beyond the data.
     """
     round_identities = set()
     for payload in payloads:
@@ -249,11 +235,9 @@ def distinct_round_count(payloads) -> int:
 class DecodeJob:
     """One unit of decoder work: a window's rounds and its life.
 
-    The window's rounds, its detector error model, its identity in the
-    decoder queues, and the timestamps of its life. ``payloads`` is the
-    weak syndrome buffer's view of the rounds until the transfer lands them
-    in a unit's memory (``decoder_input``); a decoder reads only its unit's
-    memory.
+    payloads is the weak syndrome buffer's view of the rounds until the
+    transfer lands them in a unit's memory (decoder_input); a decoder reads
+    only its unit's memory.
     """
 
     operation_id: int  # operation the window belongs to
@@ -356,7 +340,7 @@ class DecodeJob:
     # its slot so the confidence its evidence feeds is attributed to it
     decoding_unit_name: Optional[str] = None
     # ticks of confidence computation charged on that unit after the
-    # decode, so the unit stays busy for the signal's own work (D8)
+    # decode, so the unit stays busy for the signal's own work
     soft_output_ticks: int = 0
     # the rounds this job's tier turns into detection events for it,
     # frozen at the first ask so the formation stage and the dispatcher
@@ -398,14 +382,12 @@ class LogicalContribution:
 class DecoderEvidence(Enum):
     """What a decode can show about itself, beyond its correction.
 
-    A confidence signal reads one of these off the decode that produced
-    the correction, so each signal declares what it needs and each
-    decoder row declares what it produces, the way a decoder declares
-    its fault representation. FORCED_CLASS_WEIGHT is the minimum weight
-    inside a logical class the solve was pinned to, which only a decoder
-    that minimises weight inside the class reports honestly (Lee et al.
-    2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and the radii a
-    cluster-based decode grew (Meister et al. 2405.07433 Algorithm 2).
+    Each signal declares what it needs and each decoder row what it
+    produces, as a decoder declares its fault representation.
+    FORCED_CLASS_WEIGHT is the minimum weight inside a pinned logical
+    class, honest only from a decoder that minimises weight inside it (Lee
+    et al. 2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and radii a
+    cluster decode grew (Meister et al. 2405.07433 Algorithm 2).
     """
 
     FORCED_CLASS_WEIGHT = "forced_class_weight"
@@ -446,21 +428,7 @@ class BackendFailureReason(Enum):
 
 @dataclass(frozen=True)
 class WindowDecode:
-    """What one backend call on one window answers.
-
-    ``selected_faults`` is the correction and ``decode_status`` a
-    best-effort disposition (None when the decode succeeded).
-    ``no_correction_reason`` is the backend's BackendFailureReason when
-    it produced no correction and ``selected_faults`` is the empty one
-    committed in its place; None when the backend produced one. The two
-    evidence fields are what a confidence signal reads off the decode
-    that produced the correction: the minimum weight inside the class a
-    forced solve was pinned to, and the growth a cluster-based decode
-    did (Meister et al. 2405.07433 Algorithm 2 lines 518-525 reads the
-    graph and the radii). ``iterations`` is the message-passing
-    iterations an iterative decode ran, which is what its time on a
-    device scales with. A row leaves what it does not produce None.
-    """
+    """What one backend call on one window answers; unproduced fields None."""
 
     selected_faults: Any
     decode_status: Optional[BackendDecodeStatus] = None
@@ -474,11 +442,9 @@ class WindowDecode:
 class Step:
     """One step of a strong decode on its device, as the device states it.
 
-    name says what the step is (notice, launch, copy_in, decode); ticks
-    is its time; resource is the one it holds, dispatcher or worker, or
-    None for none. priced_on names where a zero-tick step's time is
-    counted instead, such as the link card's echo round trip, so a trace
-    shows every step and counts each tick once.
+    priced_on names where a zero-tick step's time is counted instead, such
+    as the link card's echo round trip, so a trace shows every step and
+    counts each tick once.
     """
 
     name: str
@@ -525,12 +491,7 @@ class DecodeResult:
 
 @dataclass(frozen=True)
 class Ticket:
-    """One submitted strong decode: decsim's answer and its priced ticks.
-
-    The strong backends that decode with decsim's own Relay-BP and price
-    the decode from a measured device (measured_table, dispatch_steps)
-    issue it.
-    """
+    """One submitted strong decode: decsim's answer and its priced ticks."""
 
     result: DecodeResult
     decode_ticks: int
@@ -551,9 +512,8 @@ class Submission:
 class Verdict(Enum):
     """The escalation policy's answer to one weak result.
 
-    KEEP commits the weak result as final; ESCALATE commits it
-    provisionally and asks the strong tier to re-decode the window
-    (Toshio et al. 2510.25222 Sec. III A, steps 3 and 4).
+    ESCALATE commits the weak result provisionally and asks the strong tier
+    to re-decode (Toshio et al. 2510.25222 Sec. III A, steps 3 and 4).
     """
 
     KEEP = auto()
@@ -564,18 +524,11 @@ class Verdict(Enum):
 class RunShape:
     """What a run is made of, as the root checks it before planning.
 
-    The escalation policy refuses a run it cannot serve from this
-    record, once, in Machine.build. strong_window is the name of the
-    strong window row the switching slot holds, so a refusal names the
-    shape the caller chose; is_absorbing_strong_window is that
-    row's own declaration that its region replaces the weak windows it
-    covers (the double window of Toshio et al. 2510.25222 Sec. III C;
-    the redo window absorbs nothing); is_bulk_strong is the
-    decoder manager's merging of queued strong re-decodes; operations
-    are the workload's planning views; commit_round_count and
-    buffer_round_count size every window (windows.commit_rounds and
-    windows.buffer_rounds, the code distance when they are left
-    None).
+    The escalation policy refuses a run it cannot serve from this, once, in
+    Machine.build. is_absorbing_strong_window is the strong window row's
+    declaration that its region replaces the weak windows it covers (the
+    double window, Toshio et al. 2510.25222 Sec. III C). commit_round_count
+    and buffer_round_count size every window.
     """
 
     scheme: Any

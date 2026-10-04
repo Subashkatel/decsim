@@ -1,13 +1,10 @@
 """The results folder: one experiment's records, pieces and rows.
 
-results/<date>_<name>/, or the folder --out names, holds one
-experiment: its run file copied, the code state as a patch, run.json
-(the commit, host, packages and the points in order), each point's
-record and workload under points/<name>/ (machine.json, inputs/),
-every piece of every point (pieces/), and the rows folded from the
-pieces. gem5 writes m5out/ the same way, out of the code tree, with
-the config of what ran beside its results (src/python/m5/main.py
---outdir; src/python/m5/simulate.py:95-144 config.json).
+results/<date>_<name>/, or --out, holds the run file, the code state as
+a patch, run.json, each point's record and workload under
+points/<name>/, every piece (pieces/) and the folded rows, as gem5 writes
+m5out/ out of the code tree with the config beside its results
+(src/python/m5/main.py --outdir; simulate.py:95-144 config.json).
 """
 
 import contextlib
@@ -120,12 +117,10 @@ def accept_raised_stop_rules(
 ) -> None:
     """A changed run file naming the folder's points replaces its copy.
 
-    A point's id hashes its machine and metadata and not its stop rule,
-    so a run file whose points have the ids run.json recorded differs
-    only in how far they run: a pilot's caps raised for the final run,
-    which goes on from the saved pieces. Its copy replaces the folder's;
-    any other change is refused when the copy is written (_copy_once).
-    A run whose point ids are not content hashes never calls this.
+    A point's id hashes its machine and metadata, not its stop rule, so a
+    run file with the recorded ids differs only in how far it runs: a
+    pilot's caps raised for the final run, which goes on from the saved
+    pieces. Any other change is refused by _copy_once.
     """
     run_path = run_dir / RUN_FILE
     if not run_path.is_file():
@@ -155,12 +150,10 @@ def finish_run(
 def refuse_another_tree(run_dir: pathlib.Path) -> None:
     """A folder whose run.json names another commit, or other changes.
 
-    A folder's rows pool the shots of every run into it, so they must
-    have run one simulator; a run asks before it writes anything. The
-    same commit clean against dirty, or dirty with another code state
-    patch, is another simulator too. A new folder from a tree whose
-    commit cannot be read is refused unless ALLOW_DIRTY_VARIABLE is set,
-    since its results could not say what ran.
+    A folder's rows pool every run into it, so they must have run one
+    simulator; clean against dirty, or another patch, is another simulator.
+    A new folder from a tree whose commit cannot be read is refused unless
+    ALLOW_DIRTY_VARIABLE is set, since its results could not say what ran.
     """
     run_path = run_dir / RUN_FILE
     if not run_path.is_file():
@@ -216,11 +209,9 @@ def _refuse_an_unread_commit() -> None:
 def piece_identity() -> dict:
     """What a piece records of the process that ran it: code, host, job.
 
-    Beside the commit, a rerun needs the interpreter and the processor
-    that set the seconds a shot; the array job and task name the Slurm
-    task that ran it, one point's. The package versions come from the
-    process that ran the shots, with its measurements
-    (collect.imported_module_versions).
+    A rerun needs the interpreter and processor that set a shot's seconds;
+    the array job and task name the Slurm task. Package versions come from
+    the process that ran the shots.
     """
     commit, is_dirty, patch_sha256 = _tree_reading()
     python_version = platform.python_version()
@@ -243,11 +234,9 @@ def snapshot_code_state(
 ) -> None:
     """Copy the run's exact inputs next to its results.
 
-    The run file is copied (_copy_the_run_file), and any uncommitted code
-    goes into code_state.patch, an untracked file as a patch that creates
-    it (git diff --no-index), so run.json's commit + patch + run file =
-    the whole experiment. The patch is the imported tree's, for the
-    reason run.json's commit is (_checkout).
+    Uncommitted code goes into code_state.patch, untracked files as patches
+    that create them (git diff --no-index), so run.json's commit + patch +
+    run file = the whole experiment.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     if run_file is not None:
@@ -299,11 +288,9 @@ def write_run_record(
 ) -> None:
     """run.json: what ran, where, and with which code and packages.
 
-    Sampling is deterministic from (stim version, circuit, distance,
-    rounds, p, seed), so run.json plus the seeds are the raw data.
-    run_files is the run file, none for a run no file describes (the
-    examples/ scripts). point_ids are the run's points in order, which is
-    the order a fold writes the rows in.
+    Sampling is deterministic from (stim version, circuit, distance, rounds,
+    p, seed), so run.json plus the seeds are the raw data. point_ids are in
+    the order a fold writes rows.
     """
     run_files = []
     if run_file is not None:
@@ -368,12 +355,10 @@ def point_record(
 ) -> dict:
     """What a point's machine.json holds, built, not written.
 
-    Its id and name, the metadata, the seed ranges run, every setting
-    and the values the build derives, as gem5's config.json holds every
-    parameter (src/python/m5/SimObject.py:1175). An experiment's point also
-    holds experiment_facts, what its fold needs besides its pieces
-    (collect_command). Building runs the point's build, so a point the
-    build refuses is refused here, before anything is written.
+    Every setting and the values the build derives, as gem5's config.json
+    (src/python/m5/SimObject.py:1175), plus experiment_facts for the fold.
+    Building runs the point's build, so a refused build stops here, before
+    anything is written.
     """
     settings = task.settings
     plan = _plan(task)
@@ -486,14 +471,10 @@ def record_seeds(run_dir: pathlib.Path, seeds_by_point: dict) -> None:
 def swept_values(run_dir: pathlib.Path, point_ids: list) -> dict:
     """Each point's value at every swept name, as csv cells.
 
-    A swept name is a key of a point's metadata. One column per name is
-    Wickham's tidy table, each variable a column and each observation a
-    row (Tidy Data, J. Stat. Softw. 59(10), 2014, section 2.3); the
-    names come in the order the points first set them. A point's cell is
-    its metadata's value there, an empty cell for a name it does not
-    hold. A value other than a string or a number is one cell of compact
-    json, as sinter writes json_metadata (sinter/_data/_csv_out.py:35-37);
-    the typed value is in the record.
+    A swept name is a metadata key; one column per name is Wickham's tidy
+    table (Tidy Data, J. Stat. Softw. 59(10), 2014, section 2.3). A value
+    other than a string or number is compact json, as sinter writes
+    json_metadata (sinter/_data/_csv_out.py:35-37).
     """
     records = point_records(run_dir)
     paths = {}
@@ -595,11 +576,9 @@ def _copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
 def _copy_once(source: pathlib.Path, target: pathlib.Path) -> None:
     """The source's text at target, or a refusal if target holds another.
 
-    The first run into a folder writes the copy; a later one, a resume
-    or another array task, finds it and must bring the same text, since
-    a folder's rows come from one run file. The text is staged under a
-    random name and hard-linked into place, which fails when the target
-    exists, so a task starting beside another never reads half a file.
+    A later run into the folder must bring the same text. The text is staged
+    under a random name and hard-linked into place, which fails when the
+    target exists, so a task never reads half a file.
     """
     text = source.read_text()
     if not target.exists():
@@ -695,18 +674,12 @@ def _built_values(plan: plan_build.Plan) -> dict:
 def _rounds_per_shot(plan: plan_build.Plan) -> int:
     """A shot's QEC rounds as planned: every patch's rounds, added up.
 
-    They size a point's pieces before any shot runs. A live stream also
-    idles through its feedback wait, rounds only its run knows, so a
-    shot's own count is measured (measure.py executed_rounds).
-
-    A round is one patch's syndrome extraction, whenever its operation
-    starts. Tesseract 2503.10988 lines 287-290 set a two-code shot's r
-    to the rounds across both codes, so its per-round rate compares
-    with one memory; Litinski 1808.02892 Eq. 11 (lines 1408-1414) adds
-    qubits times cycles. The QPU fires the workload's operations, and an
-    operation with no detector data sends no syndrome
-    (qpu/cycle_clock.py _emit_operation_rounds); a decode operation or a
-    stream is how the decoder reads those rounds, so it adds none.
+    They size a point's pieces before any shot runs; a live stream's
+    feedback wait is measured per shot (measure.py executed_rounds). A round
+    is one patch's extraction: Tesseract 2503.10988 lines 287-290 count a
+    two-code shot's rounds across both codes, and Litinski 1808.02892 Eq. 11
+    adds qubits times cycles. An operation with no detector data, a decode
+    operation or a stream adds none.
     """
     round_counts = {}
     for resolved in plan.run_plan.resolved_operations:
@@ -825,11 +798,9 @@ def _container() -> Optional[str]:
 def _checkout() -> pathlib.Path:
     """The tree this code was imported from, which is the code that ran.
 
-    Not the working directory: a cluster task starts in the folder its
-    job was submitted from and may import a checkout pinned at a commit
-    somewhere else (docs/how-to/run_a_sweep_on_slurm.md), so a folder
-    that named the working directory's commit would name code no part
-    of the run read.
+    A cluster task starts where its job was submitted and may import a
+    checkout pinned elsewhere (docs/how-to/run_a_sweep_on_slurm.md), so the
+    working directory's commit could name code the run never read.
     """
     this_file = pathlib.Path(__file__)
     here = this_file.resolve()
@@ -839,14 +810,9 @@ def _checkout() -> pathlib.Path:
 def _git_state() -> dict:
     """run.json's git block: the one reading this process took.
 
-    gem5 prints its version, its build date, the host and the command
-    line at every start, so a result says what produced it
-    (gem5 src/python/m5/main.py:524-537), and sinter
-    carries the decoder and the task's metadata in every row of its csv
-    for the same reason (sinter/_data/_task_stats.py:196-204 through
-    _data/_csv_out.py:56-65). decsim's run folder is where that belongs
-    here, so run.json names the commit, says whether the tree had
-    uncommitted changes, and hashes them.
+    A result says what produced it, as gem5 prints its version at start
+    (src/python/m5/main.py:524-537) and sinter carries the decoder and
+    metadata in every row (sinter/_data/_task_stats.py:196-204).
     """
     commit, is_dirty, patch_sha256 = _tree_reading()
     return {"commit": commit, "dirty": is_dirty, "patch_sha256": patch_sha256}
@@ -856,33 +822,16 @@ def _git_state() -> dict:
 def _tree_reading() -> tuple:
     """(commit, dirty, patch sha256) of the tree this code came from, once.
 
-    Read at the first ask, which every caller takes before its work,
-    and reused by every later ask. A run writes run.json at its start
-    and again at its end; a tree can move in between. A
-    Slurm array running for hours out of a checkout somebody commits
-    to would otherwise name, in every folder, whatever the tree held
-    when that task finished, which is code no part of the run read. A
-    record whose commit is not the code's is worse than none.
+    Read at the first ask and reused: a tree can move during a long Slurm
+    array, and a record whose commit is not the code's is worse than none.
+    gem5 records provenance before the simulation (main.py:524-556 before
+    :687), and sinter writes its csv header before the collect loop
+    (sinter/_collection/_collection.py:385-397).
 
-    Both referents record provenance before the work and not after.
-    gem5 prints its version, its build date, its host, its pid and its
-    command line at :524-556 of
-    gem5 src/python/m5/main.py, then executes the
-    simulation script at :687. sinter writes its csv header into the
-    save file before the collect loop
-    (sinter/_collection/_collection.py:385-397 against the loop at
-    :401), and every row's strong id is computed from the task and
-    cached on it rather than recomputed per row
-    (sinter/_data/_task.py:248-270).
-
-    The launcher's answer about dirtiness and its patch's sha256 wins
-    when it is given, because the launcher looked at the tree as the job
-    started, which is the tree the process went on to import; this
-    process's own git looks later, and edits made after the import did
-    not run. The container image ships no git binary at all, which is
-    why the commit falls back to reading the tree's own git files and
-    why the dirty flag is None rather than clean when nobody could
-    answer.
+    The launcher's dirtiness and patch hash win when given, because it
+    looked at the tree the process imported. The container has no git, so
+    the commit falls back to the tree's own git files and dirty is None
+    rather than clean when nobody could answer.
     """
     checkout = _checkout()
     commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")

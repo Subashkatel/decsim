@@ -1,8 +1,7 @@
 """The decoders part: each tier's units and the manager that schedules them.
 
-A tier's algorithm is a decoder row's Settings record, and the unit is
-the decoder it builds between its fetch and release stages. The two
-tiers' units and the managers' pools are one record, gem5's
+A unit is the tier's decoder between its fetch and release stages. The
+units and the managers' pools are one record, gem5's
 CacheConfig.config_cache shape (configs/common/CacheConfig.py), built
 before the parts because the window models are compiled for the units.
 """
@@ -31,11 +30,9 @@ FORMATION_STAGE = "detection_event_formation"
 class DecoderPool:
     """The tiers' units and the managers' pool knobs.
 
-    active is the unit of the tier that decodes the plan's windows, None
-    on a run with no decoder; strong is the strong tier's unit on a
-    switching run, else None. chip is the chip's manager's pool, of the
-    tier that decodes the plan's windows; host is the host's manager's,
-    of the strong tier, on a switching run only.
+    active and chip are the unit and pool of the tier that decodes the
+    plan's windows (active None with no decoder); strong and host are
+    the strong tier's, on a switching run only.
     """
 
     active: Optional[ports.Decoder]
@@ -48,12 +45,10 @@ class DecoderPool:
 class Decoders:
     """The decode side: the units of both tiers and the managers over them.
 
-    The chip's manager schedules the tier that decodes the plan's windows.
-    A switching run has the host's manager too, over the strong
-    tier's units (LATTE 2509.03954 lines 705-720), and the two share one
-    ledger of strong requests, since the chip side opens a strong request
-    and the host side serves it. Nothing here reaches outward: the other
-    parts are handed the managers as their decode queues.
+    A switching run has the host's manager over the strong tier's units
+    too (LATTE 2509.03954 lines 705-720); the two share one ledger of
+    strong requests, since the chip side opens a strong request and the
+    host side serves it.
     """
 
     primary_decoder: Optional[ports.Decoder]
@@ -70,11 +65,7 @@ class Decoders:
         engine: engine_module.Engine,
         pool: DecoderPool,
     ) -> "Decoders":
-        """Each manager over its pool, bound to its tier's unit.
-
-        A manager card that names no clock dispatches on machine_clock. A
-        switching run's policy is bound by the switching part.
-        """
+        """Each manager over its pool, bound to its tier's unit."""
         clocked_manager = config.with_machine_clock(
             manager_settings, machine_clock
         )
@@ -98,7 +89,7 @@ class Decoders:
         )
 
     def start(self) -> None:
-        """Let each manager hear its rows before any window model exists."""
+        """Let each manager hear its units before any window model exists."""
         self.decoder_manager.start()
         if self.strong_decoder_manager is not None:
             self.strong_decoder_manager.start()
@@ -128,14 +119,9 @@ def build_decoder_unit(
     formation: Optional[detection_events_module.TierFormation],
     signal: Optional[ports.ConfidenceSignal],
 ):
-    """The decoder unit of one tier, weak or strong, as the root builds it.
+    """The decoder unit of one tier, weak or strong; None for an empty slot.
 
-    The tier's algorithm decodes inside a StagedDecoder whose fetch and
-    release stages are cycles of the tier's clock, with this tier's
-    event-detection logic in front of them when the tier's decoder is a
-    seat of the run's detection event placement (formation). A tier
-    handed a confidence signal must produce the evidence it reads. None
-    when the tier's slot is empty.
+    A tier handed a confidence signal must produce the evidence it reads.
     """
     if tier_settings is None:
         return None
@@ -159,11 +145,9 @@ def build_decoder_pool(
 ) -> DecoderPool:
     """The tiers' units and the managers' pools.
 
-    The chip's pool holds units of window_tier, whose settings are
-    window_decoder and whose unit serves the run's confidence signal; a
-    run that escalates gives the strong tier a pool of its own. Each tier
-    seated by the detection event placement gets its own event-detection
-    logic, so a round both tiers read is formed and charged by each.
+    Each tier seated by the detection event placement gets its own
+    event-detection logic, so a round both tiers read is formed and
+    charged by each.
     """
     active_tier = window_tier.value
     active_seat = f"{active_tier}_decoder"
@@ -193,11 +177,7 @@ def _pool(
     formation: Optional[detection_events_module.TierFormation],
     blocks_unit: bool,
 ) -> decoder_pool_module.PoolSettings:
-    """One manager's pool, from the settings of the tier it holds units of.
-
-    A run with no decoder holds one unit of a tier's defaults, which
-    nothing is sent to.
-    """
+    """One manager's pool; one idle unit for a run with no decoder."""
     if tier_settings is None:
         return decoder_pool_module.PoolSettings(
             name=name,
@@ -220,11 +200,9 @@ def _blocks_unit(
 ) -> bool:
     """The blocking rule of the pool that decodes the windows.
 
-    The strong pool of a switching run never blocks: a strong re-decode
-    frees its unit's compute at its end and its result waits in the
-    unit's output slot until the window side takes it (decoder_unit.py
-    hold_output), so <tier>.result_blocks_unit is read on the primary
-    tier alone.
+    The strong pool never blocks: a strong result waits in its unit's
+    output slot (decoder_unit.py hold_output), so result_blocks_unit is
+    read on the primary tier alone.
     """
     if tier_settings is None:
         return False
@@ -234,12 +212,7 @@ def _blocks_unit(
 def _tier_formation(
     detection_events: ports.DetectionEventPlacement, seat: str
 ) -> Optional[detection_events_module.TierFormation]:
-    """This tier's event-detection logic; None when rounds arrive formed.
-
-    The placement decides whether the tier's decoder is a seat. A source
-    with no recipes leaves it nothing to convert and the same stage to
-    pay.
-    """
+    """This tier's event-detection logic; None when rounds arrive formed."""
     if not detection_events.forms_at(seat):
         return None
     return detection_events_module.TierFormation(detection_events, seat)
@@ -250,10 +223,8 @@ def _check_serves_the_confidence(
 ) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
-    A confidence is the decoder's own, so the signal's evidence
-    requirement is held against the row's own declaration. A priced card
-    is not refused: it prices one decode of one window, and a forced pair
-    is two decodes, so the card is charged once per forced solve.
+    A priced card is not refused: a forced pair is two decodes, each
+    charged the card's time.
     """
     required = signal.decoder_evidence_requirement
     missing = required - algorithm.decoder_evidence
@@ -268,12 +239,7 @@ def _check_serves_the_confidence(
 
 
 def _missing_evidence_reason(algorithm, missing, signal) -> str:
-    """Why this row cannot serve this signal, cited.
-
-    A row that a reader would expect to produce the evidence says why it
-    does not; every other row gets the signal's own sentence about what
-    a decoder must do to report it.
-    """
+    """The decoder's own reason it cannot serve, else the signal's."""
     reasons = algorithm.missing_evidence_reasons
     for member in sorted(missing, key=_evidence_order):
         reason = reasons.get(member)
@@ -294,10 +260,8 @@ def _staged_unit(
 ) -> staged_decoder.StagedDecoder:
     """The algorithm between its stages, on the tier's engine clock.
 
-    This tier's event-detection logic first when the rounds reach it raw,
-    then the fetch stage, then the algorithm, then the release stage,
-    each stage priced once a job and once a round. An engine card that
-    names no clock counts on machine_clock.
+    Event detection first when the rounds reach it raw, then fetch, the
+    algorithm and release, each priced once a job and once a round.
     """
     clocked_engine = config.with_machine_clock(
         tier_settings.engine, machine_clock
@@ -333,11 +297,8 @@ def _formation_stage(
 
     The stage is the tier's own hardware in front of its decoder core
     (LILLIPUT's Event Detection Logic block, 2108.06569 lines 499-510;
-    Yang's preprocessing stage inside the decoder subtotal, 2605.04892
-    lines 1273-1275, Table I lines 1049-1052), so it is a stage of the
-    unit's timing rather than a component the manager schedules: the
-    decoder row behind it never learns that its rounds were raw. Its
-    cycles are the detection_events card's, on that card's clock.
+    Yang 2605.04892 lines 1273-1275, Table I lines 1049-1052), so it is
+    a stage of the unit's timing, on the detection_events card's clock.
     """
     if formation is None:
         return None

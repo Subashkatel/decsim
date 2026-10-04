@@ -1,9 +1,4 @@
-"""The controller's counters: how many idle rounds it emitted.
-
-A listener on the idle accounting's idle_round_emitted(operation_id,
-patch, round_index); the count is what the gate pins as
-controller_idle_rounds.
-"""
+"""The controller's counters: how many idle rounds it emitted."""
 
 
 class ControllerCounters:

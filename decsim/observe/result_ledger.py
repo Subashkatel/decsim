@@ -1,10 +1,7 @@
 """The logical observables each operation delivered.
 
-A listener on OperationResults' operation_result_delivered(operation_id,
-logical_observables); the folder delivers an operation's result once and
-withdraws it by delivering None, so the ledger holds exactly what the
-run produced. The RunResult's operation_results rows are read from here,
-never from the window side.
+An operation's result is delivered once and withdrawn by delivering
+None, so the ledger holds exactly what the run produced.
 """
 
 

@@ -1,18 +1,12 @@
 """decsim's Union-Find as a sinter decoder.
 
-sinter hands a decoder the circuit's detector error model
-(sinter/_decoding/_decoding_decoder_class.py, compile_decoder_for_dem).
-The adapter reads its graphlike faults with the catalog the machine
-reads (detector_error_model/stim_fault_catalog.py), builds the weighted
-graph the union_find row builds (decoders/union_find/window_decoder.py
-graph_from_model), and decodes every shot with the same compiled growth
-and peeling, so an offline run answers as the machine's row does.
-
-It decodes what the row decodes: a model whose every fault, after its
-`^` parts are split, flips one or two detectors. A fault that flips a
-logical observable and no detector, and an undecomposed hyperedge,
-which sinter hands on when decomposition fails
-(sinter/_collection/_collection_worker_state.py:28-33), are refused.
+The adapter reads the graphlike faults with the machine's catalog
+(detector_error_model/stim_fault_catalog.py), builds the union_find
+row's weighted graph and decodes every shot with the same compiled
+growth and peeling, so an offline run answers as the row does. It
+refuses what the row cannot decode: a fault that flips an observable and
+no detector, and an undecomposed hyperedge, which sinter hands on when
+decomposition fails (sinter/_collection/_collection_worker_state.py:28-33).
 """
 
 import numpy

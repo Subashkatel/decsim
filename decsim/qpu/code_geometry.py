@@ -1,20 +1,14 @@
 """The code cards: the numbers the simulator needs from a QEC code.
 
-A card is a small frozen record, not a stabilizer code. The simulator
-prices decoder timing, so all it takes from a code is its distance, its
-window sizes, the size of the decoding graph per round, and the syndrome
-bits per round. The numbers can be set by hand or copied from an upstream
-tool's output; decsim never imports such a tool. Each card fills the
-CodeModel port (decsim/ports.py).
-
-The rotated surface-code card follows Stim's generated
-``surface_code:rotated_memory_z`` circuit (Stim, src/stim/gen/
-gen_surface_code.cc): a distance-d patch has d*d data qubits and d*d - 1
-measure qubits, and every round reads out every measure qubit once. The
-bivariate-bicycle card follows Bravyi et al., High-threshold and
-low-overhead fault-tolerant quantum memory (Nature 627, 778, 2024; arXiv
-2308.07915): a [[n, k, d]] code whose round measures n/2 X checks and n/2
-Z checks, the [[144, 12, 12]] gross code by default.
+A card is a small frozen record, not a stabilizer code: decsim prices
+decoder timing, so it takes a distance, window sizes, the graph size per
+round and the syndrome bits per round, and never imports an upstream
+tool. The rotated surface card follows Stim's
+surface_code:rotated_memory_z (src/stim/gen/gen_surface_code.cc): d*d
+data and d*d - 1 measure qubits, each measure qubit read once a round.
+The bivariate-bicycle card follows Bravyi et al. (Nature 627, 778, 2024;
+arXiv 2308.07915): n/2 X and n/2 Z checks a round, the [[144, 12, 12]]
+gross code by default.
 """
 
 import dataclasses
@@ -80,16 +74,12 @@ class SurfaceCodeModel:
     def spatial_nodes(self, num_patches: int) -> int:
         """Per-round graph size for a latency model: d*d per patch, plus a seam.
 
-        A size knob, not the detector count: a rotated patch contributes
-        d*d - 1 detector nodes per round (Stim's bulk layer, read off
-        stim.Circuit.generated at d=3, 5 and 7 as 8, 24 and 48), one
-        fewer per patch than this returns. No shipped decoder row reads
-        the number; a latency model a study supplies would, where the
-        difference is a scale factor and reaches no correction. The seam
-        strip is the one line of d intermediate qubits a lattice-surgery
-        merge of two patches adds (Horsman et al. arXiv:1111.4022 Sec.
-        3.1); for more patches the paper gives no count, and one line
-        stays.
+        A size knob, not the detector count: a patch has d*d - 1 detectors a
+        round (Stim's bulk layer: 8, 24 and 48 at d=3, 5, 7). No shipped decoder
+        row reads it; for a supplied latency model the difference is a scale
+        factor and reaches no correction. The seam is the one line of d qubits a
+        two-patch lattice-surgery merge adds (Horsman et al. 1111.4022 Sec.
+        3.1); for more patches the paper gives no count.
         """
         node_count_per_patch = self.distance * self.distance
         seam_node_count = 0
@@ -114,19 +104,17 @@ class SurfaceCodeModel:
 class BivariateBicycleCodeModel:
     """Timing and sizing card of one bivariate-bicycle CSS code.
 
-    One modeled round is one complete extraction cycle: n/2 X checks and
-    n/2 Z checks. The detector error model owns the exact window-local
-    detector rows. The qubit counts are the card's own keys (Settings);
-    the distance comes from the sweep, as the surface card's does.
+    One round is a whole extraction cycle, n/2 X and n/2 Z checks; the
+    detector error model owns the window rows. The distance comes from the
+    sweep, as the surface card's does.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The card's own keys: n and k of the [[n, k, d]] code.
 
-        The defaults are the gross code, Bravyi et al.'s [[144, 12, 12]]
-        code (2308.07915v2 lines 180-184); its distance is twelve when
-        the run names none.
+        The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines
+        180-184); its distance is twelve when the run names none.
         """
 
         qubit_count: int = 144

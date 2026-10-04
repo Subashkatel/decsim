@@ -19,10 +19,8 @@ import decsim.records.workload as workload_records
 class WorkloadProgram:
     """A maker's workload in the machine's terms.
 
-    physical_circuits pairs the stream key that runs the workload's
-    physical circuit (the stream's owner, or the one operation that runs
-    it) with that circuit, for the syndrome source; a workload carries
-    one physical circuit at most.
+    physical_circuits pairs the stream key that runs the physical circuit
+    with that circuit; a workload carries one physical circuit at most.
     """
 
     operations: tuple
@@ -175,11 +173,7 @@ def _emitters(operations: list) -> list:
 
 
 def _segments_carrying(operations: list, stream_id, circuit) -> tuple:
-    """The operations with the stream's segments carrying the circuit.
-
-    The segments, the operations that run a slice of the stream, come
-    back too, in program order.
-    """
+    """(operations, segments): the stream's segments now carry the circuit."""
     carried = []
     segments = []
     for operation in operations:
@@ -242,13 +236,11 @@ def _owner_round_count(physical) -> int:
 def _protected_regions(operations: list, segments: list, owner) -> tuple:
     """The region a waiting stream keeps measuring in, or none.
 
-    A patch that waits keeps running rounds: "during this delay time
-    ∆proc a new data record is generated" (Terhal 1302.3428, lines
-    2697-2698 of the text), and "where our quantum system is idle,
-    more syndromes are generated" (Holmes 2004.04794 line 451). So the
-    operations that hold every patch of the stream after its last
-    segment run inside one protected region, from the first of them to
-    the last (controller/feedback_streams.py).
+    A waiting patch keeps running rounds: "during this delay time ∆proc a
+    new data record is generated" (Terhal 1302.3428) and "where our quantum
+    system is idle, more syndromes are generated" (Holmes 2004.04794). So
+    the operations that hold every patch of the stream after its last
+    segment run inside one protected region.
     """
     last_segment = segments[-1]
     last_index = operations.index(last_segment)

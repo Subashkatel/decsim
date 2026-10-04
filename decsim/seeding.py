@@ -129,16 +129,9 @@ class _AtomicRunSeedConsumer:
         """Prepare the state a commit installs, leaving the active one."""
         with self._run_seed_lock:
             self._refuse_second_binding(seed)
-            source, effective_seed = self._seed_source(seed)
-            proposed_seed = effective_seed
-            if source == "entropy":
-                proposed_seed = None
+            effective_seed = self._effective_seed(seed)
             prepared_state = self._prepare_run_seed_state(effective_seed)
-            reservation = seed_records.RunSeedReservation(
-                proposed_seed_source=source,
-                proposed_seed=proposed_seed,
-                prepared_state=prepared_state,
-            )
+            reservation = seed_records.RunSeedReservation(prepared_state)
             self._pending_run_seed = reservation
             return reservation
 
@@ -184,14 +177,13 @@ class _AtomicRunSeedConsumer:
                 f"with numeric run root {seed}"
             )
 
-    def _seed_source(self, seed) -> tuple:
-        """The seed source and value: the run, the component, or entropy."""
+    def _effective_seed(self, seed):
+        """The run's seed, else the component's own, else entropy."""
         if seed is not None:
-            return "derived", seed
+            return seed
         if self._explicit_seed is not None:
-            return "explicit_local", self._explicit_seed
-        entropy_seed = self._entropy_seed()
-        return "entropy", entropy_seed
+            return self._explicit_seed
+        return self._entropy_seed()
 
 
 class _RandomSeedConsumer(_AtomicRunSeedConsumer):

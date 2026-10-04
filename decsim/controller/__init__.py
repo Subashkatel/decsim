@@ -1,18 +1,10 @@
 """The controller: the room-side machine between the QPU and the stores.
 
-On the way in, controller.py takes every readout the QPU emits,
-round_assembly.py makes the fragments of one round into one packed
-round (detection_events.formed_at says whether the detection events
-are formed before that round leaves),
-syndrome_round_sender.py writes the finished round into every store that must
-hold it and holds it back while a store has no room, and
-round_transmission.py tells the window side what landed.
-
-On the way out, operation_issue.py admits one operation and issues it
-as one QPU command, feedback_streams.py keeps the protected cycle of a
-stream that feeds back, idle_rounds.py routes the rounds of a waiting
-patch under one of the idle policies in policies.py,
-conditional_release.py lets go of the operations that waited on a
-result, and instruction_output.py sends the instruction to the QPU.
-settings.py holds the controller's per-round costs.
+In: controller.py takes each readout, round_assembly.py packs a round's
+fragments, syndrome_round_sender.py writes it to its store or holds it,
+round_transmission.py tells the window side what landed. Out:
+operation_issue.py issues operations, feedback_streams.py keeps the
+protected cycle, idle_rounds.py and policies.py route a waiting patch's
+rounds, conditional_release.py frees the operations waiting on a result,
+instruction_output.py sends to the QPU.
 """

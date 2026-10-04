@@ -72,10 +72,7 @@ def build_plan(
 ) -> Plan:
     """The code, the workload's operations and the window plan.
 
-    Keep the root's run-shape and plan records together so their shared
-    inputs remain visible; named helpers resolve individual collaborators.
     A switching run's policy refuses a run shape it cannot serve.
-    is_bulk_strong is the decoder manager's bulk_strong.
     """
     is_switching = switching_settings is not None
     window_sizes = windows.scheme
@@ -162,7 +159,6 @@ def build_plan(
         retain_strong_context=is_switching,
         absorbs_weak_windows=absorbs_weak_windows,
         restart_reread_buffer_regions=reread_regions,
-        has_open_ended_dynamic_streams=bool(dynamic_streams),
         formation_reads=formation_reads,
     )
     resource_claims = _resource_claims(operations, view_by_id, layout)
@@ -306,20 +302,12 @@ def _strong_window_settings(
 
 
 def _scheme(windows: window_settings.WindowSettings):
-    """The windowing scheme the section's record builds, with its tail.
-
-    A switching run's policy refuses a scheme whose last window has no
-    trailing tail context, the fact the terminal tail sets.
-    """
+    """The windowing scheme the windows' record builds, with its tail."""
     return windows.scheme.build(windows.terminal_policy)
 
 
 def _boundary_policy(windows: window_settings.WindowSettings):
-    """The section's boundary policy.
-
-    A switching run's policy refuses the row its strong window cannot
-    serve (escalation/policies.py check_plan).
-    """
+    """The windows' boundary policy."""
     return windows.boundary_policy.build()
 
 
@@ -329,11 +317,7 @@ def _error_model_provider(
     code: ports.CodeModel,
     circuit_arguments: Mapping,
 ) -> ports.WindowModelSource:
-    """The window models' source: the run's own, or the one the qpu names.
-
-    A named one is built over the same card and circuits as the run's
-    source, and the decoders read its window models, not its rounds.
-    """
+    """The window models' source: the run's own, or the one the qpu names."""
     model_record = settings.error_model_provider
     if model_record is None:
         return device.window_model_source()
@@ -345,10 +329,9 @@ def _circuit_arguments(
 ) -> dict:
     """The source's constructor arguments for the workload's circuits.
 
-    A finite circuit is its measurement schedule and the round each
-    detector completes in, keyed by the stream that runs it, which is
-    StimDevice's declaration (qpu/stim_device.py); live fragments are
-    the programs StreamingStimDevice executes.
+    A finite circuit gives StimDevice its measurement schedule and each
+    detector's round, keyed by the stream that runs it; live fragments
+    are the programs StreamingStimDevice executes.
     """
     measurement_rounds = {}
     detector_rounds = {}
@@ -370,12 +353,7 @@ def _circuit_arguments(
 
 
 def _physical_formation_tables(physical_circuits: tuple) -> dict:
-    """Each finite circuit's recipes, by the stream key that runs it.
-
-    The source is declared each detector's round from this table, and
-    the plan reads from it how many rounds before a read its first
-    round's recipes reach.
-    """
+    """Each finite circuit's recipes, by the stream key that runs it."""
     tables = {}
     for key, physical in physical_circuits:
         if not isinstance(physical, workload_records.FiniteCircuit):
@@ -401,11 +379,10 @@ def _formation_tables(
 ) -> dict:
     """The recipes of every planned operation the source forms from.
 
-    The source reads an operation's recipes off its circuit when the
-    operation begins (qpu/stim_device.py, _sample_shot), after the plan
-    has placed the holds, so the plan reads the same circuit here. A
-    source that answers no recipes forms nothing, and a stream's
-    segments are planned while their stream runs, so neither has one.
+    The source reads them off the circuit only when the operation
+    begins, after the plan has placed the holds, so the plan reads the
+    same circuit here. A stream's segments are planned while their
+    stream runs, so they have none.
     """
     if not isinstance(device, ports.DetectionEventFormer):
         return {}
@@ -439,11 +416,9 @@ def _refuse_bulk_strong_without_a_merge(
 ) -> None:
     """bulk_strong merges strong re-decodes that carry timing alone.
 
-    Only the strong pool of a switching run merges, so the flag beside
-    any other escalation is read by nothing. The merged decode reads no
-    bits and returns no correction (DecoderManagerSettings.bulk_strong),
-    so rounds that carry values, or windows whose models come from a
-    provider other than the source's own, would be lost.
+    Without switching nothing reads the flag; and the merged decode
+    reads no bits and returns no correction, so rounds that carry values
+    or models from another provider would be lost.
     """
     if not is_bulk_strong:
         return
@@ -469,9 +444,7 @@ def _refuse_bulk_strong_without_a_merge(
 def _installed_circuits(device, model_provider, operations) -> dict:
     """Each operation by id, its circuit a copy when either consumer reads it.
 
-    A run whose source and model provider read no operation circuit
-    carries none; otherwise each circuit is a copy of the settings' own,
-    so the shot holds no circuit another shot shares.
+    The copy keeps a shot from holding a circuit another shot shares.
     """
     source_scope = _operation_circuit_scope(device, "syndrome source")
     model_scope = _operation_circuit_scope(model_provider, "model provider")

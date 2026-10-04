@@ -1,13 +1,11 @@
 """The Stim syndrome source: one sampled shot, emitted as raw bits by round.
 
-Every round carries one bit per measure qubit and the final round of a
-memory circuit also carries the data-qubit readout (Stim,
-src/stim/gen/gen_surface_code.cc); detection events are formed wherever
-detection_events.formed_at seats the former, from the recipes
-formation_table reads off the circuit. One shot is sampled per stream identity,
-under that identity's substream of the root seed (seeding.substream_seed)
-so a run is reproducible across processes, and reused by every segment
-of the stream.
+Every round carries one bit per measure qubit, and the final round of a
+memory circuit the data readout too (Stim
+src/stim/gen/gen_surface_code.cc). One shot is sampled per stream under
+that stream's substream of the root seed (seeding.substream_seed), so a
+run is reproducible across processes, and every segment of the stream
+reuses it.
 """
 
 import bisect
@@ -52,17 +50,12 @@ BURST_CHANNELS = ("gate", "idle", "measurement", "reset")
 class StimDevice(seeding._AtomicRunSeedConsumer):
     """Streams one sampled Stim shot as raw measurement packets, by round.
 
-    The model maps are keyed by stream identity and use one-based
-    emitted rounds. detector_rounds says which round each detector belongs
-    to when the circuit does not follow Stim's generator layout;
-    measurement_rounds declares the QPU's packet schedule for the same
-    reason. A non-empty terminal_detector_ids entry says the stream's
-    final data readout arrives as its own fragment, through
-    finalize_stream_round.
-
-    Trace source: shot_sampled(operation, detection_events) once per
-    fresh shot, with the whole-circuit detection events a reference
-    decode reads.
+    The maps are keyed by stream identity with one-based rounds.
+    detector_rounds and measurement_rounds declare the rounds when the
+    circuit does not follow Stim's generator layout. A non-empty
+    terminal_detector_ids entry says the final data readout arrives as its
+    own fragment (finalize_stream_round). shot_sampled carries the
+    whole-circuit detection events a reference decode reads.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -75,11 +68,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         def build(
             self, code: ports.CodeModel, circuit_arguments: Mapping
         ) -> "StimDevice":
-            """A fresh source over the workload's circuits.
-
-            circuit_arguments are the workload's circuits as this
-            constructor's keywords (build/plan.py _circuit_arguments).
-            """
+            """A fresh source over the workload's circuits, as keywords."""
             del code
             return StimDevice(**circuit_arguments)
 
@@ -198,8 +187,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """The stream's final data readout as its own raw fragment.
 
         The refusals are the contract with the frontend that declared the
-        stream: a wrong declaration would stamp another round's bits as
-        the final readout.
+        stream: a wrong declaration would stamp another round's bits as the
+        final readout.
         """
         key = program_records.decode_identity(operation)
         shot = self._shots.shot_by_key[key]
@@ -300,8 +289,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ) -> bool:
         """A finite model's terminal boundary is fixed at registration.
 
-        A seal at another length stops the run where the decoder memory
-        checks each input against its window model's rows.
+        A seal at another length stops where the decoder memory checks each
+        input against its window model's rows.
         """
         del stream_operation
         del stream_round_count
@@ -372,9 +361,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ) -> Optional[fault_models.WindowErrorModel]:
         """An independent window model for a strong re-decode.
 
-        Each inclusive round range is assigned to another seam side, and
-        a pinned face's neighbour supplies the faults it has already
-        committed, which are no columns of this model.
+        Each round range goes to another seam side, and a pinned face's
+        neighbour supplies the faults it already committed, which are no
+        columns here.
         """
         if operation.circuit is None:
             return None
@@ -515,20 +504,17 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 class RecordedStimDevice(StimDevice):
     """Replays recorded raw measurements (hardware data) instead of sampling.
 
-    measurements is a (shots, measurements) bool array in the measurement
-    order of the operation's circuit (the measurements.b8 of a released
-    experiment); shot selects the row. Detection events, observable truth,
-    round chronology and window error models come from the circuit
-    exactly as for sampled data.
+    measurements is a (shots, measurements) bool array in the circuit's
+    measurement order (a released experiment's measurements.b8); shot picks
+    the row. Everything else comes from the circuit as for sampled data.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The replay row: the measurements are an array no record holds.
 
-        Its build stops on the constructor's missing measurements, so a
-        replay runs from a record of the caller's own whose build hands
-        the source its array.
+        Its build stops on the missing measurements, so a replay runs from a
+        record of the caller's own that hands the source its array.
         """
 
         # the word the reports name this row by
@@ -560,25 +546,6 @@ class RecordedStimDevice(StimDevice):
         self.measurements = measurements
         self.shot = shot
 
-    @staticmethod
-    def detector_rounds_from_coordinates(
-        circuit: stim.Circuit, round_count: int
-    ) -> dict[int, int]:
-        """The one-based emitted round of every detector of a hardware circuit.
-
-        Google's released memory experiments write detector coordinates as
-        concatenated (x, y, t) triples; a detector belongs to its latest t.
-        """
-        rounds = {}
-        coordinates_by_detector = circuit.get_detector_coordinates()
-        for detector_id, coordinates in coordinates_by_detector.items():
-            layer = int(max(coordinates[2::3]))
-            if layer >= round_count:
-                rounds[detector_id] = round_count
-            else:
-                rounds[detector_id] = layer + 1
-        return rounds
-
     def _measurement_row(
         self, sampler: stim.CompiledMeasurementSampler
     ) -> tuple[int, ...]:
@@ -590,42 +557,31 @@ class RecordedStimDevice(StimDevice):
 class BurstStimDevice(StimDevice):
     """Samples every shot with one error burst the decoders are not told of.
 
-    The shot is drawn from burst_circuit, the operation's circuit with the
-    burst's extra noise; detection events are formed, and window models
-    built, from the operation's own circuit, as on hardware, where the
-    decoders' error model is the calibrated one. The public
-    qec-burst-scaling code samples its bursts the same way, with the
-    decoder weights from the background circuit (qecburst/circuit.py
-    inject_burst_profile; qecburst/simulate.py). One burst per shot:
-    bursts come every 10 s on Sycamore (McEwen 2104.05219, "λ = 1/(10
-    s)") and about once an hour on Willow (2408.13687, "once every
-    hour"), far apart next to a shot, so the rate joins when the shots
-    are read, as Q3DE weighs a burst shot's logical error by the time
-    bursts take up (2501.00331, equation (1)).
+    The shot is drawn from burst_circuit; detection events and window
+    models come from the operation's own circuit, as on hardware, where the
+    decoders' model is the calibrated one, and as qec-burst-scaling samples
+    (qecburst/circuit.py inject_burst_profile). One burst per shot: bursts
+    come every 10 s on Sycamore (McEwen 2104.05219) and about hourly on
+    Willow (2408.13687), far apart next to a shot, so the rate joins when
+    shots are read, as Q3DE weighs a burst shot (2501.00331, equation (1)).
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The burst: its rise and decay, where, how strong, which noise.
 
-        burst_onset_round is the first one-based round with extra noise.
-        It climbs to burst_error_probability over burst_rise_rounds,
-        (i + 1) / rise of it in the i-th round from the onset, then
-        decays from that peak as exp(-(rounds since the peak) /
-        burst_decay_rounds), the exponential recovery McEwen measures ("a
-        typical ~25 ms exponential decay", 2104.05219) and
-        qec-burst-scaling samples (qecburst/circuit.py
-        exponential_decay_profile); a burst_decay_rounds of None holds the
-        peak's probability to the shot's end. A rise of 1 is a step,
-        McEwen's and qec-burst-scaling's shape; the six largest bursts in
-        the repetition-code data released with 2408.13687 peak about 3
-        rounds after their onset, as Kurilovich's T1 transient of about
-        10 us would (2506.18228 lines 312-315). The region is every qubit
-        whose first two Stim coordinates lie within burst_radius of
-        burst_center, the midpoint of the qubits' coordinates when None;
-        a burst_radius of None is every qubit. burst_channels names the
-        noise it raises (BURST_CHANNELS). A burst_error_probability of 0
-        is no burst: the shot is drawn from the operation's own circuit.
+        burst_onset_round is the first one-based round with extra noise. It
+        climbs to burst_error_probability over burst_rise_rounds, (i + 1) / rise
+        of it in the i-th round, then decays as exp(-(rounds since the peak) /
+        burst_decay_rounds), McEwen's "typical ~25 ms exponential decay"
+        (2104.05219) and qecburst exponential_decay_profile; None holds the peak
+        to the shot's end. A rise of 1 is McEwen's step; the six largest bursts
+        in the 2408.13687 repetition-code data peak about 3 rounds after onset,
+        as Kurilovich's T1 transient of about 10 us would (2506.18228). The
+        region is every qubit whose first two Stim coordinates lie within
+        burst_radius of burst_center (the qubits' midpoint when None); a radius
+        of None is every qubit. burst_channels names the noise raised. A
+        probability of 0 is no burst.
         """
 
         burst_onset_round: int = 1
@@ -709,26 +665,20 @@ def burst_circuit(
 ) -> stim.Circuit:
     """The flattened circuit with one burst's extra noise in its rounds.
 
-    A round is decsim's own: the instructions after the previous round's
-    last measurement through its own last one, as the formation table's
-    packet widths lay the measurements out, so no TICK count is assumed.
-    In a burst round every noise instruction of a named channel that
-    touches the region is preceded by a copy of itself on the region's
-    targets at the round's extra probability; a two-qubit channel keeps a
-    pair when either qubit is in the region. The idle copy lands right
-    after the round's first TICK, where qec-burst-scaling inserts its
-    one DEPOLARIZE1 per round (qecburst/circuit.py inject_burst_profile).
-    A patch the region misses is returned as it is, so its shot is the
-    one stim_device draws. A region on the patch with none of the named
-    noise to raise is refused: qec-burst-scaling locates its burst on the
-    background noise too, and refuses a circuit without it
-    (qecburst/geometry.py get_data_qubits, "Ensure p0 > 0";
-    circuit.py build_background_circuit, "expects 0 < p0").
+    A round runs from after the previous round's last measurement through
+    its own last, as the formation table lays measurements out, so no TICK
+    count is assumed. In a burst round each noise instruction of a named
+    channel touching the region is preceded by a copy on the region's
+    targets at the extra probability; a two-qubit channel keeps a pair when
+    either qubit is in the region. The idle copy lands after the round's
+    first TICK, where qecburst inserts its DEPOLARIZE1. A patch the region
+    misses comes back unchanged. A region with none of the named noise is
+    refused, as qecburst refuses a circuit without background noise
+    (geometry.py get_data_qubits, circuit.py build_background_circuit).
 
     Raises:
         ValueError: the burst starts after the shot's last round, or its
-            region covers the patch and finds no noise of its channels,
-            so no shot would run with the burst the settings name.
+            region finds no noise of its channels.
     """
     return _with_burst(circuit, table, burst, is_background_kept=True)
 
@@ -740,12 +690,9 @@ def burst_noise(
 ) -> stim.Circuit:
     """burst_circuit's extra noise alone: the circuit's own noise removed.
 
-    The copies land where burst_circuit puts them, found from the same
-    noise, and Stim's without_noise strips the rest, measurement flip
-    arguments included. Detection events are the XOR of every Pauli
-    error's flips, and the burst's copies are channels independent of
-    the circuit's own, so a shot of the circuit XOR a shot of this one is
-    a shot of burst_circuit: one quiet shot serves as its own control.
+    Detection events are the XOR of every error's flips and the burst's
+    copies are independent channels, so a shot of the circuit XOR a shot of
+    this is a shot of burst_circuit: one quiet shot is its own control.
 
     Raises:
         ValueError: as burst_circuit.
@@ -914,13 +861,10 @@ def _closed_temporal_boundary_windows(windows: list) -> tuple:
 class _ShotTable:
     """Every per-shot and per-stream map of one device, as one member.
 
-    A shot sits under its sample key: the stream id, or the operation id
-    of a standalone operation. An operation that replays a stream's shot
-    is known by its own id, which maps to the sample key. The three
-    override maps are the caller's declarations about the circuit; the
-    four registries are what sampling fills in. Grouping them is gem5's
-    move for a component's many members
-    (gem5 src/base/stats/group.hh:60-92).
+    A shot sits under its sample key: the stream id, or a standalone
+    operation's id; an operation replaying a stream's shot maps to it. The
+    override maps are the caller's declarations; the registries are what
+    sampling fills in.
     """
 
     detector_rounds_override: dict

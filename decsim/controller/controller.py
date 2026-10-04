@@ -2,14 +2,9 @@
 
 The model carries no analog waveform. A readout's classified bits cross
 qpu_to_controller, pay the readout-to-bits cost (40 ns in-FPGA
-discrimination, Fermilab 2406.18807; 32 ns of IQ demodulation and 4 ns
-of state classification, Yang 2605.04892 lines 1054-1055), and reach
-the round assembler as one fragment. The rest of
-the controller is its own components: the issuer (operation_issue.py)
-turns admitted operations into commands, the output
-(instruction_output.py) carries commands and decisions to the QPU, the
-idle accounting (idle_rounds.py) routes and charges idle rounds, and the
-feedback streams (feedback_streams.py) keep the protected regions.
+discrimination, Fermilab 2406.18807; 32 ns IQ demodulation plus 4 ns
+classification, Yang 2605.04892) and reach the assembler as one
+fragment.
 """
 
 import dataclasses
@@ -26,9 +21,7 @@ import decsim.trace_source as trace_source
 class Controller:
     """The readout intake; implements the ReadoutReceiver port.
 
-    Trace source: copy_made(round_key, bits, "readout", "controller
-    intake") for the intake's copy of the bits (data_path.md hop 1). The
-    instant the readout left is the QPU's own event (qpu/cycle_clock.py).
+    copy_made fires for the intake's copy of the bits (data_path.md hop 1).
     """
 
     link = ports.Port(ports.Link)
@@ -48,10 +41,7 @@ class Controller:
         readout: round_records.QPUReadout,
         route: round_records.SyndromePacketRoute,
     ) -> None:
-        """One readout crosses qpu_to_controller to the assembler.
-
-        The fragment reaches the assembler after the readout delay.
-        """
+        """Send one readout over qpu_to_controller; it then pays the delay."""
         fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
         self.assembler.expect_round(fragment, readout.fragment_count, route)
         round_key = (fragment.operation_id, fragment.round_index)
@@ -87,12 +77,6 @@ class Controller:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the controller reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the controller reports, as one member."""
 
     copy_made: trace_source.TraceSource = trace_source.new_source()

@@ -1,8 +1,5 @@
 """Everything that happens to a program before and while it runs.
 
-The frontends turn an input (a Deltakit circuit, a small circuit) into
-decsim operations, streams and rounds; the planner sizes the decoding
-windows and their dependencies ahead of time; the execution runtime
-decides which operation runs when. Planning is build time, off the
-reaction path.
+Planning is build time, off the reaction path; the execution runtime
+decides which operation runs when.
 """

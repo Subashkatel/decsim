@@ -1,26 +1,18 @@
 """How often a run copied bits, referenced them and moved them.
 
-The counters of the data path's hops, so a study reads the data path
-without the trace file. gem5's
-vocabulary: a copy duplicates bits into a structure the receiver owns
-(mem/cache/cache_blk.hh 97-104), a reference is a handle to bits that
-stay where they are (mem/packet.hh 1163-1171), a move crosses a link
+gem5's vocabulary: a copy duplicates bits into a structure the receiver
+owns (mem/cache/cache_blk.hh 97-104), a reference is a handle to bits
+that stay (mem/packet.hh 1163-1171), a move crosses a link
 (dev/dma_device.cc 194-213).
 
-A listener on copy_made on every component that copies, on the fabric's
-transfer_delivered for the moves, and on the stores' hold_registered
-for the references; it counts and keeps no bits.
-
-The counts are also grouped by the memory class the hop crosses, because
-the classical sources make the class the cost and not the count: a DRAM
-access is "a couple of orders-of-magnitude higher than the cost of an
-internal cache access" (Horowitz, ISSCC 2014 lines 232-247), and on an
-accelerator "memory accesses have a cost that is a function of the size
-of the memory being accessed" (Dally, CACM 2020 lines 231-234), so a
-copy into a register and a copy across a cryostat link must not be
-summed. The two tables below are decsim's placement of this machine's
-structures and links, read off the sources named on each row; they are
-a report-side grouping and no component reads them.
+The counts are also grouped by the memory class the hop crosses, since
+the class is the cost: a DRAM access is "a couple of orders-of-magnitude
+higher than the cost of an internal cache access" (Horowitz, ISSCC
+2014), and "memory accesses have a cost that is a function of the size
+of the memory being accessed" (Dally, CACM 2020), so a register copy and
+a cryostat-link copy must not be summed. The two tables are decsim's
+placement of its structures and links, a report-side grouping no
+component reads.
 """
 
 import dataclasses
@@ -30,11 +22,8 @@ import enum
 class MemoryClass(enum.Enum):
     """The memory a hop crosses, and what it costs to cross it.
 
-    ON_CHIP is a register or an SRAM inside one chip; ON_BOARD is a
-    memory two chips of one board share; OFF_BOARD is a link between
-    boards or out of the cryostat. UNCLASSIFIED is a structure or a path
-    no table row names, so a grouped report still sums to the run's
-    total.
+    UNCLASSIFIED is a structure or path no table row names, so a grouped
+    report still sums to the run's total.
     """
 
     ON_CHIP = "on_chip"
@@ -149,12 +138,9 @@ class DataMovement:
     def transfer_delivered(self, record) -> None:
         """One move landed on its link, its header with its payload.
 
-        The wire serializes the path's framing beside the payload, and the
-        link ledger charges both (ns-3's point-to-point device adds its
-        header in Send and times the whole packet, ns-3
-        src/point-to-point/model/point-to-point-net-device.cc lines 528
-        and 243), so a move counts the same bits: every header, and the
-        payload when its size is known.
+        The wire serializes the framing beside the payload and the link ledger
+        charges both (ns-3 point-to-point-net-device.cc lines 528, 243), so a
+        move counts the same bits.
         """
         transfer = record.transfer
         bits = transfer.header_bits
@@ -186,10 +172,8 @@ class DataMovement:
     def formation_state_held(self, seat: str, operation_id, bits) -> None:
         """A seat's former holds these raw bits of one operation now.
 
-        The ledger keeps the most one history held at each seat: the
-        state a seat keeps to form the next round (detection_events),
-        reported because no referent sizes it and nothing is refused
-        for it.
+        The most one history held at each seat is kept, reported because no
+        referent sizes it.
         """
         del operation_id
         held = self.formation_state_bits_by_seat.get(seat, 0)
@@ -249,10 +233,8 @@ class DataMovement:
 class _Counts:
     """One structure's tally: the events, the rounds they carried, bits.
 
-    data_path.md's hop table counts per round, so one job's input copy
-    of six rounds is one event and six rounds; a study that prices the
-    hop reads the events, one that counts the table's hops reads the
-    rounds.
+    A six-round input copy is one event and six rounds: a study pricing the
+    hop reads events, one counting data_path.md's hops reads rounds.
     """
 
     events: int = 0
@@ -280,9 +262,8 @@ def _row_of(rows: dict, key):
 def _as_rows(kind: "_PathCounts") -> dict:
     """One row per path, in path order, each naming the class it crosses.
 
-    The class travels with the path because the report groups by it and
-    a reported path is the only name the report has: reading the class
-    back off that text would put this table's placement in two files.
+    The report has only the path's text, so the class travels with it
+    rather than being read back off that text.
     """
     rows = {}
     for path in sorted(kind.by_path):

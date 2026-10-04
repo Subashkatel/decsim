@@ -1,68 +1,43 @@
 """The machine: the parts of one run, built from its settings and connected.
 
-A run is six parts, each a record of the components it holds, in the
-order a readout travels: the qpu (the device and its readouts), the
-readout path (the controller, the packing stage and the syndrome
-buffers), the windows (the window manager, the verdict and the strong
-re-decode), the decoders (each tier's units and their managers), the
-control side (the program's execution and the Pauli frame) and the link
-fabric every hop rides. Each part lives in decsim/build/, builds its own
-components from their settings and wires them to one another; the
-machine builds the parts and connects them, and Machine.assemble lists
-every wire that crosses from one part to another.
-
-That is the shape of gem5's standard library and of OMNeT++'s compound
-modules. A gem5 board is handed a processor, a memory and a cache
-hierarchy, and each wires its own insides through one method
-(src/python/gem5/components/boards/abstract_board.py:426-459,
-cachehierarchies/classic/private_l1_cache_hierarchy.py:97-130); an
-OMNeT++ compound module declares its submodules and connections and
-shows its parent only its own gates (manual section 3.4,
-samples/routing/node/Node.ned). A component still meets its neighbours
-only through the ports of decsim/ports.py, and a pluggable component is
-still one class and one row in its package's table, sinter's
-`BUILT_IN_DECODERS` (sinter/_decoding/_decoding_all_built_in_decoders.py)
-made one dict per pluggable component. Where two components refer to
-each other the per-job callback law breaks the cycle (SimPy's callback
-on the event, simpy/core.py step()): the submitting side carries the
-return path with the job, so the window side names the decoder manager
-as its DecodeQueue and the strong redecode asks it to await and accept
-a strong selection over the same port.
+A run is six parts in decsim/build/, in the order a readout travels:
+the qpu, the readout path (the controller, the packing stage and the
+syndrome buffers), the windows, the decoders, the control side (the
+program's execution and the Pauli frame) and the link fabric every hop
+rides. Each part builds and wires its own components; Machine.assemble
+lists every wire that crosses from one part to another. That is gem5's
+standard library, where a board is handed a processor, a memory and a
+cache hierarchy that each wire their own insides
+(src/python/gem5/components/boards/abstract_board.py:426-459), and
+OMNeT++'s compound modules (manual section 3.4). Where two components
+refer to each other, the submitting side carries the return path with
+the job (SimPy's callback on the event, simpy/core.py step()).
 
 The packages import each other in one direction only, so the top can be
 cut off and what is left still runs (Parnas 1972 lines 505-529;
 Dijkstra's THE, dijkstra_the.txt 52-57). The levels, leaves first, are
 what tools/check_uses_graph.py prints and check.sh enforces:
 
-    0  compiled_libraries, config, plots, records, tables, trace_source
+    0  compiled_libraries, config, records, trace_source
     1  engine, ports, seeding
     2  controller, detector_error_model, links, pauli_frame,
        syndrome_buffer, windows
     3  decoders, escalation, qpu
     4  confidence, frontends, observe, sinter_adapters
-    5  build, producers, settings
-    6  machine (this file)
-    7  collect
-    8  experiments
-    9  __main__, results
-
-Level 3 and below decode a window on a store with no window manager,
-which is what the decoders' own tests run.
+    5  build, producers
+    6  settings
+    7  machine (this file)
+    8  collect
+    9  experiments
+    10 __main__
 
 The eleven priced hops are the line where a call stops being local
 (Waldo 1994, waldo1994.txt 302-304 and 852-855): a call across a hop
 has a card, a payload a record names, and a send at one end; a call
-inside a unit is never priced. Across that line decsim models latency,
-memory access, and partial failure only where a card's protocol names
-it. The ideal row, every card's default, drops, duplicates and reorders
-nothing and never retries. The credit row cuts a message into frames
-that wait for a finite receive buffer's credits and loses nothing. The
-reliable row loses frames at the card's bit error rate and resends them
-by go-back-N until each message is delivered once and in order, so a
-component above a hop never sees a loss, a duplicate or a reordering
-on any row (decsim/links/credit_channel.py and reliable_channel.py);
-when its retry count runs out, the link has failed and the run stops
-with an error.
+inside a unit is never priced. A component above a hop never sees a
+loss, a duplicate or a reordering on any protocol
+(decsim/links/credit_channel.py and reliable_channel.py); when a
+reliable link's retry count runs out, the run stops with an error.
 """
 
 import dataclasses
@@ -123,19 +98,12 @@ class Machine:
     ) -> "Machine":
         """Build every part from the run's settings, then assemble them.
 
-        These are the steps a script that replaces one part repeats: the
-        switching part, the plan and the decoder units are compiled
-        first, since the parts are built for them; then each part is
-        built on its own, and assemble connects them. The seed is the
-        run's root; every stochastic component derives its own from it
-        and its path. built_models is the window error model cache the
-        shots of one unit share (collect.run_unit); a machine built
-        without one builds its own models. online_threshold is the
-        point's calibrator when its switching threshold learns across
-        shots (collect.Task builds it); like the models it is point
-        state, never a setting. The settings are read at their point
-        first (MachineSettings.at_point), so a record whose calibration
-        row no task has read builds a shot as one whose row is read.
+        The seed is the run's root; every stochastic component derives
+        its own from it and its path. built_models is the window error
+        model cache the shots of one unit share (collect.run_unit), and
+        online_threshold the point's calibrator when its threshold
+        learns across shots (collect.Task); both are point state, never
+        settings.
         """
         settings = settings.at_point()
         if built_models is None:
@@ -245,12 +213,9 @@ class Machine:
     ) -> "Machine":
         """Connect the parts, start them, seed them, and load the program.
 
-        The connections are every wire that crosses from one part to
-        another, in the order a readout travels; each part wired its own
-        inside when it was built, and a switching part wires its strong
-        side to the window side last. Nothing is scheduled until the machine
-        runs, so the order the parts were built in cannot move a tick
-        (gem5 src/sim/sim_object.hh lines 194 and 280).
+        Nothing is scheduled until the machine runs, so the order the
+        parts were built in cannot move a tick (gem5
+        src/sim/sim_object.hh lines 194 and 280).
         """
         root_seed = _root_seed(seed)
         qpu.connect(
@@ -325,11 +290,8 @@ class Machine:
     def start(self) -> None:
         """Queue the first event of every component that has one.
 
-        Every component is built and wired first and nothing is
-        scheduled while the graph is still being assembled; that is
-        gem5's split between the constructor and startup, "the
-        appropriate place to schedule initial event(s)"
-        (gem5 src/sim/sim_object.hh lines 194 and 280).
+        gem5's startup, "the appropriate place to schedule initial
+        event(s)" (gem5 src/sim/sim_object.hh lines 194 and 280).
         """
         self.qpu.factory.start()
         self.control.execution_runtime.start()
@@ -360,10 +322,7 @@ def store_slots(
 ) -> tuple:
     """The weak and the strong syndrome buffer slots; None for an unread one.
 
-    The tier that decodes the plan's windows reads its own store through
-    the chip's pool, and a switching run's strong tier reads the strong
-    store through the host's; each pool says whether its units read the
-    rounds in place. A run with no decoder reads neither store.
+    Each pool says whether its units read the rounds in place.
     """
     if pool.active is None:
         return None, None
@@ -393,9 +352,7 @@ def _seed_roots(
 ) -> tuple:
     """The seed path of every stochastic owner; the names are results.
 
-    The plan's own rows first, then each part's, then the switching
-    policy, None on a run with no switching. The seeding sorts the roots
-    by path, so the order they are listed in moves nothing.
+    The seeding sorts the roots by path, so the order here moves nothing.
     """
     escalation_policy = None
     if switching is not None:
@@ -455,13 +412,7 @@ def _observe(
 def _process_name(
     settings: machine_settings.MachineSettings, seed: Optional[int]
 ) -> str:
-    """The machine the trace is of: its escalation, code distance and seed.
-
-    The escalation is the word for the filled decode slots
-    (MachineSettings.escalation_kind). The machine knows no sweep, so the
-    point's other values name the trace's file (experiments/measure.py
-    shot_label) and not this line.
-    """
+    """The machine the trace is of: its escalation, code distance and seed."""
     kind = settings.escalation_kind
     distance = settings.qpu.distance
     return f"decsim {kind} d{distance} seed{seed}"

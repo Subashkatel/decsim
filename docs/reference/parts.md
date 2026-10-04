@@ -544,7 +544,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `DistillationFactory.Settings`
 
-`decsim/qpu/magic_state_factories.py`. The 15-to-1 stage's card, checked where it enters.
+`decsim/qpu/magic_state_factories.py`. The 15-to-1 stage's card, in engine ticks, checked at entry.
 
 | Field | Type | Default |
 | --- | --- | --- |

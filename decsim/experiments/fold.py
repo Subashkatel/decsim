@@ -1,50 +1,23 @@
 """Many run folders' additive rows folded into one, none of them held.
 
-A run folder records only facts that add up, so folding folders is
-reading their rows and adding them. The rows are what an experiment
-has most of: the 500 folders of one weak_ler sweep hold
-115 million link rows and 10.5 million shot rows, and one row as a dict
-of typed Python values costs about a kilobyte, so reading them into
-lists costs a hundred gigabytes. This module holds what the fold needs
-instead, and nothing in it grows with the number of shots:
+The 500 folders of one sweep hold 115 million link rows, a hundred
+gigabytes as dicts, so nothing here grows with the shots: row_stream
+reads one row at a time, merged_rows orders several folders' streams,
+RowFile writes as rows arrive, RowTotals keeps counts, sums, maxes and
+means, ExactSum keeps a sum equal to math.fsum. sinter folds its csv
+files the same way (sinter/_command/_main_combine.py:31-34;
+_data/_task_stats.py:117-150).
 
-    row_stream   one folder's file as rows, one row alive at a time
-    merged_rows  several folders' streams in one order, a file open only
-                 while its rows are due
-    RowFile      one file written as its rows arrive
-    RowTotals    a set of rows' count, true counts, sums, maxes, means
-    ExactSum     a running sum that equals math.fsum of its values
-
-sinter folds its csv files the same way: `total += ExistingData.from_file(path)`
-over the paths, nothing else held (sinter/_command/_main_combine.py:31-34),
-where the rows of one task fold into one TaskStats whose __add__ sums
-shots, errors, discards, seconds and the counter table
-(sinter/_data/_task_stats.py:117-150), so that "the statistics for that
-task are folded together (so only the total shots, total errors, etc for
-each task are included in the results)"
-(sinter/_data/_existing_data.py:137-142).
-
-The order comes from a merge, not a sort. Every run folder holds its
-rows in the run's own order, its task position and then its seed, and a
-shot lives in one folder, so walking the folders side by side puts the
-rows back in the sweep's order. The heap holds one entry per open file,
-(place, the file's index, row, stream), so rows of equal place come out
-in the order the files were given, the tie heapq.merge breaks the same
-way (/opt/python/lib/python3.11/heapq.py:376, 383-388); the merged
-order is the order the stable sort of the concatenation gave, the
-classical balanced merge of Knuth, TAOCP volume 3, section 5.4.1. Unlike
-heapq.merge, which starts every stream at once, a file is opened only
-when its first row is due: before that, only its first place is known,
-read with the file open for one row. The pieces of an experiment hold
-disjoint seed ranges, so one piece's file is open at a time, and a
+The order comes from a merge, not a sort: each folder holds its rows in
+the run's order and a shot lives in one folder, so a heap of one entry
+per open file restores the sweep's order, ties broken by file order as
+heapq.merge does (heapq.py:376, 383-388), Knuth's balanced merge (TAOCP
+vol. 3, 5.4.1). A file opens only when its first row is due, so a
 capped point's hundred thousand pieces stay under the open-file limit.
-The merge assumes each input is sorted, so a stream that goes backwards
-is refused where it is read rather than folded into a wrong order.
+A stream that goes backwards is refused where it is read.
 
-Nothing here knows a column of decsim's: which field is a mean and which
-a count is report.py's to say, and a row is either the text a csv file
-holds or the numbers a measurement held, which `number_of` reads either
-way. One accumulator therefore serves the fold and the single run.
+Nothing here knows decsim's columns; report.py says which field is
+which.
 """
 
 import csv
@@ -133,36 +106,13 @@ def merged_rows(paths: list, key):
 class ExactSum:
     """A running sum that equals math.fsum of the finite values it was given.
 
-    The state is the list of non-overlapping partial sums whose total is
-    the exact sum of every value added, which is what math.fsum keeps
-    while it walks a list: Shewchuk's adaptive-precision addition
-    (Shewchuk 1997, "Adaptive Precision Floating-Point Arithmetic and
-    Fast Robust Geometric Predicates"), the recipe named at
-    /opt/python/lib/python3.11/test/test_math.py:657-659, "Based on the
-    'lsum' function at http://code.activestate.com/recipes/393090/".
-    Neither the paper nor the recipe is on this machine, and the msum
-    that test file carries at :656-681 is a different algorithm, the
-    frexp/ldexp integer one the file itself labels so at :649-651. What
-    is on this machine, and what the tests here compare against value
-    for value, is math.fsum itself.
-
-    Finite is the whole claim and not a hedge: on a value that is not
-    finite, or on partials that overflow, this sum and math.fsum part
-    company. math.fsum([1.0, inf]) is inf and this returns nan, because
-    the loop computes inf - (inf - 1.0); math.fsum raises OverflowError
-    on [1e308, 1e308] and this raises ValueError out of total, and on
-    [1e308, 1e308, -1e308] this returns nan (the four cases CPython's
-    own test pins at test_math.py:735-740). Nothing here refuses them,
-    because every column a fold sums is a microsecond span or a bit
-    count of a run that finished, and STYLE.md rule 4 leaves out a check
-    no caller can trigger.
-
-    `total` rounds that list once, so it is the sum math.fsum returns
-    for the same values in any order, and a mean folded over an
-    experiment's folders is the mean one process would have computed, to
-    the last bit.
-    A plain running float sum would not be: it would move the last bits
-    of every mean column with the order the folders came in.
+    The state is the non-overlapping partials math.fsum keeps, Shewchuk's
+    adaptive-precision addition (Shewchuk 1997), and the tests compare
+    against math.fsum value for value. Finite is the whole claim: on inf or
+    overflow the two part company (CPython test_math.py:735-740), and no
+    fold sums such a value, so nothing refuses them (STYLE.md rule 4). total
+    rounds once, so a mean folded over folders in any order is the mean one
+    process computes, to the last bit, which a running float sum is not.
     """
 
     def __init__(self) -> None:
@@ -171,17 +121,11 @@ class ExactSum:
     def add(self, value) -> None:
         """One more value, the sum still exact.
 
-        A zero leaves an exact sum as it was and is skipped, which is
-        three quarters of an experiment's link fields: it changes no
-        partial, and it takes no sign with it either, because math.fsum
-        of zeros is 0.0 and not -0.0 (tests/experiments/test_fold.py). The
-        partials loop stays in this one function because a fold of the
-        500-folder experiment adds four hundred million values and each
-        call of it walks the whole partials list: measured over a
-        million calls, 0.43 us for a value whose
-        magnitude is the ones before it (two partials), 1.86 us across a
-        1e-30 to 1e30 spread (fourteen), and 0.07 us for a zero, which
-        is skipped. That is STYLE.md's one concession to a hot path.
+        A zero changes no partial and is skipped, three quarters of the link
+        fields; math.fsum of zeros is 0.0, not -0.0. The loop stays in this
+        function because a 500-folder fold makes four hundred million calls:
+        0.43 us at two partials, 1.86 us at fourteen, 0.07 us for a zero.
+        STYLE.md's one concession to a hot path.
         """
         addend = float(value)
         if not addend:
@@ -209,14 +153,8 @@ class ExactSum:
 class RowTotals:
     """What a set of rows adds up to, one row at a time.
 
-    Which field plays which role is given once, at construction: how
-    many rows there are, how many hold a field true, a field's sum, a
-    field's largest value, and a field's mean. Nothing here grows with
-    the rows, so the totals of ten shots and of ten million are the same
-    size, which is what lets a fold stream an experiment. It is the shape
-    of sinter's TaskStats, which holds shots, errors, discards, seconds
-    and a counter table and folds by adding them
-    (sinter/_data/_task_stats.py:117-150).
+    Each field's role is given at construction, and nothing grows with the
+    rows, the shape of sinter's TaskStats (sinter/_data/_task_stats.py).
     """
 
     def __init__(
@@ -278,11 +216,8 @@ class RowTotals:
 class RowFile:
     """One csv file written as its rows arrive, never held and then written.
 
-    The header is every column the file's rows hold, known before the
-    first row comes, and a row's cell for a column it does not hold is
-    empty: `write_csv`'s rule. A file whose first row never came is not
-    created, which is the rule a run folder's files keep for a run that
-    had nothing to put in them.
+    The header is known before the first row; a missing cell is empty, and
+    a file whose first row never came is not created.
     """
 
     def __init__(self, path: pathlib.Path, field_names: list) -> None:

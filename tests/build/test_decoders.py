@@ -96,7 +96,7 @@ class _SeedRecordingScheduler(schedulers.FifoScheduler):
 
     def reserve_run_seed(self, seed):
         self.reserved_seeds.append(seed)
-        return seed_records.RunSeedReservation("derived", seed, None)
+        return seed_records.RunSeedReservation(None)
 
     def commit_run_seed(self, reservation):
         del reservation

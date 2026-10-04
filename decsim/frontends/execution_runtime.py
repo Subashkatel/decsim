@@ -1,17 +1,13 @@
 """Which operation runs when: readiness, resource ownership, timestamps.
 
 An operation starts when its predecessors are done, its scheduled start
-round has passed, its magic state (if any) is ready, its feedback release
-(if any) has arrived and the controller's issuer lets it onto the QPU.
-Resources (qubits, patches) are claimed at request and freed when the
-body is done; two operations never hold one resource without a
-dependency edge between them. The runtime keeps which operations have
-started, finished and been released; the ticks of every operation's
-life go out on its trace sources (operation_issued, operation_started,
-body_finished, decode_released, result_returned, each with the
-operation id and the tick) and the runtime stamps listener keeps them.
-The issuer hears each start through on_started (SimPy's callback on the
-event): the runtime never receives a call back from the controller.
+round has passed, its magic state is ready, its feedback release has
+arrived and the issuer lets it onto the QPU. Resources are claimed at
+request and freed when the body is done; two operations never hold one
+resource without a dependency edge between them. Each lifecycle tick
+goes out on a trace source. The issuer reports a start through
+on_started (SimPy's event callback), so the controller never calls the
+runtime back.
 """
 
 import dataclasses
@@ -29,9 +25,7 @@ import decsim.trace_source as trace_source
 class ExecutionRuntime:
     """Drive the operations' lifecycle: start each one, finish it, release.
 
-    _OperationSchedule owns the program's dependency graph and readiness;
-    this class owns what happens to an operation over its life, so the
-    two responsibilities are two classes. The ticks are fired, not kept.
+    The ticks are fired, not kept.
     """
 
     issuer = ports.Port(ports.OperationIssuer)
@@ -113,11 +107,7 @@ class ExecutionRuntime:
             self._maybe_begin(operation)
 
     def on_decision(self, decision: program_records.Decision) -> None:
-        """A decision reached the controller: a release starts its operation.
-
-        A result return is only recorded; a release is recorded and the
-        blocked operation tries to start.
-        """
+        """A decision reached the controller: a release starts its operation."""
         operation_id = decision.target_operation_id
         operation = self.schedule.operations[operation_id]
         if not decision.releases_operation:
@@ -256,13 +246,9 @@ class _ResourceLedger:
 class _OperationSchedule:
     """The program's dependency graph and every operation's readiness.
 
-    operations indexes the program; dependencies_remaining counts each
-    operation's unfinished predecessors and successors is the reverse
-    edge; schedule_released, requested and state_ready are the three
-    gates an operation passes before it may be issued. gem5 keeps the
-    same split between the workload's graph and the object that runs it
-    (configs/deprecated/example/se.py builds the process list, the
-    system runs it).
+    The graph and the object that runs it are split, as gem5 keeps the
+    workload's process list apart from the system that runs it
+    (configs/deprecated/example/se.py).
     """
 
     def __init__(self) -> None:
@@ -301,9 +287,8 @@ class _OperationSchedule:
 class _StartGates:
     """The three gates an operation passes before it may be issued.
 
-    schedule_released is its scheduled start round having arrived,
-    requested is its resources claimed and its magic state asked for,
-    state_ready is that state in hand.
+    schedule_released: its start round arrived; requested: its resources
+    claimed and its magic state asked for; state_ready: that state in hand.
     """
 
     schedule_released: set = dataclasses.field(default_factory=set)
@@ -315,9 +300,8 @@ class _StartGates:
 class _OperationLifecycle:
     """Where each operation is in its life, and what it holds.
 
-    An operation is started when it is issued, finished when its body
-    ends, and released when a feedback decision unblocks it; the ledger
-    holds the resources it claimed between the first and the second.
+    The ledger holds an operation's resources from its issue to the end of
+    its body.
     """
 
     resources: _ResourceLedger
@@ -345,13 +329,7 @@ def _claim_keys(claim) -> list[tuple]:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the execution runtime reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the execution runtime reports, as one member."""
 
     operation_issued: trace_source.TraceSource = trace_source.new_source()
     operation_started: trace_source.TraceSource = trace_source.new_source()

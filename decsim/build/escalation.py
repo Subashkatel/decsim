@@ -1,15 +1,10 @@
 """The switching part: the confidence, the policy and the strong window side.
 
-A run whose switching slot is filled decodes weak first and escalates a
-window on low confidence. This part builds what only that run has (the
-signal the weak decoder reports, the policy that decides on it with its
-threshold, the strong regions, the strong window's shape, the pending
-strong windows and the strong re-decode), wires the strong side to the
-window side, and binds the re-decode, the signal and the policy onto
-the window side's and the decoder managers' optional ports. A run with
-no switching builds none of it and leaves those ports unbound, as a
-gem5 cache with no prefetcher holds a NULL one
-(src/mem/cache/Cache.py:108, Param.BasePrefetcher(NULL)).
+A switching run decodes weak first and escalates a window on low
+confidence. This part binds the re-decode, the signal and the policy
+onto the window side's and the decoder managers' optional ports; a run
+with no switching leaves them unbound, as a gem5 cache with no
+prefetcher holds a NULL one (src/mem/cache/Cache.py:108).
 """
 
 import dataclasses
@@ -35,18 +30,16 @@ if TYPE_CHECKING:
 class Switching:
     """What a switching run adds: the decision and the strong window side.
 
-    confidence_signal is what the weak decoder reports and policy decides
-    on; regions says which rounds an escalated window covers, shape lays
-    the strong window over them, pending_strong_windows holds one until
-    the conditions its row named are met, and strong_redecode submits it
-    and takes its result back. connect wires the four strong components
-    to the window side's.
+    regions says which rounds an escalated window covers, shape lays the
+    strong window over them, pending_strong_windows holds one until its
+    conditions are met, and strong_redecode submits it and takes its
+    result back.
     """
 
     confidence_signal: ports.ConfidenceSignal
     policy: escalation_policies.Switching
     regions: strong_regions.StrongRegions
-    # the row escalation.strong_window names
+    # the strong window settings' shape
     shape: Any
     pending_strong_windows: pending_strong_windows.PendingStrongWindows
     strong_redecode: strong_redecode_module.StrongRedecode
@@ -61,14 +54,9 @@ class Switching:
     ) -> "Switching":
         """The signal from the weak decoder, the policy, the strong side.
 
-        The confidence record builds its row from the weak decoder's own
-        settings and the point's threshold: the decode's weight step,
-        the threshold it grows to, the unit's cycle count; a row reads
-        what it needs and ignores the rest. The policy expects the
-        signal's source, and decides on online_threshold, the point's
-        calibrator, when the threshold learns across shots. The shape is
-        the strong window record's row: the redo window, or the double
-        window of Toshio Sec. III C.
+        The confidence is built from the weak decoder's own settings and
+        the point's threshold. The policy decides on online_threshold,
+        the point's calibrator, when the threshold learns across shots.
         """
         threshold_nats = settings.threshold.threshold_nats
         signal = settings.confidence.build(
@@ -100,16 +88,7 @@ class Switching:
         windows: "windows_part.Windows",
         decoders: "decoders_part.Decoders",
     ) -> None:
-        """Wire the strong side, then bind it on the ports left empty.
-
-        The strong side reads the window side's plan, rounds and stores,
-        takes an escalated region from the strong store and submits to
-        the host's manager. The committer, the verdict and the window
-        manager hand the re-decode its windows, and the join reads the
-        signal. The verdict asks the policy to keep or escalate, the
-        requester which tiers decode a ready window, and both managers
-        teach it a strong result.
-        """
+        """Wire the strong side, then bind it on the ports left empty."""
         self._wire_the_strong_side(plan, windows)
         strong_redecode = self.strong_redecode
         strong_redecode.strong_receiver = readout.strong_syndrome_round_receiver
@@ -174,12 +153,7 @@ def _threshold_source(
     settings: escalation_settings.SwitchingSettings,
     online_threshold: Optional[ports.ThresholdSource],
 ):
-    """The point's threshold source, built from its row's record.
-
-    A row built once per point (it learns across the point's shots)
-    arrives already built as online_threshold; every other row's record
-    builds its source here.
-    """
+    """online_threshold, built once per point, else one from the settings."""
     if online_threshold is not None:
         return online_threshold
     return settings.threshold.build()

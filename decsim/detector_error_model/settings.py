@@ -1,16 +1,9 @@
 """The detection events' settings: where the former sits, and its cost.
 
-A detection event is a parity of raw measurement outcomes
-(detector_formation.py), so its value is the same wherever the machine
-forms it; the seat moves the width every hop after it carries, the
-state the seat holds and the clock the conversion is charged on. The
-published seats are four: the controller's workstation (Google
-2408.13687 lines 472-477), the decoder chip's input path (Maurer
-2510.21600 lines 234-236), inside the decoder (Caune 2410.05202 lines
-1252-1255, LILLIPUT 2108.06569 lines 500-509, cudaqx
-libs/qec/lib/decoder.cpp:426-432) and offline (Deltakit through Stim's
-compile_m2d_converter). These settings name the seats on decsim's path
-that do it.
+The published seats are four: the controller's workstation (Google
+2408.13687), the decoder chip's input path (Maurer 2510.21600), inside
+the decoder (Caune 2410.05202, LILLIPUT 2108.06569, cudaqx) and offline
+(Deltakit through Stim's compile_m2d_converter).
 """
 
 import dataclasses
@@ -55,20 +48,14 @@ STRONG_SIDE_SEATS = ("strong_syndrome_buffer", "strong_decoder")
 class DetectionEventSettings:
     """The seats that form a round's detection events, and what it costs.
 
-    formed_at lists the seats, each named once; every path a round takes
-    to a decoder crosses exactly one of them, which the build checks
-    against the run's paths (build/readout.py). One conversion
-    costs latency_cycles, plus cycles_per_round for every round after
-    the first when a seat forms several rounds together, on clock, the
-    clock of the logic that forms them: a pipelined stage takes a round
-    a cycle after its fixed latency (Yang et al. 2605.04892 lines
-    1273-1275, "The total latency of the preprocessing stage for
-    syndrome calculation ... at 20 ns (5 FPGA clock cycles)", with "All
-    variables ... in FPGA registers, enabling fully pipelined
-    operation"). A seat that forms one round at a time pays the latency
-    for each. No source publishes a controller-side or buffer-side
-    figure, so both costs are zero by default. clock None is the
-    machine's clock.
+    formed_at lists the seats, each once; every path a round takes to a
+    decoder crosses exactly one (build/readout.py). One conversion costs
+    latency_cycles, plus cycles_per_round for each further round a seat
+    forms together, on the clock of the forming logic: a pipelined stage
+    takes a round a cycle after its fixed latency (Yang et al. 2605.04892:
+    syndrome calculation "at 20 ns (5 FPGA clock cycles)", "fully pipelined
+    operation"). No source publishes a controller-side or buffer-side
+    figure, so both costs default to zero. clock None is the machine's.
     """
 
     formed_at: tuple = ("controller",)

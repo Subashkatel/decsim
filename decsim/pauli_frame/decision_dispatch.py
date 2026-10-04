@@ -1,17 +1,11 @@
 """The frame's end of the frame-to-controller path.
 
-A decision leaves the frame side and lands at the controller, so the
-send is executed here: gem5 bills a transfer to the port it left by
-(gem5 src/mem/coherent_xbar.cc:354-357), and OMNeT++ refuses a module
-that sends a message it does not own (omnetpp-6.1.0
-src/sim/csimplemodule.cc:333-334). The line that
-narrates the dispatch is sourced at the end that executes it. What the
-controller then does with the decision is its own
-(controller/instruction_output.py), reached at the landing.
-
-A card that prices no path has no fabric at all: the decision is then
-available at the controller in the same instant, and only the
-controller's own decision-to-pulse cost stands.
+A decision leaves the frame side, so the send is executed here: gem5
+bills a transfer to the port it left by (src/mem/coherent_xbar.cc:354-357)
+and OMNeT++ refuses a module that sends a message it does not own
+(src/sim/csimplemodule.cc:333-334). A card that prices no path has no
+fabric: the decision is at the controller at once, and only the
+controller's decision-to-pulse cost stands.
 """
 
 import functools

@@ -1,12 +1,9 @@
 """The readout part: the path a round takes from the controller to the stores.
 
 The controller takes each readout, the packing stage turns its fragments
-into one packed round, the sender writes the round into every store that
-must hold it, and each store's outgoing end hands the rounds on to the
-decoder that reads them. A store exists only when a decoder reads it: a
-run whose plan's windows the strong tier decodes has no weak syndrome
-buffer, a run that never reads the room side no strong one, and a run
-with no decoder neither; no run has ends for a missing store.
+into one packed round, the sender writes it into every store that must
+hold it, and each store's outgoing end hands it on to the decoder that
+reads it. A store exists only when a decoder reads it.
 """
 
 import dataclasses
@@ -42,8 +39,7 @@ from decsim.syndrome_buffer import (
 class StoreSlot:
     """A syndrome buffer a decoder reads, and how that decoder reads it.
 
-    reads_in_place is the reading decoder's fact: its unit reads the
-    rounds where the store keeps them rather than a copy of them
+    reads_in_place: the unit reads the rounds where the store keeps them
     (DecoderPoolSettings.copies_input False).
     """
 
@@ -58,12 +54,8 @@ class StoreSlot:
 class Readout:
     """Every component a round passes on its way into the stores.
 
-    The three weak fields are None on a run whose plan's windows the
-    strong tier decodes, and the three strong fields on a run that never
-    reads the room side; all six on a run with no decoder. primary_output
-    is one of the two outgoing ends: the weak one when the weak store
-    exists, since the tier that decodes the plan's windows reads it, and
-    the strong one otherwise, None when neither exists.
+    A store no decoder reads has its three fields None. primary_output is
+    the outgoing end of the store the plan's windows read.
     """
 
     controller: controller_module.Controller
@@ -100,13 +92,7 @@ class Readout:
         detection_events: ports.DetectionEventPlacement,
         links: ports.Link,
     ) -> "Readout":
-        """Every component of the readout path, wired to one another.
-
-        A store slot left None is a store no decoder reads, which the
-        part does not build; the controller and a store that name no
-        clock run on machine_clock. One line per component, in the
-        order a round meets them, then the wires inside the part.
-        """
+        """Every component of the readout path, wired to one another."""
         _check_readout_cost_is_priced(controller_settings, link_card)
         _check_one_price_for_a_read(weak_store_slot, link_card)
         _check_strong_store_charges_nothing(strong_store_slot)
@@ -178,9 +164,8 @@ class Readout:
     def check_settled(self) -> None:
         """No round is still on its way; the stores before the waiting line.
 
-        A round held for room is the symptom, the hold that keeps the
-        store full is the cause, so the stores are asked first; the
-        seats last, since every round has left the stores by then.
+        A round held for room is the symptom and the hold that keeps the
+        store full the cause, so the stores are asked first.
         """
         self.assembler.check_settled()
         if self.weak_syndrome_round_receiver is not None:
@@ -248,9 +233,8 @@ class Readout:
     def _wire_the_primary_store(self) -> None:
         """The store the plan's windows read tells the seats what leaves it.
 
-        Every read, the escalation's included, holds its rounds there
-        until they have landed and formed, so a round that leaves it is
-        formed nowhere after. A run with no decoder has no such store.
+        Every read holds its rounds there until they have landed and
+        formed, so a round that leaves it is formed nowhere after.
         """
         primary_store = self.weak_syndrome_buffer
         if self.primary_output is self.strong_output:
@@ -269,15 +253,10 @@ def build_detection_events(
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
 
-    Every path a round of this run takes to a decoder crosses exactly
-    one seat of detection_events.formed_at: a path with none would
-    decode raw outcomes, and a path with two would form events of
-    events, a wrong answer either way. A source that does not answer
-    the DetectionEventFormer port forms nothing. window_tier is the tier
-    that decodes the plan's windows, and escalates says a switching run
-    sends regions on to the strong tier. A placement that names no clock
-    forms on machine_clock. The decoder units are compiled from this
-    placement, so the machine builds it before the parts.
+    Every path a round takes to a decoder crosses exactly one seat of
+    detection_events.formed_at: with none it would decode raw outcomes,
+    with two it would form events of events. A source that does not
+    answer DetectionEventFormer forms nothing.
     """
     formed_at = detection_event_settings.formed_at
     paths = _paths_of_the_run(window_tier, escalates)
@@ -297,10 +276,7 @@ def _weak_store(
     machine_clock: Optional[config.Clock],
     engine: engine_module.Engine,
 ) -> tuple:
-    """The weak syndrome buffer, its outgoing end and its receiving end.
-
-    Three Nones when no decoder reads the store.
-    """
+    """The weak syndrome buffer, its outgoing end and its receiving end."""
     if slot is None:
         return None, None, None
     store_settings = config.with_machine_clock(slot.settings, machine_clock)
@@ -319,10 +295,7 @@ def _weak_store(
 def _strong_store(
     slot: Optional[StoreSlot], engine: engine_module.Engine
 ) -> tuple:
-    """The strong syndrome buffer, its outgoing end and its receiving end.
-
-    Three Nones when no decoder reads the store.
-    """
+    """The strong syndrome buffer, its outgoing end and its receiving end."""
     if slot is None:
         return None, None, None
     store = slot.settings.build(engine)
@@ -338,11 +311,7 @@ def _strong_store(
 
 
 def _check_strong_store_charges_nothing(slot: Optional[StoreSlot]) -> None:
-    """The strong syndrome buffer is a plain store with no access cost.
-
-    Its receiving end stores a round as it lands and books no access, so
-    a cost set on it would never be paid.
-    """
+    """Refuse a cost on the strong syndrome buffer: it is never paid."""
     if slot is None:
         return
     settings = slot.settings
@@ -378,12 +347,7 @@ def _check_one_price_for_a_read(
     weak_store_slot: Optional[StoreSlot],
     link_card: link_settings.FabricSettings,
 ) -> None:
-    """A ported weak store prices its reads; the link out of it may not.
-
-    The store's read port moves the bits by words, so a rate on
-    weak_buffer_to_weak_decoder as well would charge the same bits twice.
-    The link keeps its latency.
-    """
+    """A ported weak store prices its reads; a link rate would charge twice."""
     if weak_store_slot is None:
         return
     if not weak_store_slot.settings.prices_read_bits:
@@ -405,10 +369,8 @@ def _check_readout_cost_is_priced(
 ) -> None:
     """A readout cost on the controller needs a card that leaves it out.
 
-    The claim belongs to the one card it is about: a qpu_to_controller
-    card that keeps the reference number already covers the controller
-    turning the readout into bits, so a second charge for that work
-    would count it twice.
+    A qpu_to_controller card that keeps the reference number already
+    covers turning the readout into bits.
     """
     readout_cycles = controller_settings.readout_to_bits_cycles
     if readout_cycles == 0:

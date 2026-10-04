@@ -2,29 +2,18 @@
 
 One Protocol per handoff between neighbours, one method per handoff, and
 the record that crosses it in decsim/records. A component depends on ports,
-never on another component's class, so a new implementation plugs in as
-one class that fills the port and one row in the root's table
-(decsim/machine.py). Read top to bottom, this file is the pipeline: the
-QPU emits a readout, the controller receives it, the store holds the
-packed round, the window manager closes a window, the decoder manager
-schedules a decode, the decoder returns a result, the frame commits the
-correction, the frame releases the controller, the controller instructs
-the QPU, and every hop between components rides a link.
+never on another component's class. Read top to bottom, this file is the
+pipeline: the QPU emits a readout, the controller receives it, the store
+holds the packed round, the window manager closes a window, the decoder
+manager schedules a decode, the decoder returns a result, the frame
+commits the correction, the frame releases the controller, the controller
+instructs the QPU, and every hop between components rides a link.
 
-The pluggable components (SyndromeSource, SyndromeBuffer, Decoder,
-StrongBackend, Link, EscalationPolicy, ThresholdSource,
-ConfidenceSignal, WindowingScheme, IdlePolicy) have their abstract
-class here, sinter's Decoder shape
-(sinter/_decoding/_decoding_decoder_class.py, one class with the methods
-a row of the table must offer), written as a Protocol because the
-implementations fill it without inheriting. Observation (metrics, the
-traffic ledger, the trace) reaches a component through callbacks it
-fires, never through a port, so every component runs with no observer.
-
-A component names its neighbours by declaring a Port (below) for each
-one. The part that holds the component binds them by assignment, those
-inside the part when it is built and those to another part when the
-machine connects the parts (decsim/build/, decsim/machine.py).
+A pluggable component's port is sinter's Decoder shape
+(sinter/_decoding/_decoding_decoder_class.py), written as a Protocol
+because the implementations fill it without inheriting. Observation
+reaches a component through callbacks it fires, never through a port, so
+every component runs with no observer.
 """
 
 from collections.abc import Callable, Mapping
@@ -43,30 +32,14 @@ class Port:
 
     A component declares a port as a class attribute and reads it as an
     ordinary attribute; the part that holds it binds it by assignment,
-    which is gem5's script assigning one port to another
-    (gem5 configs/learning_gem5/part1/simple.py:68).
-    The port carries the Protocol its peer answers, so a class points at
-    this file rather than the other way about.
-
-    Two refusals, both gem5's. A second bind names the port, the peer it
-    holds and the peer offered, as PortRef.connect does
-    (gem5 src/python/m5/params/port_params.py:109-114). A
-    required port read before it is bound raises, as gem5's default peer
-    throws UnboundPortException
-    (gem5 src/mem/port.cc:62-65); an optional port reads as
-    None instead, which is the neighbour a run does not have.
-
-    Whether the peer answers the Protocol is not asked. Every bind site
-    is decsim's own build code, so no call on the experiments layer
-    can offer a stranger, and one that a change offered
-    would raise at its first call naming the method it lacks. The
-    Protocol is what the port promises its reader, and what a new
-    component written for it must answer.
-
-    The name arrives at class creation rather than at construction,
-    because a descriptor learns what it was called only once the class
-    body has run; gem5 fills it the same way, from its metaclass
-    (gem5 src/python/m5/SimObject.py:353-357).
+    as gem5's script assigns one port to another
+    (gem5 configs/learning_gem5/part1/simple.py:68). A second bind is
+    refused by name, as PortRef.connect does
+    (gem5 src/python/m5/params/port_params.py:109-114); a required port
+    read before it is bound raises, as gem5's UnboundPortException
+    (gem5 src/mem/port.cc:62-65); an optional port reads as None, the
+    neighbour a run does not have. Whether the peer answers the Protocol
+    is not asked: every bind site is decsim's own build code.
     """
 
     def __init__(self, protocol, optional: bool = False) -> None:
@@ -158,18 +131,14 @@ class IdleRoundReceiver(Protocol):
 class SyndromeBuffer(Protocol):
     """The weak syndrome buffer, as its own round receiver sees it.
 
-    Table row: syndrome_buffer. A round occupies a slot when its bits are
-    in the store, which is at the landing of the hop that carried them, and
-    it is readable at that same instant: the store and the publication
-    are one call at one tick. The end that takes the landing asks
-    has_room first with the round's key and bits, counting the rounds it
-    has reserved for the writes in flight (gem5's packet store answers
-    `avail() = _maxsize - _size - _reserved` against the packet's own
-    length, src/dev/net/pktfifo.hh); a packed round is written once and
-    kept until every consumer releases it. A store never refuses a
-    write: a round that finds no room waits upstream. occupied_bits is
-    the bits the stored rounds hold now, which the strong receiving end
-    names when an escalated region finds no room.
+    A round occupies a slot from the landing of the hop that carried it,
+    and is readable at that same tick. The receiving end asks has_room
+    first, counting the writes in flight it reserved (gem5's packet
+    store answers `avail() = _maxsize - _size - _reserved`,
+    src/dev/net/pktfifo.hh); a round is written once and kept until
+    every consumer releases it. A store never refuses a write: a round
+    that finds no room waits upstream. occupied_bits is the bits stored
+    now.
     """
 
     occupied_bits: int
@@ -183,14 +152,11 @@ class SyndromeBuffer(Protocol):
         """Whether this round fits beside the stored and the reserved rounds.
 
         The store is asked with the round itself, as gem5's requester
-        asks its responder with the packet (RequestPort::tryTiming(
-        PacketPtr pkt), src/mem/port.hh:268 and 617-623), so a store of
-        several memories answers for the memory the round goes to, which
-        gem5's interleaved ranges pick from the address
-        (src/base/addr_range.hh 70-78). reserved_bits_by_round is the
-        bits each round still crossing toward the store will take, by
-        its key. A bounded store raises on a round that states no size:
-        a bound is measured against a size.
+        asks with the packet (src/mem/port.hh:268), so a store of several
+        memories answers for the one the round goes to.
+        reserved_bits_by_round is the bits each round still crossing
+        toward the store will take, by its key. A bounded store raises on
+        a round that states no size.
         """
 
     def accept_packed_round(
@@ -204,21 +170,17 @@ class SyndromeBuffer(Protocol):
     def book_write(self, round_key: tuple, bits: Optional[int]) -> int:
         """Take a write of this round's stored bits; the tick it completes.
 
-        The store owns its access timing, so the receiving end asks it
-        rather than pricing the write itself. The tick is fixed when the
-        write is booked, as gem5's SimpleMemory fixes a response tick at
-        acceptance (src/mem/simple_mem.cc:174), and a booking is never
-        withdrawn. Nothing is scheduled: the caller schedules its own
-        continuation at the tick.
+        The tick is fixed at booking and never withdrawn, as gem5's
+        SimpleMemory fixes a response tick at acceptance
+        (src/mem/simple_mem.cc:174). Nothing is scheduled: the caller
+        schedules its own continuation at the tick.
         """
 
     def book_read(self, round_keys: tuple) -> int:
         """Take a read of these stored rounds; the tick their bits are out.
 
-        Asked by whoever takes the bits out, at the tick they leave: the
-        store's outgoing port at dispatch. The store sizes the read from
-        the widths it keeps. The tick is fixed and never withdrawn, as
-        for book_write.
+        Asked by the store's outgoing port at dispatch; the store sizes
+        the read from the widths it keeps. Fixed, as for book_write.
         """
 
     def release_round(self, round_key: tuple) -> None:
@@ -231,9 +193,7 @@ class SyndromeBuffer(Protocol):
         """The bits this store is bounded to, or None for unbounded.
 
         A store bounded some other way than by a bit capacity answers
-        None and refuses nothing: the callers that size a trace lane or
-        a room check ask this instead of reading a settings record, so
-        the bound stays the store's own to decide.
+        None.
         """
 
     def held_rounds_description(self) -> str:
@@ -247,12 +207,9 @@ class SyndromeBuffer(Protocol):
 class RetainedRounds(Protocol):
     """The same store, as the window side that reads and holds it sees it.
 
-    Two neighbours cross a store on two different handoffs: syndrome
-    packing writes rounds through SyndromeBuffer, and the window side keeps
-    the rounds one decode reads alive through this port. A hold names
-    the rounds its holder will read from the moment it is placed, so the
-    store may hold a round it has not received yet; the holder is any
-    record that answers referenced_operation_ids (decsim/records).
+    A hold names the rounds its holder will read from the moment it is
+    placed, so the store may hold a round it has not received yet; the
+    holder is any record that answers referenced_operation_ids.
     """
 
     def register_hold(self, holder, round_keys: tuple) -> None:
@@ -311,16 +268,11 @@ class RetainedRounds(Protocol):
 class SyndromeRoundSender(Protocol):
     """The syndrome round sender, as the assembler sees it.
 
-    The one end a packed round leaves the assembler by. The sender
-    reserves room in every syndrome buffer the round must reach and
-    sends it on; a round that finds no room goes to the waiting line,
-    which holds it for a retry.
-
-    strong_crossing_count is the strong-primary rounds sent to the
-    strong syndrome buffer and not yet landed there, which the packing
-    stage's bound on rounds in flight counts (controller/round_assembly.py
-    RoundsInFlight), since the windows hear of such a round at its
-    landing.
+    The sender reserves room in every syndrome buffer the round must
+    reach and sends it on; a round that finds no room waits in line for
+    a retry. strong_crossing_count is the strong-primary rounds sent and
+    not yet landed, which the packing stage's bound on rounds in flight
+    counts (controller/round_assembly.py RoundsInFlight).
     """
 
     strong_crossing_count: int
@@ -333,12 +285,9 @@ class SyndromeRoundSender(Protocol):
 class StrongSyndromeRoundReceiver(Protocol):
     """The strong syndrome buffer's receiving end, as its two senders see it.
 
-    The store counts the bits still crossing toward it as room taken.
-    A strong-primary run's controller reserves that room before a round
-    leaves and the store keeps the round when it lands; a switching
-    run's strong redecode reserves the room of an escalated region before
-    it leaves the chip and the store keeps every round of it at the
-    landing.
+    The bits still crossing toward the store count as room taken: a
+    round's or an escalated region's room is reserved before it leaves
+    and kept when it lands.
     """
 
     def has_room(self, packed: round_records.PackedRound) -> bool:
@@ -369,14 +318,9 @@ class StrongSyndromeRoundReceiver(Protocol):
 class WeakSyndromeRoundReceiver(Protocol):
     """The weak syndrome round receiver, as the controller sees it.
 
-    This end owns the store's room and its landing. It answers has_room
-    against the bits stored and the bits reserved for the writes still
-    in flight, the sender reserves that room before the round leaves,
-    and the transfer that carries the round lands here: this end stores
-    it, which is the tick it becomes readable, and announces it to
-    whoever waits on it. The same port takes the controller's ask for a
-    timing-only round, which takes its slot here and leaves by the
-    store's own outgoing port.
+    This end owns the store's room and its landing: has_room counts the
+    bits stored and those reserved for writes in flight, and a landed
+    round is stored, readable from that tick, and announced.
     """
 
     def has_room(self, packed: round_records.PackedRound) -> bool:
@@ -409,11 +353,7 @@ class SyndromeBufferOutput(Protocol):
     """A syndrome buffer's outgoing port, as whoever asks for a round sees it.
 
     A round leaves by the end that holds it, so this end executes every
-    send and frees the slot the round held. Two kinds leave: a decode
-    job's input, asked for by the window side or by the strong
-    re-decode, and a timing-only round the controller packed. Each send
-    answers the ticks the link expects, so the asker charges nothing of
-    its own.
+    send, frees the slot, and answers the ticks the link expects.
     """
 
     def send_input(
@@ -454,9 +394,8 @@ class SyndromeBufferOutput(Protocol):
 class MemoryRoundArrivals(Protocol):
     """The decoders' end for a timing-only round, as the controller sees it.
 
-    A feedback-memory round carries no syndrome to decode; it lands at
-    the decoder side so that the stream stage it occupies is accounted
-    for, and that end tells whoever waits on it.
+    A feedback-memory round carries no syndrome; it lands at the decoder
+    side so that the stream stage it occupies is accounted for.
     """
 
     def receive_memory_round(self, source_operation_id) -> None:
@@ -467,14 +406,9 @@ class MemoryRoundArrivals(Protocol):
 class HeldRounds(Protocol):
     """The waiting line in front of a bounded stage, as the stage sees it.
 
-    A store or the packing stage that is full holds nothing back itself:
-    the round waits at the sender, and whatever frees a place in the
-    stage tells the line so the head can try again (gem5
-    src/mem/port.hh:244-262, sendRetryReq). Ruby's MessageBuffer counts
-    that wait as the buffer's own statistic
-    (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82), and
-    ns-3's queue disc stamps the packet at the enqueue
-    (ns-3 src/traffic-control/model/queue-disc.cc:851).
+    A full stage holds nothing back itself: the round waits at the
+    sender, and whatever frees a place tells the line so the head can
+    try again (gem5 src/mem/port.hh:244-262, sendRetryReq).
     """
 
     def retry(self) -> None:
@@ -488,14 +422,10 @@ class HeldRounds(Protocol):
 class WindowInput(Protocol):
     """The window manager, as the controller side sees it.
 
-    Two kinds of thing cross here. A round arrives: the packed round
-    itself, or the note that an idle patch produced a timing-only one. A
-    stream's shape changes: the controller learns a dynamic stream's
-    boundary, its length, or which segment folds into it, and the window
-    plan follows. Both stay one-way; the window manager answers nothing
-    back except whether it knows a stream at all, and which store the
-    tier that decodes the plan's windows reads from, which decides where
-    the sender publishes a round.
+    Rounds arrive here, and a dynamic stream's shape changes here (its
+    boundary, its length, the segments folding into it). Both are
+    one-way; the window manager answers only whether it knows a stream
+    and which store its windows read.
     """
 
     def accept_window_input(
@@ -543,9 +473,8 @@ class WindowPlan(Protocol):
     """The window plan, as the escalation side reads and reshapes it.
 
     A strong window covers rounds several weak windows were going to
-    commit, so the strong region reads the plan and the shape row changes
-    it: one window absorbed, another's read start moved. Everything else
-    about the plan (who is ready, what commits) stays the window side's.
+    commit, so the escalation side may absorb a window or move another's
+    read start; the rest of the plan stays the window side's.
     """
 
     def window_at(self, key: tuple) -> window_records.Window:
@@ -578,15 +507,14 @@ class WindowPlan(Protocol):
         """The error model of one strong window of that operation.
 
         prior_faults is what a pinned face's neighbour has committed,
-        per fault representation, and None when the row pins no face.
+        per fault representation, and None when no face is pinned.
         """
 
     def owned_faults_of(self, key: tuple) -> Optional[dict]:
         """The faults the window at that key commits, per representation.
 
-        A row that pins a face on a neighbour asks for this, so that the
-        neighbour's faults are prior faults of its own strong model
-        rather than columns it may spend twice (Bombin et al.
+        A strong window pinned on this neighbour takes them as prior
+        faults rather than columns it may spend twice (Bombin et al.
         2303.04846 lines 775-788). None when the run builds no error
         models.
         """
@@ -594,11 +522,9 @@ class WindowPlan(Protocol):
     def crossing_faults_of(self, key: tuple) -> Optional[dict]:
         """The faults it commits that reach behind its commit region.
 
-        A region pinned on the escalated window's own weak commit asks
-        for this: that commit stands for the faults crossing the seam
-        behind it and for no others, since the rest of the window's
-        rounds are exactly what the region decodes again. None when the
-        run builds no error models.
+        A region pinned on the escalated window's own weak commit reads
+        these: the rest of the window's rounds are what the region
+        decodes again. None when the run builds no error models.
         """
 
 
@@ -606,9 +532,8 @@ class WindowPlan(Protocol):
 class WindowRetention(Protocol):
     """The rounds a window may still read, as the escalation side sees it.
 
-    Which store a strong window reads is the retention's to say, not the
-    escalation's, so a caller here asks for holds and for the input
-    rather than for a store.
+    Which store a strong window reads is the retention's to say, so a
+    caller asks for holds and input, never for a store.
     """
 
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
@@ -620,10 +545,7 @@ class WindowRetention(Protocol):
     def hold_strong_context(
         self, key: tuple, strong_request_key, context_keys
     ) -> None:
-        """The rounds kept in case the window escalates pass to its request.
-
-        The window's potential strong read becomes the request's hold.
-        """
+        """The rounds kept in case the window escalates pass to its request."""
 
     def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
         """The rounds the strong syndrome buffer lacks that the weak one has."""
@@ -659,10 +581,7 @@ class WindowRetention(Protocol):
     def release_absorbed_strong_hold(
         self, key: tuple, restart_key: Optional[tuple], replacement
     ) -> None:
-        """Drop the rounds an absorbed window kept; the strong request has them.
-
-        A strong window covered this window, so its potential read goes.
-        """
+        """Drop an absorbed window's rounds; the strong request holds them."""
 
     def require_rounds_retained(
         self, label: str, payloads: list, first_round: int, last_round: int
@@ -700,10 +619,7 @@ class WindowRounds(Protocol):
     """The arrivals per operation, as the escalation side reads them.
 
     A strong region is laid over an operation whose rounds are still
-    arriving, so the row asks how long the operation is, how many rounds
-    one of its windows reads and how far the strong syndrome buffer has been
-    filled. Which windows are ready and what commits stay the window
-    side's.
+    arriving.
     """
 
     def operation(self, operation_id) -> program_records.Operation:
@@ -767,15 +683,10 @@ class LogicalLedger(Protocol):
 class BoundaryCourier(Protocol):
     """The committed boundaries a strong window pins a face on.
 
-    A shape row whose face is pinned reads the correction its neighbour
-    committed and has it delivered to its own window, which is Bombin
-    et al. 2303.04846's input adaptation (lines 775-788): the input to
-    the later decoding task is the syndrome of the errors plus the
-    corrections already committed. The message is one seam layer on
-    decoder_to_decoder, priced against the receiving window's own model.
-    Pinning a face is the whole of what the escalation side asks for, so
-    it is the whole port; what the courier tells its own package about a
-    committed boundary stays a method of the class.
+    A pinned face reads the correction its neighbour committed, Bombin
+    et al. 2303.04846's input adaptation (lines 775-788): the later
+    decoding task's input is the syndrome plus the corrections already
+    committed. The message is one seam layer on decoder_to_decoder.
     """
 
     def pin_strong_face(
@@ -793,13 +704,9 @@ class BoundaryCourier(Protocol):
 class StrongRedecode(Protocol):
     """The strong tier's window side, as the committer and verdict see it.
 
-    Both ends of one escalation cross a package boundary: the window
-    that decided sits in windows, the re-decode that carries it out sits
-    in escalation. A weak verdict that escalates hands over the job, a
-    weak window that commits releases the strong window waiting on it,
-    and a weak result that is kept halts the strong request it made
-    unnecessary, held here or on the strong side's manager (Toshio et
-    al. 2510.25222 lines 606-614).
+    A kept weak result halts the strong request it made unnecessary,
+    held here or on the strong side's manager (Toshio et al. 2510.25222
+    lines 606-614).
     """
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
@@ -819,11 +726,9 @@ class StrongRedecode(Protocol):
 class WindowVerdict(Protocol):
     """The window side, as a finished decode returns its result to it.
 
-    The return path of one window: a solve of the primary tier, joined
-    with the window's others when the run's confidence reads several,
-    and the strong re-decode of an escalated window. Either way the side
-    that owns the window publishes the correction and finalizes it, so
-    the decision and its outcome stay in one place.
+    The side that owns the window publishes and finalizes every
+    correction, primary or strong, so the decision and its outcome stay
+    in one place.
     """
 
     def accept_result(
@@ -849,9 +754,8 @@ class DecoderInputFold(Protocol):
     """The decoder side's input, as the window's gate hands it a mask.
 
     The gate says what the landed input must read once the window's
-    boundary is folded in; which row the tier declares decides which of
-    these two the gate calls, and the decoder side performs the write
-    into the storage it owns.
+    boundary is folded in; the decoder side writes it into the storage
+    it owns.
     """
 
     def fold_into_a_copy(
@@ -890,9 +794,7 @@ class DecoderOutput(Protocol):
     """The decoder side's outgoing sends, as the window side asks them.
 
     A result leaves the decoder that produced it, so the window side
-    asks for the send and never executes it: the correction rides its
-    tier's output link to the frame, and an escalated window's selection
-    rides the link to the strong decoder.
+    asks for the send and never executes it.
     """
 
     def publish(
@@ -928,11 +830,8 @@ class DecoderOutput(Protocol):
 class WindowGapJoin(Protocol):
     """The confidence join, as the requester that admits a solve sees it.
 
-    A run whose confidence reads several forced-class solves joins them
-    here rather than in the verdict: every solve of the window returns
-    to accept_result, and the join calls the verdict once the window's
-    solves are all in. A run whose weak decoder reports its own soft
-    output from one decode has no join at all.
+    A confidence that reads several forced-class solves joins them here
+    and calls the verdict once they are all in.
     """
 
     signal: "ConfidenceSignal"
@@ -966,9 +865,7 @@ class DecodeQueue(Protocol):
         """Admit a job once; send_input(on_landed) moves its input later.
 
         on_decoded(job, result) is the job's return path, SimPy's callback
-        on the event (simpy/core.py): the submitting side carries it with
-        the job. The job carries its WindowInputGate; a windowless job has
-        none.
+        on the event (simpy/core.py).
         """
 
     def enqueue_without_input(
@@ -979,11 +876,7 @@ class DecodeQueue(Protocol):
         code: Optional[str] = None,
         spatial_nodes: Optional[int] = None,
     ) -> None:
-        """Queue a self-contained decode of the rounds; on_done at its end.
-
-        A factory's correction decode or an idle decode: no syndrome
-        data, so no transport and no unit memory.
-        """
+        """Queue a decode with no syndrome data; on_done at its end."""
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back a window's not-yet-started decode; it is superseded."""
@@ -996,9 +889,8 @@ class DecodeQueue(Protocol):
     ) -> None:
         """The window asked for this request's strong result.
 
-        Its selection is on the weak-to-strong link; a result that
-        finishes first waits in the unit that produced it until
-        accept_selection.
+        A result that finishes before its selection lands waits in its
+        unit until accept_selection.
         """
 
     def accept_selection(
@@ -1011,10 +903,8 @@ class DecodeQueue(Protocol):
     ) -> None:
         """Charge the confidence's own computation on the job's unit.
 
-        The window side computes no confidence: the signal row reports
-        what its computation cost and the join asks the decoder side to
-        put those ticks on the unit that produced the evidence, whose
-        service then carries them (decision D8).
+        The ticks go on the unit that produced the evidence, whose
+        service then carries them.
         """
 
     def resolve_weak_request(
@@ -1023,27 +913,19 @@ class DecodeQueue(Protocol):
         result: decoding_records.DecodeResult,
         verdict: decoding_records.Verdict,
     ) -> None:
-        """The window side decided this weak request; close its attempt.
-
-        The verdict is the window's, not the manager's: the manager
-        learns here whether the weak answer stands or a strong re-decode
-        follows, and closes the attempt either way.
-        """
+        """The window side decided this weak request; close its attempt."""
 
     def read_result(self, job: decoding_records.DecodeJob) -> None:
         """The window side, or the confidence join, has this result in hand.
 
-        A tier whose result blocks its unit gets the unit back here; a
-        tier that gave it back at the decode's end, or when the walk
-        charged on it ended, has nothing to give,
-        and nor does a result already read.
+        A tier whose result blocks its unit gets the unit back here.
         """
 
     def cancel_strong(self, window_key: tuple) -> None:
         """A kept weak result: the window's strong request ends where it is.
 
-        Queued, crossing the link, running, or done and waiting in the
-        unit that produced it; nothing when none is live or done.
+        Queued, crossing, running, or done and waiting; nothing when none
+        is live or done.
         """
 
     def close_companion_request(
@@ -1051,12 +933,7 @@ class DecodeQueue(Protocol):
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """This forced solve lost; its window is answered by the other.
-
-        The confidence side knows which of a window's solves answered
-        it, so the losing solve is closed from there, not by the
-        manager's own schedule.
-        """
+        """This forced solve lost; its window is answered by the other."""
 
 
 # ------------------------------------------- the decoder returns a result
@@ -1066,51 +943,26 @@ class DecodeQueue(Protocol):
 class Decoder(Protocol):
     """One decoder: correctness and timing from one object.
 
-    Rows: pymatching, unweighted_pymatching, belief_matching,
-    union_find, tesseract, relay_bp, bposd, or a number (a preset
-    latency on the MWPM path). sinter's abstract class
-    with defaults (decsim/decoders/decoder.py, DecoderBase) fills start,
-    cancel and occupancy from decode and latency, so a row writes those
-    two. The manager asks occupancy at dispatch, calls start once the
-    input has landed, and cancel when the request is withdrawn; a
-    decoder measured on the host clock answers occupancy with None and
-    start decides its own time.
+    sinter's abstract class with defaults (decsim/decoders/decoder.py,
+    DecoderBase) fills start, cancel and occupancy from decode and
+    latency. The manager asks occupancy at dispatch, calls start once
+    the input has landed, and cancel when the request is withdrawn; a
+    decoder measured on the host clock answers occupancy with None.
 
-    stage_recorded is the port's data-side stage callback
-    (the data path's hop table): a trace source the row
-    fires once per internal stage with a DecoderStageRecord, so an ASIC
-    model's engines or a GPU model's kernels reach the trace and the
-    stage ledger under their own names. A row with no internal stages
-    exposes the silent source DecoderBase gives it and fires nothing;
-    the machine connects the stage listeners to every row without asking
-    what the row is.
+    stage_recorded, window_checked and forced_solve_unavailable are
+    trace sources (a DecoderStageRecord per internal stage, a referee
+    audit, a window model with no forced class); DecoderBase gives a
+    decoder that fires none of them the silent source, so the machine
+    connects listeners without asking what the decoder is.
 
-    decoder_evidence declares, as data on the row, what its decode can
-    show about itself beyond the correction: a solve pinned to one
-    logical class with that class's minimum weight, the growth a
-    cluster-based decode did, or neither (decsim/records/decoding.py
-    DecoderEvidence). A confidence signal declares the same set as its
-    requirement, and the build refuses a pairing the row cannot serve.
-    missing_evidence_reasons is how a row that a reader would expect to
-    produce some evidence says why it does not; the refusal quotes it
-    instead of the signal's general sentence. The unit's insides stay
-    closed: the port learns what the decoder can answer, never how.
-
-    window_checked is the same shape for a row that audits its own
-    answer against a referee, and forced_solve_unavailable fires once
-    per window model this row cannot pin to a logical class. All three
-    sources are on the port because the machine connects the trace, the
-    stage ledger and the referee audit to whatever answers this port,
-    without asking what the row is; DecoderBase gives a row that fires
-    none of them the silent source.
-
-    A row that wraps another is asked for it under the seeding protocol,
-    not under this port: decoder_pool's decoder_rows walks
-    run_seed_children (decsim/seeding.py RunSeedComposite) down from each
-    decoder unit, so a wrapping row that does not answer it hides the
-    row inside it from the trace, the stage ledger and the referee
-    audit. StagedDecoder and TesseractCheckedDecoder are the shipped rows
-    that answer it.
+    decoder_evidence declares what a decode can show beyond the
+    correction (decsim/records/decoding.py DecoderEvidence); a
+    confidence signal declares the same set as its requirement, and the
+    build refuses a pairing the decoder cannot serve, quoting
+    missing_evidence_reasons when it has one. A decoder that wraps
+    another answers run_seed_children (decsim/seeding.py
+    RunSeedComposite), or the one inside it is hidden from the trace,
+    the stage ledger and the referee audit.
     """
 
     fault_model_requirement: Any
@@ -1125,9 +977,7 @@ class Decoder(Protocol):
     ) -> decoding_records.DecodeResult:
         """The window's correction and its logical observables.
 
-        A timing-only decoder leaves both unset: the result's two
-        fields are optional (decsim/records/decoding.py DecodeResult),
-        and every reader of them handles None.
+        A timing-only decoder leaves both None.
         """
 
     def latency(self, job: decoding_records.DecodeJob) -> int:
@@ -1150,12 +1000,10 @@ class Decoder(Protocol):
 
 @runtime_checkable
 class DecoderSettings(Protocol):
-    """A decoder row's settings record, as a tier and a confidence see it.
+    """A decoder's settings record, as a tier and a confidence see it.
 
-    Every decoder row (decsim/decoders/) declares a frozen
-    Settings dataclass that checks its own values, names its row and
-    builds the decoder. A row that grows clusters also holds a
-    weight_step and a timing, which a cluster confidence reads.
+    A decoder that grows clusters also holds a weight_step and a timing,
+    which a cluster confidence reads.
     """
 
     name: str
@@ -1168,46 +1016,27 @@ class DecoderSettings(Protocol):
 class StrongBackend(Protocol):
     """The device a strong decode runs on, as the strong decoder sees it.
 
-    Rows: measured_table, a device's measured time law with decsim's own
-    answer, one step on the dispatcher; dispatch_steps, the steps a
-    CUDA-Q dispatcher and its workers take, each timed on its own. A
-    live device (a real GPU process decsim hands the region to and
-    waits for) answers the same four methods.
-
-    A strong decode crosses the link in, lands, is noticed, waits, is
-    decoded and is written back before the link out. The link cards
-    price the two links from echo round trips, which already hold the
-    landing, the notice and the write back with no work done: Backline's
-    responders poll their memory and "return the received value without
-    decoding" (2609.09270 lines 2355-2360), and NVQLink's persistent
-    kernel "waits for packet arrival, and loops them back" (2510.25213
-    lines 528-533). So a backend reports only the time beyond the echo
-    on the same path, the launch included, and never the wait: the wait
-    emerges from its capacity in front of the arrivals, a queue decsim
-    keeps. IonQ gives each decoding core a fixed set of blocks served in
-    turn (2608.25027 lines 507-511), and a device graph "cannot be
-    launched twice from the device at the same time" (CUDA C++
-    Programming Guide, device graph launch), so one CUDA-Q dispatcher's
-    decode ends before its next begins (cudaqx
+    The link cards price the two links from echo round trips, which
+    already hold the landing, the notice and the write back (Backline
+    2609.09270 lines 2355-2360, NVQLink 2510.25213 lines 528-533). So a
+    backend reports only the time beyond the echo on the same path, the
+    launch included, and never the wait: the wait emerges from its
+    capacity, a queue decsim keeps. One CUDA-Q dispatcher's decode ends
+    before its next begins (cudaqx
     docs/sphinx/examples_rst/qec/realtime_relay_bp.rst:49-50).
 
-    A decode is a sequence of steps (decoding_records.Step), each with
-    its time and the resource it holds: the dispatcher every request
-    enters by, in slot order (cuda-quantum dispatch_kernel.cu v0.15.2
-    lines 552-555), or a worker, one graph and stream of the host path
+    A decode is a sequence of steps (decoding_records.Step), each holding
+    one resource: the dispatcher every request enters by, in slot order
+    (cuda-quantum dispatch_kernel.cu v0.15.2 lines 552-555), or a worker
     (host_api.md lines 1065-1113). capacities says how many of each the
-    device has; decsim keeps one arrival-order queue per resource. A
-    step on a new resource holds the old one until it ends, as the host
-    monitor launches a graph on the idle worker it found before it moves
-    on. The echo's own steps appear with zero ticks and the card they
-    are priced on, so every tick is counted once.
+    device has; decsim keeps one arrival-order queue per resource, and a
+    step on a new resource holds the old one until it ends. The echo's
+    own steps appear with zero ticks, so every tick is counted once.
 
-    submit takes the region with the count of decodes already running on
-    the device, because the device's time depends on it (IonQ lines
-    550-554 time every decode under full co-running load); it is called
-    once the request holds the dispatcher. The ticket lets a device
-    answer after its own call returns; steps and result are asked after
-    submit, once each.
+    submit takes the count of decodes already running, since the
+    device's time depends on it (IonQ 2608.25027 lines 550-554); it is
+    called once the request holds the dispatcher. steps and result are
+    asked after submit, once each.
     """
 
     def capacities(self) -> Mapping[str, int]:
@@ -1229,11 +1058,7 @@ class StrongBackend(Protocol):
 
 @runtime_checkable
 class Frame(Protocol):
-    """The Pauli frame, as the decoder output sees it.
-
-    Built by PauliFrameConfig.build (pauli_frame/pauli_frame.py) from the
-    write cost in cycles and the clock it counts on.
-    """
+    """The Pauli frame, as the decoder output sees it."""
 
     def commit_correction(
         self,
@@ -1261,9 +1086,7 @@ class ReleaseReceiver(Protocol):
 class DecisionDispatch(Protocol):
     """The frame's dispatch, as the conditional release sees it.
 
-    The decision leaves by the frame's end of frame_to_controller, so
-    the send is executed there and the controller is reached at the
-    landing.
+    The decision leaves by the frame's end of frame_to_controller.
     """
 
     def dispatch_decision(
@@ -1290,14 +1113,9 @@ class InstructionReceiver(Protocol):
 class OperationRuntime(Protocol):
     """What drives an operation's life, as the three that reach it see it.
 
-    An operation is started, its body ends, and a decision releases it,
-    and the three events arrive from three different places: the QPU
-    when the cycle clock reaches the body's last round, the frame's
-    release path when a decision lands, and the protected streams when a
-    cadence change frees an operation that was waiting. gem5 keeps the
-    same split between the workload's graph and the object that runs it
-    (gem5 configs/deprecated/example/se.py builds the
-    process list, the system runs it).
+    The QPU ends a body, the frame's release path lands a decision, and
+    the protected streams free a waiting operation after a cadence
+    change.
     """
 
     def body_done(self, operation: program_records.Operation) -> None:
@@ -1315,10 +1133,8 @@ class OperationIssuer(Protocol):
     """The controller, as the runtime that drives the operations asks it.
 
     The runtime owns when an operation may go; what going means is the
-    controller's: the streams it begins, the idle rounds it claims, the
-    command it prepares, and the boundaries it closes afterwards. The
-    start callback rides with the issue, so the return path is the job's
-    and neither side holds the other.
+    controller's. The start callback rides with the issue, so neither
+    side holds the other.
     """
 
     def round_ticks_for(self, operation: program_records.Operation) -> int:
@@ -1354,8 +1170,6 @@ class OperationIssuer(Protocol):
 class Qpu(Protocol):
     """The QPU, as the controller sees it.
 
-    The controller instructs and it emits: an operation body, the end of
-    the program, and the two rounds a patch produces while no body runs.
     Where the next body may start is the QPU's own cadence, so the
     controller asks for the boundary rather than computing it.
     """
@@ -1372,8 +1186,7 @@ class Qpu(Protocol):
     def are_patches_idle(self, operation_id: Any, patches: tuple) -> bool:
         """Every patch is idle after this same operation, as the QPU owns it.
 
-        The controller queries this before advancing a joint stream from
-        per-patch idle callbacks; a busy group member must not execute.
+        Asked before a joint stream advances; a busy member must not run.
         """
 
     def emit_idle_stream_round(
@@ -1384,10 +1197,9 @@ class Qpu(Protocol):
         *,
         is_final: bool,
     ) -> None:
-        """Deliver one protection round, including readout when it is final.
+        """Deliver one protection round, its terminal readout when is_final.
 
-        is_final requests this round's terminal readout from a live source.
-        It replaces the bulk fragment rather than adding a second round.
+        The terminal readout replaces the bulk fragment, not a second round.
         """
 
     def emit_feedback_memory_round(
@@ -1402,8 +1214,7 @@ class Qpu(Protocol):
     ) -> None:
         """Refuse a seal whose length differs from the rounds executed.
 
-        The controller asks before it seals a stream: only the QPU's
-        source can attest that the stream physically ended there.
+        Only the QPU's source can attest that the stream ended there.
         """
 
 
@@ -1411,19 +1222,13 @@ class Qpu(Protocol):
 class SyndromeSource(Protocol):
     """What the QPU reads out each round for an operation.
 
-    Rows: stim_device, timing_only, syndrome_bits, recorded_stim,
-    streaming_stim.
     Payload bits are raw measurement bits per round; a source with a
-    detector formation table also answers DetectionEventFormer below,
-    the port the machine forms a round's detection events through.
-
-    shot_sampled(operation, detection_events) is the port's shot source:
-    a physical source fires it once when its complete shot is available.
-    A live source waits for final readout; a source that draws nothing
-    carries the silent source, so a listener connects to every row by name.
-
-    emits_bit_values says whether a round's payloads carry measured
-    values, or their sizes alone.
+    detector formation table also answers DetectionEventFormer.
+    shot_sampled(operation, detection_events) fires once when a physical
+    source's complete shot is available (a live source's at final
+    readout); a source that draws nothing carries the silent source.
+    emits_bit_values says whether payloads carry measured values or
+    their sizes alone.
     """
 
     # none means this consumer does not need Operation.circuit; it does not
@@ -1437,11 +1242,9 @@ class SyndromeSource(Protocol):
         stream_operation: program_records.Operation,
         round_count: int,
     ) -> Optional[int]:
-        """Bind physical provenance without sampling or building decode models.
+        """Bind a stream before execution; its physical round limit or None.
 
-        The root declares each owner after seed binding and before execution.
-        Return the physical round limit, or None for an open-ended source.
-        This declaration is independent of the selected model provider.
+        None is an open-ended source. Nothing is sampled or modelled here.
         """
 
     def validate_stream_length(
@@ -1451,8 +1254,8 @@ class SyndromeSource(Protocol):
     ) -> None:
         """Require a sealed length consistent with the physical history.
 
-        A finite source requires its declared length. A live source requires
-        actual final readout at this length, before decoder models finalize.
+        A finite source requires its declared length; a live source, a
+        final readout at this length.
         """
 
     def begin_operation(
@@ -1465,22 +1268,18 @@ class SyndromeSource(Protocol):
     ) -> None:
         """Prepare the operation's rounds at the resolved QPU cadence.
 
-        round_period_ticks is the actual physical round period in integer
-        simulator ticks. A duration-dependent source checks it against its
-        declared circuit period before executing any instructions.
+        A duration-dependent source checks round_period_ticks against its
+        circuit's period before executing anything.
         """
 
     def round_payloads(
         self, operation: program_records.Operation, round_index: int
     ) -> list[round_records.QPUReadout]:
-        """The round's acquisitions in measurement order.
+        """The round's acquisitions in circuit measurement order.
 
-        Each acquisition names its contributing patches. The QPU assigns
-        fragment_index from list order before transport, unless the operation
-        declares the first slot of a contiguous group in a partitioned round.
-        The declared fragment count covers the complete round. Sources
-        preserve circuit measurement order here; numbered fragments may
-        arrive out of order downstream without changing that record order.
+        The QPU numbers the fragments from list order, unless the
+        operation declares the first slot of its group in a partitioned
+        round.
         """
 
     def finalize_stream_round(
@@ -1499,12 +1298,9 @@ class SyndromeSource(Protocol):
     ) -> list[round_records.QPUReadout]:
         """The protection round the controller requests, possibly its last.
 
-        round_period_ticks is the resolved QPU cadence in simulator ticks.
-        A duration-dependent source checks it before physical execution.
-        For a live source, is_final selects a terminal fragment containing
-        this round's checks and final data readout in place of a bulk round.
-        A finite source retains its already-declared measurement schedule.
-        Return acquisitions in the measurement order of round_payloads.
+        For a live source, is_final selects a terminal fragment holding
+        this round's checks and the final data readout; a finite source
+        keeps its declared schedule. Ordered as round_payloads.
         """
 
     def logical_observable_truth(
@@ -1517,25 +1313,19 @@ class SyndromeSource(Protocol):
     ) -> int:
         """The tick this readout leaves the chip, at or after readout_tick.
 
-        readout_tick is the cycle boundary the clock read the round out
-        at, and a source whose readout arrives with a fixed delay or a
-        jitter names a later tick, as gem5's queued port lets its owner
-        name the absolute tick a response or a request is sent
-        (gem5 src/mem/qport.hh:94 schedTimingResp, 150
-        schedTimingReq). The clock asks for every readout it hands the
-        controller, and sends it at that tick behind every earlier
-        readout of its patches.
+        A source with a fixed readout delay or a jitter names a later
+        tick, as gem5's queued port names the absolute tick a packet is
+        sent (gem5 src/mem/qport.hh:94 schedTimingResp). The clock sends
+        it then, behind every earlier readout of its patches.
         """
 
     def window_model_source(self) -> "WindowModelSource":
         """Where the run's window error models come from, by default.
 
-        A source with a circuit answers itself, since its circuit is the
-        model; a source without one answers a component that builds no
-        model. The plan wires this unless the qpu names another provider
-        (qpu.error_model_provider), as sinter derives a task's model from
-        its circuit only when none is given (sinter/_data/_task.py lines
-        71 and 87-89): the sampler is never asked to be the model.
+        A source with a circuit answers itself; one without answers a
+        component that builds no model. qpu.error_model_provider
+        overrides it, as sinter derives a task's model from its circuit
+        only when none is given (sinter/_data/_task.py lines 71, 87-89).
         """
 
 
@@ -1543,13 +1333,10 @@ class SyndromeSource(Protocol):
 class DetectionEventFormer(Protocol):
     """Who holds the recipes that turn a round's outcomes into its events.
 
-    Rows: the run's syndrome sources with a circuit, whose recipes are
-    read off it (decsim/detector_error_model/detector_formation.py,
-    build_formation_table), a live stream's table growing as its rounds
-    execute. The former itself is seated where
-    detection_events.formed_at names (DetectionEventPlacement), and each
-    seat forms from the raw packets it holds, since a detector compares
-    this round's outcomes against the round before it (LILLIPUT
+    A source with a circuit reads them off it
+    (detector_error_model/detector_formation.py build_formation_table);
+    a live stream's table grows as its rounds execute. A detector
+    compares this round's outcomes against the round before (LILLIPUT
     2108.06569 lines 499-510).
     """
 
@@ -1561,16 +1348,11 @@ class DetectionEventFormer(Protocol):
 class DetectionEventPlacement(Protocol):
     """Where the machine forms a round's detection events, and what it costs.
 
-    Row: SeatedFormation (decsim/detector_error_model/
-    detection_event_formation.py), built from detection_events. The
-    seats are the points on the path a round takes from the controller
-    to a decoder (decsim/detector_error_model/settings.py SEATS), and
-    each component there asks with its own seat name: the controller's
-    assembler before the round leaves, each store's receiving end before
-    it stores the round, and each decoder unit as a job's rounds land in
-    its memory. The values are the same at every seat, a parity of the
-    raw outcomes, so a seat moves the width the round carries, the state
-    the seat holds and the clock its formation is charged on (Google
+    The seats are the points on a round's path from the controller to a
+    decoder (detector_error_model/settings.py SEATS); each component
+    there asks with its own seat name. The values are the same at every
+    seat, a parity of the raw outcomes, so a seat moves only the width
+    the round carries, the state held and the clock charged (Google
     2408.13687 lines 474-476, Maurer 2510.21600 lines 234-236, Caune
     2410.05202 lines 1252-1255, LILLIPUT 2108.06569 lines 500-509).
     clock is the clock cycles_at counts on; None when nothing is
@@ -1594,9 +1376,8 @@ class DetectionEventPlacement(Protocol):
     def width_at(self, seat: str, fragments: tuple) -> Optional[int]:
         """The width one round's fragments take as they leave the seat.
 
-        Forms nothing and holds nothing, so a store can weigh its room at
-        the width it will hold before the round lands. None when the
-        width is unknown.
+        Forms and holds nothing, so a store can weigh its room before the
+        round lands. None when the width is unknown.
         """
 
     def rounds_needed_before(
@@ -1604,8 +1385,8 @@ class DetectionEventPlacement(Protocol):
     ) -> tuple:
         """The raw rounds before a read's first round the seat must be given.
 
-        The rounds the read's unformed rounds' recipes read, less those
-        the seat holds raw.
+        Those the read's unformed rounds' recipes read, less those the
+        seat holds raw.
         """
 
     def earlier_rounds_read(
@@ -1613,16 +1394,12 @@ class DetectionEventPlacement(Protocol):
     ) -> tuple[int, ...]:
         """The raw rounds before first_round it or any later round reads.
 
-        What a stream's window holds before its first round for a seat
-        that forms, whatever that seat has formed by then; on a live
-        stream as far back as its program reaches. None with no recipes.
+        On a live stream as far back as its program reaches. None with no
+        recipes.
         """
 
     def retire_round(self, round_key: tuple) -> None:
-        """The round left the store the plan's windows read: none forms it.
-
-        Every seat stops keeping raw packets for it.
-        """
+        """The round left the store the windows read; every seat drops it."""
 
     def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
         """The round keys no earlier job of the seat claimed, now claimed."""
@@ -1641,17 +1418,10 @@ class DetectionEventPlacement(Protocol):
 class WindowModelSource(Protocol):
     """Who builds the decoder-facing error model of one window.
 
-    The window planner holds one of these and asks it per window. The
-    run's syndrome source names the shipped answer
-    (SyndromeSource.window_model_source): itself when the model comes
-    from the same circuit the readouts come from, or a component that
-    answers every question with nothing when it has no circuit. The plan
-    takes it as its own collaborator (qpu.error_model_provider) so a
-    model built anywhere else plugs in.
-
-    The requirement and the returned model are the detector error
-    model's records; this port names them by position only, so the
-    window side never imports that package to hold the port.
+    The window planner asks it per window; the default is the syndrome
+    source's own (SyndromeSource.window_model_source). The requirement
+    and the model are the detector error model's records, named here by
+    position only, so the window side never imports that package.
     """
 
     # per_operation retains the root-owned circuit; none does not require it.
@@ -1689,14 +1459,11 @@ class WindowModelSource(Protocol):
         stream_operation: program_records.Operation,
         stream_round_count: int,
     ) -> bool:
-        """Bind the terminal boundary; return whether pending models changed.
+        """Bind the terminal boundary; whether pending models changed.
 
-        Physical source validation has already succeeded. A finite model
-        keeps the length it registered; an evolving model fixes its final
-        length.
-        The provider needs no physical execution state to answer this call.
-        True requests rebuilding unqueued models without changing any queued
-        or committed model's semantics. False retains the installed models.
+        A finite model keeps the length it registered; an evolving one
+        fixes its final length. True asks for the unqueued models to be
+        rebuilt; queued and committed ones never change.
         """
 
     def strong_window_model_for_operation(
@@ -1724,22 +1491,12 @@ class WindowModelSource(Protocol):
 class Link(Protocol):
     """The link fabric as every sender sees it.
 
-    Built by links/fabric.py LinkFabric from a FabricSettings card, a
-    preset of links/link_profiles.py or one the run writes. Every hop of
-    the
-    reaction path is priced, and a send delivers by callback with every
-    tick of the transfer on the record.
-
-    trace holds transfer_delivered, a trace source the fabric fires once
-    per delivered transfer with a TransferRecord, and frame_landed, one
-    FrameRecord per frame a channel moves. It is on the port
-    because the machine connects the traffic ledger, the data-movement
-    ledger and the trace writer to whatever answers this port
-    (decsim/observe/wiring.py), as the Decoder port carries
-    stage_recorded; ns-3's point-to-point device declares its trace
-    sources on the device the same way (ns-3
-    src/point-to-point/model/point-to-point-net-device.cc, GetTypeId's
-    AddTraceSource calls).
+    Every hop of the reaction path is priced, and a send delivers by
+    callback with every tick of the transfer on the record. trace holds
+    transfer_delivered (a TransferRecord per delivered transfer) and
+    frame_landed (a FrameRecord per frame a channel moves), declared on
+    the port as ns-3's point-to-point device declares its trace sources
+    (point-to-point-net-device.cc, GetTypeId's AddTraceSource calls).
     """
 
     trace: Any
@@ -1767,13 +1524,9 @@ class Link(Protocol):
 class WindowTransfers(Protocol):
     """The link fabric, as a sender that names a window or a job sees it.
 
-    One step below Link: the sender says what it moves (this window's
-    boundary, this job's rounds) and the adapter builds the transfer's
-    attribution and calls Link.send. The decoder output ports and a
-    store's output port name it as a port rather than importing the
-    class that fills it. Every method here sends; an input that rides no
-    link never reaches this port, because whether an input moves at all
-    is the sending store's own decision.
+    The sender says what it moves and the adapter builds the transfer's
+    attribution and calls Link.send. Whether an input moves at all is
+    the sending store's decision, made before it calls here.
     """
 
     def send_for_window(
@@ -1829,28 +1582,15 @@ class WindowTransfers(Protocol):
 class Channel(Protocol):
     """One physical channel under the fabric: its setup engine and its wire.
 
-    One step below Link: the fabric selects a path's payload, frames it
-    with the path's header and hands it to the channel the path's card
-    names; the channel decides when the bits cross and calls back at
-    the delivery. The split is ns-3's, where the net device frames and
-    queues and the channel it is attached to times the crossing (ns-3
-    src/point-to-point/model/point-to-point-net-device.cc TransmitStart
-    calls point-to-point-channel.cc TransmitStart), and gem5's, where a
-    port hands its packets to the packet queue that decides when each
-    one goes (gem5 src/mem/port.hh, src/mem/packet_queue.hh:62-63).
-
-    The fabric builds one per channel name: the channel the card's
-    protocol record builds from that channel's ChannelSettings and the
-    engine, credit or reliable, or the ideal wire for a card with none
-    (links/fabric.py protocol_channel), so a jittered or credit-limited
-    channel is one record and one class and no fabric subclass. framed
-    is a
-    FramedPayload (decsim/links/channel.py): the payload bits a
-    component sent and the header bits its path adds.
-
-    trace holds frame_landed, fired with one FrameRecord
-    (decsim/links/channel.py) per frame, the transfer's inside, which
-    the fabric's own frame_landed hears for every channel.
+    The fabric frames a path's payload with its header and hands it to
+    the channel the path's card names; the channel decides when the
+    bits cross and calls back at the delivery. The split is ns-3's,
+    where the net device frames and the channel times the crossing
+    (point-to-point-net-device.cc TransmitStart calls
+    point-to-point-channel.cc TransmitStart), and gem5's packet queue
+    (src/mem/packet_queue.hh:62-63). framed is a FramedPayload
+    (links/channel.py). trace holds frame_landed, one FrameRecord per
+    frame.
     """
 
     trace: Any
@@ -1874,16 +1614,11 @@ class Channel(Protocol):
 class Framing(Protocol):
     """How a packet channel cuts one message into its wire's frames.
 
-    Built by its settings record: whole, flits, aurora_64b66b, pcie_tlp,
-    roce_v2 or ethernet_udp (links/framings.py). A message is the path's
-    header
-    and its payload; the frames carry it with the protocol's own
-    framing, and the channel serializes, credits and acknowledges them
-    one by one. The cut is Garnet's, where a network interface turns a
-    message into divCeil(size, width) flits (gem5
-    src/mem/ruby/network/garnet/NetworkInterface.cc:382-387), and ns-3's,
-    where a device adds its header to every packet
-    (point-to-point-net-device.cc:528).
+    A message is the path's header and its payload; the channel
+    serializes, credits and acknowledges the frames one by one. The cut
+    is Garnet's divCeil(size, width) flits (gem5
+    src/mem/ruby/network/garnet/NetworkInterface.cc:382-387) and ns-3's
+    header on every packet (point-to-point-net-device.cc:528).
     """
 
     def frames(self, payload_bits: int, header_bits: int) -> tuple[int, ...]:
@@ -1897,12 +1632,9 @@ class Framing(Protocol):
 class BoundaryPolicy(Protocol):
     """When a committed window ships its boundary to the windows after it.
 
-    Rows: Eager and Held (windows/boundary_policies.py), held by
-    WindowSettings.boundary_policy. Eager ships at every commit; held ships
-    only once the committing result is final. A provisional boundary that
-    ships is never revised, so a run that may revise a weak result needs
-    a row that holds. ships_provisional_boundaries is that fact, declared
-    by the row so a caller reads it rather than the row's class.
+    A provisional boundary that ships is never revised, so a run that may
+    revise a weak result needs a policy that holds;
+    ships_provisional_boundaries declares that fact.
     """
 
     ships_provisional_boundaries: bool
@@ -1912,24 +1644,18 @@ class BoundaryPolicy(Protocol):
 
 
 class BoundaryPolicySettings(Protocol):
-    """A boundary policy row's settings record, which builds the policy.
-
-    The windows record holds one; a switching run's strong window record
-    gives the one its windows take (StrongWindowBoundaries).
-    """
+    """A boundary policy's settings record, which builds the policy."""
 
     def build(self) -> BoundaryPolicy:
         """A fresh policy."""
 
 
 class StrongWindowBoundaries(Protocol):
-    """The boundary row a strong window's settings record gives the windows.
+    """The boundary policy a strong window's settings give the windows.
 
-    A switching run's windows take it (windows/settings.py
-    switching_windows). A strong window that absorbs the weak windows it
-    covers gives eager, since the weak chain must keep committing; one
-    that absorbs nothing gives held, since its escalation would revise a
-    boundary already shipped.
+    A strong window that absorbs the weak windows it covers gives eager,
+    since the weak chain must keep committing; one that absorbs nothing
+    gives held, since its escalation would revise a shipped boundary.
     """
 
     boundary_policy: BoundaryPolicySettings
@@ -1939,18 +1665,11 @@ class StrongWindowBoundaries(Protocol):
 class EscalationPolicy(Protocol):
     """Whether and when a window is decoded again by the strong tier.
 
-    The switching policy (escalation/policies.py Switching), on a run
-    whose switching slot is filled; a run with none leaves this port
-    unbound and keeps every window's one decode. The policy decides
+    A run with no switching leaves this port unbound. The policy decides
     and is told, the shape of gem5's conditional predictor
-    (src/cpu/pred/conditional.hh: lookup answers, update teaches, and
-    the unit acts on the answer): it builds no job and sends nothing.
-    tiers_for_ready_window says which tiers decode a complete window at
-    once, verdict_for_weak_result keeps a weak result or escalates its
-    window, learn_from_strong_result hears the strong tier's answer, and
-    check_plan refuses a run the policy cannot serve, once, at build.
-    The strong re-decode itself is the window side's
-    (decsim/escalation/strong_redecode.py).
+    (src/cpu/pred/conditional.hh: lookup answers, update teaches): it
+    builds no job and sends nothing. check_plan refuses, once at build,
+    a run the policy cannot serve.
     """
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
@@ -1978,11 +1697,10 @@ class EscalationPolicy(Protocol):
 class ThresholdSource(Protocol):
     """Where the switching policy's threshold comes from.
 
-    Rows: FixedThreshold, TableThreshold and OnlineThreshold
-    (escalation/threshold_sources.py). A source that audits by
-    escalating (the online row labels a kept window by re-decoding it on
-    the strong tier) needs one serial strong re-decode per window, so
-    Switching refuses it beside run_both_at_once and the double window.
+    A source that audits by escalating (it labels a kept window by
+    re-decoding it on the strong tier) needs one serial strong re-decode
+    per window, so Switching refuses it beside run_both_at_once and the
+    double window.
     """
 
     audits_by_escalating: bool
@@ -2004,19 +1722,13 @@ class ThresholdSource(Protocol):
 class ConfidenceSignal(Protocol):
     """The soft output one window's decodes report, as the join sees it.
 
-    Rows: complementary_gap, cluster_gap and extra_cluster_gap
-    (decsim/confidence/); each row's Settings record builds it from the
-    weak decoder and the threshold.
     source names the signal so the switching policy can refuse another
-    one's, fault_model_requirement is what a window model must offer,
-    decoder_evidence_requirement is what the decode itself must show
-    (decsim/records/decoding.py DecoderEvidence) and is held against the
-    weak row's own declaration when the machine is built, evidence_refusal is
-    the cited sentence that refusal prints, and forced_logical_classes
-    are the classes the window must be decoded in, one job each, empty
-    for a signal that reads one ordinary decode.
-    The row computes the soft output from the decoder's own output: the
-    solves it is given are that window's DecodeResults.
+    one's; fault_model_requirement is what a window model must offer;
+    decoder_evidence_requirement is what the decode must show
+    (records/decoding.py DecoderEvidence), held against the weak
+    decoder's declaration at build, with evidence_refusal the sentence
+    that refusal prints; forced_logical_classes are the classes the
+    window is decoded in, one job each, empty for one ordinary decode.
     """
 
     source: decoding_records.SoftOutputSource
@@ -2029,10 +1741,8 @@ class ConfidenceSignal(Protocol):
         """The window's confidence and what computing it cost.
 
         The soft output is None when the evidence is missing. The ticks
-        are the row's own computation on the weak tier's clock: zero for
-        a subtraction, and for a walk over the decode's growth the time
-        it took, measured on the host clock the way a measured decoder
-        is or declared as a card number (decision D8).
+        are the signal's own computation: zero for a subtraction, the
+        measured or declared time of a walk over the decode's growth.
         """
 
 
@@ -2040,10 +1750,7 @@ class ConfidenceSignal(Protocol):
 class RegionProposer(Protocol):
     """The window interaction, as the strong regions see it.
 
-    The escalation package plans a strong region over a weak window it
-    is escalating, and that is the one thing it asks of the interaction;
-    the rest of WindowInteraction is the windows package's own seam, so
-    this port declares the one call and nothing else.
+    The rest of WindowInteraction is the windows package's own seam.
     """
 
     def plan_strong_region(
@@ -2059,10 +1766,8 @@ class RegionProposer(Protocol):
 class BoundaryPayload(Protocol):
     """How a boundary message is written on decoder_to_decoder.
 
-    Rows: DenseSeamMask and SparseSeamList
-    (decsim/windows/boundary_payloads.py), held by
-    WindowSettings.boundary_payload. The seam is the destination's oldest round
-    layer and the row turns it into the bits the wire carries.
+    The seam is the destination's oldest round layer, turned into the
+    bits the wire carries.
     """
 
     def bits(self, seam: window_records.BoundarySeam) -> int:
@@ -2073,13 +1778,9 @@ class BoundaryPayload(Protocol):
 class WindowingScheme(Protocol):
     """How an operation's rounds are cut into windows.
 
-    Rows: sliding, parallel, sandwich, naive_online. The static
-    window graph of an operation, and when a window has its data.
-
-    Three facts about the layout are declared rather than read off the
-    row's class, so a scheme written outside decsim answers the same
-    questions the shipped rows answer (gem5's port API, arXiv 2007.03152
-    lines 489-491).
+    The static window graph of an operation, and when a window has its
+    data. Three facts about the layout are declared, never read off the
+    class (gem5's port API, arXiv 2007.03152 lines 489-491):
 
     has_trailing_tail_context: the last window this scheme lays out
         reads rounds past its own commit, which is what the switching
@@ -2117,16 +1818,9 @@ class WindowingScheme(Protocol):
 class RoundsPolicy(Protocol):
     """How many syndrome rounds an operation runs for: one or more if decoded.
 
-    An operation the plan does not decode may run none; the planner
-    refuses a decoded one with none (frontends/planner.py
-    _check_decode_owner_rounds).
-
-    The policies are FixedRounds, PerOperationRounds, CodeRounds and
-    GateRounds (qpu/round_policies.py): a memory circuit fixes its rounds, a
-    Python workload may pass its own (a PerOperationRounds may give an
-    operation none), and GateRounds is the default. The lattice-surgery unit
-    of d rounds per step is Horsman 1111.4022 Sec. 3.1 and Litinski
-    1808.02892.
+    An operation the plan does not decode may run none. The
+    lattice-surgery unit of d rounds per step is Horsman 1111.4022 Sec.
+    3.1 and Litinski 1808.02892.
     """
 
     def rounds_for(
@@ -2139,22 +1833,13 @@ class RoundsPolicy(Protocol):
 class MagicStateFactory(Protocol):
     """Where a non-Clifford operation gets its magic state.
 
-    Built by its settings record (qpu/magic_state_factories.py) from the
-    run's engine and round. The runtime asks and is called back; a
-    factory that produces on demand answers at once. A row that produces
-    ahead of demand queues its first attempt in start, never in its
-    constructor, so the order the machine builds its components in
-    cannot move a tick (gem5's startup, the place to schedule initial
-    events, gem5 src/sim/sim_object.hh lines 194 and 280). A row
-    declares a decode_queue port (a DecodeQueue), which the machine binds
-    to the run's decoder manager; a row whose card corrects nothing
-    leaves it unread.
-
-    trace holds state_delivered(operation_id, waited_ticks), fired at
-    every delivery with the ticks the request waited, which is the
-    supply stall; it is on the port because the machine connects the
-    run's runtime stamps to whatever answers this port, and a row whose
-    requests never wait carries it and never fires it.
+    The runtime asks and is called back. A factory that produces ahead
+    of demand queues its first attempt in start, never in its
+    constructor, so the build order cannot move a tick (gem5's startup,
+    src/sim/sim_object.hh lines 194 and 280). A factory declares a
+    decode_queue port, bound to the run's decoder manager. trace holds
+    state_delivered(operation_id, waited_ticks), the supply stall of
+    each delivery.
     """
 
     trace: Any
@@ -2173,12 +1858,9 @@ class MagicStateFactory(Protocol):
 class IdlePolicy(Protocol):
     """How idle rounds travel while an operation waits for feedback.
 
-    Rows: separate_decode_jobs, ignore (controller/policies.py,
-    beside the accounting they serve). relay carries one idle round
-    through the idle accounting it is given (controller/idle_rounds.py);
     end_idle_period runs when an operation starts on the patch and, for
-    every idle patch, when the workload completes, so rounds the policy
-    has not charged yet can be settled.
+    every idle patch, when the workload completes, so uncharged rounds
+    are settled.
     """
 
     def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
@@ -2188,24 +1870,17 @@ class IdlePolicy(Protocol):
         """Settle the uncharged rounds: a claim, or the workload's end."""
 
 
-# ---------------------------- the rows the root reads before it builds
+# ----------------------------- what the root reads before it builds
 
 
 @runtime_checkable
 class CodeModel(Protocol):
     """A code card: the numbers the machine reads off a QEC code.
 
-    Rows: SurfaceCodeModel and BivariateBicycleCodeModel
-    (qpu/code_geometry.py), held by QpuSettings.code_card. A card is a record of
-    numbers, not a stabilizer code: the machine prices decoder timing,
-    so it asks a card for its name and distance, its window sizes, its
-    own round period, the graph size a latency model prices, and the
-    bits one round reads out, and for nothing else. The shape is CUDA-Q
-    QEC's code base class, a few counts every code implements
-    (cudaqx libs/qec/include/cudaq/qec/code.h lines 51-58
-    and 140-160), built by name with the code's own options (get_code,
-    line 257). The planner, the plan, the round policies, the QPU clock
-    and the circuit-less sources call it.
+    A card is a record of numbers, not a stabilizer code: the machine
+    prices decoder timing and asks for nothing else. The shape is CUDA-Q
+    QEC's code base class, a few counts every code implements (cudaqx
+    libs/qec/include/cudaq/qec/code.h lines 51-58 and 140-160).
     """
 
     name: str

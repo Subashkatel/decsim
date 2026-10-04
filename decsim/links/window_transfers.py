@@ -1,15 +1,10 @@
 """The window transfers: sends in a window's name over the links.
 
-The fabric adapter the two decoder output ports hold: it turns a window
-or a job into one Link send, so a caller names what it moves and never
-the fabric. Every send rides the Link port with a TransferAttribution naming the
-operation, its patches, the window and the round range, and the request
-the transfer serves; the delivery callback runs at the link's delivery.
-The rounds a window's send carries are the ones the retention says the
-window reads, so a lookahead window's next-operation rounds are named
-under their own operation.
-Every method here sends: an input that rides no link is the sending
-store's own business and never reaches this module.
+The decoder output ports hold this adapter, so a caller names what it
+moves and never the fabric. Each send carries an attribution naming the
+operation, patches, window, round range and request. A window's rounds
+are those the retention says it reads, so a lookahead window's
+next-operation rounds are named under their own operation.
 """
 
 import functools

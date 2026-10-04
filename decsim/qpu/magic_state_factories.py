@@ -1,31 +1,23 @@
 """The magic-state factories: where a non-Clifford operation gets its state.
 
-A factory fills the MagicStateFactory port (decsim/ports.py): an
-operation that needs a magic state calls request and is called back when
-one is ready; an empty store stalls the requester, and that supply stall
-is the quantity the factories exist to measure. Trace source:
-state_delivered(operation_id, waited_ticks) at every delivery, which the
-run result sums.
+An empty store stalls the requester, and that supply stall is the
+quantity the factories exist to measure. InfiniteFactory never stalls.
 
-InfiniteFactory is the idealized supply with no stall. DistillationFactory
-is one 15-to-1 distillation stage: every unit attempts a distillation
-every attempt_ticks, a success submits one correction decode per
-multi-qubit pi/8 rotation of the 15-to-1 circuit, 11 of them (rotations
-5 to 15 of Fig. 3; the first four are single-qubit rotations whose
-Clifford corrections are Pauli corrections and need no ancilla: Litinski,
-Magic state distillation: not as costly as you think, arXiv 1905.06903,
-Sec. 4, text lines 1038-1043; Silva 2411.04270 line 381 counts the same
-11 logical cycles for the T gates) to the run's decoder pool, where they
-compete with the core's windows, and the state reaches the store one
-return trip after the last decode. MultiLevelDistillationFactory
-is the pull-driven supply chain of Silva et al., Optimizing multi-level
-magic state factories for fault-tolerant quantum architectures (arXiv
-2411.04270, Sec. II B): level 0 prepares physical states, each level
-above consumes inputs_per_round states from the buffer below and, after
+DistillationFactory is one 15-to-1 stage: each unit attempts every
+attempt_ticks, and a success submits one correction decode per
+multi-qubit pi/8 rotation, 11 of them (rotations 5 to 15 of Fig. 3; the
+first four are single-qubit and need no ancilla: Litinski 1905.06903,
+Sec. 4; Silva 2411.04270 line 381 counts the same 11 cycles), to the
+run's decoder pool, where they compete with the core's windows. The
+state reaches the store one return trip after the last decode.
+
+MultiLevelDistillationFactory is the pull-driven chain of Silva et al.
+(2411.04270, Sec. II B): level 0 prepares physical states, each level
+above consumes inputs_per_round states and, after
 logical_cycles_per_round * distance rounds, yields outputs_per_round
-states with its success probability; a failure discards the inputs. A
-request at the top propagates demand down the chain, so no level
-free-runs unless production_mode is "continuous".
+with its success probability; a failure discards the inputs. A request
+at the top pulls demand down, so no level free-runs unless
+production_mode is "continuous".
 """
 
 import dataclasses
@@ -79,20 +71,13 @@ class InfiniteFactory:
 class DistillationFactory(seeding._RandomSeedConsumer):
     """One 15-to-1 distillation stage with optional continuous production.
 
-    Demand mode starts an attempt only for an unmet request; continuous
-    mode also keeps buffer_capacity states in the pipeline. A state with
-    no correction decodes to wait on is released one return trip after
-    the physical attempt. initial_store warm-starts the store.
+    Continuous mode also keeps buffer_capacity states in the pipeline.
+    initial_store warm-starts the store.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The 15-to-1 stage's card, checked where it enters.
-
-        attempt_ticks and return_ticks are engine ticks. The eleven
-        correction decodes are Litinski's multi-qubit rotations (module
-        docstring).
-        """
+        """The 15-to-1 stage's card, in engine ticks, checked at entry."""
 
         unit_count: int
         attempt_ticks: int
@@ -311,24 +296,19 @@ class DistillLevel:
 class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     """A pull-driven chain of distillation levels feeding one store.
 
-    Level 0 holds preparation_unit_count units that each inject a physical
-    state into a distance preparation_distance patch, one prepared state
-    every preparation_logical_cycles * preparation_distance rounds. Level l
-    consumes inputs_per_round states of level l - 1 per round and yields
-    outputs_per_round. A request at the top level pulls demand down the
-    chain; continuous mode also keeps buffer_capacity states at the top.
+    Level 0 holds preparation_unit_count units, each injecting a physical
+    state into a distance preparation_distance patch every
+    preparation_logical_cycles * preparation_distance rounds.
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The level chain's card, checked where it enters.
 
-        levels runs from the first level up. The preparation_logical_cycles
-        of two and preparation_distance of three are project coefficients:
-        Silva et al. 2411.04270 Sec. II B prices a level in logical cycles
-        of its own distance but fixes neither number for the physical
-        injection stage. No correction decode by default: Silva line 249
-        counts the correction inside a level's 13 logical cycles.
+        levels runs from the first level up. preparation_logical_cycles 2 and
+        preparation_distance 3 are project coefficients: Silva et al. 2411.04270
+        Sec. II B fixes neither for the injection stage. No correction decode by
+        default: Silva line 249 counts it inside a level's 13 logical cycles.
         """
 
         levels: tuple
@@ -644,8 +624,8 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 class _WaitingRequests:
     """The requests waiting for a magic state, served oldest first.
 
-    A request's stall runs from the tick it asked to the tick it is
-    served, so a request served at once waited nothing.
+    A stall runs from the request to its service, so one served at once
+    waited nothing.
     """
 
     def __init__(self, engine: decsim.engine.Engine) -> None:
@@ -773,12 +753,6 @@ def _stall_tag(waited_ticks: int) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event a factory reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one member per
-    counter; a component's events are the same shape, so a listener
-    reaches all of them through one name.
-    """
+    """Every event a factory reports, as one member."""
 
     state_delivered: trace_source.TraceSource = trace_source.new_source()

@@ -82,7 +82,7 @@ STATS_FILE = "stats.csv"
 
 @dataclasses.dataclass(frozen=True)
 class BaselinePoint:
-    """One sinter task and the decoder object that decodes it.
+    """A sinter task paired with the decoder object that decodes it.
 
     decoder is None for sinter's built-in of the task's decoder name. It
     is kept per point because a decoder may be built from its point's

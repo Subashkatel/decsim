@@ -2625,9 +2625,9 @@ def link_totals(machine, path):
 
 # a base's shot at d = 3: thirty rounds of eight checks, and the nine
 # data qubits read out at its end
-BASE_ROUNDS = 30
-CHECKS_PER_ROUND = 8
-DATA_QUBITS = 9
+BASE_ROUND_COUNT = 30
+CHECK_COUNT = 8
+DATA_QUBIT_COUNT = 9
 
 
 def base_run(base):
@@ -2656,10 +2656,10 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    events = BASE_ROUNDS * CHECKS_PER_ROUND
-    outcomes = events + DATA_QUBITS
-    assert link_totals(machine, store_hop) == (BASE_ROUNDS, events)
-    assert link_totals(machine, readout_hop) == (BASE_ROUNDS, outcomes)
+    events = BASE_ROUND_COUNT * CHECK_COUNT
+    outcomes = events + DATA_QUBIT_COUNT
+    assert link_totals(machine, store_hop) == (BASE_ROUND_COUNT, events)
+    assert link_totals(machine, readout_hop) == (BASE_ROUND_COUNT, outcomes)
     assert link_totals(machine, room_hop) == (0, 0)
 
 
@@ -2677,10 +2677,10 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
-    events = BASE_ROUNDS * CHECKS_PER_ROUND
-    outcomes = events + DATA_QUBITS
-    assert link_totals(machine, room_hop) == (BASE_ROUNDS, events)
-    assert link_totals(machine, readout_hop) == (BASE_ROUNDS, outcomes)
+    events = BASE_ROUND_COUNT * CHECK_COUNT
+    outcomes = events + DATA_QUBIT_COUNT
+    assert link_totals(machine, room_hop) == (BASE_ROUND_COUNT, events)
+    assert link_totals(machine, readout_hop) == (BASE_ROUND_COUNT, outcomes)
     assert link_totals(machine, store_hop) == (0, 0)
 
 

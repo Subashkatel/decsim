@@ -9,6 +9,7 @@ ordinary windows. tests/windows/test_committed_rounds.py checks the
 ledger against a per-round oracle.
 """
 
+import dataclasses
 from typing import Optional
 
 import decsim.records.decoding as decoding_records
@@ -66,8 +67,9 @@ class LogicalLedger:
             _refuse_extent(contribution)
         if contribution.commit_hi < contribution.commit_lo:
             _refuse_extent(contribution)
-        self._check_arity(contribution)
-        self.contributions[contribution.owner_key] = contribution
+        copied = _with_copied_observables(contribution)
+        self._check_arity(copied)
+        self.contributions[copied.owner_key] = copied
 
     def observables_for_interval(
         self,
@@ -212,6 +214,21 @@ def _check_inside_interval(
         f"logical contribution {contribution.owner_key} crosses "
         f"strict interval boundary {commit_lo}-{commit_hi}"
     )
+
+
+def _with_copied_observables(
+    contribution: decoding_records.LogicalContribution,
+) -> decoding_records.LogicalContribution:
+    """The contribution with its observables as ints, as they are now.
+
+    A decoder may keep and later change the sequence it returned, so the
+    ledger holds the values of the install, not the decoder's object.
+    """
+    observables = contribution.logical_observables
+    if observables is None:
+        return contribution
+    copied = tuple(int(bit) for bit in observables)
+    return dataclasses.replace(contribution, logical_observables=copied)
 
 
 def _xor_of(contributions: list) -> tuple:

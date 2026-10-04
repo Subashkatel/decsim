@@ -42,7 +42,7 @@ WORKER = strong_backend.WORKER
 
 @dataclasses.dataclass(frozen=True)
 class DispatchStepsSettings:
-    """The dispatch_steps row's keys in its tier section.
+    """The dispatch_steps row's settings.
 
     device names the GPU measured, path the dispatcher's (device or
     host), workers the host path's graph workers, each with its own

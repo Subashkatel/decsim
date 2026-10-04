@@ -190,7 +190,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `DispatchStepsSettings`
 
-`decsim/decoders/dispatch_steps/decoder.py`. The dispatch_steps row's keys in its tier section.
+`decsim/decoders/dispatch_steps/decoder.py`. The dispatch_steps row's settings.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -227,7 +227,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `RelayBeliefPropagationDecoder.Settings`
 
-`decsim/decoders/relay_belief_propagation/decoder.py`. The row's own keys in its tier section.
+`decsim/decoders/relay_belief_propagation/decoder.py`. The relay_bp row's settings.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -245,7 +245,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `TesseractDecoder.Settings`
 
-`decsim/decoders/tesseract/decoder.py`. The row's own keys in its tier section: Tesseract's search.
+`decsim/decoders/tesseract/decoder.py`. The Tesseract row's settings: its search.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -262,7 +262,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `UnionFindDecoder.Settings`
 
-`decsim/decoders/union_find/decoder.py`. The row's own keys in its tier section.
+`decsim/decoders/union_find/decoder.py`. The union-find row's settings.
 
 | Field | Type | Default |
 | --- | --- | --- |

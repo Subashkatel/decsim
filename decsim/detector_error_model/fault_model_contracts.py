@@ -127,6 +127,7 @@ class PlacedFaultModel:
             flips_by_column[int(column)] = flips
         frozen_flips = types.MappingProxyType(flips_by_column)
         object.__setattr__(self, "boundary_flips", frozen_flips)
+        _check_column_counts(self)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -182,6 +183,7 @@ class WindowErrorModel:
     observable_bases: Optional[tuple[str, ...]] = None
 
     def __post_init__(self) -> None:
+        _check_detector_counts(self)
         if self.detector_bases is not None:
             bases = dict(self.detector_bases)
             frozen_bases = types.MappingProxyType(bases)
@@ -310,6 +312,42 @@ def _crossing_ids(
         if model.reaches_behind(detectors):
             crossing_ids.add(fault_id)
     return frozenset(crossing_ids)
+
+
+def _check_column_counts(faults: PlacedFaultModel) -> None:
+    """Every fault column has one prior and one observable column.
+
+    A model is a user's plug-in (the WindowModelSource port), and a
+    decoder that reads a column past the shorter count can run on.
+    """
+    columns = faults.check.shape[1]
+    priors = len(faults.priors)
+    observable_columns = faults.observables.shape[1]
+    if priors == columns and observable_columns == columns:
+        return
+    raise ValueError(
+        f"a {faults.representation.value} fault model has {columns} check "
+        f"columns, {priors} priors and {observable_columns} observable "
+        "columns; every fault column needs one of each"
+    )
+
+
+def _check_detector_counts(model: WindowErrorModel) -> None:
+    """Every view's check rows, and the coordinates, follow detector_ids."""
+    detectors = len(model.detector_ids)
+    for faults in (model.graphlike_faults, model.physical_faults):
+        if faults is not None and faults.check.shape[0] != detectors:
+            raise ValueError(
+                f"a window model has {detectors} detector ids and "
+                f"{faults.check.shape[0]} {faults.representation.value} "
+                "check rows; every row needs one id"
+            )
+    coordinates = model.detector_coordinates
+    if coordinates is not None and len(coordinates) != detectors:
+        raise ValueError(
+            f"a window model has {detectors} detector ids and "
+            f"{len(coordinates)} detector coordinates; every id needs one"
+        )
 
 
 def _frozen_array(value: object) -> object:

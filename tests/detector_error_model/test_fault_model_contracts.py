@@ -7,6 +7,7 @@ requirement joins with another; the module is a leaf that loads no
 numeric library when it is imported on its own.
 """
 
+import dataclasses
 import pathlib
 import subprocess
 import sys
@@ -192,3 +193,50 @@ def test_importing_the_contract_alone_loads_no_numeric_library():
         check=True,
     )
     assert probe.stdout.strip() == "[]"
+
+
+def consistent_window():
+    """Two detectors with coordinates, read by the graphlike view."""
+    graphlike = placed_model()
+    return fault_model_contracts.WindowErrorModel(
+        detector_ids=(0, 1),
+        detector_coordinates=((0.0,), (1.0,)),
+        defect_positions={0: (1, 0), 1: (1, 1)},
+        first_commit_round=1,
+        graphlike_faults=graphlike,
+        physical_faults=None,
+    )
+
+
+THREE_COLUMN_OBSERVABLES = scipy.sparse.csc_matrix(
+    [[0, 1, 1]], dtype=numpy.uint8
+)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"priors": [0.1]}, {"observables": THREE_COLUMN_OBSERVABLES}],
+    ids=["one prior for two columns", "three observable columns for two"],
+)
+def test_every_fault_column_has_one_prior_and_one_observable_column(change):
+    placed = placed_model()
+
+    with pytest.raises(ValueError, match="needs one of each"):
+        dataclasses.replace(placed, **change)
+
+
+@pytest.mark.parametrize(
+    "change, refusal",
+    [
+        ({"detector_ids": (0, 1, 2)}, "every row needs one id"),
+        ({"detector_coordinates": ((0.0,),)}, "every id needs one"),
+    ],
+    ids=["three ids for two check rows", "one coordinate for two ids"],
+)
+def test_every_detector_id_has_one_check_row_and_one_coordinate(
+    change, refusal
+):
+    window = consistent_window()
+
+    with pytest.raises(ValueError, match=refusal):
+        dataclasses.replace(window, **change)

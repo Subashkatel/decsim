@@ -31,10 +31,9 @@ import decsim.trace_source as trace_source
 class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     """Keep one physical memory history until its actual final readout.
 
-    Programs are keyed by dynamic-stream owner. Only trailing-buffer feedback
-    is supported. The source retains the executed circuit and raw record for
-    reproduction, so host memory grows with the actual number of rounds.
-    shot_sampled fires once at finalization with that complete circuit.
+    Programs are keyed by dynamic-stream owner; only trailing-buffer
+    feedback is supported. The source keeps the executed circuit and raw
+    record for reproduction, so host memory grows with the rounds run.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -74,11 +73,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         stream_operation: program_records.Operation,
         round_count: int,
     ) -> Optional[int]:
-        """Create a physical history independently of decoder models.
-
-        How far back the stream's rounds read is fixed here, from the
-        fragments the program declares (_program_reach).
-        """
+        """Create a physical history; the program fixes its read-back reach."""
         del round_count
         program = self._program_for(stream_operation)
         reach = _program_reach(program)
@@ -364,11 +359,9 @@ class _Stream:
 class _History:
     """The physical instructions and measurements executed so far.
 
-    The formation table covers the circuit so far; every appended
-    fragment extends it, and each seat that forms the stream's rounds
-    takes the longer table in turn. Until the final round the table
-    carries the program's reach, how far back a round still to run may
-    read (FormationTable live_reach).
+    Every appended fragment extends the formation table, and each forming
+    seat takes the longer table. Until the final round the table carries the
+    program's reach (FormationTable live_reach).
     """
 
     def __init__(self, seed: Optional[int]) -> None:
@@ -426,12 +419,10 @@ def _copied_programs(programs):
 def _program_reach(program: circuit_records.RepeatedStimCircuit) -> int:
     """How many rounds back any round after the first reads.
 
-    Read off the repeated and final fragments, the only ones that run
-    after another round; the first round has nothing before it. A
-    program whose round_circuit reaches further on some round loses the
-    round it reads there, and the seat forming that round raises
-    (detector_formation.StreamingDetectorFormer), so no event is formed
-    from a round it was not given.
+    Read off the repeated and final fragments, the only ones run after
+    another round. A program reaching further on some round loses that
+    round, and the seat forming it raises, so no event is formed from a
+    round it was not given.
     """
     round_width = program.repeated_round.num_measurements
     repeated_reach = formation.rounds_read_back(

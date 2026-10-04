@@ -1,26 +1,19 @@
 """Turns raw measurement bits into detection events, round by round.
 
-A detector's recipe is the raw measurement bits, addressed as (round,
-slot) in the QPU's one-based packet schedule, that XOR into it plus their
-noiseless reference parity; that is Stim's own rule
-(stim.Circuit.compile_m2d_converter, measurements_to_detection_events).
-A front end may declare the packet schedule (measurement_rounds);
-without one, the Stim generator layout applies, with the trailing data
-readout folded into the last round's packet.
+A detector's recipe is the raw bits it XORs, addressed as (round, slot)
+in the QPU's one-based packet schedule, plus their noiseless reference
+parity: Stim's rule (stim.Circuit.compile_m2d_converter). A front end
+may declare the packet schedule (measurement_rounds); without one, the
+Stim generator layout applies, with the data readout folded into the
+last round's packet.
 
 The folding is why a round's detector count is not constant. On a
-rotated surface-code memory Stim lays out three kinds of layer: the
-preparation layer compares each check against the prepared state and
-holds (d*d - 1)/2 detectors, every bulk layer compares a round against
-the one before it and holds d*d - 1, and the readout layer rebuilds the
-checks from the data-qubit readout and holds another (d*d - 1)/2. The
-readout layer folds into the last round, so the rounds this module
-forms carry (d*d - 1)/2 events on the first, d*d - 1 in the middle and
-3(d*d - 1)/2 on the last: 4, 8 and 12 at d=3, 12, 24 and 36 at d=5,
-24, 48 and 72 at d=7, read off stim.Circuit.generated. The raw packet
-widths differ again, d*d - 1 per round and d*d - 1 + d*d on the last,
-which is where the 240-against-249 and 1200-against-1225 bit counts of
-the store hop come from.
+rotated surface-code memory the preparation layer holds (d*d - 1)/2
+detectors, each bulk layer d*d - 1, and the readout layer another
+(d*d - 1)/2, folded into the last round: 4, 8 and 12 at d=3, 12, 24 and
+36 at d=5 (stim.Circuit.generated). The raw packets are d*d - 1 bits per
+round and d*d - 1 + d*d on the last, hence the 240-against-249 and
+1200-against-1225 bit counts of the store hop.
 """
 
 import dataclasses
@@ -70,12 +63,10 @@ class ObservableRecipe:
 class FormationTable:
     """Every recipe read off one circuit, over its packet layout.
 
-    `packet_width_by_round` is the raw bit count of each round's packet.
-    `readout_slot_start` is the slot where the folded data readout begins
-    in the last packet, or None when nothing was folded. `live_reach`
-    is, on a live stream's table, how many rounds back a round not yet
-    run may read, the program's reach (rounds_read_back); None when the
-    table is the whole operation.
+    readout_slot_start is the slot where the folded data readout begins in
+    the last packet, or None. live_reach, on a live stream's table, is how
+    many rounds back a round not yet run may read (rounds_read_back); None
+    on a whole operation's table.
     """
 
     round_count: int
@@ -91,11 +82,10 @@ class FormationTable:
         return list(detectors)
 
     def rounds_read_by(self, round_indices: Iterable[int]) -> set[int]:
-        """The rounds whose packets forming these rounds reads.
+        """The rounds whose packets forming these rounds reads, and no more.
 
-        Their detectors' records (StreamingDetectorFormer form_round):
-        no more, so a seat joining mid-stream is given what its rounds
-        read and nothing between.
+        A seat joining mid-stream is given what its rounds read and nothing
+        between.
         """
         record_rounds = set()
         for round_index in round_indices:
@@ -109,10 +99,8 @@ class FormationTable:
     ) -> int:
         """How many rounds before first_round forming these rounds reads.
 
-        A read forms each of its rounds in turn, and a later round can
-        reach further back than the first (a detector of rec[-1] and
-        rec[-4] after rounds of rec[-1] alone), so the read reaches back
-        to the earliest round any of them reads (rounds_read_by).
+        A later round can reach further back than the first (rec[-1] and rec[-4]
+        after rounds of rec[-1] alone), so the earliest read of any counts.
         """
         record_rounds = self.rounds_read_by(round_indices)
         record_rounds.add(first_round)
@@ -120,13 +108,11 @@ class FormationTable:
         return first_round - earliest_round
 
     def earlier_rounds_read(self, first_round: int) -> tuple[int, ...]:
-        """The rounds before first_round it or any later round reads.
+        """The rounds before first_round that it or any later round reads.
 
-        What a stream's window keeps for the windows after it, which
-        register later: on a whole operation the detectors' records of
-        first_round on, back to the earliest; on a live table the
-        live_reach rounds before it, since a round not yet run may read
-        that far.
+        What a stream's window keeps for the windows after it: on a live table
+        the live_reach rounds before it, since a round not yet run may read that
+        far.
         """
         earliest_round = first_round - self._reach_from(first_round)
         earliest_round = max(1, earliest_round)
@@ -136,10 +122,7 @@ class FormationTable:
     def rounds_reading(self, round_index: int) -> tuple[int, ...]:
         """The later rounds whose formation reads this round's packet.
 
-        The reference set of the packet: forming any of these rounds
-        reads it (rounds_read_by names the same records from the
-        reading side). A round's own formation always comes with its
-        own packet, so it is not listed.
+        A round's own formation always has its own packet, so it is not listed.
         """
         return self._later_readers_by_round.get(round_index, ())
 
@@ -169,9 +152,8 @@ class FormationTable:
     def _detectors_by_round(self) -> dict[int, list[DetectorRecipe]]:
         """The detectors grouped by round, once per table.
 
-        A seat asks for one round's detectors to form it and again to
-        size its store's room; scanning every detector of a d=15, 100
-        round table costs 0.4 ms a call, a lookup costs nothing.
+        A seat asks per round to form it and to size its store's room; a scan
+        of a d=15, 100 round table costs 0.4 ms a call.
         """
         by_round: dict[int, list[DetectorRecipe]] = {}
         for recipe in self.detectors:
@@ -181,10 +163,9 @@ class FormationTable:
 
     @functools.cached_property
     def _earliest_detector_read_from(self) -> dict[int, int]:
-        """For each round, the earliest record its or a later detector reads.
+        """For each round, the earliest record it or a later detector reads.
 
-        One pass from the last round down, once per whole table, so a
-        stream's every window asks it in a lookup.
+        One pass from the last round down, so each window asks in a lookup.
         """
         earliest_by_round = {}
         earliest_round = self.round_count
@@ -231,13 +212,11 @@ def build_formation_table(
 ) -> FormationTable:
     """Read the recipe of every detector and observable off the circuit.
 
-    `measurement_rounds` is the QPU's packet schedule as a front end
-    declares it: one round per absolute measurement index.
-    `detector_rounds` is each detector's declared round, inside
-    1..round_count as detector_chronology requires; a detector can only
-    be formed once every bit it reads has arrived, so a declared round
-    may not precede them either. `live_reach` marks a live stream's
-    table, rounds still to run after it (FormationTable).
+    measurement_rounds is the front end's packet schedule, one round per
+    absolute measurement index. detector_rounds is each detector's declared
+    round in 1..round_count; a detector forms only once every bit it reads
+    has arrived, so it may not precede them. live_reach marks a live
+    stream's table.
     """
     if round_count < 1:
         raise ValueError("round_count must be positive")
@@ -261,17 +240,12 @@ def build_formation_table(
 def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
     """How many rounds back a fragment reads, run after rounds this wide.
 
-    A record past the fragment's own measurements lies k measurements
-    before it starts, so in the ceil(k / round_width)th round back once
-    the rounds before it are repeated ones, the furthest it lands; on an
-    earlier round it lands in the first round, no further back. The
-    count is fixed by the program's text, not its outcomes, so a stream
-    keeps that many rounds as gem5's TAGE keeps its last maxHist
-    outcomes (src/cpu/pred/tage_base.cc:310-313). After rounds that
-    measure nothing a record lies a round further back each round and no
-    count bounds it, so such a read is refused by name. An observable's
-    records are not counted: no seat forms an observable, and form_shot
-    folds them once per shot from its complete packets.
+    A record k measurements before the fragment lies at most
+    ceil(k / round_width) rounds back. The count is fixed by the program's
+    text, so a stream keeps that many rounds, as gem5's TAGE keeps its last
+    maxHist outcomes (src/cpu/pred/tage_base.cc:310-313). After rounds that
+    measure nothing no count bounds it, so that read is refused. Observable
+    records are not counted: no seat forms an observable.
     """
     furthest_count = 0
     measured_so_far = 0
@@ -289,31 +263,22 @@ def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
 class StreamingDetectorFormer:
     """One seat's former for one operation: a raw packet in, events out.
 
-    It keeps a packet while a round that reads it (FormationTable
-    rounds_reading) is neither formed here nor retired (retire_round),
-    as an HEVC decoder keeps each picture the current reference set
-    names (FFmpeg hevc/refs.c:486-517), so a round formed out of order
-    finds the packets it reads. On a live table it also keeps the
-    live_reach last packets, which a round not yet run may read. Fed in
-    round order it so holds, between rounds, the packets of the last k
-    rounds, k the furthest any detector reaches back: the state IBM's
-    windowed form keeps as its running syndrome (Maurer 2510.21600
-    Algorithm 2, lines 760-770). A seat that forms only some rounds
-    keeps a packet until each round reading it has formed here or left
-    the store (retire_round), so it holds no more than the rounds the
-    store still keeps read. Every detector of the arriving round starts
-    at its reference parity and XORs in its listed bits. It forms no
-    observable, which no seat reads (form_shot folds them per shot).
+    It keeps a packet while a round that reads it is neither formed here
+    nor retired, as an HEVC decoder keeps each picture the reference set
+    names (FFmpeg hevc/refs.c:486-517), so a round formed out of order finds
+    its packets. On a live table it also keeps the last live_reach packets.
+    Fed in order it holds the last k rounds, k the furthest reach back: the
+    running syndrome of IBM's windowed form (Maurer 2510.21600 Algorithm 2).
+    It forms no observable; form_shot folds them per shot.
     """
 
     def __init__(
         self, table: FormationTable, done_rounds: Optional["DoneRounds"] = None
     ) -> None:
-        """done_rounds is the seat's record of the operation's done rounds.
+        """done_rounds is shared with the seat.
 
-        A seat that forms only some rounds may make its former after
-        rounds have already left the store, so the seat keeps that
-        record and the former shares it.
+        A seat that forms only some rounds may make its former after rounds
+        have already left the store.
         """
         self.table = table
         self.packets: dict[int, tuple[int, ...]] = {}
@@ -342,10 +307,7 @@ class StreamingDetectorFormer:
         self.packets[round_index] = packet
 
     def form_round(self, round_index: int) -> list[tuple[int, int]]:
-        """Form the round from the held packets, then let go of the unread.
-
-        Returns the events as (detector index, bit) pairs.
-        """
+        """The round's (detector index, bit) pairs; unread packets go."""
         self.done_rounds.add(round_index)
         recipes = self.table.detectors_of_round(round_index)
         events = [
@@ -356,18 +318,12 @@ class StreamingDetectorFormer:
         return events
 
     def hold_packet(self, round_index: int, bits: Iterable[int]) -> None:
-        """Keep one round's packet, for the rounds after it, forming nothing.
-
-        Every packet no round left to form here reads is let go now.
-        """
+        """Keep one round's packet for later rounds, forming nothing."""
         self.take_packet(round_index, bits)
         self._let_go_of_unread_packets()
 
     def retire_round(self, round_index: int) -> None:
-        """No read forms this round here again: its reads are done.
-
-        The packets it alone still read are let go now.
-        """
+        """No read forms this round here again; let go of what it alone read."""
         self.done_rounds.add(round_index)
         self._let_go_of_unread_packets()
 
@@ -380,13 +336,11 @@ class StreamingDetectorFormer:
         return sum(len(packet) for packet in self.packets.values())
 
     def extend_table(self, table: FormationTable) -> None:
-        """Append recipes without changing earlier rounds.
+        """Take a longer table whose earlier rounds are unchanged.
 
-        A live circuit supplies the next recipes before their packets.
-        The packets they read are the live table's last live_reach,
-        which the former kept, or rounds a seat that
-        forms only some rounds was never given, which a read gives it
-        then (rounds_needed_before).
+        A live circuit supplies the next recipes before their packets. A round
+        they read that this seat was never given comes with the read
+        (rounds_needed_before).
         """
         _check_formation_prefix(self.table, table)
         self.table = table
@@ -435,12 +389,9 @@ class StreamingDetectorFormer:
 class DoneRounds:
     """One operation's rounds done at a seat, in memory that does not grow.
 
-    Every round up to `through` is done, and the done rounds above it
-    are listed in `above`, as TCP acknowledges every byte below its
-    cumulative ACK and lists only the blocks received above it (RFC
-    2018, section 3). Every round is formed or retired once, in about
-    round order, so the watermark keeps up and `above` holds only the
-    rounds done ahead of an earlier one.
+    Every round up to through is done, and those done above it are listed
+    in above, as TCP's cumulative ACK and SACK blocks (RFC 2018, section 3).
+    Rounds finish in about round order, so above stays small.
     """
 
     def __init__(self) -> None:
@@ -485,14 +436,11 @@ def form_shot(
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Every detector and observable bit of one shot, in index order.
 
-    The device calls it once per shot with the shot's complete packets;
-    no seat calls it. It walks the packets once in round order, and each
-    observable starts at its reference parity and XORs in that round's
-    records of it, as Stim's frame simulator XORs an OBSERVABLE_INCLUDE's
-    records into its obs_record when the instruction runs
-    (src/stim/simulators/frame_simulator.inl:233-243, v1.16.0). XOR
-    commutes, so folding a record with its round gives the parity the
-    instruction would.
+    The device calls it once per shot with complete packets. Each observable
+    starts at its reference parity and XORs in each round's records of it,
+    as Stim's frame simulator does at OBSERVABLE_INCLUDE
+    (src/stim/simulators/frame_simulator.inl:233-243, v1.16.0); XOR
+    commutes, so folding by round gives the same parity.
     """
     streaming_former = StreamingDetectorFormer(table)
     detector_bits = [0] * len(table.detectors)
@@ -553,10 +501,10 @@ def _circuit_tables(
 class _MeasurementRoundReader:
     """Gives each measurement its round from one walk over the circuit.
 
-    The measurement blocks between two DETECTOR groups belong to the round
-    the following group announces (its time coordinate plus one). Blocks
-    after the last group, and groups past round_count (Stim's post-readout
-    layer), fold into the last round's packet.
+    The measurements before a DETECTOR group belong to the round it
+    announces (time coordinate plus one). Those after the last group, and
+    groups past round_count (Stim's post-readout layer), fold into the last
+    round.
     """
 
     def __init__(self, round_count: int):
@@ -683,10 +631,7 @@ def _round_of_each_measurement(
     round_count: int,
     measurement_rounds: Optional[dict[int, int]],
 ) -> tuple[list[int], Optional[int]]:
-    """One round per absolute measurement index, and the readout start.
-
-    Declared by the front end, or read off the circuit's shape.
-    """
+    """One round per absolute measurement, declared or read off the circuit."""
     if measurement_rounds is None:
         reader = _MeasurementRoundReader(round_count)
         return reader.read(circuit)

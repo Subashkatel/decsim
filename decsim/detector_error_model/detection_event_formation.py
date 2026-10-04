@@ -1,30 +1,22 @@
 """The detection event former, seated at the points the settings name.
 
-A detection event is a parity of raw measurement outcomes
-(detector_formation.py), so its value is the same wherever it is formed:
-a seat moves the width every hop after it carries, the state the seat
-holds and the clock the conversion is charged on, and nothing else
-(detection_events.formed_at, detector_error_model/settings.py). The
-published placements sit at every seat decsim has. At the controller,
-"inside the workstation, measurements are converted into detections
-and then streamed to the real-time decoding software via a shared
-memory buffer" (Google 2408.13687 lines 474-476). At the decoder chip's
-input path, its "detector window processing component calculates
-parities of groups of measurements" (Maurer 2510.21600 lines 234-236),
-which decsim seats at either store's receiving end. Inside the decoder,
-the controller writes the outcomes "sequentially to the decoder" and
-"The decoder computes the syndrome from measurement outcomes" (Caune
-2410.05202 lines 1252-1255), LILLIPUT's Event Detection Logic block
-sits inside it (2108.06569 lines 500-509), and cudaqx's real-time
-decoder resolves "every detector whose measurements have now all
-arrived" (cudaqx libs/qec/lib/decoder.cpp:426-432).
+A detection event is a parity of raw outcomes, so its value is the same
+wherever it is formed: a seat moves only the width the later hops
+carry, the state the seat holds and the clock it is charged on. The
+seats are the published placements. At the controller, measurements
+"are converted into detections and then streamed to the real-time
+decoding software" (Google 2408.13687 lines 474-476). At the decoder
+chip's input, a "detector window processing component calculates
+parities" (Maurer 2510.21600 lines 234-236), seated at either store's
+receiving end. Inside the decoder, "The decoder computes the syndrome
+from measurement outcomes" (Caune 2410.05202 lines 1252-1255), as
+LILLIPUT's Event Detection Logic (2108.06569 lines 500-509) and cudaqx's
+real-time decoder (libs/qec/lib/decoder.cpp:426-432) do.
 
-Every seat keeps its own history, as every real one does: LILLIPUT's
-block is inside its decoder and cudaqx keeps a detector buffer per
-decoder instance (cudaqx libs/qec/lib/decoder.cpp:51-61, 128-129). A
-seat holds the last raw packets its recipes still read, and remembers
-the rounds it has formed, so a round two windows of one seat read is
-formed once.
+Every seat keeps its own history, as cudaqx keeps a detector buffer per
+decoder instance (decoder.cpp:51-61): the raw packets its recipes still
+read, and the rounds it formed, so a round two windows read is formed
+once.
 """
 
 import dataclasses
@@ -41,15 +33,10 @@ import decsim.trace_source as trace_source
 class SeatedFormation:
     """The run's former at every seat detection_events.formed_at names.
 
-    A seat not in the list hands a round on as it came and costs
-    nothing. The source's recipes are read per operation
-    (ports.DetectionEventFormer); each seat forms from its own packets.
-
-    Trace source: state_held(seat, operation_id, bits) each time a seat
-    takes a raw round, bits being the raw packets the seat then holds
-    for that operation: the state a former keeps, IBM's running
-    syndrome (Maurer 2510.21600 Algorithm 2, lines 760-770), which no
-    referent sizes, so it is reported and never refused.
+    A seat not listed hands a round on as it came, at no cost. state_held
+    reports the raw bits a seat holds per operation, IBM's running syndrome
+    (Maurer 2510.21600 Algorithm 2), which no referent sizes, so it is
+    reported and never refused.
     """
 
     def __init__(
@@ -78,13 +65,10 @@ class SeatedFormation:
     ) -> tuple:
         """The fragments as they leave the seat: formed there, or as they came.
 
-        A seat outside a decoder unit sends the events on at their own
-        width; a decoder seat keeps the width that landed, since the
-        unit's input memory was written the raw round and a memory
-        counts what is written into it. rounds_before are the raw rounds
-        before the first of the fragments, in order, given to a seat that
-        needs them (rounds_needed_before): the seat holds them for that
-        round's detectors and neither forms nor returns them.
+        A decoder seat keeps the landed width, since the unit's input memory was
+        written the raw round. rounds_before are the raw rounds before the first
+        fragment that the seat needs (rounds_needed_before); it holds them and
+        neither forms nor returns them.
         """
         history = self.history_by_seat.get(seat)
         if history is None:
@@ -95,10 +79,9 @@ class SeatedFormation:
     def width_at(self, seat: str, fragments: tuple) -> Optional[int]:
         """The width one round's fragments leave the seat at, forming nothing.
 
-        A store weighs its room at the width it will hold, as gem5 makes
-        room for a block at the size its compressor will store it at
-        (src/mem/cache/base.cc:1678-1698), so the width is asked before
-        the round lands and must not move the seat's history.
+        A store weighs its room before the round lands, as gem5 makes room at
+        the compressed size (src/mem/cache/base.cc:1678-1698), so this must not
+        move the seat's history.
         """
         history = self.history_by_seat.get(seat)
         if history is None:
@@ -110,17 +93,10 @@ class SeatedFormation:
     ) -> tuple:
         """The raw rounds before a read's first round the seat must be given.
 
-        A detector compares a round against earlier ones, one round back
-        on a surface code (LILLIPUT 2108.06569 lines 499-510) and further
-        on others, so a read of first_round to last_round is given the
-        rounds its unformed rounds' recipes read and no round between
-        (detector_formation.FormationTable rounds_read_by), the rounds
-        its stream keeps for it (earlier_rounds_read). A round the seat
-        formed before is answered from what it remembers, and its former
-        keeps its packet, or the packet it was given raw, while an
-        unformed round reads it
-        (detector_formation.StreamingDetectorFormer), so it is not given
-        again.
+        A detector compares a round against earlier ones, one round back on a
+        surface code (LILLIPUT 2108.06569 lines 499-510) and further on others,
+        so a read is given exactly the rounds its unformed rounds' recipes read
+        and the seat does not already hold.
         """
         history = self.history_by_seat.get(seat)
         if history is None:
@@ -134,11 +110,8 @@ class SeatedFormation:
     ) -> tuple[int, ...]:
         """The raw rounds before first_round it or any later round reads.
 
-        What a stream's window holds before its first round for a seat
-        that forms, whatever that seat has formed by the time it reads
-        (detector_formation.FormationTable earlier_rounds_read): a later
-        window registers after it, so it keeps what that window reads
-        too. None for a source with no recipes, which forms nothing.
+        What a stream's window holds for a forming seat, since a later window
+        registers after it. Empty for a source with no recipes.
         """
         if self.recipes is None:
             return ()
@@ -146,13 +119,10 @@ class SeatedFormation:
         return table.earlier_rounds_read(first_round)
 
     def retire_round(self, round_key: tuple) -> None:
-        """No read forms this round again: every seat's reads of it are done.
+        """No read forms this round again: every seat lets go of it.
 
-        The round left the store the plan's windows read, so no window
-        or escalation reads it after now, and every seat stops keeping
-        packets for it (detector_formation.StreamingDetectorFormer
-        retire_round): a round an escalation took to the strong side, a
-        sealed stream's last rounds and a clipped tail are among them.
+        The round left the store the plan's windows read, so no window or
+        escalation reads it after now.
         """
         operation_id, round_index = round_key
         for history in self.history_by_seat.values():
@@ -161,12 +131,9 @@ class SeatedFormation:
     def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
         """The round keys no earlier job of the seat claimed, now claimed.
 
-        A decoder tier charges a job for the rounds it is first to claim
-        (decoders/detection_events.py TierFormation). Every job claims
-        its rounds while the store still holds them for it
-        (decoder_memory_transfer.py stage), and a round retires only
-        once no read holds it, so no job claims a round after it
-        retires and its claim goes then.
+        A decoder tier charges a job for the rounds it is first to claim. A job
+        claims while the store holds its rounds, and a round retires only when
+        no read holds it, so a claim never outlives its round.
         """
         history = self.history_by_seat[seat]
         return history.memory.claim(round_keys)
@@ -177,11 +144,7 @@ class SeatedFormation:
         history.memory.unclaim(round_keys)
 
     def check_settled(self) -> None:
-        """At the end of a run no seat may still hold a raw round.
-
-        Every round has formed or left the store by then, so a packet
-        still held is one no round would ever have let go of.
-        """
+        """At the end of a run no seat may still hold a raw round."""
         for history in self.history_by_seat.values():
             history.check_settled()
 
@@ -193,15 +156,7 @@ class SeatedFormation:
 
 
 class _SeatHistory:
-    """What one seat holds: the packets its recipes read, the rounds formed.
-
-    A detector compares this round's outcomes against the round before
-    it (LILLIPUT 2108.06569 lines 499-510), so a round is formed from
-    the packets the seat holds, each kept while a round that reads it is
-    unformed here (detector_formation.StreamingDetectorFormer). A round
-    the seat formed before is answered from what it remembers, and its
-    packet is held for the rounds after it.
-    """
+    """What one seat holds: the packets its recipes read, the rounds formed."""
 
     def __init__(
         self,
@@ -225,11 +180,8 @@ class _SeatHistory:
     def form(self, fragments: tuple) -> tuple:
         """Every round among the fragments formed, in the order they came.
 
-        A source with no recipes states the width its events take
-        (QPUReadout.event_bits), and the fragments leave at it. The
-        fragments as they came when there is nothing to form them with
-        or from: a timing-only round of a circuit source, which carries
-        no bits.
+        A source with no recipes leaves at its stated event width; a timing-only
+        round, which carries no bits, leaves as it came.
         """
         if self.recipes is None:
             return self._at_the_stated_width(fragments)
@@ -240,13 +192,7 @@ class _SeatHistory:
         return tuple(formed)
 
     def width(self, fragments: tuple) -> Optional[int]:
-        """The width one round's fragments take once formed here.
-
-        The width form gives them: the landed width at a decoder seat or
-        for a timing-only round, the stated event width for a source with
-        no recipes, and one bit per detector of the round otherwise
-        (detector_formation.StreamingDetectorFormer.feed_packet).
-        """
+        """The width form would give one round's fragments."""
         if self.keeps_landed_width:
             return round_records.fragment_wire_bits(fragments)
         if self.recipes is None:
@@ -260,10 +206,7 @@ class _SeatHistory:
         return len(detectors)
 
     def _at_the_stated_width(self, fragments: tuple) -> tuple:
-        """Each fragment at the event width its source stated.
-
-        A decoder seat keeps the width that landed, as for any round.
-        """
+        """Each fragment at its stated event width; a decoder seat keeps it."""
         if self.keeps_landed_width:
             return fragments
         leaving = []
@@ -288,11 +231,9 @@ class _SeatHistory:
     def retire(self, operation_id: Any, round_index: int) -> None:
         """No read forms this round here again; held packets may go.
 
-        Its remembered events go too, since no read asks for it here
-        again. A seat with no former yet records the round, for the
-        former it makes later. The former takes the source's newest table first,
-        so a live stream that has since run its final round no longer
-        keeps rounds for a round still to run.
+        A seat with no former yet records the round for the former it makes
+        later. The former takes the newest table first, so a live stream that
+        has run its final round keeps no rounds for one still to run.
         """
         self.memory.retire(operation_id, round_index)
         if operation_id not in self.former_by_operation:
@@ -316,14 +257,7 @@ class _SeatHistory:
     def rounds_needed_before(
         self, operation_id: Any, first_round: int, last_round: int
     ) -> tuple:
-        """The raw rounds before first_round that forming the read reads.
-
-        Exactly the rounds its unformed rounds' recipes read
-        (FormationTable rounds_read_by) that the seat does not hold raw:
-        a round given to it or formed there before stays in its former
-        while an unformed round reads it. A source with no recipes forms
-        nothing, so nothing is missing.
-        """
+        """The raw rounds before first_round the read needs and lacks."""
         if self.recipes is None:
             return ()
         table = self.recipes.formation_table(operation_id)
@@ -361,9 +295,8 @@ class _SeatHistory:
     def _form_round(self, fragments: list) -> tuple:
         """One round's fragments as one fragment of its events.
 
-        Stim rec targets span acquisition fragments, so the round is
-        formed once, whole, in measurement order, as one event vector
-        shared by all contributing patches.
+        Stim rec targets span fragments, so the round is formed once, whole, as
+        one event vector shared by its patches.
         """
         bits = _joined_bits(fragments)
         if bits is None:
@@ -408,11 +341,7 @@ class _SeatHistory:
     def _former_for(
         self, operation_id: Any
     ) -> detector_formation.StreamingDetectorFormer:
-        """This seat's former for the operation, on the source's newest table.
-
-        A live stream's table grows as its rounds execute, and the
-        former takes the longer table without losing what it holds.
-        """
+        """The seat's former for the operation, on the newest table."""
         table = self.recipes.formation_table(operation_id)
         former = self.former_by_operation.get(operation_id)
         if former is None:
@@ -428,11 +357,7 @@ class _SeatHistory:
 
 
 class _SeatMemory:
-    """What a seat remembers of the rounds it is done with.
-
-    Read where a round is formed or retired, not where the seat is
-    wired, so it is kept apart from the seat's collaborators.
-    """
+    """What a seat remembers of the rounds it is done with."""
 
     def __init__(self) -> None:
         # per operation, the rounds formed here or retired, kept from
@@ -477,10 +402,9 @@ class _SeatMemory:
 def _as_stated_events(
     fragment: round_records.RetainedSyndromeFragment,
 ) -> round_records.RetainedSyndromeFragment:
-    """The fragment formed at its stated width; as it came when none is.
+    """The fragment at its stated event width; as it came when none is.
 
-    A fake-bit source's events are the first of its random bits, since
-    random bits carry no parity to form.
+    A fake-bit source's events are its first random bits.
     """
     event_bits = fragment.event_bits
     if event_bits is None:
@@ -529,12 +453,7 @@ def _rounds_in_order(fragments) -> list:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the seated former reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92); a component's events are the
-    same shape.
-    """
+    """Every event the seated former reports, as one member."""
 
     state_held: trace_source.TraceSource = trace_source.new_source()
 

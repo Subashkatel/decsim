@@ -2,12 +2,9 @@
 
 g_comp = |w(class 1) - w(class 0)| (Toshio et al. 2510.25222 Sec. III A,
 lines 482-494, the method of Gidney et al. 2312.04522): the window is
-decoded twice, each solve pinned to one logical class, and the two
-minimum weights are subtracted. A small gap is a decoder unsure which
-class it is in. The two solves are the weak decoder's own
-(DecodeJob.forced_logical_class, decsim/ports.py Decoder), so this row
-names the signal, says what it needs a decoder to answer, and does the
-subtraction.
+decoded twice, each solve pinned to one logical class, and a small gap
+is a decoder unsure which class it is in. The solves are the weak
+decoder's own (DecodeJob.forced_logical_class); this row subtracts.
 """
 
 import dataclasses
@@ -37,9 +34,8 @@ FORCED_LOGICAL_CLASSES = (0, 1)
 class ComplementaryGap:
     """The signal row: the gap between one window's two forced solves.
 
-    walk_microseconds is what this row's own computation costs on the
-    weak unit; None is free, because the computation is one subtraction
-    of two numbers the decodes already reported (decision D8).
+    The subtraction costs nothing unless walk_microseconds prices it on
+    the weak unit.
     """
 
     walk_microseconds: Optional[float] = None
@@ -58,10 +54,7 @@ class ComplementaryGap:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row as a run names it: the card that prices its computation.
-
-        walk_microseconds is that card, None for the row's own cost model.
-        """
+        """Its settings: walk_microseconds prices the subtraction, or None."""
 
         walk_microseconds: Optional[float] = None
         # the word the reports name this row by
@@ -85,14 +78,11 @@ class ComplementaryGap:
             return ComplementaryGap(walk_microseconds=self.walk_microseconds)
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
-        """The gap between the weights of one window's forced solves.
+        """The gap of one window's forced solves, and the ticks it is priced at.
 
-        The gap is None when a weight is missing: a window whose model
-        pins no observable has no forced solve, and the escalation
-        policy then escalates it (escalation/policies.py). The
-        computation is one subtraction of two numbers the decodes
-        already reported, so it charges no time unless walk_microseconds
-        prices it (decision D8).
+        The gap is None when a weight is missing: a model that pins no
+        observable has no forced solve, and the policy escalates the
+        window.
         """
         soft_output = self._gap_of(solves)
         ticks = self._walk_ticks()

@@ -1,27 +1,15 @@
 """One window's solves, joined into its confidence.
 
-The window side submits a window's solves at one instant, one job per
-class the signal needs forced (two for the complementary gap, none for
-the cluster gap, which reads one ordinary decode); this object is every
-one of those jobs' on_decoded. It holds each solve until the window's
-last one arrives, the way a reservation station holds a value until its
-tag matches (Tomasulo 1967, IBM Journal of R&D, the tag here being the
-window key), asks the signal for the window's confidence, and hands the
-answering solve to the window verdict, which applies the threshold.
-The join is outside the decoder manager on purpose: every fine-grained
-referent puts a two-result comparison in the producer or the consumer
-and none puts it in the scheduler (gem5's SplitDataRequest counting its
-own halves, src/cpu/o3/lsq.cc; RMT's store comparator beside the store
-queue, Mukherjee et al. ISCA 2002).
-
-The join computes nothing itself and charges nothing to itself: the
-signal row reports what its computation cost, the join asks the decoder
-side to charge those ticks on the unit that produced the evidence, and
-the window's answer waits for them, so both the unit's service and the
-window's reaction time carry the signal's work (decision D8). On a
-window of several solves those are two different jobs: the answer is the
-lightest solve's and the ticks are the last solve's, since the last one
-to arrive is the one whose service has not closed yet.
+The window side submits one job per class the signal forces (two for the
+complementary gap, one plain decode for the cluster gap), and this
+object is each job's on_decoded. It holds the solves until the window's
+last one arrives, as a reservation station holds a value until its tag
+matches (Tomasulo 1967; the tag is the window key), asks the signal for
+the confidence, and hands the answering solve to the window verdict. The
+join sits outside the decoder manager because the referents put a
+two-result comparison in the producer or the consumer, never in the
+scheduler (gem5's SplitDataRequest, src/cpu/o3/lsq.cc; RMT's store
+comparator, Mukherjee et al. ISCA 2002).
 """
 
 import dataclasses
@@ -87,19 +75,13 @@ class WindowGapJoin:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """Keep the solve until the window's others report.
+        """Keep the solve and release its unit's result.
 
-        The join now has the value, so the unit that produced it has
-        been read. The complementary gap is one decode, a second decode
-        on the complementary boundary, then the difference of the two
-        weights (Toshio et al. 2510.25222 lines 482-494; Gidney et al.
-        2312.04522 lines 823-832): the first weight waits while the
-        second solve runs, as a reservation station captures a result
-        and frees its functional unit (Tomasulo 1967). On one unit the
-        other solve is already staged there and runs next, Toshio's
-        order; on two they overlap. A unit that blocks on its result
-        would otherwise hold it while the other solve waits for a unit,
-        and on one unit wait on itself.
+        The first weight waits while the second solve runs, as a
+        reservation station captures a result and frees its unit
+        (Tomasulo 1967; Toshio et al. 2510.25222 lines 482-494). A unit
+        that blocked on its result would wait on itself when both solves
+        share it.
         """
         forced_class = job.forced_logical_class
         self.engine.log(
@@ -111,18 +93,12 @@ class WindowGapJoin:
         self.decode_queue.read_result(job)
 
     def _join(self, held: list) -> None:
-        """Ask the signal for the window's gap and commit its answer.
+        """Ask the signal for the gap and commit the window's answer.
 
-        Two things the same computation decides go to two different
-        solves. The soft output goes on the answering solve, whose
-        result carries the window's correction. The ticks go on the
-        solve that delivered last, because its unit is the one the
-        decoder manager has not yet given back when this returns; it
-        gives that unit back once the ticks pass
-        (decoders/decoder_manager.py), so the unit that produced the
-        evidence carries the work (decision D8). On a one-solve window
-        the two are the same solve. A signal that only subtracts reports
-        no ticks and the answer goes on at once.
+        The soft output goes on the answering solve. The ticks go on the
+        solve that arrived last, whose unit the manager has not given
+        back yet, so the unit that produced the evidence carries the
+        signal's work.
         """
         solves = []
         for solve in held:
@@ -161,9 +137,7 @@ def _answering_solve(held: list) -> HeldSolve:
 
     The unconstrained minimum weight is the minimum over the classes, so
     the lightest forced solve is the decoder's own answer. A solve with
-    no weight (a signal that forces no class, or a window that pins no
-    observable) leaves the first solve answering, and its result then
-    carries whatever gap the signal reported.
+    no weight leaves the first solve answering.
     """
     answer = held[0]
     answer_weight = answer.result.forced_class_weight
@@ -188,12 +162,6 @@ def _gap_text(soft_output) -> str:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the window gap join reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the join reports, as one member (gem5's stats Group)."""
 
     solve_held: trace_source.TraceSource = trace_source.new_source()

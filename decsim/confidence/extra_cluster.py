@@ -1,30 +1,23 @@
 """The extra-cluster gap: a Union-Find decode's confidence, by growing on.
 
-Kishi et al. 2602.03336 Algorithm 1 (lines 478 to 491 of the text):
-after the decode, every cluster and the boundary grow by half a weight
-step a tick, clusters that meet fuse, and after every tick the unit
-asks whether the two boundaries have joined. The gap is the growth
-spent when they do, and undefined, here infinite, when the growth limit
-is reached first. Theorem 2 (532-548): whenever the cluster gap is at or
-under the limit this gap is defined and no larger, so no window the
-cluster gap would escalate is missed; Theorem 1 (510-530): whenever it
-is defined it is at most the cluster gap. The limit is the escalation
-threshold itself (345-347), which is why a threshold source with no
-number when the machine is built is refused.
+Kishi et al. 2602.03336 Algorithm 1 (lines 478-491): after the decode,
+every cluster and the boundary grow half a weight step a tick, clusters
+that meet fuse, and the gap is the growth spent when the two boundaries
+join; it is infinite when the growth limit comes first. Theorem 2
+(532-548): whenever the cluster gap is at or under the limit, this gap
+is defined and no larger, so no window the cluster gap would escalate is
+missed; Theorem 1 (510-530): when defined, it is at most the cluster
+gap. The limit is the escalation threshold (345-347), so the build
+refuses a threshold source with no number.
 
 The growth is the decoder's own grow and merge loop run on
-(union_find.c, union_find_extra_growth), which is the paper's point
-(145-149: the soft output "can directly reuse the cluster growth module
-of the decoder"). decsim's graph has one boundary node, so "b1 meets
-b2" is an edge closing a walk of odd logical parity, the reading of
-Meister's quotient that cluster_gap.c also takes. The cost is a
-card's number when the settings price it, and otherwise the weak row's
-own timing: its loop's cycle count on the unit that decoded
-(cycle_count.py, extra_growth_cycles), or the host's measured time.
+(union_find.c, union_find_extra_growth), the paper's point (145-149).
+decsim's graph has one boundary node, so the two boundaries meeting is
+an edge closing a walk of odd logical parity, as in cluster_gap.c.
 
-The unit grows whole ticks, so the gap it reports is a whole number of
-weight steps and can exceed the continuous value by up to half a step;
-a cluster gap exactly at the threshold may therefore read as kept.
+The unit grows whole ticks, so the gap is a whole number of weight steps
+and can exceed the continuous value by up to half a step; a cluster gap
+exactly at the threshold may read as kept.
 """
 
 import dataclasses
@@ -66,10 +59,8 @@ def union_find_extra_cluster_gap_source(
 def growth_limit_ticks(growth_limit_nats: float, weight_step: float) -> int:
     """The ticks that reach the limit: a tick grows a cluster half a step.
 
-    Two fronts close a weight step a tick between them, so the gap after
-    t ticks is t weight steps and the limit is ceil(limit / step) ticks;
-    the ceiling keeps Theorem 2, since every cluster gap at or under
-    the limit joins within that many ticks.
+    Two fronts close a weight step a tick between them, so the limit is
+    ceil(limit / step) ticks; the ceiling keeps Theorem 2.
     """
     ticks = growth_limit_nats / weight_step
     limit_ticks = math.ceil(ticks)
@@ -116,9 +107,11 @@ class ExtraClusterGap:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row as a run names it: the card that prices its growth.
+        """Its settings: walk_microseconds prices the growth, or None.
 
-        walk_microseconds is that card, None for the row's own cost model.
+        None charges the weak row's own timing: its loop's cycle count
+        on the unit that decoded (cycle_count.py), or the host's
+        measured time.
         """
 
         walk_microseconds: Optional[float] = None
@@ -139,9 +132,8 @@ class ExtraClusterGap:
         ) -> "ExtraClusterGap":
             """The row grown to the threshold, on the weak row's unit.
 
-            A weak row that keeps no weight step grows no clusters: the
-            row takes the shipped step and the host's measured time, and
-            the build refuses the pairing by name (build/decoders.py).
+            A weak row with no weight step grows no clusters, and the
+            build refuses that pairing.
             """
             walk_microseconds = self.walk_microseconds
             weight_step = getattr(weak_algorithm, "weight_step", None)
@@ -160,12 +152,10 @@ class ExtraClusterGap:
             )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
-        """The window's gap by growing on, and what the growth cost.
+        """The gap in natural-log weight, and the ticks the growth cost.
 
-        The gap is in natural-log weight, infinite when the limit came
-        before the join, and None when the decode carried no growth, in
-        which case the escalation policy escalates the window
-        (escalation/policies.py) and nothing is charged.
+        The gap is infinite when the limit came before the join; a
+        decode that carried no growth gives None and zero.
         """
         evidence = solves[0].cluster_evidence
         if evidence is None:

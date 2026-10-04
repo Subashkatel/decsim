@@ -37,7 +37,7 @@ _READ_WRITE = "read_write"
 
 @dataclasses.dataclass(frozen=True)
 class PortedSyndromeBufferSettings:
-    """The ported store: its capacity, its ports, its word and its timing.
+    """The ported store's settings.
 
     bits bounds the store; None is unbounded. read_ports, write_ports
     and read_write_ports count OpenRAM's three port kinds. word_bits is
@@ -103,7 +103,7 @@ class PortedSyndromeBufferSettings:
 
 
 class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
-    """The store whose writes and reads take words on ports in arrival order."""
+    """The store whose accesses take words on ports in arrival order."""
 
     def __init__(
         self,
@@ -176,7 +176,7 @@ class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
 
 
 class _MemoryPort:
-    """One port: the directions it serves and the tick it frees."""
+    """One memory port of the store."""
 
     def __init__(self, kind: str) -> None:
         self.kind = kind

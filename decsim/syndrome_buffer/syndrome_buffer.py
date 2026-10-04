@@ -32,7 +32,7 @@ import decsim.trace_source as trace_source
 
 @dataclasses.dataclass(frozen=True)
 class SyndromeBufferSettings:
-    """The plain store: its capacity, and a flat cost per write and per read.
+    """The plain store's settings.
 
     bits bounds the store; None is unbounded. A full store makes the
     controller hold the finished round and write it in order once a slot
@@ -67,7 +67,7 @@ class SyndromeBufferSettings:
 
 
 class SyndromeBuffer:
-    """The store: rounds by key, their holds, and the operations it serves."""
+    """The store of finished rounds, kept until their last hold releases."""
 
     # a store built with no waiting line in front of it frees its slots
     # with nobody to tell
@@ -485,7 +485,10 @@ class _TraceSources:
 
 
 class _StoredRound:
-    """One stored round: its packet, its bits, and once published its tick."""
+    """One stored round.
+
+    publication_tick stays None until the round is published.
+    """
 
     def __init__(
         self, packet: round_records.SyndromeRoundPacket, held_bits: int

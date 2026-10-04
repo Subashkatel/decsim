@@ -31,7 +31,7 @@ _SEAT = "strong_syndrome_buffer"
 
 
 class StrongSyndromeRoundReceiver:
-    """The room, the writes in flight, and the landing into the store.
+    """The strong syndrome buffer's receiving end.
 
     Trace sources: copy_made(round_key, bits, source, "strong syndrome
     buffer") at every landing, the source being the controller assembler
@@ -356,7 +356,10 @@ class StrongSyndromeRoundReceiver:
 
 @dataclasses.dataclass(frozen=True)
 class _Hop:
-    """One of the two hops that land here: its row, and where its bits sat."""
+    """One of the two hops that land here.
+
+    path_name is its row; source_name is where its bits sat.
+    """
 
     path_name: str
     source_name: str

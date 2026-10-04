@@ -14,7 +14,7 @@ MSHR queue, write buffer and tags and implements the ports
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import decsim.engine as engine_module
 import decsim.ports as ports
@@ -48,9 +48,9 @@ class WindowTraceSources:
     window_data_complete: trace_source.TraceSource
     window_committed: trace_source.TraceSource
     # the silent source on a run that escalates nothing
-    window_absorbed: Any
+    window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
     # the silent source on a run whose confidence reads one solve
-    solve_held: Any
+    solve_held: Union[trace_source.TraceSource, trace_source.SilentSource]
 
 
 class WindowManager:

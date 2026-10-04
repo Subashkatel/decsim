@@ -431,7 +431,10 @@ class WindowPlanner:
         if model is not None:
             self.models.model_by_window[window.key] = model
 
-    def refresh_stream_models(self, stream_id: Any) -> None:
+    def refresh_stream_models(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> None:
         """Install the terminal models before the remaining windows queue.
 
         A readout chosen at run time can change every unqueued tail
@@ -463,7 +466,9 @@ class WindowPlanner:
         return None
 
     def cut_stream_after(
-        self, stream_id: Any, last_round: int
+        self,
+        stream_id: Any,  # an opaque identity
+        last_round: int,
     ) -> Optional[window_records.Window]:
         """End a commit region on the round: a segment starts after it.
 
@@ -488,7 +493,10 @@ class WindowPlanner:
     # ---- private
 
     def _replan_finite_after(
-        self, stream_id: Any, growth: "_StreamGrowth", last_round: int
+        self,
+        stream_id: Any,  # an opaque identity
+        growth: "_StreamGrowth",
+        last_round: int,
     ) -> None:
         """Lay the finite source's windows not laid yet from the cut on.
 
@@ -518,7 +526,7 @@ class WindowPlanner:
 
     def _plan_stretch(
         self,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         growth: "_StreamGrowth",
         round_before: int,
         last_round: int,

@@ -24,12 +24,16 @@ import decsim.records.windows as window_records
 class WindowInteraction(Protocol):
     """Decisions relating adjacent or replaced windows."""
 
-    def initial_boundary_state(self, window: window_records.WindowInfo) -> Any:
+    def initial_boundary_state(
+        self, window: window_records.WindowInfo
+    ) -> Any:  # an opaque identity
         """The boundary a window starts with."""
 
     def boundary_from_result(
-        self, result: Optional[decoding_records.DecodeResult], fallback: Any
-    ) -> Any:
+        self,
+        result: Optional[decoding_records.DecodeResult],
+        fallback: Any,  # an opaque identity
+    ) -> Any:  # an opaque identity
         """The boundary a decode result carries, else the fallback."""
 
     def boundary_targets(
@@ -43,16 +47,16 @@ class WindowInteraction(Protocol):
         self,
         delivery: window_records.BoundaryDelivery,
         destination: window_records.WindowInfo,
-        current_state: Any,
+        current_state: Any,  # an opaque identity
     ) -> window_records.BoundaryUpdate:
         """The destination's boundary after this delivery."""
 
-    def boundary_arrived(self, state: Any) -> bool:
+    def boundary_arrived(self, state: Any) -> bool:  # an opaque identity
         """Whether any source has delivered a boundary into this state."""
 
     def apply_boundary(
         self,
-        state: Any,
+        state: Any,  # an opaque identity
         window: window_records.WindowInfo,
         payload: round_records.RetainedSyndromeFragment,
         round_key: int,
@@ -61,7 +65,7 @@ class WindowInteraction(Protocol):
 
     def boundary_payload_bits(
         self,
-        payload: Any,
+        payload: Any,  # an opaque identity
         destination: window_records.WindowInfo,
         source: window_records.WindowInfo,
     ) -> Optional[int]:

@@ -123,7 +123,10 @@ class RoundRetention:
             store.register_hold(potential, held)
         self._hold_later_stream_reads(window)
 
-    def release_later_stream_reads(self, stream_id: Any) -> None:
+    def release_later_stream_reads(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> None:
         """A sealed stream has every window registered: its hold ends."""
         later_reads = decoding_records.LaterStreamReads(stream_id)
         self.release_strong_hold_if_live(later_reads)
@@ -221,7 +224,10 @@ class RoundRetention:
         return [round_key for round_key in strong if round_key not in weak]
 
     def strong_rounds_before(
-        self, operation_id: Any, first_round: int, last_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
+        last_round: int,
     ) -> list:
         """The raw rounds before these that a strong read of them carries.
 
@@ -300,7 +306,10 @@ class RoundRetention:
 
     # ---- what a strong window holds
 
-    def open_operation_store(self, operation_id: Any) -> None:
+    def open_operation_store(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> None:
         """Open the operation's rounds in the store its windows read.
 
         A run with no decoder has no such store and opens nothing.
@@ -308,10 +317,12 @@ class RoundRetention:
         primary_store = self.primary_store
         if primary_store is None:
             return
-        # Operation identities are opaque to retention.
         primary_store.open_operation(operation_id)
 
-    def has_operation_store(self, operation_id: Any) -> bool:
+    def has_operation_store(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> bool:
         """Whether the operation's syndrome RAM is still open."""
         return self.primary_store.has_operation(operation_id)
 
@@ -600,7 +611,9 @@ class RoundRetention:
             self.weak_store.replace_hold(restart, primary_reads)
 
     def _strong_rounds_read_before(
-        self, operation_id: Any, first_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
     ) -> list:
         """The raw rounds a strong read from first_round on may carry.
 

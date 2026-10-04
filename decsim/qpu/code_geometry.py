@@ -17,7 +17,7 @@ from typing import Optional
 
 @dataclasses.dataclass(frozen=True)
 class SurfaceCodeModel:
-    """Timing and sizing card of one rotated surface-code patch."""
+    """The code card of one rotated surface-code patch."""
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -102,7 +102,7 @@ class SurfaceCodeModel:
 
 @dataclasses.dataclass(frozen=True)
 class BivariateBicycleCodeModel:
-    """Timing and sizing card of one bivariate-bicycle CSS code.
+    """The code card of one bivariate-bicycle CSS code.
 
     One round is a whole extraction cycle, n/2 X and n/2 Z checks; the
     detector error model owns the window rows. The distance comes from the
@@ -111,9 +111,10 @@ class BivariateBicycleCodeModel:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The card's own keys: n and k of the [[n, k, d]] code.
+        """The card's own keys.
 
-        The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines
+        qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The
+        defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines
         180-184); its distance is twelve when the run names none.
         """
 

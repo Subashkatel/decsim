@@ -576,7 +576,7 @@ class BurstStimDevice(StimDevice):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The burst: its rise and decay, where, how strong, which noise.
+        """The one burst each shot carries.
 
         burst_onset_round is the first one-based round with extra noise. It
         climbs to burst_error_probability over burst_rise_rounds, (i + 1) / rise
@@ -760,7 +760,7 @@ def _background(
 
 @dataclasses.dataclass(frozen=True)
 class _SampledShot:
-    """One shot of a circuit: its packets and formed events."""
+    """One sampled shot of a circuit."""
 
     packets: dict
     table: formation_records.FormationTable
@@ -867,7 +867,7 @@ def _closed_temporal_boundary_windows(windows: list) -> tuple:
 
 @dataclasses.dataclass(frozen=True)
 class _ShotTable:
-    """Every per-shot and per-stream map of one device, as one member.
+    """Every map one device keeps, as one member.
 
     A shot sits under its sample key: the stream id, or a standalone
     operation's id; an operation replaying a stream's shot maps to it. The

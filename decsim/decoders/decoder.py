@@ -224,6 +224,8 @@ class WindowDecoderBase(DecoderBase):
         faults = model.require_faults(self.fault_representation)
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
+        # the result carries these events, so no backend may write them
+        syndrome.setflags(write=False)
         backend = self.compiled_for(faults, model)
         started_ns = time.perf_counter_ns()
         answer = self.window_answer(job, backend, model, faults, syndrome)
@@ -237,6 +239,7 @@ class WindowDecoderBase(DecoderBase):
         )
         result.forced_class_weight = answer.forced_class_weight
         result.cluster_evidence = answer.cluster_evidence
+        result.detection_events = syndrome
         result.iterations = answer.iterations
         result.no_correction_reason = answer.no_correction_reason
         return result, finished_ns - started_ns

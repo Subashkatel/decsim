@@ -504,6 +504,9 @@ class DecodeResult:
     # the growth a cluster-based decode did, what a cluster gap reads;
     # None from a row that grows no clusters
     cluster_evidence: Optional[Any] = None
+    # the window's detection events the decode read, in its detector
+    # rows' order and read-only; None from a row that reads none
+    detection_events: Optional[Any] = None
     # the message-passing iterations the decode ran, what a measured
     # device time law reads; None from a row that runs no iterations
     iterations: Optional[int] = None

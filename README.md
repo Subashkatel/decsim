@@ -11,9 +11,9 @@ units, the Pauli frame, and the instruction back to the QPU. A hop is
 one link between two of those parts. Every hop charges its configured
 latency and bandwidth, so a run says where the time went and which
 component set the reaction time. Decoding is real: windows of a Stim
-circuit are decoded by PyMatching (weighted or unweighted), BP-OSD,
-belief matching, union find, Relay-BP or Tesseract. A run may also price
-a decoder with a number instead of measuring one.
+circuit are decoded by PyMatching, union find, BP-OSD or another of the
+decoders `docs/reference/parts.md` lists. A run may also price a decoder
+with a number instead of measuring one.
 
 ## Install
 

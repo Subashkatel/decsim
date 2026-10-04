@@ -17,8 +17,8 @@ time** is how long the loop takes, end to end. It is charged out of
 cards: a card is a small record of numbers that prices one part, such
 as a link's latency or a decoder's time per decode. The **logical error
 rate** is how often the corrected answer is wrong, and it is real:
-windows of a Stim circuit are decoded by PyMatching (weighted or
-unweighted), union find, belief matching, BP-OSD, Relay-BP or Tesseract,
+windows of a Stim circuit are decoded by PyMatching, union find, BP-OSD
+or another of the decoders the [parts page](reference/parts.md) lists,
 so an accuracy number is a measurement and not a model.
 
 **New here?** Start with [Your first run](tutorials/first_run.md). It

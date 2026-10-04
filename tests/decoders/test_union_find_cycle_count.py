@@ -22,9 +22,9 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
 import tests.decoders.test_union_find_decoder as hand_graph
 
 MEGAHERTZ = 100.0

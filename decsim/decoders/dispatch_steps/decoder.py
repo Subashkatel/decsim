@@ -28,8 +28,8 @@ import decsim.config as config
 import decsim.decoders.dispatch_steps.measurements as measurements
 import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.strong_backend as strong_backend
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 from decsim.decoders.relay_belief_propagation import (
     decoder as relay_belief_propagation,
 )

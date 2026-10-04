@@ -21,8 +21,8 @@ import stim
 
 import decsim.confidence.complementary as complementary
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import tests.decoders.windows as windows
 
 DECIBELS_PER_NAT = 10.0 * math.log10(math.e)

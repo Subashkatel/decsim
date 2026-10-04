@@ -12,9 +12,9 @@ import math
 from typing import Optional
 
 import decsim.config as config
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 COMPLEMENTARY_GAP_SOURCE = decoding_records.SoftOutputSource(
     method="complementary_gap"

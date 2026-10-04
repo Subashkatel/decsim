@@ -38,8 +38,8 @@ import pytest
 
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.decoders.union_find.window_decoder as window_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
 import tests.decoders.test_union_find_decoder as hand_graph
 import tests.decoders.union_find_oracle as union_find_oracle
 import tests.decoders.windows as windows

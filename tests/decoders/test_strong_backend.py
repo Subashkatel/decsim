@@ -19,9 +19,9 @@ import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.windows as window_records
 from tests.decoders import windows
 

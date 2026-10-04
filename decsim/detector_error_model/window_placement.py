@@ -17,7 +17,7 @@ from typing import Optional
 import numpy
 import scipy.sparse
 
-from decsim.detector_error_model import fault_model_contracts
+from decsim.records import fault_model_contracts
 
 
 @dataclasses.dataclass(frozen=True)

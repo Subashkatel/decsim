@@ -19,9 +19,9 @@ import numpy
 import scipy.sparse
 
 import decsim.config as config
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source

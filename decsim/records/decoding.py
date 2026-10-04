@@ -14,6 +14,7 @@ from typing import Any, Optional, Union
 import numpy
 
 import decsim.records.decoder_evidence as evidence_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.windows as window_records
 
 
@@ -336,9 +337,8 @@ class DecodeJob:
     # rounds the decoder processes: the distinct rounds landed in its
     # input, plus batched idle rounds
     round_count: int
-    detector_error_model: Optional[Any] = (
-        None  # window detector error model (data-path decoders)
-    )
+    # the window's error model, which a data-path decoder reads
+    detector_error_model: Optional[fault_models.WindowErrorModel] = None
     payloads: list = field(
         default_factory=list
     )  # transfer-source view; cleared after materialization

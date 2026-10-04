@@ -11,8 +11,8 @@ import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.relay_belief_propagation.window_decoder as window_decoder
 import decsim.decoders.strong_backend as strong_backend
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 
 

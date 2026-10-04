@@ -10,7 +10,8 @@ may be cut at, validated for the graphlike representation only.
 from typing import Optional
 
 import decsim.records.windows as window_records
-from decsim.detector_error_model import fault_model_contracts, window_slicer
+from decsim.detector_error_model import window_slicer
+from decsim.records import fault_model_contracts
 
 
 def validate_closed_windows_are_dependency_destinations(

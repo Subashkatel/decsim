@@ -16,12 +16,12 @@ import stim
 
 import decsim.records.windows as window_records
 from decsim.detector_error_model import (
-    fault_model_contracts,
     window_ownership_dag,
     window_placement,
     window_protocol_policy,
     window_slicer,
 )
+from decsim.records import fault_model_contracts
 
 # What a neighbour of a single window has already committed; None when
 # no neighbour has, and the window's columns are every candidate fault.

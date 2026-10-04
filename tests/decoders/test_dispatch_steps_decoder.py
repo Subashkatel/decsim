@@ -14,10 +14,10 @@ import decsim.config as config
 import decsim.decoders.dispatch_steps.decoder as dispatch_steps
 import decsim.decoders.dispatch_steps.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
 import decsim.links.channel as channel_module
 import decsim.links.link_profiles as link_profiles
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 from tests.decoders import windows

@@ -13,10 +13,10 @@ import stim
 
 import decsim.records.windows as window_records
 from decsim.detector_error_model import (
-    fault_model_contracts,
     window_model_builders,
     window_ownership_dag,
 )
+from decsim.records import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED

@@ -13,9 +13,9 @@ import pytest
 import stim
 
 from decsim.detector_error_model import (
-    fault_model_contracts,
     stim_fault_catalog,
 )
+from decsim.records import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL

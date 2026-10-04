@@ -24,8 +24,8 @@ import numpy
 import pytest
 
 import decsim.detector_error_model.detector_formation as detector_formation
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.qpu.stim_device as stim_device
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records

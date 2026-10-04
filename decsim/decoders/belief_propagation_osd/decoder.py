@@ -15,8 +15,8 @@ import numpy
 import scipy.sparse
 
 import decsim.decoders.decoder as decoder_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 
 class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):

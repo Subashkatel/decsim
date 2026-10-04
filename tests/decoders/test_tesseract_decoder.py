@@ -21,8 +21,8 @@ import stim
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.tesseract.window_decoder as tesseract_window
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 ROUNDS = 3

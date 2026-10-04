@@ -21,8 +21,8 @@ import sinter
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 ROUNDS = 3

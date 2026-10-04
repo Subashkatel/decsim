@@ -13,10 +13,10 @@ from collections.abc import Container, Sequence
 from typing import Optional
 
 from decsim.detector_error_model import (
-    fault_model_contracts,
     window_placement,
     window_slicer,
 )
+from decsim.records import fault_model_contracts
 
 
 def dependency_depths(

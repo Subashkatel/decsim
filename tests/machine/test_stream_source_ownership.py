@@ -14,7 +14,6 @@ import stim
 
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
@@ -28,6 +27,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.settings as machine_settings

@@ -12,10 +12,10 @@ import stim
 
 import decsim.records.windows as window_records
 from decsim.detector_error_model import (
-    fault_model_contracts,
     window_model_builders,
     window_protocol_policy,
 )
+from decsim.records import fault_model_contracts
 
 TAN = window_records.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
 GENERIC = window_records.WindowProtocol.GENERIC

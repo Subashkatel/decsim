@@ -36,9 +36,9 @@ import numpy
 import pytest
 
 import decsim.detector_error_model.detector_chronology as chronology
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.detector_error_model.stim_fault_catalog as fault_catalogs
 import decsim.detector_error_model.window_model_builders as builders
+import decsim.records.fault_model_contracts as fault_models
 import decsim.windows.schemes.sliding as sliding_scheme
 
 stim = pytest.importorskip("stim")

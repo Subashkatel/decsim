@@ -25,8 +25,8 @@ import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.trace_source as trace_source
 
 WARM_UP_COLUMNS = 3

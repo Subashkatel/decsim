@@ -18,8 +18,8 @@ import decsim.decoders.measured_table.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.decoders.strong_backend as strong_backend
 import decsim.detector_error_model.basis_split as basis_split
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.engine as engine_module
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 from tests.decoders import windows

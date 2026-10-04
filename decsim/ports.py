@@ -22,6 +22,7 @@ from typing import Any, Optional, Protocol, Union, runtime_checkable
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -552,7 +553,10 @@ class WindowPlan(Protocol):
         """A window a strong region covers is never weak-decoded."""
 
     def reslice_window(
-        self, key: tuple, buffer_lo: int, model
+        self,
+        key: tuple,
+        buffer_lo: int,
+        model: Optional[fault_models.WindowErrorModel],
     ) -> window_records.Window:
         """Move a window's read start and install the model it reads with."""
 
@@ -573,7 +577,7 @@ class WindowPlan(Protocol):
         round_count: int,
         fault_exclusion_ranges: tuple,
         prior_faults: Optional[dict],
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The error model of one strong window of that operation.
 
         prior_faults is what a pinned face's neighbour has committed,
@@ -791,7 +795,7 @@ class BoundaryCourier(Protocol):
         self,
         source_key: tuple,
         destination: window_records.Window,
-        model,
+        model: Optional[fault_models.WindowErrorModel],
         operation: program_records.Operation,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
@@ -1066,7 +1070,7 @@ class Decoder(Protocol):
     the stage ledger and the referee audit.
     """
 
-    fault_model_requirement: Any
+    fault_model_requirement: fault_models.DecoderFaultModelRequirement
     stage_recorded: Union[trace_source.TraceSource, trace_source.SilentSource]
     window_checked: Union[trace_source.TraceSource, trace_source.SilentSource]
     forced_solve_unavailable: Union[
@@ -1546,8 +1550,9 @@ class WindowModelSource(Protocol):
 
     The window planner asks it per window; the default is the syndrome
     source's own (SyndromeSource.window_model_source). The requirement
-    and the model are the detector error model's records, named here by
-    position only, so the window side never imports that package.
+    and the model are records (records/fault_model_contracts.py), so the
+    window side names them without importing the package that builds
+    them.
     """
 
     # per_operation retains the root-owned circuit; none does not require it.
@@ -1560,7 +1565,7 @@ class WindowModelSource(Protocol):
         windows: list,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
         window_protocol: window_records.WindowProtocol,
     ) -> list:
@@ -1570,7 +1575,7 @@ class WindowModelSource(Protocol):
         self,
         stream_id: Any,  # an opaque identity
         window: window_records.Window,
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """The model of one window of a dynamic stream, laid at runtime."""
 
     def register_dynamic_stream(
@@ -1578,7 +1583,7 @@ class WindowModelSource(Protocol):
         stream_operation: program_records.Operation,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
     ) -> Optional[int]:
         """Note a dynamic stream; the rounds it can supply, or None."""
 
@@ -1600,10 +1605,10 @@ class WindowModelSource(Protocol):
         window: window_records.Window,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple = (),
         prior_faults: Optional[dict] = None,
-    ):
+    ) -> Optional[fault_models.WindowErrorModel]:
         """One strong window's model, its non-owned round ranges excluded.
 
         prior_faults names the faults a pinned face's neighbour has
@@ -1874,7 +1879,7 @@ class ConfidenceSignal(Protocol):
     """
 
     source: decoding_records.SoftOutputSource
-    fault_model_requirement: Any
+    fault_model_requirement: fault_models.DecoderFaultModelRequirement
     decoder_evidence_requirement: frozenset
     evidence_refusal: str
     forced_logical_classes: tuple

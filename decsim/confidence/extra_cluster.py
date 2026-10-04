@@ -29,10 +29,10 @@ import decsim.confidence.cluster as cluster
 import decsim.config as config
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 # union_find_extra_growth takes the limit as an int64_t (union_find.h),
 # and ctypes wraps a larger Python int without a word, which would turn

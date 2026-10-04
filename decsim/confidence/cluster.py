@@ -23,10 +23,10 @@ from typing import Optional, Union
 
 import decsim.config as config
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
-import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 
 CLUSTER_GAP_SOURCE = decoding_records.SoftOutputSource(method="cluster_gap")
 

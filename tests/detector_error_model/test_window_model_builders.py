@@ -21,10 +21,10 @@ import stim
 
 from decsim.detector_error_model import (
     detector_chronology,
-    fault_model_contracts,
     stim_fault_catalog,
     window_model_builders,
 )
+from decsim.records import fault_model_contracts
 
 qldpc_decoders = pytest.importorskip("qldpc.decoders")
 

@@ -1,8 +1,10 @@
 """The parts page: every settings record a machine is built from.
 
 docs/reference/parts.md lists each settings record of decsim/, grouped
-by package: its name, its module, the first sentence of its docstring,
+by package: its name, its module, its docstring, the records it extends,
 and each field with its type and default. A field's unit is in its name.
+A slot a researcher fills with a record of their own is typed by a
+Protocol named for the record it takes, and the page lists its members.
 gem5 generates its reference from its classes the same way, so the page
 cannot fall behind the code. The run side's records (decsim/experiments/)
 and the build's own (decsim/build/) are no part a user sets.
@@ -77,7 +79,8 @@ def parts_page(checkout: pathlib.Path) -> str:
 
 def first_sentence(text: str) -> str:
     """The first sentence of a docstring, on one line."""
-    opening = _first_paragraph(text)
+    paragraphs = _paragraphs(text)
+    opening = paragraphs[0]
     found = SENTENCE_END.finditer(opening)
     for match in found:
         end = match.end()
@@ -98,11 +101,11 @@ def main() -> int:
 
 @dataclasses.dataclass(frozen=True)
 class _Record:
-    """One settings record: its name, its module, its summary, its node."""
+    """One settings record: its name, its module, its text, its node."""
 
     name: str
     path: pathlib.Path
-    summary: str
+    paragraphs: tuple
     node: ast.ClassDef
 
 
@@ -135,19 +138,25 @@ def _records_of(path: pathlib.Path) -> list:
     return records
 
 
-def _collect_records(node, path, outer_name, outer_summary, records) -> None:
-    """The records under one node, each named by its enclosing classes."""
+def _collect_records(node, path, outer_name, outer_text, records) -> None:
+    """The records under one node, each named by its enclosing classes.
+
+    A nested Settings with no docstring of its own reads as the first
+    sentence of the class it sits in.
+    """
     for child in ast.iter_child_nodes(node):
         if not isinstance(child, ast.ClassDef):
             continue
         name = f"{outer_name}{child.name}"
         docstring = ast.get_docstring(child)
-        summary = outer_summary
+        paragraphs = (outer_text,)
         if docstring is not None:
-            summary = first_sentence(docstring)
-        if _is_a_record(child):
-            record = _Record(name, path, summary, child)
+            paragraphs = _paragraphs(docstring)
+        if _is_a_record(child) or _is_a_slot(child):
+            record = _Record(name, path, paragraphs, child)
             records.append(record)
+        opening = paragraphs[0]
+        summary = first_sentence(opening)
         _collect_records(child, path, f"{name}.", summary, records)
 
 
@@ -159,17 +168,86 @@ def _is_a_record(node: ast.ClassDef) -> bool:
     return any("dataclass" in decorator for decorator in decorators)
 
 
+def _is_a_slot(node: ast.ClassDef) -> bool:
+    """A Protocol named for the settings record a slot takes."""
+    if not node.name.endswith(RECORD_NAME_ENDINGS):
+        return False
+    bases = _base_names(node)
+    return "Protocol" in bases
+
+
 def _record_section(record: _Record, checkout: pathlib.Path) -> list:
-    """One record's heading, its module and summary, and its fields."""
+    """One record's heading, its module and text, and its fields."""
     module_path = record.path.relative_to(checkout)
     module = module_path.as_posix()
-    lines = [f"### `{record.name}`", "", f"`{module}`. {record.summary}", ""]
+    opening, *rest = record.paragraphs
+    lines = [f"### `{record.name}`", "", f"`{module}`. {opening}", ""]
+    for paragraph in rest:
+        lines.extend([paragraph, ""])
+    extended = _extended_records(record.node)
+    if extended:
+        lines.extend([f"It extends {extended}, and holds its fields.", ""])
+    if _is_a_slot(record.node):
+        member_lines = _member_table(record.node)
+        lines.extend(member_lines)
+        return lines
     rows = _field_rows(record.node)
     if rows:
         lines.extend(["| Field | Type | Default |", "| --- | --- | --- |"])
         lines.extend(rows)
         lines.append("")
     return lines
+
+
+def _base_names(node: ast.ClassDef) -> list:
+    """The classes this one names as its bases, as the source writes them."""
+    names = []
+    for base in node.bases:
+        name = ast.unparse(base)
+        names.append(name)
+    return names
+
+
+def _extended_records(node: ast.ClassDef) -> str:
+    """The records this one subclasses, in backticks; empty for none."""
+    extended = []
+    for name in _base_names(node):
+        if name.endswith(RECORD_NAME_ENDINGS):
+            extended.append(f"`{name}`")
+    return ", ".join(extended)
+
+
+def _member_table(node: ast.ClassDef) -> list:
+    """A slot's members: each attribute's type, each method's call."""
+    rows = []
+    for child in node.body:
+        if isinstance(child, ast.AnnAssign):
+            row = _attribute_row(child)
+            rows.append(row)
+        if isinstance(child, ast.FunctionDef):
+            row = _method_row(child)
+            rows.append(row)
+    if not rows:
+        return []
+    return ["| Member | Type |", "| --- | --- |", *rows, ""]
+
+
+def _attribute_row(node: ast.AnnAssign) -> str:
+    """One attribute of a slot and its type."""
+    annotation = ast.unparse(node.annotation)
+    type_cell = _cell(annotation)
+    return f"| `{node.target.id}` | {type_cell} |"
+
+
+def _method_row(node: ast.FunctionDef) -> str:
+    """One method of a slot, as its call, and what it returns."""
+    arguments = ast.unparse(node.args)
+    returns = "None"
+    if node.returns is not None:
+        returns = ast.unparse(node.returns)
+    call_cell = _cell(f"{node.name}({arguments})")
+    returns_cell = _cell(returns)
+    return f"| {call_cell} | {returns_cell} |"
 
 
 def _field_rows(node: ast.ClassDef) -> list:
@@ -216,14 +294,15 @@ def _cell(text: str) -> str:
     return f"`{escaped}`"
 
 
-def _first_paragraph(text: str) -> str:
-    """The opening paragraph of a docstring, on one line."""
+def _paragraphs(text: str) -> tuple:
+    """A docstring's paragraphs, each on one line."""
     stripped = text.strip()
-    paragraphs = stripped.split("\n\n")
-    opening = paragraphs[0]
-    unwrapped = opening.replace("\n", " ")
-    words = unwrapped.split()
-    return " ".join(words)
+    paragraphs = []
+    for paragraph in stripped.split("\n\n"):
+        words = paragraph.split()
+        one_line = " ".join(words)
+        paragraphs.append(one_line)
+    return tuple(paragraphs)
 
 
 def _ends_a_sentence(sentence: str) -> bool:

@@ -30,13 +30,17 @@ class BackendDecodeOutcome:
     iterations: Optional[int]
 
     def __post_init__(self) -> None:
-        # a user's decoder may build this record, and a success with no
-        # correction would be scored as the empty one
+        # a user's decoder may build this record; with no correction the
+        # reason is what leaves the shot unscored, so it must be there
         if self.physical_correction is not None:
             return
         if self.succeeded:
             raise ValueError(
                 "a successful outcome needs its physical_correction"
+            )
+        if self.failure_reason is None:
+            raise ValueError(
+                "an outcome with no correction needs its failure_reason"
             )
 
     @property

@@ -121,3 +121,11 @@ def test_a_successful_outcome_needs_its_correction():
 
     with pytest.raises(ValueError, match="needs its physical_correction"):
         backend_outcome.BackendDecodeOutcome(succeeded, None, None, None)
+
+
+def test_an_outcome_with_no_correction_needs_its_reason():
+    """The reason is what leaves the shot unscored rather than failed."""
+    backend_error = decoding_records.BackendDecodeStatus.BACKEND_ERROR
+
+    with pytest.raises(ValueError, match="needs its failure_reason"):
+        backend_outcome.BackendDecodeOutcome(backend_error, None, None, None)

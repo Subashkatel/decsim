@@ -20,6 +20,9 @@ import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
 import tests.decoders.windows as windows
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
 def _algorithm_spans(strong_algorithm) -> list:
@@ -129,3 +132,30 @@ def test_the_referee_refuses_a_syndrome_that_does_not_fit_its_model():
 
     with pytest.raises(ValueError, match="do not match the window error"):
         referee.decode(job)
+
+
+def test_the_referee_keeps_the_checked_decoders_seed_paths():
+    """A checked decoder draws what it draws unchecked, under one run seed.
+
+    The seed walk derives a component's seed from its path
+    (decsim/seeding.py), so the inner decoder's children keep theirs.
+    """
+    pytest.importorskip("tesseract_decoder")
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=1.0
+    )
+    inner = matching.build()
+    referee = verify_windows.TesseractCheckedDecoder(inner)
+
+    inner_paths = _child_paths(inner)
+    referee_paths = _child_paths(referee)
+
+    assert inner_paths
+    assert inner_paths <= referee_paths
+
+
+def _child_paths(component) -> set:
+    paths = set()
+    for child in component.run_seed_children():
+        paths.add(child.relative_path)
+    return paths

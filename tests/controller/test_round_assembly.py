@@ -177,11 +177,9 @@ def test_packing_starts_at_the_edge_after_the_last_fragment_arrives() -> None:
     assert merged.size_bits == 4
     assert round.wire_bits == 4
     assert round.route is round_records.WINDOW_INPUT_ROUTE
-    packed_events = [
-        event for event in recorder.events if event.kind == "PACKED"
-    ]
+    packed_ticks = _ticks_of_kind(recorder.events, "PACKED")
     expected_tick = 4 * PACKING_TICKS
-    assert [event.tick for event in packed_events] == [expected_tick]
+    assert packed_ticks == [expected_tick]
 
 
 def test_a_round_that_finds_the_stage_full_waits_until_a_round_leaves() -> None:
@@ -491,3 +489,12 @@ class _Placement:
         if seat != self.seat:
             return 0
         return self.cycles
+
+
+def _ticks_of_kind(events, kind: str) -> list:
+    """The tick of every recorded event of one kind, in record order."""
+    ticks = []
+    for event in events:
+        if event.kind == kind:
+            ticks.append(event.tick)
+    return ticks

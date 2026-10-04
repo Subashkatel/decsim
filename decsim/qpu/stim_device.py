@@ -576,7 +576,7 @@ class BurstStimDevice(StimDevice):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The one burst each shot carries.
+        """The burst noise a shot may carry, none at zero probability.
 
         burst_onset_round is the first one-based round with extra noise. It
         climbs to burst_error_probability over burst_rise_rounds, (i + 1) / rise

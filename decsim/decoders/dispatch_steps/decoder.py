@@ -66,7 +66,7 @@ class DispatchStepsSettings:
 
 
 class DispatchSteps:
-    """A CUDA-Q dispatcher on one GPU, each step timed on its own."""
+    """The CUDA-Q dispatch path to one GPU, each step timed on its own."""
 
     def __init__(self, settings: DispatchStepsSettings) -> None:
         self.settings = settings

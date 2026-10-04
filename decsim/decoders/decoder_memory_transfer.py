@@ -33,9 +33,11 @@ SendInput = Callable[[Callable[[], None]], int]
 
 
 class DecoderInputStaging:
-    """Stages each job's input into a unit's memory.
+    """Readies each job's input for its unit.
 
-    It frees the input again at the job's release.
+    It copies the rounds into the unit's memory, or, for a tier that
+    reads its input in place, holds them where the store keeps them. It
+    frees the input again at the job's release.
 
     Trace sources: copy_made(job, bits, store_name, memory_name) at
     every landing that deposits rounds and at every boundary folded into

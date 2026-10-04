@@ -791,7 +791,7 @@ Its build stops on the missing measurements, so a replay runs from a record of t
 
 ### `BurstStimDevice.Settings`
 
-`decsim/qpu/stim_device.py`. The one burst each shot carries.
+`decsim/qpu/stim_device.py`. The burst noise a shot may carry, none at zero probability.
 
 burst_onset_round is the first one-based round with extra noise. It climbs to burst_error_probability over burst_rise_rounds, (i + 1) / rise of it in the i-th round, then decays as exp(-(rounds since the peak) / burst_decay_rounds), McEwen's "typical ~25 ms exponential decay" (2104.05219) and qecburst exponential_decay_profile; None holds the peak to the shot's end. A rise of 1 is McEwen's step; the six largest bursts in the 2408.13687 repetition-code data peak about 3 rounds after onset, as Kurilovich's T1 transient of about 10 us would (2506.18228). The region is every qubit whose first two Stim coordinates lie within burst_radius of burst_center (the qubits' midpoint when None); a radius of None is every qubit. burst_channels names the noise raised. A probability of 0 is no burst.
 

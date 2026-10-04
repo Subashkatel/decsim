@@ -1843,7 +1843,7 @@ class StrongWindowBoundaries(Protocol):
 
 @runtime_checkable
 class EscalationPolicy(Protocol):
-    """The rule that sends a window to the strong tier.
+    """The rule that decides when a window needs the strong tier.
 
     It says whether and when the strong tier decodes a window again. A
     run with no switching leaves this port unbound. The policy decides

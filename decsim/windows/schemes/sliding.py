@@ -27,7 +27,7 @@ import decsim.windows.schemes.window_data as window_data
 
 
 class SlidingWindowScheme:
-    """Serial commit windows, each reading a look-ahead buffer.
+    """Serial commit windows that read ahead where the stream allows.
 
     terminal_policy is the one setting this row reads: flush ends the
     last window at the stream's last round, qLDPC's last window, and

@@ -50,10 +50,6 @@ class LogicalLedger:
         for other_key, contribution in self.contributions.items():
             if other_key not in replaced:
                 kept[other_key] = contribution
-        for other_key, contribution in kept.items():
-            _refuse_overlapping_extent(
-                owner_key, commit_lo, commit_hi, other_key, contribution
-            )
         kept[owner_key] = decoding_records.LogicalContribution(
             owner_key=owner_key,
             commit_lo=commit_lo,
@@ -82,10 +78,6 @@ class LogicalLedger:
             _refuse_extent(contribution)
         if contribution.commit_hi < contribution.commit_lo:
             _refuse_extent(contribution)
-        previous = self.contributions.get(contribution.owner_key)
-        if previous is not None:
-            _check_ownership_unchanged(previous, contribution)
-        self._check_no_overlap(contribution)
         self._check_arity(contribution)
         self.contributions[contribution.owner_key] = contribution
 
@@ -104,16 +96,7 @@ class LogicalLedger:
         stream_segment, only a functional (observable-bearing) one may
         not. None when any covering contribution is timing-only.
         """
-        if commit_lo < 1 or commit_hi < commit_lo:
-            raise ValueError(
-                f"invalid logical prediction interval {commit_lo}-{commit_hi}"
-            )
         contributions = self._covering(stream_id, commit_lo, commit_hi)
-        if not contributions:
-            raise RuntimeError(
-                f"logical prediction interval {stream_id!r} "
-                f"{commit_lo}-{commit_hi} has no contribution coverage"
-            )
         _check_tiling(contributions, stream_id, commit_lo, commit_hi)
         for contribution in contributions:
             _check_inside_interval(
@@ -122,17 +105,13 @@ class LogicalLedger:
         for contribution in contributions:
             if contribution.logical_observables is None:
                 return None
-        return _xor_of(contributions, stream_id)
+        return _xor_of(contributions)
 
     def replace_prediction(
         self, owner_key: tuple, logical_observables: tuple
     ) -> None:
         """A strong result replaces the owner's prediction, extent unchanged."""
-        contribution = self.contributions.get(owner_key)
-        if contribution is None:
-            raise RuntimeError(
-                f"result for {owner_key} has no logical contribution owner"
-            )
+        contribution = self.contributions[owner_key]
         replaced = decoding_records.LogicalContribution(
             owner_key=contribution.owner_key,
             commit_lo=contribution.commit_lo,
@@ -141,23 +120,6 @@ class LogicalLedger:
             logical_observables=logical_observables,
         )
         self.install(replaced)
-
-    def _check_no_overlap(
-        self, contribution: decoding_records.LogicalContribution
-    ) -> None:
-        stream_id = contribution.owner_key[0]
-        for other_key, other in self.contributions.items():
-            if other_key == contribution.owner_key:
-                continue
-            if other_key[0] != stream_id:
-                continue
-            if _overlaps(contribution, other):
-                raise RuntimeError(
-                    f"logical contribution {contribution.owner_key} extent "
-                    f"{contribution.commit_lo}-{contribution.commit_hi} "
-                    f"overlaps {other_key} extent "
-                    f"{other.commit_lo}-{other.commit_hi}"
-                )
 
     def _check_arity(
         self, contribution: decoding_records.LogicalContribution
@@ -194,60 +156,11 @@ class LogicalLedger:
         return covering
 
 
-def _refuse_overlapping_extent(
-    owner_key: tuple,
-    commit_lo: int,
-    commit_hi: int,
-    other_key: tuple,
-    contribution: decoding_records.LogicalContribution,
-) -> None:
-    """A kept contribution may not touch the strong window's extent."""
-    if other_key[0] != owner_key[0]:
-        return
-    is_begun = contribution.commit_lo <= commit_hi
-    is_unfinished = commit_lo <= contribution.commit_hi
-    if is_begun and is_unfinished:
-        raise RuntimeError(
-            f"strong window {owner_key} extent {commit_lo}-"
-            f"{commit_hi} overlaps unabsorbed logical "
-            f"contribution {other_key} extent "
-            f"{contribution.commit_lo}-{contribution.commit_hi}"
-        )
-
-
 def _refuse_extent(contribution: decoding_records.LogicalContribution) -> None:
     raise ValueError(
         f"logical contribution {contribution.owner_key} has invalid "
         f"extent {contribution.commit_lo}-{contribution.commit_hi}"
     )
-
-
-def _check_ownership_unchanged(
-    previous: decoding_records.LogicalContribution,
-    contribution: decoding_records.LogicalContribution,
-) -> None:
-    same_extent = previous.commit_lo == contribution.commit_lo
-    if previous.commit_hi != contribution.commit_hi:
-        same_extent = False
-    same_kind = previous.ownership_kind == contribution.ownership_kind
-    if same_extent and same_kind:
-        return
-    raise RuntimeError(
-        f"logical contribution {contribution.owner_key} cannot "
-        f"change ownership from {previous.ownership_kind} "
-        f"{previous.commit_lo}-{previous.commit_hi} to "
-        f"{contribution.ownership_kind} "
-        f"{contribution.commit_lo}-{contribution.commit_hi}"
-    )
-
-
-def _overlaps(
-    left: decoding_records.LogicalContribution,
-    right: decoding_records.LogicalContribution,
-) -> bool:
-    if left.commit_lo > right.commit_hi:
-        return False
-    return right.commit_lo <= left.commit_hi
 
 
 def _extent_order(contribution: decoding_records.LogicalContribution) -> tuple:
@@ -313,18 +226,13 @@ def _check_inside_interval(
     )
 
 
-def _xor_of(contributions: list, stream_id) -> tuple:
+def _xor_of(contributions: list) -> tuple:
     """The XOR of every contribution's observables, one arity throughout."""
     first = contributions[0]
     arity = len(first.logical_observables)
     aggregate = [0] * arity
     for contribution in contributions:
-        logical_observables = contribution.logical_observables
-        if len(logical_observables) != arity:
-            raise RuntimeError(
-                f"logical prediction interval {stream_id!r} changed "
-                "observable arity during aggregation"
-            )
-        for observable_index, bit in enumerate(logical_observables):
+        observables = contribution.logical_observables
+        for observable_index, bit in enumerate(observables):
             aggregate[observable_index] ^= bit
     return tuple(aggregate)

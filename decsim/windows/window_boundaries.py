@@ -157,11 +157,6 @@ class BoundaryCourier:
             source_key, destination, record, boundary
         )
         update = self._propose_boundary_update(delivery, destination)
-        if update.release_dependency:
-            raise RuntimeError(
-                f"window interaction released boundary dependency "
-                f"{(source_key, destination.key)} more than once"
-            )
         if update.accepted:
             destination.boundary_in = update.state
 
@@ -513,8 +508,6 @@ class BoundaryCourier:
             payload=defects,
         )
         update = self._propose_boundary_update(delivery, window)
-        delivery_key = (source_key, key)
-        self._check_update(update, window, delivery_key, dependency_released)
         if update.accepted:
             window.boundary_in = update.state
             if update.release_dependency:
@@ -529,33 +522,6 @@ class BoundaryCourier:
         if not window.queued or window.committed:
             return False
         return window.deps_remaining == 0
-
-    def _check_update(
-        self,
-        update: window_records.BoundaryUpdate,
-        window: window_records.Window,
-        delivery_key: tuple,
-        dependency_released: bool,
-    ) -> None:
-        """Refuse an interaction's update that breaks the edge's contract."""
-        if update.accepted and window.committed:
-            raise RuntimeError(
-                f"accepted boundary delivery {delivery_key} reached window "
-                f"{window.key} after its decode lifecycle started"
-            )
-        if not update.release_dependency:
-            return
-        if dependency_released:
-            raise RuntimeError(
-                f"window interaction released boundary dependency "
-                f"{delivery_key} more than once"
-            )
-        source_key = delivery_key[0]
-        if source_key not in window.deps or window.deps_remaining <= 0:
-            raise RuntimeError(
-                f"window interaction released unresolved edge "
-                f"{delivery_key}, but it is not a live dependency"
-            )
 
     def _propose_boundary_update(
         self,
@@ -578,22 +544,10 @@ class BoundaryCourier:
         strong window is read with the model of its own re-decode, which
         the caller passes because both windows carry the same key.
         """
-        try:
-            candidate_state = copy.deepcopy(destination.boundary_in)
-        except Exception as error:
-            raise TypeError(
-                f"boundary state for {delivery.destination_key} must support "
-                "deep copying before merge_boundary"
-            ) from error
-        update = self.interaction.merge_boundary(
+        candidate_state = copy.deepcopy(destination.boundary_in)
+        return self.interaction.merge_boundary(
             delivery, destination_info, candidate_state
         )
-        if not update.accepted and update.release_dependency:
-            raise RuntimeError(
-                f"rejected boundary {delivery.source_key}->"
-                f"{delivery.destination_key} cannot release a dependency"
-            )
-        return update
 
 
 def _row_positions(model) -> Optional[dict]:

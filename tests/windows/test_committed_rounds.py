@@ -45,11 +45,12 @@ def test_an_interval_folds_each_owner_once_like_the_per_round_oracle():
     ) == (1, 0)
 
 
-def test_an_overlapping_install_is_refused():
+def test_an_overlapping_owner_is_refused_when_its_interval_is_read():
     ledger = _ledger()
-    with pytest.raises(RuntimeError):
-        contribution = _contribution(3, 3, 5, (0, 0))
-        ledger.install(contribution)
+    contribution = _contribution(3, 3, 5, (0, 0))
+    ledger.install(contribution)
+    with pytest.raises(RuntimeError, match="overlap"):
+        ledger.observables_for_interval("s", 1, 8, boundary_policy="strict")
 
 
 def test_a_round_without_an_owner_is_refused():

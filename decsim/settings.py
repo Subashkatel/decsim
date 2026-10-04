@@ -47,20 +47,14 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 class MachineSettings:
     """One settings record per part of the machine.
 
-    Every field has a default, so a Python caller names only what
-    differs from a timing-only run of three-qubit surface code patches
-    with no decoder at all. links is the fabric card; the reference card
-    prices propagation only. clock is the machine's clock, the one every
-    part that names none of its own counts its cycles on; it is stated
-    here alone, and a part on it names none (the controller's clock
-    None).
+    Every field has a default: a timing-only run of distance-three
+    surface code patches with no decoder. clock is the machine's clock,
+    the one every part that names none of its own counts its cycles on.
 
     The decode side is three slots, each None when the run has no such
-    part: weak_decoder alone decodes every window once on the weak
-    decoder, strong_decoder alone on the strong one, and both with
-    switching decode weak first and escalate a window to the strong
-    decoder; none of the three is a run that plans no decoding. Two
-    decoders without switching is refused.
+    part: weak_decoder alone, strong_decoder alone, or both with
+    switching, which decodes weak first and escalates a window to the
+    strong decoder. None of the three plans no decoding.
     """
 
     clock: Optional[config.Clock] = None
@@ -116,22 +110,14 @@ class MachineSettings:
 
     @property
     def window_tier(self) -> window_records.DecoderTier:
-        """The tier that decodes the plan's windows: weak if set, else strong.
-
-        A run with no decoder plans no decoding, and its windows, if any,
-        are the weak tier's.
-        """
+        """The tier that decodes the windows: weak if set, else strong."""
         if self.weak_decoder is None and self.strong_decoder is not None:
             return window_records.DecoderTier.STRONG
         return window_records.DecoderTier.WEAK
 
     @property
     def escalation_kind(self) -> str:
-        """The word a trace names these slots' run by.
-
-        The trace's process name and the plots that read it name a run
-        by it: switching, strong_only or weak_baseline.
-        """
+        """The word a trace names these slots' run by."""
         if self.switching is not None:
             return "switching"
         if self.window_tier is window_records.DecoderTier.STRONG:
@@ -141,11 +127,8 @@ class MachineSettings:
     def point_facts(self) -> dict:
         """The point's facts a threshold reads, None where none is stated.
 
-        The names are threshold_sources.POINT_FACTS: the qpu's distance
-        and round period, the physical error probability the workload
-        was made at, and the window sizes, None being the distance. A
-        threshold reads them here, off the point, so a run states each
-        once.
+        The names are threshold_sources.POINT_FACTS; a window size of
+        None is the distance.
         """
         workload_record = self.workload.workload_record
         probability = None
@@ -163,10 +146,8 @@ class MachineSettings:
     def at_point(self) -> "MachineSettings":
         """The settings with the threshold their point's facts give.
 
-        A calibration table's row is read here, once per point by the
-        point's task (collect.Task), or by Machine.build for a record no
-        task read; settings read at their point are their own reading,
-        and any other threshold is the same at every point.
+        A calibration table's row is read here, once per point; reading
+        settings already read returns them unchanged.
         """
         switching = self.switching
         if switching is None:

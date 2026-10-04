@@ -259,7 +259,7 @@ class TransferRecord:
 
 @dataclass(frozen=True)
 class FramedPayload:
-    """What one transfer puts on the wire: its payload, and its path's header.
+    """One transfer's payload, framed by its path's header.
 
     The ledger counts the payload and the wire serializes both. A payload of
     unknown size rides an unbounded channel only.

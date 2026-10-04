@@ -32,7 +32,7 @@ FOLD_SHAPE = "--cpus-per-task=1 --mem=16G --time=12:00:00"
 
 @dataclasses.dataclass(frozen=True)
 class JobShape:
-    """What one array task asks Slurm for: cores, walltime and memory.
+    """The Slurm request of one array task (cores, walltime, memory).
 
     Each is at least 1: sbatch reads a time limit of zero as no limit
     and a memory of zero as all of each node's memory (sbatch(1),

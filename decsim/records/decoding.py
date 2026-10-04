@@ -563,7 +563,7 @@ class PauliFrameCommitRecord:
 
 @dataclass(frozen=True)
 class DecoderStageRecord:
-    """One stage of one job: name, cycles charged, start and end ticks."""
+    """One timed stage of one job."""
 
     operation_id: int
     window_id: int
@@ -724,7 +724,7 @@ class DecodeResult:
 
 @dataclass(frozen=True)
 class Ticket:
-    """One submitted strong decode: decsim's answer and its priced ticks."""
+    """One submitted strong decode's outcome, priced in ticks."""
 
     result: DecodeResult
     decode_ticks: int

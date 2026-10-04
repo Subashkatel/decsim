@@ -1148,7 +1148,7 @@ class Decoder(Protocol):
 
 @runtime_checkable
 class DecoderSettings(Protocol):
-    """A decoder's settings record, as a tier and a confidence see it.
+    """A decoder's settings record, as its readers outside the decoder see it.
 
     A decoder that grows clusters also holds a weight_step and a timing,
     which a cluster confidence reads.
@@ -2145,7 +2145,7 @@ class CodeModel(Protocol):
 
 @runtime_checkable
 class LayoutModel(Protocol):
-    """Which code every patch and every operation runs on, and its claims."""
+    """One run's code layout: the code under each patch or operation."""
 
     def code_for_operation(
         self, operation: program_records.OperationPlanningView
@@ -2195,7 +2195,7 @@ class DecoderMemory(Protocol):
 
 @runtime_checkable
 class DecoderUnit(Protocol):
-    """A decoder unit, as a listener of its pool and its service reads it.
+    """A decoder unit, as its listeners see it.
 
     The pool fires unit_busy(unit) and unit_freed(unit), the service
     fires each job's dispatch, landing, start and finish with its unit,

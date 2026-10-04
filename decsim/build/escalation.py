@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class Switching:
-    """What a switching run adds: the decision and the strong window side.
+    """One run's switching side, from the escalation decision onward.
 
     regions says which rounds an escalated window covers, shape lays the
     strong window over them, pending_strong_windows holds one until its

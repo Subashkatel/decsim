@@ -97,7 +97,7 @@ class RunOperationBody:
 
 @dataclass(frozen=True)
 class QPUCommandEvent:
-    """When a command arrived at the QPU, and when it started."""
+    """One QPU command transition, an arrival or a start."""
 
     # "ARRIVED" or "STARTED"; the event ledger reads these words.
     kind: str

@@ -37,7 +37,7 @@ from decsim.syndrome_buffer import (
 
 @dataclasses.dataclass(frozen=True)
 class StoreSlot:
-    """A syndrome buffer a decoder reads, and how that decoder reads it.
+    """One decoder's read access to a syndrome buffer.
 
     reads_in_place: the unit reads the rounds where the store keeps them
     (DecoderPoolSettings.copies_input False).

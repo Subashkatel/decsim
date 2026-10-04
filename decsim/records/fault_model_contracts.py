@@ -146,7 +146,7 @@ class FaultCatalog:
 
 @dataclasses.dataclass(frozen=True)
 class FaultCatalogs:
-    """One circuit's catalogs, keyed by representation, and their link.
+    """One circuit's fault catalogs, keyed by representation.
 
     `link` is a graphlike-by-physical csc_matrix whose column j marks the
     graphlike faults physical fault j is made of, or None when the

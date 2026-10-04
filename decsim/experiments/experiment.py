@@ -60,7 +60,7 @@ class Point:
 
 @dataclasses.dataclass(frozen=True)
 class Experiment:
-    """A named set of points and the collection they stop by.
+    """A named set of points under one collection plan.
 
     A point's name is its folder, so two points of one name are refused, as
     is a point no collection stops.

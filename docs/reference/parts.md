@@ -23,7 +23,7 @@ bits bounds the store, None for no bound; clock None is the machine's. prices_re
 
 ### `DecoderSettings`
 
-`decsim/ports.py`. A decoder's settings record, as a tier and a confidence see it.
+`decsim/ports.py`. A decoder's settings record, as its readers outside the decoder see it.
 
 A decoder that grows clusters also holds a weight_step and a timing, which a cluster confidence reads.
 

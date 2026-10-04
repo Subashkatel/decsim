@@ -19,7 +19,7 @@ bits bounds the store, None for no bound; clock None is the machine's. prices_re
 | `bits` | `Optional[int]` |
 | `clock` | `Optional[config.Clock]` |
 | `prices_read_bits` | `bool` |
-| `build(self, engine)` | `SyndromeBuffer` |
+| `build(self, engine: engine_module.Engine)` | `SyndromeBuffer` |
 
 ### `DecoderSettings`
 

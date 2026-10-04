@@ -18,6 +18,7 @@ follow that packet store with a holder set per round.
 """
 
 import collections
+import dataclasses
 import functools
 import random
 
@@ -29,6 +30,7 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import tests.declared_run as declared_run
 
 # every round this file stores carries one fragment of two bits
 BITS_PER_ROUND = 2
@@ -338,21 +340,63 @@ def test_settlement_reports_a_hold_on_a_round_never_written():
         the_store.check_settled()
 
 
-def test_a_bounded_store_refuses_a_round_that_states_no_size():
-    """A bound is measured against a size, so the round must state one."""
-    the_store = store(bits=BITS_PER_ROUND)
+def blocked_successor() -> list:
+    """mem1, then mem2 blocked by mem1's feedback.
 
-    with pytest.raises(RuntimeError):
-        the_store.has_room((1, 1), None, {})
+    mem1's patch keeps measuring while mem2 waits, so a run whose rounds
+    wait for room forever never reaches its end-of-run checks.
+    """
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(2, predecessors=(1,), blocked_by=1)
+    return [first, second]
 
 
-def test_a_bounded_store_refuses_a_round_wider_than_itself():
-    """No free makes room for it (gem5 Network.cc:64-65 refuses the same)."""
-    the_store = store(bits=BITS_PER_ROUND)
-    wide_bits = BITS_PER_ROUND + 1
+NARROWER_THAN_A_ROUND = syndrome_buffer_module.SyndromeBufferSettings(bits=1)
 
-    with pytest.raises(RuntimeError):
-        the_store.has_room((1, 4), wide_bits, {})
+
+def test_a_weak_store_narrower_than_a_round_stops_the_run():
+    """No free makes room for the round (gem5 Network.cc:64-65)."""
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="no round leaving it makes room"):
+        declared_run.weak_only_run(
+            operations=operations, weak_syndrome_buffer=NARROWER_THAN_A_ROUND
+        )
+
+
+def strong_store_of(monkeypatch, store_settings) -> None:
+    """Every declared run from here on sizes its strong store so."""
+    run_machine = declared_run.run_machine
+
+    def run_with_the_strong_store(settings, seed=0, probes=()):
+        sized = dataclasses.replace(
+            settings, strong_syndrome_buffer=store_settings
+        )
+        return run_machine(sized, seed, probes)
+
+    monkeypatch.setattr(declared_run, "run_machine", run_with_the_strong_store)
+
+
+def test_a_strong_store_narrower_than_a_round_stops_the_run(monkeypatch):
+    """The strong-primary run writes every round into the strong store."""
+    strong_store_of(monkeypatch, NARROWER_THAN_A_ROUND)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="no round leaving it makes room"):
+        declared_run.strong_only_run(operations=operations)
+
+
+def test_a_strong_store_too_small_for_a_region_stops_the_run(monkeypatch):
+    """An escalated region cannot wait for room, so it must fit at once.
+
+    Each 6-round region is 48 bits against a store of 8.
+    """
+    store_of_8_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=8)
+    strong_store_of(monkeypatch, store_of_8_bits)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match="strong_syndrome_buffer.bits"):
+        declared_run.switching_run(escalates=True, operations=operations)
 
 
 def test_an_unbounded_store_takes_a_round_that_states_no_size():

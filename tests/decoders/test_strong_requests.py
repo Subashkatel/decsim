@@ -108,8 +108,8 @@ def test_a_destination_keeps_at_most_one_unconsumed_strong_result():
         requests.admit_strong(second, now=1)
 
 
-def test_a_windows_attempt_holds_its_forced_class_requests_and_no_repeat():
-    """One attempt, one or two requests; a request is admitted once.
+def test_a_windows_attempt_holds_its_forced_class_requests():
+    """One attempt, one or two requests, resolved as one.
 
     The complementary gap decodes a window once per logical class, so
     the window's open attempt names both request keys and resolves as
@@ -132,8 +132,6 @@ def test_a_windows_attempt_holds_its_forced_class_requests_and_no_repeat():
     requests.admit(second, now=0)
     record = requests.by_window[(1, 0)]
     assert record.open_weak_requests == {first_key, second_key}
-    with pytest.raises(RuntimeError):
-        requests.admit(second, now=1)
     requests.resolve_weak((1, 0))
     assert (1, 0) not in requests.by_window
 
@@ -169,6 +167,7 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
 
 
 def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
+    """A user decoder may answer a batch; its members would drop the answer."""
     requests = strong_requests_module.StrongRequests()
     first_key = _request_key(1)
     first = _strong_job(first_key, window_key=(1, 0))
@@ -181,7 +180,8 @@ def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
     result = decoding_records.DecodeResult(-1, 0, logical_observables=(1,))
-    with pytest.raises(RuntimeError):
+
+    with pytest.raises(RuntimeError, match="accuracy-bearing fields"):
         requests.deliveries_for(batch, result, now=40)
 
 

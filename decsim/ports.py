@@ -666,9 +666,6 @@ class WindowRequests(Protocol):
 class LogicalLedger(Protocol):
     """Who commits which rounds, as a strong window shape rewrites it."""
 
-    def owns_strong_window(self, owner_key: tuple) -> bool:
-        """Whether a strong window already claims that owner's extent."""
-
     def replace_contributions(
         self,
         owner_key: tuple,

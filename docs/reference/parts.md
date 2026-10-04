@@ -36,7 +36,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `ClusterGap.Settings`
 
-`decsim/confidence/cluster.py`. The row as a run names it: the card that prices its walk.
+`decsim/confidence/cluster.py`. Its settings: walk_microseconds prices the walk, None measures it.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `ComplementaryGap.Settings`
 
-`decsim/confidence/complementary.py`. The row as a run names it: the card that prices its computation.
+`decsim/confidence/complementary.py`. Its settings: walk_microseconds prices the subtraction, or None.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 
 ### `ExtraClusterGap.Settings`
 
-`decsim/confidence/extra_cluster.py`. The row as a run names it: the card that prices its growth.
+`decsim/confidence/extra_cluster.py`. Its settings: walk_microseconds prices the growth, or None.
 
 | Field | Type | Default |
 | --- | --- | --- |

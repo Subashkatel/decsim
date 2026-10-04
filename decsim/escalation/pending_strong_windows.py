@@ -1,20 +1,12 @@
 """The strong windows held until the conditions their row declared fire.
 
-A shape row that cannot build its job at the escalation says so
-(StrongAssignment.job is None) and declares what releases it: the weak
-windows whose commits it waits on, and, when it has no later window to
-wait on, the operation whose stored rounds release it. StrongRedecode
-holds this index, counts the commits down and asks the row for the job
-when an entry's conditions are met.
-
-Toshio et al. 2510.25222 Sec. III C: the strong decoder starts "after
-the boundary conditions at both ends have been determined by the weak
-decoder" (lines 1248-1250). Which boundaries those are is the row's own
-geometry, so the condition is a declaration rather than a fixed hook per
-row: the double window waits on the restart window's commit, a
-seam-pinned window would wait on both of its faces, and a Skoric
-layer-B window on its two adjacent layer-A commits (2209.08552 lines
-419-421).
+A shape row that cannot build its job at the escalation declares what
+releases it: the weak windows whose commits it waits on, or the
+operation whose stored rounds release it when it has no later window.
+Toshio et al. 2510.25222 Sec. III C starts the strong decoder "after the
+boundary conditions at both ends have been determined by the weak
+decoder" (lines 1248-1250); which boundaries those are is the row's
+geometry, so the condition is a declaration rather than a hook per row.
 """
 
 import dataclasses
@@ -27,12 +19,10 @@ import decsim.records.identity as identity_records
 class ReleaseConditions:
     """What must happen before a held strong job may be built.
 
-    committed_windows names the weak windows whose commits the row waits
-    on, all of them; stored_data_of_operation names the operation whose
-    stored rounds release the row, which is how a window at the end of a
-    stream waits when there is no later window to bound it. name labels
-    the wait in the run's view and released_description names the
-    condition in the run log, both in the row's own words.
+    committed_windows are the weak windows whose commits the row waits
+    on; stored_data_of_operation is the operation whose stored rounds
+    release it. name labels the wait in the run's view,
+    released_description in the log.
     """
 
     committed_windows: tuple = ()
@@ -54,12 +44,9 @@ class PendingStrongWindow:
 class PendingStrongWindows:
     """The held strong windows, under every condition that can release one.
 
-    One entry per escalated window, indexed under each window it waits
-    on and under the operation whose data releases it; the windows it
-    still waits on are counted down as they commit. An entry whose
-    conditions are met is offered to its row, which builds the job when
-    the rounds are there, and a release takes the entry out of every
-    index at once.
+    An entry is indexed under each window it waits on and under the
+    operation whose data releases it, and a release takes it out of
+    every index at once.
     """
 
     def __init__(self) -> None:

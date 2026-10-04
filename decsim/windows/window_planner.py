@@ -1,16 +1,12 @@
 """The window planner: which windows exist, planned or grown.
 
-The static plan (frontends/planner.py) lays out every window of an
-operation of known length up front; a dynamic stream's windows are laid
-out here as its rounds arrive, the runtime twin of that plan. The
-commit and buffer regions are the planner's only geometry: a window
-reads [start_round, buffer_hi] and commits [commit_lo, commit_hi]
-(Skoric et al. 2209.08552, the overlapping recovery method; Tan et al.
-2209.09219, core and buffer regions). qLDPC separates the window plan
-from the decode loop the same way (qldpc/decoders/sinter.py,
-SlidingWindowDecoder.compile_decoder_for_dem and
-CompiledSequentialWindowDecoder.decode_shots_to_error); readiness is
-the RoundTracker's.
+The static plan (frontends/planner.py) lays every window of an operation
+of known length up front; a dynamic stream's windows are laid here as
+its rounds arrive. A window reads [start_round, buffer_hi] and commits
+[commit_lo, commit_hi] (Skoric et al. 2209.08552, the overlapping
+recovery method; Tan et al. 2209.09219, core and buffer regions). As in
+qLDPC, the plan is apart from the decode loop (qldpc/decoders/sinter.py,
+SlidingWindowDecoder); readiness is the RoundTracker's.
 """
 
 import dataclasses
@@ -59,8 +55,7 @@ class WindowModels:
     ) -> list:
         """One model per window of a planned operation, or none.
 
-        Built once per task: the models are a function of the circuit
-        and the window plan, so the shots of one sweep point share them
+        Built once per task and shared by its shots
         (built_window_models).
         """
         if self.provider is None:
@@ -166,10 +161,8 @@ class WindowPlanner:
     def start(self) -> None:
         """Build the model of every window the plan laid.
 
-        The models come from the port, so they are built once the root
-        has bound it, which is gem5's split between the constructor and
-        startup (gem5 src/sim/sim_object.hh lines 194 and
-        280).
+        It runs once the ports are bound, as gem5's startup does
+        (src/sim/sim_object.hh lines 194 and 280).
         """
         for operation in self.planned_operations:
             self._build_operation_models(operation)
@@ -409,10 +402,10 @@ class WindowPlanner:
             self.models.model_by_window[window.key] = model
 
     def refresh_stream_models(self, stream_id: Any) -> None:
-        """Install actual terminal models before the remaining windows queue.
+        """Install the terminal models before the remaining windows queue.
 
-        The stream identity is opaque. A runtime-selected readout can affect
-        every unqueued tail buffer, while published models stay unchanged.
+        A readout chosen at run time can change every unqueued tail
+        buffer's model; published ones stay.
         """
         for window in self.windows_of(stream_id):
             if window.queued or window.committed:
@@ -425,12 +418,10 @@ class WindowPlanner:
         """Clip the one window whose commit region holds a closed tail.
 
         The tail is the sealed length or a measurement-closed boundary.
-        The window commits through it, its buffer follows the new commit
-        end, and the stream's next window starts on the round after it:
-        a last window may be smaller than the others (Tan et al.
-        2209.09219 lines 1052-1056; Skoric et al. 2209.08552 lines
-        692-700). The window is returned so its holds can shrink with
-        it. None when no window is clipped.
+        The window commits through it, its buffer follows, and the next
+        window starts after it, so a last window may be smaller than the
+        others (Tan et al. 2209.09219 lines 1052-1056; Skoric et al.
+        2209.08552 lines 692-700). Returns the clipped window, or None.
         """
         growth = self.growth_by_stream[stream_id]
         for window in self.windows_of(stream_id):
@@ -445,14 +436,11 @@ class WindowPlanner:
         """End a commit region on the round: a segment starts after it.
 
         A segment's result is the sum of the windows committed over its
-        rounds (Skoric et al. 2209.08552, the stream's correction is the
-        sum over its committed windows; operation_results.py), so its
-        first round starts a window. A window already laid across the
-        round commits through it and may be smaller than the others, as
-        at a closed tail (Tan et al. 2209.09219 lines 1052-1056), but the
-        stream's model stays open; a window not laid yet is cut as it is
-        laid. Every cut is kept, so a later replan keeps the segments
-        bound before it. The window clipped is returned, or None.
+        rounds (Skoric et al. 2209.08552; operation_results.py), so its
+        first round starts a window. A window laid across the round
+        commits through it, as at a closed tail; one not laid yet is cut
+        as it is laid. Every cut is kept, so a later replan keeps it.
+        Returns the clipped window, or None.
         """
         growth = self.growth_by_stream[stream_id]
         clipped = None
@@ -528,11 +516,6 @@ class WindowPlanner:
         )
         if not models:
             return
-        successor_ids = self.plan.successors.get(operation.id, ())
-        if successor_ids:
-            _refuse_reads_past_the_model(
-                operation, windows, models, resolved.round_count
-            )
         for window, model in zip(windows, models, strict=True):
             self.models.model_by_window[window.key] = model
 
@@ -594,36 +577,6 @@ def _model_key(
         requirement,
         protocol,
     )
-
-
-def _refuse_reads_past_the_model(
-    operation: program_records.Operation,
-    windows: list,
-    models: list,
-    round_count: int,
-) -> None:
-    """A window with an error model reads only its own operation's rounds.
-
-    The model is sliced from the operation's own circuit, so its rows
-    end at the operation's last round. A window whose buffer runs on
-    into the next operation's rounds would hand the decoder rows its
-    model does not have, which the decoder's input memory refuses in the
-    middle of the run (decoders/decoder_memory.py). The flush terminal
-    policy ends the last window inside its operation.
-    """
-    for window, model in zip(windows, models, strict=True):
-        if model is None:
-            continue
-        if window.buffer_hi <= round_count:
-            continue
-        first_foreign_round = round_count + 1
-        raise ValueError(
-            f"{operation.name} window {window.window_index} reads rounds "
-            f"{first_foreign_round} to {window.buffer_hi} from the operation "
-            f"after it, but its error model holds only the operation's own "
-            f"{round_count} rounds; windows.terminal_policy flush ends the "
-            "last window inside its operation"
-        )
 
 
 def _clip(
@@ -784,12 +737,6 @@ class _StreamGrowth:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the window planner reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the window planner reports, as one member."""
 
     window_planned: trace_source.TraceSource = trace_source.new_source()

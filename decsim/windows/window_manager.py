@@ -1,25 +1,16 @@
 """The windows facade: the window life cycle of every operation.
 
-Which windows exist is the WindowPlanner's, which rounds arrived and
-whether a window has its data is the RoundTracker's, which rounds each
-window holds is the RoundRetention's, a decode is asked for by the
-DecodeRequester from a job the DecodeRequestBuilder builds, its input
-is sent by the store's own SyndromeBufferOutput, a result commits its
-window through the WindowCommitter and leaves for the frame through the
-decoder side's DecoderOutput, boundaries between windows are the
-BoundaryCourier's, ownership of
-committed rounds is the LogicalLedger's, and each operation's result is
-the OperationResults'; the facade receives rounds and wires them, the
-shape of gem5's cache (BaseCache owns its MSHR queue, write buffer and
-tags, each one job, and implements the ports: src/mem/cache/base.hh).
-The strong tier is the StrongRedecode's (decsim/escalation), on the
-same components; a run that never escalates has none. One round reads
-as accept_window_input, requester.request_if_ready, job.on_decoded
-(verdict.accept_result), results.deliver_if_final.
-
-The seven components a round crosses, the strong redecode the arrivals
-wake and the interaction that gives a new window its first boundary are
-ports; the engine and the workload's feedback mode are its own state.
+The facade receives rounds and hands them to components with one job
+each: the WindowPlanner (which windows exist), the RoundTracker (which
+rounds arrived), the RoundRetention (which rounds each window holds),
+the DecodeRequester and its DecodeRequestBuilder (a decode per complete
+window), the WindowCommitter (a result commits its window), the
+BoundaryCourier (boundaries between windows), the LogicalLedger (who
+committed which rounds) and the OperationResults (each operation's
+result). This is the shape of gem5's cache, whose BaseCache owns its
+MSHR queue, write buffer and tags and implements the ports
+(src/mem/cache/base.hh). The strong tier is the StrongRedecode's
+(decsim/escalation), on the same components.
 """
 
 import dataclasses
@@ -81,10 +72,8 @@ class WindowManager:
     def start(self) -> None:
         """Give every window the plan laid its first boundary.
 
-        The plan and the interaction come from ports, so the first
-        boundaries are written once the root has bound them, which is
-        gem5's split between the constructor and startup
-        (gem5 src/sim/sim_object.hh lines 194 and 280).
+        It runs once the ports are bound, as gem5's startup does
+        (src/sim/sim_object.hh lines 194 and 280).
         """
         for window in self.planner.windows_by_key.values():
             window_info = window_records.WindowInfo.from_window(window)
@@ -150,10 +139,7 @@ class WindowManager:
             self._admit_stream_window(window)
 
     def _admit_stream_window(self, window: window_records.Window) -> None:
-        """Connect one new stream window: its boundary, its model, its holds.
-
-        If the previous boundary already arrived, apply it immediately.
-        """
+        """Connect one new stream window: its boundary, its model, its holds."""
         window_info = window_records.WindowInfo.from_window(window)
         window.boundary_in = self.window_interaction.initial_boundary_state(
             window_info
@@ -242,9 +228,8 @@ class WindowManager:
     ) -> None:
         """Publish one stored upstream round to window readiness.
 
-        Assembly-to-retention is a state transition on the same
-        allocation; no decoder input moves here. Window input transfer
-        begins only when a decode request is admitted.
+        No decoder input moves here: a window's input leaves its store
+        when its decode request is admitted.
         """
         operation = self.tracker.operation_by_id[packet.operation_id]
         self._refuse_unplanned_round(packet, operation)
@@ -283,12 +268,7 @@ class WindowManager:
             )
 
     def accept_feedback_memory_round(self, source_operation_id) -> None:
-        """Record one idle or memory round and re-check waiting windows.
-
-        The round's arrival is narrated by the end it arrived at
-        (decoders/memory_rounds.py); what is kept here is the window
-        side's own count of the operation's memory rounds.
-        """
+        """Record one idle or memory round and re-check waiting windows."""
         self.tracker.note_memory_round(source_operation_id)
         self.check_windows_for_operation(source_operation_id)
 
@@ -381,9 +361,6 @@ class WindowManager:
     def window_sources(self) -> WindowTraceSources:
         """The window life cycle's trace sources, in the order they fire.
 
-        An observer connects to what the window side reports, never to
-        the component that happens to report it: which of the package's
-        components fires which source is the package's own arrangement.
         A run that never escalates absorbs no window and a run whose
         confidence reads one solve holds none, so each reports the
         silent source instead.
@@ -410,10 +387,10 @@ class WindowManager:
         return self.planner.windows_by_key
 
     def copy_sources(self) -> list:
-        """The copy_made sources of this side's own hops, in hop order.
+        """The copy_made sources of this side's own hops: none.
 
-        None: every copy on the window side's hops lands in a structure
-        another package owns, and is booked by the package that owns it.
+        Every copy on the window side's hops lands in a structure
+        another package owns, which books it.
         """
         return []
 
@@ -429,10 +406,8 @@ class WindowManager:
         """Note which stream and offset a segment's rounds fold into.
 
         The segment's first round starts a window of its stream and its
-        last round ends one, the interval its result reads
-        (operation_results.py), so its result is a sum over whole
-        windows even when idle rounds of the stream come before or after
-        it.
+        last round ends one, so its result (operation_results.py) is a
+        sum over whole windows.
         """
         self.results.bind_stream_segment(operation_id, stream_id, stream_offset)
         if not self.planner.has_stream(stream_id):

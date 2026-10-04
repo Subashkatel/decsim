@@ -1,19 +1,14 @@
 """The decoder unit's timing around one algorithm: its stages.
 
-One decode job is one walk through the configured stages before the
-algorithm (for a weak ASIC, reading the window out of the decoder-side
-memory), the algorithm itself, started on its own decoder and delivered
-when its time ends, then the configured stages after it (releasing the
-correction). Every stage is one engine event and one record, so the
-trace shows latency at each point inside the unit.
-
-Stages are data (name, cycles per job, cycles per round, at one clock),
-not a fixed vocabulary: a hardware decoder declares its own real stages
-when it has them. Precedent for modeling actual units and reporting
-their cycles per job: XQsim src/XQ-simulator
-(https://github.com/SNU-HPCS/XQsim, commit
-006c38474c4caf8d51e2065ad3f3a5144b251bfc, MIT); nothing is copied from
-it. A job holds the unit from first stage to release.
+One decode job walks the configured stages before the algorithm (for a
+weak ASIC, reading the window out of the unit's memory), the algorithm
+itself, started on its own decoder, then the stages after it (releasing
+the correction). Every stage is one engine event and one record, so the
+trace shows latency at each point inside the unit. Stages are data
+(name, cycles per job, cycles per round, one clock), so a hardware
+decoder declares its own, as XQsim models its units and reports their
+cycles per job (github.com/SNU-HPCS/XQsim). A job holds the unit from
+first stage to release.
 """
 
 import dataclasses
@@ -28,8 +23,6 @@ import decsim.records.rounds as round_records
 import decsim.records.seeds as seed_records
 import decsim.trace_source as trace_source
 
-# The decoder unit component's name in the narrator (docs/
-# architecture.md's component table).
 ALGORITHM_STAGE = "algorithm"
 
 
@@ -50,19 +43,14 @@ class DecoderStage:
         """The clock the stage's cycles count on: the unit's own.
 
         A stage of other logic in front of the unit, a detection event
-        former on its own clock (decoders/detection_events.py), names
-        that clock instead, as gem5 gives each clocked object its own
-        domain (src/sim/clocked_object.hh).
+        former on its own clock (detection_events.py), names that clock
+        instead, as gem5 gives each clocked object its own domain
+        (src/sim/clocked_object.hh).
         """
         return unit_clock
 
     def formed_round_keys(self, job: decoding_records.DecodeJob) -> tuple:
-        """The rounds this stage forms; none, for a stage that forms none.
-
-        A stage that turns rounds into detection events answers with the
-        ones it formed, so the trace says which rounds a stage's cycles
-        were spent on (decoders/detection_events.py).
-        """
+        """The rounds this stage forms; none, for a stage that forms none."""
         del job
         return ()
 
@@ -71,12 +59,11 @@ class DecoderStage:
 class MemoryFetchStage(DecoderStage):
     """The fetch out of the unit's own memory: its cycles, then one a word.
 
-    Each round is read in whole words of word_bits, one word a cycle,
-    beside the stage's cycles per job and per round, as gem5's crossbar
-    charges divCeil(size, width) per packet (src/mem/xbar.cc:135) and
-    Helios loads each round a byte a clock from a byte boundary
-    (Helios_scalable_QEC control_node_single_FPGA.v lines 35-36 and
-    152-167). word_bits None prices no words.
+    Each round is read in whole words of word_bits, one a cycle, as
+    gem5's crossbar charges divCeil(size, width) per packet
+    (src/mem/xbar.cc:135) and Helios loads each round a byte a clock
+    (control_node_single_FPGA.v lines 35-36 and 152-167). word_bits None
+    prices no words.
     """
 
     word_bits: Optional[int] = None
@@ -168,20 +155,15 @@ class StagedDecoder(decoder_module.DecoderBase):
     """A decoder on a unit: its stages walked as engine events.
 
     The wrapped decoder starts the algorithm stage on its own terms
-    (priced, or measured on the host clock); the result reaches on_result
-    when the last stage ends (None when the job was cancelled meanwhile).
-    Trace source: stage_recorded(record), one DecoderStageRecord per
-    stage, fired when the stage ends, the lane a hardware model fills in
-    for its own stages. A stage ends at its own time or at a cancel, and
-    a record closed by a cancel says so: gem5 stops a squashed
-    instruction where it stands and counts it apart from the rest
-    (gem5 src/cpu/o3/inst_queue.cc:895-908 for the issue
-    it abandons, :294-298 and :1442 for the squashed counters), and
-    decoder switching halts the strong decoder's ongoing computation at
-    the weak decoder's confident verdict (Toshio et al. 2510.25222
-    Sec. III A step 1, 2510.25222.txt lines 598-601, and step 3, lines
-    610-612). The decoder keeps no history; the run's StageLedger
-    (observe/stage_records.py) holds what it fires.
+    (priced, or measured on the host clock); the result reaches
+    on_result when the last stage ends, None when the job was cancelled
+    meanwhile. Trace source: stage_recorded(record), one
+    DecoderStageRecord per stage, fired when the stage ends. A record
+    closed by a cancel says so: gem5 stops a squashed instruction where
+    it stands and counts it apart (src/cpu/o3/inst_queue.cc:895-908,
+    :294-298 and :1442), and decoder switching halts the strong
+    decoder's ongoing computation at the weak decoder's confident
+    verdict (Toshio et al. 2510.25222 lines 598-601 and 610-612).
     """
 
     def __init__(self, decoder, timing: UnitTiming):
@@ -226,11 +208,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         return stages + algorithm
 
     def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
-        """The whole latency, stages included.
-
-        None when the wrapped decoder is measured on the host clock: the
-        unit cannot say in advance when it frees.
-        """
+        """The whole latency, stages included; None when host-measured."""
         algorithm = self.decoder.occupancy(job)
         if algorithm is None:
             return None
@@ -255,9 +233,8 @@ class StagedDecoder(decoder_module.DecoderBase):
     def cancel(self, job: decoding_records.DecodeJob) -> None:
         """Abort a running job: its open stage ends here, marked cancelled.
 
-        The engine schedules and never unschedules (engine.py), so the
-        stage's own timer still fires; the record is closed by this call
-        and the timer then finds the walk aborted and writes nothing.
+        The engine never unschedules, so the stage's own timer still
+        fires and finds the walk aborted.
         """
         key = _key(job)
         running = self._running.pop(key, None)

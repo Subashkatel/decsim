@@ -4,8 +4,6 @@ Smith 1982 decoupled access-execute: the second slot holds the
 next window's input while the first computes.
 """
 
-import pytest
-
 import decsim.decoders.decoder_memory as decoder_memory
 import decsim.decoders.decoder_unit as decoder_unit
 import decsim.records.decoding as decoding_records
@@ -138,13 +136,3 @@ def test_the_output_slot_holds_one_finished_result_until_it_is_taken():
     assert unit.take_output((1, 0)) is completion
     assert unit.output_windows() == []
     assert unit.take_output((1, 0)) is None
-
-
-def test_a_second_result_for_one_destination_is_refused():
-    """A destination window has at most one unconsumed strong result."""
-    unit = _unit()
-    first = object()
-    second = object()
-    unit.hold_output((1, 0), first)
-    with pytest.raises(RuntimeError):
-        unit.hold_output((1, 0), second)

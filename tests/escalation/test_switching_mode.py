@@ -542,7 +542,7 @@ def test_a_priced_confidence_walk_charges_its_card_once_per_window():
 
     The cluster gap's walk is a Dijkstra over the decode's own edge
     intervals (Meister et al. 2405.07433 Algorithm 2), charged on the
-    unit that grew them (decision D8). Left None it is measured on the
+    unit that grew them. Left None it is measured on the
     host clock; given a number it is that number of microseconds per
     window, so a run can price it the way a decoder tier is priced.
     """

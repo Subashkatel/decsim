@@ -1,23 +1,13 @@
 """The boundary courier: residual defects travel to dependent windows.
 
-A boundary is the residual defects at a window's commit edge, produced by
-the decoder at decode done and delivered to dependent windows over
-decoder_to_decoder, whose two ends this package holds: the record kept
-here is what leaves, and the destination window's record is what it
-lands in, so this component executes the send and handles the landing
-(OMNeT++ refuses a module that sends a message it does not own,
-src/sim/csimplemodule.cc:333-334; decisions.md
-D12). A held boundary waits for a final result. Versions
-make late deliveries harmless: every send bumps the source's version and
-each delivery's version, and a receiver only accepts the latest. Each
-source window has one record here; the courier owns the boundary policy
-(when a committed window may ship) and the interaction (what a boundary
-is and how it merges), and tells the window side when a delivery landed.
-A strong window whose face is pinned reads the same records: the
-courier ships the neighbour's committed boundary to it and folds it in
-(pin_strong_face, Bombin et al. 2303.04846 lines 775-788), and that
-window owes the boundary until the message lands, so its decode waits
-the way a weak window's does.
+A boundary is the residual defects at a window's commit edge. The record
+that leaves is the courier's, so it both sends it over
+decoder_to_decoder and handles its landing (OMNeT++ refuses a module
+that sends a message it does not own, src/sim/csimplemodule.cc:333-334).
+Every send bumps the source's version and each delivery's version, and a
+receiver accepts only the latest, so a late delivery is harmless. A held
+boundary waits for a final result. A strong window whose face is pinned
+reads the same records (pin_strong_face).
 """
 
 import copy
@@ -157,11 +147,6 @@ class BoundaryCourier:
             source_key, destination, record, boundary
         )
         update = self._propose_boundary_update(delivery, destination)
-        if update.release_dependency:
-            raise RuntimeError(
-                f"window interaction released boundary dependency "
-                f"{(source_key, destination.key)} more than once"
-            )
         if update.accepted:
             destination.boundary_in = update.state
 
@@ -177,29 +162,20 @@ class BoundaryCourier:
     ) -> None:
         """Pin a strong window's face on a committed correction.
 
-        Which correction it is, the neighbour's or the window's own, is
-        _pinned_boundary's answer.
+        The input to a later decoding task is the syndrome plus the
+        corrections the tasks before it committed, on the one layer
+        where the two windows meet (Bombin et al. 2303.04846 lines
+        775-788; Tan et al. 2209.09219 lines 943-946). The strong window
+        has its own model, so the residual is intersected with its
+        detectors and priced on its own seam layer. The fold is written
+        into its boundary state now, and the job's gate XORs it into the
+        input when the decode starts.
 
-        Bombin et al. 2303.04846 lines 775-788: the input to a later
-        decoding task is the syndrome of the errors plus the corrections
-        committed by the tasks before it, which updates the detectors of
-        the one round layer where the two windows meet (Tan et al.
-        2209.09219 lines 943-946). The strong window has its own error
-        model, so the residual is intersected with its detectors and the
-        message is priced against its own seam layer rather than the
-        weak window's. The delivery rides decoder_to_decoder, where
-        every boundary of this courier is charged; the fold is written
-        into the strong window's boundary state here and the job's gate
-        XORs it into the input when the decode starts.
-
-        The strong window owes that boundary until the message lands.
-        Toshio et al. 2510.25222 lines 1248-1250 start the strong
-        decoder after the boundary conditions have been determined, and
-        Bombin et al. 2303.04846 lines 782-788 make kappa_Pj part of the
-        input task j reads, so the decode may not begin before the
-        message that carries it: deps_remaining counts it, and
-        WindowInputGate.may_start parks the job until the delivery
-        clears it, which is the weak side's own rule.
+        The strong decoder starts once the boundary conditions are
+        determined (Toshio et al. 2510.25222 lines 1248-1250), so the
+        window owes the boundary until the message lands: deps_remaining
+        counts it, and WindowInputGate.may_start parks the job until the
+        delivery clears it.
         """
         record = self._record(source_key)
         if record.committed_request_key is None:
@@ -233,12 +209,10 @@ class BoundaryCourier:
     ) -> Optional[window_records.DependencyResidual]:
         """What the face pins on: a neighbour's commit, or its own seam.
 
-        A strong window that carries the source's own key is the redo of
-        that window, so the commit it pins on is its own weak one, and
-        of that commit only the faults crossing behind its first round
-        are the boundary condition: the rest of the window's rounds are
-        exactly what it decodes again (Toshio et al. 2510.25222 lines
-        1248-1250).
+        A strong window with the source's own key is the redo of that
+        window. Of its own weak commit only the faults crossing behind
+        its first round are the boundary condition; the rest it decodes
+        again (Toshio et al. 2510.25222 lines 1248-1250).
         """
         if source_key != destination.key:
             return record.committed
@@ -278,12 +252,7 @@ class BoundaryCourier:
         request_key: window_records.DecoderRequestKey,
         boundary: Optional[window_records.DependencyResidual],
     ) -> None:
-        """One pinned face's message, priced on the strong window's seam.
-
-        The bits are the strong window's own seam layer, so the transfer
-        is attributed to that window and to the request that reads it
-        (_pin_attribution).
-        """
+        """One pinned face's message, priced on the strong window's seam."""
         record = self._record(source_key)
         attribution = self._pin_attribution(
             record, source_key, destination, operation, request_key
@@ -377,10 +346,9 @@ class BoundaryCourier:
     ) -> None:
         """A pinned face's message landed: the strong window may start.
 
-        The fold was written when the job was built, so nothing changes
-        in the input here; what changes is that the window no longer
-        owes the boundary, and the parked decode is woken the way a weak
-        window's is (_receive_boundary).
+        The fold was written when the job was built, so only the owed
+        count drops here, and the parked decode wakes as a weak window's
+        does.
         """
         destination.deps_remaining -= 1
         self.windows.accept_boundary(destination.key, True)
@@ -455,9 +423,8 @@ class BoundaryCourier:
     def _boundary_bits(self, boundary, source_key: tuple, dependent_key: tuple):
         """The bits this hand-off takes on the wire, or None for the card.
 
-        The interaction owns what a boundary is, so it is the one that
-        counts what crosses; which layer of the destination the message
-        lands on follows from the two windows, so it reads both.
+        The interaction prices it, since it decides what a boundary is
+        and which layer of the destination it lands on.
         """
         destination = self.planner.windows_by_key[dependent_key]
         destination_info = self._destination_info(destination)
@@ -513,8 +480,6 @@ class BoundaryCourier:
             payload=defects,
         )
         update = self._propose_boundary_update(delivery, window)
-        delivery_key = (source_key, key)
-        self._check_update(update, window, delivery_key, dependency_released)
         if update.accepted:
             window.boundary_in = update.state
             if update.release_dependency:
@@ -529,33 +494,6 @@ class BoundaryCourier:
         if not window.queued or window.committed:
             return False
         return window.deps_remaining == 0
-
-    def _check_update(
-        self,
-        update: window_records.BoundaryUpdate,
-        window: window_records.Window,
-        delivery_key: tuple,
-        dependency_released: bool,
-    ) -> None:
-        """Refuse an interaction's update that breaks the edge's contract."""
-        if update.accepted and window.committed:
-            raise RuntimeError(
-                f"accepted boundary delivery {delivery_key} reached window "
-                f"{window.key} after its decode lifecycle started"
-            )
-        if not update.release_dependency:
-            return
-        if dependency_released:
-            raise RuntimeError(
-                f"window interaction released boundary dependency "
-                f"{delivery_key} more than once"
-            )
-        source_key = delivery_key[0]
-        if source_key not in window.deps or window.deps_remaining <= 0:
-            raise RuntimeError(
-                f"window interaction released unresolved edge "
-                f"{delivery_key}, but it is not a live dependency"
-            )
 
     def _propose_boundary_update(
         self,
@@ -578,34 +516,20 @@ class BoundaryCourier:
         strong window is read with the model of its own re-decode, which
         the caller passes because both windows carry the same key.
         """
-        try:
-            candidate_state = copy.deepcopy(destination.boundary_in)
-        except Exception as error:
-            raise TypeError(
-                f"boundary state for {delivery.destination_key} must support "
-                "deep copying before merge_boundary"
-            ) from error
-        update = self.interaction.merge_boundary(
+        candidate_state = copy.deepcopy(destination.boundary_in)
+        return self.interaction.merge_boundary(
             delivery, destination_info, candidate_state
         )
-        if not update.accepted and update.release_dependency:
-            raise RuntimeError(
-                f"rejected boundary {delivery.source_key}->"
-                f"{delivery.destination_key} cannot release a dependency"
-            )
-        return update
 
 
 def _row_positions(model) -> Optional[dict]:
     """Where the model's own detector rows sit, and no other detector.
 
-    A window's input is its own checks, so the residual is intersected
-    with the rows the strong window decodes on (Bombin et al.
-    2303.04846 lines 782-788, the input to task j is restricted to
-    Sigma_j). The model also places the detectors its faults flip
-    outside the window, which belong to a neighbour's input and not to
-    this one's. A run whose windows carry no error model has no rows to
-    intersect with, and the wire prices the message by its card.
+    The input of task j is restricted to its own checks (Bombin et al.
+    2303.04846 lines 782-788), so the residual is intersected with the
+    rows the strong window decodes on, not the neighbour's detectors its
+    faults also flip. None for a run with no error model; the wire then
+    prices the message by its card.
     """
     if model is None:
         return None

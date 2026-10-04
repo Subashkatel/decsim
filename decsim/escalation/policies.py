@@ -1,14 +1,10 @@
 """The switching policy: weak first, escalate on low confidence.
 
-Switching decodes weak first and escalates a window whose confidence
-falls below its threshold (Toshio et al. 2510.25222 Sec. III A). A run
-with no switching slot has no policy: every window is decoded once, on
-the decoder that decodes the plan's windows, and kept. A policy decides
-and is told (gem5's conditional predictor, src/cpu/pred/conditional.hh):
-it builds no job; the window side plans and submits the strong re-decode
-(strong_redecode.py, strong_window_shapes.py) and the decoder manager
-owns the units, hold-or-deliver and cancellation. Where Switching's
-threshold comes from is its ThresholdSource (threshold_sources.py).
+Toshio et al. 2510.25222 Sec. III A. A run with no switching slot has no
+policy: every window is decoded once and kept. A policy decides and is
+told, as gem5's conditional predictor is (src/cpu/pred/conditional.hh):
+it builds no job; the window side plans and submits the strong
+re-decode, and the decoder manager owns the units and cancellation.
 """
 
 import decsim.ports as ports
@@ -19,20 +15,11 @@ import decsim.records.windows as window_records
 class Switching:
     """Weak decoder first; escalate to a strong decoder on low confidence.
 
-    The threshold source decides keep from the weak result's soft output, whose
-    source must be the one the policy expects; a result without a soft output
-    escalates. run_both_at_once starts a speculative strong decode with the weak
-    job and cancels it on confidence (the paper's Step 1, Toshio et al.
-    2510.25222 Sec. III A); otherwise the strong re-decode starts at the
-    verdict, after the weak_decoder_to_strong_decoder hop (the serial
-    modification of the same section). How the strong window is laid out is the
-    run's shape (the row SwitchingSettings.strong_window holds,
-    strong_window_shapes.py, which every refusal here names back), and whether
-    queued re-decodes are batched is the decoder manager's (bulk_strong);
-    check_plan holds the policy's knobs and its threshold source against both
-    once, at build. threshold is the ThresholdSource it decides keep on,
-    expected_source the soft output source the run's confidence signal
-    reports.
+    A result without a soft output escalates. run_both_at_once starts a
+    speculative strong decode with the weak job and cancels it on
+    confidence (Step 1); otherwise the strong re-decode starts at the
+    verdict, after the weak_decoder_to_strong_decoder hop. check_plan
+    refuses, once at build, a run shape the escalation cannot serve.
     """
 
     def __init__(
@@ -66,7 +53,6 @@ class Switching:
         _refuse_absorbing_window_scheme(
             plan.strong_window, plan.scheme, plan.boundary_policy
         )
-        _refuse_crossing_strong_region(plan)
         _refuse_absorbing_window_run(plan)
 
     def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
@@ -83,7 +69,7 @@ class Switching:
         """Keep a confident weak result; otherwise escalate its window.
 
         The decision is made exactly once per window, since an online
-        source learns from every call it is asked.
+        source learns from every call.
         """
         soft_output = result.soft_output
         if soft_output is None:
@@ -168,36 +154,6 @@ def _refuse_absorbing_window_scheme(
             "make later windows wait for "
             "the strong result and deadlock the strong window"
         )
-
-
-def _refuse_crossing_strong_region(plan: decoding_records.RunShape) -> None:
-    """An absorbing strong region must end where a weak commit region ends.
-
-    The shipped interaction's strong region is commit plus two buffers
-    from the escalated window's commit start (window_interactions.py),
-    and the sliding scheme commits in strides of commit_rounds, so the
-    region ends on a stride edge exactly when twice buffer_rounds is a
-    multiple of commit_rounds. Otherwise a later window commits across
-    the region's end and has no owner; the shape stops the run there
-    (strong_window_shapes.py), and the settings say so at build.
-    """
-    row_name = plan.strong_window
-    commit_round_count = plan.commit_round_count
-    buffer_round_count = plan.buffer_round_count
-    strong_round_count = window_records.strong_region_round_count(
-        commit_round_count, buffer_round_count
-    )
-    if strong_round_count % commit_round_count == 0:
-        return
-    raise ValueError(
-        f"windows of {commit_round_count} commit rounds and "
-        f"{buffer_round_count} buffer rounds give "
-        f"switching.strong_window {row_name} a strong region of "
-        f"{strong_round_count} rounds that ends inside a later window's "
-        f"commit region; the strong region of {row_name}, commit plus two "
-        "buffers, must end inside its own commit region, so twice "
-        "buffer_rounds must be a multiple of commit_rounds"
-    )
 
 
 def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:

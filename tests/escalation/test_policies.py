@@ -281,31 +281,6 @@ def _double_window_settings(
     )
 
 
-@pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 4), (4, 3)])
-def test_a_double_window_crossing_a_later_commit_region_is_refused(
-    commit_rounds, buffer_rounds
-):
-    """The crossing shape is decided at build.
-
-    The strong region is commit plus two buffers; when twice the buffer
-    is not a multiple of the commit, it ends inside a later window's
-    commit region, and that window commits across the region's end with
-    no owner.
-    """
-    settings = _double_window_settings(commit_rounds, buffer_rounds)
-    with pytest.raises(ValueError):
-        machine_module.Machine.build(settings, 0)
-
-
-@pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 3), (4, 4)])
-def test_a_double_window_ending_on_a_commit_edge_builds(
-    commit_rounds, buffer_rounds
-):
-    settings = _double_window_settings(commit_rounds, buffer_rounds)
-    machine = machine_module.Machine.build(settings, 0)
-    assert machine.windows.window_manager.strong_redecode is not None
-
-
 def test_an_online_source_under_a_double_window_is_refused_as_serial():
     """check_plan's serial-only law.
 

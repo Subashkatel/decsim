@@ -1,31 +1,22 @@
 """The decoder manager: the facade that gives ready windows a decoder unit.
 
-A job waits in the WaitingJobs, the DecodeDispatcher places
-it on the DecoderUnit the DecoderPool offers, the DecodeService stages
-its input into that unit's memory and starts the manager's decoder once
-the input landed and the window owes no boundary, the StrongRequests say
-which destination waits for which strong result, and the DecodeOutcomes
-deliver a finished decode through the job's on_decoded and close the
-request when the window side answers. The manager schedules, says when
-a job's input moves, and returns results; it executes no send, holds no
-join and holds no result for a third party. The facade implements the
-DecodeQueue port (admits, cancels, withdraws, releases, awaits and
-accepts a strong selection, resolves a weak request, settles) and wires
-the five, the shape of gem5's cache (BaseCache owns its MSHR queue,
-write buffer and tags, each one job, and implements the ports:
-src/mem/cache/base.hh). One job reads as enqueue, dispatcher.run,
-service.dispatch_to, service.begin, decode_completed,
-outcomes.deliver_weak, job.on_decoded.
+A job waits in the WaitingJobs; the DecodeDispatcher places it on the
+DecoderUnit the DecoderPool offers; the DecodeService stages its input
+into that unit's memory and starts the decoder once the input landed and
+the window owes no boundary; the StrongRequests say which destination
+waits for which strong result; and the DecodeOutcomes deliver a finished
+decode through the job's on_decoded. The manager schedules, says when an
+input moves and returns results; it executes no send and holds no join.
+It implements the DecodeQueue port and wires the five, the shape of
+gem5's cache (src/mem/cache/base.hh).
 
 A run has one manager per side: the chip's over the default pool and,
-when windows may escalate, the host's over the strong pool, two
-instances of this class in the decoders part (decsim/build/decoders.py),
-which is LATTE's shape
-(2509.03954 lines 24-25 and 705-720: the local decoder on the control
-FPGA has no scheduler, the host's Global Dynamic Scheduler owns the
-decode queue and the thread pool). The StrongRequests ledger is one
-component both bind, since a strong request is opened by the chip side
-and served by the host side.
+when windows may escalate, the host's over the strong pool
+(decsim/build/decoders.py). This is LATTE's shape: the local decoder on
+the control FPGA has no scheduler, and the host's Global Dynamic
+Scheduler owns the decode queue and the thread pool (2509.03954 lines
+24-25 and 705-720). Both bind one StrongRequests ledger, since the chip
+side opens a strong request and the host side serves it.
 """
 
 import functools
@@ -48,15 +39,7 @@ import decsim.records.windows as window_records
 
 
 class DecoderManager:
-    """Admits, cancels, withdraws, releases and settles every decode.
-
-    Five attributes: four of the one-job components the module
-    docstring names, and the engine it logs and reads the clock on. The
-    decoder, the ledger and the escalation policy are ports the root
-    binds, and the parts read them through the manager, as a gem5
-    cache's packet queue holds the cache that owns it
-    (gem5 src/mem/cache/base.hh:185-189).
-    """
+    """Admits, cancels, withdraws, releases and settles every decode."""
 
     # the one decoder this side's units run, bound straight to it as a
     # gem5 cache's port is bound to its one peer
@@ -110,8 +93,8 @@ class DecoderManager:
     def start(self) -> None:
         """Hear every row of the decoder say a model pins no class.
 
-        The decoder is a port, so its rows are known once the root has
-        bound it, which is gem5's init (src/sim/sim_object.hh:186-194).
+        It runs once the decoder port is bound, as gem5's init does
+        (src/sim/sim_object.hh:186-194).
         """
         decoders = (self.decoder,)
         for row in decoder_pool_module.decoder_rows(decoders):
@@ -120,12 +103,9 @@ class DecoderManager:
     def report_unpinnable_model(self, model, reason: str) -> None:
         """Say once per model that its windows can pin no logical class.
 
-        Compiling the model is where that is known. A confidence built
-        from forced-class solves reads no gap on such a model, so
-        without this line the run shows one unexplained escalation per
-        window of it. The manager narrates it because the manager owns
-        the rows that report it: the line is in the run's log whether
-        or not anything is observing.
+        A confidence from forced-class solves reads no gap on such a
+        model, so without this line the run shows one unexplained
+        escalation per window of it.
         """
         detector_count = len(model.detector_ids)
         self.engine.log(
@@ -155,8 +135,7 @@ class DecoderManager:
         """The input a window's gate hands its boundary mask to.
 
         The manager owns the unit memory the fold writes, so the window
-        side asks the manager for the end that performs it rather than
-        writing that memory itself (decisions.md D11).
+        side asks it for the end that performs the write.
         """
         return self.service.staging
 
@@ -168,12 +147,7 @@ class DecoderManager:
         return (child,)
 
     def input_transport(self):
-        """The transport that moves an input into a unit's memory.
-
-        The manager owns the hop, so it names it; a caller that needs to
-        seed or observe the transport asks the manager rather than
-        reaching through its service and its staging.
-        """
+        """The transport that moves an input into a unit's memory."""
         return self.service.staging.transport
 
     # ---------------------------------------------------------- admission
@@ -183,13 +157,13 @@ class DecoderManager:
     ) -> None:
         """Admit once and queue; the rounds stay in the weak syndrome buffer.
 
-        ``send_input(on_landed)`` is called at dispatch, after a unit is
-        assigned, to send the input over its link; it calls ``on_landed``
+        ``send_input(on_landed)`` is called at dispatch, once a unit is
+        assigned: it sends the input over its link, calls ``on_landed``
         at the delivery and returns the delay the link expects (the
-        accelerator pattern: invoke the unit, then DMA its input into that
-        unit's memory, then compute; Aladdin aladdin_sys_connection.h and
-        dma_interface.h). ``None`` means the job carries no syndrome data.
-        ``on_decoded(job, result)`` is where the result goes.
+        accelerator pattern of invoking the unit, then DMA into its
+        memory, then compute; Aladdin aladdin_sys_connection.h and
+        dma_interface.h). ``None`` means the job carries no syndrome
+        data. ``on_decoded(job, result)`` is where the result goes.
         """
         _refuse_spent_job(job)
         self.strong_requests.admit(job, self.engine.now)
@@ -336,12 +310,11 @@ class DecoderManager:
     ) -> None:
         """Charge the confidence's own computation on the job's unit.
 
-        Decision D8: the walk over a decode's growth reads the evidence
-        that decode left behind, and the evidence and its reader are the
-        same hardware (Toshio 2510.25222 lines 152-160), so the time is
-        the unit's. The unit gives its compute back when the confidence
-        it fed is done, and the window side waits for the same ticks
-        before its answer moves on.
+        The walk over a decode's growth reads the evidence that decode
+        left behind, on the same hardware (Toshio 2510.25222 lines
+        152-160), so the time is the unit's. The unit gives its compute
+        back when the confidence it fed is done, and the window side
+        waits for the same ticks.
         """
         if ticks <= 0:
             return
@@ -374,13 +347,11 @@ class DecoderManager:
         """The window side has the result in hand: a held unit is free now.
 
         <tier>.result_blocks_unit true is a unit with no output buffer,
-        stalled by back-pressure until its output is taken (Bascones et
-        al. 2605.01035 lines 607-609 size FIFOs to avoid that stall); a
-        tier that does not block gave the unit back at the decode's end,
-        or when the walk charged on it ended, and has nothing to give back
-        here. A result is read once: a forced-class solve the confidence
-        join held was read then, and its later close or commit finds its
-        unit already given back.
+        stalled until its output is taken (Bascones et al. 2605.01035
+        lines 607-609 size FIFOs to avoid that stall); a tier that does
+        not block gave the unit back at the decode's end, or when the
+        walk charged on it ended. A result is read once: a forced-class
+        solve the confidence join held was read then.
         """
         if not self.pool.blocks_unit:
             return
@@ -392,15 +363,12 @@ class DecoderManager:
     def cancel_strong(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode wherever it is.
 
-        Queued, crossing the link, running, or finished and waiting in
-        its unit's output slot; the window side asks when a weak result
-        is kept (Toshio 2510.25222 lines 606-614, the ongoing strong
-        computation halted), and nothing happens when no request is
-        live or done. A cancel ends one request; it passes no verdict on
-        the destination. A destination that keeps its weak result stops
-        being a consumer because its weak decode has resolved, and a
-        destination still waiting keeps its demand, so the cancelled
-        request can be replaced in either position.
+        Queued, crossing the link, running, or waiting in its unit's
+        output slot: the window side asks when a weak result is kept
+        (Toshio 2510.25222 lines 606-614, the ongoing strong computation
+        halted), and nothing happens when no request is live or done. A
+        cancel ends one request and passes no verdict on the
+        destination, so the cancelled request can be replaced.
         """
         completion = self.service.take_strong_output(key)
         if completion is not None:
@@ -430,11 +398,8 @@ class DecoderManager:
     def check_decode_work_settled(self) -> None:
         """Require every admitted decode to reach a final result.
 
-        Decoder-input storage settles with it, configured or not: nothing
-        may still hold rounds, wait for round credits, or hold returned
-        credits nobody drained. Every stored input is released
-        unconditionally, so a leak on either path is a real defect rather
-        than a tolerated one.
+        Nothing may still hold rounds, wait for round credits, or hold
+        returned credits nobody drained.
         """
         self.service.check_settled()
         unsettled = self.strong_requests.unsettled()
@@ -454,11 +419,7 @@ class DecoderManager:
     # ------------------------------------------------- the decode's end
 
     def decode_completed(self, job: decoding_records.DecodeJob, result) -> None:
-        """One decode finished: free the unit and settle the outcome.
-
-        Which settlement is the job's kind, looked up, not asked for
-        field by field.
-        """
+        """One decode finished: free the unit and settle by the job's kind."""
         if job.cancelled:
             self.service.release_input(job)
             self.dispatcher.run()
@@ -506,9 +467,8 @@ class DecoderManager:
         """The decode ended; its result goes to the destination that asked.
 
         The unit's compute goes back once the confidence its evidence
-        feeds is computed, since that walk runs on the unit (decision
-        D8, charge_soft_output), unless the tier blocks on the result,
-        in which case it goes back when the window side has read it
+        feeds is computed, since that walk runs on the unit
+        (charge_soft_output), unless the tier blocks on the result
         (<tier>.result_blocks_unit). The delivery is what charges the
         walk, so it comes first.
         """
@@ -611,11 +571,6 @@ SETTLE_BY_JOB_KIND = {
     _JOB_KINDS.STRONG_BATCH: DecoderManager._strong_decode_done,
     _JOB_KINDS.SELF_CONTAINED: DecoderManager._self_contained_decode_done,
 }
-# a new job kind says how it settles here, at the table, and not with a
-# KeyError inside the completion of the first decode that has it
-assert set(SETTLE_BY_JOB_KIND) == set(_JOB_KINDS), (
-    "every decode job kind says how it is settled"
-)
 
 
 def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:

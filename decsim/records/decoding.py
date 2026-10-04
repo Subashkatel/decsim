@@ -297,7 +297,6 @@ class DecodeJob:
         None  # decoding-graph nodes per round (latency models)
     )
     code: Optional[str] = None  # code name, a latency function may read it
-    attempt: int = 0  # 0 = first (weak) decode, 1 = strong redo
     kind: DecodeJobKind = DecodeJobKind.WINDOW  # what this job is
     # the logical class this decode is pinned to, or None to decode
     # normally; a forced solve reports that class's minimum weight

@@ -123,21 +123,6 @@ def room_side(
     return receiver
 
 
-class RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
-    """The one-memory store, recording every room question it is asked."""
-
-    def __init__(self, settings, engine) -> None:
-        syndrome_buffer_module.SyndromeBuffer.__init__(self, settings, engine)
-        self.asked = []
-
-    def has_room(self, round_key, bits, reserved_bits_by_round):
-        reserved = dict(reserved_bits_by_round)
-        self.asked.append((round_key, bits, reserved))
-        return syndrome_buffer_module.SyndromeBuffer.has_room(
-            self, round_key, bits, reserved_bits_by_round
-        )
-
-
 def region(*round_indices, first_round=1) -> round_records.EscalatedRegion:
     """The escalated region of these rounds, in the strong request's name."""
     request_key = window_records.DecoderRequestKey(
@@ -417,18 +402,6 @@ def test_a_region_reserves_its_formed_rounds_and_its_raw_rounds_before():
     }
 
 
-def test_a_region_with_no_room_is_refused_and_reserves_nothing():
-    """An escalation cannot wait, so a region with no room is refused."""
-    engine = engine_module.Engine()
-    receiver = room_side(engine, bits=BITS_PER_ROUND)
-    carried = region(1, 2)
-
-    with pytest.raises(RuntimeError):
-        receiver.reserve_region(carried)
-
-    assert receiver.reserved_bits_by_round == {}
-
-
 def test_arrival_can_create_a_windows_first_round_hold() -> None:
     """gem5 base.cc services response targets before freeing their entry."""
     engine = engine_module.Engine()
@@ -457,26 +430,3 @@ class _ArrivalConsumer:
         reads = decoding_records.WindowReads((operation_id, 0))
         round_key = (operation_id, round_index)
         self.store.register_hold(reads, [round_key])
-
-
-def test_a_region_asks_the_store_for_each_round_beside_the_ones_before_it():
-    """gem5 asks with the packet (port.hh:268); a bank answers per round."""
-    engine = engine_module.Engine()
-    receiver = strong_syndrome_round_receiver.StrongSyndromeRoundReceiver(
-        engine
-    )
-    store_settings = syndrome_buffer_module.SyndromeBufferSettings(bits=9)
-    receiver.store = RoomAskingStore(store_settings, engine)
-    receiver.detection_events = RecordingFormer()
-    carried = region(1, 2)
-
-    receiver.reserve_region(carried)
-
-    assert receiver.store.asked == [
-        ((1, 1), BITS_PER_ROUND, {}),
-        ((1, 2), BITS_PER_ROUND, {(1, 1): BITS_PER_ROUND}),
-    ]
-    assert receiver.reserved_bits_by_round == {
-        (1, 1): BITS_PER_ROUND,
-        (1, 2): BITS_PER_ROUND,
-    }

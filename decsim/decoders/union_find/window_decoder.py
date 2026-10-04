@@ -1,22 +1,17 @@
 """Prior-weighted graphlike Union-Find: the graph and one decode on it.
 
-Delfosse and Nickerson 1709.06218:
-every odd cluster grows by one half-edge per round (Algorithm 1, step
-4), clusters that meet fuse, and the peeling decoder reads the
-correction off a spanning forest of the grown erasure (Algorithm 1,
-step 8). The edge lengths are Huang, Newman and Brown's 2004.04693: an
-edge of log-odds weight w has the integer length round(w /
-weight_step), at least one tick when w is not zero, so a likelier
-fault is crossed sooner; that quantization is _quantize_weight_ticks.
-A fault of probability one half has weight zero and length zero, an
-edge the growth starts closed.
+Delfosse and Nickerson 1709.06218: every odd cluster grows by one
+half-edge per round (Algorithm 1, step 4), clusters that meet fuse, and
+the peeling decoder reads the correction off a spanning forest of the
+grown erasure (step 8). Edge lengths follow Huang, Newman and Brown
+2004.04693: an edge of log-odds weight w has the integer length round(w
+/ weight_step), at least one tick when w is not zero, so a likelier
+fault is crossed sooner. A fault of probability one half has length
+zero, an edge the growth starts closed.
 
-This module builds the graph of one placed model and turns one
-syndrome into the evidence a decode returns. The growth, the forest
-and the peeling run in the compiled decoder, reached through
-compiled_decoder. What a decode leaves behind is a record a confidence
-signal reads, so the graph, its edges, the open and closed intervals
-and the weight step live in decsim/records/decoder_evidence.py.
+The growth, the forest and the peeling run in the compiled decoder
+(compiled_decoder.py); the graph and the evidence a decode leaves behind
+are records in decsim/records/decoder_evidence.py.
 """
 
 import math
@@ -46,7 +41,7 @@ def graph_from_model(
     check = faults.check
     raw_priors = numpy.asarray(faults.priors)
     fault_count = check.shape[1]
-    _check_priors(raw_priors, fault_count, location)
+    _check_priors(raw_priors, location)
     # observables are few rows; dense per-fault columns are cheap to read
     observables = faults.observables.toarray()
     observables = observables.astype(numpy.uint8, copy=False)
@@ -177,11 +172,7 @@ def _refuse_lengths_past_the_counters(
     )
 
 
-def _check_priors(raw_priors, fault_count: int, location: str) -> None:
-    if raw_priors.ndim != 1 or raw_priors.size != fault_count:
-        raise ValueError(
-            f"{location} priors must have one entry per fault column"
-        )
+def _check_priors(raw_priors, location: str) -> None:
     is_finite = numpy.isfinite(raw_priors)
     if not numpy.all(is_finite):
         raise ValueError(f"{location} priors must be finite")

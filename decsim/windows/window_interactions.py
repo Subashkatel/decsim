@@ -78,14 +78,13 @@ class WindowInteraction(Protocol):
 class DefaultWindowInteraction:
     """decsim's defect-mask boundary and double-window region.
 
-    The boundary is a mask per (round, patch_ids) or per round, XORed into
-    the landed rounds when the decode starts; a same-operation A/B
+    The boundary is a mask per (round, patch_ids) or per round, XORed
+    into the landed rounds when the decode starts; a same-operation A/B
     delivery is mapped by stable detector identity.
-    `restart_reread_buffer_regions` is how many of the strong region's
-    buffer regions the restart window re-reads (DoubleWindow.Settings);
-    `boundary_payload` is the
-    representation its hand-off takes on the wire
-    (windows.boundary_payload, decsim/windows/boundary_payloads.py).
+    restart_reread_buffer_regions is how many of the strong region's
+    buffer regions the restart window re-reads (DoubleWindow.Settings),
+    and boundary_payload is the hand-off's form on the wire
+    (boundary_payloads.py).
     """
 
     def __init__(
@@ -179,14 +178,11 @@ class DefaultWindowInteraction:
     def boundary_payload_bits(self, payload, destination, source):
         """The bits this hand-off takes in the configured representation.
 
-        The message updates one layer of the destination (Tan 2209.09219
-        lines 936-946), the one the two windows share, so the seam is
-        that layer's detectors and the flips landing on it, and the
-        representation turns the seam into bits. Which layer it is
-        follows from the source, so the interaction that decides where a
-        delivery lands also prices it. A destination with no window
-        model has no layer to count, and the wire prices the transfer by
-        its card instead.
+        The message updates the one layer of the destination the two
+        windows share (Tan 2209.09219 lines 936-946), so the seam is
+        that layer's detectors and the flips landing on it. A
+        destination with no window model has no layer to count, and the
+        wire prices the transfer by its card.
         """
         seam = _seam_of(payload, destination, source)
         if seam is None:

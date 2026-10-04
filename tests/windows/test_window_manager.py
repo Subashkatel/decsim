@@ -99,9 +99,10 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
 
 
 def test_a_modelled_window_never_reads_the_next_operations_rounds():
-    """Its model ends at its own last round, so the plan refuses it."""
-    with pytest.raises(ValueError):
-        _chained_stim_run("lookahead")
+    """Its model ends at its own last round, so its decode refuses it."""
+    lookahead = _chained_stim_run("lookahead")
+    with pytest.raises(RuntimeError, match="does not match job operation"):
+        lookahead.run()
     machine = _chained_stim_run("flush")
     machine.run()
 

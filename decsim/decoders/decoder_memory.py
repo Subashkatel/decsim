@@ -1,23 +1,19 @@
 """The memory inside one decoder unit.
 
-Each unit holds the input of the jobs it is decoding: the manager assigns
-a unit, the window's rounds move from the weak syndrome buffer into that unit's
-memory as one immutable DecoderInput, the engine reads them, and the memory is
-freed when the decode completes. Capacity is bits per unit; a window
-larger than the unit's memory cannot be decoded by that unit and stops
-the run. There is no shared store, no credits and no waiting: a job
-waits in the weak syndrome buffer for a unit, never for memory. Precedent:
-XQsim's error decode unit holds one syndrome input at a time in its own
-registers.
+Each unit holds the input of the jobs it decodes: the window's rounds
+move from the weak syndrome buffer into that unit's memory as one
+immutable DecoderInput, the engine reads them, and the memory is freed
+when the decode completes. Capacity is bits per unit; a window larger
+than the memory stops the run. A job waits in the weak syndrome buffer
+for a unit, never for memory, as XQsim's error decode unit holds one
+syndrome input at a time in its own registers.
 
-An input is held per input, not per job, with its readers recorded, so
-two jobs that read the same rounds on one unit are one copy and one
-transfer: gem5's MSHR keeps every target of a single fill
-(src/mem/cache/mshr.hh), and OpenMP's shared clause says every task
-reads the storage of the original item (OpenMP API 5.2, section 5.4.2).
-The rule the data-movement study rests on is one copy per unit that
-reads the window, never one copy per job and never a copy taken from
-another unit.
+An input is held once with its readers recorded, so two jobs that read
+the same rounds on one unit are one copy and one transfer: gem5's MSHR
+keeps every target of a single fill (src/mem/cache/mshr.hh), and
+OpenMP's shared clause has every task read the original item's storage
+(OpenMP API 5.2, section 5.4.2). One copy per unit that reads the
+window, never one per job and never one taken from another unit.
 """
 
 import dataclasses
@@ -141,10 +137,9 @@ def materialize_decoder_input(job: decoding_records.DecodeJob) -> DecoderInput:
 class DecoderMemory:
     """The input memory of one decoder unit.
 
-    Trace sources: deposited(job, decoder_input) when a job's rounds land
-    here, taken(job, decoder_input) when they are freed; a residence in
-    this memory runs between the two (data_path.md hop 6), and both
-    carry the input so a listener counts the bits that are held.
+    Trace sources: deposited(job, decoder_input) when a job's rounds
+    land here and taken(job, decoder_input) when they are freed; both
+    carry the input, so a listener counts the bits held.
     """
 
     def __init__(
@@ -179,10 +174,9 @@ class DecoderMemory:
     ) -> None:
         """A bounded memory needs rounds that state their size.
 
-        The link fabric refuses a payload of unknown size on a bounded
-        wire for the same reason (decsim/links/fabric.py): a bound is
-        measured against a size, so rounds with none cannot be admitted
-        to a memory that has one.
+        A bound is measured against a size, as on a bounded wire
+        (decsim/links/fabric.py); an unsized round would hold no bits
+        and fit silently.
         """
         if self.capacity_bits is None:
             return
@@ -207,10 +201,6 @@ class DecoderMemory:
     def deposit(self, job: decoding_records.DecodeJob) -> DecoderInput:
         """Materialize one job's rounds into this unit's memory."""
         key = _memory_key(job)
-        if key in self._inputs:
-            raise RuntimeError(
-                f"unit {self.pool!r}#{self.unit} already holds {job.label!r}"
-            )
         decoder_input = materialize_decoder_input(job)
         bits = decoder_input.size_bits()
         self.check_input_size(job, bits)
@@ -246,16 +236,13 @@ class DecoderMemory:
     ) -> DecoderInput:
         """Replace the input this job reads, in the unit's own memory.
 
-        Every reader of that input reads the new one, so the input is
-        written once and by one job: Helios keeps its shared memory
-        single-writer (2301.08419 lines 632-640), and the rule belongs
-        to the memory that holds the input rather than to whoever asks,
-        so a second caller cannot forget it. The jobs that share one
-        landed input are the forced-class solves of one window's request
-        (decision D2), and the boundary they fold is that window's one
-        boundary, so the first of them writes it and the rest read what
-        it wrote (DecoderInputTransfer.fold_in_place). A second write
-        would be a second mask over the first and is refused here.
+        Every reader reads the new input, so it is written once and by
+        one job, a rule the memory keeps itself: Helios keeps its shared
+        memory single-writer (2301.08419 lines 632-640). The jobs
+        sharing one input are the forced-class solves of one window,
+        with one boundary, so the first writes it
+        (DecoderInputStaging.fold_in_place) and a second write, a mask
+        over the first, is refused.
         """
         key = _memory_key(job)
         resident = self._inputs[key]
@@ -402,13 +389,7 @@ def _model_row_identities(
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the decoder memory reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the decoder memory reports, as one member."""
 
     deposited: trace_source.TraceSource = trace_source.new_source()
     taken: trace_source.TraceSource = trace_source.new_source()

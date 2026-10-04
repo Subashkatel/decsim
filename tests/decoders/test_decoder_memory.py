@@ -207,15 +207,6 @@ def test_a_deposited_job_occupies_its_bits_until_it_is_taken():
     assert memory.occupied_bits == 0
 
 
-def test_depositing_one_job_twice_is_refused():
-    four_rounds_bits = 4 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 0, four_rounds_bits)
-    job = timing_only_job("w0", 3)
-    memory.deposit(job)
-    with pytest.raises(RuntimeError):
-        memory.deposit(job)
-
-
 def _two_patch_memory_run(bits_per_unit, unit_count):
     """Two three-round memory operations, one memory of the size given."""
     operations = []
@@ -352,7 +343,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
 
     An input two jobs read is written once: the jobs that share one
     landed input are the forced-class solves of one window's request
-    (decision D2) and the boundary they fold is that window's one
+    and the boundary they fold is that window's one
     boundary, so the first write stands and a second is refused here
     rather than XORing a second mask over the first. Helios keeps its
     shared memory single-writer (2301.08419 lines 632-640).

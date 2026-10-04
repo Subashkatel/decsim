@@ -2,13 +2,11 @@
 
 The decisions are the C files' (union_find.c grows, takes the contact
 forest and peels, and grows on for the extra-cluster gap; cluster_gap.c
-walks the quotient graph of a growth);
-this module lays a graph, a residual syndrome and a growth out as flat
-arrays, makes one call, and reads the outcome back as the records the
-evidence carries. ctypes rather than cffi because ctypes is in the
-standard library, so a checkout that compiles the C needs nothing else,
-and one call carries a whole window, so the per-call cost of either
-binding is beside the point.
+walks the quotient graph of a growth). This module lays a graph, a
+residual syndrome and a growth out as flat arrays, makes one call, and
+reads the outcome back as the evidence records. It uses ctypes, which is
+in the standard library; one call carries a whole window, so the
+binding's per-call cost does not matter.
 """
 
 import ctypes
@@ -337,11 +335,6 @@ compiled_libraries.register(library_path)
 def _bound(symbol: str, argument_types: list):
     """One exported function of the library, with its call declared."""
     path = library_path()
-    if not path.exists():
-        raise RuntimeError(
-            "the Union-Find decoder needs its compiled library at "
-            f"{path}; build it with {BUILD_COMMAND}"
-        )
     library = ctypes.CDLL(str(path))
     function = getattr(library, symbol)
     function.argtypes = argument_types
@@ -379,13 +372,10 @@ def _selected_edges(selected) -> tuple:
 def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
     """One interval per edge, shared between the edges that carry it.
 
-    Open and Closed are frozen and carry no identity: every reader tests
-    the type and reads the bounds, so one instance stands for every edge
-    with the same interval. A window has tens of thousands of edges and
-    a few hundred distinct intervals, so one object per edge would be
-    most of a decode's Python time. The arrays are read whole
-    because element by element indexing of numpy costs more than the
-    list does.
+    Open and Closed are frozen, so one instance stands for every edge
+    with the same interval: a window has tens of thousands of edges and
+    a few hundred distinct intervals, and one object per edge would be
+    most of a decode's Python time.
     """
     closed = evidence_records.Closed()
     closed_flags = is_closed.tolist()

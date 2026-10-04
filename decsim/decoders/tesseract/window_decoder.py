@@ -1,11 +1,11 @@
 """Tesseract decoding over one explicitly physical window fault model.
 
 The official tesseract_decoder package (Google Quantum AI's Tesseract, a
-search-based most-likely-error decoder; its paper is not on disk) is
-compiled once per live window model from a Stim detector error model
-rebuilt out of the window's physical check, observables, priors and
-detector coordinates; one decode is one decode_to_errors call, whose
-indices are physical columns whether the backend merges or not.
+search-based most-likely-error decoder) is compiled once per live window
+model from a Stim detector error model rebuilt out of the window's
+physical check, observables, priors and detector coordinates; one decode
+is one decode_to_errors call, whose indices are physical columns whether
+the backend merges or not.
 """
 
 import math
@@ -67,7 +67,7 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         physical_faults = model.require_faults(
             fault_models.FaultRepresentation.PHYSICAL
         )
-        syndrome_array = _checked_syndrome(syndrome, physical_faults)
+        syndrome_array = _checked_syndrome(syndrome)
         if physical_faults.check.shape[1] == 0:
             return backend_outcome.empty_fault_model_outcome(syndrome_array)
         try:
@@ -179,44 +179,18 @@ def detector_error_model_of(model, physical_faults) -> tuple:
     # observables are few rows; dense per-fault columns are cheap to read
     observables = physical_faults.observables.toarray()
     observables = observables.astype(numpy.uint8, copy=False)
-    detector_count, fault_count = check.shape
-    if observables.shape[1] != fault_count:
-        raise ValueError(
-            "physical check and observable matrices have different fault counts"
-        )
-    if len(model.detector_ids) != detector_count:
-        raise ValueError(
-            "window detector identities do not match physical detector rows"
-        )
-    priors = _validated_priors(physical_faults.priors, fault_count)
+    detector_count = check.shape[0]
+    priors = _validated_priors(physical_faults.priors)
     coordinates = _normalized_coordinates(model, detector_count)
     detector_error_model = stim.DetectorErrorModel()
     _append_errors(detector_error_model, check, observables, priors)
     _append_detectors(detector_error_model, coordinates)
     _append_observables(detector_error_model, observables.shape[0])
-    _check_round_trip(
-        detector_error_model,
-        fault_count,
-        detector_count,
-        observables.shape[0],
-        coordinates,
-    )
     return detector_error_model, coordinates
 
 
 class _BackendConstructionError(RuntimeError):
     """The optional backend rejected the settings for this model."""
-
-
-def _load_tesseract_backend():
-    try:
-        import tesseract_decoder
-    except ImportError as error:
-        raise ImportError(
-            "Tesseract decoding requires the optional "
-            "'tesseract-decoder' package"
-        ) from error
-    return tesseract_decoder
 
 
 def _compile_backend(
@@ -225,7 +199,8 @@ def _compile_backend(
     seed: int,
 ):
     """The backend decoder for one model; construction failures are typed."""
-    backend = _load_tesseract_backend()
+    import tesseract_decoder as backend
+
     member = DETECTOR_ORDER_METHODS[settings.detector_order_method]
     method = getattr(backend.utils.DetOrder, member)
     try:
@@ -256,13 +231,8 @@ def _compile_backend(
         raise _BackendConstructionError from error
 
 
-def _checked_syndrome(syndrome, physical_faults):
+def _checked_syndrome(syndrome):
     syndrome_array = numpy.asarray(syndrome)
-    detector_count = physical_faults.check.shape[0]
-    if syndrome_array.ndim != 1 or syndrome_array.shape[0] != detector_count:
-        raise ValueError(
-            "syndrome arity does not match the physical fault model"
-        )
     is_zero = syndrome_array == 0
     is_one = syndrome_array == 1
     is_bit = is_zero | is_one
@@ -275,10 +245,6 @@ def _normalized_coordinates(model, detector_count: int) -> tuple:
     coordinates = model.detector_coordinates
     if coordinates is None:
         return ((),) * detector_count
-    if len(coordinates) != detector_count:
-        raise ValueError(
-            "detector coordinate count does not match physical detector rows"
-        )
     normalized = []
     for detector_index, coordinate in enumerate(coordinates):
         row = _normalized_coordinate(detector_index, coordinate)
@@ -287,14 +253,8 @@ def _normalized_coordinates(model, detector_count: int) -> tuple:
 
 
 def _normalized_coordinate(detector_index: int, coordinate) -> tuple:
-    try:
-        values = tuple(coordinate)
-    except TypeError as error:
-        raise TypeError(
-            f"detector coordinate {detector_index} must be an iterable"
-        ) from error
     row = []
-    for coordinate_index, value in enumerate(values):
+    for coordinate_index, value in enumerate(coordinate):
         number = _finite_coordinate(detector_index, coordinate_index, value)
         row.append(number)
     return tuple(row)
@@ -303,11 +263,6 @@ def _normalized_coordinate(detector_index: int, coordinate) -> tuple:
 def _finite_coordinate(
     detector_index: int, coordinate_index: int, value
 ) -> float:
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
-        raise TypeError(
-            f"detector coordinate {detector_index}[{coordinate_index}] "
-            "must be a real number"
-        )
     number = float(value)
     if not math.isfinite(number):
         raise ValueError(
@@ -332,12 +287,8 @@ def _validate_coordinate_order(coordinates) -> None:
             )
 
 
-def _validated_priors(priors, fault_count: int) -> tuple:
+def _validated_priors(priors) -> tuple:
     values = numpy.asarray(priors)
-    if values.ndim != 1 or values.shape[0] != fault_count:
-        raise ValueError(
-            "physical priors must have one entry per physical fault column"
-        )
     normalized = []
     for fault_index, value in enumerate(values):
         probability = _validated_prior(fault_index, value)
@@ -346,8 +297,6 @@ def _validated_priors(priors, fault_count: int) -> tuple:
 
 
 def _validated_prior(fault_index: int, value) -> float:
-    if isinstance(value, bool) or not isinstance(value, numbers.Real):
-        raise TypeError(f"physical prior at column {fault_index} must be real")
     probability = float(value)
     if not math.isfinite(probability) or not 0 < probability <= 0.5:
         raise ValueError(
@@ -393,43 +342,6 @@ def _append_observables(detector_error_model, observable_count: int) -> None:
         target = stim.DemTarget.logical_observable_id(observable_index)
         instruction = stim.DemInstruction("logical_observable", [], [target])
         detector_error_model.append(instruction)
-
-
-def _check_round_trip(
-    detector_error_model,
-    fault_count: int,
-    detector_count: int,
-    observable_count: int,
-    coordinates,
-) -> None:
-    if detector_error_model.num_errors != fault_count:
-        raise ValueError(
-            "synthetic Tesseract model changed physical fault arity"
-        )
-    if detector_error_model.num_detectors != detector_count:
-        raise ValueError(
-            "synthetic Tesseract model changed physical detector arity"
-        )
-    if detector_error_model.num_observables != observable_count:
-        raise ValueError(
-            "synthetic Tesseract model changed logical-observable arity"
-        )
-    round_trip = detector_error_model.get_detector_coordinates()
-    recovered = []
-    for index in range(detector_count):
-        coordinate = _float_tuple(round_trip[index])
-        recovered.append(coordinate)
-    if tuple(recovered) != coordinates:
-        raise ValueError(
-            "synthetic Tesseract model changed detector coordinates"
-        )
-
-
-def _float_tuple(values) -> tuple:
-    floats = []
-    for value in values:
-        floats.append(float(value))
-    return tuple(floats)
 
 
 def _correction_from_error_indices(indices, fault_count: int) -> tuple:

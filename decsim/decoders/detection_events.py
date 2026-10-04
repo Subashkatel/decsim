@@ -1,21 +1,15 @@
 """One tier's event-detection logic: it forms the rounds that tier reads.
 
 When detection_events.formed_at seats the former at a decoder unit, the
-rounds reach that tier raw and it converts them, which is where two of
-the three decoder-side papers put the work: LILLIPUT "generates error
-detection events by comparing the stabilizer measurement outcomes from
-two consecutive QEC cycles ... This step is accomplished by the Event
-Detection Logic block shown in Figure 4", inside the decoder (2108.06569
-lines 499-510), and Yang et al. keep "All variables ... in FPGA
-registers, enabling fully pipelined operation" and fix "The total
-latency of the preprocessing stage for syndrome calculation ... at 20 ns
-(5 FPGA clock cycles)", counted inside their decoder subtotal
+rounds reach that tier raw and it converts them, where two of the three
+decoder-side papers put the work: LILLIPUT's Event Detection Logic block
+sits inside the decoder (2108.06569 lines 499-510), and Yang et al.
+count their 20 ns preprocessing stage inside their decoder subtotal
 (2605.04892 lines 1273-1275, Table I lines 1049-1052).
 
-Each tier is its own seat (weak_decoder, strong_decoder) with its own
-history, so a round two windows of one tier read is formed once and
-charged once, and a round both tiers read is formed and charged by
-each. The values are the seat's
+Each tier is its own seat with its own history, so a round two windows
+of one tier read is formed and charged once, and a round both tiers read
+is formed and charged by each
 (detector_error_model/detection_event_formation.py).
 """
 
@@ -31,18 +25,14 @@ import decsim.records.decoding as decoding_records
 class TierFormation:
     """The rounds one decoder tier forms, and what it is charged for them.
 
-    A job's rounds are formed where they land on the tier, which is the
-    first demand for them; the rounds it is charged for are the ones no
-    earlier job of this tier had already formed, frozen on the job at
-    the first ask so the stage that prices the formation and the
+    A job's rounds are formed where they land on the tier. It is charged
+    for the ones no earlier job of this tier formed, frozen on the job
+    at the first ask, so the stage that prices the formation and the
     dispatcher that predicts the unit's compute read one number. A job
-    that is cancelled before its decode starts gives that claim back,
-    since no stage of it ever ran. The claims live at the seat
-    (claim_rounds), which forgets one once its round retires: every job
-    claims its rounds when it is staged, while they are still held for
-    it, so none asks for a round after it retires. A source with no
-    recipes leaves the rounds as they landed, and the tier is charged
-    for them all the same.
+    cancelled before its decode starts gives that claim back. Every job
+    claims its rounds when staged, while they are still held for it, so
+    the seat may forget a claim once its round retires. A source with no
+    recipes leaves the rounds as they landed, charged all the same.
     """
 
     def __init__(
@@ -80,11 +70,9 @@ class TierFormation:
     def release(self, job: decoding_records.DecodeJob) -> None:
         """A cancelled job gives the rounds it claimed back to this tier.
 
-        A job is charged for its rounds by the formation stage, which
-        runs when its decode starts; a job cancelled or withdrawn before
-        that was never charged, so its claim goes back and the next job
-        that reads those rounds pays for forming them. A job whose
-        decode had started keeps its claim: its stage charged it.
+        The formation stage charges a job when its decode starts, so a
+        job cancelled before that was never charged and the next job
+        that reads those rounds pays; a started job keeps its claim.
         """
         if job.service_started:
             return
@@ -99,12 +87,11 @@ class TierFormation:
 class DetectionEventFormationStage(staged_decoder.DecoderStage):
     """The tier's event-detection logic, priced in front of its core.
 
-    A pipelined stage, so its cycles are the seat's fixed latency once
-    and its rate for every round after the first, on the former's own
-    clock (detection_events, detector_error_model/settings.py). The
-    stage prices the rounds this job forms on this tier and no others,
-    so a window that overlaps an earlier one pays for the rounds the
-    earlier window did not bring.
+    A pipelined stage: the seat's fixed latency once and its rate for
+    every round after the first, on the former's own clock
+    (detector_error_model/settings.py). It prices only the rounds this
+    job forms on this tier, so a window overlapping an earlier one pays
+    for the rounds the earlier one did not bring.
     """
 
     formation: Optional[TierFormation] = None

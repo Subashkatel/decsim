@@ -29,16 +29,13 @@ class RoundHolds:
 
     def register(self, holder, record: HoldRecord) -> None:
         """Keep the record's rounds alive for a new token."""
-        self._check_new_holder(holder)
         self.record_by_holder[holder] = record
         for round_key in record.round_keys:
             self._attach(round_key, holder)
 
     def replace(self, holder, record: HoldRecord) -> list:
         """Re-point a live hold; the rounds that lost their last holder."""
-        old = self.record_by_holder.get(holder)
-        if old is None:
-            raise RuntimeError(f"hold {holder!r} is not live")
+        old = self.record_by_holder[holder]
         self.record_by_holder[holder] = record
         added = _rounds_missing_from(record.round_keys, old.round_keys)
         for round_key in added:
@@ -48,10 +45,7 @@ class RoundHolds:
 
     def transfer(self, old_holder, new_holder) -> None:
         """Move a live hold to a new token without freeing its rounds."""
-        self._check_new_holder(new_holder)
-        record = self.record_by_holder.pop(old_holder, None)
-        if record is None:
-            raise RuntimeError(f"hold {old_holder!r} is not live")
+        record = self.record_by_holder.pop(old_holder)
         self.record_by_holder[new_holder] = record
         for round_key in record.round_keys:
             holders = self.holders_by_round[round_key]
@@ -64,9 +58,7 @@ class RoundHolds:
         assert holder not in self.released_holders, (
             f"hold {holder!r} was released twice"
         )
-        record = self.record_by_holder.pop(holder, None)
-        if record is None:
-            raise RuntimeError(f"hold {holder!r} was never registered")
+        record = self.record_by_holder.pop(holder)
         orphaned = self._detach_all(record.round_keys, holder)
         self.released_holders[holder] = record.referenced_operation_ids
         return orphaned
@@ -103,12 +95,6 @@ class RoundHolds:
                 stale.append(holder)
         for holder in stale:
             del self.released_holders[holder]
-
-    def _check_new_holder(self, holder) -> None:
-        is_live = holder in self.record_by_holder
-        was_released = holder in self.released_holders
-        if is_live or was_released:
-            raise RuntimeError(f"hold {holder!r} was registered before")
 
     def _attach(self, round_key, holder) -> None:
         holders = self.holders_by_round.setdefault(round_key, set())

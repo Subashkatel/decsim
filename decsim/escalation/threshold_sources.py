@@ -1,24 +1,15 @@
 """The threshold sources: where the switching policy's threshold comes from.
 
 FixedThreshold keeps a weak result whose gap is at or above one value,
-the paper's constant g_th (Toshio et al. 2510.25222 Sec. III A, step
-3). OnlineThreshold starts there and adapts it across a sweep point's
-shots with two loops: a rate tracker that pins the escalation fraction
-at a target, and an audit lane that strong-decodes a random sample of
-kept windows to learn whether the target is safe; it is one instance
-per sweep point, shared by every shot, and built for it from the
-point's facts (OnlineThreshold.Settings.for_point). The third source,
-TableThreshold, looks a point's facts up in an offline calibration csv
-(TableThreshold.Settings.at_point), so at run time it decides as
-FixedThreshold does. A record states no fact of the point: it reads
-them off the point's settings (settings.MachineSettings.point_facts),
-as a gem5 parameter set to Parent.x reads x off the object above it
-when the system is instantiated (src/python/m5/proxy.py:116-148,
-simulate.py:87-89). Every row fills the ThresholdSource port
-(decsim/ports.py) and is built from its own Settings record, which the
-switching settings hold. A record takes its threshold in the paper's
-decibels and hands it out in natural-log weight (nats), the unit the
-decoder compares a gap in.
+the paper's constant g_th (Toshio et al. 2510.25222 Sec. III A, step 3).
+TableThreshold looks a point's facts up in an offline calibration csv
+before the machine is built, then decides as FixedThreshold does.
+OnlineThreshold starts at a value and adapts it across a sweep point's
+shots with a rate tracker and an audit lane; one instance per point is
+shared by its shots. A record reads the point's facts off the point's
+settings, as a gem5 Parent.x proxy reads x off the object above it
+(src/python/m5/proxy.py:116-148). A record takes decibels and hands out
+nats, the unit a gap is compared in.
 """
 
 import csv
@@ -63,11 +54,9 @@ def nats_to_decibels(nats: float) -> float:
 def checked_decibels(decibels: float, name: str) -> float:
     """A keep threshold is finite and not negative, wherever it is read.
 
-    Every signal's gap is a weight difference or a growth spent, never
-    below zero, so a negative threshold keeps every window, as 0 dB
-    already does, and an infinite or undefined one is no likelihood
-    ratio (Toshio et al. 2510.25222 Sec. III A, step 3: keep at g >=
-    g_th, with g_th in decibels).
+    Every gap is at least zero, so a negative threshold keeps every
+    window as 0 dB does, and an infinite or undefined one is no
+    likelihood ratio.
     """
     is_finite = config.is_number(decibels) and math.isfinite(decibels)
     if not is_finite or decibels < 0.0:
@@ -80,9 +69,8 @@ def checked_decibels(decibels: float, name: str) -> float:
 class FixedThreshold:
     """The paper's constant g_th: keep at gap >= threshold, escalate below.
 
-    audits_by_escalating says the row learns from strong results it
-    forces, which is why such a row is serial-only (escalation/policies.py
-    reads it off the row instead of its name).
+    audits_by_escalating says whether the row learns from strong results
+    it forces, which makes it serial-only.
     """
 
     audits_by_escalating = False
@@ -137,25 +125,19 @@ class FixedThreshold:
 class TableThreshold(FixedThreshold):
     """The calibration table's g_th for this sweep point.
 
-    An offline calibration csv holds one row per point with the
-    threshold in decibels, set as Toshio et al. 2510.25222 Sec. III B
-    sets it (by brute force, or as Eq. (4)'s smallest g_th, line 890);
-    the point is looked up and converted before the machine is built
-    (Settings.at_point), so at run time this row decides on a constant
-    exactly as FixedThreshold does.
+    The table holds one row per point with the threshold in decibels,
+    set as Toshio et al. 2510.25222 Sec. III B sets it (by brute force,
+    or as Eq. (4)'s smallest g_th, line 890).
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """The csv and its column, and the threshold they give the point.
 
-        table is a label, no part of a point's id, since the number the
-        table gives a point names the point and the file it sits in
-        does not. threshold_decibels is that number, None until the
-        point's row is read (at_point), which the point's task does
-        before it names the point (collect.Task). The file is read
-        there, once, where it enters: its columns and the point's row
-        are checked, and the read record needs the file no more.
+        table is a label and no part of a point's id: the number the
+        table gives names the point. threshold_decibels is that number,
+        None until the point's row is read (at_point), which the point's
+        task does before it names the point.
         """
 
         table: pathlib.Path = dataclasses.field(compare=False)
@@ -178,21 +160,17 @@ class TableThreshold(FixedThreshold):
             """The record holding the threshold of the point these facts name.
 
             The table's key columns are headed by the POINT_FACTS they
-            match, and the point is refused when the table does not
-            certify it, instead of guessed; every other column is one
-            method's threshold in dB (Toshio et al. 2510.25222 Sec. III B
-            sets g_th by brute force over P_L(g_th), lines 855-863, or as
-            the smallest g_th with P_L,th(g_th) <= epsilon P_L,strong,
-            Eq. (4) at line 890). The first row that holds the point
-            wins. A record whose row is read is the point's already, so
-            reading it again is itself and reads no file.
+            match; every other column is one method's threshold in dB
+            (Toshio et al. 2510.25222 Sec. III B: brute force over
+            P_L(g_th), lines 855-863, or Eq. (4) at line 890). The first
+            row that holds the point wins. A record already read is its
+            own reading.
             """
             if self.threshold_decibels is not None:
                 return self
-            _refuse_a_missing_table(self.table)
-            columns, rows = _table_rows(self.table, self.column)
+            columns, rows = _table_rows(self.table)
             point = _point_of(columns, facts, self.table)
-            row = _first_row_holding(rows, point, self.table)
+            row = _first_row_holding(rows, point)
             cell = row[self.column]
             threshold_decibels = _certified_decibels(
                 cell, self.table, self.column, point
@@ -213,25 +191,17 @@ class TableThreshold(FixedThreshold):
 class EscalationRateTracker:
     """Inner calibration loop: pin the escalation fraction at a target.
 
-    Label-free: every window reveals whether it escalated
-    (gap < threshold), so the escalation fraction is fully observable.
-    The update is the adaptive conformal recursion of Gibbs and Candes,
-    arXiv:2106.00170, Eq. (2) at line 143,
-    alpha_{t+1} = alpha_t + gamma (alpha - err_t): here alpha is the
-    target escalation rate, err_t whether this window escalated, and
-    gamma the step, so the threshold rises a little on every kept window
-    and falls a lot on every escalation. It balances at the target
-    quantile of the live gap distribution, and their Proposition 4.1
-    (lines 309-317) bounds the long-run average of err_t around alpha
-    with no assumption on the data-generating distribution, which is
-    what a drifting gap distribution needs. The bound rests on the
-    recursion running unclipped (their Lemma 4.1, lines 303-308): the
-    threshold may dip below zero, where no gap is below it and nothing
-    escalates until the kept windows have raised it again. A floor at
-    zero would let a stream of gaps tied at zero escalate far above the
-    target. The same shape is old in
-    hardware, where an update threshold is servoed by the balance of two
-    event rates (Seznec's O-GEHL, CBP-1 2004).
+    Every window reveals whether it escalated, so the fraction is fully
+    observable. The update is the adaptive conformal recursion of Gibbs
+    and Candes, arXiv:2106.00170, Eq. (2) at line 143, alpha_{t+1} =
+    alpha_t + gamma (alpha - err_t), with alpha the target rate and
+    err_t whether this window escalated: the threshold rises a little on
+    every kept window and falls a lot on every escalation. Their
+    Proposition 4.1 (lines 309-317) bounds the long-run average of err_t
+    around alpha with no assumption on the gap distribution, and the
+    bound needs the recursion unclipped (Lemma 4.1, lines 303-308): the
+    threshold may dip below zero, where nothing escalates until kept
+    windows raise it again.
     """
 
     def __init__(
@@ -262,20 +232,14 @@ class EscalationRateTracker:
 class AuditLane:
     """Randomized strong-decoder audits of kept windows.
 
-    The lane dedicates a small fixed sample to the expensive path so
-    ground truth keeps flowing whatever threshold is live, which is the
-    move of set-dueling in caches (Qureshi et al., ISCA 2007). Sampling
-    kept windows is what avoids the selective-labels problem (Lakkaraju
-    et al., KDD 2017): without it every label comes from below the
-    threshold and the kept region is pure extrapolation. Neither paper
-    is on disk here, so neither is cited by line.
-
-    kept_bad_rate estimates P(weak revised and kept) per window, the
-    quantity Toshio et al. 2510.25222 bound with epsilon * PL_strong in
-    Eq. (4), line 890. Each audited bad outcome counts 1/audit_rate kept
-    windows (inverse propensity). The label is disagreement with the
-    strong result, which is the reference that paper measures against
-    too.
+    A small fixed sample goes to the expensive path so ground truth
+    keeps flowing whatever threshold is live, the move of set-dueling in
+    caches (Qureshi et al., ISCA 2007). Sampling kept windows avoids the
+    selective-labels problem (Lakkaraju et al., KDD 2017). kept_bad_rate
+    estimates P(weak revised and kept) per window, the quantity Toshio
+    et al. 2510.25222 bound with epsilon * PL_strong in Eq. (4), line
+    890; each audited bad outcome counts 1/audit_rate kept windows. The
+    label is disagreement with the strong result.
     """
 
     def __init__(self, audit_rate: float) -> None:
@@ -306,11 +270,10 @@ class AuditLane:
 class TargetAdjustment:
     """How the outer loop moves the escalation target on an audit label.
 
-    kept_bad_budget is the bad rate the target may not exceed; one bad
-    audit multiplies the target by adjust_factor, ceil(3 / kept_bad_
-    budget) clean audits in a row divide it back; the target stays
-    inside [min_escalation_rate, max_escalation_rate - audit_rate]
-    (OnlineThresholdController).
+    One bad audit multiplies the target by adjust_factor; ceil(3 /
+    kept_bad_budget) clean audits in a row divide it back; the target
+    stays inside [min_escalation_rate, max_escalation_rate -
+    audit_rate].
     """
 
     kept_bad_budget: float
@@ -322,25 +285,16 @@ class TargetAdjustment:
 class OnlineThresholdController:
     """Both calibration loops together: duty tracking steered by audits.
 
-    The two directions of the outer loop have asymmetric evidence costs
-    and are handled asymmetrically. Raise: each audited bad outcome
-    carries importance weight one over the audit rate, so one event is
-    already strong evidence the budget is blown; the escalation target
-    is multiplied by adjust_factor immediately. Relax: certifying the
-    bad rate is below budget needs the rule-of-three quota, about
-    3 / kept_bad_budget clean audits for a 95% upper bound at the
-    budget; only a full clean quota shrinks the target.
-
-    The switching rate of Toshio 2510.25222 Theorem 1 (lines
-    1272-1291) counts every window the strong tier decodes (lines
-    1333-1340), and the audited windows reach the strong tier beside
-    the ones escalated on their gap: the strong duty is the target plus
-    audit_rate of the kept windows, target + audit_rate (1 - target).
-    So the target stays inside [min_escalation_rate,
-    max_escalation_rate - audit_rate], whatever accuracy would prefer,
-    and the strong duty stays at or under max_escalation_rate, the
-    number the settings give for the theorem's bound. That number is the
-    caller's, and nothing here derives it from the theorem's inputs.
+    Raise: one audited bad outcome weighs one over the audit rate,
+    already strong evidence the budget is blown, so the target is
+    multiplied by adjust_factor at once. Relax: certifying the bad rate
+    is below budget needs the rule-of-three quota, about 3 /
+    kept_bad_budget clean audits for a 95% bound. The switching rate of
+    Toshio 2510.25222 Theorem 1 (lines 1272-1291) counts every window
+    the strong tier decodes (lines 1333-1340), audits included, so the
+    target stays at or under max_escalation_rate - audit_rate and the
+    strong duty at or under max_escalation_rate, a number the caller
+    gives.
     """
 
     def __init__(
@@ -403,15 +357,11 @@ class OnlineThresholdController:
 class OnlineThreshold:
     """Adapts the threshold during the run, from the escalation rate it sees.
 
-    The online row, asked at Switching's decision point.
-
-    One instance persists across every shot of a sweep point, so the
-    controller learns over the point's whole window stream; its random
-    stream is seeded once at construction, so a rerun of the point
-    reproduces the same audits. An audited window still escalates (the
-    strong result commits, so the audit costs latency, never accuracy)
-    and is remembered here; when its strong result arrives, the label is
-    whether the strong answer revised the weak committed observables.
+    One instance persists across every shot of a sweep point, and its
+    random stream is seeded once, so a rerun reproduces the same audits.
+    An audited window still escalates, so an audit costs latency, never
+    accuracy; its label is whether the strong answer revised the weak
+    committed observables.
     """
 
     audits_by_escalating = True
@@ -420,18 +370,13 @@ class OnlineThreshold:
     class Settings:
         """The starting threshold and the calibrator's knobs.
 
-        threshold_decibels is where the rate tracker starts. Two loops move
-        it: a rate tracker steps it toward target_escalation_rate on every
-        window (step_decibels per event), and a randomized audit lane
-        strong-decodes audit_rate of the kept windows; one revised audit
-        multiplies the target by adjust_factor, and only ceil(3 /
-        kept_bad_budget) consecutive clean audits divide it back. The target
-        stays inside [min_escalation_rate, max_escalation_rate -
-        audit_rate], because the audits reach the strong tier beside the
-        target and max_escalation_rate bounds the strong duty they make
-        together (OnlineThresholdController). Defaults are the validated
-        drift-replay configuration. The audits' random stream is seeded
-        from the point's facts, which for_point reads off the point.
+        threshold_decibels is where the rate tracker starts; it steps
+        toward target_escalation_rate by step_decibels per window. The
+        audit lane strong-decodes audit_rate of the kept windows; one
+        revised audit multiplies the target by adjust_factor, and ceil(3
+        / kept_bad_budget) clean audits divide it back, inside
+        [min_escalation_rate, max_escalation_rate - audit_rate]. The
+        defaults are the drift-replay configuration it was validated on.
         """
 
         threshold_decibels: float
@@ -466,12 +411,9 @@ class OnlineThreshold:
         def for_point(self, facts: Mapping) -> "OnlineThreshold":
             """The one instance a sweep point's shots share, point-seeded.
 
-            Both loops are assembled here, where they are read: the rate
-            tracker starting at the threshold in nats, the audit lane,
-            and the target adjustment. The random stream is seeded from
-            the point's distance and physical error probability alone
-            (facts, settings.MachineSettings.point_facts), as they are
-            written, so a rerun of the point draws the same audits.
+            The random stream is seeded from the point's distance and
+            physical error probability as written, so a rerun draws the
+            same audits.
             """
             distance = facts["distance"]
             physical_error_probability = facts["physical_error_probability"]
@@ -523,7 +465,8 @@ class OnlineThreshold:
     ) -> bool:
         """True keeps the weak result, False escalates.
 
-        An audit escalates with the decision recorded for labeling.
+        An audit escalates, with the weak observables kept for its
+        label.
         """
         unit_random = self.random_generator.random()
         escalated, audited = self.controller.observe(
@@ -532,12 +475,6 @@ class OnlineThreshold:
         if self.controller.tracker.window_count % 100 == 0:
             self._record("sample")
         if audited:
-            if result.logical_observables is None:
-                raise ValueError(
-                    "online threshold calibration needs the weak decoder "
-                    "to produce logical observables for audit labels; "
-                    "the configured weak card is timing-only"
-                )
             key = (job.operation_id, job.window_id)
             self._pending_audits[key] = tuple(result.logical_observables)
             self._record("audit")
@@ -551,11 +488,6 @@ class OnlineThreshold:
         weak_observables = self._pending_audits.pop(window_key, None)
         if weak_observables is None:
             return
-        if result.logical_observables is None:
-            raise ValueError(
-                f"audited window {window_key}: the strong result carries no "
-                "logical observables to compare against"
-            )
         strong_observables = tuple(result.logical_observables)
         weak_was_bad = strong_observables != weak_observables
         self.controller.record_audit_outcome(weak_was_bad)
@@ -649,15 +581,8 @@ def _refuse_a_seed_with_no_fact(distance, physical_error_probability) -> None:
     )
 
 
-def _refuse_a_missing_table(table_path: pathlib.Path) -> None:
-    table = pathlib.Path(table_path)
-    if table.exists():
-        return
-    raise ValueError(f"threshold_table {table_path} does not exist")
-
-
-def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
-    """The table's columns and rows; the threshold column must be one.
+def _table_rows(table_path: pathlib.Path) -> tuple:
+    """The table's columns and rows.
 
     A table with no key column would match every point to its first row,
     a wrong threshold with no sign of it, so it is refused.
@@ -667,11 +592,6 @@ def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
         rows = list(reader)
         columns = reader.fieldnames or []
     _refuse_a_settings_path_header(columns, table_path)
-    if column not in columns:
-        raise ValueError(
-            f"threshold_table {table_path} has no column {column!r}; its "
-            f"columns are {sorted(columns)}"
-        )
     key_columns = _key_columns(columns)
     if not key_columns:
         raise ValueError(
@@ -713,7 +633,11 @@ def _key_columns(columns: list) -> list:
 
 
 def _point_of(columns: list, facts: Mapping, table_path) -> dict:
-    """The point's value at each of the table's key columns."""
+    """The point's value at each of the table's key columns.
+
+    A fact the point does not give is refused: its None would otherwise
+    match a row whose cell reads "None".
+    """
     point = {}
     for column in _key_columns(columns):
         value = facts[column]
@@ -726,27 +650,12 @@ def _point_of(columns: list, facts: Mapping, table_path) -> dict:
     return point
 
 
-def _first_row_holding(rows: list, point: dict, table_path) -> dict:
-    """The first row whose key cells hold the point; none is refused."""
+def _first_row_holding(rows: list, point: dict) -> Optional[dict]:
+    """The first row whose key cells hold the point, or None."""
     for row in rows:
         if _is_point(row, point):
             return row
-    calibrated = _calibrated_points(rows, point)
-    raise ValueError(
-        f"threshold_table {table_path} has no row for {point}; its rows "
-        f"are {calibrated}"
-    )
-
-
-def _calibrated_points(rows: list, point: dict) -> list:
-    """Each row's key cells, the points the table does certify."""
-    calibrated = []
-    for row in rows:
-        keys = {}
-        for column in point:
-            keys[column] = row[column]
-        calibrated.append(keys)
-    return calibrated
+    return None
 
 
 def _is_point(row: dict, point: dict) -> bool:
@@ -775,11 +684,6 @@ def _cell_holds(cell: str, value) -> bool:
 def _certified_decibels(
     cell: str, table_path: pathlib.Path, column: str, point: dict
 ) -> float:
-    if cell == "":
-        raise ValueError(
-            f"threshold_table {table_path} refuses {point}: the {column} "
-            "entry is empty (not enough evidence at calibration time)"
-        )
     entry = f"threshold_table {table_path} entry {column} at {point}"
     gap_threshold_db = float(cell)
     return checked_decibels(gap_threshold_db, entry)

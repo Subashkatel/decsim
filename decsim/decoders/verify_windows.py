@@ -143,6 +143,12 @@ class TesseractCheckedDecoder(decoder_module.DecoderBase):
         if model is None or result.logical_observables is None:
             return result
         syndrome = decoder_module.payload_syndrome(job)
+        # a failed backend outcome skips the window, so a syndrome that
+        # does not fit is refused here rather than dropped from the audit
+        physical = model.require_faults(
+            fault_models.FaultRepresentation.PHYSICAL
+        )
+        decoder_module.check_syndrome_size(job, syndrome, physical)
         outcome = self.referee.decode(model, syndrome)
         succeeded = decoding_records.BackendDecodeStatus.SUCCEEDED
         if outcome.status is not succeeded:
@@ -159,13 +165,6 @@ def _owned_observable_flips(model, outcome) -> tuple:
     physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
     referee_correction = numpy.asarray(outcome.physical_correction, dtype=bool)
     owned_correction = referee_correction & physical.owned
-    observables = physical.observables.astype(numpy.int64)
-    corrections = owned_correction.astype(numpy.int64)
-    flip_counts = observables @ corrections
-    flip_counts = numpy.asarray(flip_counts)
-    flat_counts = flip_counts.ravel()
-    flips = []
-    for count in flat_counts:
-        parity = int(count) % 2
-        flips.append(parity)
-    return tuple(flips)
+    observables = physical.observables
+    flips = decoder_module.parity_product(observables, owned_correction)
+    return decoder_module.int_tuple(flips)

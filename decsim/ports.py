@@ -762,6 +762,16 @@ class WindowJobBuilder(Protocol):
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
 
+    def stamp_first_round(
+        self, window: window_records.Window, store: RetainedRounds
+    ) -> None:
+        """Note when the window's first round became readable in the store."""
+
+    def assemble_payloads(
+        self, window: window_records.Window, store: RetainedRounds
+    ) -> list:
+        """The window's stored payloads, with successor overflow rounds."""
+
 
 @runtime_checkable
 class WindowRequests(Protocol):
@@ -815,12 +825,28 @@ class BoundaryCourier(Protocol):
 
 @runtime_checkable
 class StrongRedecode(Protocol):
-    """The strong tier's window side, as the committer and verdict see it.
+    """The strong tier's window side, as the weak windows see it.
 
-    A kept weak result halts the strong request it made unnecessary,
+    The requester asks it for the speculative strong decode that starts
+    beside a weak one (2510.25222 Step 1, lines 598-601); the committer,
+    the verdict and the window manager ask it to escalate, release and
+    cancel. A kept weak result halts the strong request it made unnecessary,
     held here or on the strong side's manager (Toshio et al. 2510.25222
     lines 606-614).
     """
+
+    def parallel_strong_submission(
+        self, weak_job: decoding_records.DecodeJob
+    ) -> Optional[decoding_records.Submission]:
+        """The speculative strong decode started beside the weak job.
+
+        None when the weak job is parked or the strong job is held.
+        """
+
+    def unparked_submission(
+        self, window_key: tuple
+    ) -> Optional[decoding_records.Submission]:
+        """The weak job left its park: its speculative decode, or None."""
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the strong tier to re-decode the weak job's window."""

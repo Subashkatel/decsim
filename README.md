@@ -25,6 +25,9 @@ as well.
 python -m pip install -e ".[run]" -c constraints.txt
 ```
 
+From a checkout, `PYTHONPATH=. python -m decsim run <run file>` runs
+decsim without installing it; the extras' packages must still be there.
+
 `constraints.txt` pins every package the `run`, `test` and `dev` extras
 install, at versions tested together on Python 3.10, 3.12 and 3.13; pip
 installs only what the extras ask for, at those versions. It is uv's

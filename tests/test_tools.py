@@ -173,7 +173,9 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
     An `and`, an `or` and a comprehension's `for` and `if` each count
     one, and the nested `inner` is counted apart from `outer`. In
     `filtered`, the filter's `and` counts once, and the default value is
-    no part of the body.
+    no part of the body. In `chosen`, the `and` of a conditional
+    expression that is a whole test counts once; rule 1 reports that
+    expression as an inline conditional.
     """
     tool = _tool("check_one_action")
     module = tmp_path / "decisions.py"
@@ -206,6 +208,12 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
         "        return True\n"
         "    if enabled:\n"
         "        return False\n"
+        "\n"
+        "def chosen(a, b, c, d):\n"
+        "    if a if b and c else d:\n"
+        "        return a\n"
+        "    if b or c:\n"
+        "        return b\n"
     )
     exit_code = tool.main([str(tmp_path)])
     captured = capsys.readouterr()
@@ -213,7 +221,8 @@ def test_rule_eleven_fails_a_function_that_decides_six_times(tmp_path, capsys):
     assert "decisions.py:8: over five decisions: six decides 6 times" in (
         captured.out
     )
-    assert "1 findings in 1 of 1 files checked" in captured.out
+    assert "chosen decides" not in captured.out
+    assert "2 findings in 1 of 1 files checked" in captured.out
 
 
 def _classes_tested_against(tool, root) -> set:

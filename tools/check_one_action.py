@@ -355,17 +355,23 @@ def tested_decisions(test):
 def condition_operators(node):
     """The `and` and `or` operators of one condition.
 
-    A comprehension or a conditional expression inside it holds its own
-    condition, which is counted where that node is.
+    A comprehension or a conditional expression holds its own condition,
+    which is counted where that node is, even when it is the whole test.
     """
-    count = 0
-    if isinstance(node, ast.BoolOp):
-        count += len(node.values) - 1
+    if isinstance(node, OWN_CONDITIONS):
+        return 0
+    count = own_operators(node)
     for child in ast.iter_child_nodes(node):
-        if isinstance(child, OWN_CONDITIONS):
-            continue
         count += condition_operators(child)
     return count
+
+
+def own_operators(node):
+    """How many `and` or `or` operators one node joins its values with."""
+    if not isinstance(node, ast.BoolOp):
+        return 0
+    value_count = len(node.values)
+    return value_count - 1
 
 
 def init_method(class_node):

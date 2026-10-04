@@ -40,15 +40,18 @@ TIER_COLOR = {"weak": "C0", "strong": "C1"}
 TIER_NAME = {"weak": "union-find (weak)", "strong": "Relay-BP-5 (strong)"}
 VIOLIN_HALF_WIDTH = 0.8
 VIOLIN_BINS = 40
-# A window's stages, first round readable to correction committed, in
-# the order they happen; they add up to TOTAL_STAGE
-# (decsim/experiments/measure.py window_points).
+# A window's stages, its last round measured on the QPU to its
+# correction committed in the Pauli frame, in the order they happen;
+# they add up to TOTAL_STAGE (decsim/experiments/measure.py
+# window_points). Three are differences of recorded spans, made by
+# with_derived_stages.
 STAGES = {
-    "buffer_fill": "buffer fill",
+    "qpu_to_buffer": "QPU to weak buffer",
     "admission_wait": "admission wait",
     "queue_wait": "queue wait",
     "weak_attempt": "weak attempt",
-    "dep_block": "dependency wait",
+    "escalation_link_per_window": "send to strong decoder",
+    "other_dependency_wait": "other dependency wait",
     "input_link_per_window": "input link",
     "compute_wait": "unit busy wait",
     "fetch": "fetch",
@@ -59,7 +62,7 @@ STAGES = {
     "output_link_per_window": "output link",
     "frame_commit": "frame commit",
 }
-TOTAL_STAGE = "buffer0_first_round_to_frame"
+TOTAL_STAGE = "qpu_last_round_to_frame"
 # the weak tier's windows take microseconds, the strong tier's milliseconds
 TIER_UNIT = {"weak": ("us", 1.0), "strong": ("ms", 1e3)}
 TIER_WINDOWS = {
@@ -376,7 +379,32 @@ def stage_means_of(folder: pathlib.Path) -> dict:
         distance = int(row["distance"])
         key = (error_rate, distance, row["tier"], row["stage"])
         stage_means[key] = float(row["mean_us"])
-    return stage_means
+    return with_derived_stages(stage_means)
+
+
+def with_derived_stages(stage_means: dict) -> dict:
+    """The stage means with the three stages no span records on its own.
+
+    QPU to weak buffer is the last round's trip from the QPU to the weak
+    syndrome buffer, qpu_last_round_to_frame less buffer0_ready_to_frame.
+    The send to the strong decoder, escalation_link_per_window, lies
+    inside dep_block, the wait for the escalated rounds to land in the
+    strong store (decsim/experiments/measure.py), so the rest of
+    dep_block is the other dependency wait.
+    """
+    derived_means = dict(stage_means)
+    for (error_rate, distance, tier, stage), mean in stage_means.items():
+        if stage != TOTAL_STAGE:
+            continue
+        point = (error_rate, distance, tier)
+        formed_key = (*point, "buffer0_ready_to_frame")
+        dependency_key = (*point, "dep_block")
+        transfer_key = (*point, "escalation_link_per_window")
+        qpu_to_buffer = mean - stage_means[formed_key]
+        other_wait = stage_means[dependency_key] - stage_means[transfer_key]
+        derived_means[(*point, "qpu_to_buffer")] = qpu_to_buffer
+        derived_means[(*point, "other_dependency_wait")] = other_wait
+    return derived_means
 
 
 def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
@@ -384,8 +412,9 @@ def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
 
     Each bar is one distance's mean time per window, split into the
     stages in the order they happen. Means, unlike medians, add up, so
-    a bar's length is the mean time from the window's first round
-    readable to its correction committed, the number at its end.
+    a bar's length is the mean time from the window's last round
+    measured on the QPU to its correction committed in the Pauli frame,
+    the number at its end.
     """
     drawn_stages = stages_with_time(stage_means)
     tiers = list(TIER_WINDOWS)
@@ -454,13 +483,27 @@ def draw_breakdown(
         lefts = [
             left + width for left, width in zip(lefts, widths, strict=True)
         ]
-    for position, total in zip(positions, lefts, strict=True):
-        axis.text(total, position, f" {total:.4g}", va="center", fontsize=8)
+    # the send to the strong decoder is microseconds on a milliseconds
+    # bar, so its time is written beside the total
+    for position, distance, total in zip(
+        positions, distances, lefts, strict=True
+    ):
+        label = f" {total:.4g}"
+        if tier == "strong":
+            send_key = (
+                error_rate,
+                distance,
+                tier,
+                "escalation_link_per_window",
+            )
+            send_us = stage_means[send_key]
+            label += f" (send {send_us:.3g} us)"
+        axis.text(total, position, label, va="center", fontsize=8)
     distance_labels = [f"d={distance}" for distance in distances]
     axis.set_yticks(positions, distance_labels)
     axis.invert_yaxis()
     widest = max(lefts, default=1.0)
-    axis.set_xlim(0, widest * 1.2)
+    axis.set_xlim(0, widest * 1.45)
     axis.set_xlabel(f"mean time per window ({unit_name})")
     axis.set_title(f"{TIER_WINDOWS[tier]}, {X} = {error_rate:g}")
 

@@ -42,16 +42,17 @@ class Closed:
 
 @dataclasses.dataclass(frozen=True)
 class GrowthStep:
-    """One growth step's cycle count inputs: its work and its critical path.
+    """One growth step's inputs to the cycle count.
 
-    hop_count is the deepest flood over closed edges from the lowest
-    detector of any cluster the step fused, the boundary left out: the
-    stages a cluster identifier and parity take to cross it (Helios
-    2301.08419 lines 623-629). growth_ticks is the one-unit growth
-    iterations a unit spends (lines 1242-1254). fusion is the strongest
-    kind among the step's fusions: none, roots (only roots and the boundary
-    flag moved), or parity (an odd absorbed root's parity must cross the
-    fused cluster).
+    edge_count is the step's work. hop_count is its critical path, the
+    deepest flood over closed edges from the lowest detector of any
+    cluster the step fused, the boundary left out: the stages a cluster
+    identifier and parity take to cross it (Helios 2301.08419 lines
+    623-629). growth_ticks is the one-unit growth iterations a unit
+    spends (lines 1242-1254). fusion is the strongest kind among the
+    step's fusions: none, roots (only roots and the boundary flag moved),
+    or parity (an odd absorbed root's parity must cross the fused
+    cluster).
     """
 
     edge_count: int
@@ -89,7 +90,10 @@ class UnionFindGraph:
 
 @dataclasses.dataclass(frozen=True)
 class UnionFindHardEvidence:
-    """Immutable weighted growth and peeling evidence from one hard decode."""
+    """The evidence one hard union-find decode leaves.
+
+    It covers the weighted growth and the peel.
+    """
 
     graph: UnionFindGraph
     syndrome: tuple[int, ...]

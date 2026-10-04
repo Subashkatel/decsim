@@ -9,9 +9,10 @@ from typing import Optional, Protocol
 
 @dataclasses.dataclass(frozen=True)
 class LogicalOperationResult:
-    """One operation's prediction and, when sampled, its truth.
+    """One logical operation's result.
 
-    logical_failure is true when any predicted bit differs from truth.
+    It holds the prediction and, when sampled, the truth. logical_failure
+    is true when any predicted bit differs from truth.
     """
 
     operation_id: int

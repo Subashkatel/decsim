@@ -13,17 +13,19 @@ import stim
 
 @dataclass(frozen=True)
 class RepeatedStimCircuit:
-    """One preparation, repeatable protection, and actual final readout.
+    """A physical measurement program whose protection round repeats.
 
-    The first and repeated fragments leave the data live. The final
-    fragment contains a complete last round and destructive readout;
-    single_round contains preparation and readout for a one-round run.
-    All fragments use the same physical qubit and logical observable ids.
-    A declared period binds duration-dependent physics to the QPU cadence,
-    and the live source checks it against the run's period before it
-    executes. None leaves cadence independent of the circuit's noise
-    probabilities and skips that check: every fragment, preparation and
-    the terminal readout included, is then charged one round period.
+    It holds one preparation, the repeatable protection and the actual
+    final readout. The first and repeated fragments leave the data live.
+    The final fragment contains a complete last round and destructive
+    readout; single_round contains preparation and readout for a
+    one-round run. All fragments use the same physical qubit and logical
+    observable ids. A declared period binds duration-dependent physics to
+    the QPU cadence, and the live source checks it against the run's
+    period before it executes. None leaves cadence independent of the
+    circuit's noise probabilities and skips that check: every fragment,
+    preparation and the terminal readout included, is then charged one
+    round period.
     """
 
     # Stim's circuits have no hash; equal records hold equal circuits, so

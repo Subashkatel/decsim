@@ -37,7 +37,10 @@ class ResolvedOperationPlanning:
 
 @dataclass(frozen=True)
 class ResolvedPatchPlanning:
-    """Exact immutable cadence and idle-work facts for one patch."""
+    """Exact immutable planning facts for one patch.
+
+    They cover its cadence and its idle work.
+    """
 
     patch_identity: Any  # an opaque identity
     code_geometry: ResolvedCodeGeometry
@@ -77,7 +80,7 @@ class ExecutionProgram:
 
 @dataclass(frozen=True)
 class StreamBinding:
-    """Immutable runtime association between an operation and stream range."""
+    """Immutable runtime binding of an operation to a stream range."""
 
     stream_id: Any  # an opaque identity
     stream_offset: int

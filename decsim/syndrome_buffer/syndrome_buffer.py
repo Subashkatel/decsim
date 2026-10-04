@@ -110,7 +110,6 @@ class SyndromeBuffer:
         # closed; a closed identity never reopens
         self.operations: dict = {}
         self.trace = _TraceSources()
-        self._check_costs_have_a_clock()
 
     # ---- the port
 
@@ -352,11 +351,6 @@ class SyndromeBuffer:
         return "; ".join(parts)
 
     # ---- private
-
-    def _check_costs_have_a_clock(self) -> None:
-        charged = self.settings.write_cycles + self.settings.read_cycles
-        if charged > 0 and self.settings.clock is None:
-            raise ValueError("charged weak_syndrome_buffer costs need a clock")
 
     def _access_completion_tick(self, cycles: int) -> int:
         """The access's end, cycles after now's edge; a zero cost is now."""

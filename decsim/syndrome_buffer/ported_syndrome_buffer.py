@@ -150,15 +150,6 @@ class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
             word_count += self._words(stored.held_bits)
         return self._serve(_READ, round_keys, word_count)
 
-    def _check_costs_have_a_clock(self) -> None:
-        """Every access takes cycles here, so the section needs a clock."""
-        if self.settings.clock is not None:
-            return
-        raise ValueError(
-            "weak_syndrome_buffer kind ported_syndrome_buffer prices every "
-            "access in cycles and needs a clock"
-        )
-
     def _words(self, bits: int) -> int:
         """A round stored in whole words: one more word for a part word."""
         word_count, part_word_bits = divmod(bits, self.settings.word_bits)

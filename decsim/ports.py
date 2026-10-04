@@ -23,6 +23,7 @@ import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
+import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -1478,7 +1479,7 @@ class DetectionEventFormer(Protocol):
     def formation_table(
         self,
         operation_id: Any,  # an opaque identity
-    ):
+    ) -> formation_records.FormationTable:
         """The operation's formation table, the rounds executed so far."""
 
 

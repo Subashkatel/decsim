@@ -24,6 +24,7 @@ import decsim.qpu.layouts as layouts
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
+import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
@@ -365,7 +366,7 @@ def _physical_formation_tables(physical_circuits: tuple) -> dict:
 
 def _physical_formation_table(
     physical: workload_records.FiniteCircuit,
-) -> detector_formation.FormationTable:
+) -> formation_records.FormationTable:
     """The recipes, formed off the declared measurement schedule."""
     schedule = dict(physical.measurement_rounds)
     rounds = schedule.values()

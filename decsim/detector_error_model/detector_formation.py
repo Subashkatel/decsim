@@ -17,189 +17,13 @@ round and d*d - 1 + d*d on the last, hence the 240-against-249 and
 """
 
 import dataclasses
-import enum
-import functools
 from collections.abc import Iterable, Sequence
 from typing import Optional
 
 import stim
 
+import decsim.records.formation as formation_records
 from decsim.detector_error_model import detector_chronology
-
-
-class LayerKind(enum.Enum):
-    """What a detector compares, told by how many records it reads."""
-
-    # Compared against the prepared state: one record.
-    PREPARATION = "prep"
-    # This round against the previous round: two records.
-    BULK = "bulk"
-    # Rebuilt from the data-qubit readout: three or more records.
-    READOUT = "readout"
-
-
-@dataclasses.dataclass(frozen=True)
-class DetectorRecipe:
-    """What one detector XORs, starting from its reference parity."""
-
-    detector_index: int
-    round_index: int
-    kind: LayerKind
-    records: tuple[tuple[int, int], ...]
-    reference_parity: int
-    coordinates: tuple[float, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class ObservableRecipe:
-    """What one logical observable XORs, starting from its reference parity."""
-
-    observable_index: int
-    records: tuple[tuple[int, int], ...]
-    reference_parity: int
-
-
-@dataclasses.dataclass(frozen=True)
-class FormationTable:
-    """Every recipe read off one circuit, over its packet layout.
-
-    readout_slot_start is the slot where the folded data readout begins in
-    the last packet, or None. live_reach, on a live stream's table, is how
-    many rounds back a round not yet run may read (rounds_read_back); None
-    on a whole operation's table.
-    """
-
-    round_count: int
-    packet_width_by_round: dict[int, int]
-    readout_slot_start: Optional[int]
-    detectors: tuple[DetectorRecipe, ...]
-    observables: tuple[ObservableRecipe, ...]
-    live_reach: Optional[int] = None
-
-    def detectors_of_round(self, round_index: int) -> list[DetectorRecipe]:
-        """The detectors formed when this round's packet arrives."""
-        detectors = self._detectors_by_round.get(round_index, ())
-        return list(detectors)
-
-    def rounds_read_by(self, round_indices: Iterable[int]) -> set[int]:
-        """The rounds whose packets forming these rounds reads, and no more.
-
-        A seat joining mid-stream is given what its rounds read and nothing
-        between.
-        """
-        record_rounds = set()
-        for round_index in round_indices:
-            detectors = self.detectors_of_round(round_index)
-            rounds_of_round = _record_rounds_of(detectors)
-            record_rounds.update(rounds_of_round)
-        return record_rounds
-
-    def rounds_read_before_first(
-        self, first_round: int, round_indices: Iterable[int]
-    ) -> int:
-        """How many rounds before first_round forming these rounds reads.
-
-        A later round can reach further back than the first (rec[-1] and rec[-4]
-        after rounds of rec[-1] alone), so the earliest read of any counts.
-        """
-        record_rounds = self.rounds_read_by(round_indices)
-        record_rounds.add(first_round)
-        earliest_round = min(record_rounds)
-        return first_round - earliest_round
-
-    def earlier_rounds_read(self, first_round: int) -> tuple[int, ...]:
-        """The rounds before first_round that it or any later round reads.
-
-        What a stream's window keeps for the windows after it: on a live table
-        the live_reach rounds before it, since a round not yet run may read that
-        far.
-        """
-        earliest_round = first_round - self._reach_from(first_round)
-        earliest_round = max(1, earliest_round)
-        read_rounds = range(earliest_round, first_round)
-        return tuple(read_rounds)
-
-    def rounds_reading(self, round_index: int) -> tuple[int, ...]:
-        """The later rounds whose formation reads this round's packet.
-
-        A round's own formation always has its own packet, so it is not listed.
-        """
-        return self._later_readers_by_round.get(round_index, ())
-
-    def detector_rounds(self) -> dict[int, int]:
-        """Each detector's round, the map resolve_detector_rounds yields."""
-        return {
-            recipe.detector_index: recipe.round_index
-            for recipe in self.detectors
-        }
-
-    def observable_slots_of_round(
-        self, round_index: int
-    ) -> tuple[tuple[int, int], ...]:
-        """(observable index, slot) for each observable record in the packet."""
-        return self._observable_slots_by_round.get(round_index, ())
-
-    def _reach_from(self, first_round: int) -> int:
-        """How far before first_round its or a later detector reads."""
-        if self.live_reach is not None:
-            return self.live_reach
-        earliest_round = self._earliest_detector_read_from.get(
-            first_round, first_round
-        )
-        return first_round - earliest_round
-
-    @functools.cached_property
-    def _detectors_by_round(self) -> dict[int, list[DetectorRecipe]]:
-        """The detectors grouped by round, once per table.
-
-        A seat asks per round to form it and to size its store's room; a scan
-        of a d=15, 100 round table costs 0.4 ms a call.
-        """
-        by_round: dict[int, list[DetectorRecipe]] = {}
-        for recipe in self.detectors:
-            group = by_round.setdefault(recipe.round_index, [])
-            group.append(recipe)
-        return by_round
-
-    @functools.cached_property
-    def _earliest_detector_read_from(self) -> dict[int, int]:
-        """For each round, the earliest record it or a later detector reads.
-
-        One pass from the last round down, so each window asks in a lookup.
-        """
-        earliest_by_round = {}
-        earliest_round = self.round_count
-        for round_index in range(self.round_count, 0, -1):
-            detectors = self._detectors_by_round.get(round_index, ())
-            record_rounds = _record_rounds_of(detectors)
-            record_rounds.append(earliest_round)
-            record_rounds.append(round_index)
-            earliest_round = min(record_rounds)
-            earliest_by_round[round_index] = earliest_round
-        return earliest_by_round
-
-    @functools.cached_property
-    def _later_readers_by_round(self) -> dict[int, tuple[int, ...]]:
-        """Each round's later readers, read off every recipe once."""
-        readers: dict[int, set] = {}
-        for recipe in self.detectors:
-            _note_later_reader(readers, recipe.records, recipe.round_index)
-        by_round = {}
-        for round_index, reader_rounds in readers.items():
-            by_round[round_index] = tuple(sorted(reader_rounds))
-        return by_round
-
-    @functools.cached_property
-    def _observable_slots_by_round(self) -> dict[int, tuple]:
-        """Each round's observable records, read off every recipe once."""
-        by_round: dict[int, list] = {}
-        for recipe in self.observables:
-            for record_round, slot in recipe.records:
-                slots = by_round.setdefault(record_round, [])
-                slots.append((recipe.observable_index, slot))
-        return {
-            round_index: tuple(slots) for round_index, slots in by_round.items()
-        }
 
 
 def build_formation_table(
@@ -209,7 +33,7 @@ def build_formation_table(
     measurement_rounds: Optional[dict[int, int]] = None,
     detector_rounds: Optional[dict[int, int]] = None,
     live_reach: Optional[int] = None,
-) -> FormationTable:
+) -> formation_records.FormationTable:
     """Read the recipe of every detector and observable off the circuit.
 
     measurement_rounds is the front end's packet schedule, one round per
@@ -227,7 +51,7 @@ def build_formation_table(
         circuit, packet_of_measurement, round_count, detector_rounds
     )
     detectors, observables = _read_recipes(circuit, tables)
-    return FormationTable(
+    return formation_records.FormationTable(
         round_count=round_count,
         packet_width_by_round=packet_width_by_round,
         readout_slot_start=readout_slot_start,
@@ -273,7 +97,9 @@ class StreamingDetectorFormer:
     """
 
     def __init__(
-        self, table: FormationTable, done_rounds: Optional["DoneRounds"] = None
+        self,
+        table: formation_records.FormationTable,
+        done_rounds: Optional["DoneRounds"] = None,
     ) -> None:
         """done_rounds is shared with the seat.
 
@@ -335,7 +161,7 @@ class StreamingDetectorFormer:
         """The raw bits the former holds."""
         return sum(len(packet) for packet in self.packets.values())
 
-    def extend_table(self, table: FormationTable) -> None:
+    def extend_table(self, table: formation_records.FormationTable) -> None:
         """Take a longer table whose earlier rounds are unchanged.
 
         A live circuit supplies the next recipes before their packets. A round
@@ -416,7 +242,7 @@ class DoneRounds:
 
 
 def split_measurements_into_packets(
-    table: FormationTable, measurement_row: Sequence[int]
+    table: formation_records.FormationTable, measurement_row: Sequence[int]
 ) -> dict[int, tuple[int, ...]]:
     """Cut one shot's measurement row into per-round packets (the QPU side)."""
     packets = {}
@@ -432,7 +258,8 @@ def split_measurements_into_packets(
 
 
 def form_shot(
-    table: FormationTable, packets_by_round: dict[int, Sequence[int]]
+    table: formation_records.FormationTable,
+    packets_by_round: dict[int, Sequence[int]],
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Every detector and observable bit of one shot, in index order.
 
@@ -465,7 +292,8 @@ class _CircuitTables:
 
 
 def _check_formation_prefix(
-    previous: FormationTable, table: FormationTable
+    previous: formation_records.FormationTable,
+    table: formation_records.FormationTable,
 ) -> None:
     for round_index, width in previous.packet_width_by_round.items():
         if table.packet_width_by_round.get(round_index) != width:
@@ -680,7 +508,7 @@ def _measurement_packets(
 
 def _read_recipes(circuit, tables: _CircuitTables) -> tuple[list, list]:
     """Every detector recipe and every observable recipe, in index order."""
-    detectors: list[DetectorRecipe] = []
+    detectors: list[formation_records.DetectorRecipe] = []
     observable_records: dict[int, list] = {}
     observable_parity: dict[int, int] = {}
     measurement_count_so_far = 0
@@ -709,7 +537,7 @@ def _read_recipes(circuit, tables: _CircuitTables) -> tuple[list, list]:
         records = observable_records.get(index, [])
         records = tuple(records)
         parity = observable_parity.get(index, 0)
-        recipe = ObservableRecipe(index, records, parity)
+        recipe = formation_records.ObservableRecipe(index, records, parity)
         observables.append(recipe)
     return detectors, observables
 
@@ -727,7 +555,7 @@ def _detector_recipe(
     instruction,
     detector_index: int,
     measurement_count_so_far: int,
-) -> DetectorRecipe:
+) -> formation_records.DetectorRecipe:
     absolute_indices = _absolute_indices(instruction, measurement_count_so_far)
     records = tuple(
         tables.packet_of_measurement[index] for index in absolute_indices
@@ -748,7 +576,7 @@ def _detector_recipe(
     reference_parity = int(parity)
     coordinates = tables.coordinates.get(detector_index, ())
     kind = _layer_kind_for(len(records))
-    return DetectorRecipe(
+    return formation_records.DetectorRecipe(
         detector_index=detector_index,
         round_index=round_index,
         kind=kind,
@@ -780,12 +608,12 @@ def _note_observable(
     observable_parity[observable_index] = total_parity % 2
 
 
-def _layer_kind_for(record_count: int) -> LayerKind:
+def _layer_kind_for(record_count: int) -> formation_records.LayerKind:
     if record_count == 1:
-        return LayerKind.PREPARATION
+        return formation_records.LayerKind.PREPARATION
     if record_count == 2:
-        return LayerKind.BULK
-    return LayerKind.READOUT
+        return formation_records.LayerKind.BULK
+    return formation_records.LayerKind.READOUT
 
 
 def _store_bits(bits: list[int], indexed_values) -> None:
@@ -794,27 +622,14 @@ def _store_bits(bits: list[int], indexed_values) -> None:
 
 
 def _fold_observables(
-    parities: list[int], table: FormationTable, round_index: int, packet
+    parities: list[int],
+    table: formation_records.FormationTable,
+    round_index: int,
+    packet,
 ) -> None:
     """XOR the round's observable records into the running parities."""
     for observable_index, slot in table.observable_slots_of_round(round_index):
         parities[observable_index] ^= int(packet[slot])
-
-
-def _note_later_reader(readers: dict, records, reader_round: int) -> None:
-    """Add reader_round to the readers of every earlier round it reads."""
-    for record_round, _ in records:
-        if record_round >= reader_round:
-            continue
-        reader_rounds = readers.setdefault(record_round, set())
-        reader_rounds.add(reader_round)
-
-
-def _record_rounds_of(recipes) -> list[int]:
-    """Every round the recipes' records name."""
-    return [
-        record_round for recipe in recipes for record_round, _ in recipe.records
-    ]
 
 
 def _rounds_back(before_start: int, round_width: int) -> int:

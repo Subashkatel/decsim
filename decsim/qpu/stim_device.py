@@ -26,6 +26,7 @@ import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.ports as ports
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.fault_model_contracts as fault_models
+import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
@@ -172,7 +173,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def formation_table(
         self,
         operation_id: Any,  # an opaque identity
-    ) -> detector_formation.FormationTable:
+    ) -> formation_records.FormationTable:
         """The recipes the operation's rounds are formed by, off its circuit."""
         shot = self._shot_for(operation_id)
         return shot.table
@@ -446,7 +447,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         self.shot_sampled.fire(operation, formed_events)
 
     def _sampled_circuit(
-        self, circuit: stim.Circuit, table: detector_formation.FormationTable
+        self, circuit: stim.Circuit, table: formation_records.FormationTable
     ) -> stim.Circuit:
         """The circuit the shot is drawn from: the operation's own."""
         del table
@@ -637,7 +638,7 @@ class BurstStimDevice(StimDevice):
         self.burst = settings
 
     def _sampled_circuit(
-        self, circuit: stim.Circuit, table: detector_formation.FormationTable
+        self, circuit: stim.Circuit, table: formation_records.FormationTable
     ) -> stim.Circuit:
         """The burst circuit; the operation's own when there is no burst."""
         if self.burst.burst_error_probability == 0:
@@ -667,7 +668,7 @@ def validated_seed(seed: Optional[numbers.Integral]) -> Optional[int]:
 
 def burst_circuit(
     circuit: stim.Circuit,
-    table: detector_formation.FormationTable,
+    table: formation_records.FormationTable,
     burst: BurstStimDevice.Settings,
 ) -> stim.Circuit:
     """The flattened circuit with one burst's extra noise in its rounds.
@@ -692,7 +693,7 @@ def burst_circuit(
 
 def burst_noise(
     circuit: stim.Circuit,
-    table: detector_formation.FormationTable,
+    table: formation_records.FormationTable,
     burst: BurstStimDevice.Settings,
 ) -> stim.Circuit:
     """burst_circuit's extra noise alone: the circuit's own noise removed.
@@ -709,7 +710,7 @@ def burst_noise(
 
 def _with_burst(
     circuit: stim.Circuit,
-    table: detector_formation.FormationTable,
+    table: formation_records.FormationTable,
     burst: BurstStimDevice.Settings,
     is_background_kept: bool,
 ) -> stim.Circuit:
@@ -762,7 +763,7 @@ class _SampledShot:
     """One shot of a circuit: its packets and formed events."""
 
     packets: dict
-    table: detector_formation.FormationTable
+    table: formation_records.FormationTable
     detection_events: tuple
     truth: tuple
 
@@ -1017,7 +1018,7 @@ def _planar(position) -> tuple:
     return (position[0], position[1])
 
 
-def _round_ends(table: detector_formation.FormationTable) -> list:
+def _round_ends(table: formation_records.FormationTable) -> list:
     """The measurement count at each round's end, round 1 first."""
     ends = []
     total = 0

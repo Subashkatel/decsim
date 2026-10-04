@@ -20,9 +20,9 @@ import pytest
 
 import decsim.config as config
 import decsim.detector_error_model.detection_event_formation as formation
-import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
+import decsim.records.formation as formation_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
@@ -271,15 +271,15 @@ class _ChipSource:
     def formation_table(self, operation_id):
         """The one table."""
         del operation_id
-        recipe = detector_formation.DetectorRecipe(
+        recipe = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
-            kind=detector_formation.LayerKind.PREPARATION,
+            kind=formation_records.LayerKind.PREPARATION,
             records=((1, 0),),
             reference_parity=0,
             coordinates=(),
         )
-        return detector_formation.FormationTable(
+        return formation_records.FormationTable(
             round_count=1,
             packet_width_by_round={1: 2},
             readout_slot_start=None,

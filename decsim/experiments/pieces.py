@@ -98,7 +98,8 @@ def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
 def every_folder(experiment_dir: pathlib.Path) -> list:
     """Every whole piece the folder holds, of whichever point."""
     pieces_dir = experiment_dir / PIECES_FOLDER
-    point_dirs = sorted(pieces_dir.glob("*"))
+    every_point_dir = pieces_dir.glob("*")
+    point_dirs = sorted(every_point_dir)
     point_ids = [point_dir.name for point_dir in point_dirs]
     return folders_of(experiment_dir, point_ids)
 
@@ -118,12 +119,14 @@ def refuse_pieces_of_another_tree(run_dir: pathlib.Path, folders: list) -> None:
         piece = read_piece(folder)
         if run_folder.is_one_tree(folder_tree, piece):
             continue
-        raise refusal.RefusalError(
-            f"{folder} ran {run_folder.tree_text(piece)}, and {run_path} "
+        piece_text = run_folder.tree_text(piece)
+        message = (
+            f"{folder} ran {piece_text}, and {run_path} "
             f"names {folder_text}; a folder holds "
             "one tree's results, so collect into a new folder, or move "
             "that tree's pieces out of this one"
         )
+        raise refusal.RefusalError(message)
 
 
 def point_folders(folders: list, point_id: str) -> list:

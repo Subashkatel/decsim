@@ -5,6 +5,7 @@ writes to json; a workload read from files is refused at the record when
 its circuit cannot be laid out.
 """
 
+import importlib.util
 import json
 
 import pytest
@@ -21,6 +22,12 @@ ONE_MEASUREMENT = stim.Circuit("M 0")
 LIVE_FRAGMENTS = circuit_records.RepeatedStimCircuit(
     ONE_MEASUREMENT, ONE_MEASUREMENT, ONE_MEASUREMENT, ONE_MEASUREMENT
 )
+# The Deltakit makers need the Deltakit packages, which no extra installs.
+DELTAKIT_SPEC = importlib.util.find_spec("deltakit_explorer")
+IS_DELTAKIT_ABSENT = DELTAKIT_SPEC is None
+NEEDS_DELTAKIT = pytest.mark.skipif(
+    IS_DELTAKIT_ABSENT, reason="could not import 'deltakit_explorer'"
+)
 # Every maker decsim ships, with the arguments of a small point.
 SHIPPED_MAKERS = [
     (
@@ -31,8 +38,14 @@ SHIPPED_MAKERS = [
         producers.memory_patches,
         ("surface_code:rotated_memory_z", 4, 2, 3, 0.001),
     ),
-    (producers.deltakit_memory, (3, 3, 0.001)),
-    (producers.deltakit_live_memory, (3, 0.001, 1.0, 2)),
+    pytest.param(
+        producers.deltakit_memory, (3, 3, 0.001), marks=NEEDS_DELTAKIT
+    ),
+    pytest.param(
+        producers.deltakit_live_memory,
+        (3, 0.001, 1.0, 2),
+        marks=NEEDS_DELTAKIT,
+    ),
     (producers.live_memory, (LIVE_FRAGMENTS, 2)),
 ]
 

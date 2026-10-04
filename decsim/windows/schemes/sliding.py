@@ -135,13 +135,11 @@ def _finite_double_window_geometries(
 ) -> tuple:
     """Finite forward windows with one closed all-core tail.
 
-    Regular windows commit F rounds and read W = F + B. The tail rule is
-    qLDPC's SlidingWindowDecoder rule (qLDPC src/qldpc/decoders/sinter.py:
-    776-777, `while start_time < end_time - max_size_of_last_window`,
-    that size being W + F - 1): the last window starts as soon as fewer
-    than W + F rounds remain, so it commits everything left and is never
-    shorter than W. A short tail is never decoded on its own; it is absorbed by
-    the last full-width window instead.
+    The tail follows qLDPC's SlidingWindowDecoder (qLDPC
+    src/qldpc/decoders/sinter.py:776-777, `while start_time < end_time -
+    max_size_of_last_window`, that size being W + F - 1): the last
+    window starts once fewer than W + F rounds remain, so it commits
+    everything left and is never shorter than W.
     """
     window_width = commit_round_count + buffer_round_count
     windows = []

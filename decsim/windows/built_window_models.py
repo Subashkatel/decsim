@@ -2,18 +2,11 @@
 
 A window's detector error model is a function of the operation's circuit
 and the window plan, and of nothing a seed touches, so the shots of one
-sweep point all build the same models. They are most of a shot's wall
-time: at weak_ler's d 7, p 0.005 point, Machine.build costs 2.08 s of
-the 2.41 s a shot takes, and 2.0 s of that is inside
-build_window_error_models.
-
-sinter does the same thing one level down: it compiles the decoder once
-per task and decodes every shot of the task with it
+sweep point share them; building them is most of a shot's wall time.
+sinter likewise compiles its decoder once per task
 (sinter/_decoding/_decoding_decoder_class.py, compile_decoder_for_dem).
-decsim's `collect` builds one of these per work unit and hands it to
-every shot's Machine.build, beside the settings, since it is run state
-and no setting; a Machine built alone gets an empty one and fills it
-for itself.
+collect hands one of these to every shot's Machine.build; a Machine
+built alone fills its own.
 """
 
 

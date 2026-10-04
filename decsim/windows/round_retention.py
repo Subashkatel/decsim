@@ -1,40 +1,31 @@
 """The round retention: which rounds each window and request holds.
 
-A window holds [start_round, buffer_hi] plus the successor overflow in
-the store its tier reads; when the strong tier may re-decode it, the
-same rounds and the ones a strong redo of it reads (its commit and one
-buffer past it, records/windows.py strong_context_bounds) are held as a
-potential strong read in both stores: in the weak syndrome
-buffer, because the chip keeps them until the verdict and carries them
-up with the escalation (Toshio 2510.25222 lines 1247 to 1250), and in
-the strong syndrome buffer, where they are expected. At admission the
-window's hold becomes the request's and is released once the input
-lands in the unit's memory. Under the double window a window
-that an earlier window bounds also keeps the rounds its restart would
-read as a potential restart read (PotentialRestart, planned in
-frontends/planner.py), past its own request and landing: an earlier
-escalation may re-slice it as the restart window, which re-reads
-restart_reread_buffer_regions buffer regions of the strong
-region (Toshio et al. 2510.25222 Sec. III C). When the strong side
-forms the detection events, a window's potential strong read also holds
-the raw rounds before its first that its or a later round's recipes
-read (a later window claims them only once it registers), as an
-HEVC decoder keeps each picture the current reference set names (FFmpeg
-hevc/refs.c:486-517); an escalation carries only those its strong seat
-lacks (strong_rounds_before), since that seat's former keeps a round an
-earlier strong read landed while a round it has not formed reads it. A
-weak read holds none: the earlier window's read holds those rounds
-until it lands in the same decoder, which forms them and keeps each
-packet while a round it has not formed reads it
-(detector_formation.StreamingDetectorFormer), even when it forms a
-later block first, and a restart window's rounds before its start are
-in the strong region, whose request keeps them until the restart window
-commits. The hold ends when the reader no longer needs the round in the
-store, as on a read of no formation. The read ends when the window
-before it commits, or when the window is re-sliced or absorbed. The
-stores hold slots and holders; which rounds a window needs is decided
-here, gem5's split between the cache that allocates a miss buffer and
-the queue that holds the entry (src/mem/cache/base.hh
+A window holds [start_round, buffer_hi], with any successor overflow, in
+the store its tier reads. When the strong tier may re-decode it, the
+same rounds and those a strong redo reads (records/windows.py
+strong_context_bounds) are also held as a potential strong read in both
+stores: the chip keeps them until the verdict and carries them up with
+the escalation (Toshio et al. 2510.25222 lines 1247-1250). At admission
+the window's hold becomes its request's, released once the input lands
+in the unit's memory. Under the double window, a window an earlier one
+bounds also keeps the rounds its restart would re-read
+(PotentialRestart, frontends/planner.py; Toshio et al. Sec. III C); that
+read ends when the window before it commits, or when the window is
+re-sliced or absorbed.
+
+When the strong side forms the detection events, a potential strong read
+also holds the raw rounds before its first that its recipes read, as an
+HEVC decoder keeps each picture its reference set names (FFmpeg
+hevc/refs.c:486-517); an escalation carries only those its seat lacks
+(strong_rounds_before). A weak read holds none: the decoder that formed
+the earlier window keeps each packet a later round reads
+(detector_formation.StreamingDetectorFormer), and a restart window's
+rounds before its start stay with the strong region's request until the
+restart window commits.
+
+The stores hold slots and holders, and which rounds a window needs is
+decided here: gem5's split between the cache that allocates a miss
+buffer and the queue that holds it (src/mem/cache/base.hh
 allocateMissBuffer).
 """
 
@@ -82,8 +73,8 @@ class RoundRetention:
     def primary_store(self) -> ports.RetainedRounds:
         """The store the primary tier reads.
 
-        The weak syndrome buffer for the weak lane, strong syndrome buffer for
-        a strong-primary plan.
+        The weak syndrome buffer, or the strong one for a strong-primary
+        plan.
         """
         if self.primary_tier is window_records.DecoderTier.STRONG:
             return self.strong_store
@@ -118,9 +109,9 @@ class RoundRetention:
     ) -> None:
         """Register the primary read and any possible escalation context.
 
-        Then the stream's hold for its windows still to come moves past
-        this one (_hold_later_stream_reads), after this window has
-        claimed its own rounds.
+        The stream's hold for its later windows moves past this one only
+        after this window has claimed its own rounds
+        (_hold_later_stream_reads).
         """
         primary_reads = self.primary_read_keys(window)
         strong_context = self.strong_context_read_keys(window, primary_reads)
@@ -176,10 +167,9 @@ class RoundRetention:
     def primary_read_keys(self, window: window_records.Window) -> list:
         """The rounds the window's primary decode reads, from its start.
 
-        None of the rounds before its start: an earlier window's read
-        holds them until it lands in the same decoder, which forms them
-        there and keeps each packet while a round it has not formed
-        reads it.
+        The rounds before its start stay with the earlier window's read,
+        whose decoder forms them and keeps each packet a later round
+        reads.
         """
         return self.read_keys_for_bounds(
             window.operation_id, window.start_round, window.buffer_hi, window
@@ -237,10 +227,8 @@ class RoundRetention:
 
         When the strong side forms the events, its seat is given the
         rounds before the read's first that its unformed rounds' recipes
-        read and it does not hold (rounds_needed_before): a round an
-        earlier strong read landed there stays in its former while an
-        unformed round reads it, so the stores need not keep it for this
-        read. None otherwise.
+        read and it does not hold (rounds_needed_before). None
+        otherwise.
         """
         if self.strong_side_seat is None:
             return []
@@ -270,11 +258,11 @@ class RoundRetention:
     def bind_input_hold(
         self, job: decoding_records.DecodeJob, previous_owner, store=None
     ) -> None:
-        """Transfer upstream retention to an admitted input request.
+        """Transfer the window's hold to its admitted request.
 
-        The release runs only after decoder memory materialization, so
-        overlapping rounds remain upstream until their last consumer
-        transfer.
+        The release runs after the input lands in decoder memory, so
+        overlapping rounds stay upstream until their last consumer has
+        them.
         """
         store = self.store_for(store)
         owner = decoding_records.DecoderInputHold(job.request_key)
@@ -403,11 +391,11 @@ class RoundRetention:
     ) -> Optional[decoding_records.RephaseGuard]:
         """Hold the restart window's strong context while a plan lands.
 
-        The strong syndrome buffer loses the absorbed windows' potential strong
-        holds as the plan lands; the guard keeps the restart window's
-        context until its re-sliced potential strong hold names it. Its
-        the weak syndrome buffer reads need no guard: its potential restart
-        hold is live until the weak chain restarts.
+        The strong syndrome buffer loses the absorbed windows' potential
+        strong holds as the plan lands; the guard keeps the restart
+        window's context until its re-sliced potential strong hold names
+        it. Its weak reads need no guard: its potential restart hold is
+        live until the weak chain restarts.
         """
         if restart_key is None:
             return None
@@ -547,16 +535,13 @@ class RoundRetention:
     def _hold_later_stream_reads(self, window: window_records.Window) -> None:
         """Keep what the stream's windows after this one read before it.
 
-        A strong read of a window carries the raw rounds before its first
-        that its recipes read (strong_rounds_before), and the window
-        after this one registers only once its first round has arrived,
-        maybe after this one's potential strong read ended at its commit
-        or became an escalation's. So the stream holds the rounds before
-        this window's commit end that a round after it reads
+        A strong read carries the raw rounds before its first that its
+        recipes read (strong_rounds_before), and the next window
+        registers only once its first round arrived, maybe after this
+        one's potential strong read ended. So the stream holds the
+        rounds before this window's commit end that a later round reads
         (earlier_rounds_read), and moves the hold as each window
         registers, claiming the new rounds before letting the old go.
-        With none to keep it holds nothing, and a store with room for
-        one round runs on.
         """
         if self.strong_side_seat is None:
             return
@@ -593,13 +578,11 @@ class RoundRetention:
     ) -> list:
         """The raw rounds a strong read from first_round on may carry.
 
-        A window's potential strong read is placed before anyone knows
-        whether it escalates, or what the strong seat will have formed
-        by then, so it keeps every round before its first that its
-        rounds' recipes read, and those a later round reads, since the
-        later window claims them only once it registers
-        (earlier_rounds_read); the read itself carries only what the
-        seat lacks (strong_rounds_before).
+        A potential strong read is placed before anyone knows whether it
+        escalates or what the strong seat will have formed, so it keeps
+        every round before its first that its rounds' recipes read, and
+        those a later round reads (earlier_rounds_read); the read itself
+        carries only what the seat lacks (strong_rounds_before).
         """
         if self.strong_side_seat is None:
             return []

@@ -1,16 +1,13 @@
 """The round tracker: which rounds arrived, and each window's readiness.
 
-Readiness is a function of the arrivals and the planner's geometry: the
-tracker builds a WindowReadiness and asks the scheme, the way qLDPC's
-decode loop asks each planned window for its detectors
-(qldpc/decoders/sinter.py, CompiledSequentialWindowDecoder). A window's
-buffer that overflows the operation's end is satisfied by a successor's
-rounds, memory rounds or a closed tail (Skoric et al. 2209.08552, the
-artificial defects at the commit edge carry into the next window). The
-strong syndrome buffer's stored-through round per operation is counted here
-too: the strong tier's readiness reads it, never the weak syndrome buffer's
-counter. A stream's length knowledge (its source limit, its sealed length, its
-closed feedback boundaries) lives here; its geometry is the planner's.
+Readiness is the arrivals read against the planner's geometry: the
+tracker builds a WindowReadiness and asks the scheme, as qLDPC's decode
+loop asks each planned window for its detectors
+(qldpc/decoders/sinter.py, CompiledSequentialWindowDecoder). The strong
+tier's readiness reads the strong syndrome buffer's stored-through
+round, counted here, never the weak one's. A stream's length (its source
+limit, sealed length and closed boundaries) lives here; its geometry is
+the planner's.
 """
 
 from typing import Optional
@@ -38,10 +35,7 @@ class RoundTracker:
     # ---- operations and streams
 
     def register_operation(self, operation: program_records.Operation) -> bool:
-        """Track an operation's arrivals and feedback role.
-
-        True the first time the operation is seen.
-        """
+        """Track an operation's arrivals and feedback role; True if new."""
         is_new = operation.id not in self.operation_by_id
         if is_new:
             self.arrivals_by_operation[operation.id] = _Arrivals()
@@ -159,8 +153,8 @@ class RoundTracker:
     def close_boundary(self, stream_id, stream_round_count: int) -> None:
         """Mark a live stream round as a measurement-closed boundary.
 
-        A finite real-syndrome stream cannot close a boundary inside its
-        registered circuit: that is a decsim.experiments call's mistake.
+        A finite real-syndrome stream refuses one inside its registered
+        circuit.
         """
         stream = self.stream_by_id[stream_id]
         stream.refuse_boundary_inside_finite_source(stream_round_count)
@@ -171,12 +165,7 @@ class RoundTracker:
     def round_count_for_window(
         self, operation_id, window: Optional[window_records.Window] = None
     ) -> int:
-        """The round count to check or read one window against.
-
-        A non-stream operation has its planned rounds; a sealed stream its
-        sealed length; a capped stream its source limit; an open stream
-        the window's own read end, or the rounds arrived so far.
-        """
+        """The round count to check or read one window against."""
         stream = self.stream_by_id.get(operation_id)
         if stream is None:
             return self.planner.round_count_of(operation_id)
@@ -203,12 +192,7 @@ class RoundTracker:
     def closed_boundary_round_for_window(
         self, window: window_records.Window
     ) -> Optional[int]:
-        """The closed boundary in the window's trailing buffer, if any.
-
-        A stream's closed feedback boundary first; else, in
-        measurement_closed mode, a feedback source's own last round when
-        it falls inside the buffer.
-        """
+        """The closed boundary in the window's trailing buffer, if any."""
         stream = self.stream_by_id.get(window.operation_id)
         if stream is not None:
             stream_boundary = stream.closed_boundary_for_window(window)

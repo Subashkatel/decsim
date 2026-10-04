@@ -46,13 +46,10 @@ def buffer_filled_by_memory_only(
 ) -> bool:
     """Whether memory rounds alone satisfy the buffer past the operation.
 
-    That is a trailing buffer with no successor content standing behind it.
-
     Such a release is time-only: the reference systems decode the buffer
-    region's content (Skoric and Tan windows, LATTE d^3+buffer blocks),
-    so a window released this way carries an approximate result. The
-    terminal no-successor release is the Tan
-    flush and is not flagged.
+    region's content (Skoric and Tan windows), so a window released this
+    way carries an approximate result. The terminal release with no
+    successor is the Tan flush and is not flagged.
     """
     overflow_rounds = window.buffer_hi - readiness.local_round_count
     if overflow_rounds <= 0 or readiness.tail_closed:

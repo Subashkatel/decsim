@@ -1,12 +1,12 @@
 """The logical ledger: which owner committed which rounds of a stream.
 
-A contribution is one owner (an ordinary window or a strong window)
-over an exact inclusive round extent; the contributions of one stream
-tile it without gap or overlap, and the observables of an interval are
-the XOR of the contributions that cover it. A strong result may replace
-the prediction of an owner; a strong window may replace ordinary
-windows. tests/windows/test_committed_rounds.py checks the ledger
-against a per-round oracle.
+A contribution is one owner (an ordinary window or a strong window) over
+an exact inclusive round extent. The contributions of one stream tile it
+without gap or overlap, which every read checks, and the observables of
+an interval are the XOR of the contributions that cover it. A strong
+result may replace an owner's prediction; a strong window may replace
+ordinary windows. tests/windows/test_committed_rounds.py checks the
+ledger against a per-round oracle.
 """
 
 from typing import Optional
@@ -38,12 +38,11 @@ class LogicalLedger:
     ) -> None:
         """A strong window takes the extent of the windows it replaces.
 
-        The windows it absorbs, and the escalated window's own entry,
-        leave the ledger; every contribution that stays must sit outside
-        the strong window's extent, since two owners never claim one
-        round (Toshio et al. 2510.25222 Theorem 1's single strong
-        decoder). Nothing live moves: the strong window's own
-        contribution carries no observables until it commits.
+        The windows it absorbs and the escalated window's own entry
+        leave the ledger. Its contribution carries no observables until
+        it commits, and a read refuses any owner left inside its extent,
+        since two owners never claim one round (Toshio et al. 2510.25222
+        Theorem 1).
         """
         replaced = {owner_key, *replaced_keys}
         kept = {}
@@ -69,11 +68,7 @@ class LogicalLedger:
     def install(
         self, contribution: decoding_records.LogicalContribution
     ) -> None:
-        """Record who owns an extent.
-
-        An owner never changes kind or extent, extents never overlap,
-        and one stream has one observable arity.
-        """
+        """Record who owns an extent, one observable arity per stream."""
         if contribution.commit_lo < 1:
             _refuse_extent(contribution)
         if contribution.commit_hi < contribution.commit_lo:

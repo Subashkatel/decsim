@@ -351,13 +351,7 @@ class _Segment:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the operation results reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the operation results reports, as one member."""
 
     operation_result_delivered: trace_source.TraceSource = (
         trace_source.new_source()

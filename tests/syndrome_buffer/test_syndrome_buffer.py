@@ -30,6 +30,8 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.windows.schemes.parallel as parallel_scheme
+import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 # every round this file stores carries one fragment of two bits
@@ -401,6 +403,31 @@ def test_interleaved_successors_waiting_for_room_stop_the_run():
     with pytest.raises(RuntimeError, match=r"round \(2, 6\) needs 84 bits"):
         declared_run.weak_only_run(
             operations=operations, weak_syndrome_buffer=store_of_80_bits
+        )
+
+
+def test_a_window_waiting_for_a_later_boundary_stops_the_run():
+    """Parallel windows of one round: window 1 waits for window 2's boundary.
+
+    Window 1's input takes no slot before window 2 decodes, and window 2
+    reads round 6, so round 6's 12 bits must sit beside the 24 of rounds
+    3 to 5, past a 32-bit store.
+    """
+    plain_windows = window_settings.WindowSettings()
+    windows = declared_run.windows_on(
+        plain_windows,
+        parallel_scheme.ParallelWindowScheme,
+        commit_rounds=1,
+        buffer_rounds=1,
+    )
+    store_of_32_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=32)
+    operations = blocked_successor()
+
+    with pytest.raises(RuntimeError, match=r"round \(1, 6\) needs 36 bits"):
+        declared_run.weak_only_run(
+            operations=operations,
+            windows=windows,
+            weak_syndrome_buffer=store_of_32_bits,
         )
 
 

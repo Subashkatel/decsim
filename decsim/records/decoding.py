@@ -219,9 +219,15 @@ class StrongInputInFlight:
 
 @dataclass(frozen=True)
 class DecoderInputHold:
-    """A hold: a decode job's rounds until they land in unit memory."""
+    """A hold: a decode job's rounds until they land in unit memory.
+
+    boundary_window_keys are the windows whose boundaries the job waits
+    for before its input takes a slot (decode_requests.py, may_stage);
+    the request key alone names the hold.
+    """
 
     request_key: window_records.DecoderRequestKey
+    boundary_window_keys: tuple = field(default=(), compare=False)
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the job's own."""
@@ -232,8 +238,12 @@ class DecoderInputHold:
         return ()
 
     def holders_waited_for(self) -> tuple:
-        """None: it ends when its rounds land in unit memory."""
-        return ()
+        """The reads of the windows whose boundaries it waits for."""
+        waited = []
+        for window_key in self.boundary_window_keys:
+            reads = WindowReads(window_key)
+            waited.append(reads)
+        return tuple(waited)
 
 
 @dataclass(frozen=True)

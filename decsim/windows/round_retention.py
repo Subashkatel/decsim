@@ -265,7 +265,12 @@ class RoundRetention:
         them.
         """
         store = self.store_for(store)
-        owner = decoding_records.DecoderInputHold(job.request_key)
+        boundary_window_keys = ()
+        if job.window is not None:
+            boundary_window_keys = tuple(job.window.deps)
+        owner = decoding_records.DecoderInputHold(
+            job.request_key, boundary_window_keys
+        )
         if previous_owner != owner:
             _move_hold_to_input(store, previous_owner, owner, job)
         job.input_hold = functools.partial(store.release_hold, owner)

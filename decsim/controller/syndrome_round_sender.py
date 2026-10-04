@@ -1,24 +1,13 @@
 """The sender: a finished round into every store it must reach, or held.
 
-The backpressure law of the readout path: each store's own end answers
-has_room for the round before any round leaves for it, counting
-the bits it holds and the bits reserved for the writes in flight, and
-the room is reserved before the wire is used (gem5's packet store
-answers `avail() = _maxsize - _size - _reserved` against the packet's
-own length and reserves it with `reserve(len)`,
-src/dev/net/pktfifo.hh). A finished
-round that finds no room in either store waits in HeldRounds, upstream
-of the stores, and enters when a slot frees, in the order the rounds
-were completed. gem5's blocked port keeps the request at the requester
-and re-sends it when clearBlocked schedules the retry
-(src/mem/cache/base.cc:255-257 setBlocked when the write buffer fills,
-:266-271 clearBlocked when it drains, processSendRetry); Ciw's Type I
-blocking keeps the customer at the upstream node and releases the
-longest blocked one when the destination has capacity
-(Ciw ciw/node.py:470-473, block_individual,
-release_blocked_individual). Nothing is reordered and nothing is
-dropped. The written round leaves on its route at the write
-(RoundTransmitter) and takes its slot where it lands.
+Backpressure: a store's own end answers has_room for the round, counting
+the bits it holds and the bits reserved for writes in flight, and the
+room is reserved before the wire is used (gem5 src/dev/net/pktfifo.hh,
+avail() and reserve(len)). A round that finds no room waits in
+HeldRounds, upstream of the stores, and enters in completion order when
+a slot frees: gem5's blocked port and retry (src/mem/cache/base.cc
+setBlocked, clearBlocked) and Ciw's Type I blocking (ciw/node.py
+block_individual). Nothing is reordered and nothing is dropped.
 """
 
 import dataclasses
@@ -35,11 +24,7 @@ import decsim.trace_source as trace_source
 
 
 class WaitingRound(Protocol):
-    """What a waiting line reads of a round: its key and its route.
-
-    A packed round waits in front of the stores and a round in assembly
-    in front of the packing stage; the line is this package's own seam.
-    """
+    """What a waiting line reads of a round: its key and its route."""
 
     round_key: tuple
     route: round_records.SyndromePacketRoute
@@ -48,31 +33,17 @@ class WaitingRound(Protocol):
 class HeldRounds:
     """The waiting line in front of one bounded stage of the readout path.
 
-    The run keeps two: one in front of the stores, one in front of the
-    packing stage (round_assembly.py); a round waits whole in either,
-    and the stage it waits for calls retry when it has room.
-    Neither line has a size. The QPU keeps measuring while a round waits,
-    so the rounds pile up as a backlog in the controller (Terhal
-    1302.3428 lines 3151-3159, Quantum Machines 2412.00289 lines
-    478-485), and a Ruby MessageBuffer holds any number of messages
-    unless it is given a size (gem5
-    src/mem/ruby/network/MessageBuffer.py:58-61,
-    MessageBuffer.cc:147-153). A finite line would, when full, have to
-    stall the QPU or drop a round, and no source settles either for a
-    QEC stream.
-    Trace source: round_event(RoundEvent) with kind STALLED when a round
-    is held for room and RELEASED when a freed slot admits it. The two
-    ends are the wait itself, which is the
-    back-pressure a full stage applies to its sender and is measured
-    nowhere else: the round waits here, before the stage is asked again,
-    so the stage's own time carries none of it. Ruby's MessageBuffer counts that
-    wait as the buffer's own statistic, the ticks a message was stalled
-    in it (gem5 src/mem/ruby/network/MessageBuffer.cc:76-82
-    for the stall counters, :331 where the wait is summed at the
-    dequeue), and ns-3's queue disc stamps a packet at the enqueue and
-    reads the sojourn time back at the dequeue
-    (ns-3 src/traffic-control/model/queue-disc.cc:851
-    and :701, the trace source described at queue-disc.h:162-167).
+    One waits in front of the stores and one in front of the packing stage
+    (round_assembly.py). Neither has a size: the QPU keeps measuring while a
+    round waits, so rounds pile up in the controller (Terhal 1302.3428,
+    Quantum Machines 2412.00289), as a Ruby MessageBuffer without a size
+    holds any number (gem5 src/mem/ruby/network/MessageBuffer.py). A finite
+    line would have to stall the QPU or drop a round, and no source settles
+    either for a QEC stream.
+
+    The STALLED and RELEASED round events bound the wait, the back-pressure
+    a full stage applies, which no stage's own time carries (gem5
+    MessageBuffer.cc stall counters; ns-3 queue-disc.cc sojourn time).
     """
 
     def __init__(self, engine: engine_module.Engine) -> None:
@@ -86,10 +57,9 @@ class HeldRounds:
         held: WaitingRound,
         admit: Callable[[WaitingRound], bool],
     ) -> bool:
-        """A round found no room: hold it for a retry.
+        """Hold a round that found no room; False, so the caller reports it.
 
-        False, so the admission that called reports the refusal; a held
-        round is recorded STALLED once.
+        A held round is recorded STALLED once.
         """
         operation_id, round_index = held.round_key
         if self._is_holding(held):
@@ -138,18 +108,12 @@ class HeldRounds:
 class SyndromeRoundSender:
     """Sends a finished round to the store its tier reads, or holds it.
 
-    A weak-primary run's round goes into the weak syndrome buffer and
-    stays there: what the strong tier needs of it goes up with the
-    escalation (escalation/strong_redecode.py), never as a second copy
-    (Battistel 2303.00054 lines 342 to 347, a cold first stage exists to
-    keep the rounds off the cryostat I/O). A strong-primary run's window
-    round goes into the strong syndrome buffer over
-    controller_to_strong_buffer, its one transport. The sender reserves
-    the room the store's own end answers for and hands the round to the
-    send; the slot, the copy and the intake line are the receiving
-    end's, at the round's landing there
-    (syndrome_buffer/weak_syndrome_round_receiver.py and
-    syndrome_buffer/strong_syndrome_round_receiver.py).
+    A weak-primary run's round stays in the weak syndrome buffer; what the
+    strong tier needs goes up with the escalation, never as a second copy
+    (Battistel 2303.00054: a cold first stage keeps rounds off the cryostat
+    I/O). A strong-primary run's round crosses controller_to_strong_buffer
+    into the strong syndrome buffer. The sender reserves room; the slot and
+    the copy are the receiving end's, at the landing.
     """
 
     # the controller's own fabric: it executes the crossing to the strong
@@ -181,12 +145,10 @@ class SyndromeRoundSender:
         self.strong_crossing_count = 0
 
     def start(self) -> None:
-        """Read which store the plan's windows come from, once.
+        """Read once which store the plan's windows come from.
 
-        A strong-primary plan reads its windows from the room side, so
-        every round takes one hop into the strong store. The
-        window side settles that when the machine connects it and never moves it
-        again, so the sender reads it here rather than at every admit.
+        The window side settles it when the machine connects it and never moves
+        it, so admit does not ask again.
         """
         reads_from_buffer_zero = self.windows.reads_windows_from(
             self.weak_store
@@ -196,13 +158,10 @@ class SyndromeRoundSender:
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it waits.
 
-        A round that finds rounds already held joins the line behind them
-        without asking for room, even when its own bits would fit: gem5's
-        requester that was refused "must wait for a recvReqRetry" before
-        it sends again (src/mem/port.hh:244-255), and its packet queue
-        holds every later packet behind the refused front
-        (src/mem/packet_queue.cc:155-162 and 191-217), so a narrow round
-        never overtakes a wide one that waits.
+        A round joins any held rounds without asking for room, even when it
+        would fit: a refused gem5 requester waits for a retry before it sends
+        again (src/mem/port.hh:244-255, packet_queue.cc), so a narrow round
+        never overtakes a wide one.
         """
         if self.held_rounds.count:
             return self.held_rounds.refuse(packed, self._write)
@@ -219,8 +178,7 @@ class SyndromeRoundSender:
     def _write(self, packed: round_records.PackedRound) -> bool:
         """Write the round if its store has room; False when it has none.
 
-        A run with no decoder has no store, since a store exists only
-        when a decoder reads it, so its round is sent nowhere.
+        A run with no decoder has no store, so its round is sent nowhere.
         """
         if self.publishes_from_strong_store:
             if not self.strong_receiver.has_room(packed):
@@ -241,14 +199,9 @@ class SyndromeRoundSender:
     def _write_strong(self, packed: round_records.PackedRound) -> None:
         """Carry the round over its link to the strong syndrome buffer.
 
-        The controller is the end this round leaves by, so it executes
-        the send (OMNeT++ refuses a module that sends a message it does
-        not own, omnetpp src/sim/csimplemodule.cc:333-334;
-        gem5 bills a transfer to the port it left by,
-        coherent_xbar.cc:354-357).
-        The room side takes the room before the round leaves, gem5's
-        packet store reserving the packet's bytes before the data lands
-        (src/dev/net/pktfifo.hh reserve), and handles the landing itself.
+        The controller is the end the round leaves by, so it executes the send
+        (OMNeT++ csimplemodule.cc:333-334; gem5 coherent_xbar.cc:354-357). The
+        room is reserved before the round leaves (gem5 pktfifo.hh reserve).
         """
         attribution = transfer_records.TransferAttribution.for_packet(
             packed.packet
@@ -267,11 +220,10 @@ class SyndromeRoundSender:
     def _land_in_strong_store(
         self, packed: round_records.PackedRound, _transfer
     ) -> None:
-        """The strong syndrome buffer took the round and handles the landing.
+        """Hand the round to the strong syndrome buffer's landing.
 
-        The landing publishes the round, so it stops counting in the
-        event after, as the transmitter lets a weak round go: a fragment
-        landing at this tick still counts it.
+        The round stops counting in flight one event later, as a weak round
+        does, so a fragment landing at this tick still counts it.
         """
         self.strong_receiver.receive_round(packed)
         self.engine.schedule(
@@ -286,12 +238,6 @@ class SyndromeRoundSender:
 
 @dataclasses.dataclass(frozen=True)
 class _HeldRoundsTraceSources:
-    """Every event the held rounds reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the held rounds reports, as one member."""
 
     round_event: trace_source.TraceSource = trace_source.new_source()

@@ -1,10 +1,6 @@
 """The issuer: an admitted operation becomes one QPU command.
 
-The execution runtime admits an operation when its predecessors are done
-and its release has arrived; the issuer then opens its protected
-regions and hands the command to the output. The operation claims its
-patches' idle rounds when it starts (controller/idle_rounds.py). A
-program root or an ordinary successor is preloaded and starts at the
+A program root or an ordinary successor is preloaded and starts at the
 next boundary; a feedback-blocked operation is dynamic and pays the
 output path first. The runtime hears the start boundary through
 on_started, so the issuer never calls the runtime.
@@ -77,11 +73,7 @@ class OperationIssuer:
         operation: program_records.Operation,
         is_workload_complete: bool,
     ) -> None:
-        """Successors released: close boundaries, seal streams, stop the QPU.
-
-        At the workload's end the idle rounds no operation claimed are
-        settled too.
-        """
+        """Successors released: close boundaries; at the end, seal and stop."""
         self.streams.close_feedback_boundary(operation)
         if is_workload_complete:
             self.streams.seal_finished_streams()

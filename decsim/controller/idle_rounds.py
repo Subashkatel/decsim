@@ -1,19 +1,13 @@
 """Idle rounds per patch: how they travel and what decode work they cost.
 
-Syndrome extraction never stops, so a patch nobody is operating on
-emits a round every cycle. The QPU reports each one here. A patch that
-holds an unsealed stream sends it as that stream's next round; for any
-other patch the idle policy (controller/policies.py) decides how it
-travels (a feedback-memory round of the operation that left the patch)
-and whether it is charged as decode work (one load-only job per commit
-region of idle rounds, the last one shorter). An operation claims its
-patches when it starts on them and takes every round emitted since the
-last claim, through its start boundary, so the window manager can
-prepend them to its plan; the rounds of a patch no operation claims
-again settle when the workload completes. Idle rounds
-are decoder workload: the backlog bound counts every generated syndrome
-bit against the decoder's processing rate (Terhal 1302.3428 lines
-3151-3159; Battistel et al. 2303.00054 line 144).
+Syndrome extraction never stops, so a patch nobody operates on emits a
+round every cycle. A patch that holds an unsealed stream sends it as the
+stream's next round; for any other patch the idle policy decides how it
+travels and whether it is charged as decode work. An operation claims
+every round its patches emitted since the last claim, so the windows can
+prepend them. Idle rounds are decoder workload: the backlog bound counts
+every generated syndrome bit (Terhal 1302.3428; Battistel et al.
+2303.00054).
 """
 
 import dataclasses
@@ -29,8 +23,8 @@ import decsim.trace_source as trace_source
 class _PatchIdle:
     """One patch's idle rounds: since the last claim, since the last job.
 
-    operation is the one that left the patch idle, which a job charged
-    at the workload's end is labelled with.
+    operation, the one that left the patch idle, labels a job charged at
+    the workload's end.
     """
 
     operation: Optional[program_records.Operation] = None
@@ -40,11 +34,7 @@ class _PatchIdle:
 
 
 class IdleRoundAccounting:
-    """Routes each idle round by the policy and charges the decodes.
-
-    Trace source: idle_round_emitted(operation_id, patch, round_index)
-    for every idle round the policy relayed.
-    """
+    """Routes each idle round by the policy and charges the decodes."""
 
     decode_queue = ports.Port(ports.DecodeQueue)
     streams = ports.Port(feedback_streams.Streams)
@@ -66,11 +56,8 @@ class IdleRoundAccounting:
     def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
         """One idle cycle of a patch nobody is operating on.
 
-        The round is produced, transmitted and accounted; the policy
-        decides how it travels and whether it costs decode work. A patch
-        on a live protected stream emits through that stream instead, and
-        a patch that holds an unsealed stream continues it whatever the
-        policy.
+        A patch on a live protected stream emits through that stream, and one
+        that holds an unsealed stream continues it whatever the policy.
         """
         if self.streams.is_live_protected_patch(patch):
             return
@@ -88,13 +75,10 @@ class IdleRoundAccounting:
     ) -> program_records.RunOperationBody:
         """The operation starts on its patches and claims their idle rounds.
 
-        A waiting patch keeps measuring until the operation starts, and
-        those rounds are history the decoder must read too (Quantum
-        Machines 2412.00289 lines 524-531; Holmes et al. 2004.04794 lines
-        506-510). The QPU emits a boundary's idle rounds before it starts
-        the commands on it (qpu/cycle_clock.py _cross_boundary), so the
-        claim here takes every one of them. The streams then bind the
-        command to its stream.
+        A waiting patch keeps measuring, and those rounds are history the
+        decoder must read too (Quantum Machines 2412.00289; Holmes et al.
+        2004.04794). The QPU emits a boundary's idle rounds before the commands
+        on it, so the claim takes every one.
         """
         operation = command.operation
         for patch in program_records.patches_of(operation):
@@ -108,10 +92,8 @@ class IdleRoundAccounting:
         """The idle cycles on the operation's patches since the last claim.
 
         A code cycle measures every check of every patch once (Litinski
-        1808.02892 lines 204-206), so patches idle through the same cycles
-        are those cycles once. Each patch's unclaimed rounds are the
-        cycles since it was last claimed, one per cycle, all ending here,
-        so the longest run among the patches is every cycle they idled.
+        1808.02892), so patches idle through the same cycles count them once:
+        the longest run among the patches.
         """
         patches = operation.patches
         if not patches:
@@ -128,10 +110,8 @@ class IdleRoundAccounting:
     def end_every_idle_period(self) -> None:
         """The workload is complete: the policy settles every idle patch.
 
-        No idle round follows: the workload completes when a body ends
-        on a cycle boundary, after that boundary's idle rounds, and the
-        QPU stops its idle patches on the same boundary
-        (qpu/cycle_clock.py _cross_boundary).
+        No idle round follows: the QPU stops its idle patches on the boundary
+        the workload completes on.
         """
         for patch, idle in self.idle_by_patch.items():
             self.policy.end_idle_period(self, idle.operation, patch)
@@ -143,11 +123,7 @@ class IdleRoundAccounting:
         self.qpu.emit_feedback_memory_round(operation.id, patch, round_index)
 
     def submit_idle_decode_if_due(self, operation, patch, round_index) -> None:
-        """Count one idle round toward the patch's next decode job.
-
-        The job is charged once a full commit region of idle rounds has
-        accumulated.
-        """
+        """Count one idle round; charge a job at each full commit region."""
         geometry = self.geometry_by_patch[patch].code_geometry
         idle = self._idle(patch)
         idle.uncharged += 1
@@ -159,10 +135,7 @@ class IdleRoundAccounting:
         idle.last_round_index = round_index
 
     def submit_idle_decode_for_remaining_rounds(self, operation, patch) -> None:
-        """Charge the idle rounds after the last full commit region as one job.
-
-        Every idle round is decoded; the last job may be shorter.
-        """
+        """Charge the rounds after the last full commit region as one job."""
         idle = self._idle(patch)
         uncharged = idle.uncharged
         last_round_index = idle.last_round_index
@@ -176,11 +149,7 @@ class IdleRoundAccounting:
     def _submit_idle_decode(
         self, operation, patch, idle_round_count: int, round_index: int
     ) -> None:
-        """One load-only decode job for a region of idle rounds.
-
-        The job is sized to those rounds plus the buffer rounds a window
-        reads past them.
-        """
+        """One load-only decode job: the idle rounds plus the buffer rounds."""
         patch_record = self.geometry_by_patch[patch]
         geometry = patch_record.code_geometry
         rounds = idle_round_count + geometry.buffer_round_count
@@ -206,12 +175,6 @@ def _ignore_completion() -> None:
 
 @dataclasses.dataclass(frozen=True)
 class _TraceSources:
-    """Every event the idle round accounting reports, as one member.
-
-    gem5 groups a component's statistics into one nested Group member
-    (gem5 src/base/stats/group.hh:60-92) rather than one
-    member per counter; a component's events are the same shape, so a
-    listener reaches all of them through one name.
-    """
+    """Every event the idle round accounting reports, as one member."""
 
     idle_round_emitted: trace_source.TraceSource = trace_source.new_source()

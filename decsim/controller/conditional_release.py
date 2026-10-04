@@ -1,24 +1,15 @@
 """Conditional release: letting go of the operations that waited on a result.
 
-When an operation's final result is in, every operation blocked on it may
-start; that is one "conditional release" decision per waiting operation.
-When nothing waits but the QPU itself needs the outcome, the decision is a
-"result return". Every decision travels to the controller over the
-frame-to-controller path, which the frame side executes
-(pauli_frame/decision_dispatch.py), and a release then sends the real
-operation command through the controller and on to the QPU.
+When an operation's final result is in, each operation blocked on it
+gets a release decision; when none waits but the QPU needs the outcome,
+the decision is a result return.
 
-The value of the outcome never matters here: a conditional operation
-starts once its dependency is fully decoded, whatever it decoded to.
-Caune et al. 2410.05202 stalls the program on the decoder's status
-register until decoding completes and then executes the second program
-"conditionally on the received result" (lines 364-367, 1255-1262), and
-the conditional gate costs the same either way, the qubit idling "for a
-time equal to the gate's duration" when the result is 0. Sivak et al.
-2211.09116 broadcasts the two decision bits to every control card,
-which "run independent but synchronized control flows that include
-conditional branching on these bits" (lines 1051-1056). So nothing in
-this file reads the result's bits.
+The outcome's value never matters: a conditional operation starts once
+its dependency is decoded, whatever it decoded to. Caune et al.
+2410.05202 stall on the decoder's status register and pad the
+conditional gate to the same time either way; Sivak et al. 2211.09116
+broadcast the decision bits to every control card, which branch on them
+in lockstep. So nothing here reads the result's bits.
 """
 
 import decsim.ports as ports

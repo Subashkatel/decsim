@@ -192,7 +192,7 @@ to one decode.
   the verdict's selection to reach it.
 - `frame_commit` closes it.
 
-On a serial path those ten add
+On a serial path those eleven add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 

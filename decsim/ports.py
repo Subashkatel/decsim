@@ -1936,6 +1936,19 @@ class ConfidenceSignal(Protocol):
         """
 
 
+class ConfidenceSettings(Protocol):
+    """A confidence row's settings record, which builds the signal."""
+
+    name: str
+
+    def build(
+        self,
+        weak_algorithm: DecoderSettings,
+        threshold_nats: Optional[float],
+    ) -> ConfidenceSignal:
+        """The signal, from the weak decoder's record and the threshold."""
+
+
 @runtime_checkable
 class RegionProposer(Protocol):
     """The window interaction, as the strong regions see it.

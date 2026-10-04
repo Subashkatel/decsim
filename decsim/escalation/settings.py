@@ -16,19 +16,6 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
 
 
-class ConfidenceSettings(Protocol):
-    """A confidence row's settings record, which builds the signal."""
-
-    name: str
-
-    def build(
-        self,
-        weak_algorithm: ports.DecoderSettings,
-        threshold_nats: Optional[float],
-    ) -> ports.ConfidenceSignal:
-        """The signal, from the weak decoder's record and the threshold."""
-
-
 class ThresholdSettings(Protocol):
     """A threshold row's settings record: decibels in, nats out.
 
@@ -88,7 +75,7 @@ class SwitchingSettings:
     the weak pool, so its unit_count decides whether they overlap.
     """
 
-    confidence: ConfidenceSettings
+    confidence: ports.ConfidenceSettings
     threshold: ThresholdSettings
     clock: Optional[config.Clock] = None
     threshold_cycles: int = 0

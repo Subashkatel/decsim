@@ -40,6 +40,15 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 | --- | --- |
 | `build(self)` | `BoundaryPolicy` |
 
+### `ConfidenceSettings`
+
+`decsim/ports.py`. A confidence row's settings record, which builds the signal.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `build(self, weak_algorithm: DecoderSettings, threshold_nats: Optional[float])` | `ConfidenceSignal` |
+
 ### `MachineSettings`
 
 `decsim/settings.py`. One settings record per part of the machine.
@@ -374,15 +383,6 @@ formed_at lists the seats, each once; every path a round takes to a decoder cros
 
 ## decsim/escalation
 
-### `ConfidenceSettings`
-
-`decsim/escalation/settings.py`. A confidence row's settings record, which builds the signal.
-
-| Member | Type |
-| --- | --- |
-| `name` | `str` |
-| `build(self, weak_algorithm: ports.DecoderSettings, threshold_nats: Optional[float])` | `ports.ConfidenceSignal` |
-
 ### `ThresholdSettings`
 
 `decsim/escalation/settings.py`. A threshold row's settings record: decibels in, nats out.
@@ -419,7 +419,7 @@ Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier repo
 
 | Field | Type | Default |
 | --- | --- | --- |
-| `confidence` | `ConfidenceSettings` | required |
+| `confidence` | `ports.ConfidenceSettings` | required |
 | `threshold` | `ThresholdSettings` | required |
 | `clock` | `Optional[config.Clock]` | `None` |
 | `threshold_cycles` | `int` | `0` |

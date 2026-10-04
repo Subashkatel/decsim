@@ -38,6 +38,7 @@ import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.links.link_profiles as link_profiles
+import decsim.ports as ports
 import decsim.settings as machine_settings
 import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -131,7 +132,7 @@ def switching_points() -> list:
 
 def _switching(
     base: machine_settings.MachineSettings,
-    confidence: escalation_settings.ConfidenceSettings,
+    confidence: ports.ConfidenceSettings,
     weak_decoder: decoder_settings.DecoderPoolSettings,
     strong_decoder: decoder_settings.DecoderPoolSettings,
 ) -> machine_settings.MachineSettings:

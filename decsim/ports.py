@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.config as config
+import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -42,7 +43,7 @@ class Port:
     is not asked: every bind site is decsim's own build code.
     """
 
-    def __init__(self, protocol, optional: bool = False) -> None:
+    def __init__(self, protocol: type, optional: bool = False) -> None:
         self.protocol = protocol
         self.optional = optional
         self.name = ""
@@ -108,7 +109,12 @@ class IdleRoundReceiver(Protocol):
     its route.
     """
 
-    def emit_idle_round(self, operation_id, patch, round_index: int) -> None:
+    def emit_idle_round(
+        self,
+        operation_id: Any,  # an opaque identity
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """Take one idle cycle of a patch nobody is operating on."""
 
     def start_command(
@@ -217,7 +223,7 @@ class SyndromeBufferSettings(Protocol):
     clock: Optional[config.Clock]
     prices_read_bits: bool
 
-    def build(self, engine) -> SyndromeBuffer:
+    def build(self, engine: engine_module.Engine) -> SyndromeBuffer:
         """A fresh store on these settings."""
 
 
@@ -262,13 +268,22 @@ class RetainedRounds(Protocol):
     def publication_tick(self, round_key: tuple) -> Optional[int]:
         """When the round became readable, or None while it is not."""
 
-    def open_operation(self, operation_id) -> None:
+    def open_operation(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> None:
         """This operation may receive rounds from now on."""
 
-    def has_operation(self, operation_id) -> bool:
+    def has_operation(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> bool:
         """Whether the store still serves this operation."""
 
-    def close_operation(self, operation_id) -> None:
+    def close_operation(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> None:
         """The operation sends no more rounds; a closed one never reopens.
 
         A round still crossing a priced link when its operation closes
@@ -276,7 +291,10 @@ class RetainedRounds(Protocol):
         the round has no reader and the receiver drops it at the landing.
         """
 
-    def has_live_operation_reference(self, operation_id) -> bool:
+    def has_live_operation_reference(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> bool:
         """Whether a live hold still names this operation.
 
         A stored round that no hold names has no reader, so it does not
@@ -418,7 +436,10 @@ class MemoryRoundArrivals(Protocol):
     side so that the stream stage it occupies is accounted for.
     """
 
-    def receive_memory_round(self, source_operation_id) -> None:
+    def receive_memory_round(
+        self,
+        source_operation_id: Any,  # an opaque identity
+    ) -> None:
         """Take one timing-only round that landed at the decoder side."""
 
 
@@ -456,23 +477,40 @@ class WindowInput(Protocol):
     ) -> None:
         """Publish one stored round to window readiness; never refused."""
 
-    def accept_feedback_memory_round(self, source_operation_id) -> None:
+    def accept_feedback_memory_round(
+        self,
+        source_operation_id: Any,  # an opaque identity
+    ) -> None:
         """Record one idle or memory round and re-check waiting windows."""
 
     def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style operation."""
 
-    def has_dynamic_stream(self, stream_id) -> bool:
+    def has_dynamic_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> bool:
         """True for a stream whose windows are planned at runtime."""
 
-    def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
+    def close_stream_boundary(
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
+    ) -> None:
         """Mark a live stream round as a measurement-closed boundary."""
 
-    def seal_stream(self, stream_id, stream_round_count: int) -> None:
+    def seal_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
+    ) -> None:
         """Close a dynamic stream once its full length has arrived."""
 
     def bind_stream_operation(
-        self, operation_id: int, stream_id, stream_offset: int
+        self,
+        operation_id: int,
+        stream_id: Any,  # an opaque identity
+        stream_offset: int,
     ) -> None:
         """Note which stream and offset a segment's rounds fold into."""
 
@@ -481,13 +519,17 @@ class WindowInput(Protocol):
     ) -> None:
         """Note the stream round a protected segment's result waits for."""
 
-    def accept_room_round(self, operation_id, round_index: int) -> None:
+    def accept_room_round(
+        self,
+        operation_id: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """Record a round that landed in the strong syndrome buffer instead."""
 
     def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
         """A boundary landed in the window; True when it owed no other."""
 
-    def reads_windows_from(self, store) -> bool:
+    def reads_windows_from(self, store: Optional[SyndromeBuffer]) -> bool:
         """Whether the primary tier's window reads come from this store."""
 
 
@@ -516,7 +558,7 @@ class WindowPlan(Protocol):
     def later_windows(self, operation_id: Any, window_index: int) -> list:
         """The operation's windows past that index, in index order."""
 
-    def check_absorbable(self, window_keys) -> None:
+    def check_absorbable(self, window_keys: tuple) -> None:
         """Every listed window is still undecoded and uncommitted."""
 
     def strong_window_model(
@@ -562,11 +604,17 @@ class WindowRetention(Protocol):
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
         """The strong job's context becomes its input hold."""
 
-    def strong_window_input(self, builder, window) -> list:
+    def strong_window_input(
+        self, builder: "WindowJobBuilder", window: window_records.Window
+    ) -> list:
         """The room-side payloads of a strong window, first round stamped."""
 
     def hold_strong_context(
-        self, key: tuple, strong_request_key, context_keys, restart_key
+        self,
+        key: tuple,
+        strong_request_key: window_records.DecoderRequestKey,
+        context_keys: tuple,
+        restart_key: Optional[tuple],
     ) -> None:
         """The rounds kept in case the window escalates pass to its request.
 
@@ -574,21 +622,21 @@ class WindowRetention(Protocol):
         request, or None.
         """
 
-    def context_rounds_in_flight(self, key: tuple, read_keys) -> tuple:
+    def context_rounds_in_flight(self, key: tuple, read_keys: tuple) -> tuple:
         """The rounds the strong syndrome buffer lacks that the weak one has."""
 
-    def escalated_rounds(self, round_keys) -> tuple:
+    def escalated_rounds(self, round_keys: list) -> tuple:
         """The weak syndrome buffer's packets of these rounds, to carry up."""
 
     def guard_restart_reads(
         self,
         key: tuple,
         restart_key: Optional[tuple],
-        proposed_restart,
-        strong_request_key,
-        context_keys,
-        restart_read_keys,
-    ):
+        proposed_restart: Optional[window_records.Window],
+        strong_request_key: window_records.DecoderRequestKey,
+        context_keys: tuple,
+        restart_read_keys: tuple,
+    ) -> Optional[decoding_records.RephaseGuard]:
         """Hold the restart window's strong context while a plan lands."""
 
     def replace_window_reads(
@@ -599,14 +647,19 @@ class WindowRetention(Protocol):
     def release_restart_reads(self, key: tuple) -> None:
         """No earlier escalation can re-slice the window: its claim ends."""
 
-    def release_hold_if_live(self, owner, store=None) -> None:
+    def release_hold_if_live(
+        self, owner, store: Optional[RetainedRounds] = None
+    ) -> None:
         """Drop a hold that is still live; nothing for one already gone."""
 
     def release_strong_hold_if_live(self, owner) -> None:
         """Drop a room-side hold when it is still registered."""
 
     def release_absorbed_strong_hold(
-        self, key: tuple, restart_key: Optional[tuple], replacement
+        self,
+        key: tuple,
+        restart_key: Optional[tuple],
+        replacement: decoding_records.PendingStrong,
     ) -> None:
         """Drop an absorbed window's rounds; the strong request holds them."""
 
@@ -633,11 +686,14 @@ class WindowRetention(Protocol):
         """
 
     def require_retained(
-        self, round_keys: list, purpose: str, store=None
+        self,
+        round_keys: list,
+        purpose: str,
+        store: Optional[RetainedRounds] = None,
     ) -> None:
         """Refuse a new consumer if an already-arrived round was released."""
 
-    def require_strong_retained(self, round_keys, purpose: str) -> None:
+    def require_strong_retained(self, round_keys: list, purpose: str) -> None:
         """The same, on the strong syndrome buffer."""
 
 
@@ -649,15 +705,23 @@ class WindowRounds(Protocol):
     arriving.
     """
 
-    def operation(self, operation_id) -> program_records.Operation:
+    def operation(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> program_records.Operation:
         """The operation of that id."""
 
     def round_count_for_window(
-        self, operation_id, window: window_records.Window
+        self,
+        operation_id: Any,  # an opaque identity
+        window: window_records.Window,
     ) -> int:
         """The rounds the window reads of its operation."""
 
-    def strong_rounds_arrived(self, operation_id) -> int:
+    def strong_rounds_arrived(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
         """The rounds of the operation stored in the strong syndrome buffer."""
 
 
@@ -681,7 +745,9 @@ class WindowRequests(Protocol):
     """The submission side, as a strong window shape steers it."""
 
     def request_if_ready(
-        self, window: window_records.Window, strong_redecode
+        self,
+        window: window_records.Window,
+        strong_redecode: Optional["StrongRedecode"],
     ) -> None:
         """If the window has its data, submit it through the policy."""
 
@@ -742,7 +808,10 @@ class StrongRedecode(Protocol):
     def cancel_strong_request(self, window_key: tuple) -> None:
         """A kept weak result: its strong request ends, held or submitted."""
 
-    def submit_if_stored_data_releases(self, operation_id) -> None:
+    def submit_if_stored_data_releases(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> None:
         """A round was stored: a window waiting for its tail leaves."""
 
 
@@ -1010,7 +1079,7 @@ class Decoder(Protocol):
     def start(
         self,
         job: decoding_records.DecodeJob,
-        engine,
+        engine: engine_module.Engine,
         on_result: Callable[[Optional[decoding_records.DecodeResult]], None],
     ) -> None:
         """Run the job on the unit; on_result runs once at its output."""
@@ -1088,7 +1157,7 @@ class Frame(Protocol):
         self,
         *,
         window_key: tuple,
-        logical_observables,
+        logical_observables: Optional[tuple[int, ...]],
         request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
     ) -> None:
@@ -1460,7 +1529,7 @@ class WindowModelSource(Protocol):
         *,
         fault_model_requirement,
         fault_exclusion_ranges: tuple,
-        window_protocol,
+        window_protocol: window_records.WindowProtocol,
     ) -> list:
         """One model per window of a planned operation, in window order."""
 
@@ -1498,7 +1567,7 @@ class WindowModelSource(Protocol):
         *,
         fault_model_requirement,
         fault_exclusion_ranges: tuple = (),
-        prior_faults=None,
+        prior_faults: Optional[dict] = None,
     ):
         """One strong window's model, its non-owned round ranges excluded.
 
@@ -1840,7 +1909,7 @@ class WindowingScheme(Protocol):
         *,
         commit_round_count: int,
         buffer_round_count: int,
-    ):
+    ) -> window_records.OperationWindowPlan:
         """The operation's windows and their internal dependencies."""
 
     def data_complete(
@@ -1862,7 +1931,9 @@ class RoundsPolicy(Protocol):
     """
 
     def rounds_for(
-        self, operation: program_records.OperationPlanningView, code
+        self,
+        operation: program_records.OperationPlanningView,
+        code: "CodeModel",
     ) -> int:
         """The operation's round count on this code."""
 
@@ -1901,10 +1972,21 @@ class IdlePolicy(Protocol):
     are settled.
     """
 
-    def relay(self, idle_rounds, operation, patch, round_index: int) -> None:
+    def relay(
+        self,
+        idle_rounds,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """Carry one idle round of the patch through the idle accounting."""
 
-    def end_idle_period(self, idle_rounds, operation, patch) -> None:
+    def end_idle_period(
+        self,
+        idle_rounds,
+        operation: program_records.Operation,
+        patch: Any,  # an opaque identity
+    ) -> None:
         """Settle the uncharged rounds: a claim, or the workload's end."""
 
 

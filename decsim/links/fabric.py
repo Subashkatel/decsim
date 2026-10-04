@@ -179,7 +179,7 @@ class LinkFabric:
 
 @dataclasses.dataclass(frozen=True)
 class _PathBinding:
-    """One wired path: its settings and the channel it rides."""
+    """One wired path, bound to the channel it rides."""
 
     settings: link_settings.PathSettings
     channel: ports.Channel

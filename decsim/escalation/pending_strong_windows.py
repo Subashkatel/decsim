@@ -57,7 +57,7 @@ class ReleaseConditions:
 
 @dataclasses.dataclass(frozen=True)
 class PendingStrongWindow:
-    """One held strong window: what was assigned, and what releases it."""
+    """One held strong window."""
 
     key: tuple
     assignment: StrongAssignment

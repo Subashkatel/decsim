@@ -27,7 +27,7 @@ import decsim.ports as ports
 
 @dataclasses.dataclass(frozen=True)
 class Control:
-    """What issues the program to the QPU and closes the feedback loop.
+    """The components that run the program's feedback loop with the QPU.
 
     pauli_frame is None when the run commits into no frame.
     """

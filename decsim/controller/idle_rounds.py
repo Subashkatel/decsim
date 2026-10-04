@@ -20,7 +20,11 @@ import decsim.trace_source as trace_source
 
 
 class IdleRoundAccounting:
-    """Routes each idle round by the policy and charges the decodes."""
+    """Accounts for each idle round as the idle policy rules.
+
+    The policy decides how the round travels and which decodes it
+    charges.
+    """
 
     decode_queue = ports.Port(ports.DecodeQueue)
     streams = ports.Port(feedback_streams.Streams)

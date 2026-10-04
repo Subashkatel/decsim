@@ -33,7 +33,9 @@ SendInput = Callable[[Callable[[], None]], int]
 
 
 class DecoderInputStaging:
-    """Stages a job's input into a unit's memory and frees it again.
+    """Stages each job's input into a unit's memory.
+
+    It frees the input again at the job's release.
 
     Trace sources: copy_made(job, bits, store_name, memory_name) at
     every landing that deposits rounds and at every boundary folded into
@@ -384,7 +386,10 @@ class CancellableDecoderMemoryTransfer:
 
 @dataclasses.dataclass
 class _AwaitedLanding:
-    """One transfer in flight into a unit, and the jobs joining its landing."""
+    """One transfer in flight into a unit.
+
+    joined holds the jobs that join its landing.
+    """
 
     expected_landing_ticks: int
     joined: list

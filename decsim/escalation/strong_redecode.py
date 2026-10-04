@@ -31,7 +31,7 @@ import decsim.trace_source as trace_source
 
 
 class StrongRedecode:
-    """Selects, submits and lands the strong tier's re-decode of a window."""
+    """Drives each escalated window's strong re-decode."""
 
     shape = ports.Port(strong_window_shapes.StrongWindowShape)
     # the ledger of held strong windows and what releases each

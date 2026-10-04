@@ -132,12 +132,13 @@ class TableThreshold(FixedThreshold):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The csv and its column, and the threshold they give the point.
+        """The calibration table's threshold for one point.
 
-        table is a label and no part of a point's id: the number the
-        table gives names the point. threshold_decibels is that number,
-        None until the point's row is read (at_point), which the point's
-        task does before it names the point.
+        column is the csv column it reads. table is a label and no part of
+        a point's id: the number the table gives names the point.
+        threshold_decibels is that number, None until the point's row is
+        read (at_point), which the point's task does before it names the
+        point.
         """
 
         table: pathlib.Path = dataclasses.field(compare=False)
@@ -368,7 +369,7 @@ class OnlineThreshold:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The starting threshold and the calibrator's knobs.
+        """The online calibrator's knobs.
 
         threshold_decibels is where the rate tracker starts; it steps
         toward target_escalation_rate by step_decibels per window. The

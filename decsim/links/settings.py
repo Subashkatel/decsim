@@ -128,7 +128,7 @@ class ChannelSettings:
 
 @dataclasses.dataclass(frozen=True)
 class PathSettings:
-    """One path: its channel, its payload rule, and its setup cost.
+    """How one path carries a transfer.
 
     At least one of the default payload and the actual payload source is
     given. setup_ticks is paid on the channel's setup engine before every
@@ -197,7 +197,7 @@ class ReadoutRoute:
 
 @dataclasses.dataclass(frozen=True)
 class FabricSettings:
-    """A fabric card: one path setting per hop and a profile name.
+    """A fabric card: one path setting per hop.
 
     Every hop of the reaction path is priced, so a card names all eleven. A
     card whose QPU-to-controller latency leaves out the controller's

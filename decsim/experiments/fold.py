@@ -216,10 +216,11 @@ class RowTotals:
 
 
 class RowFile:
-    """One csv file written as its rows arrive, never held and then written.
+    """One csv file written as its rows arrive.
 
-    The header is known before the first row; a missing cell is empty, and
-    a file whose first row never came is not created.
+    No row is held for a later write. The header is known before the first
+    row; a missing cell is empty, and a file whose first row never came is
+    not created.
     """
 
     def __init__(self, path: pathlib.Path, field_names: list) -> None:

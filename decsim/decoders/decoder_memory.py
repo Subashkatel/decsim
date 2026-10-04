@@ -48,7 +48,10 @@ class DecoderMemoryCapacityError(RuntimeError):
 
 @dataclasses.dataclass
 class ResidentInput:
-    """One landed input of a unit and the jobs still reading it."""
+    """One landed input in a unit's memory.
+
+    readers are the jobs still reading it.
+    """
 
     decoder_input: decoding_records.DecoderInput
     readers: list

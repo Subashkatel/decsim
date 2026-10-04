@@ -31,7 +31,7 @@ class FifoScheduler:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """FIFO has no knob; the record names the rule and builds it."""
+        """FIFO's settings: the rule has no knob."""
 
         def build(self) -> "FifoScheduler":
             """A fresh scheduler: each manager orders its own queue."""

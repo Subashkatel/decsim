@@ -53,7 +53,10 @@ FRAME_PATH_BY_TIER = {
 
 
 class DecoderOutput:
-    """Sends one decoder's answers where they go, and charges the frame."""
+    """Sends one decoder's answers where they go.
+
+    A correction commits into the frame as a priced write.
+    """
 
     transfers = ports.Port(ports.WindowTransfers)
     # a run with no frame commits its corrections nowhere

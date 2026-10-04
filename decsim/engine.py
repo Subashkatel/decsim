@@ -51,7 +51,7 @@ class Event:
 
 
 class Engine:
-    """Runs scheduled actions in time order and narrates through sources."""
+    """Runs scheduled actions in time order."""
 
     def __init__(self) -> None:
         self.now: int = 0

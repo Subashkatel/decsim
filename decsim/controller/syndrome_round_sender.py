@@ -24,7 +24,7 @@ import decsim.trace_source as trace_source
 
 
 class WaitingRound(Protocol):
-    """What a waiting line reads of a round: its key and its route."""
+    """What a waiting line reads of a round."""
 
     round_key: tuple
     route: round_records.SyndromePacketRoute

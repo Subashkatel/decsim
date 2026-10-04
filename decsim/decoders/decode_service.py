@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 class DecodeService:
-    """Stages, starts, prices and frees every decode on its unit.
+    """Serves every decode on its unit, from staging to release.
 
     Every decode's end goes to the manager's decode_completed, and
     dispatch runs wherever compute frees inside an engine event. Four

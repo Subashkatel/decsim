@@ -53,7 +53,7 @@ class Counts:
 
 @dataclasses.dataclass(frozen=True)
 class FollowedPath:
-    """One round's or one window's hops and counts, in tick order."""
+    """One round's or one window's path through a shot, in tick order."""
 
     kind: str
     key: str

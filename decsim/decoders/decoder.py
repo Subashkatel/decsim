@@ -30,7 +30,7 @@ OnResult = Callable[[Optional[decoding_records.DecodeResult]], None]
 
 
 class DecoderBase(abc.ABC):
-    """A row of the decoder table: decode and latency, timing from those.
+    """The port's defaults for a row of the decoder table.
 
     start prices the job with latency and decodes when that time ends; a
     decoder whose occupancy is None is measured instead, its result

@@ -35,10 +35,11 @@ class SeparateDecodeJobsSettings:
 
 
 class Ignore:
-    """Idle rounds travel as feedback-memory rounds and cost no decode work.
+    """Idle rounds cost no decode work.
 
-    Valid for latency studies of the active path; it undercounts decoder
-    throughput, utilization and unit counts on multi-operation workloads.
+    They travel as feedback-memory rounds. Valid for latency studies of
+    the active path; it undercounts decoder throughput, utilization and
+    unit counts on multi-operation workloads.
     """
 
     def relay(
@@ -64,14 +65,15 @@ class Ignore:
 
 
 class SeparateDecodeJobs:
-    """Idle rounds travel as memory rounds and are charged as decode jobs.
+    """Idle rounds are charged as decode jobs.
 
-    Every commit region costs one load-only decode job sized to the region
-    plus the buffer rounds. The rounds left when an operation claims the
-    patch, or the workload completes, cost one shorter job: a final window
-    may be smaller (Tan et al. 2209.09219; Skoric et al. 2209.08552), and no
-    validated system leaves the end of a stream undecoded. The honest
-    default for throughput, utilization, backlog or unit-count claims.
+    They travel as memory rounds. Every commit region costs one load-only
+    decode job sized to the region plus the buffer rounds. The rounds left
+    when an operation claims the patch, or the workload completes, cost one
+    shorter job: a final window may be smaller (Tan et al. 2209.09219;
+    Skoric et al. 2209.08552), and no validated system leaves the end of a
+    stream undecoded. The honest default for throughput, utilization,
+    backlog or unit-count claims.
     """
 
     def relay(

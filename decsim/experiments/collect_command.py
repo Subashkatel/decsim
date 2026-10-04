@@ -35,7 +35,7 @@ import decsim.settings as machine_settings
 
 @dataclasses.dataclass
 class PointCollection:
-    """One point's collection as it runs: its next seed and its prefix.
+    """One point's collection as it runs.
 
     tracker reads the prefix shot by shot off the saved shots.csv, as the
     report does, so the collector stops on the report's shot. pending holds

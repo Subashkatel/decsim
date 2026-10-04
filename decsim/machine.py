@@ -70,7 +70,7 @@ import decsim.windows.built_window_models as built_window_models
 
 @dataclasses.dataclass(frozen=True)
 class Machine:
-    """The parts of one run, built from its settings and connected.
+    """The wired parts of one run, built from its settings.
 
     Build one per seed with Machine.build, then run it once; the parts
     stay readable afterwards for the measurements and the views that

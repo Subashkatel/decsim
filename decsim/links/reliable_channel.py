@@ -70,8 +70,9 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The credit protocol's fields, the connection's, and their clock.
+        """The reliable protocol's settings.
 
+        The framing, buffer and credit fields are the credit protocol's.
         window_packets is the most unacknowledged packets in flight;
         ack_every_packets bounds the packets between acknowledgement requests;
         retransmit_timeout_cycles is on clock, the card's domain; retry_count is
@@ -441,7 +442,10 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
 
 @dataclasses.dataclass
 class _Message:
-    """One transfer as the requester numbers it, and its transmissions."""
+    """One transfer as the requester numbers it.
+
+    timings holds the frame timing of each of its transmissions.
+    """
 
     request: object
     sequence: int
@@ -474,7 +478,10 @@ class _Transmission:
 
 @dataclasses.dataclass
 class _SendState:
-    """The requester's side: rxe's req.psn, comp.psn and counters."""
+    """The requester's side of the connection.
+
+    rxe keeps the same state in req.psn, comp.psn and its counters.
+    """
 
     retries_left: int
     # the packets a send can still reach, by PSN, from first_kept_psn
@@ -491,7 +498,10 @@ class _SendState:
 
 @dataclasses.dataclass
 class _ReceiveState:
-    """The responder's side: rxe's resp.psn and sent_psn_nak."""
+    """The responder's side of the connection.
+
+    rxe keeps the same state in resp.psn and sent_psn_nak.
+    """
 
     expected_psn: int = 0
     is_nak_sent: bool = False

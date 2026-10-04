@@ -29,7 +29,7 @@ import decsim.trace_source as trace_source
 
 
 class TesseractCheckedDecoder(decoder_module.DecoderBase):
-    """A decoder whose every result Tesseract re-decodes and checks.
+    """A decoder whose every result Tesseract re-decodes to check.
 
     Timing is the inner decoder's in every respect; the referee's own
     call is never charged.

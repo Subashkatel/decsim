@@ -34,7 +34,10 @@ import decsim.windows.window_interactions as window_interactions
 
 @dataclasses.dataclass(frozen=True)
 class Plan:
-    """Everything the wiring reads that the planner and the workload fix."""
+    """Everything the wiring reads from the planned run.
+
+    The planner and the workload fix it.
+    """
 
     code: ports.CodeModel
     layout: layouts.UniformLayout

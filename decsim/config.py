@@ -120,7 +120,7 @@ def is_number(value: object) -> bool:
 
 @dataclasses.dataclass(frozen=True)
 class Clock:
-    """One clock domain's period, and the edges its component charges on.
+    """One clock domain.
 
     A component charges a cost of n cycles from the edge at or after the
     tick it stands on, so work started mid-cycle lands on an edge and

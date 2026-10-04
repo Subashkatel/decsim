@@ -7,7 +7,9 @@ downstream of these records.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any, Optional, Union
+
+import numpy
 
 import decsim.records.windows as window_records
 
@@ -27,7 +29,7 @@ class SyndromePacketRoute:
     """
 
     kind: SyndromePacketRouteKind
-    source_operation_id: Optional[Any] = None
+    source_operation_id: Optional[Any] = None  # an opaque identity
 
     @classmethod
     def feedback_memory_round(
@@ -55,10 +57,10 @@ class QPUReadout:
     a formation table sizes them, or nothing does.
     """
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     patch_ids: tuple
     round_index: int
-    bits: Optional[Any] = None
+    bits: Optional[Union[list, tuple, numpy.ndarray]] = None
     fragment_count: int = 1
     fragment_index: int = 0
     size_bits: Optional[int] = None
@@ -72,7 +74,7 @@ class RetainedSyndromeFragment:
     event_bits is the readout's, until a seat forms the fragment.
     """
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     patch_ids: tuple
     round_index: int
     bits: Optional[tuple[int, ...]]
@@ -105,7 +107,7 @@ class RetainedSyndromeFragment:
 class SyndromeRoundPacket:
     """One complete immutable syndrome round in declared measurement order."""
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
 
@@ -301,7 +303,9 @@ def stated_bits(bits: Optional[int]) -> int:
 
 
 def _split_at_the_first_round(
-    packets: tuple, operation_id: Any, first_round: int
+    packets: tuple,
+    operation_id: Any,  # an opaque identity
+    first_round: int,
 ) -> tuple:
     """(the rounds before first_round, the rest), each in the order given.
 

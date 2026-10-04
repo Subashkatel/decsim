@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional
 
+import stim
+
 
 @dataclass(frozen=True)
 class ResolvedCodeGeometry:
@@ -37,7 +39,7 @@ class ResolvedOperationPlanning:
 class ResolvedPatchPlanning:
     """Exact immutable cadence and idle-work facts for one patch."""
 
-    patch_identity: Any
+    patch_identity: Any  # an opaque identity
     code_geometry: ResolvedCodeGeometry
     round_ticks: int
     spatial_node_count: int
@@ -77,7 +79,7 @@ class ExecutionProgram:
 class StreamBinding:
     """Immutable runtime association between an operation and stream range."""
 
-    stream_id: Any
+    stream_id: Any  # an opaque identity
     stream_offset: int
 
 
@@ -85,7 +87,7 @@ class StreamBinding:
 class RunOperationBody:
     """Immutable controller-to-QPU command for one operation body."""
 
-    operation: Any
+    operation: "Operation"
     round_ticks: int
     round_count: int
     source_round_count: int
@@ -128,7 +130,7 @@ class Operation:
     # Stim circuit for real-syndrome (data-path) runs. A Stim circuit has
     # no hash, and equal operations hold equal circuits, so the hash
     # leaves it out and still agrees with equality.
-    circuit: Optional[Any] = field(default=None, hash=False)
+    circuit: Optional[stim.Circuit] = field(default=None, hash=False)
     consumes_magic_state: Optional[bool] = (
         None  # override; None = infer from clifford
     )
@@ -180,7 +182,7 @@ class OperationPlanningView:
     patches: tuple
     predecessors: tuple
     decoder_boundary_predecessors: tuple
-    stream_id: Optional[Any]
+    stream_id: Optional[Any]  # an opaque identity
     stream_offset: Optional[int]
     scheduled_start_round: int
     emits_detector_data: bool
@@ -239,7 +241,7 @@ def patches_of(operation: Operation) -> tuple:
     return (0,)
 
 
-def decode_identity(operation: Operation) -> Any:
+def decode_identity(operation: Operation) -> Any:  # an opaque identity
     """The decode stream an operation's rounds fold into.
 
     A stream segment names its stream; a standalone operation is its own

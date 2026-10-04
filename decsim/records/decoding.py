@@ -9,8 +9,11 @@ escalation policy reads them with the result.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
+import numpy
+
+import decsim.records.decoder_evidence as evidence_records
 import decsim.records.windows as window_records
 
 
@@ -156,7 +159,7 @@ class LaterStreamReads:
     keeps the raw rounds its strong read will need until then.
     """
 
-    stream_id: Any
+    stream_id: Any  # an opaque identity
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the stream's own."""
@@ -346,7 +349,7 @@ class DecodeJob:
     # rounds_needed_before); held by the former and never decoded,
     # cleared with the payloads
     rounds_before: tuple = ()
-    input_hold: Optional[Any] = (
+    input_hold: Optional[Callable[[], None]] = (
         None  # upstream hold released at transfer completion
     )
     # the WindowInputGate the decoder manager asks before staging, before
@@ -521,10 +524,10 @@ class BackendFailureReason(Enum):
 class WindowDecode:
     """What one backend call on one window answers; unproduced fields None."""
 
-    selected_faults: Any
+    selected_faults: Union[numpy.ndarray, tuple[int, ...]]
     decode_status: Optional[BackendDecodeStatus] = None
     forced_class_weight: Optional[float] = None
-    cluster_evidence: Optional[Any] = None
+    cluster_evidence: Optional[evidence_records.UnionFindHardEvidence] = None
     iterations: Optional[int] = None
     no_correction_reason: Optional[BackendFailureReason] = None
 
@@ -550,7 +553,8 @@ class DecodeResult:
 
     operation_id: int
     window_id: int
-    correction: Optional[Any] = None  # correction operator (None = timing-only)
+    # correction operator (None = timing-only)
+    correction: Optional[numpy.ndarray] = None
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction
     soft_output: Optional[SoftOutput] = None  # source-compatible confidence
     # the minimum weight inside the class the job was forced to; None
@@ -558,17 +562,18 @@ class DecodeResult:
     forced_class_weight: Optional[float] = None
     # the growth a cluster-based decode did, what a cluster gap reads;
     # None from a row that grows no clusters
-    cluster_evidence: Optional[Any] = None
+    cluster_evidence: Optional[evidence_records.UnionFindHardEvidence] = None
     # the window's detection events the decode read, in its detector
     # rows' order and read-only; None from a row that reads none
-    detection_events: Optional[Any] = None
+    detection_events: Optional[numpy.ndarray] = None
     # the message-passing iterations the decode ran, what a measured
     # device time law reads; None from a row that runs no iterations
     iterations: Optional[int] = None
     # round-keyed seam defects a decoder may report in place of a
     # residual in boundary_data
     boundary_defects: Optional[dict] = None
-    boundary_data: Optional[Any] = None  # optional richer interaction payload
+    # optional richer interaction payload
+    boundary_data: Optional[window_records.DependencyResidual] = None
     # CrossingCommit: the part of the correction that commits faults
     # touching a round before the window's commit region, which the
     # residual's XOR cannot be split into afterwards

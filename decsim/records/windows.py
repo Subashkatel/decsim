@@ -43,7 +43,7 @@ class DecoderRequestKey:
     distinct from the request it replaces.
     """
 
-    operation_id: Any
+    operation_id: Any  # an opaque identity
     window_id: int
     tier: DecoderTier
     run_sequence: int
@@ -284,7 +284,7 @@ class BoundaryDelivery:
     latest_delivery_revision: int
     source_operation_round_count: int
     dependency_released: bool
-    payload: Any
+    payload: Any  # opaque to all but the window interaction
 
     @property
     def is_current(self) -> bool:
@@ -314,7 +314,7 @@ class BoundarySeam:
 class BoundaryUpdate:
     """A policy's decision for one boundary arrival."""
 
-    state: Any
+    state: Any  # opaque to all but the window interaction
     accepted: bool
     release_dependency: bool
 
@@ -411,7 +411,10 @@ class FormationReads:
     tables: Mapping = field(default_factory=dict)
 
     def strong_read_start(
-        self, operation_id: Any, first_round: int, last_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
+        last_round: int,
     ) -> int:
         """The first round a strong read of these rounds holds."""
         table = self.tables.get(operation_id)

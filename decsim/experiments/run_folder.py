@@ -20,7 +20,7 @@ import subprocess
 import sys
 import uuid
 from collections.abc import Iterator, Mapping
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
@@ -481,7 +481,7 @@ def write_json(path: pathlib.Path, value: dict) -> None:
     path.write_text(lines)
 
 
-def read_json(path: pathlib.Path) -> Any:
+def read_json(path: pathlib.Path) -> dict:
     """One json file of the run folder."""
     text = path.read_text()
     return json.loads(text)

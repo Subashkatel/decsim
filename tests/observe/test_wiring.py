@@ -140,6 +140,26 @@ def _sources_on(owner) -> list:
     return sources
 
 
+def _sources_heard_twice(census, classes_by_source) -> list:
+    """(owner, source name, classes) of each source one class hears twice."""
+    doubled = []
+    for owner_name, source_name, source in census:
+        source_identity = id(source)
+        classes = classes_by_source[source_identity]
+        if len(classes) != len(set(classes)):
+            doubled.append((owner_name, source_name, classes))
+    return doubled
+
+
+def _unheard_sources(census) -> list:
+    """(owner, source name) of each source no listener hears."""
+    unheard = []
+    for owner_name, source_name, source in census:
+        if not source.has_listeners:
+            unheard.append((owner_name, source_name))
+    return unheard
+
+
 def test_no_source_is_heard_twice_by_one_listener_class(monkeypatch):
     """One connection per (source, listener class), with every knob on.
 
@@ -159,12 +179,7 @@ def test_no_source_is_heard_twice_by_one_listener_class(monkeypatch):
 
     census = _walk(machine)
     classes_by_source = _listener_classes_by_source(connections)
-    doubled = []
-    for owner_name, source_name, source in census:
-        source_identity = id(source)
-        classes = classes_by_source[source_identity]
-        if len(classes) != len(set(classes)):
-            doubled.append((owner_name, source_name, classes))
+    doubled = _sources_heard_twice(census, classes_by_source)
 
     assert doubled == []
     assert len(census) > 30
@@ -181,10 +196,7 @@ def test_every_source_has_a_listener_when_every_knob_is_on():
     machine = machine_module.Machine.build(point, gate_point.SEED)
 
     census = _walk(machine)
-    unheard = []
-    for owner_name, source_name, source in census:
-        if not source.has_listeners:
-            unheard.append((owner_name, source_name))
+    unheard = _unheard_sources(census)
 
     assert unheard == []
 
@@ -196,10 +208,12 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     asked = machine_module.Machine.build(asked_point, gate_point.SEED)
     silent = machine_module.Machine.build(silent_point, gate_point.SEED)
 
-    for machine in (asked, silent):
-        assert machine.observation.log is not None
-        assert machine.observation.round_events is not None
-        assert machine.observation.stages is not None
+    assert asked.observation.log is not None
+    assert asked.observation.round_events is not None
+    assert asked.observation.stages is not None
+    assert silent.observation.log is not None
+    assert silent.observation.round_events is not None
+    assert silent.observation.stages is not None
     assert asked.observation.trace_writer is not None
     assert asked.observation.data_movement is not None
     assert asked.observation.decode_records is not None
@@ -304,11 +318,18 @@ def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():
     assert result.terminal_status == "complete"
     assert machine.observation.stages.records != []
     assert decoder.window_checked.has_listeners
-    stage_events = []
-    for event in machine.observation.trace_writer.events:
-        if event.get("cat") == "stage":
-            stage_events.append(event)
+    trace_events = machine.observation.trace_writer.events
+    stage_events = _events_of_category(trace_events, "stage")
     assert stage_events != []
+
+
+def _events_of_category(events: list, category: str) -> list:
+    """The trace events of one category, in write order."""
+    found = []
+    for event in events:
+        if event.get("cat") == category:
+            found.append(event)
+    return found
 
 
 def _bare_observe(observation, engine, **parts):

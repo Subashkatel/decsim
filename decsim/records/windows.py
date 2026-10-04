@@ -105,7 +105,7 @@ class Window:
     # the final one, so a provisional weak commit is still awaiting strong
     published_request_key: Optional[DecoderRequestKey] = None
     queued: bool = False  # a decode request is pending or admitted
-    boundary_in: Any = field(default_factory=dict)  # state owned by the
+    boundary_in: object = field(default_factory=dict)  # state owned by the
     # configured WindowInteraction
     decode_status: Optional[str] = (
         None  # best-effort status of the committed decode, None = succeeded
@@ -284,7 +284,7 @@ class BoundaryDelivery:
     latest_delivery_revision: int
     source_operation_round_count: int
     dependency_released: bool
-    payload: Any  # opaque to all but the window interaction
+    payload: object  # opaque to all but the window interaction
 
     @property
     def is_current(self) -> bool:
@@ -314,7 +314,7 @@ class BoundarySeam:
 class BoundaryUpdate:
     """A policy's decision for one boundary arrival."""
 
-    state: Any  # opaque to all but the window interaction
+    state: object  # opaque to all but the window interaction
     accepted: bool
     release_dependency: bool
 

@@ -1673,7 +1673,7 @@ class Link(Protocol):
     (point-to-point-net-device.cc, GetTypeId's AddTraceSource calls).
     """
 
-    trace: Any
+    trace: object
 
     def expected_delay_ticks(
         self,
@@ -1766,7 +1766,7 @@ class Channel(Protocol):
     FrameRecord per frame.
     """
 
-    trace: Any
+    trace: object
 
     def send(
         self,
@@ -2034,7 +2034,7 @@ class MagicStateFactory(Protocol):
     each delivery.
     """
 
-    trace: Any
+    trace: object
 
     def start(self) -> None:
         """Queue whatever the factory does before the first request."""
@@ -2147,7 +2147,7 @@ class CodeModel(Protocol):
 class LayoutModel(Protocol):
     """Which code every patch and every operation runs on, and its claims."""
 
-    def code_for_op(
+    def code_for_operation(
         self, operation: program_records.OperationPlanningView
     ) -> CodeModel:
         """The code the operation runs on."""

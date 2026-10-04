@@ -429,7 +429,7 @@ class DecodeJob:
     # the WindowInputGate the decoder manager asks before staging, before
     # starting and when masking the landed input; None for a windowless job.
     # Opaque to the record, which cannot import the ports that name it
-    gate: Optional[Any] = None
+    gate: Optional[object] = None
     # where the result goes: on_decoded(job, result), set at enqueue
     on_decoded: Optional[Callable] = None
     # called at dispatch: send the input link, call back at the landing,
@@ -438,7 +438,7 @@ class DecodeJob:
     # the store the input leaves from, stamped by that store's own port
     input_source_name: Optional[str] = None
     # the ports.DecoderUnit assigned at dispatch, opaque to the record
-    unit: Optional[Any] = None
+    unit: Optional[object] = None
     # tick a unit took this decode, the end of its own queue wait; the
     # window record keeps the last one, this keeps each decode's own
     dispatch_ticks: Optional[int] = None
@@ -457,7 +457,7 @@ class DecodeJob:
     store_read_ticks: int = 0
     # that unit's ports.DecoderMemory while it holds this job's input,
     # opaque to the record
-    memory: Optional[Any] = None
+    memory: Optional[object] = None
     ready_time: int = 0  # tick the job was enqueued (queue-wait accounting)
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
@@ -766,8 +766,8 @@ class RunShape:
 
     # the ports.WindowingScheme and ports.BoundaryPolicy, opaque to the
     # record, which only hands them to the policy that reads them
-    scheme: Any
-    boundary_policy: Any
+    scheme: object
+    boundary_policy: object
     operations: tuple
     commit_round_count: int
     buffer_round_count: int

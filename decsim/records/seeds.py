@@ -6,7 +6,7 @@ machine draw the same numbers (decsim/seeding.py).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Union
 
 _SEED_PATH_TAG = {"field": b"F", "string_key": b"S"}
 
@@ -50,4 +50,4 @@ class RunSeedChild:
 class RunSeedReservation:
     """The random state a leaf prepared, which its commit installs."""
 
-    prepared_state: Any = field(repr=False)  # opaque to all but its leaf
+    prepared_state: object = field(repr=False)  # opaque to all but its leaf

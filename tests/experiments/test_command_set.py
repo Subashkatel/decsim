@@ -9,6 +9,7 @@ command line is never the only record of a number.
 import csv
 import dataclasses
 import datetime
+import errno
 import functools
 import hashlib
 import importlib.metadata
@@ -2219,43 +2220,30 @@ def test_a_refused_fold_leaves_the_last_run_folder_as_it_was(tmp_path):
 
 
 def test_a_fold_that_fails_part_way_leaves_the_last_run_folder_as_it_was(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
     """A fold that raises after writing some files publishes none of them.
 
-    Every piece is made to name a latency point this tree does not
-    measure, as a tree that called service something else would write
-    it, so the fold's sort of the window samples raises after sweep.csv
-    and shots.csv are written. Those went into the staging folder, so
-    every file of the run folder is what the first fold wrote.
+    The second fold writes shots.csv whole, then the disk fills partway
+    through sweep.csv. Both went into the staging folder, so every file
+    of the run folder is what the first fold wrote.
     """
     config_path = _capped_noisy_config(tmp_path, 2, 15)
     out_dir = tmp_path / "out"
     command.main(["run", str(config_path), "--out", str(out_dir)])
     before = _run_folder_bytes(out_dir)
-    for piece_folder in out_dir.glob("pieces/*/*"):
-        _with_a_renamed_point(piece_folder, "service", "park")
+    monkeypatch.setattr(report, "write_csv", _write_part_then_fill_the_disk)
 
-    with pytest.raises(ValueError, match="x not in tuple"):
+    with pytest.raises(OSError, match="No space left on device"):
         command.main(["run", "--fold", "--out", str(out_dir)])
 
     assert _run_folder_bytes(out_dir) == before
 
 
-def _with_a_renamed_point(piece_folder, name: str, renamed: str) -> None:
-    """The piece as a tree that called that latency point renamed writes it."""
-    shots_path = piece_folder / "shots.csv"
-    shot_rows = _csv_rows(shots_path)
-    for row in shot_rows:
-        row[f"{renamed}_mean_us"] = row.pop(f"{name}_mean_us")
-        row[f"{renamed}_max_us"] = row.pop(f"{name}_max_us")
-    _write_csv_rows(shots_path, shot_rows)
-    samples_path = piece_folder / "window_samples.csv"
-    samples = _csv_rows(samples_path)
-    for row in samples:
-        if row["name"] == name:
-            row["name"] = renamed
-    _write_csv_rows(samples_path, samples)
+def _write_part_then_fill_the_disk(_rows, path, _swept=None) -> None:
+    """write_csv on a disk that fills after the header's first column."""
+    path.write_text("point_id,")
+    raise OSError(errno.ENOSPC, "No space left on device", str(path))
 
 
 def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:

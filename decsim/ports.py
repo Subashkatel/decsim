@@ -2181,3 +2181,36 @@ class LayoutModel(Protocol):
         self, operation: program_records.OperationPlanningView
     ) -> list[program_records.ResourceClaim]:
         """The resources the operation holds while it runs."""
+
+
+# ------------------------------ what a listener reads off what it hears
+
+
+@runtime_checkable
+class DecoderMemory(Protocol):
+    """A decoder unit's input memory, as a listener reads its size."""
+
+    capacity_bits: Optional[int]
+
+
+@runtime_checkable
+class DecoderUnit(Protocol):
+    """A decoder unit, as a listener of its pool and its service reads it.
+
+    The pool fires unit_busy(unit) and unit_freed(unit), the service
+    fires each job's dispatch, landing, start and finish with its unit,
+    and a listener reads the unit's names and its memory's size, never
+    its state.
+    """
+
+    name: str
+    pool: str
+    memory: DecoderMemory
+
+
+@runtime_checkable
+class WindowBacklog(Protocol):
+    """The window manager, as the decode backlog sampler reads it."""
+
+    def rounds_backlog(self) -> tuple:
+        """Rounds arrived and not decoded: (operation id, patch, rounds)."""

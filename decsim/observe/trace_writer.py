@@ -16,8 +16,8 @@ import json
 from typing import Any, Optional, Union
 
 import decsim.config as config
-import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
@@ -538,7 +538,7 @@ class TraceWriter:
     def job_dispatched(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The job left the ready queue for a unit."""
         closing = {"unit": unit.name}
@@ -547,7 +547,7 @@ class TraceWriter:
     def input_landed(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The job's input is in the unit's own memory."""
         thread = _unit_thread(unit.name)
@@ -572,7 +572,7 @@ class TraceWriter:
     def job_started(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The unit began this job's physical decode."""
         thread = _unit_thread(unit.name)
@@ -589,7 +589,7 @@ class TraceWriter:
     def job_finished(
         self,
         job: decoding_records.DecodeJob,
-        unit: decoder_unit_module.DecoderUnit,
+        unit: ports.DecoderUnit,
     ) -> None:
         """The unit's physical decode ended."""
         thread = _unit_thread(unit.name)

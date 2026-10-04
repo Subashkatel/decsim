@@ -8,7 +8,10 @@ answer is known without running the machine:
   noise channel at 0), so no tier flips a logical observable;
 - a latency added on one hop of the reaction path moves the reaction time,
   from a round's measurement to the instruction that acts on its correction
-  (docs/reference/glossary.md), by exactly that latency.
+  (docs/reference/glossary.md), by exactly that latency;
+- every round is committed by exactly one owner and every owner's
+  correction enters the Pauli frame exactly once (Toshio et al. 2510.25222
+  Theorem 1: two owners never claim one round).
 
 Three more laws sit beside the parts they exercise: switching that never
 escalates is the weak tier alone (tests/escalation/test_switching_mode.py),
@@ -17,6 +20,7 @@ strong-only predicts what its decoder predicts offline on the same events
 committed corrections (tests/pauli_frame/test_pauli_frame.py).
 """
 
+import collections
 import dataclasses
 
 import pytest
@@ -36,10 +40,12 @@ import decsim.windows.settings as window_settings
 
 DISTANCE = 3
 ROUND_PERIOD_MICROSECONDS = 1.0
+PHYSICAL_ERROR_PROBABILITY = 0.005
 CODE_TASK = "surface_code:rotated_memory_z"
 # no complementary gap reaches it, so every window escalates
 UNREACHABLE_DECIBELS = 1e6
 REDO_WINDOW = strong_window_shapes.RedoWindow.Settings()
+DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
 # every hop a round's correction crosses before the instruction that acts
 # on it reaches the QPU, in the order it crosses them
 REACTION_PATH = (
@@ -96,6 +102,11 @@ def switching(physical_error_probability: float, strong_window=REDO_WINDOW):
         strong_decoder=strong_base.strong_decoder,
         switching=slot,
     )
+
+
+def switching_on_double_windows(physical_error_probability: float):
+    """Every window escalating to a double window, which absorbs windows."""
+    return switching(physical_error_probability, DOUBLE_WINDOW)
 
 
 def logical_failures(shot: collect.Shot) -> list:
@@ -204,3 +215,46 @@ def test_a_latency_added_on_the_reaction_path_adds_exactly_that(path_name):
 
     one_microsecond = config.microseconds_to_ticks(1.0)
     assert slower_reaction - reaction == one_microsecond
+
+
+def committed_rounds(contributions: dict) -> list:
+    """Every round some owner of the logical ledger commits, with repeats."""
+    rounds = []
+    for contribution in contributions.values():
+        last = contribution.commit_hi + 1
+        rounds.extend(range(contribution.commit_lo, last))
+    return sorted(rounds)
+
+
+def frame_commits_by_window(shot: collect.Shot) -> dict:
+    """How many corrections the Pauli frame took from each window."""
+    committed = shot.machine.observation.frame_corrections.committed
+    window_keys = []
+    for record in committed:
+        window_keys.append(record.window_key)
+    counts = collections.Counter(window_keys)
+    return dict(counts)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    (weak_only, strong_only, switching_on_double_windows),
+    ids=("weak_only", "strong_only", "switching_on_double_windows"),
+)
+def test_every_round_has_one_owner_and_the_frame_takes_each_owner_once(shape):
+    """Every round is decoded once and every window committed once.
+
+    The run's logical ledger tiles the shot's 30 rounds with its owners,
+    none twice and none left out, and the frame takes one correction from
+    each owner and none from any other window. On double windows every
+    window escalates and its strong region absorbs its neighbours, so the
+    owners are strong regions.
+    """
+    settings = shape(PHYSICAL_ERROR_PROBABILITY)
+
+    shot = run(settings)
+
+    contributions = shot.machine.windows.ledger.contributions
+    owners_once = dict.fromkeys(contributions, 1)
+    assert committed_rounds(contributions) == list(range(1, 31))
+    assert frame_commits_by_window(shot) == owners_once

@@ -93,7 +93,11 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         self.compile_key = (row, None)
         self.forced_solve_unavailable = trace_source.TraceSource()
 
-    def compile(self, faults, model=None) -> MatchingGraphs:
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: Optional[fault_models.WindowErrorModel] = None,
+    ) -> MatchingGraphs:
         """The matching graphs of one placed model, both warm."""
         # PyMatching normalises the matrix it is given in place; the placed
         # matrix is frozen, so it gets a copy (one per model, cached).
@@ -119,7 +123,13 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         forced = self._forced_matching(faults, edge_weights)
         return MatchingGraphs(plain=matching, forced=forced)
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: MatchingGraphs,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """The matching's correction, or an empty one marked invalid.
 
         PyMatching raises on a syndrome with odd parity in a
@@ -137,8 +147,13 @@ class PyMatchingDecoder(decoder_module.WindowDecoderBase):
         return decoding_records.WindowDecode(selected)
 
     def decode_forced_window(
-        self, backend, model, faults, syndrome, forced_logical_class: int
-    ):
+        self,
+        backend: MatchingGraphs,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+        forced_logical_class: int,
+    ) -> decoding_records.WindowDecode:
         """The lightest correction whose observable parity is the class.
 
         The appended detector carries the class bit (Gidney et al.

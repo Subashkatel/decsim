@@ -82,7 +82,11 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             belief_propagation_method,
         )
 
-    def compile(self, faults, model) -> tuple:
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> tuple:
         """The model's BP decoder and sparse hyperedge-to-edge map, warm.
 
         The first decode on a model builds ldpc's message-passing state;
@@ -112,7 +116,13 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         self.decode_window(backend, model, faults, empty_syndrome)
         return backend
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: tuple,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """BP on the hyperedges, then a matching with posterior weights.
 
         PyMatching raises on odd parity in a boundaryless component (see

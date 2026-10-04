@@ -8,6 +8,8 @@ The growth evidence it returns on every result feeds the cluster gap
 import dataclasses
 from typing import Optional
 
+import numpy
+
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.window_decoder as window_decoder
@@ -86,7 +88,11 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         evidence = result.cluster_evidence
         return self.timing.decode_ticks(evidence, elapsed_nanoseconds, now)
 
-    def compile(self, faults, model=None) -> evidence_records.UnionFindGraph:
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> evidence_records.UnionFindGraph:
         """The immutable weighted graph of one placed model."""
         del model
         return window_decoder.graph_from_model(
@@ -95,7 +101,13 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             weight_step=self.weight_step,
         )
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: evidence_records.UnionFindGraph,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """The hard correction and the growth that produced it.
 
         The immutable growth evidence rides on the result, so a cluster

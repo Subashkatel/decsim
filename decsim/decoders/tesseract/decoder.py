@@ -7,11 +7,14 @@ decoder module is the backend this row compiles.
 import dataclasses
 from typing import Optional
 
+import numpy
+
 import decsim.config as config
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as window_decoder
 import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
 
 
@@ -98,7 +101,11 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         orders = seed_records.RunSeedChild(decoder_path, self.window_decoder)
         return (timing, orders)
 
-    def compile(self, faults, model):
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> window_decoder.TesseractWindowDecoder:
         """The window decoder, with this model's backend already built.
 
         The build is setup, outside the timed decode, as Tesseract's own
@@ -109,7 +116,13 @@ class TesseractDecoder(decoder_module.WindowDecoderBase):
         self.window_decoder.prepare(model)
         return self.window_decoder
 
-    def decode_window(self, backend, model, faults, syndrome):
+    def decode_window(
+        self,
+        backend: window_decoder.TesseractWindowDecoder,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
         """One backend call; a produced correction is committed as it stands."""
         outcome = backend.decode(model, syndrome)
         fault_count = faults.check.shape[1]

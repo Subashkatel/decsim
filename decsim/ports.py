@@ -204,6 +204,23 @@ class SyndromeBuffer(Protocol):
         """At the end of a run no round is stored and no hold is live."""
 
 
+class SyndromeBufferSettings(Protocol):
+    """A weak syndrome buffer's settings record, which builds its store.
+
+    bits bounds the store, None for no bound; clock None is the
+    machine's. prices_read_bits says whether the store prices a read's
+    bits itself, in which case the link out of it may not charge them
+    again.
+    """
+
+    bits: Optional[int]
+    clock: Optional[config.Clock]
+    prices_read_bits: bool
+
+    def build(self, engine) -> SyndromeBuffer:
+        """A fresh store on these settings."""
+
+
 @runtime_checkable
 class RetainedRounds(Protocol):
     """The same store, as the window side that reads and holds it sees it.

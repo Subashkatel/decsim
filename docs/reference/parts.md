@@ -20,7 +20,7 @@ A machine is one `MachineSettings` (`decsim/settings.py`), a record of records: 
 | `idle_policy` | `Union[idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings]` | `idle_policies.SeparateDecodeJobsSettings()` |
 | `detection_events` | `detection_event_settings.DetectionEventSettings` | `detection_event_settings.DetectionEventSettings()` |
 | `links` | `link_settings.FabricSettings` | `link_profiles.logical_reference_profile()` |
-| `weak_syndrome_buffer` | `Union[syndrome_buffer_module.SyndromeBufferSettings, ported_syndrome_buffer.PortedSyndromeBufferSettings]` | `syndrome_buffer_module.SyndromeBufferSettings()` |
+| `weak_syndrome_buffer` | `ports.SyndromeBufferSettings` | `syndrome_buffer_module.SyndromeBufferSettings()` |
 | `strong_syndrome_buffer` | `syndrome_buffer_module.SyndromeBufferSettings` | `syndrome_buffer_module.SyndromeBufferSettings()` |
 | `windows` | `window_settings.WindowSettings` | `window_settings.WindowSettings()` |
 | `weak_decoder` | `Optional[decoder_settings.DecoderPoolSettings]` | `None` |

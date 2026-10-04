@@ -25,6 +25,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.ports as ports
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.layouts as layouts
@@ -32,7 +33,6 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.windows as window_records
-import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.boundary_policies as boundary_policies
@@ -71,10 +71,9 @@ class MachineSettings:
     links: link_settings.FabricSettings = (
         link_profiles.logical_reference_profile()
     )
-    weak_syndrome_buffer: Union[
-        syndrome_buffer_module.SyndromeBufferSettings,
-        ported_syndrome_buffer.PortedSyndromeBufferSettings,
-    ] = syndrome_buffer_module.SyndromeBufferSettings()
+    weak_syndrome_buffer: ports.SyndromeBufferSettings = (
+        syndrome_buffer_module.SyndromeBufferSettings()
+    )
     strong_syndrome_buffer: syndrome_buffer_module.SyndromeBufferSettings = (
         syndrome_buffer_module.SyndromeBufferSettings()
     )

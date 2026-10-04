@@ -36,13 +36,7 @@ def sliding_data_complete(
     overflow_rounds = window.buffer_hi - readiness.local_round_count
     if overflow_rounds <= 0 or readiness.tail_closed:
         return True
-    if not readiness.successors:
-        return True
-    if _successor_has_rounds(readiness, overflow_rounds):
-        return True
-    if readiness.memory_rounds_arrived >= overflow_rounds:
-        return True
-    return _every_successor_exhausted(readiness)
+    return _overflow_is_satisfied(readiness, overflow_rounds)
 
 
 def buffer_filled_by_memory_only(
@@ -63,6 +57,19 @@ def buffer_filled_by_memory_only(
     if _successor_has_rounds(readiness, overflow_rounds):
         return False
     return readiness.memory_rounds_arrived >= overflow_rounds
+
+
+def _overflow_is_satisfied(
+    readiness: window_records.WindowReadiness, overflow_rounds: int
+) -> bool:
+    """Whether the buffer rounds past the operation are in or never will be."""
+    if not readiness.successors:
+        return True
+    if _successor_has_rounds(readiness, overflow_rounds):
+        return True
+    if readiness.memory_rounds_arrived >= overflow_rounds:
+        return True
+    return _every_successor_exhausted(readiness)
 
 
 def _successor_has_rounds(

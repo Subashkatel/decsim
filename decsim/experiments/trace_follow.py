@@ -243,11 +243,7 @@ def _events_of(document, kind: str, key: str) -> list:
     landed = _input_landed_ticks(document)
     ordered = []
     for position, event in enumerate(document.events):
-        if event["ph"] not in HOP_PHASES:
-            continue
-        if not _belongs(event, kind, key):
-            continue
-        if kind == ROUND and _is_after_the_decode(event, landed):
+        if not _is_a_hop_of(event, kind, key, landed):
             continue
         tick = trace_file.tick_of(event)
         ordered.append((tick, event["tid"], position, event))
@@ -256,6 +252,17 @@ def _events_of(document, kind: str, key: str) -> list:
     for _tick, _tid, _position, event in ordered:
         events.append(event)
     return events
+
+
+def _is_a_hop_of(event: dict, kind: str, key: str, landed: dict) -> bool:
+    """Whether an event is a hop of the thing; a round's ends at its decode."""
+    if event["ph"] not in HOP_PHASES:
+        return False
+    if not _belongs(event, kind, key):
+        return False
+    if kind != ROUND:
+        return True
+    return not _is_after_the_decode(event, landed)
 
 
 def _input_landed_ticks(document) -> dict:
@@ -452,16 +459,11 @@ def _queue_phrase(args: dict) -> str:
 
 def _counts_of(events) -> Counts:
     """The copies, references, moves and longest waits over the hops."""
-    copies = 0
-    moves = 0
+    copies = _hop_count(events, "i", "copy")
+    moves = _hop_count(events, "X", "link")
     holds = 0
     requests = set()
     for event in events:
-        category = event["cat"]
-        if event["ph"] == "i" and "copy" in category:
-            copies += 1
-        if event["ph"] == "X" and "link" in category:
-            moves += 1
         if event["name"] == "hold registered":
             holds += 1
         _note_request(requests, event)
@@ -475,6 +477,15 @@ def _counts_of(events) -> Counts:
         longest_residence=residence,
         longest_queue_wait=queue_wait,
     )
+
+
+def _hop_count(events, phase: str, category: str) -> int:
+    """How many hops of one phase carry the category."""
+    count = 0
+    for event in events:
+        if event["ph"] == phase and category in event["cat"]:
+            count += 1
+    return count
 
 
 def _note_request(requests: set, event: dict) -> None:

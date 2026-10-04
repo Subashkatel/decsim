@@ -60,7 +60,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `result.json` | `decsim/experiments/run_folder.py`, `write_shot` | `decsim run --seed` and the two Deltakit examples only: every field of the shot's result |
 | `trace/<id>_seed<seed>.trace.json` | `decsim/observe/trace_writer.py` | one Chrome trace per traced shot, named by its point's id and its seed (`decsim/experiments/measure.py`, `shot_label`), so two points never share a file. How long the data sat is read from it: a structure's stays are the complete events on its lane whose `cat` holds `residence`, each from `args.tick` for `dur` microseconds, and a link path's waits are the `args.queue_wait_ticks` of the complete events on its lane, whose `cat` holds `link` |
 | `log/<id>_seed<seed>.log` | `decsim/experiments/measure.py`, and `decsim/experiments/run_folder.py` for one shot | the engine narrator's lines, written when the `observation` section asks for a log |
-| `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when `escalation.threshold_source` is `online`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |
+| `online_threshold_<id>.csv` | `decsim/experiments/collect_command.py` | the online threshold's trajectory at one point, written when the point's `switching.threshold` is an `OnlineThreshold.Settings`: `point_id`, the swept paths and `algorithm`, then `window_count`, `threshold_db` and `event` per audit, target move and hundredth window, and an `end` row |
 | `threshold_summary.csv` | `decsim/experiments/collect_command.py`, `_threshold_summary_row` | one row per online point, the counters its stderr line prints and the rest of the calibrator's summary at the end of its prefix: `point_id`, the swept paths and `algorithm`, then `windows`, `escalated`, `escalation_rate`, `target_escalation_rate`, `audited`, `audited_bad`, `kept_bad_rate`, `raises`, `relaxes`, `pending_audits` and `threshold_db` |
 
 `run.json`, the run file's copy and the patch together are the whole
@@ -214,7 +214,7 @@ then starts where the decode's own path started, at the dispatch or at
 the verdict, and runs to the tick that input was readable.
 
 One run is outside that sum, and knowingly: under
-`escalation.run_both_at_once` the weak attempt and the strong decode
+`switching.run_both_at_once` the weak attempt and the strong decode
 overlap rather than follow each other, so adding both would count the
 same wall time twice. `tests/experiments/test_measure.py` asserts the
 identity window by window on `decsim.settings.weak_decoder_baseline`,
@@ -292,7 +292,7 @@ success, and sweep.csv's `unscored_shots` counts it.
 | Column | What it is |
 | --- | --- |
 | `point_id`, the swept paths, `algorithm`, `seed` | the shot |
-| `signal` | the confidence the verdict read, `escalation.confidence` (`complementary_gap`, `cluster_gap`, `extra_cluster_gap`) |
+| `signal` | the confidence the verdict read, `switching.confidence` (`complementary_gap`, `cluster_gap`, `extra_cluster_gap`) |
 | `operation_id`, `window_index` | the window: its operation and its index within it |
 | `gap_nats` | the window's gap, ln of the likelihood ratio; empty when the signal gave none, a window the escalation then escalates |
 | `escalated` | whether the verdict sent the window to the strong tier |

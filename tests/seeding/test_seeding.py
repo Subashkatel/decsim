@@ -55,13 +55,13 @@ class RecordingLeaf:
 
     def reserve_run_seed(self, seed):
         self.events.append(("reserve", self.name, seed))
-        return seed_records.RunSeedReservation("derived", seed, self.name)
+        return seed_records.RunSeedReservation(seed)
 
     def commit_run_seed(self, reservation):
-        self.events.append(("commit", self.name, reservation.proposed_seed))
+        self.events.append(("commit", self.name, reservation.prepared_state))
 
     def cancel_run_seed(self, reservation):
-        self.events.append(("cancel", self.name, reservation.proposed_seed))
+        self.events.append(("cancel", self.name, reservation.prepared_state))
 
 
 class GeneratorLeaf(seeding._RandomSeedConsumer):

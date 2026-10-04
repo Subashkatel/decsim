@@ -2086,10 +2086,7 @@ class SeedRecordingPolicy:
 
     def reserve_run_seed(self, seed):
         self.reserved_seeds.append(seed)
-        source = "derived"
-        if seed is None:
-            source = "entropy"
-        return seed_records.RunSeedReservation(source, seed, None)
+        return seed_records.RunSeedReservation(None)
 
     def commit_run_seed(self, reservation):
         del reservation

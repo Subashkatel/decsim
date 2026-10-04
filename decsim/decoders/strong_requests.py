@@ -25,6 +25,16 @@ from typing import Optional
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
+# the fields a merged batch must leave empty: its members' results are
+# timing alone, so anything here would be dropped without a word
+ACCURACY_FIELDS = (
+    "correction",
+    "logical_observables",
+    "soft_output",
+    "boundary_defects",
+    "boundary_data",
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class LiveStrongRequest:
@@ -311,6 +321,14 @@ class StrongRequests:
         if not _is_merged_service(requests, result):
             request = requests[0]
             return (StrongCompletion(request, result, now, unit),)
+        populated = _populated_accuracy_fields(result)
+        if populated:
+            listed = ", ".join(populated)
+            raise RuntimeError(
+                "merged strong decode returned accuracy-bearing fields "
+                f"({listed}); disable bulk_strong for accuracy-coupled "
+                "switching"
+            )
         deliveries = []
         for request in requests:
             key = request.strong_decode_for
@@ -392,6 +410,15 @@ def _states_of(record: WindowRequests) -> list:
     if record.open_weak_requests:
         states.append("decoding with no outcome")
     return states
+
+
+def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:
+    populated = []
+    for field_name in ACCURACY_FIELDS:
+        value = getattr(result, field_name)
+        if value is not None:
+            populated.append(field_name)
+    return populated
 
 
 def _is_merged_service(

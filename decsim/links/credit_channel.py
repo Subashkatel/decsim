@@ -33,7 +33,6 @@ import dataclasses
 import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
-import decsim.links.framings as framings
 import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
@@ -54,7 +53,7 @@ class CreditChannel(channel_module.Channel):
         usable. Every field is written, since each is a sourced hardware number.
         """
 
-        framing: framings.FramingSettings
+        framing: link_settings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
         clock: config.Clock

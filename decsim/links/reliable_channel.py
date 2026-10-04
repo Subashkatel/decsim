@@ -52,7 +52,6 @@ import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.credit_channel as credit_channel
-import decsim.links.framings as framings
 import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
 import decsim.seeding as seeding
@@ -80,7 +79,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
         is wrong.
         """
 
-        framing: framings.FramingSettings
+        framing: link_settings.FramingSettings
         receive_buffer_frames: int
         credit_latency_cycles: int
         window_packets: int
@@ -496,7 +495,7 @@ class _TimerState:
     expiry: Optional[decsim.engine.Event] = None
 
 
-def _require_roce_framing(framing: framings.FramingSettings) -> None:
+def _require_roce_framing(framing: link_settings.FramingSettings) -> None:
     """This protocol is RoCE's go-back-N, whose ACKs are RoCE packets.
 
     PCIe's data link replay needs the base specification, not in hand;

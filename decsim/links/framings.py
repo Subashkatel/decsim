@@ -10,7 +10,7 @@ as pcie-bench prices them (model/pcie.py:40-48, model/eth.py:29-41).
 """
 
 import dataclasses
-from typing import ClassVar, Union
+from typing import ClassVar
 
 import decsim.links.settings as link_settings
 
@@ -285,17 +285,6 @@ class EthernetUdp:
             frame_bits = frame_bytes * BITS_PER_BYTE
             frames.append(frame_bits)
         return tuple(frames)
-
-
-# the framing records, whichever a protocol cuts its messages with
-FramingSettings = Union[
-    Whole.Settings,
-    Flits.Settings,
-    Aurora64b66b.Settings,
-    PcieTlp.Settings,
-    RoceV2.Settings,
-    EthernetUdp.Settings,
-]
 
 
 def _roce_datagram_bytes(chunk_bytes: int, is_first: bool) -> int:

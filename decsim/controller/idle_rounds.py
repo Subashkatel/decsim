@@ -19,20 +19,6 @@ import decsim.records.program as program_records
 import decsim.trace_source as trace_source
 
 
-@dataclasses.dataclass
-class _PatchIdle:
-    """One patch's idle rounds: since the last claim, since the last job.
-
-    operation, the one that left the patch idle, labels a job charged at
-    the workload's end.
-    """
-
-    operation: Optional[program_records.Operation] = None
-    unclaimed: int = 0
-    uncharged: int = 0
-    last_round_index: int = 0
-
-
 class IdleRoundAccounting:
     """Routes each idle round by the policy and charges the decodes."""
 
@@ -167,6 +153,20 @@ class IdleRoundAccounting:
             idle = _PatchIdle()
             self.idle_by_patch[patch] = idle
         return idle
+
+
+@dataclasses.dataclass
+class _PatchIdle:
+    """One patch's idle rounds: since the last claim, since the last job.
+
+    operation, the one that left the patch idle, labels a job charged at
+    the workload's end.
+    """
+
+    operation: Optional[program_records.Operation] = None
+    unclaimed: int = 0
+    uncharged: int = 0
+    last_round_index: int = 0
 
 
 def _ignore_completion() -> None:

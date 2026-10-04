@@ -14,10 +14,11 @@ import decsim.records.circuits as circuit_records
 
 @dataclasses.dataclass(frozen=True)
 class FiniteCircuit:
-    """One finite physical history and the round each measurement lands in.
+    """One finite physical history.
 
-    measurement_rounds is the packet schedule a front end declares when its
-    detectors carry no round coordinate, held as pairs so the record hashes.
+    measurement_rounds is the round each measurement lands in: the packet
+    schedule a front end declares when its detectors carry no round
+    coordinate, held as pairs so the record hashes.
     """
 
     # Stim's circuit has no hash; equal records hold equal circuits.
@@ -31,7 +32,7 @@ class FiniteCircuit:
 
 @dataclasses.dataclass(frozen=True)
 class Workload:
-    """The operations a run issues, their rounds, and their physical circuit.
+    """What a workload maker hands one run.
 
     An operation runs its own circuit or is a segment of the workload's one
     physical circuit; decsim never builds a merged circuit, so a shared

@@ -114,7 +114,10 @@ class CompiledRelayBeliefPropagationDecoder(sinter.CompiledDecoder):
 
 @dataclasses.dataclass(frozen=True)
 class _Part:
-    """One part's window model and the whole window's rows it reads."""
+    """One part of the whole-circuit window, decoded on its own.
+
+    rows are the whole window's rows the part's model reads.
+    """
 
     model: fault_models.WindowErrorModel
     rows: list

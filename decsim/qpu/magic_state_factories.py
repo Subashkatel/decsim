@@ -264,7 +264,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
 @dataclasses.dataclass(frozen=True)
 class DistillLevel:
-    """One level of the multi-level factory: its units and its protocol."""
+    """One level of the multi-level factory."""
 
     unit_count: int
     distance: int
@@ -631,7 +631,7 @@ class _WaitingRequests:
 
 @dataclasses.dataclass
 class _LevelCounters:
-    """The states in store, units busy, states made and rounds failed."""
+    """One distillation level's counters."""
 
     stored_state_count: int = 0
     busy_unit_count: int = 0

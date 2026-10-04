@@ -232,7 +232,7 @@ class SyndromeBufferSettings(Protocol):
 
 @runtime_checkable
 class RetainedRounds(Protocol):
-    """The same store, as the window side that reads and holds it sees it.
+    """The same store, as the window side that holds its rounds sees it.
 
     A hold names the rounds its holder will read from the moment it is
     placed, so the store may hold a round it has not received yet; the
@@ -546,7 +546,7 @@ class WindowInput(Protocol):
 
 @runtime_checkable
 class WindowPlan(Protocol):
-    """The window plan, as the escalation side reads and reshapes it.
+    """The window plan, as the escalation side reshapes it.
 
     A strong window covers rounds several weak windows were going to
     commit, so the escalation side may absorb a window or move another's
@@ -750,7 +750,10 @@ class WindowRounds(Protocol):
 
 @runtime_checkable
 class WindowJobBuilder(Protocol):
-    """Where a strong window shape gets a job's identity and its gate."""
+    """The job-building side, as a strong window shape uses it.
+
+    It gives a job its identity, its payloads and its gate.
+    """
 
     gate: "WindowInputGate"
 
@@ -1087,13 +1090,14 @@ class DecodeQueue(Protocol):
 
 @runtime_checkable
 class Decoder(Protocol):
-    """One decoder: correctness and timing from one object.
+    """One decoder, as the machine sees it.
 
-    sinter's abstract class with defaults (decsim/decoders/decoder.py,
-    DecoderBase) fills start, cancel and occupancy from decode and
-    latency. The manager asks occupancy at dispatch, calls start once
-    the input has landed, and cancel when the request is withdrawn; a
-    decoder measured on the host clock answers occupancy with None.
+    One object answers both the correction and the timing. sinter's
+    abstract class with defaults (decsim/decoders/decoder.py, DecoderBase)
+    fills start, cancel and occupancy from decode and latency. The manager
+    asks occupancy at dispatch, calls start once the input has landed, and
+    cancel when the request is withdrawn; a decoder measured on the host
+    clock answers occupancy with None.
 
     stage_recorded, window_checked and forced_solve_unavailable are
     trace sources (a DecoderStageRecord per internal stage, a referee
@@ -1511,7 +1515,7 @@ class DetectionEventFormer(Protocol):
 
 @runtime_checkable
 class DetectionEventPlacement(Protocol):
-    """Where the machine forms a round's detection events, and what it costs.
+    """Where the machine forms a round's detection events.
 
     The seats are the points on a round's path from the controller to a
     decoder (detector_error_model/settings.py SEATS); each component
@@ -1754,16 +1758,16 @@ class WindowTransfers(Protocol):
 
 @runtime_checkable
 class Channel(Protocol):
-    """One physical channel under the fabric: its setup engine and its wire.
+    """One physical channel under the fabric.
 
-    The fabric frames a path's payload with its header and hands it to
-    the channel the path's card names; the channel decides when the
-    bits cross and calls back at the delivery. The split is ns-3's,
-    where the net device frames and the channel times the crossing
-    (point-to-point-net-device.cc TransmitStart calls
-    point-to-point-channel.cc TransmitStart), and gem5's packet queue
-    (src/mem/packet_queue.hh:62-63). trace holds frame_landed, one
-    FrameRecord per frame.
+    It holds a setup engine and a wire. The fabric frames a path's
+    payload with its header and hands it to the channel the path's card
+    names; the channel decides when the bits cross and calls back at the
+    delivery. The split is ns-3's, where the net device frames and the
+    channel times the crossing (point-to-point-net-device.cc
+    TransmitStart calls point-to-point-channel.cc TransmitStart), and
+    gem5's packet queue (src/mem/packet_queue.hh:62-63). trace holds
+    frame_landed, one FrameRecord per frame.
     """
 
     trace: object
@@ -1839,9 +1843,10 @@ class StrongWindowBoundaries(Protocol):
 
 @runtime_checkable
 class EscalationPolicy(Protocol):
-    """Whether and when a window is decoded again by the strong tier.
+    """The rule that sends a window to the strong tier.
 
-    A run with no switching leaves this port unbound. The policy decides
+    It says whether and when the strong tier decodes a window again. A
+    run with no switching leaves this port unbound. The policy decides
     and is told, the shape of gem5's conditional predictor
     (src/cpu/pred/conditional.hh: lookup answers, update teaches): it
     builds no job and sends nothing. check_plan refuses, once at build,

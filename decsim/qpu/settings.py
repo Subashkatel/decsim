@@ -36,7 +36,7 @@ CodeCardSettings = Union[
 
 @dataclasses.dataclass(frozen=True)
 class QpuSettings:
-    """The QPU: its syndrome source, its code card and its round period.
+    """The QPU's settings.
 
     source is a source row's Settings record, which builds the device over
     the run's card and the workload's circuits. code_card is a card row's

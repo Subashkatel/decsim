@@ -62,7 +62,10 @@ class PauliFrameSnapshot:
 
 
 class PauliFrame:
-    """Keeps every committed correction and charges each write once."""
+    """Keeps every committed correction.
+
+    It charges each write once.
+    """
 
     def __init__(
         self,
@@ -255,7 +258,7 @@ class _TraceSources:
 
 @dataclasses.dataclass
 class _FrameState:
-    """What the frame holds: its records and its two registries.
+    """What the frame holds, as one member.
 
     records is every accepted correction in acceptance order, a write still
     landing included; pending_by_window the writes not yet landed;

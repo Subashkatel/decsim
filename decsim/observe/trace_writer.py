@@ -1213,7 +1213,7 @@ def _job_round_keys(job: decoding_records.DecodeJob) -> tuple:
 
 @dataclasses.dataclass
 class _OpenSlices:
-    """Every slice the writer has begun and not yet closed, as one member.
+    """The slices the writer has open, as one member.
 
     A residence or a service that has begun and not ended sits under
     (thread, key) and writes one X event at its end; flowing_rounds and

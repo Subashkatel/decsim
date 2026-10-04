@@ -22,10 +22,11 @@ import decsim.windows.built_window_models as built_window_models
 
 
 class WindowModels:
-    """The decoder-facing models of windows and streams, from the source.
+    """The decoder-facing window models, from the source.
 
-    A run whose source gives no models (a timing-only device) has none;
-    every question answers None or nothing.
+    They cover the planned windows and those a dynamic stream lays. A run
+    whose source gives no models (a timing-only device) has none; every
+    question answers None or nothing.
     """
 
     # a circuit-less source names one that answers every model with None
@@ -147,8 +148,9 @@ class WindowModels:
 
 
 class WindowPlanner:
-    """Which windows exist: the plan's, and a stream's as it grows.
+    """Which windows exist.
 
+    The plan lays some up front, and a stream lays its own as it grows.
     Trace source: window_planned(window) for every window a stream lays
     after build; the plan's own windows exist before anyone listens.
     """
@@ -720,7 +722,7 @@ def _stream_round_limit(physical_round_limit, model_round_limit):
 
 
 class _StreamGrowth:
-    """One stream's growth: its region sizes and the next window to lay."""
+    """One stream's window growth."""
 
     def __init__(
         self, commit_rounds: int, buffer_rounds: int, finite_geometries

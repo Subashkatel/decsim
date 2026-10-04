@@ -15,7 +15,7 @@ import decsim.records.transfers as transfer_records
 
 @dataclasses.dataclass(frozen=True)
 class TrafficCounters:
-    """Additive counters kept per path and per channel.
+    """The additive traffic counters of one path or one channel.
 
     header_bits is the framing the wire serialized beside the payload (ns-3
     point-to-point-net-device.cc lines 528, 243), so a path's serialization
@@ -97,7 +97,7 @@ class TrafficCounters:
 
 @dataclasses.dataclass(frozen=True)
 class PathSnapshot:
-    """One path/channel binding, its channel alias, and its counters."""
+    """One path/channel binding, frozen for reports."""
 
     path: transfer_records.LinkPath
     physical_alias: str
@@ -116,7 +116,7 @@ class ChannelSnapshot:
 
 @dataclasses.dataclass(frozen=True)
 class FabricSnapshot:
-    """What a run's fabric looked like and carried, frozen for reports."""
+    """A run's fabric, frozen for reports."""
 
     paths: tuple
     channels: tuple
@@ -124,10 +124,11 @@ class FabricSnapshot:
 
 
 class TrafficLedger:
-    """The fabric's observer: every transfer counted per path and per channel.
+    """The fabric's observer, which counts every transfer.
 
-    A channel's alias is "channel-<n>", numbered in the order the paths
-    first meet it; the reports name channels by alias.
+    It counts per path and per channel. A channel's alias is "channel-<n>",
+    numbered in the order the paths first meet it; the reports name
+    channels by alias.
     """
 
     def __init__(self, fabric_settings: link_settings.FabricSettings) -> None:

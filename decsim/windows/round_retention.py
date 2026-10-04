@@ -41,7 +41,10 @@ import decsim.windows.window_planner as window_planner
 
 
 class RoundRetention:
-    """Which rounds each window and request keeps alive, and where."""
+    """Which rounds each holder keeps alive in which store.
+
+    A holder is a window or a request.
+    """
 
     # a run whose plan's windows the strong tier decodes has no weak store
     weak_store = ports.Port(ports.RetainedRounds, optional=True)

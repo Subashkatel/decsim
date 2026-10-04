@@ -21,7 +21,10 @@ import decsim.windows.window_planner as window_planner
 
 
 class RoundTracker:
-    """The arrivals per operation, and each window's readiness."""
+    """Each window's readiness, from the rounds that arrived.
+
+    It counts the arrivals per operation.
+    """
 
     scheme = ports.Port(ports.WindowingScheme)
     planner = ports.Port(window_planner.WindowPlanner)
@@ -304,7 +307,7 @@ class _Arrivals:
 
 
 class _StreamLength:
-    """What is known of one stream's length, and its closed boundaries."""
+    """What is known of one stream's length."""
 
     def __init__(self, source_round_limit: Optional[int]) -> None:
         self.source_round_limit = source_round_limit

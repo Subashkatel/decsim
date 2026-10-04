@@ -14,7 +14,7 @@ import decsim.records.program as program_records
 
 @dataclasses.dataclass(frozen=True)
 class SampledShot:
-    """One sampled shot: the circuit, and the events it produced."""
+    """One shot the source sampled for an operation."""
 
     operation_id: int
     circuit: stim.Circuit  # the listener never reads inside it

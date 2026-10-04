@@ -461,7 +461,7 @@ def is_simple_lambda(node):
 
 
 class Checker(ast.NodeVisitor):
-    """Walks one file and collects findings."""
+    """Collects one file's findings."""
 
     def __init__(self, path, source_lines):
         self.path = path

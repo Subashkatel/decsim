@@ -353,7 +353,7 @@ def _fragment_slots(operation, payload_count: int) -> tuple[int, int]:
 
 @dataclasses.dataclass
 class _RunningOperation:
-    """An operation body on the QPU and how many rounds it has emitted."""
+    """An operation body running on the QPU."""
 
     command: program_records.RunOperationBody
     emitted_round_count: int
@@ -361,7 +361,7 @@ class _RunningOperation:
 
 @dataclasses.dataclass
 class _IdlePatch:
-    """A patch between operations and how many idle rounds it has emitted."""
+    """A patch idling between operations."""
 
     operation_id: object
     emitted_round_count: int
@@ -378,7 +378,7 @@ class _TraceSources:
 
 @dataclasses.dataclass
 class _LiveOperations:
-    """What the clock is running this cycle, and what it has emitted.
+    """The clock's live state, as one member.
 
     scheduled_boundaries and last_emitted_boundary keep a boundary from
     being scheduled or emitted twice; departure_tick_by_patch is the latest

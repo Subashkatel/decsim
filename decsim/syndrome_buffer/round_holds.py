@@ -12,14 +12,18 @@ from typing import Any
 
 @dataclasses.dataclass(frozen=True)
 class HoldRecord:
-    """The rounds one holder keeps and the operations they belong to."""
+    """The rounds one holder keeps.
+
+    referenced_operation_ids are the operations the hold keeps open: its
+    rounds' own and any its token names.
+    """
 
     round_keys: tuple
     referenced_operation_ids: frozenset
 
 
 class RoundHolds:
-    """The live holds, the holders of every round, and the released tokens."""
+    """Which holders keep which rounds alive in one store."""
 
     def __init__(self) -> None:
         self.record_by_holder: dict = {}

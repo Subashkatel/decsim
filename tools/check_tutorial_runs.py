@@ -50,7 +50,10 @@ CLOCK_FREE_LINE = re.compile(
 
 @dataclasses.dataclass(frozen=True)
 class Tutorial:
-    """One page, and whether its decoders are priced by cards."""
+    """One tutorial page.
+
+    is_priced says whether its decoders are priced by cards.
+    """
 
     page: str
     is_priced: bool

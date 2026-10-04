@@ -39,7 +39,7 @@ class SoftOutput:
 
 @dataclass(frozen=True)
 class SoftOutputComputation:
-    """One window's soft output and what computing it cost.
+    """One window's soft output, as the signal computed it.
 
     ticks are the weak tier's clock ticks the signal's own computation took:
     zero for a subtraction, the time of a walk over the decode's growth
@@ -131,12 +131,13 @@ class PotentialStrong:
 
 @dataclass(frozen=True)
 class PotentialRestart:
-    """A hold in the weak syndrome buffer: a window's reads and one before them.
+    """A hold in the weak syndrome buffer for a window that may restart.
 
-    Under the double window an earlier escalation may re-slice this window
-    as its restart window, which re-reads one buffer into the strong region
-    (Toshio 2510.25222 Sec. III C); the rounds stay until the window before
-    it commits.
+    It keeps the window's reads and the rounds before them that a restart
+    re-reads. Under the double window an earlier escalation may re-slice
+    this window as its restart window, which re-reads one buffer into the
+    strong region (Toshio 2510.25222 Sec. III C); the rounds stay until
+    the window before it commits.
     """
 
     window_key: tuple
@@ -304,7 +305,7 @@ class DecoderServiceKey:
 
 
 class DecodeJobKind(Enum):
-    """What one decode job is, declared once and read by everyone.
+    """The kind of one decode job, declared once.
 
     A heterogeneous runtime declares a task's kind rather than inferring it,
     as StarPU declares a codelet per architecture and Legion a processor
@@ -398,11 +399,12 @@ def distinct_round_count(payloads: list) -> int:
 
 @dataclass
 class DecodeJob:
-    """One unit of decoder work: a window's rounds and its life.
+    """One unit of decoder work.
 
-    payloads is the weak syndrome buffer's view of the rounds until the
-    transfer lands them in a unit's memory (decoder_input); a decoder reads
-    only its unit's memory.
+    It carries a window's rounds through the job's life. payloads is the
+    weak syndrome buffer's view of the rounds until the transfer lands
+    them in a unit's memory (decoder_input); a decoder reads only its
+    unit's memory.
     """
 
     operation_id: int  # operation the window belongs to

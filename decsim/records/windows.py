@@ -158,7 +158,10 @@ class Window:
 
 @dataclass(frozen=True)
 class WindowInfo:
-    """Read-only geometry and topology exposed to interaction policies."""
+    """One window as an interaction policy reads it.
+
+    It holds the window's geometry and topology, read-only.
+    """
 
     operation_id: int
     window_index: int

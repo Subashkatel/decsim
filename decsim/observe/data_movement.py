@@ -25,7 +25,7 @@ import decsim.records.transfers as transfer_records
 
 
 class MemoryClass(enum.Enum):
-    """The memory a hop crosses, and what it costs to cross it.
+    """The cost class of the memory a hop crosses.
 
     UNCLASSIFIED is a structure or path no table row names, so a grouped
     report still sums to the run's total.
@@ -122,7 +122,10 @@ def memory_class_of_link_path(path: str) -> MemoryClass:
 
 
 class DataMovement:
-    """Copies, references and moves, in total and per named path."""
+    """The run's data-movement tally.
+
+    It counts copies, references and moves, in total and per named path.
+    """
 
     def __init__(self) -> None:
         self.copies = _PathCounts()
@@ -339,7 +342,7 @@ class _PathCounts:
 
 @dataclasses.dataclass
 class _HoldTallies:
-    """How often a reference was registered, handed on and ended."""
+    """How often each kind of hold event happened."""
 
     registered: int = 0
     transferred: int = 0

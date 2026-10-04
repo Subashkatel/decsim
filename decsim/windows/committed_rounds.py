@@ -16,7 +16,11 @@ import decsim.records.decoding as decoding_records
 
 
 class LogicalLedger:
-    """The contributions by owner key, and one observable arity per stream."""
+    """Which owner committed which rounds of each stream.
+
+    Contributions sit by owner key, and all of a stream's carry one
+    observable arity.
+    """
 
     def __init__(self):
         self.contributions: dict[

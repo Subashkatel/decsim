@@ -364,7 +364,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
 
 @dataclasses.dataclass(frozen=True)
 class _Stream:
-    """One registered source stream: its owner, program and history.
+    """One registered source stream.
 
     reach is how many rounds back a round after the first reads
     (_program_reach).
@@ -378,8 +378,9 @@ class _Stream:
 
 
 class _History:
-    """The physical instructions and measurements executed so far.
+    """What one stream has executed so far.
 
+    It keeps the physical instructions and the measurements they made.
     Every appended fragment extends the formation table, and each forming
     seat takes the longer table. Until the final round the table carries the
     program's reach (FormationTable live_reach).

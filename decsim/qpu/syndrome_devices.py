@@ -101,7 +101,7 @@ class CircuitlessSource:
 
 
 class TimingOnlyDevice(CircuitlessSource):
-    """Emits payloads with a size and no bit values: timing alone.
+    """Emits valueless payloads, sized for timing alone.
 
     A rotated surface code "requires d2 - 1 syndrome qubits" a round
     (Barber et al. 2309.05558 lines 947-951), and an operation's last round

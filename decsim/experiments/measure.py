@@ -400,21 +400,6 @@ def input_hop_by_request(transfers: list) -> dict:
     return hops
 
 
-def _request_run_sequence(row: dict):
-    """The run ordinal of the request a transfer serves, None when it has none.
-
-    A boundary hand-off names its source request instead, and a round's
-    transfer names no request at all.
-    """
-    relation = row["attribution"].get("relation")
-    if not relation:
-        return None
-    request_key = relation.get("request_key")
-    if request_key is None:
-        return None
-    return request_key["run_sequence"]
-
-
 def controller_to_weak_buffer_delays_us(transfers: list) -> list:
     """Every round's controller_to_weak_buffer delay, in microseconds."""
     delays = []
@@ -734,6 +719,43 @@ def trace_path_for_shot(path, label: str) -> str:
 def shot_label(point_id: str, seed: int) -> str:
     """The name a shot's log and trace files carry: its point id and seed."""
     return f"{point_id}_seed{seed}"
+
+
+def parallel_processes_needed(
+    samples: dict, code: ports.CodeModel, round_period_microseconds: float
+) -> int:
+    """Skoric's least count of parallel decoding processes for no backlog.
+
+    N_par >= 2 tau_W / ((n_com + n_W) tau_rd) (2209.08552 lines 429-438;
+    NVQLink equation 2, 2510.25213), with n_W = n_com + 2 n_buf ("nW = 3w",
+    lines 388-390), tau_W this shot's mean service and the sizes the code
+    card's. The serial chain's own condition is chain_load.
+    """
+    service_us = _mean_or_zero(samples["service"])
+    commit_rounds = code.commit_rounds()
+    buffer_rounds = code.buffer_rounds()
+    both_buffers_round_count = 2 * buffer_rounds
+    window_round_count = commit_rounds + both_buffers_round_count
+    committed_round_count = commit_rounds + window_round_count
+    committed_rounds_us = committed_round_count * round_period_microseconds
+    both_layers_service_us = 2 * service_us
+    processes = both_layers_service_us / committed_rounds_us
+    return math.ceil(processes)
+
+
+def _request_run_sequence(row: dict):
+    """The run ordinal of the request a transfer serves, None when it has none.
+
+    A boundary hand-off names its source request instead, and a round's
+    transfer names no request at all.
+    """
+    relation = row["attribution"].get("relation")
+    if not relation:
+        return None
+    request_key = relation.get("request_key")
+    if request_key is None:
+        return None
+    return request_key["run_sequence"]
 
 
 def _measurement(
@@ -1332,28 +1354,6 @@ def _backlog_peak_rounds(
     if backlog is None:
         return None
     return backlog.peak
-
-
-def parallel_processes_needed(
-    samples: dict, code: ports.CodeModel, round_period_microseconds: float
-) -> int:
-    """Skoric's least count of parallel decoding processes for no backlog.
-
-    N_par >= 2 tau_W / ((n_com + n_W) tau_rd) (2209.08552 lines 429-438;
-    NVQLink equation 2, 2510.25213), with n_W = n_com + 2 n_buf ("nW = 3w",
-    lines 388-390), tau_W this shot's mean service and the sizes the code
-    card's. The serial chain's own condition is chain_load.
-    """
-    service_us = _mean_or_zero(samples["service"])
-    commit_rounds = code.commit_rounds()
-    buffer_rounds = code.buffer_rounds()
-    both_buffers_round_count = 2 * buffer_rounds
-    window_round_count = commit_rounds + both_buffers_round_count
-    committed_round_count = commit_rounds + window_round_count
-    committed_rounds_us = committed_round_count * round_period_microseconds
-    both_layers_service_us = 2 * service_us
-    processes = both_layers_service_us / committed_rounds_us
-    return math.ceil(processes)
 
 
 def _window_order(window_item: tuple) -> bytes:

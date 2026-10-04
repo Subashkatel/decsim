@@ -155,8 +155,8 @@ def test_a_warm_store_delivers_without_a_stall():
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
     assert delivered == [0]
-    assert factory.total_stall_ticks == 0
-    assert factory.stored_state_count == 0
+    assert factory.state.total_stall_ticks == 0
+    assert factory.state.stored_state_count == 0
 
 
 def test_eleven_correction_decodes_run_in_parallel_before_delivery():
@@ -174,9 +174,9 @@ def test_eleven_correction_decodes_run_in_parallel_before_delivery():
     engine.run()
     assert decoder.submitted == [(100, 3, "MSF-corr")] * 11
     assert delivered == [140]
-    assert factory.produced_count == 1
-    assert factory.in_flight_count == 0
-    assert factory.stored_state_count == 0
+    assert factory.state.produced_count == 1
+    assert factory.state.in_flight_count == 0
+    assert factory.state.stored_state_count == 0
 
 
 def test_the_return_trip_follows_the_correction_decodes():
@@ -218,8 +218,8 @@ def test_two_units_hold_two_states_in_flight_at_the_peak():
     factory.request(2, note_second)
     engine.run()
     assert delivered == [(1, 150), (2, 150)]
-    assert factory.peak_in_flight_count == 2
-    assert factory.in_flight_count == 0
+    assert factory.state.peak_in_flight_count == 2
+    assert factory.state.in_flight_count == 0
 
 
 def eight_requests(factory, note):
@@ -261,9 +261,9 @@ def test_continuous_production_keeps_the_buffer_full_ahead_of_demand():
     )
     engine.run()
     assert engine.now == 100
-    assert factory.stored_state_count == 2
-    assert factory.produced_count == 2
-    assert factory.busy_unit_count == 0
+    assert factory.state.stored_state_count == 2
+    assert factory.state.produced_count == 2
+    assert factory.state.busy_unit_count == 0
 
 
 def test_continuous_production_refills_the_slot_a_delivery_takes():
@@ -281,12 +281,12 @@ def test_continuous_production_refills_the_slot_a_delivery_takes():
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
     assert delivered == [100]
-    assert factory.stored_state_count == 1
-    assert factory.busy_unit_count == 1
+    assert factory.state.stored_state_count == 1
+    assert factory.state.busy_unit_count == 1
     engine.run()
     assert engine.now == 200
-    assert factory.stored_state_count == 2
-    assert factory.produced_count == 3
+    assert factory.state.stored_state_count == 2
+    assert factory.state.produced_count == 3
 
 
 def test_a_shut_down_factory_launches_no_attempt():
@@ -303,7 +303,7 @@ def test_a_shut_down_factory_launches_no_attempt():
     factory.shutdown()
     engine.run()
     assert engine.now == 0
-    assert factory.produced_count == 0
+    assert factory.state.produced_count == 0
 
 
 def test_an_unknown_production_mode_is_refused():
@@ -367,12 +367,12 @@ def test_one_final_state_costs_fifteen_prepared_states_and_one_round():
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
     engine.run()
-    assert factory.counters_by_level[0].produced_count == 15
-    assert factory.counters_by_level[1].produced_count == 1
-    assert factory.counters_by_level[0].stored_state_count == 0
-    assert factory.counters_by_level[1].stored_state_count == 0
+    assert factory.state.counters_by_level[0].produced_count == 15
+    assert factory.state.counters_by_level[1].produced_count == 1
+    assert factory.state.counters_by_level[0].stored_state_count == 0
+    assert factory.state.counters_by_level[1].stored_state_count == 0
     assert delivered == [400]
-    assert factory.total_stall_ticks == 400
+    assert factory.state.total_stall_ticks == 400
 
 
 def test_a_second_request_waits_for_a_second_round():
@@ -393,7 +393,7 @@ def test_a_second_request_waits_for_a_second_round():
     factory.request(2, note_second)
     engine.run()
     assert delivered == [(1, 400), (2, 790)]
-    assert factory.total_stall_ticks == 400 + 790
+    assert factory.state.total_stall_ticks == 400 + 790
 
 
 def test_a_failed_preparation_is_counted_and_retried():
@@ -406,8 +406,8 @@ def test_a_failed_preparation_is_counted_and_retried():
     factory.request(1, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [430]
-    assert factory.counters_by_level[0].failure_count == 11
-    assert factory.counters_by_level[0].produced_count == 15
+    assert factory.state.counters_by_level[0].failure_count == 11
+    assert factory.state.counters_by_level[0].produced_count == 15
 
 
 def test_a_preparation_success_probability_above_one_is_refused():
@@ -427,10 +427,10 @@ def test_a_failed_round_discards_its_inputs_and_is_counted():
     factory.request(1, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [800]
-    assert factory.counters_by_level[0].produced_count == 30
-    assert factory.counters_by_level[1].failure_count == 1
-    assert factory.counters_by_level[1].produced_count == 1
-    assert factory.counters_by_level[0].stored_state_count == 0
+    assert factory.state.counters_by_level[0].produced_count == 30
+    assert factory.state.counters_by_level[1].failure_count == 1
+    assert factory.state.counters_by_level[1].produced_count == 1
+    assert factory.state.counters_by_level[0].stored_state_count == 0
 
 
 def test_a_chains_correction_decodes_carry_their_level_label():
@@ -463,7 +463,7 @@ def test_an_explicit_cycle_count_wins_over_the_default_at_a_higher_level():
         ),
     ]
     factory = chain(engine, levels)
-    assert factory.round_ticks_by_level == {1: 390, 2: 600}
+    assert factory.state.round_ticks_by_level == {1: 390, 2: 600}
 
 
 def test_a_second_level_round_takes_fifteen_logical_cycles_by_default():
@@ -481,7 +481,7 @@ def test_a_second_level_round_takes_fifteen_logical_cycles_by_default():
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
     engine.run()
-    assert factory.round_ticks_by_level == {1: 390, 2: 450}
+    assert factory.state.round_ticks_by_level == {1: 390, 2: 450}
     assert delivered == [6310]
 
 
@@ -494,12 +494,12 @@ def test_a_two_level_chain_feeds_fifteen_first_level_states_to_the_top():
     factory = chain(engine, levels)
     factory.request(1, lambda: None)
     engine.run()
-    assert factory.counters_by_level[0].produced_count == 225
-    assert factory.counters_by_level[1].produced_count == 15
-    assert factory.counters_by_level[2].produced_count == 1
-    assert factory.counters_by_level[1].stored_state_count == 0
-    assert factory.counters_by_level[2].stored_state_count == 0
-    assert factory.peak_in_flight_count == 16
+    assert factory.state.counters_by_level[0].produced_count == 225
+    assert factory.state.counters_by_level[1].produced_count == 15
+    assert factory.state.counters_by_level[2].produced_count == 1
+    assert factory.state.counters_by_level[1].stored_state_count == 0
+    assert factory.state.counters_by_level[2].stored_state_count == 0
+    assert factory.state.peak_in_flight_count == 16
 
 
 def test_a_continuous_chain_fills_its_buffer_before_any_request():
@@ -510,8 +510,8 @@ def test_a_continuous_chain_fills_its_buffer_before_any_request():
     )
     engine.run()
     assert engine.now == 400
-    assert factory.counters_by_level[1].stored_state_count == 1
-    assert factory.counters_by_level[1].produced_count == 1
+    assert factory.state.counters_by_level[1].stored_state_count == 1
+    assert factory.state.counters_by_level[1].produced_count == 1
 
 
 def test_a_continuous_chain_refills_the_state_a_delivery_takes():
@@ -524,11 +524,11 @@ def test_a_continuous_chain_refills_the_state_a_delivery_takes():
     delivered = []
     factory.request(1, lambda: delivered.append(engine.now))
     assert delivered == [400]
-    assert factory.counters_by_level[1].stored_state_count == 0
+    assert factory.state.counters_by_level[1].stored_state_count == 0
     engine.run()
     assert engine.now == 800
-    assert factory.counters_by_level[1].stored_state_count == 1
-    assert factory.counters_by_level[1].produced_count == 2
+    assert factory.state.counters_by_level[1].stored_state_count == 1
+    assert factory.state.counters_by_level[1].produced_count == 2
 
 
 def test_a_shut_down_chain_serves_no_request():
@@ -541,7 +541,7 @@ def test_a_shut_down_chain_serves_no_request():
     engine.run()
     assert engine.now == 0
     assert delivered == []
-    assert factory.counters_by_level[0].produced_count == 0
+    assert factory.state.counters_by_level[0].produced_count == 0
 
 
 def test_continuous_production_refuses_an_empty_buffer_capacity():
@@ -581,7 +581,7 @@ def test_a_continuous_row_queues_nothing_until_it_is_started():
 
     assert engine.idle is False
     engine.run()
-    assert factory.stored_state_count == 1
+    assert factory.state.stored_state_count == 1
 
 
 def test_factory_level_cycles_require_integers_by_key():

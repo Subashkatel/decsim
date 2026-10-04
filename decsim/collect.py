@@ -436,12 +436,10 @@ def _json_scalar(
         return _json_number(value)
     if isinstance(value, str) or value is None:
         return value
-    if isinstance(value, pathlib.Path):
+    if isinstance(value, (pathlib.Path, stim.Circuit)):
         return str(value)
     if isinstance(value, enum.Enum):
         return value.name
-    if isinstance(value, stim.Circuit):
-        return str(value)
     return _json_object(value, form)
 
 

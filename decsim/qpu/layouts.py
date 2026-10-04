@@ -22,7 +22,10 @@ class LayoutModel(Protocol):
     ) -> ports.CodeModel:
         """The code the operation runs on."""
 
-    def code_for_patch(self, patch_id: Any) -> ports.CodeModel:
+    def code_for_patch(
+        self,
+        patch_id: Any,  # an opaque identity
+    ) -> ports.CodeModel:
         """The code the patch runs on."""
 
     def codes(self) -> list:
@@ -37,7 +40,10 @@ class LayoutModel(Protocol):
         """Decoding-graph nodes per round of the operation."""
 
     def patch_spatial_nodes_for(
-        self, patch_identity: Any, *, base_spatial_node_count: int
+        self,
+        patch_identity: Any,  # an opaque identity
+        *,
+        base_spatial_node_count: int,
     ) -> int:
         """Decoding-graph nodes per round of the patch."""
 
@@ -61,7 +67,10 @@ class UniformLayout:
     def __init__(self, code: ports.CodeModel):
         self.code = code
 
-    def code_for_patch(self, patch_id: Any) -> ports.CodeModel:
+    def code_for_patch(
+        self,
+        patch_id: Any,  # an opaque identity
+    ) -> ports.CodeModel:
         """The one code, whatever the patch."""
         del patch_id
         return self.code
@@ -84,7 +93,10 @@ class UniformLayout:
         return base_spatial_node_count
 
     def patch_spatial_nodes_for(
-        self, patch_identity: Any, *, base_spatial_node_count: int
+        self,
+        patch_identity: Any,  # an opaque identity
+        *,
+        base_spatial_node_count: int,
     ) -> int:
         """The base node count, unchanged."""
         del patch_identity

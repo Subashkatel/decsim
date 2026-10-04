@@ -108,7 +108,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         return truth_by_key
 
     def logical_observable_truth(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> Optional[tuple[int, ...]]:
         """Stim's sampled observable-flip vector, when the shot exists."""
         shot = self._shot_for(operation_id)
@@ -124,7 +125,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """This source: the circuit it samples is the window models' too."""
         return self
 
-    def sampled_detection_events(self, operation_id: Any) -> tuple[bool, ...]:
+    def sampled_detection_events(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> tuple[bool, ...]:
         """The shot's detection events, in the circuit's detector order."""
         shot = self._shot_for(operation_id)
         if shot is None:
@@ -166,7 +170,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         self._sample_shot(key, operation, source_round_count, detector_rounds)
 
     def formation_table(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> detector_formation.FormationTable:
         """The recipes the operation's rounds are formed by, off its circuit."""
         shot = self._shot_for(operation_id)
@@ -215,7 +220,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -330,7 +335,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
 
     def window_model_for_stream(
-        self, stream_id: Any, window: window_records.Window
+        self,
+        stream_id: Any,  # an opaque identity
+        window: window_records.Window,
     ) -> Optional[fault_models.WindowErrorModel]:
         """The detector error model of one dynamic stream window.
 

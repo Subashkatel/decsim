@@ -55,14 +55,16 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
 
     def __init__(
         self,
-        programs: Mapping[Any, circuit_records.RepeatedStimCircuit],
+        programs: Mapping[  # opaque identity keys
+            Any, circuit_records.RepeatedStimCircuit
+        ],
         seed: Optional[int] = None,
     ) -> None:
         self._seed = stim_device.validated_seed(seed)
         self._initialize_run_seed_binding(self._seed)
         self._programs = _copied_programs(programs)
-        self._streams_by_id: dict[Any, _Stream] = {}
-        self._models_by_stream_id: dict[
+        self._streams_by_id: dict[Any, _Stream] = {}  # opaque identity keys
+        self._models_by_stream_id: dict[  # opaque identity keys
             Any, stream_models.GrowingStimModels
         ] = {}
         self._stream_id_by_operation: dict = {}
@@ -136,7 +138,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
     def idle_round_payloads(
         self,
         operation: program_records.Operation,
-        stream_id: Any,
+        stream_id: Any,  # an opaque identity
         global_round: int,
         *,
         is_final: bool,
@@ -156,7 +158,10 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         del source_round_count
         raise ValueError("live Stim memory folds readout into its final round")
 
-    def formation_table(self, operation_id: Any) -> formation.FormationTable:
+    def formation_table(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> formation.FormationTable:
         """The recipes of the stream's rounds executed so far."""
         stream = self._stream_for(operation_id)
         table = stream.history.table
@@ -164,7 +169,8 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         return table
 
     def logical_observable_truth(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> Optional[tuple[int, ...]]:
         """Return truth only after the actual destructive readout executes."""
         stream_id = self._stream_id_by_operation.get(operation_id, operation_id)
@@ -186,24 +192,36 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
         """This source: the fragments it executes grow the window models."""
         return self
 
-    def sampled_detection_events(self, operation_id: Any) -> tuple[int, ...]:
+    def sampled_detection_events(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> tuple[int, ...]:
         """Convert the executed prefix, without hypothetical future rounds."""
         stream = self._stream_for(operation_id)
         events, _ = stream.history.formed_shot()
         return events
 
-    def sampled_measurements(self, operation_id: Any) -> tuple[int, ...]:
+    def sampled_measurements(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> tuple[int, ...]:
         """Copy the executed raw record in absolute measurement order."""
         stream = self._stream_for(operation_id)
         measurements = stream.history.simulator.current_measurement_record()
         return tuple(int(bit) for bit in measurements)
 
-    def executed_circuit(self, stream_id: Any) -> stim.Circuit:
+    def executed_circuit(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> stim.Circuit:
         """Copy the physical history for independent replay."""
         stream = self._stream_for(stream_id)
         return stream.history.circuit.copy()
 
-    def measurement_rounds_for_stream(self, stream_id: Any) -> dict[int, int]:
+    def measurement_rounds_for_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> dict[int, int]:
         """Copy the explicit schedule needed to replay the executed circuit."""
         stream = self._stream_for(stream_id)
         return dict(stream.history.measurement_rounds)
@@ -233,7 +251,9 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
             )
 
     def window_model_for_stream(
-        self, stream_id: Any, window: window_records.Window
+        self,
+        stream_id: Any,  # an opaque identity
+        window: window_records.Window,
     ) -> fault_models.WindowErrorModel:
         """Describe a decoder window without advancing physical execution."""
         models = self._models_by_stream_id[stream_id]

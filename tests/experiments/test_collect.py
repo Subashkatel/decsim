@@ -368,16 +368,11 @@ def test_two_records_with_the_same_fields_are_two_tasks():
     class NoRound:
         pass
 
-    tasks = []
-    for rounds_policy in (EveryRound(), NoRound()):
-        workload = workload_settings.WorkloadSettings(
-            rounds_policy=rounds_policy
-        )
-        settings = machine_settings.MachineSettings(workload=workload)
-        task = collect.Task(settings, {"point": 1})
-        tasks.append(task)
+    every_round = EveryRound()
+    no_round = NoRound()
+    every_round_task = _rounds_task(every_round)
+    no_round_task = _rounds_task(no_round)
 
-    every_round_task, no_round_task = tasks
     assert every_round_task.strong_id() != no_round_task.strong_id()
 
 
@@ -738,6 +733,10 @@ class _SlottedRounds:
 
 def _slotted_rounds_task(round_count: int) -> collect.Task:
     rounds_policy = _SlottedRounds(round_count)
+    return _rounds_task(rounds_policy)
+
+
+def _rounds_task(rounds_policy) -> collect.Task:
     workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
     settings = machine_settings.MachineSettings(workload=workload)
     return collect.Task(settings, {"point": 1})

@@ -2041,9 +2041,14 @@ def test_array_tasks_then_the_fold_write_the_local_runs_rows(tmp_path):
     job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
 
-    for index in ("3", "1", "0", "2"):
-        task = _task_arguments(split_dir, index)
-        command.main(task)
+    task_3 = _task_arguments(split_dir, "3")
+    command.main(task_3)
+    task_1 = _task_arguments(split_dir, "1")
+    command.main(task_1)
+    task_0 = _task_arguments(split_dir, "0")
+    command.main(task_0)
+    task_2 = _task_arguments(split_dir, "2")
+    command.main(task_2)
     command.main(["run", "--fold", "--out", str(split_dir)])
 
     assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)

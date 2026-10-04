@@ -1131,19 +1131,11 @@ def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
     gaps = chain_gap_ticks(shot, measurement)
     confidence = measurement.samples["confidence"]
     walk_us = 12.0
-    kept = []
-    for index, value in enumerate(confidence):
-        if value:
-            kept.append(index)
-    assert kept
-    assert len(kept) < len(confidence)
-    for index, value in enumerate(confidence):
-        if index in kept:
-            assert value == walk_us
-        else:
-            assert value == 0.0
-    for gap in gaps.values():
-        assert gap == 0
+    confidence_values = set(confidence)
+    gap_ticks = gaps.values()
+    gap_values = set(gap_ticks)
+    assert confidence_values == {0.0, walk_us}
+    assert gap_values == {0}
 
 
 def test_the_stage_points_are_the_committing_decodes_own_stages():

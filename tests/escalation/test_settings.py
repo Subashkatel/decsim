@@ -1,4 +1,11 @@
-"""The switching slot's record: its threshold, its costs, its slots."""
+"""The switching slot's record and the decoder slots it switches between.
+
+SwitchingSettings (decsim/escalation/settings.py) is Toshio et al.
+2510.25222 Sec. III A's switch, weak first and strong on low
+confidence; MachineSettings (decsim/settings.py) holds the two decoder
+slots. The laws here are the slot's own refusals and the build's stop
+when a slot it needs is empty.
+"""
 
 import dataclasses
 

@@ -254,8 +254,7 @@ def _shot_count(text: str) -> int:
 def _check_the_run_arguments(parser, parsed) -> None:
     """The run's arguments name one thing to do."""
     if parsed.fold:
-        if parsed.out is None:
-            parser.error("--fold folds a results folder; name it with --out")
+        _check_the_fold_arguments(parser, parsed)
         return
     if parsed.run_file is None:
         parser.error("name the run file")
@@ -265,6 +264,12 @@ def _check_the_run_arguments(parser, parsed) -> None:
         _check_the_slurm_arguments(parser, parsed)
         return
     _check_the_local_arguments(parser, parsed)
+
+
+def _check_the_fold_arguments(parser, parsed) -> None:
+    """A fold names the results folder it folds."""
+    if parsed.out is None:
+        parser.error("--fold folds a results folder; name it with --out")
 
 
 def _check_the_local_arguments(parser, parsed) -> None:

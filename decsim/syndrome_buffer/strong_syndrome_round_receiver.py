@@ -26,19 +26,8 @@ import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
 
-
-@dataclasses.dataclass(frozen=True)
-class _Hop:
-    """One of the two hops that land here: its row, and where its bits sat."""
-
-    path_name: str
-    source_name: str
-
-
-CONTROLLER_WRITE = _Hop("controller_to_strong_buffer", "controller assembler")
 # the seat this end is on the path, as detection_events.formed_at names it
 _SEAT = "strong_syndrome_buffer"
-ESCALATION = _Hop("weak_decoder_to_strong_decoder", "weak syndrome buffer")
 
 
 class StrongSyndromeRoundReceiver:
@@ -363,6 +352,18 @@ class StrongSyndromeRoundReceiver:
                 f"writes in flight"
             )
         self.store.check_settled()
+
+
+@dataclasses.dataclass(frozen=True)
+class _Hop:
+    """One of the two hops that land here: its row, and where its bits sat."""
+
+    path_name: str
+    source_name: str
+
+
+CONTROLLER_WRITE = _Hop("controller_to_strong_buffer", "controller assembler")
+ESCALATION = _Hop("weak_decoder_to_strong_decoder", "weak syndrome buffer")
 
 
 @dataclasses.dataclass(frozen=True)

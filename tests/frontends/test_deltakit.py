@@ -130,16 +130,12 @@ def test_one_seed_draws_the_same_samples_in_every_process() -> None:
         "sampler = circuit.compile_detector_sampler(seed=7)\n"
         "print(sampler.sample(200).tobytes().hex())\n"
     )
-    samples = set()
-    for _ in range(3):
-        finished = subprocess.run(
-            [sys.executable, "-c", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        samples.add(finished.stdout)
-    assert len(samples) == 1
+    command = [sys.executable, "-c", script]
+    first = subprocess.run(command, check=True, capture_output=True, text=True)
+    second = subprocess.run(command, check=True, capture_output=True, text=True)
+    third = subprocess.run(command, check=True, capture_output=True, text=True)
+    assert second.stdout == first.stdout
+    assert third.stdout == first.stdout
 
 
 @pytest.mark.usefixtures("explorer")

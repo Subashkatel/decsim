@@ -1773,11 +1773,11 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
             named.append(line)
     # the weak tier of this card is the default pool's one unit
     assert "on unit default#0" in named[0]
-    later_by = []
     paired = zip(decodes.finished, longer_decodes.finished, strict=True)
-    for finished, longer in paired:
-        lag_ticks = longer.finish_ticks - finished.finish_ticks
-        later_by.append(lag_ticks)
+    later_by = [
+        longer.finish_ticks - finished.finish_ticks
+        for finished, longer in paired
+    ]
     last_walk = window_count + 1
     walks_before_and_own = range(1, last_walk)
     assert later_by == [

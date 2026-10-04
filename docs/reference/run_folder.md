@@ -159,8 +159,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `dd_per_window` | one decoder to the next: the boundary handoff |
 | `output_link_per_window` | the decoder to the Pauli frame |
 | `frame_commit` | the frame accepting a correction, to it being committed |
-| `buffer0_ready_to_frame` | the window complete in the weak syndrome buffer, to the frame |
-| `buffer0_first_round_to_frame` | the window's first round in the weak syndrome buffer, to the frame |
+| `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |
+| `buffer0_first_round_to_frame` | the window's first round in that syndrome buffer, to the frame |
 | `qpu_last_round_to_frame` | the last round the window needs leaving the QPU, to the frame |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
 

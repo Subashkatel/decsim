@@ -614,7 +614,7 @@ No capacity is an unbounded wire that charges its latency only. The name is the 
 
 At least one of the default payload and the actual payload source is given. setup_ticks is paid on the channel's setup engine before every transfer; header_bits_per_transfer is serialized with every payload and counted apart. CUDA-Q's real-time messages are the worked case: a 24 byte RPCHeader per request, a 24 byte RPCResponse per reply, and 32 bytes of fields before an enqueue's syndromes (cudaqx decoder_rpc_wire_format.h lines 41-43, 62-69). Those bytes hold CUDA-Q's ids, which decsim's 64-bit request name already stands for (records/windows.py REQUEST_KEY_WIRE_BITS), so pricing that framing leaves the id out.
 
-excludes_receiver_processing says what the latency covers: a number measured end to end includes the receiver turning the arrival into bits; a card that times the wire alone lets the receiving component price that processing. It has no default, so every card says which.
+excludes_receiver_processing says what the latency covers: a number measured end to end includes the receiver turning the arrival into bits; a card that times the wire alone lets the receiving component price that processing. It has no default, so every card says which. The build reads it on the readout hops alone, where the controller's readout_to_bits_cycles needs a card that leaves that cost out; on every other hop it records what the number means.
 
 | Field | Type | Default |
 | --- | --- | --- |

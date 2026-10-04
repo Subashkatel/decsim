@@ -75,7 +75,8 @@ and prices the algorithm at zero.
 
 - The weak tier's tau_weak_dec is 0.4 tau_gen a round. Its confidence
   signal decodes each window twice, so `solves_per_window=2` makes each
-  solve 0.2 microseconds a round.
+  solve 0.2 microseconds a round. A signal that decodes a window once
+  takes `solves_per_window=1`.
 - The strong tier's tau_strong_dec is 10 tau_gen, 10 microseconds a
   round.
 

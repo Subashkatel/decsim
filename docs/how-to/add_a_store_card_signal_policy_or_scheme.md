@@ -21,7 +21,9 @@ same kind of job, with a page of its own:
 3. **Put the record in the field** with `dataclasses.replace`, as the
    decoder how-to does for `weak_decoder`.
 4. **Name it.** A short form in a class, a folder or a record's `name`
-   needs a row in [the glossary](../reference/glossary.md).
+   needs a row in [the glossary](../reference/glossary.md). A row
+   under `decsim/` also joins its package docstring's list of rows,
+   where it has one.
 5. **Run `python tools/docs_map.py`** if the record lives under
    `decsim/`, so the parts page lists it; `tests/test_docs.py` fails
    until it does.
@@ -92,15 +94,37 @@ A card is numbers, not a class: a `FabricSettings` record, one
 - **Field:** `switching.confidence`, typed `ConfidenceSettings`.
 - **Record:** `name` and `build(weak_algorithm, threshold_nats)`, which
   builds the signal from the weak decoder's record and the threshold.
-- **Component:** fills `ports.ConfidenceSignal`. Its `compute(solves)`
-  gets the window's `DecodeResult`s, one per forced logical class, or
-  one. A result carries `detection_events` (every decoder built on
-  `WindowDecoderBase`),
-  `cluster_evidence` (a decoder that grows clusters) and
-  `forced_class_weight` (a forced solve).
+- **Component:** fills `ports.ConfidenceSignal`, with five
+  attributes:
+  - `source`: `SoftOutputSource(method=...)`, the signal's name;
+  - `fault_model_requirement`: what a window model must offer,
+    `NO_FAULT_MODEL_REQUIRED` for nothing
+    (`decsim/detector_error_model/fault_model_contracts.py`);
+  - `decoder_evidence_requirement`: what the decode must show,
+    `NO_DECODER_EVIDENCE` for nothing (`decsim/records/decoding.py`);
+  - `evidence_refusal`: the sentence the build prints when the weak
+    decoder cannot show it;
+  - `forced_logical_classes`: the classes each window is decoded in,
+    one decode each, `()` for one ordinary decode.
+- **`compute(solves)`** gets the window's `DecodeResult`s, one per
+  forced class, or one, and returns
+  `SoftOutputComputation(SoftOutput(gap, source), ticks)`, the ticks
+  being the signal's own computation.
+- **A result carries:**
+  - `detection_events`: a read-only uint8 array, one 0 or 1 per
+    detector row of the window's model, the bits the decode read.
+    Every decoder built on `WindowDecoderBase` fills it.
+  - `cluster_evidence`, from a decoder that grows clusters.
+  - `forced_class_weight`, from a forced solve.
 - **The gap's unit is nats,** a natural-log weight, and never negative.
   The policy keeps a window whose gap is at or above the threshold;
   `math.inf` is certain, and a soft output of `None` escalates.
+- **A signal where higher is worse,** such as a count of detection
+  events, reports a gap that falls as the count rises and stops at
+  zero. A gap of zero escalates only when the threshold is above zero.
+- **The weak pool's solves:** `linear_decoder_pool`'s
+  `solves_per_window` splits a window's decode time over the solves,
+  so give it `len(forced_logical_classes)`, or 1 when that is empty.
 - **Evidence:** name what your signal reads in
   `decoder_evidence_requirement`; the build refuses a weak decoder that
   does not declare it, with the decoder's own reason or else your

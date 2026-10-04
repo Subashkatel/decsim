@@ -343,7 +343,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
 
     An input two jobs read is written once: the jobs that share one
     landed input are the forced-class solves of one window's request
-    (decision D2) and the boundary they fold is that window's one
+    and the boundary they fold is that window's one
     boundary, so the first write stands and a second is refused here
     rather than XORing a second mask over the first. Helios keeps its
     shared memory single-writer (2301.08419 lines 632-640).

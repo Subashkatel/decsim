@@ -382,7 +382,7 @@ def test_a_shared_input_is_written_once_and_the_other_solve_reads_it():
     """One input has one writer (Helios 2301.08419 lines 632-640).
 
     The jobs that share one landed input are the two forced-class solves
-    of one window's request (decision D2), so the boundary they fold is
+    of one window's request, so the boundary they fold is
     that window's one boundary: the solve that starts first writes the
     mask into the unit's memory and the other reads exactly those
     rounds, which is what the copy fold gives each of them too.
@@ -459,7 +459,7 @@ def test_two_solves_of_one_request_fold_one_mask_into_one_input(probability):
     """The in-place fold under switching answers what the copy fold does.
 
     The two forced-class solves of one window read one landed input
-    (decision D2) and fold one window's boundary, so the mask is written
+    and fold one window's boundary, so the mask is written
     into the unit's memory once and both solves read those rounds: one
     input, one writer (Helios 2301.08419 lines 632-640). Five seeds at
     each of two noise levels, one where almost no seam carries a defect

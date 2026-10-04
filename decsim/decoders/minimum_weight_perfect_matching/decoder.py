@@ -34,11 +34,12 @@ WARM_UP_COLUMNS = 3
 
 @dataclasses.dataclass(frozen=True)
 class MatchingGraphs:
-    """One window's matching graph, and the one that pins its observable.
+    """One window's matching graphs.
 
-    forced is None for a window whose model carries no single nonzero
-    observable row: there is no parity to pin, so no class can be
-    forced and the plain graph answers a forced job with no weight.
+    forced is the graph that pins the window's observable. It is None
+    for a window whose model carries no single nonzero observable row:
+    there is no parity to pin, so no class can be forced and the plain
+    graph answers a forced job with no weight.
     """
 
     plain: pymatching.Matching

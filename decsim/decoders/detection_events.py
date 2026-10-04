@@ -23,7 +23,7 @@ import decsim.records.decoding as decoding_records
 
 
 class TierFormation:
-    """The rounds one decoder tier forms, and what it is charged for them.
+    """One decoder tier's event-detection logic.
 
     A job's rounds are formed where they land on the tier. It is charged
     for the ones no earlier job of this tier formed, frozen on the job

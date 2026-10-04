@@ -300,7 +300,7 @@ class _Walk:
 
 
 class _Resources:
-    """Each resource's free count and waiting decodes, and those on the device.
+    """The device's resources, shared by the decodes on it.
 
     A freed unit passes straight to the decode waiting longest for it. A
     decode is on the device from its submit to its last step's end.

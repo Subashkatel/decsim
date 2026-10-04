@@ -42,7 +42,10 @@ import decsim.records.windows as window_records
 
 
 class DecoderManager:
-    """Admits, cancels, withdraws, releases and settles every decode."""
+    """The facade every decode on one side's pool passes through.
+
+    It admits, cancels, withdraws, releases and settles each one.
+    """
 
     # the one decoder this side's units run, bound straight to it as a
     # gem5 cache's port is bound to its one peer

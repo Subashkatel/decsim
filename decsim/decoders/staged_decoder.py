@@ -87,7 +87,11 @@ class MemoryFetchStage(DecoderStage):
 
 @dataclasses.dataclass(frozen=True)
 class UnitTiming:
-    """The unit's stages and the clock that prices them."""
+    """The timing of one decoder unit's stages.
+
+    clock is the unit's own, which prices every stage that names no
+    other.
+    """
 
     before: tuple[DecoderStage, ...]
     after: tuple[DecoderStage, ...]
@@ -323,7 +327,7 @@ class _Step:
 
 @dataclasses.dataclass
 class _RunningDecode:
-    """One walk in progress: what it decodes, and the stage now open."""
+    """One walk through the unit's stages, in progress."""
 
     job: decoding_records.DecodeJob
     on_result: Callable[[Optional[decoding_records.DecodeResult]], None]

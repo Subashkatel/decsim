@@ -38,7 +38,7 @@ ACCURACY_FIELDS = (
 
 @dataclasses.dataclass(frozen=True)
 class LiveStrongRequest:
-    """A strong request admitted for one destination, and its service job.
+    """A strong request admitted for one destination.
 
     The service job is the request itself, or the merged batch serving
     it.
@@ -64,7 +64,11 @@ class StrongCompletion:
 
 @dataclasses.dataclass
 class StrongCounts:
-    """How many strong results were asked for, and how many cancelled."""
+    """The run's tally of strong results.
+
+    needed counts every strong result asked for; cancelled counts each
+    one cancelled.
+    """
 
     needed: int = 0
     cancelled: int = 0
@@ -108,7 +112,7 @@ class WindowRequests:
 
 
 class StrongRequests:
-    """The strong requests by destination window and their states."""
+    """The ledger of strong requests, by destination window."""
 
     def __init__(self) -> None:
         self.by_window: dict[tuple, WindowRequests] = {}

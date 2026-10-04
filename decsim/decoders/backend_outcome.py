@@ -22,7 +22,7 @@ _Reason = decoding_records.BackendFailureReason
 
 @dataclasses.dataclass(frozen=True)
 class BackendDecodeOutcome:
-    """Immutable correction, disposition and diagnostics of one backend call."""
+    """What one backend call returns."""
 
     status: _Status
     failure_reason: Optional[_Reason]

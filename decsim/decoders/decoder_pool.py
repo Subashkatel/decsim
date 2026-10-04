@@ -80,7 +80,9 @@ class PoolSettings:
 
 
 class DecoderPool:
-    """The pool's units and the free ones.
+    """The pool of one tier's decoder units.
+
+    It tracks which are free.
 
     Trace sources: unit_busy(unit) when a job takes a unit's compute,
     unit_freed(unit) when it goes back.

@@ -53,7 +53,7 @@ class KernelTime:
 
 @dataclasses.dataclass(frozen=True)
 class PathCard:
-    """A device's launch and copies on one dispatcher path."""
+    """One device's measured costs on one dispatcher path."""
 
     launch_microseconds: float
     copy_in_microseconds: float

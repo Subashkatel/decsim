@@ -30,7 +30,7 @@ STRONG_POOL = "strong"
 
 
 class WaitingJobs:
-    """The pool's ready queue, and the depth reported at every change.
+    """The pool's ready queue.
 
     Trace sources: job_enqueued(job) as a job joins the queue;
     job_withdrawn(job) as one leaves it unserved; depth_changed(tick,

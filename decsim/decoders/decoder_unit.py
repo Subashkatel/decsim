@@ -35,7 +35,7 @@ INPUT_SLOT_COUNT = 2
 
 @dataclasses.dataclass
 class ComputeClaim:
-    """Who holds or reserves the unit's compute, and when it is expected free.
+    """The claim on one unit's compute.
 
     The holder runs from assignment through decode end; None means the
     compute is free or back in the pool. The expected free tick comes
@@ -50,7 +50,7 @@ class ComputeClaim:
 
 @dataclasses.dataclass
 class UnitSlots:
-    """What the unit's slots hold, in and out.
+    """What the unit's slots hold.
 
     residents are the jobs whose input occupies or reserves an input
     slot (in transfer or landed), in dispatch order; at most the

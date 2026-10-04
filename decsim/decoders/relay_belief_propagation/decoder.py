@@ -17,7 +17,10 @@ import decsim.records.seeds as seed_records
 
 
 class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
-    """Use Relay-BP for corrections and an injected model for service time."""
+    """Decode one window with Relay-BP.
+
+    Its service time comes from an injected latency model.
+    """
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.PHYSICAL

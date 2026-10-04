@@ -11,9 +11,10 @@ releases it. The submission is the DecodeQueue port's enqueue with the
 committer's return path (SimPy's callback on the event).
 """
 
+import dataclasses
+
 import pytest
 
-import decsim.build.escalation as escalation_build
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_module
 import decsim.escalation.strong_redecode as strong_redecode_module
@@ -21,6 +22,7 @@ import decsim.escalation.strong_window_shapes as shapes
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import tests.declared_run as declared_run
 
 WINDOW_KEY = (1, 2)
 FAR_BOUNDARY_KEY = (1, 4)
@@ -409,21 +411,33 @@ def test_a_region_still_forming_at_its_landing_is_not_carried_again():
     assert redecode.carried_round_keys == set()
 
 
-def test_a_row_that_holds_its_job_and_names_nothing_stops_the_run_at_its_end():
-    """A held job with no condition never leaves, so settlement stops."""
-    strong_job = _strong_job(5)
-    shape = _Shape(strong_job, is_held=True, waits_on=())
-    redecode, _output, _strong, _queue, _done = _redecode(shape)
-    switching = escalation_build.Switching(
-        confidence_signal=None,
-        policy=None,
-        regions=None,
-        shape=shape,
-        pending_strong_windows=redecode.pending,
-        strong_redecode=redecode,
-    )
-    weak_job = _weak_job()
-    redecode.escalate(weak_job)
+class _NoConditionRedo(shapes.RedoWindow):
+    """A user row whose held job names nothing that releases it."""
 
-    with pytest.raises(RuntimeError, match="pending strong escalations"):
-        switching.check_settled()
+    def release_conditions(self, assignment):
+        del assignment
+        return pending_module.ReleaseConditions()
+
+
+@dataclasses.dataclass(frozen=True)
+class _NoConditionRedoSettings(shapes.RedoWindow.Settings):
+    def build(self, engine) -> _NoConditionRedo:
+        return _NoConditionRedo(engine)
+
+
+def test_a_row_that_holds_its_job_and_names_nothing_is_refused():
+    """A held job with no condition would never leave.
+
+    mem2 waits on mem1's feedback, so mem1's patch keeps measuring and a
+    run that kept the job would never reach its end-of-run checks.
+    """
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(2, predecessors=(1,), blocked_by=1)
+    no_condition = _NoConditionRedoSettings()
+
+    with pytest.raises(RuntimeError, match="held with no release condition"):
+        declared_run.switching_run(
+            escalates=True,
+            operations=[first, second],
+            strong_window=no_condition,
+        )

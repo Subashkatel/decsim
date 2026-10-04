@@ -201,8 +201,8 @@ def test_a_round_reads_back_to_the_earliest_record_of_its_detectors():
     """The reset layer reads only itself; a bulk layer the round before."""
     table = formation_table(4)
 
-    assert table.rounds_read_before(1) == 0
-    assert table.rounds_read_before(3) == 1
+    assert table.rounds_read_before_first(1, (1,)) == 0
+    assert table.rounds_read_before_first(3, (3,)) == 1
 
 
 def test_a_read_reaches_back_as_far_as_its_furthest_reaching_round():
@@ -231,7 +231,7 @@ def test_the_last_round_reads_no_round_back_for_an_observable():
     )
     table = detector_formation.build_formation_table(circuit, 3)
 
-    assert table.rounds_read_before(3) == 0
+    assert table.rounds_read_before_first(3, (3,)) == 0
 
 
 def test_a_packet_of_the_wrong_width_is_refused():

@@ -90,21 +90,6 @@ class FormationTable:
         detectors = self._detectors_by_round.get(round_index, ())
         return list(detectors)
 
-    def rounds_read_before(self, round_index: int) -> int:
-        """How many rounds before this one its formation reads.
-
-        Forming a round reads the records of its detectors
-        (StreamingDetectorFormer feed_packet), so a former that starts
-        at this round needs the raw rounds from the earliest record on.
-        Stim's converter reads every record a detector names, however
-        far back (stim.Circuit.compile_m2d_converter). Records start at
-        round one, so the count never reaches before it.
-        """
-        record_rounds = self.rounds_read_by((round_index,))
-        record_rounds.add(round_index)
-        earliest_round = min(record_rounds)
-        return round_index - earliest_round
-
     def rounds_read_by(self, round_indices: Iterable[int]) -> set[int]:
         """The rounds whose packets forming these rounds reads.
 
@@ -152,7 +137,7 @@ class FormationTable:
         """The later rounds whose formation reads this round's packet.
 
         The reference set of the packet: forming any of these rounds
-        reads it (rounds_read_before names the same records from the
+        reads it (rounds_read_by names the same records from the
         reading side). A round's own formation always comes with its
         own packet, so it is not listed.
         """

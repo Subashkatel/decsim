@@ -63,7 +63,7 @@ def transfers_by_path(result) -> dict:
     return transfers
 
 
-def test_every_window_commits_once_across_both_output_links():
+def test_every_window_commits_once_across_both_output_links_property():
     """Every window commits exactly once, over one of the output links.
 
     Escalations ride WSD then SBD then DO; kept windows ride WDO. WSD
@@ -203,7 +203,8 @@ def expected_tier_of(gap, threshold_nats, weak_tier, strong_tier):
     return strong_tier
 
 
-def test_gap_records_decide_the_selected_tier():
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_gap_records_decide_the_selected_tier(seed):
     """Every recorded gap sits on the escalation decision's dividing line.
 
     Below the threshold the window's committed result is the strong
@@ -220,18 +221,21 @@ def test_gap_records_decide_the_selected_tier():
     settings = dataclasses.replace(settings, observation=observation)
     weak_tier = window_records.DecoderTier.WEAK
     strong_tier = window_records.DecoderTier.STRONG
-    for seed in range(4):
-        completed, _result = run_shot(settings, seed)
-        requests = completed.observation.decode_records.requests
-        gap_by_window = gaps_by_window(requests, weak_tier)
-        windows = completed.observation.windows.windows
-        for key, window in windows.items():
-            gap = gap_by_window[key]
-            selected_tier = window.published_request_key.tier
-            expected_tier = expected_tier_of(
-                gap, threshold_nats, weak_tier, strong_tier
-            )
-            assert selected_tier is expected_tier
+    completed, _result = run_shot(settings, seed)
+    requests = completed.observation.decode_records.requests
+    gap_by_window = gaps_by_window(requests, weak_tier)
+    windows = completed.observation.windows.windows
+    selected_tiers = {
+        key: window.published_request_key.tier
+        for key, window in windows.items()
+    }
+    expected_tiers = {
+        key: expected_tier_of(
+            gap_by_window[key], threshold_nats, weak_tier, strong_tier
+        )
+        for key in windows
+    }
+    assert selected_tiers == expected_tiers
 
 
 # ---- the declared-tick timeline of the two variants
@@ -395,6 +399,15 @@ def _flows_of(document, lanes: dict, lane: str, window_text: str) -> list:
         if row["args"].get("window") != window_text:
             continue
         rows.append(row)
+    return rows
+
+
+def _input_residences(document) -> list:
+    """Every span the trace draws for a decode input held in memory."""
+    rows = []
+    for row in document:
+        if row["ph"] == "X" and row["name"].endswith(" input in memory"):
+            rows.append(row)
     return rows
 
 
@@ -614,10 +627,9 @@ def test_a_priced_confidence_walk_charges_its_card_once_per_window():
     expected_ticks = decsim_config.microseconds_to_ticks(12.0)
     charged = _confidence_charges(machine)
     weak_decodes = decodes.of_pool("default")
+    decode_count = len(weak_decodes)
     assert charged
-    assert len(charged) == len(weak_decodes)
-    for ticks in charged:
-        assert ticks == expected_ticks
+    assert charged == [expected_ticks] * decode_count
 
 
 def test_a_windows_commit_instant_says_whether_its_result_is_provisional(
@@ -669,13 +681,9 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
     machine.observation.trace_writer.write(str(trace_path))
     text = trace_path.read_text()
     document = json.loads(text)
-    residences = [
-        row
-        for row in document
-        if row["ph"] == "X" and row["name"].endswith(" input in memory")
-    ]
+    residences = _input_residences(document)
+    freed_reasons = [row["args"]["freed_reason"] for row in residences]
     windows = machine.observation.windows.windows
+    window_count = len(windows)
 
-    assert len(residences) == len(windows)
-    for row in residences:
-        assert row["args"]["freed_reason"] == "decode done"
+    assert freed_reasons == ["decode done"] * window_count

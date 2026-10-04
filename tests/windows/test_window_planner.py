@@ -139,24 +139,28 @@ def qldpc_sliding_windows(round_count, width, stride):
     return windows
 
 
-def test_the_sliding_tail_is_qldpcs_tail_on_every_shape_it_ships():
+@pytest.mark.parametrize("round_count", [5, 13, 20, 30, 31, 32, 33])
+@pytest.mark.parametrize(
+    "commit_rounds, buffer_rounds", [(3, 6), (3, 3), (2, 4), (5, 5)]
+)
+def test_the_sliding_tail_is_qldpcs_tail_on_every_shape_it_ships(
+    round_count, commit_rounds, buffer_rounds
+):
     """The flush terminal policy against qLDPC's loop, shape for shape."""
     scheme = sliding_scheme.SlidingWindowScheme()
-    for round_count in (5, 13, 20, 30, 31, 32, 33):
-        for commit_rounds, buffer_rounds in ((3, 6), (3, 3), (2, 4), (5, 5)):
-            plan = scheme.plan_operation(
-                1,
-                round_count,
-                commit_round_count=commit_rounds,
-                buffer_round_count=buffer_rounds,
-            )
-            ours = [
-                (window.commit_lo, window.commit_hi, window.buffer_hi)
-                for window in plan.windows
-            ]
-            width = commit_rounds + buffer_rounds
-            theirs = qldpc_sliding_windows(round_count, width, commit_rounds)
-            assert ours == theirs
+    plan = scheme.plan_operation(
+        1,
+        round_count,
+        commit_round_count=commit_rounds,
+        buffer_round_count=buffer_rounds,
+    )
+    ours = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in plan.windows
+    ]
+    width = commit_rounds + buffer_rounds
+    theirs = qldpc_sliding_windows(round_count, width, commit_rounds)
+    assert ours == theirs
 
 
 def test_a_stream_grows_one_window_when_its_commit_region_begins():

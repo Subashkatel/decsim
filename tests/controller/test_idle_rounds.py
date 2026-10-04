@@ -115,6 +115,12 @@ def counters_on(accounting):
     return counters
 
 
+def emit_idle_rounds(accounting, operation_id, patch, round_indices):
+    """The patch idles through each of the rounds, in order."""
+    for round_index in round_indices:
+        accounting.emit_idle_round(operation_id, patch, round_index)
+
+
 def test_the_rounds_emitted_on_a_patch_are_claimed_once_by_the_operation():
     ignore = policies.Ignore()
     accounting, qpu, _demand = accounting_with(ignore)
@@ -162,9 +168,12 @@ def test_patches_idle_through_the_same_cycles_claim_each_cycle_once():
         9, "both", ("patch-a", "patch-b"), patches=("patch-a", "patch-b")
     )
 
-    for round_index in (1, 2, 3):
-        accounting.emit_idle_round(7, "patch-a", round_index)
-        accounting.emit_idle_round(8, "patch-b", round_index)
+    accounting.emit_idle_round(7, "patch-a", 1)
+    accounting.emit_idle_round(8, "patch-b", 1)
+    accounting.emit_idle_round(7, "patch-a", 2)
+    accounting.emit_idle_round(8, "patch-b", 2)
+    accounting.emit_idle_round(7, "patch-a", 3)
+    accounting.emit_idle_round(8, "patch-b", 3)
 
     assert accounting.claim(both) == 3
 
@@ -180,8 +189,7 @@ def test_an_operation_claims_its_idle_rounds_when_it_starts():
     accounting, _qpu, _demand = accounting_with(ignore)
     operation = accounting.operation_by_id[7]
 
-    for round_index in (1, 2, 3, 4):
-        accounting.emit_idle_round(7, "patch-a", round_index)
+    emit_idle_rounds(accounting, 7, "patch-a", (1, 2, 3, 4))
     command = started(accounting, operation)
 
     assert command.operation is operation
@@ -206,8 +214,7 @@ def test_the_charged_policy_costs_one_job_per_region_and_the_remainder():
     accounting, _qpu, demand = accounting_with(charged)
     operation = accounting.operation_by_id[7]
 
-    for round_index in (1, 2, 3, 4, 5):
-        accounting.emit_idle_round(7, "patch-a", round_index)
+    emit_idle_rounds(accounting, 7, "patch-a", (1, 2, 3, 4, 5))
     started(accounting, operation)
 
     rounds_and_labels = [
@@ -224,8 +231,7 @@ def test_the_workload_end_charges_every_patchs_remaining_idle_rounds():
     charged = policies.SeparateDecodeJobs()
     accounting, _qpu, demand = accounting_with(charged)
 
-    for round_index in (1, 2, 3):
-        accounting.emit_idle_round(7, "patch-a", round_index)
+    emit_idle_rounds(accounting, 7, "patch-a", (1, 2, 3))
     accounting.emit_idle_round(8, "patch-b", 1)
     accounting.end_every_idle_period()
 

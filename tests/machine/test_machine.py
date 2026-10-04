@@ -220,9 +220,7 @@ def test_a_new_decoder_is_one_class_and_its_settings_record():
     result = machine.run()
     assert result.terminal_status == "complete"
     assert type(machine.decoders.primary_decoder.decoder) is FakeWeakDecoder
-    decode_lines = [
-        line for line in machine.observation.log.lines if "decode" in line
-    ]
+    decode_lines = declared_run.log_lines_containing(machine, "decode")
     assert decode_lines
 
 
@@ -1287,9 +1285,7 @@ def test_separate_terminal_emitters_preserve_the_complete_record(
     raw_bits = _raw_bits(run.packets)
     expected_raw_bits = tuple(measurements[0])
     assert raw_bits == expected_raw_bits
-    final_packets = [
-        packet for packet in run.packets if packet.round_index == 3
-    ]
+    final_packets = _in_round(run.packets, 3)
     final_indices = [packet.fragment_index for packet in final_packets]
     final_fragment_counts = [packet.fragment_count for packet in final_packets]
     final_width_bits = [packet.size_bits for packet in final_packets]
@@ -1330,19 +1326,16 @@ def test_a_round_overtaken_on_a_faster_route_still_packs_first(
     _assert_direct_strong_path(run)
     _assert_drained(run)
     events = run.machine.observation.round_events.events
-    binary_events = [
-        event for event in events if event.kind == "BINARY_AVAILABLE"
-    ]
-    first_round_arrival_ticks = [
-        event.tick for event in binary_events if event.round_index == 1
-    ]
-    last_round_arrival_ticks = [
-        event.tick for event in binary_events if event.round_index == 3
-    ]
+    binary_events = _events_of_kind(events, "BINARY_AVAILABLE")
+    first_round_events = _in_round(binary_events, 1)
+    last_round_events = _in_round(binary_events, 3)
+    first_round_arrival_ticks = [event.tick for event in first_round_events]
+    last_round_arrival_ticks = [event.tick for event in last_round_events]
     last_round_arrived_ticks = max(last_round_arrival_ticks)
     first_round_arrived_ticks = min(first_round_arrival_ticks)
     assert last_round_arrived_ticks < first_round_arrived_ticks
-    packed = [event.round_index for event in events if event.kind == "PACKED"]
+    packed_events = _events_of_kind(events, "PACKED")
+    packed = [event.round_index for event in packed_events]
     assert packed == [1, 2, 3]
     readouts = _transfers(run.result, "qpu_to_controller")
     delay_ticks = {row["total_delay_ticks"] for row in readouts}
@@ -1585,23 +1578,18 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    algorithm = [
-        record
-        for record in machine.observation.stages.records
-        if record.stage == staged_decoder.ALGORITHM_STAGE
-    ]
-    operation_ids = {1, 2}
-    load_only = [r for r in algorithm if r.operation_id not in operation_ids]
-    windows = [r for r in algorithm if r.operation_id in operation_ids]
-    assert len(load_only) == 2
-    assert len(windows) == 2
-    idle_ticks = [r.end_ticks - r.start_ticks for r in load_only]
+    stage_records = machine.observation.stages.records
+    algorithm = _of_stage(stage_records, staged_decoder.ALGORITHM_STAGE)
+    windows, load_only = _split_by_operation(algorithm, {1, 2})
+    idle_ticks = [record.end_ticks - record.start_ticks for record in load_only]
+    held_ticks = [record.end_ticks - record.start_ticks for record in windows]
+    idle_algorithm_lines = declared_run.log_lines_containing(
+        machine, "algorithm mem("
+    )
     assert idle_ticks == [0, 0]
-    assert all(r.end_ticks > r.start_ticks for r in windows)
-    idle_lines = [
-        line for line in machine.observation.log.lines if "mem(" in line
-    ]
-    assert any("algorithm mem(" in line for line in idle_lines)
+    assert len(held_ticks) == 2
+    assert min(held_ticks) > 0
+    assert idle_algorithm_lines
 
 
 # the weak rows under test at their own settings; Union-Find names its
@@ -1695,10 +1683,7 @@ def test_a_union_find_weak_tier_reports_the_gap_of_its_own_growth():
     assert result.terminal_status == "complete"
     assert result.operation_results[0].logical_observables == (0,)
     requests = machine.observation.decode_records.requests
-    sources = set()
-    for record in requests:
-        if record.soft_output is not None:
-            sources.add(record.soft_output.source.method)
+    sources = _signal_methods(requests)
     assert sources == {"cluster_gap"}
     window_count = len(decodes.finished)
     assert len(requests) == window_count
@@ -1769,10 +1754,7 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     one_microsecond = config.microseconds_to_ticks(1.0)
     window_count = len(decodes.finished)
     assert charged == [one_microsecond] * window_count
-    named = []
-    for line in machine.observation.log.lines:
-        if "CONFIDENCE" in line:
-            named.append(line)
+    named = declared_run.log_lines_containing(machine, "CONFIDENCE")
     # the weak tier of this card is the default pool's one unit
     assert "on unit default#0" in named[0]
     paired = zip(decodes.finished, longer_decodes.finished, strict=True)
@@ -1785,8 +1767,9 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     assert later_by == [
         one_microsecond * walks for walks in walks_before_and_own
     ]
-    for record in machine.observation.decode_records.requests:
-        assert record.soft_output is not None
+    requests = machine.observation.decode_records.requests
+    soft_outputs = [record.soft_output for record in requests]
+    assert None not in soft_outputs
 
 
 @pytest.mark.parametrize(
@@ -1894,9 +1877,7 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     result = machine.run()
     assert result.terminal_status == "complete"
     assert type(machine.readout.weak_syndrome_buffer) is CountingSyndromeBuffer
-    fired = [
-        line for line in machine.observation.log.lines if "fires round" in line
-    ]
+    fired = declared_run.log_lines_containing(machine, "fires round")
     assert machine.readout.weak_syndrome_buffer.stored_count == len(fired)
     assert fired
 
@@ -2293,6 +2274,15 @@ def replayed_run(circuit, measurements, shot):
     return machine, run.operation_results[0]
 
 
+def replayed_results(circuit, measurements) -> list:
+    """Every recorded shot replayed through the weak tier, in shot order."""
+    results = []
+    for shot in range(len(measurements)):
+        _machine, result = replayed_run(circuit, measurements, shot)
+        results.append(result)
+    return results
+
+
 def test_a_replayed_shots_truth_is_the_flips_stims_converter_reports(
     recorded_memory,
 ):
@@ -2302,15 +2292,10 @@ def test_a_replayed_shots_truth_is_the_flips_stims_converter_reports(
     loop must report exactly its observable flips for the shot it
     replayed, never the flips of another shot.
     """
-    circuit, measurements, detectors, observables = recorded_memory
-    reported = []
-    expected = []
-    for shot in range(len(detectors)):
-        _machine, result = replayed_run(circuit, measurements, shot)
-        truth = tuple(result.observable_truth)
-        flips = as_bits(observables[shot])
-        reported.append(truth)
-        expected.append(flips)
+    circuit, measurements, _detectors, observables = recorded_memory
+    results = replayed_results(circuit, measurements)
+    reported = [tuple(result.observable_truth) for result in results]
+    expected = [as_bits(flips) for flips in observables]
     assert reported == expected
 
 
@@ -2328,12 +2313,15 @@ def test_the_windowed_decode_agrees_with_the_whole_shot_decode(
     circuit, measurements, detectors, _observables = recorded_memory
     model = circuit.detector_error_model(decompose_errors=True)
     matching = pymatching.Matching.from_detector_error_model(model)
-    agreement_count = 0
-    for shot in range(len(detectors)):
-        _machine, result = replayed_run(circuit, measurements, shot)
-        whole_shot = matching.decode(detectors[shot])
-        prediction = as_bits(whole_shot)
-        agreement_count += prediction == result.logical_observables
+    results = replayed_results(circuit, measurements)
+    windowed = [result.logical_observables for result in results]
+    decoded = [matching.decode(shot) for shot in detectors]
+    whole_shot = [as_bits(prediction) for prediction in decoded]
+    agreements = [
+        windowed_bits == whole_bits
+        for windowed_bits, whole_bits in zip(windowed, whole_shot, strict=True)
+    ]
+    agreement_count = sum(agreements)
     assert agreement_count >= RECORDED_SHOT_COUNT - 1
 
 
@@ -2351,13 +2339,9 @@ def test_the_sliding_windows_predict_what_qldpcs_decoder_predicts(
     """
     circuit, measurements, detectors, _observables = recorded_memory
     reference_predictions = qldpc_sliding_predictions(circuit, detectors)
-    predictions = []
-    expected = []
-    for shot in range(len(detectors)):
-        _machine, result = replayed_run(circuit, measurements, shot)
-        reference_bits = as_bits(reference_predictions[shot])
-        predictions.append(result.logical_observables)
-        expected.append(reference_bits)
+    results = replayed_results(circuit, measurements)
+    predictions = [result.logical_observables for result in results]
+    expected = [as_bits(bits) for bits in reference_predictions]
     assert predictions == expected
 
 
@@ -3503,6 +3487,54 @@ def _transfers(result: result_records.RunResult, path: str) -> list[dict]:
     return [
         row for row in result.link_traffic["transfers"] if row["path"] == path
     ]
+
+
+def _events_of_kind(events: list, kind: str) -> list:
+    """The round events of one kind, in record order."""
+    found = []
+    for event in events:
+        if event.kind == kind:
+            found.append(event)
+    return found
+
+
+def _in_round(records: list, round_index: int) -> list:
+    """The packets or round events of one round, in order."""
+    found = []
+    for record in records:
+        if record.round_index == round_index:
+            found.append(record)
+    return found
+
+
+def _of_stage(records: list, stage: str) -> list:
+    """The decoder stage records of one stage, in record order."""
+    found = []
+    for record in records:
+        if record.stage == stage:
+            found.append(record)
+    return found
+
+
+def _split_by_operation(records: list, operation_ids: set) -> tuple:
+    """(the records of those operations, every other record), in order."""
+    inside = []
+    outside = []
+    for record in records:
+        if record.operation_id in operation_ids:
+            inside.append(record)
+            continue
+        outside.append(record)
+    return inside, outside
+
+
+def _signal_methods(requests: list) -> set:
+    """The confidence signal of every request that carries one."""
+    methods = set()
+    for record in requests:
+        if record.soft_output is not None:
+            methods.add(record.soft_output.source.method)
+    return methods
 
 
 def _zero_delay_links(

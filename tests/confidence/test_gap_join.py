@@ -233,8 +233,8 @@ def test_the_walk_keeps_its_unit_busy_before_the_next_decode_starts():
 
     walk_count = len(pairs)
     assert walk_count > 0
-    overlapping = [pair for pair in pairs if pair[1] < pair[0]]
-    assert overlapping == []
+    waits = [next_start - walk_end for (walk_end, next_start) in pairs]
+    assert min(waits) >= 0
 
 
 def test_the_first_solve_is_held_and_the_join_names_the_windows_gap():

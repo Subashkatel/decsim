@@ -210,6 +210,18 @@ def reserve_and_send(transmitter, packed) -> None:
     transmitter.send(packed)
 
 
+def first_rounds_on(ledger, path: str) -> list:
+    """The first round each transfer on the path carried, in send order."""
+    traffic = ledger.traffic_json_value()
+    first_rounds = []
+    for transfer in traffic["transfers"]:
+        if transfer["path"] != path:
+            continue
+        (rounds,) = transfer["attribution"]["rounds_by_operation"]
+        first_rounds.append(rounds["round_lo"])
+    return first_rounds
+
+
 def test_a_round_that_leaves_its_route_lets_a_waiting_round_enter():
     """The stage's room frees when the windows hear of the round.
 
@@ -346,11 +358,5 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     assert windows.memory_rounds == [(memory_delivery, 7)]
     (decode_input,) = windows.decode_inputs_delivered
     assert decode_input.delivery_ticks == input_delivery
-    traffic = ledger.traffic_json_value()
-    rounds_on_the_wire = []
-    for transfer in traffic["transfers"]:
-        if transfer["path"] != "weak_buffer_to_weak_decoder":
-            continue
-        (rounds,) = transfer["attribution"]["rounds_by_operation"]
-        rounds_on_the_wire.append(rounds["round_lo"])
+    rounds_on_the_wire = first_rounds_on(ledger, "weak_buffer_to_weak_decoder")
     assert rounds_on_the_wire == wire_order

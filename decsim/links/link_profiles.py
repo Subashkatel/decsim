@@ -550,39 +550,6 @@ def bandwidth_limited_profile(
     )
 
 
-def _measured_round_trip_card(
-    round_trip_microseconds: float,
-    measurement_source: str,
-    rate_source: str,
-    echo_payload_bits: int,
-    row_name: str,
-) -> settings.FabricSettings:
-    """The reference card with the strong path on a measured round trip.
-
-    Backline (arXiv 2609.09270, Sec. V-C and Table III) and NVQLink (arXiv
-    2510.25213, Sec. 2.4) each measure one FPGA-to-coprocessor round trip
-    over RoCE, with the coprocessor polling its own memory. Neither gives a
-    per-direction number, so the split is decsim's rule: the write into the
-    strong syndrome buffer, the escalation request and the reply to the
-    frame each carry half the round trip, and the strong store's read is
-    zero because the coprocessor polls its own memory. The three cable legs
-    serialize at 100 Gb/s, and each leg's latency is its half less the echo
-    payload's time on the cable, so an echo takes the measured median
-    exactly: not a warm-up round trip nor the tail.
-    """
-    cable_rate = settings.CapacitySettings(
-        _OFF_BOARD_BITS_PER_MICROSECOND, rate_source
-    )
-    strong_paths = _roce_v2_strong_paths(
-        round_trip_microseconds,
-        measurement_source,
-        cable_rate,
-        echo_payload_bits,
-    )
-    reference = logical_reference_profile()
-    return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
-
-
 class RoceV2CpuFabric:
     """The reference card with the strong path on Backline's CPU round trip.
 
@@ -712,6 +679,39 @@ def with_path_latency(
     )
     changed = dataclasses.replace(path, channel=channel)
     return dataclasses.replace(links, **{path_name: changed})
+
+
+def _measured_round_trip_card(
+    round_trip_microseconds: float,
+    measurement_source: str,
+    rate_source: str,
+    echo_payload_bits: int,
+    row_name: str,
+) -> settings.FabricSettings:
+    """The reference card with the strong path on a measured round trip.
+
+    Backline (arXiv 2609.09270, Sec. V-C and Table III) and NVQLink (arXiv
+    2510.25213, Sec. 2.4) each measure one FPGA-to-coprocessor round trip
+    over RoCE, with the coprocessor polling its own memory. Neither gives a
+    per-direction number, so the split is decsim's rule: the write into the
+    strong syndrome buffer, the escalation request and the reply to the
+    frame each carry half the round trip, and the strong store's read is
+    zero because the coprocessor polls its own memory. The three cable legs
+    serialize at 100 Gb/s, and each leg's latency is its half less the echo
+    payload's time on the cable, so an echo takes the measured median
+    exactly: not a warm-up round trip nor the tail.
+    """
+    cable_rate = settings.CapacitySettings(
+        _OFF_BOARD_BITS_PER_MICROSECOND, rate_source
+    )
+    strong_paths = _roce_v2_strong_paths(
+        round_trip_microseconds,
+        measurement_source,
+        cable_rate,
+        echo_payload_bits,
+    )
+    reference = logical_reference_profile()
+    return dataclasses.replace(reference, **strong_paths, profile_name=row_name)
 
 
 def _roce_v2_strong_paths(

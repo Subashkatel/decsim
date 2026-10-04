@@ -19,7 +19,7 @@ which only the ported store fires.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 import decsim.config as config
 import decsim.engine as engine_module
@@ -159,7 +159,7 @@ class SyndromeBuffer:
         del round_keys
         return self._access_completion_tick(self.settings.read_cycles)
 
-    def release_round(self, round_key) -> None:
+    def release_round(self, round_key: tuple) -> None:
         """Free one unheld round; its consumers are done with it."""
         self._free_round(round_key)
 
@@ -179,14 +179,14 @@ class SyndromeBuffer:
         """The bits stored now; a round that states no size holds none."""
         return self._stored_bits_of(self.round_by_key)
 
-    def retained_fragments(self, round_key) -> Optional[tuple]:
+    def retained_fragments(self, round_key: tuple) -> Optional[tuple]:
         """The stored round's fragments, or None before and after storage."""
         stored = self.round_by_key.get(round_key)
         if stored is None:
             return None
         return stored.packet.fragments
 
-    def is_round_held(self, round_key) -> bool:
+    def is_round_held(self, round_key: tuple) -> bool:
         """Whether a consumer keeps this round, stored or still expected.
 
         A hold names its rounds from the moment it is placed, so a held
@@ -194,7 +194,7 @@ class SyndromeBuffer:
         """
         return self.holds.is_held(round_key)
 
-    def publication_tick(self, round_key) -> Optional[int]:
+    def publication_tick(self, round_key: tuple) -> Optional[int]:
         """The tick the round was published to the windows, or None."""
         stored = self.round_by_key.get(round_key)
         if stored is None:
@@ -203,58 +203,65 @@ class SyndromeBuffer:
 
     # ---- operation scope
 
-    def open_operation(self, operation_id) -> None:
+    def open_operation(self, operation_id: Any) -> None:  # an opaque identity
         """Admit rounds and holds of this operation."""
         self._open(operation_id)
 
-    def has_operation(self, operation_id) -> bool:
+    def has_operation(self, operation_id: Any) -> bool:  # an opaque identity
         """True while the operation may still receive rounds."""
         return self.operations.get(operation_id, False)
 
-    def close_operation(self, operation_id) -> None:
+    def close_operation(self, operation_id: Any) -> None:  # an opaque identity
         """Retire an operation once none of its rounds or holds are live."""
         self.operations[operation_id] = False
         open_ids = self._open_operation_ids()
         self.holds.forget_released_outside(open_ids)
 
-    def has_live_operation_reference(self, operation_id) -> bool:
+    def has_live_operation_reference(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> bool:
         """True while any live hold refers to this operation."""
         return self.holds.references(operation_id)
 
     # ---- holds
 
-    def register_hold(self, holder, round_keys) -> None:
+    def register_hold(self, holder, round_keys: tuple) -> None:
         """Keep the listed rounds alive for one consumer token."""
         record = self._hold_record(holder, round_keys)
         self.holds.register(holder, record)
         self.trace.hold_registered.fire(holder, record.round_keys)
 
-    def replace_hold(self, holder, round_keys) -> None:
+    def replace_hold(self, holder, round_keys: tuple) -> None:
         """Re-point a live hold at a new set of rounds."""
         record = self._hold_record(holder, round_keys)
         orphaned = self.holds.replace(holder, record)
         self._free_stored(orphaned)
 
-    def transfer_hold(self, old_holder, new_holder) -> None:
+    def transfer_hold(
+        self,
+        old_holder: Any,  # an opaque identity
+        new_holder: Any,  # an opaque identity
+    ) -> None:
         """Move a live hold to a new token without freeing its rounds."""
         self.holds.transfer(old_holder, new_holder)
         self.trace.hold_transferred.fire(old_holder, new_holder)
 
-    def release_hold(self, holder) -> None:
+    def release_hold(self, holder: Any) -> None:  # an opaque identity
         """Drop a hold; rounds with no remaining holder are freed."""
         orphaned = self.holds.release(holder)
         self.trace.hold_released.fire(holder)
         self._free_stored(orphaned)
 
-    def has_hold(self, holder) -> bool:
+    def has_hold(self, holder: Any) -> bool:  # an opaque identity
         """True while this holder token is live."""
         return self.holds.is_live(holder)
 
-    def hold_round_identities(self, holder) -> tuple:
+    def hold_round_identities(self, holder: Any) -> tuple:  # an opaque identity
         """The rounds a live holder keeps."""
         return self.holds.round_keys_of(holder)
 
-    def release_round_if_unheld(self, round_key) -> bool:
+    def release_round_if_unheld(self, round_key: tuple) -> bool:
         """Free a stored round only when no consumer holds it."""
         if round_key not in self.round_by_key:
             return False

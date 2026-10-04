@@ -7,6 +7,7 @@ knows nothing of packets, slots or ticks.
 """
 
 import dataclasses
+from typing import Any
 
 
 @dataclasses.dataclass(frozen=True)
@@ -27,13 +28,21 @@ class RoundHolds:
         # it never registers again, and it is forgotten once they close
         self.released_holders: dict = {}
 
-    def register(self, holder, record: HoldRecord) -> None:
+    def register(
+        self,
+        holder: Any,  # an opaque identity
+        record: HoldRecord,
+    ) -> None:
         """Keep the record's rounds alive for a new token."""
         self.record_by_holder[holder] = record
         for round_key in record.round_keys:
             self._attach(round_key, holder)
 
-    def replace(self, holder, record: HoldRecord) -> list:
+    def replace(
+        self,
+        holder: Any,  # an opaque identity
+        record: HoldRecord,
+    ) -> list:
         """Re-point a live hold; the rounds that lost their last holder."""
         old = self.record_by_holder[holder]
         self.record_by_holder[holder] = record
@@ -43,7 +52,11 @@ class RoundHolds:
         dropped = _rounds_missing_from(old.round_keys, record.round_keys)
         return self._detach_all(dropped, holder)
 
-    def transfer(self, old_holder, new_holder) -> None:
+    def transfer(
+        self,
+        old_holder: Any,  # an opaque identity
+        new_holder: Any,  # an opaque identity
+    ) -> None:
         """Move a live hold to a new token without freeing its rounds."""
         record = self.record_by_holder.pop(old_holder)
         self.record_by_holder[new_holder] = record
@@ -53,7 +66,7 @@ class RoundHolds:
             holders.add(new_holder)
         self.released_holders[old_holder] = record.referenced_operation_ids
 
-    def release(self, holder) -> list:
+    def release(self, holder: Any) -> list:  # an opaque identity
         """Drop a hold; the rounds that lost their last holder."""
         assert holder not in self.released_holders, (
             f"hold {holder!r} was released twice"
@@ -63,15 +76,15 @@ class RoundHolds:
         self.released_holders[holder] = record.referenced_operation_ids
         return orphaned
 
-    def is_live(self, holder) -> bool:
+    def is_live(self, holder: Any) -> bool:  # an opaque identity
         """True while the token holds rounds."""
         return holder in self.record_by_holder
 
-    def round_keys_of(self, holder) -> tuple:
+    def round_keys_of(self, holder: Any) -> tuple:  # an opaque identity
         """The rounds a live holder keeps."""
         return self.record_by_holder[holder].round_keys
 
-    def is_held(self, round_key) -> bool:
+    def is_held(self, round_key: tuple) -> bool:
         """True while any live hold names the round."""
         holders = self.holders_by_round.get(round_key)
         return bool(holders)
@@ -80,14 +93,14 @@ class RoundHolds:
         """Every round some live hold names."""
         return list(self.holders_by_round)
 
-    def references(self, operation_id) -> bool:
+    def references(self, operation_id: Any) -> bool:  # an opaque identity
         """True while any live hold names the operation."""
         for record in self.record_by_holder.values():
             if operation_id in record.referenced_operation_ids:
                 return True
         return False
 
-    def forget_released_outside(self, open_operation_ids) -> None:
+    def forget_released_outside(self, open_operation_ids: set) -> None:
         """Forget released tokens whose every operation has closed."""
         stale = []
         for holder, referenced in self.released_holders.items():

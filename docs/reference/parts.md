@@ -387,6 +387,8 @@ formed_at lists the seats, each once; every path a round takes to a decoder cros
 
 `decsim/escalation/settings.py`. A threshold row's settings record: decibels in, nats out.
 
+The facts at_point and for_point read are MachineSettings.point_facts, keyed by threshold_sources.POINT_FACTS.
+
 | Member | Type |
 | --- | --- |
 | `threshold_decibels` | `Optional[float]` |

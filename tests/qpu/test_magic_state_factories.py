@@ -308,7 +308,7 @@ def test_a_shut_down_factory_launches_no_attempt():
 
 def test_an_unknown_production_mode_is_refused():
     engine = decsim.engine.Engine()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="production_mode"):
         single_stage(engine, production_mode="batch")
 
 
@@ -335,7 +335,7 @@ def test_a_card_with_no_correction_decode_ignores_the_decode_queue():
 def test_a_negative_correction_decode_count_is_refused():
     engine = decsim.engine.Engine()
     decoder = DecodeLog(engine, latency_ticks=1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="correction_decode_count"):
         distillation(
             engine,
             decode_queue=decoder,
@@ -348,7 +348,7 @@ def test_a_negative_correction_decode_count_is_refused():
 
 def test_a_factory_without_a_unit_is_refused():
     engine = decsim.engine.Engine()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="unit_count must be positive"):
         distillation(
             engine,
             unit_count=0,
@@ -413,7 +413,7 @@ def test_a_failed_preparation_is_counted_and_retried():
 def test_a_preparation_success_probability_above_one_is_refused():
     engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="preparation_success_probability"):
         chain(engine, [level], preparation_success_probability=2)
 
 
@@ -546,14 +546,14 @@ def test_a_shut_down_chain_serves_no_request():
 
 def test_continuous_production_refuses_an_empty_buffer_capacity():
     engine = decsim.engine.Engine()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="continuous production needs"):
         single_stage(engine, production_mode="continuous", buffer_capacity=0)
 
 
 def test_a_continuous_chain_refuses_an_empty_buffer_capacity():
     engine = decsim.engine.Engine()
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="continuous production needs"):
         chain(engine, [level], production_mode="continuous", buffer_capacity=0)
 
 
@@ -585,7 +585,7 @@ def test_a_continuous_row_queues_nothing_until_it_is_started():
 
 
 def test_factory_level_cycles_require_integers_by_key():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="level.logical_cycles_per_round"):
         magic_state_factories.DistillLevel(
             unit_count=1, distance=3, logical_cycles_per_round=0.5
         )

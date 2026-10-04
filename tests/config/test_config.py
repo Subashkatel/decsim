@@ -61,7 +61,7 @@ def test_a_clock_from_megahertz_rounds_its_period_to_whole_ticks():
 
 
 def test_a_clock_from_no_positive_frequency_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="a clock's frequency"):
         config.Clock.from_megahertz(0)
 
 

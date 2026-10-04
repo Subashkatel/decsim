@@ -142,7 +142,7 @@ def test_the_windows_match_qldpcs_sliding_window_rule_window_by_window():
 
 def test_a_gap_between_commit_regions_is_refused():
     circuit = surface_code_circuit(6)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="commit regions must be contiguous"):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 2, 3), (4, 5, 6)],
@@ -154,7 +154,7 @@ def test_a_gap_between_commit_regions_is_refused():
 
 def test_an_unordered_window_entry_is_refused():
     circuit = surface_code_circuit(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="bounds are not ordered"):
         window_model_builders.build_window_error_models(
             circuit,
             [(3, 2, 4)],
@@ -166,7 +166,7 @@ def test_an_unordered_window_entry_is_refused():
 
 def test_a_window_bound_that_is_not_positive_is_refused():
     circuit = surface_code_circuit(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="bounds must be positive"):
         window_model_builders.build_window_error_models(
             circuit,
             [(0, 2, 3)],
@@ -178,7 +178,7 @@ def test_a_window_bound_that_is_not_positive_is_refused():
 
 def test_an_inverted_exclusion_range_is_refused():
     circuit = surface_code_circuit(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="range 3-1 is inverted"):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 4, 4)],

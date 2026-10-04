@@ -82,7 +82,7 @@ def test_a_stale_result_is_refused_once_a_newer_request_owns_the_window():
     new_job = _strong_job(new_key)
     requests.admit_strong(new_job, now=1)
     stale = _completion(old_job)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="arrived after a newer strong"):
         requests.complete(stale)
 
 
@@ -93,7 +93,7 @@ def test_a_result_nobody_waits_for_is_refused():
     requests.admit_strong(job, now=0)
     requests.finish_service(job)
     orphan = _completion(job)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="the destination registered"):
         requests.complete(orphan)
 
 
@@ -104,7 +104,7 @@ def test_a_destination_keeps_at_most_one_unconsumed_strong_result():
     requests.admit_strong(first, now=0)
     second_key = _request_key(8)
     second = _strong_job(second_key)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="a destination window has at most"):
         requests.admit_strong(second, now=1)
 
 

@@ -254,7 +254,7 @@ def test_a_routed_readout_estimate_without_attribution_is_refused() -> None:
     route = link_settings.ReadoutRoute(("left",), FREE_PATH)
     fabric = fabric_with(engine, readout_routes=(route,))
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="a routed readout delay requires"):
         fabric.expected_delay_ticks(PATH.QPU_TO_CONTROLLER, 8, 0)
 
 
@@ -389,7 +389,7 @@ def test_a_transfer_with_no_payload_size_still_stops_a_bounded_channel():
     bounded = bounded_path("bounded", 1000.0, 0)
     fabric = fabric_with(engine, controller_to_weak_buffer=bounded)
     attribution = round_attribution(1)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="unsupported operand type"):
         fabric.send(PATH.CONTROLLER_TO_WEAK_BUFFER, None, 0, attribution, print)
         engine.run()
 
@@ -399,7 +399,7 @@ def test_an_actual_payload_on_a_path_without_a_source_is_refused():
     default_only = default_path("default", 100)
     fabric = fabric_with(engine, qpu_to_controller=default_only)
     attribution = round_attribution(1)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="qpu_to_controller does"):
         fabric.send(PATH.QPU_TO_CONTROLLER, 3, 0, attribution, print)
 
 

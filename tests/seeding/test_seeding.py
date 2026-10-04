@@ -191,7 +191,7 @@ def test_a_leaf_reached_by_two_paths_is_bound_once_at_the_first_one():
 
 
 def test_a_substream_key_of_another_type_still_stops_the_derivation():
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="has no attribute 'encode'"):
         seeding.substream_seed(23, (("stream", 4),))
 
 

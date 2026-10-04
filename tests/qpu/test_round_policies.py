@@ -111,20 +111,23 @@ def test_per_operation_counts_win_over_the_fallback_and_may_be_zero():
 
 
 def test_a_fixed_policy_without_a_round_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must give >= 1 round"):
         round_policies.FixedRounds(0)
 
 
 def test_a_negative_per_operation_count_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must give >= 0 rounds"):
         round_policies.PerOperationRounds(((1, -1),))
 
 
 def test_per_operation_counts_given_as_a_dict_are_refused_naming_the_form():
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError,
+        match="PerOperationRounds.rounds_by_operation must be a tuple",
+    ):
         round_policies.PerOperationRounds({1: 3})
 
 
 def test_a_round_count_that_is_not_a_whole_number_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="FixedRounds must give a whole"):
         round_policies.FixedRounds(2.5)

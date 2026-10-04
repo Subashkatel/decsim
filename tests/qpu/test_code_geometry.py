@@ -79,7 +79,7 @@ def test_the_bicycle_card_buffer_override_replaces_zero():
 
 
 def test_more_logical_than_physical_qubits_is_refused_for_a_bicycle_code():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="logical_qubit_count must not exceed"):
         code_geometry.BivariateBicycleCodeModel.Settings(
             qubit_count=24, logical_qubit_count=30
         )
@@ -89,29 +89,29 @@ def test_a_distance_above_the_qubit_count_is_refused_for_a_bicycle_code():
     small_code = code_geometry.BivariateBicycleCodeModel.Settings(
         qubit_count=24, logical_qubit_count=4
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="distance must not exceed"):
         code_geometry.BivariateBicycleCodeModel(
             settings=small_code, distance=30
         )
 
 
 def test_a_bicycle_code_without_qubits_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="qubit_count must be positive"):
         code_geometry.BivariateBicycleCodeModel.Settings(qubit_count=0)
 
 
 def test_a_negative_buffer_override_is_refused_for_a_bicycle_code():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="buffer_rounds_override"):
         code_geometry.BivariateBicycleCodeModel(buffer_rounds_override=-1)
 
 
 def test_an_odd_qubit_count_is_refused_for_a_bicycle_code():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="qubit_count must be even"):
         code_geometry.BivariateBicycleCodeModel.Settings(qubit_count=143)
 
 
 def test_a_zero_commit_override_is_refused_for_a_bicycle_code():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="commit_rounds_override"):
         code_geometry.BivariateBicycleCodeModel(commit_rounds_override=0)
 
 

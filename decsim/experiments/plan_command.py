@@ -74,12 +74,11 @@ def launch(
     study = experiment.load(run_path)
     run_dir = run_folder.run_dir_for(study.name, out_dir).resolve()
     collect_command.start_the_folder(study, study, run_dir, run_path)
-    copied = run_folder.copied_run_file(run_path, run_dir)
     logs_dir = run_dir / LOGS_FOLDER
     logs_dir.mkdir(exist_ok=True)
     point_count = len(study.points)
     run_script = run_dir / RUN_SCRIPT
-    run_lines = _run_lines(copied, run_dir, point_count, job)
+    run_lines = _run_lines(run_path, run_dir, point_count, job)
     run_script.write_text(run_lines)
     fold_script = run_dir / FOLD_SCRIPT
     fold_lines = _fold_lines(run_dir)
@@ -137,9 +136,15 @@ def _dirty_text(is_dirty: Optional[bool]) -> str:
 
 
 def _run_lines(
-    copied: pathlib.Path, run_dir: pathlib.Path, point_count: int, job: JobShape
+    run_path: pathlib.Path,
+    run_dir: pathlib.Path,
+    point_count: int,
+    job: JobShape,
 ) -> str:
     """run.sbatch: the array, task i running point i into the folder.
+
+    A task runs the run file where it stands, as MultiSim runs its
+    config, so a file the run file reads beside itself is found.
 
     Every path is quoted, which bash and sbatch's own reading of an
     #SBATCH line both undo, and the task index is left for bash to
@@ -151,7 +156,7 @@ def _run_lines(
         f"--mem={job.memory_mb}M --time={job.hours}:00:00"
     )
     log = run_dir / LOGS_FOLDER / "%a.log"
-    literal = [sys.executable, "-m", "decsim", "run", str(copied)]
+    literal = [sys.executable, "-m", "decsim", "run", str(run_path)]
     literal += ["--out", str(run_dir)]
     command = (
         f"{shlex.join(literal)} "

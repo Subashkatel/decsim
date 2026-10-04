@@ -128,7 +128,7 @@ def test_occupancy_is_none_for_a_measured_row():
 def test_a_window_row_without_a_latency_model_has_no_latency():
     job = _job()
     row = EmptyWindowRow(latency_model=None)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(NotImplementedError, match="a decoder measured"):
         row.latency(job)
 
 

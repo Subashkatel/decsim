@@ -108,7 +108,7 @@ def test_an_operation_with_no_detector_data_has_no_decoder_boundary():
 def test_an_operation_that_lists_one_qubit_twice_is_refused():
     twice = program_records.Operation(0, "Op0", (1, 1))
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Op0 lists the same qubit more"):
         _lowered_operations([twice])
 
 
@@ -141,5 +141,5 @@ def test_one_circuit_under_two_operations_without_ranges_is_refused():
     physical = workload_records.FiniteCircuit(circuit, {0: 1})
     workload = workload_records.Workload((first, second), {}, physical)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the workload's one circuit"):
         circuit_frontend.lowered(workload)

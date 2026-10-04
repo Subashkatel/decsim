@@ -134,14 +134,14 @@ def test_bulk_strong_is_refused_when_the_rounds_carry_bits():
     switching = _switching()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the qpu source syndrome_bits gives"):
         _plan(qpu=bits, switching=switching, decoder_manager=bulk)
 
 
 def test_bulk_strong_is_refused_where_no_strong_pool_merges():
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="decoder_manager.bulk_strong merges"):
         _plan(decoder_manager=bulk)
 
 
@@ -207,7 +207,7 @@ def test_live_fragments_under_a_finite_circuit_source_stop_its_call():
     source = qpu_settings.QpuSettings(source=stim_record, distance=3)
     workload = _live_fragments_workload()
 
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
         _plan(qpu=source, workload=workload)
 
 

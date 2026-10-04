@@ -341,7 +341,7 @@ def test_a_frameless_run_commits_at_the_delivery():
 
 def test_a_charged_verdict_with_no_clock_still_stops():
     """The declared run names no clock, so the first charge cannot land."""
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="has no attribute 'edge'"):
         declared_run.switching_run(rounds=3, escalates=True, threshold_cycles=3)
 
 

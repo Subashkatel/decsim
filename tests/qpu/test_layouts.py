@@ -142,7 +142,7 @@ def test_a_layout_that_declares_two_codes_is_refused():
 
     layout.codes = two_codes
     settings = settings_with(layout=layout)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="layout must declare exactly"):
         machine_module.Machine.build(settings)
 
 
@@ -157,7 +157,7 @@ def test_an_operation_selector_that_returns_another_card_is_refused():
 
     layout.code_for_op = another_card
     settings = settings_with(layout=layout)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="layout operation 4 selected a code"):
         machine_module.Machine.build(settings)
 
 
@@ -171,5 +171,5 @@ def test_a_patch_selector_that_returns_another_card_is_refused():
 
     layout.code_for_patch = another_card
     settings = settings_with(layout=layout)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="layout patch 11 selected a code"):
         machine_module.Machine.build(settings)

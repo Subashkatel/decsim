@@ -144,7 +144,7 @@ def test_an_in_place_fold_on_a_tier_that_reads_in_place_still_stops():
     folding_in_place = dataclasses.replace(settings, weak_decoder=weak)
     machine = machine_module.Machine.build(folding_in_place, 0)
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="has no attribute 'is_rewritten'"):
         machine.run()
 
 

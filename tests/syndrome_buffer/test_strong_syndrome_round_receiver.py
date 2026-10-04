@@ -242,7 +242,7 @@ def test_settlement_reports_a_write_still_in_flight():
     receiver.store.register_hold(reads, [(1, 1)])
     cross(engine, receiver, 1)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="strong syndrome buffer ended"):
         receiver.check_settled()
 
 

@@ -129,7 +129,7 @@ def test_the_growth_limit_is_the_whole_ticks_that_cover_the_threshold():
 
 def test_a_growth_limit_past_the_64_bit_tick_counter_is_refused():
     """union_find_extra_growth reads the limit as an int64_t."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the extra-cluster gap's growth"):
         extra_cluster.growth_limit_ticks(1e30, 0.1)
 
 

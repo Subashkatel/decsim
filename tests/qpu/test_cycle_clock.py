@@ -214,7 +214,7 @@ def test_a_departure_before_the_readout_is_refused():
     engine, qpu, log = clocked_qpu(10, source)
     body = memory_body(1, 1, 10)
     qpu.issue(body)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="the syndrome source sends readout"):
         engine.run()
 
 
@@ -339,7 +339,7 @@ def test_a_payload_group_cannot_exceed_the_declared_round_size() -> None:
     )
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="readout group exceeds the declared"):
         engine.run()
 
 
@@ -349,7 +349,7 @@ def test_a_declared_fragment_count_must_match_the_emitted_payloads():
     body = memory_body(1, 1, 10, syndrome_fragment_count=3)
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="declared syndrome fragment count"):
         engine.run()
 
 
@@ -359,7 +359,7 @@ def test_a_detector_emitting_round_must_emit_a_readout():
     body = memory_body(1, 1, 10)
     qpu.issue(body)
     engine.schedule(10, qpu.finish)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="a detector-emitting round"):
         engine.run()
 
 
@@ -393,7 +393,7 @@ def test_an_idle_patchs_round_is_as_wide_as_one_patchs_syndrome():
 def test_a_command_with_another_cadence_is_refused():
     engine, qpu, log = clocked_qpu(10)
     body = memory_body(1, 2, 11)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="operation cadence must equal"):
         qpu.issue(body)
 
 
@@ -403,7 +403,7 @@ def test_an_instant_emitter_must_finalize_a_stream_round():
         id=1, name="tail", qubits=(0,), patches=(0,)
     )
     body = program_records.RunOperationBody(operation, 10, 0, 3)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="zero-duration detector emitters"):
         qpu.issue(body)
 
 

@@ -270,7 +270,7 @@ def test_a_retry_with_none_left_fails_the_run_naming_the_frame():
     channel = seeded_channel(engine, settings, seed)
     send_at(engine, channel, 0, 200, [])
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="after 1 retries without"):
         engine.run()
     assert engine.now == 2 * TIMEOUT_TICKS
 
@@ -320,7 +320,7 @@ def test_an_answer_while_the_message_waits_to_be_resent_is_dropped():
     delivered = []
     send_at(engine, channel, 0, 200, delivered)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="after 1 retries without"):
         engine.run()
     assert engine.now == 1698
     assert [transfer.delivery_ticks for transfer in delivered] == [598]
@@ -574,7 +574,7 @@ def _reliable_protocol(framing, bit_error_rate: float, retry_count: int = 7):
 def test_a_bit_error_rate_of_one_is_refused():
     framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="it is the probability that one bit"):
         _reliable_protocol(framing, 1.0)
 
 
@@ -582,12 +582,12 @@ def test_a_reliable_protocol_on_frames_other_than_roce_v2_is_refused():
     """The ACK is a RoCE packet; flits have no acknowledgement of theirs."""
     framing = framings.Flits.Settings(flit_bits=64)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the reliable protocol runs"):
         _reliable_protocol(framing, 0.0)
 
 
 def test_a_retry_count_above_seven_is_refused():
     framing = framings.RoceV2.Settings(path_mtu_bytes=1024)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="it is a whole number from 0 to 7"):
         _reliable_protocol(framing, 0.0, retry_count=8)

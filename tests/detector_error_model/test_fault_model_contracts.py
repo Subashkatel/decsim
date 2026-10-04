@@ -64,7 +64,7 @@ def test_joining_keeps_the_link_when_either_side_needs_it():
 
 def test_a_link_needs_both_representations():
     only_graphlike = frozenset({GRAPHLIKE})
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="a physical-to-graphlike link"):
         fault_model_contracts.DecoderFaultModelRequirement(
             only_graphlike, require_physical_to_graphlike_link=True
         )
@@ -91,7 +91,7 @@ def test_a_placed_model_is_frozen_for_every_reader():
     assert placed.observables.indices.flags.writeable is False
     assert placed.source_fault_ids == (4, 9)
     assert placed.boundary_flips == {0: (0, 1, 7)}
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="object does not support item"):
         placed.boundary_flips[1] = (2,)
 
 
@@ -134,7 +134,7 @@ def test_a_window_refuses_a_representation_it_does_not_hold():
         graphlike_faults=placed,
         physical_faults=None,
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="window model does not contain"):
         window.require_faults(PHYSICAL)
 
 

@@ -45,5 +45,5 @@ def test_every_rows_record_refuses_a_negative_walk_card(name):
     """A negative walk would shorten the unit's hold without a stop."""
     row = ROWS[name]
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="walk_microseconds must be finite"):
         row.Settings(walk_microseconds=-1.0)

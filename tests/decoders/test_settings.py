@@ -88,7 +88,7 @@ def test_a_linear_pool_charges_tau_dec_for_every_round_of_the_job():
 def test_a_linear_decode_time_off_the_clock_is_refused():
     """1 ns a round is a quarter of a 4 ns cycle."""
     clock = config.Clock(period_ticks=4_000)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="is not a whole number of cycles"):
         decoder_settings.linear_decoder_pool(0.001, clock, solves_per_window=1)
 
 

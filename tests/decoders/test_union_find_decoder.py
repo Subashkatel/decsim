@@ -280,7 +280,7 @@ def test_a_weight_step_whose_sums_would_wrap_the_compiled_counters_is_refused():
     """
     fine_enough = ring_at(1e-12)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the compiled decoder's 64-bit sums"):
         ring_at(1e-18)
 
     assert len(fine_enough.edges) == 3

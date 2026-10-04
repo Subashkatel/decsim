@@ -85,5 +85,5 @@ def test_unequal_commit_and_buffer_widths_are_refused():
     """Skoric's construction fixes ncom = nbuf = d."""
     row = parallel_scheme.ParallelWindowScheme()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="parallel A/B decoding requires"):
         row.plan_operation(1, 40, commit_round_count=3, buffer_round_count=4)

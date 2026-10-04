@@ -74,7 +74,7 @@ def test_a_step_below_two_is_refused():
     """A step of 1 leaves no round for a seam between adjacent cores."""
     row = sandwich_scheme.TanSandwichScheme()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the sandwich row lays each step"):
         row.plan_operation(1, 30, commit_round_count=1, buffer_round_count=2)
 
 
@@ -82,5 +82,5 @@ def test_a_buffer_below_one_is_refused():
     """A buffer of 0 leaves the cores non-overlapping, not the schedule."""
     row = sandwich_scheme.TanSandwichScheme()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Tan sandwich decoding requires"):
         row.plan_operation(1, 30, commit_round_count=5, buffer_round_count=0)

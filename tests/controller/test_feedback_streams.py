@@ -100,7 +100,7 @@ def test_a_seal_the_qpu_refuses_never_reaches_the_windows() -> None:
     streams.begin(first)
     close = functools.partial(streams.request_closes, final)
     engine.schedule(2000, close)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="sealed length differs"):
         engine.run()
     assert qpu.attested_lengths == [(7, 2)]
     assert windows.seals == []
@@ -111,7 +111,7 @@ def test_a_group_endpoint_must_hold_every_owner_patch() -> None:
     first, final = program.operations
     partial = dataclasses.replace(final, patches=("B",))
     program = dataclasses.replace(program, operations=(first, partial))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="end operation does not hold every"):
         _streams(program, regions=program.protected_regions)
 
 
@@ -121,7 +121,7 @@ def test_a_protected_group_requires_one_common_cadence() -> None:
     second_patch = _resolved_patch("B")
     second_patch = dataclasses.replace(second_patch, round_ticks=2000)
     patches = (first_patch, second_patch)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="protected stream 7 patches require"):
         _streams(program, regions=program.protected_regions, patches=patches)
 
 
@@ -129,7 +129,7 @@ def test_a_protected_owner_requires_nonempty_unique_patches() -> None:
     program = _group_program()
     owner = dataclasses.replace(program.dynamic_streams[0], patches=())
     program = dataclasses.replace(program, dynamic_streams=(owner,))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="protected stream 7 requires"):
         _streams(program, regions=program.protected_regions)
 
 
@@ -415,7 +415,7 @@ def test_a_region_whose_stream_no_dynamic_stream_owns_is_refused():
     program = program_records.ExecutionProgram(operations=(first,))
     regions = (_region(7, 1, 1),)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="protected stream 7 is none"):
         _streams(program, regions=regions)
 
 
@@ -430,7 +430,7 @@ def test_two_regions_on_one_stream_are_refused():
         _region(7, 1, 1),
     )
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="protected stream 7"):
         _streams(program, regions=two_on_one_stream)
 
 
@@ -442,7 +442,7 @@ def test_an_endpoint_that_is_no_operation_is_refused():
     )
     regions = (_region(7, 1, 99),)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="end operation is not an operation"):
         _streams(program, regions=regions)
 
 
@@ -455,7 +455,7 @@ def test_a_dynamic_stream_that_feeds_a_protected_patch_is_refused():
     )
     regions = (_region(7, 1, 1),)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="external source 7"):
         _streams(program, regions=regions)
 
 
@@ -470,7 +470,7 @@ def test_a_decode_operation_that_feeds_a_protected_patch_is_refused():
     )
     regions = (_region(7, 1, 1),)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="external source 5 from decode_ops"):
         _streams(program, regions=regions)
 
 

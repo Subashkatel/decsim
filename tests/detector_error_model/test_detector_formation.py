@@ -51,7 +51,7 @@ def test_a_table_extension_cannot_change_an_existing_packet() -> None:
     changed = detector_formation.build_formation_table(
         circuit, 1, measurement_rounds={0: 1, 1: 1}
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="formation extension changes"):
         former.extend_table(changed)
 
 
@@ -65,7 +65,7 @@ def test_a_table_extension_cannot_reinterpret_an_existing_detector() -> None:
     changed = detector_formation.build_formation_table(
         changed_circuit, 2, measurement_rounds={0: 1, 1: 2}
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="formation extension changes"):
         former.extend_table(changed)
 
 
@@ -237,7 +237,7 @@ def test_the_last_round_reads_no_round_back_for_an_observable():
 def test_a_packet_of_the_wrong_width_is_refused():
     table = formation_table(4)
     former = detector_formation.StreamingDetectorFormer(table)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the formation table expects 8"):
         former.feed_packet(1, [0, 1, 0])
 
 
@@ -477,13 +477,13 @@ def test_a_round_whose_round_before_is_not_held_is_refused():
     table = formation_table(4)
     former = detector_formation.StreamingDetectorFormer(table)
     zero_packet = (0,) * 8
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="a detector compares a round"):
         former.feed_packet(3, zero_packet)
 
 
 def test_a_round_count_the_circuit_does_not_announce_is_refused():
     circuit = surface_code_circuit(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="formation table was asked for 3"):
         detector_formation.build_formation_table(circuit, 3)
 
 
@@ -491,13 +491,13 @@ def test_measurement_blocks_out_of_round_order_are_refused():
     circuit = stim.Circuit(
         "R 0 1\nM 0\nDETECTOR(0,1) rec[-1]\nM 1\nDETECTOR(0,0) rec[-1]\n"
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="measurement blocks are not in round"):
         detector_formation.build_formation_table(circuit, 2)
 
 
 def test_a_declared_measurement_round_outside_the_operation_is_refused():
     circuit = stim.Circuit("R 0\nM 0\nDETECTOR(0,0) rec[-1]\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="declared measurement rounds"):
         detector_formation.build_formation_table(
             circuit, 1, measurement_rounds={0: 2}
         )
@@ -507,7 +507,7 @@ def test_declared_measurement_rounds_that_decrease_are_refused():
     circuit = stim.Circuit(
         "R 0 1\nM 0\nDETECTOR(0,0) rec[-1]\nM 1\nDETECTOR(0,1) rec[-1]\n"
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="declared measurement rounds"):
         detector_formation.build_formation_table(
             circuit, 2, measurement_rounds={0: 2, 1: 1}
         )
@@ -516,7 +516,7 @@ def test_declared_measurement_rounds_that_decrease_are_refused():
 def test_a_declared_detector_round_may_not_precede_its_bits():
     circuit = surface_code_circuit(4)
     too_early = dict.fromkeys(range(32), 1)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="detector 4 is declared in round 1"):
         detector_formation.build_formation_table(
             circuit, 4, detector_rounds=too_early
         )
@@ -585,13 +585,13 @@ def test_a_declared_detector_round_after_its_bits_is_what_the_recipe_uses():
 
 def test_a_zero_round_count_is_refused():
     circuit = surface_code_circuit(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="round_count must be positive"):
         detector_formation.build_formation_table(circuit, 0)
 
 
 def test_a_measurement_round_map_that_misses_a_measurement_is_refused():
     circuit = stim.Circuit("R 0 1\nM 0 1\nDETECTOR(0,0) rec[-1] rec[-2]\n")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="measurement-round map must cover"):
         detector_formation.build_formation_table(
             circuit, 1, measurement_rounds={0: 1}
         )

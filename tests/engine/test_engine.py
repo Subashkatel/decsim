@@ -86,7 +86,7 @@ def test_the_engine_runs_the_same_ticks_with_no_listener_at_all():
 def test_a_negative_delay_is_refused():
     """An action due in the past would run out of order, so it stops."""
     engine = engine_module.Engine()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cannot schedule an action"):
         engine.schedule(-1, lambda: None)
 
 

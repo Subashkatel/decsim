@@ -312,7 +312,7 @@ def test_prefix_requires_a_physical_measurement_round() -> None:
 
     machine = machine_module.Machine.build(settings, seed=81)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="zero-duration detector emitters"):
         machine.run()
 
 

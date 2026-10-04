@@ -355,7 +355,7 @@ def test_a_physical_fault_kept_uncommitted_past_its_component_is_refused():
     slicer.slice_window(
         1, 1, 3, 4, is_last=False, fault_exclusion_ranges=((4, 4),)
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="local physical detector"):
         slicer.slice_window(
             3, 4, 6, 6, is_last=True, fault_exclusion_ranges=((4, 4),)
         )

@@ -65,7 +65,7 @@ def test_separate_live_models_never_execute_a_physical_history(
     assert len(samples) == 1
     assert model_samples == []
     assert models.logical_observable_truth(100) is None
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="100"):
         models.sampled_measurements(100)
     circuit = source.executed_circuit(100)
     _assert_record(source, circuit, packets)
@@ -141,7 +141,7 @@ def test_unbounded_models_cannot_remove_the_finite_source_seal_limit() -> None:
     models = streaming_stim_device.StreamingStimDevice({100: program})
     workload = _workload(circuit, 24, 10)
     machine = _machine(source, models, workload, 4.0)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="its Stim circuit was registered"):
         machine.run()
 
 
@@ -157,7 +157,7 @@ def test_a_live_stream_sealed_short_of_its_finite_models_stops_the_run():
     models = stim_device.StimDevice()
     workload = _workload(circuit, 24, 10)
     machine = _machine(source, models, workload, 4.0)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="does not match the window error"):
         machine.run()
 
 
@@ -168,7 +168,7 @@ def test_unbounded_models_cannot_extend_the_finite_physical_source() -> None:
     models = streaming_stim_device.StreamingStimDevice({100: program})
     workload = _workload(circuit, 24, 30)
     machine = _machine(source, models, workload, 4.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="idle round is outside the finite"):
         machine.run()
 
 
@@ -180,7 +180,7 @@ def test_conflicting_stream_limits_are_refused_before_sampling() -> None:
     samples = []
     source.shot_sampled.connect(lambda *sample: samples.append(sample))
     workload = _workload(circuit, 24, 24)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="physical and model stream round"):
         _machine(source, models, workload, 4.0)
     assert samples == []
     assert source.sampled_truth() == {}
@@ -208,7 +208,7 @@ def test_model_circuit_scope_is_required_at_the_root_boundary() -> None:
     source = syndrome_devices.TimingOnlyDevice(code)
     models = types.SimpleNamespace(operation_circuit_scope="shared")
     workload = _workload()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="model provider"):
         _machine(source, models, workload, 4.0)
 
 

@@ -53,17 +53,17 @@ def test_a_chain_of_dependencies_deepens_one_step_per_edge():
 
 
 def test_a_cycle_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="window dependencies must form"):
         window_ownership_dag.dependency_depths(2, ((0, 1), (1, 0)))
 
 
 def test_a_negative_window_index_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="window dependency indices"):
         window_ownership_dag.dependency_depths(2, ((-1, 0),))
 
 
 def test_an_edge_to_a_window_outside_the_plan_is_refused():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="names a window outside the plan"):
         window_ownership_dag.dependency_depths(2, ((0, 7),))
 
 
@@ -133,7 +133,7 @@ def test_the_seam_leaves_out_what_its_neighbours_own():
 
 def test_a_fault_between_two_windows_of_the_same_depth_has_no_owner():
     circuit = surface_code_circuit(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="graphlike fault 22 straddles"):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 1, 2, 2), (3, 3, 4, 4)],

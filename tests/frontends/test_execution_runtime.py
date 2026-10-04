@@ -242,7 +242,7 @@ def test_a_claim_publishes_every_resource_of_the_operation_or_none():
     runtime.lifecycle.resources.holder_by_resource[("qubit", "busy")] = 3
 
     name_of = name_of_holder(runtime)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="circuit_frontend.lowered gives"):
         runtime.lifecycle.resources.claim(contender, name_of)
 
     assert runtime.lifecycle.resources.holder_by_resource == {

@@ -219,7 +219,7 @@ def test_a_strong_result_teaches_the_online_source():
 
 
 def test_a_plan_that_contradicts_itself_is_refused_at_build():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="the two policies contradict"):
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
@@ -285,7 +285,9 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
     switching = declared_run.declared_switching(
         threshold=online_settings, strong_window=double_window
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="online threshold calibration is serial-only"
+    ):
         fabric.switching_machine(
             rounds=9,
             escalated_windows=set(),
@@ -297,7 +299,7 @@ def test_an_online_source_under_a_double_window_is_refused_as_serial():
 
 def test_an_online_source_beside_run_both_at_once_is_refused():
     online = _always_auditing_online_threshold(threshold=2.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="meaningless with run_both_at_once"):
         policies.Switching(threshold=online, run_both_at_once=True)
 
 
@@ -392,7 +394,9 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
     """
     eager = boundary_policies.Eager.Settings()
     settings = _serial_switching_settings(eager)
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="serial switching requires held boundaries"
+    ):
         machine_module.Machine.build(settings, 0)
 
 
@@ -413,7 +417,7 @@ def test_the_double_window_refuses_held_boundaries_at_build():
         scheme=scheme, terminal_policy="lookahead", boundary_policy=held
     )
     settings = dataclasses.replace(settings, windows=windows)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="deadlock the strong window"):
         machine_module.Machine.build(settings, 0)
 
 
@@ -524,7 +528,7 @@ def test_a_flush_tail_is_refused_under_switching():
 def test_a_switching_run_on_a_scheme_that_declares_nothing_still_stops():
     """The policy reads the facts the row does not declare."""
     scheme = UndeclaredWindowScheme.Settings()
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="has_trailing_tail_context"):
         fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)
 
 

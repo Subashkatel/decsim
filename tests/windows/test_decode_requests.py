@@ -664,7 +664,7 @@ def test_a_charged_window_decision_with_no_clock_still_stops():
     """The declared run names no clock, so the first decision cannot end."""
     windows = window_settings.WindowSettings(decision_cycles=3)
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match="has no attribute 'edge'"):
         declared_run.weak_only_run(windows=windows)
 
 

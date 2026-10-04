@@ -58,7 +58,11 @@ A card is numbers, not a class: a `FabricSettings` record, one
 
 - **Start** from `link_profiles.logical_reference_profile()`
   (`decsim/links/link_profiles.py`) and replace the hops you have
-  numbers for.
+  numbers for. To time a strong-side hop with no weak decoder in the
+  way, start the machine from
+  `decsim.settings.strong_decoder_baseline(3, 0.001, 1.0)` (distance,
+  physical error probability, round period in microseconds), the strong
+  decoder alone.
 - **One hop in cycles of a clock:** `link_profiles.path_card(links,
   "weak_decoder_to_strong_decoder", clock=..., latency_cycles=...,
   bits_per_cycle=..., source=...)` returns the hop's `PathSettings`;

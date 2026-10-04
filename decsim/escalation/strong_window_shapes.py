@@ -22,7 +22,7 @@ requests its weak decode afresh, and only then ends the claim.
 """
 
 import dataclasses
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, Union, runtime_checkable
 
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -52,7 +52,7 @@ class StrongAssignment:
 
     request_key: window_records.DecoderRequestKey
     job: Optional[decoding_records.DecodeJob]
-    held_plan: Any = None
+    held_plan: Any = None  # an opaque identity
     round_count: int = 0
     folded_boundaries: tuple = ()
     first_round: int = 1
@@ -97,7 +97,7 @@ class StrongWindowShape(Protocol):
 
     absorbs_weak_windows: bool
     boundary_policy: ports.BoundaryPolicySettings
-    window_absorbed: Any
+    window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
 
     def plan(self, weak_job: decoding_records.DecodeJob) -> StrongAssignment:
         """Assign the strong window; build its job now or hold it."""

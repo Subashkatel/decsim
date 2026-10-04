@@ -7,9 +7,11 @@ and the buffers read the plan and never change it.
 """
 
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import decsim.config as config
+import decsim.ports as ports
+import decsim.qpu.layouts as layouts
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
@@ -42,10 +44,10 @@ def plan_execution(
     *,
     operations: tuple[program_records.OperationPlanningView, ...],
     planned_operation_ids: tuple[int, ...],
-    code,
-    layout,
-    scheme,
-    rounds_policy,
+    code: ports.CodeModel,
+    layout: layouts.LayoutModel,
+    scheme: ports.WindowingScheme,
+    rounds_policy: ports.RoundsPolicy,
     fallback_round_microseconds: float,
     retain_strong_context: bool,
     absorbs_weak_windows: bool,
@@ -102,7 +104,7 @@ def check_operation_graph(
     operations: list[program_records.Operation],
     *,
     validate_blockers: bool = False,
-    external_blocker_ids=(),
+    external_blocker_ids: Iterable[int] = (),
     dependency_field: str = "predecessors",
 ) -> None:
     """Refuse a dependency graph a dictionary or an empty queue would hide.
@@ -129,7 +131,9 @@ def check_operation_graph(
     _check_acyclic(by_id, successors, indegree)
 
 
-def check_workload_identity(operations, decode_operations, dynamic_streams):
+def check_workload_identity(
+    operations: tuple, decode_operations: tuple, dynamic_streams: tuple
+) -> None:
     """Refuse operation and stream keys the runtime maps could confuse.
 
     An id names one object across the three roles, an operation is never

@@ -34,7 +34,7 @@ class ExecutionRuntime:
     def __init__(
         self,
         engine: decsim.engine.Engine,
-        resource_claims_by_operation_id,
+        resource_claims_by_operation_id: dict,
     ):
         self.engine = engine
         self.schedule = _OperationSchedule()

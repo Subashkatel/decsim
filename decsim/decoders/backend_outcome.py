@@ -29,6 +29,16 @@ class BackendDecodeOutcome:
     physical_correction: Optional[tuple[int, ...]]
     iterations: Optional[int]
 
+    def __post_init__(self) -> None:
+        # a user's decoder may build this record, and a success with no
+        # correction would be scored as the empty one
+        if self.physical_correction is not None:
+            return
+        if self.succeeded:
+            raise ValueError(
+                "a successful outcome needs its physical_correction"
+            )
+
     @property
     def succeeded(self) -> bool:
         """Whether the backend committed a correction it stands behind."""

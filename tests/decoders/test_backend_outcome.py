@@ -10,6 +10,7 @@ which names a nonconverged solution and an upstream error apart.
 """
 
 import numpy
+import pytest
 
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
@@ -112,3 +113,11 @@ def test_an_outcome_with_no_correction_commits_an_empty_one_and_its_reason():
     assert answer.selected_faults.tolist() == [0, 0, 0]
     assert answer.decode_status is backend_error
     assert answer.no_correction_reason is reason
+
+
+def test_a_successful_outcome_needs_its_correction():
+    """Its shot would be scored as though the empty correction were its."""
+    succeeded = decoding_records.BackendDecodeStatus.SUCCEEDED
+
+    with pytest.raises(ValueError, match="needs its physical_correction"):
+        backend_outcome.BackendDecodeOutcome(succeeded, None, None, None)

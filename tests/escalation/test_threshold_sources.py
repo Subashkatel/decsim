@@ -66,7 +66,7 @@ def _controller(
     )
 
 
-def test_the_rate_tracker_pins_the_target_rate_over_a_random_gap_stream():
+def test_the_rate_tracker_pins_the_target_rate_over_random_gaps_property():
     """A property test: 20000 Gaussian gaps against the recursion's target."""
     tracker = threshold_sources.EscalationRateTracker(
         target_escalation_rate=0.1, threshold=4.6, step=0.05
@@ -199,7 +199,7 @@ def test_an_online_threshold_records_its_trajectory_for_the_experiments_layer():
     assert online.trajectory[-1] == (1, 10.0, "audit")
 
 
-def test_the_rate_tracker_follows_the_papers_recursion_step_for_step():
+def test_the_rate_tracker_follows_the_papers_recursion_step_for_step_property():
     """The referent run beside the row.
 
     Gibbs and Candes arXiv:2106.00170 Eq. (2), line 143:
@@ -229,7 +229,7 @@ def test_the_rate_tracker_follows_the_papers_recursion_step_for_step():
     assert tracked == pytest.approx(expected)
 
 
-def test_the_realized_rate_is_pinned_by_the_distance_the_threshold_moved():
+def test_the_realized_rate_is_pinned_by_how_far_the_threshold_moved_property():
     """Proposition 4.1's identity (2106.00170 lines 309-317).
 
     Summing the recursion gives

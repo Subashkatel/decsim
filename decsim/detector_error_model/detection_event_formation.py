@@ -89,7 +89,11 @@ class SeatedFormation:
         return history.width(fragments)
 
     def rounds_needed_before(
-        self, seat: str, operation_id: Any, first_round: int, last_round: int
+        self,
+        seat: str,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
+        last_round: int,
     ) -> tuple:
         """The raw rounds before a read's first round the seat must be given.
 
@@ -106,7 +110,9 @@ class SeatedFormation:
         )
 
     def earlier_rounds_read(
-        self, operation_id: Any, first_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
     ) -> tuple[int, ...]:
         """The raw rounds before first_round it or any later round reads.
 
@@ -228,7 +234,11 @@ class _SeatHistory:
             former.hold_packet(first.round_index, bits)
             self._report_state(first.operation_id, former)
 
-    def retire(self, operation_id: Any, round_index: int) -> None:
+    def retire(
+        self,
+        operation_id: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """No read forms this round here again; held packets may go.
 
         A seat with no former yet records the round for the former it makes
@@ -255,7 +265,10 @@ class _SeatHistory:
             )
 
     def rounds_needed_before(
-        self, operation_id: Any, first_round: int, last_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
+        last_round: int,
     ) -> tuple:
         """The raw rounds before first_round the read needs and lacks."""
         if self.recipes is None:
@@ -267,7 +280,10 @@ class _SeatHistory:
         return self._lacking(operation_id, read_rounds, first_round)
 
     def _lacking(
-        self, operation_id: Any, read_rounds: set, first_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        read_rounds: set,
+        first_round: int,
     ) -> tuple:
         """The read rounds before first_round whose packet the seat lacks."""
         former = self.former_by_operation.get(operation_id)
@@ -281,7 +297,10 @@ class _SeatHistory:
         return tuple(lacking_rounds)
 
     def _unformed(
-        self, operation_id: Any, first_round: int, stop_round: int
+        self,
+        operation_id: Any,  # an opaque identity
+        first_round: int,
+        stop_round: int,
     ) -> tuple:
         """The rounds from first_round to before stop_round never formed."""
         done_rounds = self.memory.done_rounds_of(operation_id)
@@ -313,7 +332,12 @@ class _SeatHistory:
         sized = _sized_by_its_bits(formed)
         return (sized,)
 
-    def _events(self, operation_id: Any, round_index: int, raw_bits) -> tuple:
+    def _events(
+        self,
+        operation_id: Any,  # an opaque identity
+        round_index: int,
+        raw_bits,
+    ) -> tuple:
         """The round's events, formed here the first time the seat sees it."""
         former = self._former_for(operation_id)
         key = (operation_id, round_index)
@@ -331,7 +355,7 @@ class _SeatHistory:
 
     def _report_state(
         self,
-        operation_id: Any,
+        operation_id: Any,  # an opaque identity
         former: detector_formation.StreamingDetectorFormer,
     ) -> None:
         """The raw bits this seat holds for the operation, now."""
@@ -339,7 +363,8 @@ class _SeatHistory:
         self.state_held.fire(self.seat, operation_id, held_bits)
 
     def _former_for(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> detector_formation.StreamingDetectorFormer:
         """The seat's former for the operation, on the newest table."""
         table = self.recipes.formation_table(operation_id)
@@ -370,13 +395,18 @@ class _SeatMemory:
         self.claimed_keys: set = set()
 
     def done_rounds_of(
-        self, operation_id: Any
+        self,
+        operation_id: Any,  # an opaque identity
     ) -> detector_formation.DoneRounds:
         """The operation's rounds formed here or retired."""
         new_record = detector_formation.DoneRounds()
         return self.done_by_operation.setdefault(operation_id, new_record)
 
-    def retire(self, operation_id: Any, round_index: int) -> None:
+    def retire(
+        self,
+        operation_id: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
         """The round is done here; its events and claim are asked no more."""
         done_rounds = self.done_rounds_of(operation_id)
         done_rounds.add(round_index)

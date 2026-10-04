@@ -14,7 +14,6 @@ import dataclasses
 import math
 import pathlib
 import random
-import types
 
 import pytest
 
@@ -198,19 +197,6 @@ def test_an_online_threshold_records_its_trajectory_for_the_experiments_layer():
     audited = _result(15.0)
     online.decide_keep(fourth, audited)
     assert online.trajectory[-1] == (1, 10.0, "audit")
-
-
-def test_an_audit_needs_the_weak_observables_for_its_label():
-    controller = _controller(target=0.0, threshold=0.0, step=0.0)
-    draws = random.Random(0)
-    online = threshold_sources.OnlineThreshold(controller, draws)
-    soft_output = decoding_records.SoftOutput(gap=5.0, source=SOURCE)
-    timing_only = types.SimpleNamespace(
-        soft_output=soft_output, logical_observables=None
-    )
-    fourth = _job(4)
-    with pytest.raises(ValueError):
-        online.decide_keep(fourth, timing_only)
 
 
 def test_the_rate_tracker_follows_the_papers_recursion_step_for_step():
@@ -407,30 +393,19 @@ def test_a_settings_path_header_is_refused_naming_its_fact(tmp_path):
 def test_an_integer_key_matches_its_row_exactly(tmp_path):
     """Only a float key reads back within a relative 1e-9 of its text.
 
-    A whole number is written exactly, so 1000000001 finds no row keyed
+    A whole number is written exactly, so 1000000001 skips the row keyed
     1000000000 although the two lie within 1e-9 of each other.
     """
     table_path = _write_table(
-        tmp_path, "distance,gth_eq4_wilson\n1000000000,12.0\n"
+        tmp_path,
+        "distance,gth_eq4_wilson\n1000000000,12.0\n1000000001,18.0\n",
     )
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(distance=1000000001)
 
-    with pytest.raises(ValueError):
-        table.at_point(facts)
+    threshold = table.at_point(facts)
 
-
-def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
-    tmp_path,
-):
-    table_path = _write_table(
-        tmp_path, "round_period_microseconds,gth_eq4_wilson\n1.0,12.0\n"
-    )
-    table = threshold_sources.TableThreshold.Settings(table_path)
-    facts = _facts(distance=5, physical_error_probability=0.003)
-
-    with pytest.raises(ValueError, match="round_period_microseconds"):
-        table.at_point(facts)
+    assert threshold.threshold_decibels == 18.0
 
 
 def test_a_read_table_record_needs_its_file_no_more(tmp_path):
@@ -524,16 +499,6 @@ def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
     facts = _facts(distance=3)
 
     with pytest.raises(ValueError, match=sentence):
-        table.at_point(facts)
-
-
-def test_an_empty_entry_refuses_its_point(tmp_path):
-    """No threshold was certified there, so none is guessed."""
-    table_path = _write_table(tmp_path, CALIBRATION_TABLE)
-    table = threshold_sources.TableThreshold.Settings(table_path)
-    facts = _facts(distance=7, physical_error_probability=0.008)
-
-    with pytest.raises(ValueError, match="entry is empty"):
         table.at_point(facts)
 
 

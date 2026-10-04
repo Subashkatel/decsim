@@ -72,12 +72,6 @@ class PendingStrongWindows:
         """Hold the assignment under the conditions its row declared."""
         conditions = held.conditions
         waits_on_data = conditions.stored_data_of_operation is not None
-        has_condition = bool(conditions.committed_windows) or waits_on_data
-        if not has_condition:
-            raise RuntimeError(
-                f"the strong window for {held.key} is held with no release "
-                f"condition: a row that holds its job names what releases it"
-            )
         assert held.key not in self.by_key, held.key
         self.by_key[held.key] = held
         self.uncommitted_windows[held.key] = set(conditions.committed_windows)

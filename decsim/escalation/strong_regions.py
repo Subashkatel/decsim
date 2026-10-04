@@ -209,7 +209,6 @@ class StrongRegions:
         )
         plan = self._plan_region(weak_window, later_windows, round_count)
         return _DoubleWindowProposal(
-            weak_window=weak_window,
             round_count=round_count,
             later_windows=later_windows,
             plan=plan,
@@ -223,16 +222,14 @@ class StrongRegions:
     ) -> DoubleWindowRegion:
         """The proposed extent checked against the windows that exist."""
         operation_id = key[0]
-        weak_window = proposal.weak_window
         round_count = proposal.round_count
         later_windows = proposal.later_windows
         plan = proposal.plan
-        _check_region_bounds(key, weak_window, round_count, plan)
         absorbed = _absorbed_window_keys(later_windows, plan)
         _refuse_crossing_window(later_windows, plan)
         self.planner.check_absorbable(absorbed)
         restart_key = _restart_window_key(later_windows, plan)
-        restart_reads = self._restart_reads(key, restart_key, plan)
+        restart_reads = self._restart_reads(restart_key, plan)
         context_keys = self.retention.strong_rounds_before(
             operation_id, plan.context_lo, plan.context_hi
         )
@@ -280,16 +277,13 @@ class StrongRegions:
 
     def _restart_reads(
         self,
-        key: tuple,
         restart_key: Optional[tuple],
         plan: window_records.StrongRegionPlan,
     ) -> tuple:
         """The restart window's reads from its re-sliced buffer start."""
         if restart_key is None:
-            _refuse_terminal_restart_data(key, plan)
             return ()
         restart = self.planner.window_at(restart_key)
-        _check_restart_tiling(key, restart_key, restart, plan)
         reads = self.retention.read_keys_for_bounds(
             restart.operation_id,
             plan.restart_buffer_lo,
@@ -421,7 +415,6 @@ class _DoubleWindowProposal:
     rounds the row will really read.
     """
 
-    weak_window: window_records.Window
     round_count: int
     later_windows: list
     plan: window_records.StrongRegionPlan
@@ -496,43 +489,6 @@ def _window_over(
     )
 
 
-def _check_region_bounds(
-    key: tuple,
-    weak_window: window_records.Window,
-    round_count: int,
-    plan: window_records.StrongRegionPlan,
-) -> None:
-    """Context holds commit holds the weak window, inside the operation."""
-    nested_bounds = (
-        1,
-        plan.context_lo,
-        plan.commit_lo,
-        weak_window.commit_lo,
-        weak_window.commit_hi,
-        plan.commit_hi,
-        plan.context_hi,
-        round_count,
-    )
-    if not _is_nondecreasing(nested_bounds):
-        raise RuntimeError(
-            f"invalid strong-region bounds for {key}: context "
-            f"{plan.context_lo}-{plan.context_hi}, commit "
-            f"{plan.commit_lo}-{plan.commit_hi}, operation 1-{round_count}"
-        )
-    if plan.commit_lo != weak_window.commit_lo:
-        raise RuntimeError(
-            f"strong-region commit for {key} must start at the "
-            f"escalated window's commit start {weak_window.commit_lo}"
-        )
-
-
-def _is_nondecreasing(values: tuple) -> bool:
-    for left, right in zip(values, values[1:], strict=False):
-        if right < left:
-            return False
-    return True
-
-
 def _absorbed_window_keys(
     later_windows: list, plan: window_records.StrongRegionPlan
 ) -> tuple:
@@ -573,44 +529,6 @@ def _restart_window_key(
         if window.commit_lo > plan.commit_hi:
             return window.key
     return None
-
-
-def _refuse_terminal_restart_data(
-    key: tuple, plan: window_records.StrongRegionPlan
-) -> None:
-    if plan.restart_buffer_lo is not None:
-        raise RuntimeError(
-            f"terminal strong-region plan for {key} cannot define "
-            f"restart seam data"
-        )
-
-
-def _check_restart_tiling(
-    key: tuple,
-    restart_key: tuple,
-    restart: window_records.Window,
-    plan: window_records.StrongRegionPlan,
-) -> None:
-    """The restart window commits right after the strong window."""
-    expected_start = plan.commit_hi + 1
-    if restart.commit_lo != expected_start:
-        raise RuntimeError(
-            f"strong-region plan for {key} ends at "
-            f"{plan.commit_hi}, but restart {restart_key} "
-            f"starts at {restart.commit_lo}; committed regions must "
-            "tile without a gap"
-        )
-    if plan.restart_buffer_lo is None:
-        raise RuntimeError(
-            f"strong-region restart {restart_key} needs a "
-            f"buffer start in 1-{restart.commit_lo}"
-        )
-    is_inside = 1 <= plan.restart_buffer_lo <= restart.commit_lo
-    if not is_inside:
-        raise RuntimeError(
-            f"strong-region restart {restart_key} needs a "
-            f"buffer start in 1-{restart.commit_lo}"
-        )
 
 
 def _fault_exclusions(

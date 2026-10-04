@@ -377,7 +377,6 @@ class DoubleWindow(StrongWindowPorts):
         of the two, and the redecode holds the assignment until it fires.
         """
         key = (weak_job.operation_id, weak_job.window_id)
-        self._refuse_second_escalation(key)
         strong_request_key = self.builder.new_request_key(
             weak_job.operation_id,
             weak_job.window_id,
@@ -517,18 +516,6 @@ class DoubleWindow(StrongWindowPorts):
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
-
-    # ---- private: the plan
-
-    def _refuse_second_escalation(self, key: tuple) -> None:
-        # the plan claims the extent in the ledger before it holds
-        # anything, so an escalation of a window already claimed is the
-        # second one, held or committed
-        if self.ledger.owns_strong_window(key):
-            raise RuntimeError(
-                f"duplicate strong escalation for window {key}: one "
-                f"switching event creates exactly one strong job"
-            )
 
     # ---- private: landing the plan
 

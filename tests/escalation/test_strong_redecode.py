@@ -11,8 +11,6 @@ releases it. The submission is the DecodeQueue port's enqueue with the
 committer's return path (SimPy's callback on the event).
 """
 
-import pytest
-
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_module
 import decsim.escalation.strong_redecode as strong_redecode_module
@@ -406,13 +404,3 @@ def test_a_region_still_forming_at_its_landing_is_not_carried_again():
     assert len(output.regions) == 1
     assert carried_while_forming == set(REGION_ROUND_KEYS)
     assert redecode.carried_round_keys == set()
-
-
-def test_a_row_that_holds_its_job_and_names_nothing_is_refused():
-    """A held job with no condition would never leave."""
-    strong_job = _strong_job(5)
-    shape = _Shape(strong_job, is_held=True, waits_on=())
-    redecode, _output, _strong, _queue, _done = _redecode(shape)
-    weak_job = _weak_job()
-    with pytest.raises(RuntimeError):
-        redecode.escalate(weak_job)

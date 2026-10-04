@@ -286,22 +286,28 @@ def _recorded_waits(machine) -> dict:
     return waits
 
 
-def test_a_second_escalation_of_one_window_is_refused():
+@pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 4), (4, 3)])
+def test_a_double_window_crossing_a_later_commit_region_stops_the_run(
+    commit_rounds, buffer_rounds
+):
+    """The region is commit plus two buffers from the escalated commit.
+
+    When twice the buffer is not a multiple of the commit, the region
+    ends inside a later window's commit region, and that window commits
+    across the region's end with no owner.
+    """
+    scheme = sliding_scheme.SlidingWindowScheme.Settings(
+        commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
+    )
     machine = fabric.switching_machine(
-        rounds=9,
-        escalated_windows={2},
+        rounds=24,
+        escalated_windows={1},
         strong_window=declared_run.DOUBLE_WINDOW,
+        scheme=scheme,
     )
-    machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
-    again = decoding_records.DecodeJob(
-        operation_id=1,
-        window_id=2,
-        round_count=3,
-        strong_label="strong(mem1 W2)",
-    )
-    with pytest.raises(RuntimeError):
-        shape.plan(again)
+
+    with pytest.raises(RuntimeError, match="across the strong-region edge"):
+        machine.run()
 
 
 # ---- the restart window's the weak syndrome buffer claim under a backlog

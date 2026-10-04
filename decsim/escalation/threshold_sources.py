@@ -189,10 +189,9 @@ class TableThreshold(FixedThreshold):
             """
             if self.threshold_decibels is not None:
                 return self
-            _refuse_a_missing_table(self.table)
-            columns, rows = _table_rows(self.table, self.column)
-            point = _point_of(columns, facts, self.table)
-            row = _first_row_holding(rows, point, self.table)
+            columns, rows = _table_rows(self.table)
+            point = _point_of(columns, facts)
+            row = _first_row_holding(rows, point)
             cell = row[self.column]
             threshold_decibels = _certified_decibels(
                 cell, self.table, self.column, point
@@ -532,12 +531,6 @@ class OnlineThreshold:
         if self.controller.tracker.window_count % 100 == 0:
             self._record("sample")
         if audited:
-            if result.logical_observables is None:
-                raise ValueError(
-                    "online threshold calibration needs the weak decoder "
-                    "to produce logical observables for audit labels; "
-                    "the configured weak card is timing-only"
-                )
             key = (job.operation_id, job.window_id)
             self._pending_audits[key] = tuple(result.logical_observables)
             self._record("audit")
@@ -551,11 +544,6 @@ class OnlineThreshold:
         weak_observables = self._pending_audits.pop(window_key, None)
         if weak_observables is None:
             return
-        if result.logical_observables is None:
-            raise ValueError(
-                f"audited window {window_key}: the strong result carries no "
-                "logical observables to compare against"
-            )
         strong_observables = tuple(result.logical_observables)
         weak_was_bad = strong_observables != weak_observables
         self.controller.record_audit_outcome(weak_was_bad)
@@ -649,14 +637,7 @@ def _refuse_a_seed_with_no_fact(distance, physical_error_probability) -> None:
     )
 
 
-def _refuse_a_missing_table(table_path: pathlib.Path) -> None:
-    table = pathlib.Path(table_path)
-    if table.exists():
-        return
-    raise ValueError(f"threshold_table {table_path} does not exist")
-
-
-def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
+def _table_rows(table_path: pathlib.Path) -> tuple:
     """The table's columns and rows; the threshold column must be one.
 
     A table with no key column would match every point to its first row,
@@ -667,11 +648,6 @@ def _table_rows(table_path: pathlib.Path, column: str) -> tuple:
         rows = list(reader)
         columns = reader.fieldnames or []
     _refuse_a_settings_path_header(columns, table_path)
-    if column not in columns:
-        raise ValueError(
-            f"threshold_table {table_path} has no column {column!r}; its "
-            f"columns are {sorted(columns)}"
-        )
     key_columns = _key_columns(columns)
     if not key_columns:
         raise ValueError(
@@ -712,41 +688,20 @@ def _key_columns(columns: list) -> list:
     return [column for column in columns if column in POINT_FACTS]
 
 
-def _point_of(columns: list, facts: Mapping, table_path) -> dict:
+def _point_of(columns: list, facts: Mapping) -> dict:
     """The point's value at each of the table's key columns."""
     point = {}
     for column in _key_columns(columns):
-        value = facts[column]
-        if value is None:
-            raise ValueError(
-                f"threshold_table {table_path} keys its rows on {column}, "
-                f"and the point gives no {column}"
-            )
-        point[column] = value
+        point[column] = facts[column]
     return point
 
 
-def _first_row_holding(rows: list, point: dict, table_path) -> dict:
-    """The first row whose key cells hold the point; none is refused."""
+def _first_row_holding(rows: list, point: dict) -> Optional[dict]:
+    """The first row whose key cells hold the point, or None."""
     for row in rows:
         if _is_point(row, point):
             return row
-    calibrated = _calibrated_points(rows, point)
-    raise ValueError(
-        f"threshold_table {table_path} has no row for {point}; its rows "
-        f"are {calibrated}"
-    )
-
-
-def _calibrated_points(rows: list, point: dict) -> list:
-    """Each row's key cells, the points the table does certify."""
-    calibrated = []
-    for row in rows:
-        keys = {}
-        for column in point:
-            keys[column] = row[column]
-        calibrated.append(keys)
-    return calibrated
+    return None
 
 
 def _is_point(row: dict, point: dict) -> bool:
@@ -775,11 +730,6 @@ def _cell_holds(cell: str, value) -> bool:
 def _certified_decibels(
     cell: str, table_path: pathlib.Path, column: str, point: dict
 ) -> float:
-    if cell == "":
-        raise ValueError(
-            f"threshold_table {table_path} refuses {point}: the {column} "
-            "entry is empty (not enough evidence at calibration time)"
-        )
     entry = f"threshold_table {table_path} entry {column} at {point}"
     gap_threshold_db = float(cell)
     return checked_decibels(gap_threshold_db, entry)

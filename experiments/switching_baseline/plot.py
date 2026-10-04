@@ -40,11 +40,12 @@ TIER_COLOR = {"weak": "C0", "strong": "C1"}
 TIER_NAME = {"weak": "union-find (weak)", "strong": "Relay-BP-5 (strong)"}
 VIOLIN_HALF_WIDTH = 0.8
 VIOLIN_BINS = 40
-# A window's stages from formed, its last round readable in the weak
-# syndrome buffer, to its correction written in the Pauli frame, in the
-# order they happen. Each is one recorded point of
+# A window's stages from its first round readable in the weak syndrome
+# buffer to its correction written in the Pauli frame, in the order
+# they happen. Each is one recorded point of
 # decsim/experiments/measure.py, and they add up to TOTAL_STAGE.
 STAGES = {
+    "buffer_fill": "wait for the window's rounds",
     "admission_wait": "window into the decode queue",
     "queue_wait": "wait for the union-find decoder",
     "weak_attempt": "union-find attempt before escalating",
@@ -59,10 +60,12 @@ STAGES = {
     "output_link_per_window": "send correction to the Pauli frame",
     "frame_commit": "write the Pauli frame",
 }
-TOTAL_STAGE = "buffer0_ready_to_frame"
-# one color per stage, by kind: waiting in oranges and reds, data moving
-# in blues, decoding in greens, the verdict's work in purples
+TOTAL_STAGE = "buffer0_first_round_to_frame"
+# one color per stage, by kind: the rounds arriving in gray, waiting in
+# oranges and reds, data moving in blues, decoding in greens, the
+# verdict's work in purples
 STAGE_COLOR = {
+    "buffer_fill": "#bdbdbd",
     "admission_wait": "#fdd49e",
     "queue_wait": "#fc8d59",
     "weak_attempt": "#bcbddc",
@@ -77,8 +80,6 @@ STAGE_COLOR = {
     "output_link_per_window": "#3182bd",
     "frame_commit": "#08306b",
 }
-# inside dep_block: the escalated rounds moving to the strong decoder
-SEND_STAGE = "escalation_link_per_window"
 # the weak tier's windows take microseconds, the strong tier's milliseconds
 TIER_UNIT = {"weak": ("µs", 1.0), "strong": ("ms", 1e3)}
 TIER_WINDOWS = {
@@ -403,9 +404,9 @@ def breakdown_figure(stage_means: dict, path: pathlib.Path) -> None:
 
     Each bar is one distance's mean time per window, split into the
     stages in the order they happen. Means, unlike medians, add up, so
-    a bar's length is the mean time from the window formed, its last
-    round readable in the weak syndrome buffer, to its correction
-    written in the Pauli frame: the number at its end.
+    a bar's length is the mean time from the window's first round
+    readable in the weak syndrome buffer to its correction written in
+    the Pauli frame: the number at its end.
     """
     drawn_stages = stages_with_time(stage_means)
     tiers = list(TIER_WINDOWS)
@@ -473,27 +474,15 @@ def draw_breakdown(
         lefts = [
             left + width for left, width in zip(lefts, widths, strict=True)
         ]
-    # moving the escalated rounds to the strong decoder is microseconds
-    # inside the wait for a slot, rounds and boundary, on a milliseconds
-    # bar, so its time is written beside the total
-    for position, distance, total in zip(
-        positions, distances, lefts, strict=True
-    ):
-        label = f" {total:.4g}"
-        if tier == "strong":
-            send_key = (error_rate, distance, tier, SEND_STAGE)
-            send_us = stage_means[send_key]
-            label += f" (incl. {send_us:.3g} µs moving rounds to Relay-BP-5)"
-        axis.text(total, position, label, va="center", fontsize=8)
+    for position, total in zip(positions, lefts, strict=True):
+        axis.text(total, position, f" {total:.4g}", va="center", fontsize=8)
     distance_labels = [f"d={distance}" for distance in distances]
     axis.set_yticks(positions, distance_labels)
     axis.invert_yaxis()
     widest = max(lefts, default=1.0)
-    # room for the total, and on a strong bar the note beside it
-    room = 1.9 if tier == "strong" else 1.2
-    axis.set_xlim(0, widest * room)
+    axis.set_xlim(0, widest * 1.2)
     axis.set_xlabel(
-        f"mean time per window, formed to Pauli frame ({unit_name})"
+        f"mean time per window, first round to Pauli frame ({unit_name})"
     )
     axis.set_title(f"{TIER_WINDOWS[tier]}, {X} = {error_rate:g}")
 

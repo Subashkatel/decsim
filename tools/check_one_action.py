@@ -527,11 +527,14 @@ REPORT_ONLY_KINDS = frozenset({"long function", "wide state"})
 def main(arguments):
     """Check every file named, print the findings, return the exit code."""
     findings = []
-    for path in python_files(arguments):
+    found_paths = python_files(arguments)
+    checked_paths = list(found_paths)
+    for path in checked_paths:
         file_findings = check_file(path)
         findings.extend(file_findings)
     failures, reports = _split_findings(findings)
-    _print_findings(failures, reports)
+    checked_count = len(checked_paths)
+    _print_findings(failures, reports, checked_count)
     if failures:
         return 1
     return 0
@@ -549,12 +552,17 @@ def _split_findings(findings):
     return failures, reports
 
 
-def _print_findings(failures, reports):
+def _print_findings(failures, reports, checked_count: int):
     """Print the failures with their count, then the size prompts."""
     for finding in failures:
         print(finding)
     failure_paths = {finding.path for finding in failures}
-    print(f"{len(failures)} findings in {len(failure_paths)} files")
+    failure_count = len(failures)
+    failed_file_count = len(failure_paths)
+    print(
+        f"{failure_count} findings in {failed_file_count} of "
+        f"{checked_count} files checked"
+    )
     if reports:
         print("reports (size prompts, answered in the change's report):")
     for finding in reports:

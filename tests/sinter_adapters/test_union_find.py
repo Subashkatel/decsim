@@ -17,9 +17,9 @@ import pytest
 import sinter
 import stim
 
-import decsim.collect as collect
 import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
+import decsim.experiments.collect as collect
 import decsim.frontends.settings as workload_settings
 import decsim.producers as producers
 import decsim.settings as machine_settings
@@ -27,7 +27,7 @@ import decsim.sinter_adapters.union_find as union_find_adapter
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.schemes.naive_online as naive_online
 
-# the round period of the machine point the adapters answer against
+# the round period of the machine task the adapters answer against
 ROUND_PERIOD_MICROSECONDS = 1.1
 CODE_TASKS = ["surface_code:rotated_memory_x", "surface_code:rotated_memory_z"]
 # At this rate a shot holds enough defects that the graph's weights
@@ -49,7 +49,7 @@ def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
     task = baseline_task(distance, code_task, ERROR_RATE, UNION_FIND)
     seeds = range(SHOT_COUNT)
     events, machine_answers = machine_shots(task, seeds)
-    (operation,) = task.settings.workload.operations
+    (operation,) = task.machine.workload.operations
     circuit = operation.circuit
     model = circuit.detector_error_model(
         decompose_errors=True, approximate_disjoint_errors=True
@@ -112,7 +112,7 @@ def test_sinter_collects_through_the_adapter():
 
 
 def baseline_task(distance: int, code_task: str, error_rate, algorithm):
-    """The decoder baseline's machine point on one weak row, short shots.
+    """The decoder baseline's machine task on one weak row, short shots.
 
     The weak base whose naive_online scheme decodes the operation as one
     window, on one memory shot of the code task.
@@ -130,18 +130,18 @@ def baseline_task(distance: int, code_task: str, error_rate, algorithm):
     settings = dataclasses.replace(
         base, workload=workload, windows=windows, weak_decoder=weak_decoder
     )
-    return collect.Task(settings, {})
+    return collect.Task("task", settings, {})
 
 
 def machine_shots(task, seeds) -> tuple:
     """Each seed's machine shot: the events drawn, the observables predicted.
 
-    The events are the ones the device drew for the point's one
+    The events are the ones the device drew for the task's one
     operation, and the prediction is the correction the machine
     committed for it.
     """
     built_models = built_window_models.BuiltWindowModels()
-    (operation,) = task.settings.workload.operations
+    (operation,) = task.machine.workload.operations
     events = []
     answers = []
     for seed in seeds:

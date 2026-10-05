@@ -123,10 +123,10 @@ class MachineSettings:
             return "strong_only"
         return "weak_baseline"
 
-    def point_facts(self) -> dict:
-        """The point's facts a threshold reads, None where none is stated.
+    def task_facts(self) -> dict:
+        """The task's facts a threshold reads, None where none is stated.
 
-        The names are threshold_sources.POINT_FACTS; a window size of
+        The names are threshold_sources.TASK_FACTS; a window size of
         None is the distance.
         """
         workload_record = self.workload.workload_record
@@ -142,17 +142,17 @@ class MachineSettings:
             "buffer_rounds": scheme.buffer_rounds,
         }
 
-    def at_point(self) -> "MachineSettings":
-        """The settings with the threshold their point's facts give.
+    def at_task(self) -> "MachineSettings":
+        """The settings with the threshold their task's facts give.
 
-        A calibration table's row is read here, once per point; reading
+        A calibration table's row is read here, once per task; reading
         settings already read returns them unchanged.
         """
         switching = self.switching
         if switching is None:
             return self
-        facts = self.point_facts()
-        threshold = switching.threshold.at_point(facts)
+        facts = self.task_facts()
+        threshold = switching.threshold.at_task(facts)
         if threshold is switching.threshold:
             return self
         resolved = dataclasses.replace(switching, threshold=threshold)

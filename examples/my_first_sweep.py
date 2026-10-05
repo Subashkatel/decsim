@@ -2,7 +2,7 @@
 
 The weak decoder baseline with real PyMatching charged its measured
 wall clock, so every window is decoded for real and the logical error
-rate means something, at d = 3, 5 and 7 and p = 0.003. A point stops at
+rate means something, at d = 3, 5 and 7 and p = 0.003. A task stops at
 400 shots.
 
 Usage
@@ -27,7 +27,7 @@ PHYSICAL_ERROR_PROBABILITY = 0.003
 ROUND_PERIOD_MICROSECONDS = 1.0
 COLLECTION = decsim.CollectionSettings(max_shots=400)
 
-points = []
+tasks = []
 for distance in DISTANCES:
     base = machine_settings.weak_decoder_baseline(
         distance,
@@ -38,7 +38,7 @@ for distance in DISTANCES:
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
     machine = dataclasses.replace(base, weak_decoder=weak_decoder)
-    # the point's settings, named as the results' columns name them
+    # the task's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (
             PHYSICAL_ERROR_PROBABILITY
@@ -46,7 +46,7 @@ for distance in DISTANCES:
         "qpu.distance": distance,
         "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
     }
-    point = decsim.Point(f"d{distance}", machine, metadata)
-    points.append(point)
+    task = decsim.Task(f"d{distance}", machine, metadata)
+    tasks.append(task)
 
-experiment = decsim.Experiment(NAME, points, COLLECTION)
+experiment = decsim.Experiment(NAME, tasks, COLLECTION)

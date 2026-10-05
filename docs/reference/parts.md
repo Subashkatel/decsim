@@ -387,14 +387,14 @@ formed_at lists the seats, each once; every path a round takes to a decoder cros
 
 `decsim/escalation/settings.py`. A threshold row's settings record: decibels in, nats out.
 
-The facts at_point and for_point read are MachineSettings.point_facts, keyed by threshold_sources.POINT_FACTS.
+The facts at_task and for_task read are MachineSettings.task_facts, keyed by threshold_sources.TASK_FACTS.
 
 | Member | Type |
 | --- | --- |
 | `threshold_decibels` | `Optional[float]` |
 | `threshold_nats(self)` | `Optional[float]` |
-| `at_point(self, facts: Mapping)` | `'ThresholdSettings'` |
-| `for_point(self, facts: Mapping)` | `Optional[ports.ThresholdSource]` |
+| `at_task(self, facts: Mapping)` | `'ThresholdSettings'` |
+| `for_task(self, facts: Mapping)` | `Optional[ports.ThresholdSource]` |
 | `build(self)` | `ports.ThresholdSource` |
 
 ### `StrongWindowSettings`
@@ -451,9 +451,9 @@ restart_reread_buffer_regions is how many of the strong region's buffer regions 
 
 ### `TableThreshold.Settings`
 
-`decsim/escalation/threshold_sources.py`. The calibration table's threshold for one point.
+`decsim/escalation/threshold_sources.py`. The calibration table's threshold for one task.
 
-column is the csv column it reads. table is a label and no part of a point's id: the number the table gives names the point. threshold_decibels is that number, None until the point's row is read (at_point), which the point's task does before it names the point.
+column is the csv column it reads. table is a label and no part of a task's id: the number the table gives names the task. threshold_decibels is that number, None until the task's row is read (at_task), which collect.Task does before it names the task.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -572,7 +572,7 @@ The framing, buffer and credit fields are the credit protocol's. window_packets 
 
 `decsim/links/settings.py`. Bandwidth of one whole channel in bits per microsecond.
 
-Parallel lanes are one wire with aggregate bandwidth (a PCIe x4 link stripes one transfer over four), so a card folds its lane count in. The rate is one exact Fraction of the number as written, so an int, a float or a Fraction is one value with one point id, and a whole-tick duration is never inflated by float error, as ns-3's integer DataRate arithmetic.
+Parallel lanes are one wire with aggregate bandwidth (a PCIe x4 link stripes one transfer over four), so a card folds its lane count in. The rate is one exact Fraction of the number as written, so an int, a float or a Fraction is one value with one task id, and a whole-tick duration is never inflated by float error, as ns-3's integer DataRate arithmetic.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -674,7 +674,7 @@ Every hop of the reaction path is priced, so a card names all eleven. A card who
 
 log is the engine narrator: print, file (each shot's lines next to the results) or both. trace is the Chrome trace: off, chrome, or a path; trace_shots are the seeds whose shots a run traces. log_component_io adds each component's I/O lines.
 
-The log and the trace are labels (compare=False) and no part of a point's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows.
+The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows.
 
 | Field | Type | Default |
 | --- | --- | --- |

@@ -87,7 +87,7 @@ def test_the_adapter_answers_as_the_machines_relay_bp_row_shot_for_shot(
     )
     seeds = (*FIRST_SEEDS, *table_seeds)
     events, machine_answers = union_find_tests.machine_shots(task, seeds)
-    (operation,) = task.settings.workload.operations
+    (operation,) = task.machine.workload.operations
 
     adapter_answers = seeded_answers(operation.circuit, settings, seeds, events)
 

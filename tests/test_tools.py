@@ -3,7 +3,7 @@
 tools/check.sh runs three checkers over the tree, and a checker that
 misreads its arguments fails open: it exits 0 having looked at nothing,
 and the check silently stops holding. `decsim run --slurm` fails the
-same way, by asking for the wrong job or running a task on code nobody
+same way, by asking for the wrong job or running one on code nobody
 can name, so it is held here beside them, against a stub git and
 sbatch. These tests hold each to what it does with its arguments.
 """
@@ -575,24 +575,24 @@ def _decsim(tmp_path, arguments: list, environment):
 
 
 # The weak base at two distances, four shots each.
-TWO_POINT_RUN_FILE = """
+TWO_TASK_RUN_FILE = """
 import decsim
 import decsim.settings as machine_settings
 
-points = []
+tasks = []
 for distance in (3, 5):
     machine = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
-    point = decsim.Point(f"d{distance}", machine, {"qpu.distance": distance})
-    points.append(point)
+    task = decsim.Task(f"d{distance}", machine, {"qpu.distance": distance})
+    tasks.append(task)
 collection = decsim.CollectionSettings(max_shots=4)
-experiment = decsim.Experiment("two_points", points, collection)
+experiment = decsim.Experiment("two_tasks", tasks, collection)
 """
 
 
-def _two_point_run_file(tmp_path) -> pathlib.Path:
+def _two_task_run_file(tmp_path) -> pathlib.Path:
     """A run file of two distances."""
-    run_file = tmp_path / "two_points.py"
-    run_file.write_text(TWO_POINT_RUN_FILE)
+    run_file = tmp_path / "two_tasks.py"
+    run_file.write_text(TWO_TASK_RUN_FILE)
     return run_file
 
 
@@ -609,14 +609,14 @@ def _slurm_arguments(config_path, results_dir, *extra) -> list:
 
 
 def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
-    """Task i of the array runs point i of the run file, then a fold.
+    """Job i of the array runs task i of the run file, then a fold.
 
-    A dry run records the points and writes both files, and submits
+    A dry run records the tasks and writes both files, and submits
     nothing. The folder's path holds a space, and each line still reads
-    back as the arguments it was written from, the task index left for
+    back as the arguments it was written from, the array index left for
     the shell to expand.
     """
-    config_path = _two_point_run_file(tmp_path)
+    config_path = _two_task_run_file(tmp_path)
     results_dir = tmp_path / "run folder"
     environment = _slurm_environment(tmp_path, "clean")
     arguments = _slurm_arguments(config_path, results_dir, "--dry-run")
@@ -644,7 +644,7 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
         str(run_path),
         "--out",
         str(results_dir),
-        "--task",
+        "--job",
         "$SLURM_ARRAY_TASK_ID",
         "--processes",
         "4",
@@ -659,15 +659,15 @@ def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
         "--out",
         str(results_dir),
     ]
-    point_records = results_dir.glob("points/*/machine.json")
-    point_record_paths = list(point_records)
-    assert len(point_record_paths) == 2
+    task_records = results_dir.glob("tasks/*/machine.json")
+    task_record_paths = list(task_records)
+    assert len(task_record_paths) == 2
     assert not (tmp_path / "submissions.txt").exists()
 
 
 def test_a_launch_submits_the_array_then_the_fold_behind_it(tmp_path):
     """The fold's dependency names the job id sbatch answered."""
-    config_path = _two_point_run_file(tmp_path)
+    config_path = _two_task_run_file(tmp_path)
     results_dir = tmp_path / "results"
     environment = _slurm_environment(tmp_path, "clean")
     arguments = _slurm_arguments(config_path, results_dir)
@@ -682,31 +682,31 @@ def test_a_launch_submits_the_array_then_the_fold_behind_it(tmp_path):
     assert fold_text == (
         f"--parsable --dependency=afterany:1000 {results_dir / 'fold.sbatch'}"
     )
-    assert "array job 1000, fold job 1001" in completed.stdout
+    assert "job array 1000, fold job 1001" in completed.stdout
 
 
 @pytest.mark.parametrize(
     ("status", "sentence"),
     [("dirty", "has uncommitted changes"), ("unknown", "git says nothing")],
 )
-@pytest.mark.parametrize("where", ["launch", "task"])
+@pytest.mark.parametrize("where", ["launch", "job"])
 def test_a_tree_git_does_not_vouch_for_is_refused_where_it_starts(
     tmp_path, status, sentence, where
 ):
     """A dirty tree, or one git cannot read, is refused where it starts.
 
-    Every task imports the tree as it stands when that task starts, so
+    Every job imports the tree as it stands when that job starts, so
     an array launched from a tree still being edited runs code no piece
     of it can name. Launching refuses it, so nothing is queued, and so
-    does every task, since the tree may change after submission.
+    does every job, since the tree may change after submission.
     """
-    config_path = _two_point_run_file(tmp_path)
+    config_path = _two_task_run_file(tmp_path)
     results_dir = tmp_path / "results"
     environment = _slurm_environment(tmp_path, status)
     arguments = {
         "launch": _slurm_arguments(config_path, results_dir),
-        "task": ["run", str(config_path), "--out", str(results_dir)]
-        + ["--task", "0"],
+        "job": ["run", str(config_path), "--out", str(results_dir)]
+        + ["--job", "0"],
     }
 
     completed = _decsim(tmp_path, arguments[where], environment)

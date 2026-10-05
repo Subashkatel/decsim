@@ -55,13 +55,13 @@ sentence naming this command.
 
 ## One run
 
-An experiment is a Python run file: a list of points, each a machine,
-and when each point stops. `examples/priced_cards_example.py` runs the
+An experiment is a Python run file: a list of tasks, each a machine,
+and when each task stops. `examples/priced_cards_example.py` runs the
 weak decoder baseline at three distances, with its decoder priced at one
 microsecond a window:
 
 ```python examples/priced_cards_example.py
-points = []
+tasks = []
 for distance in DISTANCES:
     base = machine_settings.weak_decoder_baseline(
         distance,
@@ -73,7 +73,7 @@ for distance in DISTANCES:
     )
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=card)
     machine = dataclasses.replace(base, weak_decoder=weak_decoder)
-    # the point's settings, named as the results' columns name them
+    # the task's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (
             PHYSICAL_ERROR_PROBABILITY
@@ -81,27 +81,27 @@ for distance in DISTANCES:
         "qpu.distance": distance,
         "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
     }
-    point = decsim.Point(f"d{distance}", machine, metadata)
-    points.append(point)
+    task = decsim.Task(f"d{distance}", machine, metadata)
+    tasks.append(task)
 
-experiment = decsim.Experiment(NAME, points, COLLECTION)
+experiment = decsim.Experiment(NAME, tasks, COLLECTION)
 ```
 
-Run one shot of its first point, with a Chrome trace of every round and
+Run one shot of its first task, with a Chrome trace of every round and
 window written into the results folder it names:
 
 ```bash
 decsim run examples/priced_cards_example.py --seed 0 --trace --out results/first_shot
 ```
 
-Without `--seed`, `decsim run` collects every point until it stops.
+Without `--seed`, `decsim run` collects every task until it stops.
 [Your first run](docs/tutorials/first_run.md) walks through both and
 their output.
 
 ## The documentation
 
 [decsim documentation](docs/README.md) is the front door: tutorials to
-learn from, how-to guides for one task each, reference to look things up
+learn from, how-to guides for one goal each, reference to look things up
 in, and a link to every page.
 
 ## The tests

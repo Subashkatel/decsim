@@ -220,7 +220,7 @@ arrives through the constructor. Public methods read top to bottom in the
 order a reader meets them; private classes and functions come after every
 public one in the module and carry a leading underscore. A package's
 `__init__.py` holds the package docstring and nothing else; the root's
-also lends a run file its names (`decsim.Point`, `decsim.Experiment` and
+also lends a run file its names (`decsim.Task`, `decsim.Experiment` and
 the rest), each loaded on first use.
 
 A record used by one component lives next to it. A record shared by two
@@ -470,7 +470,7 @@ kind; it may not end larger for the wrong kind.
 
 The gate's wall time is measured before and after for the same reason.
 One action per line adds loads and stores, and a sweep multiplies the
-engine, the buffers, the links and the decoder unit by shots and points.
+engine, the buffers, the links and the decoder unit by shots and tasks.
 
 A commit message is a title, "component: what changed", and a body of
 up to five lines saying why, what and how, in Google's and LLVM's

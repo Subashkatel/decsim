@@ -10,7 +10,7 @@ T_strong_comm = tau_strong_dec = 10 tau_gen (lines 1109-1114).
 tau_weak_dec is 0.4 tau_gen, one of the values the paper sweeps (lines
 1125-1126), split over the complementary gap's two decodes of a window.
 tau_gen is the 1.0 us round period. At d = 3 and 5 and p = 0.008, a
-point stops at 50 shots.
+task stops at 50 shots.
 
 Usage
 -----
@@ -63,7 +63,7 @@ strong_decoder = decoder_settings.linear_decoder_pool(
     solves_per_window=1,
 )
 
-points = []
+tasks = []
 for distance in DISTANCES:
     base = machine_settings.weak_decoder_baseline(
         distance,
@@ -92,7 +92,7 @@ for distance in DISTANCES:
         strong_decoder=strong_decoder,
         switching=switching,
     )
-    # the point's settings, named as the results' columns name them
+    # the task's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (
             PHYSICAL_ERROR_PROBABILITY
@@ -100,7 +100,7 @@ for distance in DISTANCES:
         "qpu.distance": distance,
         "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
     }
-    point = decsim.Point(f"d{distance}", machine, metadata)
-    points.append(point)
+    task = decsim.Task(f"d{distance}", machine, metadata)
+    tasks.append(task)
 
-experiment = decsim.Experiment(NAME, points, COLLECTION)
+experiment = decsim.Experiment(NAME, tasks, COLLECTION)

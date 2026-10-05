@@ -1,4 +1,4 @@
-"""The collection: how a point's shots are cut and stopped (collection.py)."""
+"""The collection: how a task's shots are cut and stopped (collection.py)."""
 
 import math
 import random
@@ -65,7 +65,7 @@ def test_a_count_that_is_no_count_is_refused(key, value):
 
 @pytest.mark.parametrize("value", [0, -1.5, True, "60", math.inf])
 def test_a_time_cap_that_is_no_finite_positive_number_is_refused(value):
-    """An infinite time cap never stops a point that has no other cap."""
+    """An infinite time cap never stops a task that has no other cap."""
     with pytest.raises(ValueError) as refused:
         collection.CollectionSettings(max_core_seconds=value)
 
@@ -145,7 +145,7 @@ def test_the_target_on_the_caps_own_shot_is_a_target_stop():
     assert kind is StopKind.TARGET
 
 
-def test_the_time_cap_stops_a_point_at_its_seconds():
+def test_the_time_cap_stops_a_task_at_its_seconds():
     settings = _settings(max_core_seconds=30.0)
 
     before = _kind_at(settings, 9, 9, 0, 29.5)
@@ -178,7 +178,7 @@ def test_the_rule_stops_where_sinters_stops_on_the_same_counts_property():
 
 def test_a_prefix_ends_at_its_stop_and_later_rows_count_nowhere():
     settings = _settings(max_failures=1, max_shots=10)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [_shot_row(0), _shot_row(1, failed=True), _shot_row(2, failed=True)]
 
     tracker = _tracked(rule, rows)
@@ -191,7 +191,7 @@ def test_a_prefix_ends_at_its_stop_and_later_rows_count_nowhere():
 def test_a_missing_seed_ends_the_prefix_short_of_its_stop():
     """A gap holds the stop: the rows past it wait for the missing seed."""
     settings = _settings(max_failures=1, max_shots=10)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [_shot_row(0), _shot_row(2, failed=True)]
 
     tracker = _tracked(rule, rows)
@@ -204,14 +204,14 @@ def test_a_missing_seed_ends_the_prefix_short_of_its_stop():
 def test_shots_fixed_in_advance_are_a_cap_at_the_shots_run():
     rows = [_shot_row(0), _shot_row(1, failed=True)]
 
-    fixed = collection.PointRule()
+    fixed = collection.TaskRule()
     tracker = _tracked(fixed, rows)
 
     assert tracker.state() == "cap"
     assert tracker.counts.shots == 2
 
 
-def test_a_point_stopped_by_its_time_cap_says_so():
+def test_a_task_stopped_by_its_time_cap_says_so():
     """Its interval assumes a shot's time is independent of its failure.
 
     Every shot row takes half a second, so a one-second cap stops the
@@ -220,7 +220,7 @@ def test_a_point_stopped_by_its_time_cap_says_so():
     (design section 7).
     """
     settings = _settings(max_shots=10, max_core_seconds=1.0)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [_shot_row(0), _shot_row(1), _shot_row(2)]
 
     tracker = _tracked(rule, rows)
@@ -233,7 +233,7 @@ def test_a_point_stopped_by_its_time_cap_says_so():
 def test_a_shot_cap_reached_with_the_time_cap_is_a_shot_cap():
     """A count fixed in advance needs no assumption about time."""
     settings = _settings(max_shots=2, max_core_seconds=1.0)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [_shot_row(0), _shot_row(1)]
 
     tracker = _tracked(rule, rows)
@@ -241,9 +241,9 @@ def test_a_shot_cap_reached_with_the_time_cap_is_a_shot_cap():
     assert tracker.state() == "cap"
 
 
-def test_an_adaptive_point_says_so_whatever_its_counts():
+def test_an_adaptive_task_says_so_whatever_its_counts():
     settings = _settings(max_shots=2)
-    rule = collection.PointRule(settings, True)
+    rule = collection.TaskRule(settings, True)
     rows = [_shot_row(0), _shot_row(1)]
 
     tracker = _tracked(rule, rows)
@@ -251,8 +251,8 @@ def test_an_adaptive_point_says_so_whatever_its_counts():
     assert tracker.state() == "adaptive"
 
 
-def test_a_point_with_no_shot_has_no_data():
-    fixed = collection.PointRule()
+def test_a_task_with_no_shot_has_no_data():
+    fixed = collection.TaskRule()
     tracker = collection.PrefixTracker(fixed)
 
     assert tracker.state() == "no data"
@@ -260,7 +260,7 @@ def test_a_point_with_no_shot_has_no_data():
 
 def test_an_unscored_shot_counts_toward_the_cap_and_not_the_failures():
     settings = _settings(max_failures=1, max_shots=2)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [_shot_row(0, is_scored=False), _shot_row(1, is_scored=False)]
 
     tracker = _tracked(rule, rows)
@@ -271,7 +271,7 @@ def test_an_unscored_shot_counts_toward_the_cap_and_not_the_failures():
 
 def test_a_prefix_whose_shots_ran_one_shape_is_converted_by_it():
     settings = _settings(max_shots=2)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [
         _shot_row(0, outputs=4, rounds=8),
         _shot_row(1, outputs=4, rounds=8),
@@ -285,7 +285,7 @@ def test_a_prefix_whose_shots_ran_one_shape_is_converted_by_it():
 def test_a_prefix_whose_shots_ran_different_lengths_has_no_one_shape():
     """A live stream's feedback wait can differ from shot to shot."""
     settings = _settings(max_shots=2)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [_shot_row(0, rounds=8), _shot_row(1, rounds=9)]
 
     tracker = _tracked(rule, rows)
@@ -296,7 +296,7 @@ def test_a_prefix_whose_shots_ran_different_lengths_has_no_one_shape():
 def test_a_prefix_whose_outputs_ran_apart_has_no_one_shape():
     """Its shots record no one length per output, which reads as 0."""
     settings = _settings(max_shots=1)
-    rule = collection.PointRule(settings, False)
+    rule = collection.TaskRule(settings, False)
     rows = [_shot_row(0, outputs=2, rounds=0)]
 
     tracker = _tracked(rule, rows)
@@ -327,7 +327,7 @@ def _sinter_stop_shot(outcomes, max_failures, max_shots) -> int:
     """
     state = sinter_manager._ManagedTaskState(
         partial_task=None,
-        strong_id="point",
+        strong_id="task",
         shots_left=max_shots,
         errors_left=min(max_failures, max_shots),
     )

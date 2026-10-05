@@ -115,7 +115,7 @@ A card is numbers, not a class: a `FabricSettings` record, one
   checks the measured cards against their papers' transfers. A card in
   an experiment's run file is tested the same way: load the file with
   `decsim.experiments.experiment.load(path)` and replay the transfer on
-  the `links` of a point's machine.
+  the `links` of a task's machine.
 
 ## A confidence signal
 

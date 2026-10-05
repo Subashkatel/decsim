@@ -23,7 +23,7 @@ class ObservationSettings:
     adds each component's I/O lines.
 
     The log and the trace are labels (compare=False) and no part of a
-    point's id, as sinter keeps output options out of a task's strong id
+    task's id, as sinter keeps output options out of a task's strong id
     (sinter/_data/_task.py:167-204): the writers schedule nothing. The
     others stay in the id because they add a shot's columns:
     record_switching_windows and backlog_trace the wait and backlog
@@ -105,7 +105,7 @@ def _check_trace(trace) -> None:
 
 
 def _check_trace_shots(shots) -> None:
-    """The shots of a sweep point the trace is written for."""
+    """The shots of a task the trace is written for."""
     if not isinstance(shots, tuple):
         raise ValueError(
             "observation.trace_shots must be a list of shot numbers, a "
@@ -116,7 +116,7 @@ def _check_trace_shots(shots) -> None:
 
 
 def _refuse_a_shot_that_is_not_a_count(shot) -> None:
-    """A shot is named by its number in the sweep point, counting from 0."""
+    """A shot is named by its number in the task, counting from 0."""
     is_a_count = isinstance(shot, int)
     if isinstance(shot, bool):
         is_a_count = False

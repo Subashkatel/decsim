@@ -2,7 +2,7 @@
 
 The rule the module states: a window's detector error model is a
 function of the operation's circuit and the window plan and of nothing a
-seed touches, so every shot of one sweep point reuses what the first
+seed touches, so every shot of one task reuses what the first
 shot built. This is sinter's own arrangement one level down, where the
 decoder is compiled once per task and every shot of the task decodes
 with it (sinter/_decoding/_decoding_decoder_class.py,

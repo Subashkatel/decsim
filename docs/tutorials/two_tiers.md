@@ -114,7 +114,7 @@ the strong decoder, and nothing else in this run.
 decsim run examples/two_tiers.py --out results/two_tiers
 ```
 
-The command prints its folder, then one line per point as it finishes.
+The command prints its folder, then one line per task as it finishes.
 The numbers are in `sweep.csv`; these are the columns this step reads:
 
 ```bash
@@ -157,7 +157,7 @@ decsim run examples/two_tiers.py --seed 1 --trace --out results/two_tiers_shot
 
 ```
 config: two_tiers
-point: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.008} seed 1
+task: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.008} seed 1
 terminal status: complete
 execution done: 30000000 ticks
 fully done: 381700000 ticks
@@ -174,7 +174,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:0 of point d3, decsim switching d3 seed1
+window 1:0 of task d3, decsim switching d3 seed1
 
 tick (us)  where                        what                                                          dur (us)  transfer  bits
 7.004      Window planner               W0 ready
@@ -235,7 +235,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:3 of point d3, decsim switching d3 seed1
+window 1:3 of task d3, decsim switching d3 seed1
 
 tick (us)  where                            what                                                           dur (us)  transfer  bits
 16.004     Window planner                   W3 ready
@@ -338,7 +338,7 @@ decsim trace follow \
 ```
 
 ```
-window 1:4 of point d3, decsim switching d3 seed1
+window 1:4 of task d3, decsim switching d3 seed1
 
 tick (us)  where                            what                                                            dur (us)  transfer  bits
 19.004     Window planner                   W4 ready

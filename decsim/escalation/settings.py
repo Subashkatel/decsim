@@ -19,8 +19,8 @@ import decsim.ports as ports
 class ThresholdSettings(Protocol):
     """A threshold row's settings record: decibels in, nats out.
 
-    The facts at_point and for_point read are MachineSettings.point_facts,
-    keyed by threshold_sources.POINT_FACTS.
+    The facts at_task and for_task read are MachineSettings.task_facts,
+    keyed by threshold_sources.TASK_FACTS.
     """
 
     threshold_decibels: Optional[float]
@@ -29,11 +29,11 @@ class ThresholdSettings(Protocol):
     def threshold_nats(self) -> Optional[float]:
         """The threshold as the weight a gap is compared in; None unread."""
 
-    def at_point(self, facts: Mapping) -> "ThresholdSettings":
-        """The record as the point's facts give it: a table's row read."""
+    def at_task(self, facts: Mapping) -> "ThresholdSettings":
+        """The record as the task's facts give it: a table's row read."""
 
-    def for_point(self, facts: Mapping) -> Optional[ports.ThresholdSource]:
-        """The source a sweep point's shots share; None for most rows."""
+    def for_task(self, facts: Mapping) -> Optional[ports.ThresholdSource]:
+        """The source a task's shots share; None for most rows."""
 
     def build(self) -> ports.ThresholdSource:
         """A fresh source of this record."""

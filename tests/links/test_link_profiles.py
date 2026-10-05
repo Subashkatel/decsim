@@ -764,8 +764,8 @@ def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
 def test_a_path_cards_rate_is_the_exact_fraction_of_its_decimal():
     """The rate stays the exact fraction of the decimal.
 
-    So two cards of the same numbers name one point (collect.json_value,
-    which a point's id hashes).
+    So two cards of the same numbers name one task (collect.json_value,
+    which a task's id hashes).
     """
     reference = link_profiles.logical_reference_profile()
     fridge = config.Clock.from_megahertz(250.0)

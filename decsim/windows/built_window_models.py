@@ -2,7 +2,7 @@
 
 A window's detector error model is a function of the operation's circuit
 and the window plan, and of nothing a seed touches, so the shots of one
-sweep point share them; building them is most of a shot's wall time.
+task share them; building them is most of a shot's wall time.
 sinter likewise compiles its decoder once per task
 (sinter/_decoding/_decoding_decoder_class.py, compile_decoder_for_dem).
 collect hands one of these to every shot's Machine.build; a Machine

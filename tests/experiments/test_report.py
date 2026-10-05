@@ -25,7 +25,7 @@ import decsim.experiments.report as report
 import decsim.records.decoding as decoding_records
 import tests.experiments.run_files as run_files
 
-# one point, every copy and move counted, two shots
+# one task, every copy and move counted, two shots
 COUNTING = {
     "observation": {"data_movement": True},
     "collection": {"max_shots": 2},
@@ -33,7 +33,7 @@ COUNTING = {
 
 
 def measured_shots(count: int) -> list:
-    """The counting point, one measured shot per seed."""
+    """The counting task, one measured shot per seed."""
     measurements = []
     for seed in range(count):
         measurement = run_files.measured_shot(seed, **COUNTING)
@@ -140,7 +140,7 @@ def test_pieces_of_one_shot_fold_to_the_whole_runs_movement_rows(tmp_path):
     assert folded_rows == whole_rows
 
 
-# PyMatching's measured wall clock on every window, two shots a point
+# PyMatching's measured wall clock on every window, two shots a task
 WALL_CLOCK = {
     "machine_arguments": {"weak_decoder": "pymatching"},
     "collection": {"max_shots": 2},
@@ -175,9 +175,9 @@ def test_a_latency_sample_names_the_tier_that_decoded_its_window():
 def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
     tmp_path, monkeypatch
 ):
-    """A sample per decoded window, beside its point and its deadline.
+    """A sample per decoded window, beside its task and its deadline.
 
-    Each point holds as many samples as its shots decoded windows. The
+    Each task holds as many samples as its shots decoded windows. The
     deadline is the window's inter-arrival, commit rounds (d when null)
     times the round period: 3 us at d 3 and 5 us at d 5.
     """
@@ -194,17 +194,19 @@ def test_a_wall_clock_run_records_every_windows_sample_and_deadline(
         reader = csv.DictReader(handle)
         shots = list(reader)
 
-    point_ids = [row["point_id"] for row in samples]
-    sample_counts = collections.Counter(point_ids)
+    task_ids = [row["task_id"] for row in samples]
+    sample_counts = collections.Counter(task_ids)
     deadlines = {
-        (row["point_id"], row["qpu.distance"], row["window_period_us"])
+        (row["task_id"], row["qpu.distance"], row["window_period_us"])
         for row in samples
     }
-    point_of = {row["qpu.distance"]: row["point_id"] for row in shots}
-    assert sample_counts == _windows_by_point(shots)
+    task_ids_by_distance = {
+        row["qpu.distance"]: row["task_id"] for row in shots
+    }
+    assert sample_counts == _windows_by_task(shots)
     assert deadlines == {
-        (point_of["3"], "3", "3.0"),
-        (point_of["5"], "5", "5.0"),
+        (task_ids_by_distance["3"], "3", "3.0"),
+        (task_ids_by_distance["5"], "5", "5.0"),
     }
 
 
@@ -217,11 +219,11 @@ def test_a_latency_card_run_records_no_samples(tmp_path, monkeypatch):
     assert not (card_run_dir / "latency_samples.csv").exists()
 
 
-def _windows_by_point(shots: list) -> collections.Counter:
-    """The windows every point's shots decoded, off shots.csv."""
+def _windows_by_task(shots: list) -> collections.Counter:
+    """The windows every task's shots decoded, off shots.csv."""
     windows = collections.Counter()
     for row in shots:
-        windows[row["point_id"]] += int(row["decoded_windows"])
+        windows[row["task_id"]] += int(row["decoded_windows"])
     return windows
 
 
@@ -244,7 +246,7 @@ def test_a_window_with_no_gap_is_counted_in_the_empty_bin():
     )
     confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
     shot = types.SimpleNamespace(
-        point_id="p",
+        task_id="p",
         algorithm="pymatching",
         confidence=confidence,
         logical_failure=False,
@@ -271,7 +273,7 @@ def test_an_unscored_shot_is_in_neither_confidence_file():
     windows = (decoding_records.WindowConfidence((1, 0), 0.1, True, None),)
     confidence = measure.ShotConfidence("complementary_gap", windows, True, 100)
     shot = types.SimpleNamespace(
-        point_id="p",
+        task_id="p",
         algorithm="pymatching",
         seed=0,
         confidence=confidence,
@@ -286,7 +288,7 @@ def test_an_unscored_shot_is_in_neither_confidence_file():
 def _one_count(histogram, gap_low_decibels, escalated) -> dict:
     """A histogram row of one window or shot of that no-failure shot."""
     return {
-        "point_id": "p",
+        "task_id": "p",
         "algorithm": "pymatching",
         "signal": "complementary_gap",
         "histogram": histogram,

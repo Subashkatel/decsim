@@ -47,10 +47,10 @@ import decsim.machine as machine_module
 import decsim.windows.built_window_models as built_window_models
 import examples.two_tiers as two_tiers
 
-settings = two_tiers.points[0].machine
+settings = two_tiers.tasks[0].machine
 ```
 
-`settings` is the `MachineSettings` of the run file's first point, at
+`settings` is the `MachineSettings` of the run file's first task, at
 distance 3: one record for each part of the machine.
 
 ## Step 2. Compile what the parts are built for

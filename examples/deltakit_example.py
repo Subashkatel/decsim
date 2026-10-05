@@ -14,9 +14,9 @@ from typing import Optional
 
 import stim
 
-import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.experiments.collect as collect
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
@@ -34,8 +34,8 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# The one point this example runs, which names its folder in points/.
-POINT_NAME = "shot"
+# The one task this example runs, which names its folder in tasks/.
+TASK_NAME = "shot"
 
 
 def main() -> None:
@@ -43,7 +43,7 @@ def main() -> None:
 
     The folder is a results folder (decsim/experiments/run_folder.py):
     its run.json, every value of the run and its workload under
-    points/shot/, the shot's files as decsim run writes them and the
+    tasks/shot/, the shot's files as decsim run writes them and the
     finished time, beside the arguments and the setup time.
     """
     arguments = _arguments()
@@ -84,11 +84,11 @@ def main() -> None:
     machine = machine_module.Machine.build(settings, arguments.seed)
     prepared = time.perf_counter()
     setup_seconds = prepared - started
-    task = _point_task(arguments, settings)
-    point_ids = [task.strong_id()]
-    started_utc = run_folder.start_run(arguments.output, None, point_ids)
+    task = _task_of(arguments, settings)
+    task_ids = [task.strong_id()]
+    started_utc = run_folder.start_run(arguments.output, None, task_ids)
     seeds = [(arguments.seed, 1)]
-    run_folder.record_point(arguments.output, POINT_NAME, task, seeds)
+    run_folder.record_task(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
     run_folder.write_shot(machine, settings, arguments.output, label, result)
@@ -98,7 +98,7 @@ def main() -> None:
     run_folder.write_json(argument_path, argument_values)
     setup_path = arguments.output / "setup_seconds.json"
     run_folder.write_json(setup_path, setup_seconds)
-    run_folder.finish_run(arguments.output, None, point_ids, started_utc)
+    run_folder.finish_run(arguments.output, None, task_ids, started_utc)
     print(f"complete: {arguments.output}; setup {setup_seconds:.6f} seconds")
 
 
@@ -289,9 +289,9 @@ def _circuit(arguments) -> tuple[stim.Circuit, dict[int, int]]:
             arguments.basis,
             arguments.probability,
         )
-    points_folder = arguments.input / run_folder.POINTS_FOLDER
-    (point_folder,) = points_folder.iterdir()
-    inputs_folder = point_folder / run_folder.INPUTS_FOLDER
+    tasks_folder = arguments.input / run_folder.TASKS_FOLDER
+    (task_folder,) = tasks_folder.iterdir()
+    inputs_folder = task_folder / run_folder.INPUTS_FOLDER
     operations_path = inputs_folder / "operations.json"
     circuit_path = inputs_folder / "circuit.stim"
     rounds_path = inputs_folder / "measurement_rounds.json"
@@ -358,14 +358,14 @@ def _check_replay_parameter(input_folder, name, selected, recorded) -> None:
         raise ValueError(f"{name} differs from the exported circuit parameters")
 
 
-def _point_task(arguments, settings) -> collect.Task:
-    """The run's one point, its values the command line's."""
+def _task_of(arguments, settings) -> collect.Task:
+    """The run's one task, its values the command line's."""
     metadata = {
         "workload.arguments.physical_error_probability": arguments.probability,
         "qpu.distance": arguments.distance,
         "qpu.round_period_microseconds": arguments.period_microseconds,
     }
-    return collect.Task(settings, metadata)
+    return collect.Task(TASK_NAME, settings, metadata)
 
 
 if __name__ == "__main__":

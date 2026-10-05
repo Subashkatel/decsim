@@ -45,16 +45,16 @@ part any reader can follow.
 
 These are not from the papers. The pages use them everywhere.
 
-- **experiment**: one Python run file that names its points and how
+- **experiment**: one Python run file that names its tasks and how
   each stops (`decsim.Experiment`).
-- **point**: one machine at one set of values (`decsim.Point`). It has a
+- **task**: one machine at one set of values (`decsim.Task`). It has a
   name and an id, a hash of its record. Its optional `collection`
   replaces the experiment's stop rule for it, and its `record_options`
   say how many shots write their windows' confidence.
-- **shot**: one run of a point's machine at one seed.
+- **shot**: one run of a task's machine at one seed.
 - **seed**: a shot's index, 0, 1, 2 and so on. Every random draw in the
   shot follows from it.
-- **stop rule**: when a point ends, by failures, shots or core time
+- **stop rule**: when a task ends, by failures, shots or core time
   (`decsim.CollectionSettings`).
 - **results folder**: everything one experiment wrote, under
   `results/<name>/`.
@@ -121,9 +121,12 @@ These are not from the papers. The pages use them everywhere.
 - **latency point**: one named span of a window's path that the run
   folder reports as its own columns (`decsim/experiments/measure.py`,
   `POINTS`).
-- **piece**: a run of consecutive seeds of one point, run by one
+- **piece**: a run of consecutive seeds of one task, run by one
   process and saved whole as one folder of the results folder, sized by
   the stop rule's `piece_rounds` (`decsim/experiments/pieces.py`).
+- **Slurm job**: one job of the Slurm job array that `decsim run
+  --slurm` submits. Job i runs task i to its stop. It is not a decode
+  job.
 - **scored shot**, **unscored shot**: a shot is scored when every
   decode it committed, provisional or final, got a correction from its
   decoder's backend, and unscored when a backend produced none; sinter

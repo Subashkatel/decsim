@@ -13,7 +13,7 @@ the run's order and a shot lives in one folder, so a heap of one entry
 per open file restores the sweep's order, ties broken by file order as
 heapq.merge does (heapq.py:376, 383-388), Knuth's balanced merge (TAOCP
 vol. 3, 5.4.1). A file opens only when its first row is due, so a
-capped point's hundred thousand pieces stay under the open-file limit.
+capped task's hundred thousand pieces stay under the open-file limit.
 A stream that goes backwards is refused where it is read.
 
 Nothing here knows decsim's columns; report.py says which field is
@@ -63,7 +63,7 @@ def number_of(value: Union[int, float, str]) -> Union[bool, int, float, str]:
 
     A row a folder was read from holds the text of its csv file; a row
     this process measured holds the numbers themselves. The fold reads
-    both through here, so an accumulator and a sweep point are the same
+    both through here, so an accumulator and a task are the same
     code either way.
     """
     if isinstance(value, str):

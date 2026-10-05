@@ -14,9 +14,9 @@ import json
 
 import pytest
 
-import decsim.collect as collect
 import decsim.decoders.decoders as decoders
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.experiments.collect as collect
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.qpu.magic_state_factories as magic_state_factories
@@ -44,7 +44,7 @@ def _traced_switching_run(trace_path, weak_unit_count=1, **arguments):
     traced = dataclasses.replace(
         settings, weak_decoder=weak_decoder, observation=observation
     )
-    task = measure_tests.point_task(
+    task = measure_tests.task_at(
         traced, measure_tests.SWITCHING_ERROR_PROBABILITY
     )
     return collect.run_shot(task, 0)

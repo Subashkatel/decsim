@@ -6,12 +6,12 @@ one fridge cycle, its weak decoder charged a 28 ns decode on an engine
 that releases in one cycle. switching_machine adds a PyMatching strong
 tier behind a complementary-gap threshold.
 
-sweep builds an experiment from literal arguments, one point per
+sweep builds an experiment from literal arguments, one task per
 combination of its axes, so a test that runs `decsim run` writes a run
 file of a few lines (write_run_file) that calls it, and the results
 folder keeps that copy. An axis is named by the path its value sets,
-as the shipped run files name their metadata, so a point's columns are
-the shipped ones. The shot helpers run, measure and fold a point's
+as the shipped run files name their metadata, so a task's columns are
+the shipped ones. The shot helpers run, measure and fold a task's
 shots in the test's own process, and decode a shot's whole circuit as
 the reference its windowed loop is checked against.
 """
@@ -25,12 +25,12 @@ from typing import Optional
 import numpy
 import pymatching
 
-import decsim.collect as collect
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure
@@ -58,13 +58,13 @@ ERROR_RATE_PATH = "workload.arguments.physical_error_probability"
 ROUND_PERIOD_PATH = "qpu.round_period_microseconds"
 COMMIT_ROUNDS_PATH = "windows.commit_rounds"
 CODE_TASK_PATH = "workload.arguments.code_task"
-# the minimal machine's one point
-ONE_POINT_AXES = {
+# the minimal machine's one task
+ONE_TASK_AXES = {
     DISTANCE_PATH: (3,),
     ROUND_PERIOD_PATH: (1.0,),
     ERROR_RATE_PATH: (0.001,),
 }
-FOUR_POINT_AXES = {
+FOUR_TASK_AXES = {
     DISTANCE_PATH: (3, 5),
     ROUND_PERIOD_PATH: (1.0,),
     ERROR_RATE_PATH: (0.001, 0.003),
@@ -101,7 +101,7 @@ REFERENCE_HOPS = (
 REFERENCE_SOURCE = "the reference machine's hops, in fridge cycles"
 # the control processor's issue pipeline, the reference machine's count
 REFERENCE_ISSUE_CYCLES = 8
-# the reference sweep: one point, its axes in written order
+# the reference sweep: one task, its axes in written order
 REFERENCE = {
     "axes": {
         ERROR_RATE_PATH: (0.001,),
@@ -124,9 +124,9 @@ def minimal_machine(
     weak_decoder: Optional[str] = None,
     rounds_per_shot: int = ROUNDS_PER_SHOT,
 ) -> machine_settings.MachineSettings:
-    """The minimal machine at one point's cells.
+    """The minimal machine at one task's cells.
 
-    cells maps an axis path to the point's value there; a path it does
+    cells maps an axis path to the task's value there; a path it does
     not name takes distance 3, physical error probability 0.001, the
     QPU's own 1.1 us round, the rotated Z memory and the scheme's own
     commit. weak_decoder names one of ALGORITHMS run for real, in place
@@ -295,34 +295,34 @@ def sweep(
     record_options: Optional[Mapping] = None,
     name: str = NAME,
 ) -> experiment.Experiment:
-    """One point per combination of the axes, each collected alike.
+    """One task per combination of the axes, each collected alike.
 
     The axes run in the order given, the last fastest.
     machine names a MACHINES builder and machine_arguments its keywords;
-    observation replaces fields of every point's observation, and
-    record_options are collect.RecordOptions fields. A point is named by
+    observation replaces fields of every task's observation, and
+    record_options are collect.RecordOptions fields. A task is named by
     its id's first twelve characters.
     """
-    axes = axes or ONE_POINT_AXES
+    axes = axes or ONE_TASK_AXES
     collection = collection or DEFAULT_COLLECTION
     machine_arguments = machine_arguments or {}
     settings = collection_module.CollectionSettings(**collection)
     record_options = record_options or {}
     options = collect.RecordOptions(**record_options)
     build = MACHINES[machine]
-    points = []
+    tasks = []
     for cells in experiment.grid(**axes):
-        settings_at_point = build(cells, **machine_arguments)
+        settings_at_task = build(cells, **machine_arguments)
         if observation is not None:
             watched = dataclasses.replace(
-                settings_at_point.observation, **observation
+                settings_at_task.observation, **observation
             )
-            settings_at_point = dataclasses.replace(
-                settings_at_point, observation=watched
+            settings_at_task = dataclasses.replace(
+                settings_at_task, observation=watched
             )
-        point = _named_point(settings_at_point, cells, settings, options)
-        points.append(point)
-    return experiment.Experiment(name, points)
+        task = _named_task(settings_at_task, cells, settings, options)
+        tasks.append(task)
+    return experiment.Experiment(name, tasks)
 
 
 def write_run_file(directory: pathlib.Path, **arguments) -> pathlib.Path:
@@ -342,20 +342,19 @@ def write_run_file(directory: pathlib.Path, **arguments) -> pathlib.Path:
 
 
 def first_task(**arguments) -> collect.Task:
-    """The task of sweep(**arguments)'s first point."""
+    """sweep(**arguments)'s first task."""
     study = sweep(**arguments)
-    first_point = study.points[0]
-    return experiment.task_of(first_point)
+    return study.tasks[0]
 
 
 def run_one_shot(seed: int = 0, **arguments) -> collect.Shot:
-    """One seeded shot of sweep(**arguments)'s first point, run."""
+    """One seeded shot of sweep(**arguments)'s first task, run."""
     task = first_task(**arguments)
     return collect.run_shot(task, seed)
 
 
 def measured_shot(seed: int = 0, **arguments) -> measure.ShotMeasurement:
-    """One seeded shot of sweep(**arguments)'s first point, measured."""
+    """One seeded shot of sweep(**arguments)'s first task, measured."""
     shot = run_one_shot(seed, **arguments)
     return measure.measure_shot(shot)
 
@@ -370,16 +369,11 @@ def run_sweep(tasks: list, shots: int) -> list:
     return measurements
 
 
-def tasks_of(study: experiment.Experiment) -> list:
-    """Every point's task, in the experiment's order."""
-    return [experiment.task_of(point) for point in study.points]
-
-
 def folded_run(tmp_path, measurements: list) -> tuple:
     """The shots folded into a run folder as a collect folds its pieces.
 
-    Each point's shots are one piece, in the order they are given, and
-    the point's record names no swept path, so the run folder's
+    Each task's shots are one piece, in the order they are given, and
+    the task's record names no swept path, so the run folder's
     files hold only what the shots measured. Returns the sweep rows the
     fold computed, before csv turns an empty cell into text, and the
     run folder, whose shot_links.csv and shot_data_movement.csv the
@@ -387,21 +381,19 @@ def folded_run(tmp_path, measurements: list) -> tuple:
     """
     temporary_dir = tempfile.mkdtemp(dir=tmp_path)
     experiment_dir = pathlib.Path(temporary_dir)
-    measurements_by_point = {}
+    measurements_by_task = {}
     for measurement in measurements:
-        at_point = measurements_by_point.setdefault(measurement.point_id, [])
-        at_point.append(measurement)
+        at_task = measurements_by_task.setdefault(measurement.task_id, [])
+        at_task.append(measurement)
     folders = []
-    for point_id, at_point in measurements_by_point.items():
-        _write_a_bare_point_record(experiment_dir, point_id)
-        first_seed = at_point[0].seed
-        folder = pieces.write(
-            experiment_dir, point_id, first_seed, at_point, {}
-        )
+    for task_id, at_task in measurements_by_task.items():
+        _write_a_bare_task_record(experiment_dir, task_id)
+        first_seed = at_task[0].seed
+        folder = pieces.write(experiment_dir, task_id, first_seed, at_task, {})
         folders.append(folder)
-    point_ids = list(measurements_by_point)
+    task_ids = list(measurements_by_task)
     run_dir = experiment_dir / "run"
-    rows = report.fold_pieces(experiment_dir, folders, point_ids, run_dir)
+    rows = report.fold_pieces(experiment_dir, folders, task_ids, run_dir)
     return rows, run_dir
 
 
@@ -434,29 +426,32 @@ def loop_predictions(shot: collect.Shot) -> list:
     ]
 
 
-def _write_a_bare_point_record(experiment_dir, point_id: str) -> None:
-    """A record holding only what the fold reads of a point."""
-    point_dir = experiment_dir / run_folder.POINTS_FOLDER / point_id
-    point_dir.mkdir(parents=True)
-    record = {"id": point_id, "name": point_id, "metadata": {}}
-    record_path = point_dir / run_folder.RECORD_FILE
+def _write_a_bare_task_record(experiment_dir, task_id: str) -> None:
+    """A record holding only what the fold reads of a task."""
+    task_dir = experiment_dir / run_folder.TASKS_FOLDER / task_id
+    task_dir.mkdir(parents=True)
+    record = {"id": task_id, "name": task_id, "metadata": {}}
+    record_path = task_dir / run_folder.RECORD_FILE
     run_folder.write_json(record_path, record)
 
 
-def _named_point(
+def _named_task(
     settings: machine_settings.MachineSettings,
     cells: Mapping,
     collection: collection_module.CollectionSettings,
     record_options: collect.RecordOptions,
-) -> experiment.Point:
-    """The point of these settings and cells, named by its id."""
+) -> collect.Task:
+    """The task of these settings and cells, named by its id.
+
+    The strong id leaves the name out, so the unnamed task gives it.
+    """
     metadata = dict(cells)
-    task = collect.Task(settings, metadata, record_options=record_options)
-    point_id = task.strong_id()
-    name = point_id[:12]
-    return experiment.Point(
-        name, settings, metadata, collection, record_options=record_options
+    unnamed = collect.Task(
+        "unnamed", settings, metadata, collection, record_options
     )
+    task_id = unnamed.strong_id()
+    name = task_id[:12]
+    return dataclasses.replace(unnamed, name=name)
 
 
 def _windows_committing(

@@ -4,16 +4,16 @@ Four canonical Stim fragments reproduce the same live history without the
 optional producer. Runtime feedback changes how long the data stays live.
 The fragments are read and written in the files row's form: a fragments
 folder with the four .stim files and physical.json, which a results
-folder keeps in points/<name>/inputs/fragments.
+folder keeps in tasks/<name>/inputs/fragments.
 """
 
 import argparse
 import json
 import pathlib
 
-import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.experiments.collect as collect
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
@@ -29,9 +29,9 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# The one point this example runs, which names its folder in points/.
-POINT_NAME = "shot"
-# The column each physical value of a point is named by in the results:
+# The one task this example runs, which names its folder in tasks/.
+TASK_NAME = "shot"
+# The column each physical value of a task is named by in the results:
 # the run's metadata names its values by it.
 METADATA_PATHS = {
     "physical_error_probability": (
@@ -58,7 +58,7 @@ def main() -> None:
 
     The output folder is a results folder
     (decsim/experiments/run_folder.py): its run.json, every value of the
-    run and its workload under points/shot/, the shot's files as decsim
+    run and its workload under tasks/shot/, the shot's files as decsim
     run writes them and the finished time, beside the executed history
     and the arguments.
     """
@@ -81,11 +81,11 @@ def main() -> None:
     metadata = {}
     for name, path in METADATA_PATHS.items():
         metadata[path] = parameters[name]
-    task = collect.Task(settings, metadata)
-    point_ids = [task.strong_id()]
-    started_utc = run_folder.start_run(arguments.output, None, point_ids)
+    task = collect.Task(TASK_NAME, settings, metadata)
+    task_ids = [task.strong_id()]
+    started_utc = run_folder.start_run(arguments.output, None, task_ids)
     seeds = [(arguments.seed, 1)]
-    run_folder.record_point(arguments.output, POINT_NAME, task, seeds)
+    run_folder.record_task(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
     run_folder.write_shot(machine, settings, arguments.output, label, result)
@@ -96,7 +96,7 @@ def main() -> None:
     argument_path = arguments.output / "arguments.json"
     argument_json = collect.json_value(argument_values)
     run_folder.write_json(argument_path, argument_json)
-    run_folder.finish_run(arguments.output, None, point_ids, started_utc)
+    run_folder.finish_run(arguments.output, None, task_ids, started_utc)
     print(f"complete: {arguments.output}")
 
 
@@ -159,7 +159,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--patch", default="memory-patch")
     # a fragments folder of the files row, such as a run's
-    # points/<name>/inputs/fragments
+    # tasks/<name>/inputs/fragments
     parser.add_argument("--input", type=pathlib.Path)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     return parser.parse_args()
@@ -179,23 +179,23 @@ def _recorded_values(fragments) -> dict:
     """The physical values recorded beside a fragments folder.
 
     physical.json's period when it binds one, and, for a run folder's
-    points/<name>/inputs/fragments, the arguments the run that made them
-    recorded and the point's values in its machine.json, so a rerun from them
-    runs, and names, the recorded point.
+    tasks/<name>/inputs/fragments, the arguments the run that made them
+    recorded and the task's values in its machine.json, so a rerun from them
+    runs, and names, the recorded task.
     """
     if fragments is None:
         return {}
     physical_path = fragments / workload_files.PHYSICAL_FILE_NAME
     physical = _read_json(physical_path)
     inputs_folder = fragments.parent
-    point_folder = inputs_folder.parent
-    points_folder = point_folder.parent
-    results_folder = points_folder.parent
+    task_folder = inputs_folder.parent
+    tasks_folder = task_folder.parent
+    results_folder = tasks_folder.parent
     recorded = _recorded_arguments(results_folder)
     for name, value in physical.items():
         if value is not None:
             recorded[name] = value
-    record_path = point_folder / run_folder.RECORD_FILE
+    record_path = task_folder / run_folder.RECORD_FILE
     if record_path.exists():
         record = _read_json(record_path)
         metadata_values = _metadata_values(record["metadata"])
@@ -217,7 +217,7 @@ def _recorded_arguments(results_folder: pathlib.Path) -> dict:
 
 
 def _metadata_values(metadata: dict) -> dict:
-    """The physical values a recorded point's metadata holds, by name."""
+    """The physical values a recorded task's metadata holds, by name."""
     values = {}
     for name, path in METADATA_PATHS.items():
         if path in metadata:

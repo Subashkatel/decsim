@@ -1,8 +1,8 @@
 """The results folder: one experiment's records, pieces and rows.
 
 results/<date>_<name>/, or --out, holds the run file, the code state as
-a patch, run.json, each point's record and workload under
-points/<name>/, every piece (pieces/) and the folded rows, as gem5 writes
+a patch, run.json, each task's record and workload under
+tasks/<name>/, every piece (pieces/) and the folded rows, as gem5 writes
 m5out/ out of the code tree with the config beside its results
 (src/python/m5/main.py --outdir; simulate.py:95-144 config.json).
 """
@@ -24,9 +24,9 @@ from typing import Optional
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
-import decsim.collect as collect
 import decsim.compiled_libraries as compiled_libraries
 import decsim.engine as engine_module
+import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
@@ -38,7 +38,7 @@ import decsim.settings as machine_settings
 
 RESULTS_DIR = pathlib.Path("results")
 RUN_FILE = "run.json"
-POINTS_FOLDER = "points"
+TASKS_FOLDER = "tasks"
 RECORD_FILE = "machine.json"
 INPUTS_FOLDER = "inputs"
 HASHES_FILE = "hashes.json"
@@ -72,7 +72,7 @@ def run_dir_for(
     gem5's --outdir names the folder and makes it (src/python/m5/main.py:
     102). A named folder is reused as the caller asked, which is how a
     run started again resumes into the pieces it saved; a launcher fixes
-    the folder once and hands it to every task.
+    the folder once and hands it to every job.
     """
     if out_dir is None:
         return new_run_dir(name)
@@ -102,26 +102,26 @@ def new_run_dir(name: str) -> pathlib.Path:
 
 
 def start_run(
-    run_dir: pathlib.Path, run_file: Optional[pathlib.Path], point_ids: list
+    run_dir: pathlib.Path, run_file: Optional[pathlib.Path], task_ids: list
 ) -> str:
     """The code state, the run file and run.json, before the first shot.
 
     run_file is None for a run no file describes (the examples/ scripts).
-    point_ids are the run's points in order (write_run_record). Returns
+    task_ids are the run's tasks in order (write_run_record). Returns
     the start time.
     """
     snapshot_code_state(run_file, run_dir)
     started_utc = utc_now()
-    write_run_record(run_dir, run_file, point_ids, started_utc)
+    write_run_record(run_dir, run_file, task_ids, started_utc)
     return started_utc
 
 
 def accept_raised_stop_rules(
-    run_dir: pathlib.Path, run_file: pathlib.Path, point_ids: list
+    run_dir: pathlib.Path, run_file: pathlib.Path, task_ids: list
 ) -> None:
-    """A changed run file naming the folder's points replaces its copy.
+    """A changed run file naming the folder's tasks replaces its copy.
 
-    A point's id hashes its machine and metadata, not its stop rule, so a
+    A task's id hashes its machine and metadata, not its stop rule, so a
     run file with the recorded ids differs only in how far it runs: a
     pilot's caps raised for the final run, which goes on from the saved
     pieces. Any other change is refused by _copy_once.
@@ -130,7 +130,7 @@ def accept_raised_stop_rules(
     if not run_path.is_file():
         return
     recorded = read_json(run_path)
-    if recorded["points"] != list(point_ids):
+    if recorded["tasks"] != list(task_ids):
         return
     target = copied_run_file(run_file, run_dir)
     if not target.exists():
@@ -143,12 +143,12 @@ def accept_raised_stop_rules(
 def finish_run(
     run_dir: pathlib.Path,
     run_file: Optional[pathlib.Path],
-    point_ids: list,
+    task_ids: list,
     started_utc: str,
 ) -> None:
     """run.json again, with the time the run ended."""
     finished_utc = utc_now()
-    write_run_record(run_dir, run_file, point_ids, started_utc, finished_utc)
+    write_run_record(run_dir, run_file, task_ids, started_utc, finished_utc)
 
 
 def refuse_another_tree(run_dir: pathlib.Path) -> None:
@@ -199,8 +199,8 @@ def piece_identity() -> dict:
     """What a piece records of the process that ran it: code, host, job.
 
     A rerun needs the interpreter and processor that set a shot's seconds;
-    the array job and task name the Slurm task. Package versions come from
-    the process that ran the shots.
+    Slurm's array job and array task ids name the Slurm job. Package
+    versions come from the process that ran the shots.
     """
     commit, is_dirty, patch_sha256 = _tree_reading()
     python_version = platform.python_version()
@@ -250,20 +250,20 @@ def code_state_sha256(checkout: pathlib.Path) -> Optional[str]:
 def write_run_record(
     run_dir: pathlib.Path,
     run_file: Optional[pathlib.Path],
-    point_ids: list,
+    task_ids: list,
     started_utc: str,
     finished_utc: Optional[str] = None,
 ) -> None:
     """run.json: what ran, where, and with which code and packages.
 
     Sampling is deterministic from (stim version, circuit, distance, rounds,
-    p, seed), so run.json plus the seeds are the raw data. point_ids are in
+    p, seed), so run.json plus the seeds are the raw data. task_ids are in
     the order a fold writes rows.
     """
     run_files = []
     if run_file is not None:
         run_files.append(str(run_file))
-    record = {"run_files": run_files, "points": point_ids}
+    record = {"run_files": run_files, "tasks": task_ids}
     how_it_ran = _how_it_ran()
     record.update(how_it_ran)
     record["started_utc"] = started_utc
@@ -280,59 +280,57 @@ def copied_run_file(
     return run_dir / run_file.name
 
 
-def recorded_point_ids(run_dir: pathlib.Path, first_ids: list) -> list:
-    """Every recorded point's id: first_ids' recorded ones, then the rest.
+def recorded_task_ids(run_dir: pathlib.Path, first_ids: list) -> list:
+    """Every recorded task's id: first_ids' recorded ones, then the rest.
 
-    The rest are points an earlier run of the folder recorded, which a
+    The rest are tasks an earlier run of the folder recorded, which a
     fold still counts, in the order of their names.
     """
-    records = point_records(run_dir)
+    records = task_records(run_dir)
     ordered = []
-    for point_id in first_ids:
-        if point_id in records:
-            ordered.append(point_id)
+    for task_id in first_ids:
+        if task_id in records:
+            ordered.append(task_id)
     others = []
-    for point_id, record in records.items():
-        if point_id not in ordered:
-            others.append((record["name"], point_id))
-    for _name, point_id in sorted(others):
-        ordered.append(point_id)
+    for task_id, record in records.items():
+        if task_id not in ordered:
+            others.append((record["name"], task_id))
+    for _name, task_id in sorted(others):
+        ordered.append(task_id)
     return ordered
 
 
-def record_point(
+def record_task(
     run_dir: pathlib.Path,
-    name: str,
     task: collect.Task,
     seeds: Optional[list] = None,
 ) -> str:
-    """One point's values and workload, under points/<name>/.
+    """One task's values and workload, under tasks/<name>/.
 
-    point_record says what machine.json holds; inputs/ holds the
-    workload's files (write_point_record). Returns the point's id.
+    task_record says what machine.json holds; inputs/ holds the
+    workload's files (write_task_record). Returns the task's id.
     """
-    record = point_record(name, task, seeds)
-    return write_point_record(run_dir, task, record)
+    record = task_record(task, seeds)
+    return write_task_record(run_dir, task, record)
 
 
-def point_record(
-    name: str,
+def task_record(
     task: collect.Task,
     seeds: Optional[list] = None,
     experiment_facts: Optional[Mapping] = None,
 ) -> dict:
-    """What a point's machine.json holds, built, not written.
+    """What a task's machine.json holds, built, not written.
 
     Every setting and the values the build derives, as gem5's config.json
     (src/python/m5/SimObject.py:1175), plus experiment_facts for the fold.
-    Building runs the point's build, so a refused build stops here, before
+    Building runs the task's build, so a refused build stops here, before
     anything is written.
     """
-    settings = task.settings
+    settings = task.machine
     plan = _plan(task)
     record = {
         "id": task.strong_id(),
-        "name": name,
+        "name": task.name,
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
         "settings": collect.json_value(settings),
@@ -344,22 +342,22 @@ def point_record(
     return record
 
 
-def write_point_record(
+def write_task_record(
     run_dir: pathlib.Path, task: collect.Task, record: dict
 ) -> str:
-    """A point's machine.json, and its workload in inputs/, in its folder.
+    """A task's machine.json, and its workload in inputs/, in its folder.
 
     inputs/ holds the workload as the files row reads it, with each
     file's sha256 in hashes.json, so a rerun needs no maker installed.
-    Returns the point's id.
+    Returns the task's id.
     """
-    point_dir = run_dir / POINTS_FOLDER / record["name"]
-    point_dir.mkdir(parents=True, exist_ok=True)
-    record_path = point_dir / RECORD_FILE
+    task_dir = run_dir / TASKS_FOLDER / record["name"]
+    task_dir.mkdir(parents=True, exist_ok=True)
+    record_path = task_dir / RECORD_FILE
     write_json(record_path, record)
-    workload_record = task.settings.workload.workload_record
+    workload_record = task.machine.workload.workload_record
     if workload_record is not None:
-        inputs_dir = point_dir / INPUTS_FOLDER
+        inputs_dir = task_dir / INPUTS_FOLDER
         _write_inputs(inputs_dir, workload_record)
     return record["id"]
 
@@ -417,49 +415,49 @@ def trace_path_of(
     return trace_dir / f"{label}.trace.json"
 
 
-def point_records(run_dir: pathlib.Path) -> dict:
-    """Each point's machine.json, keyed by its point id."""
+def task_records(run_dir: pathlib.Path) -> dict:
+    """Each task's machine.json, keyed by its task id."""
     records = {}
-    points_dir = pathlib.Path(run_dir) / POINTS_FOLDER
-    paths = points_dir.glob(f"*/{RECORD_FILE}")
+    tasks_dir = pathlib.Path(run_dir) / TASKS_FOLDER
+    paths = tasks_dir.glob(f"*/{RECORD_FILE}")
     for path in sorted(paths):
         record = read_json(path)
         records[record["id"]] = record
     return records
 
 
-def record_seeds(run_dir: pathlib.Path, seeds_by_point: dict) -> None:
-    """Each point's machine.json given the seed ranges its pieces hold.
+def record_seeds(run_dir: pathlib.Path, seeds_by_task: dict) -> None:
+    """Each task's machine.json given the seed ranges its pieces hold.
 
     A fold writes them, so the record says which shots the rows count.
     """
-    records = point_records(run_dir)
-    for point_id, record in records.items():
-        record["seeds"] = seeds_by_point.get(point_id, [])
-        point_dir = run_dir / POINTS_FOLDER / record["name"]
-        record_path = point_dir / RECORD_FILE
+    records = task_records(run_dir)
+    for task_id, record in records.items():
+        record["seeds"] = seeds_by_task.get(task_id, [])
+        task_dir = run_dir / TASKS_FOLDER / record["name"]
+        record_path = task_dir / RECORD_FILE
         with staged_replacement(record_path) as staging:
             write_json(staging, record)
 
 
-def swept_values(run_dir: pathlib.Path, point_ids: list) -> dict:
-    """Each point's value at every swept name, as csv cells.
+def swept_values(run_dir: pathlib.Path, task_ids: list) -> dict:
+    """Each task's value at every swept name, as csv cells.
 
     A swept name is a metadata key; one column per name is Wickham's tidy
     table (Tidy Data, J. Stat. Softw. 59(10), 2014, section 2.3). A value
     other than a string or number is compact json, as sinter writes
     json_metadata (sinter/_data/_csv_out.py:35-37).
     """
-    records = point_records(run_dir)
+    records = task_records(run_dir)
     paths = {}
-    for point_id in point_ids:
-        metadata = records[point_id]["metadata"]
+    for task_id in task_ids:
+        metadata = records[task_id]["metadata"]
         new_paths = dict.fromkeys(metadata)
         paths.update(new_paths)
     values = {}
-    for point_id in point_ids:
-        record = records[point_id]
-        values[point_id] = _cells_of(record, list(paths))
+    for task_id in task_ids:
+        record = records[task_id]
+        values[task_id] = _cells_of(record, list(paths))
     return values
 
 
@@ -528,8 +526,8 @@ def copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
     """The run file beside the results, under its own name.
 
     The copy is written once (_copy_once), so a folder's copy is the file
-    that made its rows, and an array task refuses a run file edited since
-    the launch, whose task i may name another point.
+    that made its rows, and a Slurm job refuses a run file edited since
+    the launch, in which task i may be another task.
     """
     target = copied_run_file(run_file, run_dir)
     _copy_once(run_file, target)
@@ -653,7 +651,7 @@ def _how_it_ran() -> dict:
 
 def _plan(task: collect.Task) -> plan_build.Plan:
     """The plan the build derives from the task, before it wires."""
-    settings = task.settings
+    settings = task.machine
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
         settings.switching,
@@ -676,7 +674,7 @@ def _plan(task: collect.Task) -> plan_build.Plan:
 def _built_values(plan: plan_build.Plan) -> dict:
     """The values the build derives from the settings, before it wires.
 
-    The code card at the point's distance with the window sizes a null
+    The code card at the task's distance with the window sizes a null
     commit_rounds or buffer_rounds resolves to, the rows the plan built
     (the boundary and terminal defaults the escalation row names among
     them), and the run plan: every operation's rounds and windows.
@@ -701,7 +699,7 @@ def _built_values(plan: plan_build.Plan) -> dict:
 def _rounds_per_shot(plan: plan_build.Plan) -> int:
     """A shot's QEC rounds as planned: every patch's rounds, added up.
 
-    They size a point's pieces before any shot runs; a live stream's
+    They size a task's pieces before any shot runs; a live stream's
     feedback wait is measured per shot (measure.py executed_rounds). A round
     is one patch's extraction: Tesseract 2503.10988 lines 287-290 count a
     two-code shot's rounds across both codes, and Litinski 1808.02892 Eq. 11
@@ -739,7 +737,7 @@ def _write_inputs(inputs_dir: pathlib.Path, record) -> None:
 
 
 def _cells_of(record: dict, paths: list) -> dict:
-    """One point's cell at each swept name: its metadata, empty where none."""
+    """One task's cell at each swept name: its metadata, empty where none."""
     metadata = record["metadata"]
     cells = {}
     for path in paths:
@@ -825,7 +823,7 @@ def _container() -> Optional[str]:
 def _checkout() -> pathlib.Path:
     """The tree this code was imported from, which is the code that ran.
 
-    A cluster task starts where its job was submitted and may import a
+    A Slurm job starts where it was submitted and may import a
     checkout pinned elsewhere, so the working directory's commit could
     name code the run never read.
     """

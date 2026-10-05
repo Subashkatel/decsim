@@ -147,10 +147,10 @@ machine = dataclasses.replace(base, weak_decoder=weak_decoder)
 ```
 
 and make a run file of it, as `examples/my_first_sweep.py` is. To check
-its answers, add a second point whose algorithm is
-`PyMatchingDecoder.Settings()`: at one seed both points draw the same
+its answers, add a second task whose algorithm is
+`PyMatchingDecoder.Settings()`: at one seed both tasks draw the same
 shot (their `sample_digest` cells in `shots.csv` are equal), and the
-`algorithm` column tells the two points apart. Compare their failures
+`algorithm` column tells the two tasks apart. Compare their failures
 shot by shot: on the shots where only one of the two fails, a decoder
 about as strong as matching fails about as often as matching does,
 and an exact McNemar test (a two-sided binomial test at one half on

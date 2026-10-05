@@ -45,18 +45,18 @@ STRONG_TOSHIO = decoder_settings.linear_decoder_pool(
 )
 
 
-def block_points(block: str) -> list:
-    """One block's points, at every distance it sweeps."""
+def block_tasks(block: str) -> list:
+    """One block's tasks, at every distance it sweeps."""
     study = experiment.load(STUDY)
     prefix = f"{block}_d"
-    return [point for point in study.points if point.name.startswith(prefix)]
+    return [task for task in study.tasks if task.name.startswith(prefix)]
 
 
 def block_settings(block: str):
-    """One block's settings, at its first point."""
-    points = block_points(block)
-    first_point = points[0]
-    return first_point.machine
+    """One block's settings, at its first task."""
+    tasks = block_tasks(block)
+    first_task = tasks[0]
+    return first_task.machine
 
 
 def test_the_control_block_copies_at_both_settings():
@@ -111,13 +111,13 @@ def test_every_study_block_counts_its_data_movement(block):
 def swept_distances(block: str) -> list:
     """Every code distance one block names."""
     distances = set()
-    for point in block_points(block):
-        distances.add(point.machine.qpu.distance)
+    for task in block_tasks(block):
+        distances.add(task.machine.qpu.distance)
     return sorted(distances)
 
 
 @pytest.mark.parametrize("block", STUDY_BLOCKS)
-def test_every_study_block_sweeps_the_same_points_on_priced_cards(
+def test_every_study_block_sweeps_the_same_distances_on_priced_cards(
     block,
 ):
     """A priced card decodes on no host clock, so the counts repeat."""
@@ -129,10 +129,10 @@ def test_every_study_block_sweeps_the_same_points_on_priced_cards(
     assert distances == [3, 5, 7]
 
 
-def test_the_study_holds_the_four_blocks_and_every_point_builds_its_task():
-    """No point names both in place, since its decoder pool would refuse it."""
+def test_the_study_holds_the_four_blocks_and_every_task_builds():
+    """No task names both in place, since its decoder pool would refuse it."""
     study = experiment.load(STUDY)
 
-    tasks = [experiment.task_of(point) for point in study.points]
+    tasks = study.tasks
 
     assert len(tasks) == len(STUDY_BLOCKS) * 3

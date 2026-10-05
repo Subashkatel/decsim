@@ -33,7 +33,6 @@ import types
 
 import pytest
 
-import decsim.collect as collect
 import decsim.confidence.cluster as cluster
 import decsim.confidence.extra_cluster as extra_cluster
 import decsim.decoders.decoder as decoder_module
@@ -41,6 +40,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.engine as engine_module
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
 import decsim.links.link_profiles as link_profiles
@@ -300,7 +300,7 @@ def test_a_shot_gives_its_recorded_results(name):
 def shot_digest(shape) -> dict:
     """One shot of the shape: its result, seeds, final tick and events."""
     settings = shape()
-    task = collect.Task(settings, {})
+    task = collect.Task("task", settings, {})
     seed_rows = []
     event_counter = itertools.count()
     derive = _recording_derive(seeding.derive_component_seed, seed_rows)
@@ -354,7 +354,7 @@ def _run_file(name: str) -> types.ModuleType:
 
 
 def _redo_window_switching_on(threshold) -> machine_settings.MachineSettings:
-    """The redo window switching point with its threshold source swapped."""
+    """The redo window switching task with its threshold source swapped."""
     machine = redo_window_switching()
     switching = dataclasses.replace(machine.switching, threshold=threshold)
     return dataclasses.replace(machine, switching=switching)

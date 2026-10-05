@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-import decsim.collect as collect
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.experiments.collect as collect
 import decsim.experiments.trace_file as trace_file
 import decsim.experiments.trace_follow as trace_follow
 import decsim.machine as machine_module
@@ -184,7 +184,7 @@ def test_a_withdrawn_request_reads_as_withdrawn_when_it_left(tmp_path):
     )
     observation = dataclasses.replace(settings.observation, trace=str(path))
     traced_settings = dataclasses.replace(settings, observation=observation)
-    task = measure_tests.point_task(
+    task = measure_tests.task_at(
         traced_settings, measure_tests.SWITCHING_ERROR_PROBABILITY
     )
     shot = collect.run_shot(task, 0)
@@ -257,12 +257,12 @@ def test_the_command_prints_the_table(trace_path, capsys):
     assert "copies 4, references 1 job and 1 hold, moves 3" in printed
 
 
-def test_a_run_folders_trace_is_named_by_its_points_name(tmp_path):
-    """Two points of one experiment share a machine description."""
-    point_dir = tmp_path / "points" / "t_minus_1"
-    point_dir.mkdir(parents=True)
+def test_a_run_folders_trace_is_named_by_its_tasks_name(tmp_path):
+    """Two tasks of one experiment share a machine description."""
+    task_dir = tmp_path / "tasks" / "t_minus_1"
+    task_dir.mkdir(parents=True)
     record = {"id": "a1b2", "name": "t_minus_1"}
-    record_path = point_dir / "machine.json"
+    record_path = task_dir / "machine.json"
     record_text = json.dumps(record)
     record_path.write_text(record_text)
     trace_dir = tmp_path / "trace"
@@ -270,8 +270,8 @@ def test_a_run_folders_trace_is_named_by_its_points_name(tmp_path):
     named_trace = trace_dir / "a1b2_seed0.trace.json"
     other_trace = trace_dir / "c3d4_seed0.trace.json"
 
-    named = trace_follow.point_named_by(named_trace)
-    other = trace_follow.point_named_by(other_trace)
+    named = trace_follow.task_named_by(named_trace)
+    other = trace_follow.task_named_by(other_trace)
 
     assert named == "t_minus_1"
     assert other is None

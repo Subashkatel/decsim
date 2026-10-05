@@ -148,12 +148,12 @@ def _rows_of_seed(rows: list, seed: str) -> list:
 def one_tree_reading_per_test(monkeypatch):
     """Every test here takes its own reading of the tree.
 
-    run_folder reads the tree once per process, which is what a cluster
-    task is. The suite is one process running many runs, and one of
+    run_folder reads the tree once per process, which is what a Slurm
+    job is. The suite is one process running many runs, and one of
     these tests answers for git itself, so the reading is dropped
-    around each test rather than carried between them. A batch task
+    around each test rather than carried between them. A Slurm job
     refuses a tree git does not vouch for, which tests/test_tools.py
-    holds; here a task runs on the tree as it stands, and the reading
+    holds; here a run runs on the tree as it stands, and the reading
     it exports goes when the test ends.
     """
     monkeypatch.setenv(run_folder.ALLOW_DIRTY_VARIABLE, "1")
@@ -511,13 +511,14 @@ def test_a_piece_records_the_peak_memory_of_the_process_that_ran_it(
     assert 0 < piece["peak_memory_mb"] <= peak_after_mb
 
 
-def test_a_piece_records_the_interpreter_packages_and_slurm_task(
+def test_a_piece_records_the_interpreter_packages_and_slurm_job(
     tmp_path, monkeypatch
 ):
     """The referents are the interpreter's and the packages' own versions.
 
     A rerun needs what sampled and decoded beside the commit, and the
-    array job and task name the Slurm task when one ran the piece.
+    array job and array task ids name the Slurm job when one ran the
+    piece.
     """
     monkeypatch.setenv("SLURM_JOB_ID", "14700001")
     monkeypatch.setenv("SLURM_ARRAY_JOB_ID", "14700000")
@@ -1807,8 +1808,8 @@ def test_a_results_folder_in_the_checkout_leaves_the_tree_clean(
 ):
     """A run's own run.json and run file copy are results, not code.
 
-    A planned batch writes them inside the checkout before its tasks
-    start, and every task refuses a dirty tree, so they must not read
+    A planned batch writes them inside the checkout before its jobs
+    start, and every job refuses a dirty tree, so they must not read
     as uncommitted code; an edit to the code still does.
     """
     tree_folder = tmp_path / "tree"
@@ -1944,7 +1945,7 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
 ):
     """A run writes its manifest twice and both name one reading.
 
-    A tree committed to while an array runs would give a task's second
+    A tree committed to while an array runs would give a job's second
     reading another commit than the code it imported. Here git answers
     one commit for the first write and another for the second, and both
     manifests name the first, which is the code the run imported.
@@ -2061,10 +2062,10 @@ def _named_library(path: pathlib.Path, digest) -> dict:
 @pytest.mark.parametrize(
     "flag, value", [("--cores", "0"), ("--hours", "0"), ("--memory-mb", "-1")]
 )
-def test_a_slurm_task_asking_for_no_core_hour_or_memory_is_refused(
+def test_a_slurm_job_asking_for_no_core_hour_or_memory_is_refused(
     tmp_path, capsys, flag, value
 ):
-    """A task has a core, an hour and some memory, or nothing is written."""
+    """A job has a core, an hour and some memory, or nothing is written."""
     run_file = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
     arguments = [str(run_file), "--out", str(out_dir), "--slurm", "--dry-run"]
@@ -2077,14 +2078,14 @@ def test_a_slurm_task_asking_for_no_core_hour_or_memory_is_refused(
     assert not out_dir.exists()
 
 
-def test_array_tasks_then_the_fold_write_the_local_runs_rows(tmp_path):
+def test_array_jobs_then_the_fold_write_the_local_runs_rows(tmp_path):
     """The referent is one local run of the same four points.
 
-    The launcher records the points; each array task then runs the line
-    run.sbatch holds, in whatever order the array runs them, and the fold
-    job's fold writes every file the local run wrote, row for row but the
-    wall clock. The run file reads a file beside it, as a threshold table
-    is read, and every task finds it.
+    The launcher records the points; each job of the array then runs the
+    line run.sbatch holds, in whatever order the array runs them, and the
+    fold job's fold writes every file the local run wrote, row for row
+    but the wall clock. The run file reads a file beside it, as a
+    threshold table is read, and every job finds it.
     """
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     _read_a_file_beside(config_path)
@@ -2094,33 +2095,33 @@ def test_array_tasks_then_the_fold_write_the_local_runs_rows(tmp_path):
     job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
 
-    task_3 = _task_arguments(split_dir, "3")
-    command.main(task_3)
-    task_1 = _task_arguments(split_dir, "1")
-    command.main(task_1)
-    task_0 = _task_arguments(split_dir, "0")
-    command.main(task_0)
-    task_2 = _task_arguments(split_dir, "2")
-    command.main(task_2)
+    job_3 = _job_arguments(split_dir, "3")
+    command.main(job_3)
+    job_1 = _job_arguments(split_dir, "1")
+    command.main(job_1)
+    job_0 = _job_arguments(split_dir, "0")
+    command.main(job_0)
+    job_2 = _job_arguments(split_dir, "2")
+    command.main(job_2)
     command.main(["run", "--fold", "--out", str(split_dir)])
 
     assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)
 
 
-def test_an_array_task_refuses_a_run_file_edited_since_the_launch(
+def test_an_array_job_refuses_a_run_file_edited_since_the_launch(
     tmp_path, capsys
 ):
-    """Task i of an edited run file may name another point, so it stops."""
+    """Job i of an edited run file may name another point, so it stops."""
     config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
     split_dir = tmp_path / "split"
     job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
     with config_path.open("a") as run_file:
         run_file.write("# edited after the launch\n")
-    task = _task_arguments(split_dir, "0")
+    job_arguments = _job_arguments(split_dir, "0")
 
     with pytest.raises(SystemExit):
-        command.main(task)
+        command.main(job_arguments)
 
     printed = capsys.readouterr()
     saved_pieces = split_dir.glob("pieces/*")
@@ -2139,13 +2140,13 @@ def _read_a_file_beside(run_path: pathlib.Path) -> None:
         )
 
 
-def _task_arguments(run_dir: pathlib.Path, index: str) -> list:
-    """The decsim arguments in run.sbatch's task line, at one task index."""
+def _job_arguments(run_dir: pathlib.Path, index: str) -> list:
+    """The decsim arguments in run.sbatch's job line, at one array index."""
     run_script = run_dir / plan_command.RUN_SCRIPT
     script_text = run_script.read_text()
     script_lines = script_text.splitlines()
-    task_line = script_lines[-1]
-    indexed_line = task_line.replace("$SLURM_ARRAY_TASK_ID", index)
+    job_line = script_lines[-1]
+    indexed_line = job_line.replace("$SLURM_ARRAY_TASK_ID", index)
     words = shlex.split(indexed_line)
     return words[3:]
 

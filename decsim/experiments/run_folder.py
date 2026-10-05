@@ -72,7 +72,7 @@ def run_dir_for(
     gem5's --outdir names the folder and makes it (src/python/m5/main.py:
     102). A named folder is reused as the caller asked, which is how a
     run started again resumes into the pieces it saved; a launcher fixes
-    the folder once and hands it to every task.
+    the folder once and hands it to every job.
     """
     if out_dir is None:
         return new_run_dir(name)
@@ -199,8 +199,8 @@ def piece_identity() -> dict:
     """What a piece records of the process that ran it: code, host, job.
 
     A rerun needs the interpreter and processor that set a shot's seconds;
-    the array job and task name the Slurm task. Package versions come from
-    the process that ran the shots.
+    Slurm's array job and array task ids name the Slurm job. Package
+    versions come from the process that ran the shots.
     """
     commit, is_dirty, patch_sha256 = _tree_reading()
     python_version = platform.python_version()
@@ -526,7 +526,7 @@ def copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
     """The run file beside the results, under its own name.
 
     The copy is written once (_copy_once), so a folder's copy is the file
-    that made its rows, and an array task refuses a run file edited since
+    that made its rows, and a Slurm job refuses a run file edited since
     the launch, whose task i may name another point.
     """
     target = copied_run_file(run_file, run_dir)
@@ -823,7 +823,7 @@ def _container() -> Optional[str]:
 def _checkout() -> pathlib.Path:
     """The tree this code was imported from, which is the code that ran.
 
-    A cluster task starts where its job was submitted and may import a
+    A Slurm job starts where it was submitted and may import a
     checkout pinned elsewhere, so the working directory's commit could
     name code the run never read.
     """

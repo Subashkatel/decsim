@@ -10,8 +10,8 @@ MultiSim"): `python run.py --list` prints the points, `python run.py <id>
 --out DIR` runs one, `python run.py` runs them all and combines, and
 `python run.py combine --out DIR` folds the saved points into stats.csv.
 Each point is one sinter.collect into its own resume CSV, sinter's
-save_resume_filepath (sinter/_collection/_collection.py), so array tasks
-running at once never write one file and a resubmitted task goes on
+save_resume_filepath (sinter/_collection/_collection.py), so Slurm jobs
+running at once never write one file and a resubmitted job goes on
 where it stopped; stats.csv is sinter's combine, read_stats_from_csv_files
 under its CSV_HEADER (sinter/_command/_main_combine.py). The folder keeps
 run.json, the code state and a copy of this script, as every decsim
@@ -253,7 +253,7 @@ def _point_ids(target: Optional[str], point_count: int) -> list:
 def _results_folder(parsed: argparse.Namespace) -> pathlib.Path:
     """--out, or a new dated folder for a run of every point.
 
-    One point and combine name their folder, since every task of an
+    One point and combine name their folder, since every job of an
     array writes the one folder its points share.
     """
     if parsed.out is None and parsed.target is not None:

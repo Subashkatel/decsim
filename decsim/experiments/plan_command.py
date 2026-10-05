@@ -1,9 +1,9 @@
-"""`decsim run --slurm`: one array task per point, then one fold.
+"""`decsim run --slurm`: one Slurm job per point, then one fold job.
 
 gem5 MultiSim's list-then-run-one-id pattern. The launcher records every
 point, which runs each build, so a refused point queues nothing, and
-writes run.sbatch, one array whose task i runs point i to its stop from
-the saved pieces, and fold.sbatch, which waits on the array with
+writes run.sbatch, a job array whose job i runs point i to its stop
+from the saved pieces, and fold.sbatch, which waits on the array with
 afterany and folds every saved piece. Submitting again resumes.
 
 No account, partition or QOS is written: sbatch reads SBATCH_ACCOUNT,
@@ -32,7 +32,7 @@ FOLD_SHAPE = "--cpus-per-task=1 --mem=16G --time=12:00:00"
 
 @dataclasses.dataclass(frozen=True)
 class JobShape:
-    """The Slurm request of one array task (cores, walltime, memory).
+    """The Slurm request of one job (cores, walltime, memory).
 
     Each is at least 1: sbatch reads a time limit of zero as no limit
     and a memory of zero as all of each node's memory (sbatch(1),
@@ -92,16 +92,16 @@ def launch(
     array_job = _submitted([str(run_script)])
     dependency = f"--dependency=afterany:{array_job}"
     fold_job = _submitted([dependency, str(fold_script)])
-    print(f"array job {array_job}, fold job {fold_job}")
+    print(f"job array {array_job}, fold job {fold_job}")
 
 
 def refuse_an_unnamed_tree() -> None:
     """A tree git does not vouch for is refused, unless ALLOW_DIRTY is set.
 
-    Every task imports the tree as it stands when it starts, so an edit
-    while the array is queued gives tasks different code, and the pieces
+    Every job imports the tree as it stands when it starts, so an edit
+    while the array is queued gives jobs different code, and the pieces
     would name a commit none ran. The reading is taken at submission and in
-    every task, and passed through TREE_DIRTY_VARIABLE and
+    every job, and passed through TREE_DIRTY_VARIABLE and
     TREE_PATCH_VARIABLE, since a job's interpreter may have no git.
     """
     checkout, commit, is_dirty = run_folder.fresh_tree_reading()
@@ -118,14 +118,14 @@ def refuse_an_unnamed_tree() -> None:
     if is_dirty:
         raise refusal.RefusalError(
             f"refusing to start: {checkout} has uncommitted changes, so a "
-            "task would import whatever the tree holds when it starts; "
+            "job would import whatever the tree holds when it starts; "
             "commit them, submit from a worktree pinned at a commit, or "
             f"set {run_folder.ALLOW_DIRTY_VARIABLE}=1"
         )
     if is_dirty is None:
         raise refusal.RefusalError(
             f"refusing to start: git says nothing about {checkout}, so a "
-            "task cannot name the code it ran; submit from a git checkout "
+            "job cannot name the code it ran; submit from a git checkout "
             f"pinned at a commit, or set {run_folder.ALLOW_DIRTY_VARIABLE}=1"
         )
 
@@ -143,25 +143,25 @@ def _run_lines(
     point_count: int,
     job: JobShape,
 ) -> str:
-    """run.sbatch: the array, task i running point i into the folder.
+    """run.sbatch: the job array, job i running point i into the folder.
 
-    A task runs the run file where it stands, as MultiSim runs its
+    A job runs the run file where it stands, as MultiSim runs its
     config, so a file the run file reads beside itself is found.
 
     Every path is quoted, which bash and sbatch's own reading of an
-    #SBATCH line both undo, and the task index is left for bash to
-    expand.
+    #SBATCH line both undo, and the job's array index is left for bash
+    to expand.
     """
-    last_task = point_count - 1
+    last_job = point_count - 1
     shape = (
-        f"--array=0-{last_task} --cpus-per-task={job.cores} "
+        f"--array=0-{last_job} --cpus-per-task={job.cores} "
         f"--mem={job.memory_mb}M --time={job.hours}:00:00"
     )
     log = run_dir / LOGS_FOLDER / "%a.log"
     literal = [sys.executable, "-m", "decsim", "run", str(run_path)]
     literal += ["--out", str(run_dir)]
     quoted = shlex.join(literal)
-    command = f"{quoted} --task $SLURM_ARRAY_TASK_ID --processes {job.cores}"
+    command = f"{quoted} --job $SLURM_ARRAY_TASK_ID --processes {job.cores}"
     output = shlex.quote(f"--output={log}")
     lines = ["#!/bin/bash", f"#SBATCH {shape}", f"#SBATCH {output}"]
     lines.append(command)

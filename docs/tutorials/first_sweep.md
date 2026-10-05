@@ -184,18 +184,18 @@ decoder's measured wall clock.
 On a cluster the same pieces run as Slurm jobs. `decsim run
 examples/my_first_sweep.py --slurm --out $PWD/results/first_sweep`
 records every point, so a machine that cannot be built stops it before
-anything is queued. It writes `run.sbatch`, one array whose task `i`
+anything is queued. It writes `run.sbatch`, a job array whose job `i`
 runs point `i` until the point stops, and `fold.sbatch`, one job that
-folds every saved piece after the array ends, however its tasks ended.
+folds every saved piece after the array ends, however its jobs ended.
 Then it submits both; `--dry-run` writes them and submits nothing. A
-task asks for `--cores` cores (4), `--hours` hours (24) and
-`--memory-mb` megabytes (16384), and logs to `logs/<i>.log`. A task
+job asks for `--cores` cores (4), `--hours` hours (24) and
+`--memory-mb` megabytes (16384), and logs to `logs/<i>.log`. A job
 starts no piece past its point's stop, so a point with `max_failures`
-stops near its target. If a task dies or runs out of time, submit the
-same command again: each task starts from its point's saved pieces, and
+stops near its target. If a job dies or runs out of time, submit the
+same command again: each job starts from its point's saved pieces, and
 a point that stopped runs nothing. `decsim run --fold --out
 results/first_sweep` folds the saved pieces at any time, even while
-tasks run. The launch refuses a checkout with uncommitted changes
+jobs run. The launch refuses a checkout with uncommitted changes
 unless `ALLOW_DIRTY=1` is set, and sbatch reads the account, partition
 and QOS from SBATCH_ACCOUNT, SBATCH_PARTITION and SBATCH_QOS.
 

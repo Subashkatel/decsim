@@ -61,15 +61,15 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 
 def _run(argv: list) -> None:
-    """An experiment's points, one point, one shot, Slurm, a task, a fold."""
+    """An experiment's points, one point, one shot, Slurm, a job, a fold."""
     parser = _run_parser()
     parsed = parser.parse_args(argv)
     _check_the_run_arguments(parser, parsed)
     if parsed.fold:
         _fold(parsed)
         return
-    if parsed.task is not None:
-        _run_a_task(parsed)
+    if parsed.job is not None:
+        _run_a_job(parsed)
         return
     if parsed.list:
         _list_the_points(parsed.run_file)
@@ -84,7 +84,7 @@ def _run(argv: list) -> None:
 
 
 def _launch_on_slurm(parsed) -> None:
-    """Every point recorded, then one array task each and one fold."""
+    """Every point recorded, then one Slurm job each and one fold job."""
     import decsim.experiments.plan_command as plan_command
 
     job = plan_command.JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
@@ -93,16 +93,16 @@ def _launch_on_slurm(parsed) -> None:
     )
 
 
-def _run_a_task(parsed) -> None:
-    """One array task: one point to its stop, on a tree git names."""
+def _run_a_job(parsed) -> None:
+    """One Slurm job: one point to its stop, on a tree git names."""
     import decsim.experiments.collect_command as collect_command
     import decsim.experiments.plan_command as plan_command
 
     plan_command.refuse_an_unnamed_tree()
     run_path = pathlib.Path(parsed.run_file)
     run_dir = pathlib.Path(parsed.out)
-    collect_command.run_task(
-        run_path, run_dir, parsed.task, processes=parsed.processes
+    collect_command.run_job(
+        run_path, run_dir, parsed.job, processes=parsed.processes
     )
 
 
@@ -159,7 +159,7 @@ def _run_parser():
     """The run command's arguments, all here, where the command page reads them.
 
     The Slurm defaults are four cores, a day of walltime and 16384 MB a
-    task. --task is an array task's entry, which run.sbatch writes.
+    job. --job is a Slurm job's entry, which run.sbatch writes.
     """
     import argparse
 
@@ -212,16 +212,16 @@ def _run_parser():
     parser.add_argument(
         "--slurm",
         action="store_true",
-        help="run each point as one task of a Slurm array, then fold",
+        help="run each point as one job of a Slurm job array, then fold",
     )
     parser.add_argument(
-        "--cores", type=int, default=4, help="pieces a task runs at once"
+        "--cores", type=int, default=4, help="pieces a job runs at once"
     )
     parser.add_argument(
-        "--hours", type=int, default=24, help="a task's walltime"
+        "--hours", type=int, default=24, help="a job's walltime"
     )
     parser.add_argument(
-        "--memory-mb", type=int, default=16384, help="a task's memory"
+        "--memory-mb", type=int, default=16384, help="a job's memory"
     )
     parser.add_argument(
         "--dry-run",
@@ -233,9 +233,7 @@ def _run_parser():
         action="store_true",
         help="fold the --out folder's saved pieces and run nothing",
     )
-    parser.add_argument(
-        "--task", type=int, default=None, help=argparse.SUPPRESS
-    )
+    parser.add_argument("--job", type=int, default=None, help=argparse.SUPPRESS)
     return parser
 
 
@@ -258,8 +256,8 @@ def _check_the_run_arguments(parser, parsed) -> None:
         return
     if parsed.run_file is None:
         parser.error("name the run file")
-    if parsed.task is not None and parsed.out is None:
-        parser.error("--task runs one point into a folder; name it with --out")
+    if parsed.job is not None and parsed.out is None:
+        parser.error("--job runs one point into a folder; name it with --out")
     if parsed.slurm:
         _check_the_slurm_arguments(parser, parsed)
         return
@@ -287,7 +285,7 @@ def _check_the_local_arguments(parser, parsed) -> None:
 
 
 def _check_the_slurm_arguments(parser, parsed) -> None:
-    """A Slurm run runs every point to its stop, one task each."""
+    """A Slurm run runs every point to its stop, one job each."""
     chosen = (parsed.only, parsed.shots, parsed.seed)
     if any(option is not None for option in chosen):
         parser.error(

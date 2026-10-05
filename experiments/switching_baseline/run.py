@@ -14,7 +14,7 @@ A point stops at 100 failures or five million shots. A switching piece
 is 50 shots: the slowest point, d = 13 at p = 0.005, is estimated at up
 to 600 s a shot (a measured 32 s at d = 9, p = 0.003, about three times
 the region's detectors, twice the escalations), so a piece is at most
-about 8 hours, a third of a 24-hour task. A weak-alone piece is 2,000
+about 8 hours, a third of a 24-hour Slurm job. A weak-alone piece is 2,000
 shots, since weak-alone shots took 0.17 to 0.41 s each.
 
 Usage

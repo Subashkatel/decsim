@@ -6,8 +6,8 @@ contiguous prefix of its seeds, and no piece past the stop starts. Then
 the pieces are folded, one row per point. A saved piece is counted, not
 rerun, so a killed collect resumes; the same experiment reproduces the
 same rows (only the wall-clock column varies), with a pool too, as long
-as each point stops at the same piece. On Slurm each array task collects
-one point and one fold job folds them all.
+as each point stops at the same piece. On Slurm each job collects one
+point and one fold job folds them all.
 """
 
 import dataclasses
@@ -238,16 +238,16 @@ def start_the_folder(
     return every_id, points, started_utc
 
 
-def run_task(
+def run_job(
     run_file: pathlib.Path,
     run_dir: pathlib.Path,
     index: int,
     *,
     processes: int = 1,
 ) -> None:
-    """One array task: the experiment's index-th point to its stop.
+    """One Slurm job: the experiment's index-th point to its stop.
 
-    The launcher wrote run.json and the run file's copy, so a task checks
+    The launcher wrote run.json and the run file's copy, so a job checks
     the folder ran this tree and this run file, records its point again
     and collects from its saved pieces. It folds nothing.
     """

@@ -10,6 +10,7 @@ as each task stops at the same piece. On Slurm each job collects one
 task and one fold job folds them all.
 """
 
+import copy
 import dataclasses
 import functools
 import math
@@ -290,7 +291,7 @@ def run_one_shot(
     --debug-flags (src/python/m5/main.py:280, 299). A task the folder
     recorded with other settings is refused. Returns the lines to print.
     """
-    first_task = study.tasks[0]
+    first_task = _with_its_own_calibrator(study.tasks[0])
     settings = _with_observation(first_task.machine, log, trace)
     task = dataclasses.replace(first_task, machine=settings)
     machine = machine_module.Machine.build(
@@ -547,7 +548,8 @@ def _resolved_tasks(study: experiment.Experiment) -> list:
     """
     resolved = []
     names_by_id = {}
-    for task in study.tasks:
+    for given_task in study.tasks:
+        task = _with_its_own_calibrator(given_task)
         task_id = task.strong_id()
         earlier_name = names_by_id.setdefault(task_id, task.name)
         if earlier_name != task.name:
@@ -559,6 +561,17 @@ def _resolved_tasks(study: experiment.Experiment) -> list:
         resolved_task = _ResolvedTask(task, settings, record)
         resolved.append(resolved_task)
     return resolved
+
+
+def _with_its_own_calibrator(task: collect.Task) -> collect.Task:
+    """The task with a copy of its calibrator, as the run file built it.
+
+    A calibrator learns across one run's shots. A run that learned on the
+    experiment's own calibrator would give the next run of that experiment
+    a learned start.
+    """
+    calibrator = copy.deepcopy(task.online_threshold)
+    return dataclasses.replace(task, online_threshold=calibrator)
 
 
 def _refuse_two_tasks_of_one_id(first_name: str, second_name: str) -> None:

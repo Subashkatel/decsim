@@ -1190,6 +1190,28 @@ def test_an_online_task_cut_and_resumed_is_the_uncut_task(tmp_path):
     assert cut_trajectory == whole_trajectory
 
 
+def test_a_second_run_of_one_experiment_learns_from_the_start(tmp_path):
+    """Each run learns its online threshold from the run file's start.
+
+    A calibrator learns across one run's shots, so a second run of the
+    same experiment object into another folder writes the first run's
+    summary, window count and threshold alike.
+    """
+    collection = {"max_shots": 3}
+    run_file = run_files.write_run_file(
+        tmp_path, collection=collection, **ONLINE
+    )
+    study = experiment.load(run_file)
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    collect_command.collect_experiment(study, first_dir, run_file)
+    collect_command.collect_experiment(study, second_dir, run_file)
+
+    first = (first_dir / "threshold_summary.csv").read_text()
+    second = (second_dir / "threshold_summary.csv").read_text()
+    assert second == first
+
+
 def test_an_online_tasks_threshold_summary_is_its_end_counters(tmp_path):
     """threshold_summary.csv holds the counters the stderr line prints.
 

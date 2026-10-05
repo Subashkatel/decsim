@@ -4,7 +4,7 @@ Each of pymatching, union find, Relay-BP and BP-OSD as the weak tier
 alone and as the strong tier alone (belief matching too), and switching
 from a weak tier that reports a confidence to each strong tier: the
 arrangements of the decoder experiments that ran in September 2026,
-at their distance-3 point, p = 0.001 and one microsecond rounds. The
+at their distance-3 task, p = 0.001 and one microsecond rounds. The
 arrangements differ only in their switching slot and decoder rows, so a
 check that holds on one machine holds on every decoder the tree ships.
 """

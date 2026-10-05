@@ -3,7 +3,7 @@
 The referent for the circuit is decsim.producers.memory_circuit, the
 producer the machine's baseline run file calls, so the offline and the
 machine baselines sample one circuit. The rest pins the stop rule: 100
-errors a point, and a shot limit no time limit reaches, so Slurm's time
+errors a task, and a shot limit no time limit reaches, so Slurm's time
 limit is the budget; and the command line, gem5 MultiSim's, over
 sinter's own resume CSV and combine (sinter/_collection/_collection.py,
 sinter/_command/_main_combine.py), on a tiny grid in place of the
@@ -42,40 +42,40 @@ def test_the_circuit_is_decsims_memory_circuit():
     assert str(circuit) == str(operation.circuit)
 
 
-def test_the_baseline_has_a_point_per_basis_distance_rate_and_decoder():
+def test_the_baseline_has_a_task_per_basis_distance_rate_and_decoder():
     run = script_module()
 
-    points = run.baseline()
+    tasks = run.baseline()
 
-    assert len(points) == 2 * 6 * 6 * 4
+    assert len(tasks) == 2 * 6 * 6 * 4
 
 
-def test_every_point_stops_at_100_errors_or_a_billion_shots():
+def test_every_task_stops_at_100_errors_or_a_billion_shots():
     run = script_module()
 
-    points = run.baseline()
+    tasks = run.baseline()
 
-    options = [point.task.collection_options for point in points]
+    options = [task.sinter_task.collection_options for task in tasks]
     limits = {(option.max_errors, option.max_shots) for option in options}
     assert limits == {(100, 1_000_000_000)}
 
 
-def test_a_relay_bp_point_decodes_with_decsims_row_built_on_its_circuit():
+def test_a_relay_bp_task_decodes_with_decsims_row_built_on_its_circuit():
     run = script_module()
 
-    points = run.baseline()
+    tasks = run.baseline()
 
-    relay_points = _points_decoded_by(points, run.RELAY_BP)
+    relay_tasks = _tasks_decoded_by(tasks, run.RELAY_BP)
     row = relay_bp_adapter.RelayBeliefPropagationDecoder
-    is_the_row = {isinstance(point.decoder, row) for point in relay_points}
+    is_the_row = {isinstance(task.decoder, row) for task in relay_tasks}
     is_on_its_circuit = {
-        point.decoder.circuit is point.task.circuit for point in relay_points
+        task.decoder.circuit is task.sinter_task.circuit for task in relay_tasks
     }
     assert is_the_row == {True}
     assert is_on_its_circuit == {True}
 
 
-def test_list_prints_each_points_id_decoder_and_labels(capsys):
+def test_list_prints_each_tasks_id_decoder_and_labels(capsys):
     run = script_module()
 
     run.main(["--list"])
@@ -86,7 +86,7 @@ def test_list_prints_each_points_id_decoder_and_labels(capsys):
     assert lines[0] == "0 decoder=union-find basis=x d=5 p=0.0005"
 
 
-def test_a_point_run_by_id_writes_only_its_own_csv(tmp_path, monkeypatch):
+def test_a_task_run_by_id_writes_only_its_own_csv(tmp_path, monkeypatch):
     run = script_module()
     tiny_baseline = _tiny_baseline(run)
     monkeypatch.setattr(run, "baseline", tiny_baseline)
@@ -94,17 +94,17 @@ def test_a_point_run_by_id_writes_only_its_own_csv(tmp_path, monkeypatch):
 
     run.main(["1", "--out", str(folder)])
 
-    saved = sorted(path.name for path in (folder / "points").iterdir())
+    saved = sorted(path.name for path in (folder / "tasks").iterdir())
     record_path = folder / "run.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     assert saved == ["1.csv"]
-    assert record["points"] == [0, 1]
+    assert record["tasks"] == [0, 1]
     assert (folder / "run.py").exists()
     assert not (folder / "stats.csv").exists()
 
 
-def test_a_finished_point_run_again_takes_no_new_shots(tmp_path, monkeypatch):
+def test_a_finished_task_run_again_takes_no_new_shots(tmp_path, monkeypatch):
     run = script_module()
     tiny_baseline = _tiny_baseline(run)
     monkeypatch.setattr(run, "baseline", tiny_baseline)
@@ -117,7 +117,7 @@ def test_a_finished_point_run_again_takes_no_new_shots(tmp_path, monkeypatch):
     assert _saved_shots(run, folder, 0) == first
 
 
-def test_a_run_of_every_point_ends_with_stats_csv(tmp_path, monkeypatch):
+def test_a_run_of_every_task_ends_with_stats_csv(tmp_path, monkeypatch):
     run = script_module()
     tiny_baseline = _tiny_baseline(run)
     monkeypatch.setattr(run, "baseline", tiny_baseline)
@@ -127,15 +127,15 @@ def test_a_run_of_every_point_ends_with_stats_csv(tmp_path, monkeypatch):
 
     stats_path = folder / "stats.csv"
     stats = sinter.read_stats_from_csv_files(stats_path)
-    distances = sorted(point.json_metadata["d"] for point in stats)
+    distances = sorted(row.json_metadata["d"] for row in stats)
     assert distances == [3, 5]
 
 
 @pytest.mark.parametrize(
     "arguments, sentence",
     [
-        (["2"], "is no point id"),
-        (["x"], "is no point id"),
+        (["2"], "is no task id"),
+        (["x"], "is no task id"),
         (["0"], "name it with --out"),
         (["--workers", "0"], "sinter needs at least one worker"),
     ],
@@ -157,11 +157,11 @@ def test_a_command_line_that_names_no_run_is_refused(
 
 
 def _tiny_baseline(run):
-    """Two PyMatching points that stop at a few errors, as run.baseline."""
+    """Two PyMatching tasks that stop at a few errors, as run.baseline."""
 
     def tiny() -> list:
         options = sinter.CollectionOptions(max_errors=10, max_shots=5000)
-        points = []
+        tasks = []
         for distance in (3, 5):
             circuit = stim.Circuit.generated(
                 "surface_code:rotated_memory_z",
@@ -169,30 +169,30 @@ def _tiny_baseline(run):
                 rounds=3,
                 after_clifford_depolarization=0.02,
             )
-            task = sinter.Task(
+            sinter_task = sinter.Task(
                 circuit=circuit,
                 decoder="pymatching",
                 json_metadata={"d": distance},
                 collection_options=options,
             )
-            point = run.BaselinePoint(task, None)
-            points.append(point)
-        return points
+            task = run.BaselineTask(sinter_task, None)
+            tasks.append(task)
+        return tasks
 
     return tiny
 
 
-def _points_decoded_by(points, decoder: str) -> list:
-    """The points whose task names the decoder."""
+def _tasks_decoded_by(tasks, decoder: str) -> list:
+    """The tasks whose sinter task names the decoder."""
     found = []
-    for point in points:
-        if point.task.decoder == decoder:
-            found.append(point)
+    for task in tasks:
+        if task.sinter_task.decoder == decoder:
+            found.append(task)
     return found
 
 
-def _saved_shots(run, folder: pathlib.Path, point_id: int) -> int:
-    path = run.point_path(folder, point_id)
+def _saved_shots(run, folder: pathlib.Path, task_id: int) -> int:
+    path = run.task_path(folder, task_id)
     (saved,) = sinter.read_stats_from_csv_files(path)
     return saved.shots
 

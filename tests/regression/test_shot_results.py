@@ -354,7 +354,7 @@ def _run_file(name: str) -> types.ModuleType:
 
 
 def _redo_window_switching_on(threshold) -> machine_settings.MachineSettings:
-    """The redo window switching point with its threshold source swapped."""
+    """The redo window switching task with its threshold source swapped."""
     machine = redo_window_switching()
     switching = dataclasses.replace(machine.switching, threshold=threshold)
     return dataclasses.replace(machine, switching=switching)

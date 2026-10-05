@@ -160,7 +160,7 @@ def _resolve_round_ticks(code, fallback_round_microseconds: float) -> int:
 def _check_geometry_counts(code) -> None:
     """A zero or fractional geometry never terminates; refuse the card.
 
-    The labels are the settings that set them: the point's distance and
+    The labels are the settings that set them: the task's distance and
     the scheme's commit_rounds and buffer_rounds.
     """
     commit_round_count = code.commit_rounds()

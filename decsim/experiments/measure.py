@@ -178,9 +178,9 @@ class ShotConfidence:
 class ShotMeasurement:
     """One shot's numbers; the field names are the csv columns."""
 
-    # the point's strong id, sinter's strong_id column
+    # the task's strong id, sinter's strong_id column
     # (sinter/_data/_csv_out.py:69-77); the report adds its swept values
-    point_id: str
+    task_id: str
     algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
     decoded_windows: int
@@ -217,7 +217,7 @@ class ShotMeasurement:
     # the windows the strong tier committed, the rounds its decodes read
     # and their summed service, and r_com, the rounds a window commits.
     # The report divides the summed service by the summed windows per
-    # sweep point, a ratio of two sums as gem5 forms avgMissLatency =
+    # task, a ratio of two sums as gem5 forms avgMissLatency =
     # missLatency / misses (src/mem/cache/base.cc:2188), and forms
     # Toshio's Theorem 1 bound on that mean from the windows and r_com
     # (2510.25222 eq. (6))
@@ -277,7 +277,7 @@ class ShotMeasurement:
     unscored_reason: str
     provisional_no_correction_windows: int
     # sha256 of every scored owner's sampled detection events and
-    # observable truth, so two points' shots of one seed are checked to
+    # observable truth, so two tasks' shots of one seed are checked to
     # be one draw
     sample_digest: str
     # the windows' confidence gaps, None when no confidence signal
@@ -300,8 +300,8 @@ def measure_shot(
     writes nothing. only_traced_shot writes a named trace path as it stands.
     """
     settings = shot.task.machine
-    point_id = shot.task.strong_id()
-    label = shot_label(point_id, shot.seed)
+    task_id = shot.task.strong_id()
+    label = shot_label(task_id, shot.seed)
     observation = shot.machine.observation
     if run_dir is not None and settings.observation.writes_log:
         run_folder.write_log(observation, run_dir, label)
@@ -318,7 +318,7 @@ def measure_shot(
         record_options=shot.task.record_options,
         code=device.code,
         round_period_microseconds=round_period_microseconds,
-        point_id=point_id,
+        task_id=task_id,
         seed=shot.seed,
         wall_seconds=shot.wall_seconds,
     )
@@ -631,8 +631,8 @@ def collect_samples(
     qpu_send = qpu_send_ticks(transfers)
     frame_by_window = frame_records_by_window(observation)
     samples = {}
-    for point in POINTS:
-        samples[point] = []
+    for name in POINTS:
+        samples[name] = []
     window_tiers = []
     samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
     round_events = observation.round_events
@@ -655,7 +655,7 @@ def collect_samples(
         input_path = input_link.value
         output_path = output_link.value
         stage_us = _stage_microseconds(stages, frame_record)
-        points = window_points_us(
+        window_samples = window_points_us(
             window,
             frame_record,
             decode,
@@ -667,8 +667,8 @@ def collect_samples(
             input_path,
             output_path,
         )
-        for point, value in points.items():
-            samples[point].append(value)
+        for name, value in window_samples.items():
+            samples[name].append(value)
         window_tiers.append(decode.tier.value)
     return samples, tuple(window_tiers)
 
@@ -705,7 +705,7 @@ def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
     """The path a swept shot writes to: the label joins the given path.
 
     run.trace.json becomes run_<label>.trace.json, the label holding the
-    point id and seed, so two points that differ only in a setting no file
+    task id and seed, so two tasks that differ only in a setting no file
     name spells never write one file (gem5's multisim names each output
     folder by its id).
     """
@@ -722,9 +722,9 @@ def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
     return str(labelled)
 
 
-def shot_label(point_id: str, seed: int) -> str:
-    """The name a shot's log and trace files carry: its point id and seed."""
-    return f"{point_id}_seed{seed}"
+def shot_label(task_id: str, seed: int) -> str:
+    """The name a shot's log and trace files carry: its task id and seed."""
+    return f"{task_id}_seed{seed}"
 
 
 def parallel_processes_needed(
@@ -772,7 +772,7 @@ def _measurement(
     record_options: collect.RecordOptions,
     code: ports.CodeModel,
     round_period_microseconds: float,
-    point_id: str,
+    task_id: str,
     seed: int,
     wall_seconds: float,
 ) -> ShotMeasurement:
@@ -816,7 +816,7 @@ def _measurement(
     is_scored_failure = logical_failure and is_scored
     confidence = _shot_confidence(settings, observation, seed, record_options)
     return ShotMeasurement(
-        point_id=point_id,
+        task_id=task_id,
         algorithm=algorithm,
         seed=seed,
         decoded_windows=decoded_windows,
@@ -931,7 +931,7 @@ def _sample_digest(
 ) -> str:
     """sha256 of each scored owner's sampled detection events and truth.
 
-    Two points that differ only in their decoder draw the same shot at the
+    Two tasks that differ only in their decoder draw the same shot at the
     same seed, so pairing their shots can be checked rather than assumed.
     """
     shots_by_operation = observation.sampled_shots.shots_by_operation
@@ -1202,7 +1202,7 @@ def _strong_decodes(
 ) -> _StrongDecodes:
     """The windows the strong tier committed, their rounds, their service.
 
-    The report forms Toshio's Theorem 1 bound (2510.25222 eq. (6)) per point
+    The report forms Toshio's Theorem 1 bound (2510.25222 eq. (6)) per task
     from these; the summed service is taken in ticks, so it is exact.
     """
     stages = observation.stages
@@ -1618,15 +1618,15 @@ def _max_or_zero(values: list) -> float:
 
 def _means(samples: dict) -> dict:
     means = {}
-    for point, values in samples.items():
-        means[point] = _mean_or_zero(values)
+    for name, values in samples.items():
+        means[name] = _mean_or_zero(values)
     return means
 
 
 def _maxes(samples: dict) -> dict:
     maxes = {}
-    for point, values in samples.items():
-        maxes[point] = _max_or_zero(values)
+    for name, values in samples.items():
+        maxes[name] = _max_or_zero(values)
     return maxes
 
 

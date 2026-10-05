@@ -223,7 +223,7 @@ def _pinned_faces(result) -> list:
 
 
 def _pinned_run(strong_window, distance: int, seed: int = 0):
-    """One shot of the redo window switching experiment's switching point.
+    """One shot of the redo window switching experiment's switching task.
 
     The row under test replaces the redo window in the switching slot,
     which is where the build reads it from.

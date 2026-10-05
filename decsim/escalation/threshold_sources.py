@@ -2,11 +2,11 @@
 
 FixedThreshold keeps a weak result whose gap is at or above one value,
 the paper's constant g_th (Toshio et al. 2510.25222 Sec. III A, step 3).
-TableThreshold looks a point's facts up in an offline calibration csv
+TableThreshold looks a task's facts up in an offline calibration csv
 before the machine is built, then decides as FixedThreshold does.
-OnlineThreshold starts at a value and adapts it across a sweep point's
-shots with a rate tracker and an audit lane; one instance per point is
-shared by its shots. A record reads the point's facts off the point's
+OnlineThreshold starts at a value and adapts it across a task's
+shots with a rate tracker and an audit lane; one instance per task is
+shared by its shots. A record reads the task's facts off the task's
 settings, as a gem5 Parent.x proxy reads x off the object above it
 (src/python/m5/proxy.py:116-148). A record takes decibels and hands out
 nats, the unit a gap is compared in.
@@ -24,10 +24,10 @@ from typing import Optional
 import decsim.config as config
 import decsim.records.decoding as decoding_records
 
-# The point's facts a calibration table keys its rows on, each column
+# The task's facts a calibration table keys its rows on, each column
 # headed by the fact's name: the code, the noise, the round clock, and
 # the window geometry a threshold is calibrated for.
-POINT_FACTS = (
+TASK_FACTS = (
     "distance",
     "physical_error_probability",
     "round_period_microseconds",
@@ -89,13 +89,13 @@ class FixedThreshold:
             """The threshold as the weight a gap is compared in."""
             return decibels_to_nats(self.threshold_decibels)
 
-        def at_point(self, facts: Mapping) -> "FixedThreshold.Settings":
-            """A constant is the same at every point."""
+        def at_task(self, facts: Mapping) -> "FixedThreshold.Settings":
+            """A constant is the same at every task."""
             del facts
             return self
 
-        def for_point(self, facts: Mapping) -> None:
-            """A constant builds nothing shared across a point's shots."""
+        def for_task(self, facts: Mapping) -> None:
+            """A constant builds nothing shared across a task's shots."""
             del facts
 
         def build(self) -> "FixedThreshold":
@@ -123,22 +123,22 @@ class FixedThreshold:
 
 
 class TableThreshold(FixedThreshold):
-    """The calibration table's g_th for this sweep point.
+    """The calibration table's g_th for this task.
 
-    The table holds one row per point with the threshold in decibels,
+    The table holds one row per task with the threshold in decibels,
     set as Toshio et al. 2510.25222 Sec. III B sets it (by brute force,
     or as Eq. (4)'s smallest g_th, line 890).
     """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The calibration table's threshold for one point.
+        """The calibration table's threshold for one task.
 
         column is the csv column it reads. table is a label and no part of
-        a point's id: the number the table gives names the point.
-        threshold_decibels is that number, None until the point's row is
-        read (at_point), which the point's task does before it names the
-        point.
+        a task's id: the number the table gives names the task.
+        threshold_decibels is that number, None until the task's row is
+        read (at_task), which collect.Task does before it names the
+        task.
         """
 
         table: pathlib.Path = dataclasses.field(compare=False)
@@ -157,35 +157,35 @@ class TableThreshold(FixedThreshold):
                 return None
             return decibels_to_nats(self.threshold_decibels)
 
-        def at_point(self, facts: Mapping) -> "TableThreshold.Settings":
-            """The record holding the threshold of the point these facts name.
+        def at_task(self, facts: Mapping) -> "TableThreshold.Settings":
+            """The record holding the threshold of the task these facts name.
 
-            The table's key columns are headed by the POINT_FACTS they
+            The table's key columns are headed by the TASK_FACTS they
             match; every other column is one method's threshold in dB
             (Toshio et al. 2510.25222 Sec. III B: brute force over
             P_L(g_th), lines 855-863, or Eq. (4) at line 890). The first
-            row that holds the point wins. A record already read is its
+            row that holds the task wins. A record already read is its
             own reading.
             """
             if self.threshold_decibels is not None:
                 return self
             columns, rows = _table_rows(self.table)
-            point = _point_of(columns, facts, self.table)
-            row = _first_row_holding(rows, point, self.table)
+            key_facts = _key_facts_of(columns, facts, self.table)
+            row = _first_row_holding(rows, key_facts, self.table)
             cell = row[self.column]
             threshold_decibels = _certified_decibels(
-                cell, self.table, self.column, point
+                cell, self.table, self.column, key_facts
             )
             return dataclasses.replace(
                 self, threshold_decibels=threshold_decibels
             )
 
-        def for_point(self, facts: Mapping) -> None:
+        def for_task(self, facts: Mapping) -> None:
             """A table's constant builds nothing shared across the shots."""
             del facts
 
         def build(self) -> "TableThreshold":
-            """A fresh source at the point's threshold, once it is read."""
+            """A fresh source at the task's threshold, once it is read."""
             return TableThreshold(self.threshold_nats)
 
 
@@ -358,7 +358,7 @@ class OnlineThresholdController:
 class OnlineThreshold:
     """Adapts the threshold during the run, from the escalation rate it sees.
 
-    One instance persists across every shot of a sweep point, and its
+    One instance persists across every shot of a task, and its
     random stream is seeded once, so a rerun reproduces the same audits.
     An audited window still escalates, so an audit costs latency, never
     accuracy; its label is whether the strong answer revised the weak
@@ -404,15 +404,15 @@ class OnlineThreshold:
             """The step in natural-log weight units."""
             return decibels_to_nats(self.step_decibels)
 
-        def at_point(self, facts: Mapping) -> "OnlineThreshold.Settings":
-            """The card is the same at every point; its source is not."""
+        def at_task(self, facts: Mapping) -> "OnlineThreshold.Settings":
+            """The card is the same at every task; its source is not."""
             del facts
             return self
 
-        def for_point(self, facts: Mapping) -> "OnlineThreshold":
-            """The one instance a sweep point's shots share, point-seeded.
+        def for_task(self, facts: Mapping) -> "OnlineThreshold":
+            """The one instance a task's shots share, task-seeded.
 
-            The random stream is seeded from the point's distance and
+            The random stream is seeded from the task's distance and
             physical error probability as written, so a rerun draws the
             same audits.
             """
@@ -439,11 +439,11 @@ class OnlineThreshold:
             return OnlineThreshold(controller, generator)
 
         def build(self) -> "OnlineThreshold":
-            """Refused: the source learns across a point's shots."""
+            """Refused: the source learns across a task's shots."""
             raise ValueError(
-                "an online threshold learns across a sweep point's shots, "
-                "so it is built once per point by for_point and shared: "
-                "a point's task builds it, and Machine.build takes it as "
+                "an online threshold learns across a task's shots, "
+                "so it is built once per task by for_task and shared: "
+                "collect.Task builds it, and Machine.build takes it as "
                 "online_threshold for one machine"
             )
 
@@ -584,8 +584,8 @@ def _refuse_a_seed_with_no_fact(distance, physical_error_probability) -> None:
     if distance is not None and physical_error_probability is not None:
         return
     raise ValueError(
-        "an online threshold seeds its audits from the point's distance "
-        "and physical_error_probability, and the point gives "
+        "an online threshold seeds its audits from the task's distance "
+        "and physical_error_probability, and the task gives "
         f"distance={distance!r}, "
         f"physical_error_probability={physical_error_probability!r}"
     )
@@ -594,7 +594,7 @@ def _refuse_a_seed_with_no_fact(distance, physical_error_probability) -> None:
 def _table_rows(table_path: pathlib.Path) -> tuple:
     """The table's columns and rows.
 
-    A table with no key column would match every point to its first row,
+    A table with no key column would match every task to its first row,
     a wrong threshold with no sign of it, so it is refused.
     """
     with open(table_path, newline="") as table_file:
@@ -606,7 +606,7 @@ def _table_rows(table_path: pathlib.Path) -> tuple:
     if not key_columns:
         raise ValueError(
             f"threshold_table {table_path} has no key column; a key column "
-            f"is headed by the point fact it matches, one of {POINT_FACTS}"
+            f"is headed by the task fact it matches, one of {TASK_FACTS}"
         )
     return columns, rows
 
@@ -615,7 +615,7 @@ def _refuse_a_settings_path_header(columns: list, table_path) -> None:
     """A header that is a settings path is refused, naming the fact to write.
 
     Read as a threshold column, it would leave its key unmatched, and the
-    point would take another row's threshold with no sign of it.
+    task would take another row's threshold with no sign of it.
     """
     for column in columns:
         if "." not in column:
@@ -628,55 +628,55 @@ def _settings_path_header_sentence(column: str, table_path) -> str:
     """The refusal of a settings path header, with its fact if it names one."""
     sentence = (
         f"threshold_table {table_path} heads a column with the settings path "
-        f"{column}; a key column is headed by the point fact it matches, "
-        f"one of {POINT_FACTS}"
+        f"{column}; a key column is headed by the task fact it matches, "
+        f"one of {TASK_FACTS}"
     )
     _, _, last_name = column.rpartition(".")
-    if last_name not in POINT_FACTS:
+    if last_name not in TASK_FACTS:
         return sentence
     return f"{sentence}, so write {last_name}"
 
 
 def _key_columns(columns: list) -> list:
-    """The columns headed by a point fact, which name a table's points."""
-    return [column for column in columns if column in POINT_FACTS]
+    """The columns headed by a task fact, which name a table's tasks."""
+    return [column for column in columns if column in TASK_FACTS]
 
 
-def _point_of(columns: list, facts: Mapping, table_path) -> dict:
-    """The point's value at each of the table's key columns.
+def _key_facts_of(columns: list, facts: Mapping, table_path) -> dict:
+    """The task's value at each of the table's key columns.
 
-    A fact the point does not give is refused: its None would otherwise
+    A fact the task does not give is refused: its None would otherwise
     match a row whose cell reads "None".
     """
-    point = {}
+    key_facts = {}
     for column in _key_columns(columns):
         value = facts[column]
         if value is None:
             raise ValueError(
                 f"threshold_table {table_path} keys its rows on {column}, "
-                f"and the point gives no {column}"
+                f"and the task gives no {column}"
             )
-        point[column] = value
-    return point
+        key_facts[column] = value
+    return key_facts
 
 
-def _first_row_holding(rows: list, point: dict, table_path) -> dict:
-    """The first row whose key cells hold the point.
+def _first_row_holding(rows: list, key_facts: dict, table_path) -> dict:
+    """The first row whose key cells hold the task.
 
-    A table with no such row gives the point no threshold, so it is
+    A table with no such row gives the task no threshold, so it is
     refused.
     """
     for row in rows:
-        if _is_point(row, point):
+        if _holds_the_key_facts(row, key_facts):
             return row
     raise ValueError(
-        f"threshold_table {table_path} has no row for the point {point}"
+        f"threshold_table {table_path} has no row for the task {key_facts}"
     )
 
 
-def _is_point(row: dict, point: dict) -> bool:
-    """Whether every key cell of the row holds the point's value."""
-    for column, value in point.items():
+def _holds_the_key_facts(row: dict, key_facts: dict) -> bool:
+    """Whether every key cell of the row holds the task's value."""
+    for column, value in key_facts.items():
         if not _cell_holds(row[column], value):
             return False
     return True
@@ -698,8 +698,8 @@ def _cell_holds(cell: str, value) -> bool:
 
 
 def _certified_decibels(
-    cell: str, table_path: pathlib.Path, column: str, point: dict
+    cell: str, table_path: pathlib.Path, column: str, key_facts: dict
 ) -> float:
-    entry = f"threshold_table {table_path} entry {column} at {point}"
+    entry = f"threshold_table {table_path} entry {column} at {key_facts}"
     gap_threshold_db = float(cell)
     return checked_decibels(gap_threshold_db, entry)

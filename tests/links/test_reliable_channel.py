@@ -437,7 +437,7 @@ def _off_board_escalation(protocol) -> machine_settings.MachineSettings:
     The escalation hop is the reference card's off-board one: 100 Gb/s,
     400 bits a cycle at 250 MHz, 65 cycles of latency.
     """
-    machine = two_tiers.points[0].machine
+    machine = two_tiers.tasks[0].machine
     card = link_profiles.path_card(
         machine.links,
         "weak_decoder_to_strong_decoder",

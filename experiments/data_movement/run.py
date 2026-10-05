@@ -82,7 +82,7 @@ NO_STRONG_SIDE_CELLS = {
 def every_hop_copies(distance: int) -> machine_settings.MachineSettings:
     """Block 1: the weak tier on copies, every copy counted and traced.
 
-    One traced shot a point records where every round sat.
+    One traced shot a task records where every round sat.
     """
     base = machine_settings.weak_decoder_baseline(
         distance,
@@ -167,25 +167,25 @@ BLOCKS = (
 )
 
 
-def data_movement_points() -> list:
+def data_movement_tasks() -> list:
     """Every block at every distance, blocks in order."""
-    points = []
+    tasks = []
     for block_name, machine_at in BLOCKS:
         for distance in DISTANCES:
             machine = machine_at(distance)
             metadata = reported_cells(machine, distance)
-            point_name = f"{block_name}_d{distance}"
-            point = decsim.Task(point_name, machine, metadata)
-            points.append(point)
-    return points
+            task_name = f"{block_name}_d{distance}"
+            task = decsim.Task(task_name, machine, metadata)
+            tasks.append(task)
+    return tasks
 
 
 def reported_cells(
     machine: machine_settings.MachineSettings, distance: int
 ) -> dict:
-    """Every cell the study's results show for a point, in column order.
+    """Every cell the study's results show for a task, in column order.
 
-    Each column is a setting some block changes, so every point reports
+    Each column is a setting some block changes, so every task reports
     its value there, read off the machine it runs.
     """
     weak_decoder = machine.weak_decoder
@@ -290,5 +290,5 @@ def _pool_cell(
     }
 
 
-points = data_movement_points()
-experiment = decsim.Experiment(NAME, points, COLLECTION)
+tasks = data_movement_tasks()
+experiment = decsim.Experiment(NAME, tasks, COLLECTION)

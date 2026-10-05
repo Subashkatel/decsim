@@ -3,7 +3,7 @@
 Referent one is a sweep of the reference machine recorded before
 the collect module existed, rerun on its machine (run_files.REFERENCE),
 its sweep.csv and its per-link means kept in data/, each mean
-the one shot_links.csv gives a link over the point's shots. Ten of its
+the one shot_links.csv gives a link over the task's shots. Ten of its
 numbers
 were amended when the controller-to-store hop stopped being priced at
 the raw readout width: the recorded run's own buffer fill, its
@@ -17,8 +17,8 @@ stores never sees, and four more when the park was split by cause: this sweep's
 one unit is always free by the time a window's boundary is in, so its
 compute_wait is zero on every window of both recorded runs. Four more came with
 the confidence step, which a weak-baseline sweep answers on its decode and
-never spends. Its first four columns became the point's metadata and
-algorithm when a point came to be named by its id: the id hashes the
+never spends. Its first four columns became the task's metadata and
+algorithm when a task came to be named by its id: the id hashes the
 tree's settings records, not a measured value, so it is left out of the
 comparison. Five zero columns came with the window decode statuses,
 one per status besides success, which no window of the recorded sweep
@@ -42,7 +42,7 @@ refused by name (sinter/_decoding/_decoding.py "Unrecognized decoder"),
 and a shot its decoder could not answer is a discard, counted apart and
 never an error (sinter/_decoding/_decoding.py:123-125). Referent three
 is that retired reference's own columns, frozen by seed before it went,
-which a full-history point beside a sliding one reproduces.
+which a full-history task beside a sliding one reproduces.
 """
 
 import csv
@@ -107,7 +107,7 @@ WALL_CLOCK_COLUMNS = (
     "throughput_windows_per_us",
 )
 
-# the sliding pymatching point's logical_failure, direct_failure and
+# the sliding pymatching task's logical_failure, direct_failure and
 # direct_mismatch for seeds 0 to 239, written at commit 9a4334b2, the
 # last commit that measured the whole-circuit reference on every shot
 DIRECT_REFERENCE = DATA / "direct_reference.csv"
@@ -164,7 +164,7 @@ EXACT_NUMBERS = [
 
 def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):
     study = run_files.sweep(**run_files.REFERENCE)
-    measurements = run_files.run_sweep(study.points, 2)
+    measurements = run_files.run_sweep(study.tasks, 2)
     _rows, run_dir = run_files.folded_run(tmp_path, measurements)
     folded_sweep_path = run_dir / "sweep.csv"
     shot_links_path = run_dir / "shot_links.csv"
@@ -174,17 +174,17 @@ def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):
     links_path = DATA / "reference_links.csv"
     sweep_before = _csv_rows(sweep_path)
     links_before = _csv_rows(links_path)
-    sweep_measured = _without_point_id(sweep_now)
+    sweep_measured = _without_task_id(sweep_now)
     assert len(sweep_measured) == 1
     stable_now = _stable_columns(sweep_measured[0])
     assert stable_now == _stable_columns(sweep_before[0])
     assert _link_means(shot_links) == links_before
 
 
-def test_a_full_history_point_reproduces_the_retired_direct_columns(
+def test_a_full_history_task_reproduces_the_retired_direct_columns(
     tmp_path,
 ):
-    """The per-shot whole-circuit reference, from a pair of points by seed.
+    """The per-shot whole-circuit reference, from a pair of tasks by seed.
 
     One window of 16 rounds decodes the shot's whole 15-round history,
     which is whole-circuit PyMatching on the same events, so seed by
@@ -217,8 +217,8 @@ def test_a_full_history_point_reproduces_the_retired_direct_columns(
     assert sum(mismatches) == 2
 
 
-def test_every_shot_of_a_point_decides_on_the_tasks_calibrator():
-    """An online threshold: one calibrator per point, on the task."""
+def test_every_shot_of_a_task_decides_on_its_calibrator():
+    """An online threshold: one calibrator per task, on the task."""
     task = run_files.first_task(
         machine="switching", machine_arguments={"online": {}}
     )
@@ -264,11 +264,11 @@ def test_a_machine_built_alone_builds_its_own_models():
     assert first_models is not second_models
 
 
-def test_two_points_under_one_cache_do_not_share_models():
+def test_two_tasks_under_one_cache_do_not_share_models():
     """The key carries the circuit text, which is where d and p are.
 
     Two distances also differ in their window spans, so the noisier
-    point at one distance is what pins the circuit text itself.
+    task at one distance is what pins the circuit text itself.
     """
     built = built_window_models.BuiltWindowModels()
     at_three = _reference_task()
@@ -325,8 +325,8 @@ def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
     merge_workload = workload_settings.WorkloadSettings(operations=[merge])
     memory_settings = machine_settings.MachineSettings(workload=memory_workload)
     merge_settings = machine_settings.MachineSettings(workload=merge_workload)
-    memory_task = collect.Task("memory", memory_settings, {"point": 1})
-    merge_task = collect.Task("merge", merge_settings, {"point": 1})
+    memory_task = collect.Task("memory", memory_settings, {"task": 1})
+    merge_task = collect.Task("merge", merge_settings, {"task": 1})
 
     assert memory_task.strong_id() != merge_task.strong_id()
 
@@ -343,8 +343,8 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     )
     three_settings = machine_settings.MachineSettings(workload=three_workload)
     five_settings = machine_settings.MachineSettings(workload=five_workload)
-    three_task = collect.Task("three", three_settings, {"point": 1})
-    five_task = collect.Task("five", five_settings, {"point": 1})
+    three_task = collect.Task("three", three_settings, {"task": 1})
+    five_task = collect.Task("five", five_settings, {"task": 1})
 
     assert three_task.strong_id() != five_task.strong_id()
 
@@ -353,7 +353,7 @@ def test_two_records_with_the_same_fields_are_two_tasks():
     """A record enters the id by its class beside its fields.
 
     Two rows that take no settings have records with no fields, so only
-    their classes tell the points apart, as gem5's config.json writes
+    their classes tell the tasks apart, as gem5's config.json writes
     each object's type.
     """
 
@@ -423,13 +423,13 @@ def test_a_class_enters_the_id_by_its_name_whatever_it_holds():
     assert after == before
 
 
-def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
+def test_a_tasks_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     """machine.json is where a label is read, so it keeps them all."""
     task = _reference_task()
 
-    run_folder.record_point(tmp_path, task)
+    run_folder.record_task(tmp_path, task)
 
-    record_path = tmp_path / "points" / task.name / "machine.json"
+    record_path = tmp_path / "tasks" / task.name / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     links = record["settings"]["links"]
@@ -438,7 +438,7 @@ def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     assert channel["configuration_source"] == run_files.REFERENCE_SOURCE
 
 
-def test_settings_that_differ_only_in_labels_are_one_point():
+def test_settings_that_differ_only_in_labels_are_one_task():
     """A label changes no id; a latency, which changes the run, does."""
     task = _reference_task()
     links = task.machine.links
@@ -461,12 +461,12 @@ def test_settings_that_differ_only_in_labels_are_one_point():
     assert slower_task.strong_id() != task.strong_id()
 
 
-def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
-    """Recording is no part of a point: one id, one row, either way.
+def test_a_task_traced_and_logged_is_the_task_run_plain(tmp_path, capsys):
+    """Recording is no part of a task: one id, one row, either way.
 
     sinter keeps its output options out of a task's strong id
-    (sinter/_data/_task.py:167-204). The point with every recording-only
-    observation key on has the plain point's id and, shot for shot, its
+    (sinter/_data/_task.py:167-204). The task with every recording-only
+    observation key on has the plain task's id and, shot for shot, its
     rows but for the wall clock, and its resolved record says what it
     recorded.
     """
@@ -476,9 +476,9 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
     plain_rows = _shot_rows_without_wall_clock(plain)
     recorded_rows = _shot_rows_without_wall_clock(recorded)
     printed = capsys.readouterr()
-    run_folder.record_point(tmp_path, recorded)
+    run_folder.record_task(tmp_path, recorded)
 
-    record_path = tmp_path / "points" / recorded.name / "machine.json"
+    record_path = tmp_path / "tasks" / recorded.name / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     recorded_observation = record["settings"]["observation"]
@@ -500,16 +500,16 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
 def test_a_metadata_key_that_is_not_text_is_refused_at_any_depth(
     metadata, sentence_start
 ):
-    """A point's metadata is checked where its id is made."""
-    first_point = run_files.first_task()
+    """A task's metadata is checked where its id is made."""
+    first_task = run_files.first_task()
     sentence = (
-        f"{sentence_start} which is not text; a point's id is the json of "
-        "its metadata, whose keys are text, so 1 and '1' would name one point"
+        f"{sentence_start} which is not text; a task's id is the json of "
+        "its metadata, whose keys are text, so 1 and '1' would name one task"
     )
     pattern = re.escape(sentence)
 
     with pytest.raises(ValueError, match=pattern):
-        collect.Task("task", first_point.machine, metadata)
+        collect.Task("task", first_task.machine, metadata)
 
 
 @pytest.mark.parametrize(("value", "written"), EXACT_NUMBERS)
@@ -541,7 +541,7 @@ def test_a_crashed_backend_leaves_unscored_shots_and_the_task_completes(
     The crash is relay-bp's own decode_detailed raising, which the row
     turns into BACKEND_ERROR with no correction; each shot is unscored
     with that reason, counts its windows under backend_error_windows,
-    and is not a failure; the point has no failure fraction and no
+    and is not a failure; the task has no failure fraction and no
     interval, and counting its unscored shots as failures gives 1.
     """
     monkeypatch.setattr(
@@ -610,7 +610,7 @@ def _stable_columns(row: dict) -> dict:
 
 
 def _link_means(shot_link_rows: list) -> list:
-    """Each link's counters averaged over one point's shots, as text."""
+    """Each link's counters averaged over one task's shots, as text."""
     rows_by_link = {}
     for row in shot_link_rows:
         link_rows = rows_by_link.setdefault(row["link"], [])
@@ -643,11 +643,11 @@ def _means_of_one_link(link: str, rows: list) -> dict:
     return mean_row
 
 
-def _without_point_id(rows: list) -> list:
+def _without_task_id(rows: list) -> list:
     kept = []
     for row in rows:
         without = dict(row)
-        del without["point_id"]
+        del without["task_id"]
         kept.append(without)
     return kept
 
@@ -701,7 +701,7 @@ def _memory_task(rounds: int) -> collect.Task:
     )
     workload = workload_settings.WorkloadSettings(operations=(operation,))
     settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task("task", settings, {"point": 1})
+    return collect.Task("task", settings, {"task": 1})
 
 
 def _seed_after_the_release(release_path: pathlib.Path, shot) -> int:
@@ -742,7 +742,7 @@ def _slotted_rounds_task(round_count: int) -> collect.Task:
 def _rounds_task(rounds_policy) -> collect.Task:
     workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
     settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task("task", settings, {"point": 1})
+    return collect.Task("task", settings, {"task": 1})
 
 
 def _device_task(round_count: int) -> collect.Task:
@@ -751,7 +751,7 @@ def _device_task(round_count: int) -> collect.Task:
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task("task", settings, {"point": 1})
+    return collect.Task("task", settings, {"task": 1})
 
 
 def _recorded_device_task(flip: int) -> collect.Task:
@@ -761,11 +761,11 @@ def _recorded_device_task(flip: int) -> collect.Task:
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task("task", settings, {"point": 1})
+    return collect.Task("task", settings, {"task": 1})
 
 
 def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
-    """One point's shots.csv rows by seed, the point named by its window."""
+    """One task's shots.csv rows by seed, the task named by its window."""
     by_seed = {}
     for row in shots:
         if row["windows.commit_rounds"] == commit_rounds_cell:
@@ -790,23 +790,23 @@ def _frozen_columns(reference: list) -> list:
 
 
 def _sample_digests(shots_by_seed: dict, seeds: list) -> list:
-    """One point's sample digests, seed by seed."""
+    """One task's sample digests, seed by seed."""
     return [shots_by_seed[seed]["sample_digest"] for seed in seeds]
 
 
 def _retired_columns_by_seed(
     sliding: dict, full_history: dict, seeds: list
 ) -> list:
-    """The three columns as the pair of points gives them, seed by seed."""
+    """The three columns as the pair of tasks gives them, seed by seed."""
     return [
         _retired_columns(sliding[seed], full_history[seed]) for seed in seeds
     ]
 
 
 def _retired_columns(sliding_row: dict, full_history_row: dict) -> tuple:
-    """The three columns as the pair of points gives them for one seed.
+    """The three columns as the pair of tasks gives them for one seed.
 
-    The mismatch compares the two points' predictions, as the retired
+    The mismatch compares the two tasks' predictions, as the retired
     column compared the loop's with the reference's, not their failures.
     """
     sliding_failure = sliding_row["logical_failure"] == "True"

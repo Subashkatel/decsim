@@ -87,7 +87,7 @@ Each guide adds one kind of thing to the machine.
 
 There is no paper for decsim yet. Cite the repository and the commit you
 ran, which every results folder records for you: `run.json` holds the
-git commit and the library versions, each point's `machine.json` every
+git commit and the library versions, each task's `machine.json` every
 value it ran with, and `code_state.patch` any uncommitted change.
 Quoting the commit from `run.json` is enough for someone else to reproduce the run.
 

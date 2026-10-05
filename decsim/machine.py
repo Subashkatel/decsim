@@ -103,11 +103,11 @@ class Machine:
         The seed is the run's root; every stochastic component derives
         its own from it and its path. built_models is the window error
         model cache the shots of one unit share (collect.run_unit), and
-        online_threshold the point's calibrator when its threshold
-        learns across shots (collect.Task); both are point state, never
+        online_threshold the task's calibrator when its threshold
+        learns across shots (collect.Task); both are task state, never
         settings.
         """
-        settings = settings.at_point()
+        settings = settings.at_task()
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
         engine = engine_module.Engine()

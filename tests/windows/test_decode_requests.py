@@ -414,7 +414,7 @@ def _companion_solve(job, memory):
     return companion
 
 
-# one sweep point per noise level, counting the movement each shot made
+# one task per noise level, counting the movement each shot made
 FOLD_SEEDS = (0, 1, 2, 3, 4)
 # a shot of fifteen rounds at distance 3 is four sliding windows
 FOLD_ROUNDS = 15

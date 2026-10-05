@@ -128,32 +128,32 @@ def main(argv: list) -> None:
     _refuse_a_key_the_trace_does_not_carry(document, kind, key)
     path = follow(document, kind, key)
     trace_path = pathlib.Path(parsed.file)
-    point_name = point_named_by(trace_path)
-    lines = _report_lines(path, point_name)
+    task_name = task_named_by(trace_path)
+    lines = _report_lines(path, task_name)
     text = "\n".join(lines)
     print(text)
 
 
-def point_named_by(trace_path: pathlib.Path) -> Optional[str]:
-    """The name of the point a run folder's trace is of; None outside one.
+def task_named_by(trace_path: pathlib.Path) -> Optional[str]:
+    """The name of the task a run folder's trace is of; None outside one.
 
-    A run folder names a trace by its point's id and seed
-    (measure.shot_label) and keeps each point's record under points/,
-    so two points of one experiment are told apart by name.
+    A run folder names a trace by its task's id and seed
+    (measure.shot_label) and keeps each task's record under tasks/,
+    so two tasks of one experiment are told apart by name.
     """
     run_dir = trace_path.parent.parent
-    records = run_folder.point_records(run_dir)
-    for point_id, record in records.items():
-        if trace_path.name.startswith(f"{point_id}_seed"):
+    records = run_folder.task_records(run_dir)
+    for task_id, record in records.items():
+        if trace_path.name.startswith(f"{task_id}_seed"):
             return record["name"]
     return None
 
 
-def _report_lines(path: FollowedPath, point_name: Optional[str]) -> list:
+def _report_lines(path: FollowedPath, task_name: Optional[str]) -> list:
     """The table and the counts, as the command prints them."""
     machine = path.process_name
-    if point_name is not None:
-        machine = f"point {point_name}, {machine}"
+    if task_name is not None:
+        machine = f"task {task_name}, {machine}"
     lines = [f"{path.kind} {path.key} of {machine}", ""]
     table = table_lines(path.hops)
     lines.extend(table)

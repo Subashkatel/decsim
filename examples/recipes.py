@@ -1,6 +1,6 @@
-"""Recipes: ways to change the weak decoder baseline, one point each.
+"""Recipes: ways to change the weak decoder baseline, one task each.
 
-Every point is at d = 3 and p = 0.008 with 1.0 us rounds, and stops at
+Every task is at d = 3 and p = 0.008 with 1.0 us rounds, and stops at
 20 shots. Every decoder is priced by a card, so the ticks are the same
 on any host.
 
@@ -42,9 +42,9 @@ ROUND_PERIOD_MICROSECONDS = 1.0
 WEAK_DECODE_MICROSECONDS_PER_ROUND = 0.4 * ROUND_PERIOD_MICROSECONDS
 STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * ROUND_PERIOD_MICROSECONDS
 THRESHOLD_DECIBELS = 20.0
-# A calibration table holds a threshold in decibels for each point
+# A calibration table holds a threshold in decibels for each task
 # (2510.25222 Sec. III B); this one holds the paper's 20 dB at this
-# point, a stand-in, not a calibration.
+# task, a stand-in, not a calibration.
 THIS_FILE = pathlib.Path(__file__)
 THRESHOLD_TABLE = THIS_FILE.with_name("threshold_table.csv")
 # the cycles one word's read holds a port: the sky130 byte FIFO's one,
@@ -156,10 +156,10 @@ machines = {
     "double_window": switching(fixed_threshold, strong_window=double_window),
     "run_both_at_once": switching(fixed_threshold, run_both_at_once=True),
 }
-points = []
+tasks = []
 for name, machine in machines.items():
-    point = decsim.Task(name, machine, {"recipe": name})
-    points.append(point)
+    task = decsim.Task(name, machine, {"recipe": name})
+    tasks.append(task)
 cells = decsim.grid(
     cycles_per_access=CYCLES_PER_ACCESS, link_microseconds=LINK_MICROSECONDS
 )
@@ -168,7 +168,7 @@ for cell in cells:
     cycles_per_access = cell["cycles_per_access"]
     link_microseconds = cell["link_microseconds"]
     name = f"read_cycles_{cycles_per_access}_link_{link_microseconds}us"
-    point = decsim.Task(name, machine, cell)
-    points.append(point)
+    task = decsim.Task(name, machine, cell)
+    tasks.append(task)
 
-experiment = decsim.Experiment(NAME, points, COLLECTION)
+experiment = decsim.Experiment(NAME, tasks, COLLECTION)

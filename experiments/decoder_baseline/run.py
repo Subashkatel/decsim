@@ -1,15 +1,15 @@
 """The decoder baseline, offline: Stim circuits, sinter, each decoder's adapter.
 
 Rotated surface code memory in X and Z, d 5 to 15, six error rates, 100
-rounds, four decoders; a point stops at 100 errors. The Slurm time limit
+rounds, four decoders; a task stops at 100 errors. The Slurm time limit
 is the budget: a task stopped by it keeps what it saved, and the same
 submission run again goes on from there.
 
 The command line is gem5 MultiSim's (gem5 v24.0 RELEASE-NOTES.md, "gem5
-MultiSim"): `python run.py --list` prints the points, `python run.py <id>
+MultiSim"): `python run.py --list` prints the tasks, `python run.py <id>
 --out DIR` runs one, `python run.py` runs them all and combines, and
-`python run.py combine --out DIR` folds the saved points into stats.csv.
-Each point is one sinter.collect into its own resume CSV, sinter's
+`python run.py combine --out DIR` folds the saved tasks into stats.csv.
+Each task is one sinter.collect into its own resume CSV, sinter's
 save_resume_filepath (sinter/_collection/_collection.py), so Slurm jobs
 running at once never write one file and a resubmitted job goes on
 where it stopped; stats.csv is sinter's combine, read_stats_from_csv_files
@@ -42,7 +42,7 @@ ERROR_RATES = [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
 BASES = ["x", "z"]
 ROUNDS = 100
 MAX_ERRORS = 100
-# sinter needs a shot limit to stop a point that never reaches its
+# sinter needs a shot limit to stop a task that never reaches its
 # errors; one far past what a time limit buys leaves the stop to Slurm.
 MAX_SHOTS = 1_000_000_000
 # the package's own profiles (src/tesseract_sinter_compat.pybind.h:466-472)
@@ -62,35 +62,35 @@ RELAY_BP_SETTINGS = relay_decoder.RelayBeliefPropagationDecoder.Settings(
     converged_solution_count=5,
     bases="together",
 )
-# the seed each point's gamma table is drawn from, so a rerun repeats it
+# the seed each task's gamma table is drawn from, so a rerun repeats it
 RELAY_BP_SEED = 20260927
-# a point's decoders in the order of their ids
+# the decoders each circuit runs with, in the order of their task ids
 DECODERS = ["union-find", "pymatching", RELAY_BP, "tesseract-short-beam"]
-# The decoders one object serves at every point; None is sinter's
-# built-in. Relay-BP is built per point from its circuit
+# The decoders one object serves at every task; None is sinter's
+# built-in. Relay-BP is built per task from its circuit
 # (decsim/sinter_adapters/relay_bp.py says why).
 SHARED_DECODERS = {
     "union-find": union_find_adapter.UnionFindDecoder(),
     "pymatching": None,
     "tesseract-short-beam": TESSERACT_PROFILES["tesseract-short-beam"],
 }
-# `run.py combine` folds every saved point into stats.csv
+# `run.py combine` folds every saved task into stats.csv
 COMBINE = "combine"
-POINTS_FOLDER = "points"
+TASKS_FOLDER = "tasks"
 STATS_FILE = "stats.csv"
 
 
 @dataclasses.dataclass(frozen=True)
-class BaselinePoint:
+class BaselineTask:
     """A sinter task paired with the decoder object that decodes it.
 
     decoder is None for sinter's built-in of the task's decoder name. It
-    is kept per point because a decoder may be built from its point's
+    is kept per task because a decoder may be built from its task's
     circuit, which sinter's compile step never sees (sinter.Decoder,
     compile_decoder_for_dem takes the model only).
     """
 
-    task: sinter.Task
+    sinter_task: sinter.Task
     decoder: Optional[sinter.Decoder]
 
 
@@ -111,78 +111,78 @@ def circuit(basis: str, distance: int, error_rate: float) -> stim.Circuit:
     )
 
 
-def point_decoder(
-    decoder: str, point_circuit: stim.Circuit
+def task_decoder(
+    decoder: str, task_circuit: stim.Circuit
 ) -> Optional[sinter.Decoder]:
-    """The decoder object for one point, or None for sinter's built-in."""
+    """The decoder object for one task, or None for sinter's built-in."""
     if decoder == RELAY_BP:
         return relay_bp_adapter.RelayBeliefPropagationDecoder(
-            point_circuit, RELAY_BP_SETTINGS, RELAY_BP_SEED
+            task_circuit, RELAY_BP_SETTINGS, RELAY_BP_SEED
         )
     return SHARED_DECODERS[decoder]
 
 
 def baseline() -> list:
-    """Every point, basis by distance by rate by decoder.
+    """Every task, basis by distance by rate by decoder.
 
     The labels go into sinter's json_metadata, so stats.csv carries them
-    beside every point's counts.
+    beside every task's counts.
     """
     options = sinter.CollectionOptions(
         max_shots=MAX_SHOTS, max_errors=MAX_ERRORS
     )
-    points = []
+    tasks = []
     grid = itertools.product(BASES, DISTANCES, ERROR_RATES, DECODERS)
     for basis, distance, error_rate, decoder in grid:
-        point_circuit = circuit(basis, distance, error_rate)
+        task_circuit = circuit(basis, distance, error_rate)
         labels = {"basis": basis, "d": distance, "p": error_rate}
-        task = sinter.Task(
-            circuit=point_circuit,
+        sinter_task = sinter.Task(
+            circuit=task_circuit,
             decoder=decoder,
             json_metadata=labels,
             collection_options=options,
         )
-        custom_decoder = point_decoder(decoder, point_circuit)
-        point = BaselinePoint(task, custom_decoder)
-        points.append(point)
-    return points
+        custom_decoder = task_decoder(decoder, task_circuit)
+        task = BaselineTask(sinter_task, custom_decoder)
+        tasks.append(task)
+    return tasks
 
 
 def main(arguments: Optional[list] = None) -> None:
-    """Run what the command line asks: list, one point, all, or combine."""
+    """Run what the command line asks: list, one task, all, or combine."""
     parser = _parser()
     parsed = parser.parse_args(arguments)
-    points = baseline()
+    tasks = baseline()
     if parsed.list:
-        _print_points(points)
+        _print_tasks(tasks)
         return
     try:
         _refuse_no_workers(parsed.workers)
-        point_ids = _point_ids(parsed.target, len(points))
+        task_ids = _task_ids(parsed.target, len(tasks))
         folder = _results_folder(parsed)
     except ValueError as refusal:
         parser.error(str(refusal))
     run_folder.refuse_another_tree(folder)
-    every_id = list(range(len(points)))
+    every_id = list(range(len(tasks)))
     started_utc = run_folder.start_run(folder, SCRIPT, every_id)
-    for point_id in point_ids:
-        _collect_point(points[point_id], point_id, folder, parsed.workers)
+    for task_id in task_ids:
+        _collect_task(tasks[task_id], task_id, folder, parsed.workers)
     if parsed.target in (None, COMBINE):
-        combine(folder, len(points))
+        combine(folder, len(tasks))
     run_folder.finish_run(folder, SCRIPT, every_id, started_utc)
 
 
-def combine(folder: pathlib.Path, point_count: int) -> None:
-    """Every saved point's stats into stats.csv, sinter's combine."""
+def combine(folder: pathlib.Path, task_count: int) -> None:
+    """Every saved task's stats into stats.csv, sinter's combine."""
     paths = []
-    for point_id in range(point_count):
-        path = point_path(folder, point_id)
+    for task_id in range(task_count):
+        path = task_path(folder, task_id)
         if path.exists():
             paths.append(path)
     saved_statistics = sinter.read_stats_from_csv_files(*paths)
     lines = [sinter.CSV_HEADER]
-    for point_statistics in saved_statistics:
-        line = point_statistics.to_csv_line()
+    for task_statistics in saved_statistics:
+        line = task_statistics.to_csv_line()
         lines.append(line)
     lines.append("")
     text = "\n".join(lines)
@@ -190,40 +190,40 @@ def combine(folder: pathlib.Path, point_count: int) -> None:
     stats_path.write_text(text)
 
 
-def point_path(folder: pathlib.Path, point_id: int) -> pathlib.Path:
-    """Where a point's counts are saved, sinter's resume CSV."""
-    return folder / POINTS_FOLDER / f"{point_id}.csv"
+def task_path(folder: pathlib.Path, task_id: int) -> pathlib.Path:
+    """Where a task's counts are saved, sinter's resume CSV."""
+    return folder / TASKS_FOLDER / f"{task_id}.csv"
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the decoder baseline's points with sinter."
+        description="Run the decoder baseline's tasks with sinter."
     )
     parser.add_argument(
         "target",
         nargs="?",
-        help="a point id from --list, or combine; all points when absent",
+        help="a task id from --list, or combine; all tasks when absent",
     )
     parser.add_argument(
-        "--list", action="store_true", help="print every point's id"
+        "--list", action="store_true", help="print every task's id"
     )
     parser.add_argument(
         "--workers", type=int, default=1, help="sinter's worker processes"
     )
     parser.add_argument(
         "--out",
-        help="the results folder; a new dated one when every point runs",
+        help="the results folder; a new dated one when every task runs",
     )
     return parser
 
 
-def _print_points(points: list) -> None:
-    for point_id, point in enumerate(points):
+def _print_tasks(tasks: list) -> None:
+    for task_id, task in enumerate(tasks):
         label_pairs = []
-        for key, value in point.task.json_metadata.items():
+        for key, value in task.sinter_task.json_metadata.items():
             label_pairs.append(f"{key}={value}")
         labels_text = " ".join(label_pairs)
-        print(f"{point_id} decoder={point.task.decoder} {labels_text}")
+        print(f"{task_id} decoder={task.sinter_task.decoder} {labels_text}")
 
 
 def _refuse_no_workers(worker_count: int) -> None:
@@ -235,61 +235,61 @@ def _refuse_no_workers(worker_count: int) -> None:
         )
 
 
-def _point_ids(target: Optional[str], point_count: int) -> list:
-    """Every point for no target, none for combine, else the one named."""
+def _task_ids(target: Optional[str], task_count: int) -> list:
+    """Every task for no target, none for combine, else the one named."""
     if target is None:
-        return list(range(point_count))
+        return list(range(task_count))
     if target == COMBINE:
         return []
-    if not target.isdigit() or int(target) >= point_count:
-        last_point_id = point_count - 1
+    if not target.isdigit() or int(target) >= task_count:
+        last_task_id = task_count - 1
         raise ValueError(
-            f"{target!r} is no point id; --list shows the {point_count} "
-            f"points, 0 to {last_point_id}, or give combine"
+            f"{target!r} is no task id; --list shows the {task_count} "
+            f"tasks, 0 to {last_task_id}, or give combine"
         )
     return [int(target)]
 
 
 def _results_folder(parsed: argparse.Namespace) -> pathlib.Path:
-    """--out, or a new dated folder for a run of every point.
+    """--out, or a new dated folder for a run of every task.
 
-    One point and combine name their folder, since every job of an
-    array writes the one folder its points share.
+    One task and combine name their folder, since every job of an
+    array writes the one folder its tasks share.
     """
     if parsed.out is None and parsed.target is not None:
         raise ValueError(
-            "one point or combine writes the folder its array shares; "
+            "one task or combine writes the folder its array shares; "
             "name it with --out"
         )
     return run_folder.run_dir_for(NAME, parsed.out)
 
 
-def _collect_point(
-    point: BaselinePoint,
-    point_id: int,
+def _collect_task(
+    task: BaselineTask,
+    task_id: int,
     folder: pathlib.Path,
     worker_count: int,
 ) -> None:
-    """One point collected to its stop rule, resumed from its own CSV."""
+    """One task collected to its stop rule, resumed from its own CSV."""
     decoders = {}
-    if point.decoder is not None:
-        decoders[point.task.decoder] = point.decoder
-    path = point_path(folder, point_id)
+    if task.decoder is not None:
+        decoders[task.sinter_task.decoder] = task.decoder
+    path = task_path(folder, task_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    (point_statistics,) = sinter.collect(
+    (task_statistics,) = sinter.collect(
         num_workers=worker_count,
-        tasks=[point.task],
+        tasks=[task.sinter_task],
         custom_decoders=decoders,
         save_resume_filepath=path,
     )
     print(
-        f"point {point_id}: {point_statistics.shots} shots, "
-        f"{point_statistics.errors} errors, "
-        f"{point_statistics.seconds:.0f} core seconds"
+        f"task {task_id}: {task_statistics.shots} shots, "
+        f"{task_statistics.errors} errors, "
+        f"{task_statistics.seconds:.0f} core seconds"
     )
 
 
 # sinter's workers start by spawn and import this file again, so the
-# points are built and run only when it is the script itself.
+# tasks are built and run only when it is the script itself.
 if __name__ == "__main__":
     main(sys.argv[1:])

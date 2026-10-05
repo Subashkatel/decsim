@@ -86,10 +86,10 @@ def test_saved_fragments_reproduce_results_trace_and_actual_history(
     assert original_circuit == replay_circuit
 
 
-def test_a_rerun_from_a_run_folders_fragments_runs_its_recorded_point(
+def test_a_rerun_from_a_run_folders_fragments_runs_its_recorded_task(
     tmp_path: pathlib.Path,
 ) -> None:
-    """The point's distance comes back from its record."""
+    """The task's distance comes back from its record."""
     program = memory_programs.memory_program(distance=5)
     program = dataclasses.replace(program, round_period_microseconds=1.1)
     inputs = tmp_path / "distance_5" / "fragments"
@@ -103,9 +103,9 @@ def test_a_rerun_from_a_run_folders_fragments_runs_its_recorded_point(
     original_result = _read_json(original, "result.json")
     replay_result = _read_json(replay, "result.json")
     assert replay_result == original_result
-    original_points = _resolved_names(original)
-    replay_points = _resolved_names(replay)
-    assert replay_points == original_points
+    original_tasks = _resolved_names(original)
+    replay_tasks = _resolved_names(replay)
+    assert replay_tasks == original_tasks
 
 
 def _measurements_before(mapping: dict, round_index: int) -> list:
@@ -418,8 +418,8 @@ def _write_fragments(
 
 
 def _saved_fragments(run_folder: pathlib.Path) -> pathlib.Path:
-    """The fragments a tool run saved with its one point's inputs."""
-    saved = run_folder.glob("points/*/inputs/fragments")
+    """The fragments a tool run saved with its one task's inputs."""
+    saved = run_folder.glob("tasks/*/inputs/fragments")
     (fragments,) = saved
     return fragments
 
@@ -445,13 +445,13 @@ def _run_example(
 
 
 def _resolved_names(folder: pathlib.Path) -> list:
-    """The point ids a results folder recorded, which name its every value."""
-    paths = folder.glob("points/*/machine.json")
-    point_ids = []
+    """The task ids a results folder recorded, which name its every value."""
+    paths = folder.glob("tasks/*/machine.json")
+    task_ids = []
     for path in paths:
         record = _read_json(path.parent, path.name)
-        point_ids.append(record["id"])
-    return sorted(point_ids)
+        task_ids.append(record["id"])
+    return sorted(task_ids)
 
 
 def _read_json(folder: pathlib.Path, filename: str) -> object:

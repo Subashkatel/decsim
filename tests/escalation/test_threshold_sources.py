@@ -348,13 +348,13 @@ def _write_table(tmp_path, text: str) -> pathlib.Path:
 
 
 def _facts(**given) -> dict:
-    """A point's facts by name, None where the point gives none."""
-    facts = dict.fromkeys(threshold_sources.POINT_FACTS)
+    """A task's facts by name, None where the task gives none."""
+    facts = dict.fromkeys(threshold_sources.TASK_FACTS)
     facts.update(given)
     return facts
 
 
-def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
+def test_a_table_threshold_is_the_first_row_that_holds_the_tasks_facts(
     tmp_path,
 ):
     """A float key matches within a relative 1e-9; the first row wins."""
@@ -368,7 +368,7 @@ def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(distance=5, physical_error_probability=0.003)
 
-    threshold = table.at_point(facts)
+    threshold = table.at_task(facts)
 
     assert table.threshold_decibels is None
     assert threshold.threshold_decibels == 19.5
@@ -379,7 +379,7 @@ def test_a_table_threshold_is_the_first_row_that_holds_the_points_facts(
 def test_a_settings_path_header_is_refused_naming_its_fact(tmp_path):
     """Read as a threshold column it would leave its key unmatched.
 
-    Matched on distance alone, the point would take the first row's
+    Matched on distance alone, the task would take the first row's
     12 dB instead of its own 20 dB, with no sign of it.
     """
     table_path = _write_table(
@@ -394,12 +394,12 @@ def test_a_settings_path_header_is_refused_naming_its_fact(tmp_path):
     facts = _facts(distance=3, physical_error_probability=0.002)
 
     with pytest.raises(ValueError) as refusal:
-        table.at_point(facts)
+        table.at_task(facts)
 
     assert "workload.arguments.physical_error_probability" in str(refusal.value)
 
 
-def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
+def test_a_table_keyed_on_a_fact_the_task_does_not_give_is_refused(
     tmp_path,
 ):
     """A missing fact would match a row whose cell reads "None"."""
@@ -410,19 +410,19 @@ def test_a_table_keyed_on_a_fact_the_point_does_not_give_is_refused(
     facts = _facts(distance=3)
 
     with pytest.raises(ValueError, match="gives no physical_error_probability"):
-        table.at_point(facts)
+        table.at_task(facts)
 
 
-def test_a_table_with_no_row_for_the_point_is_refused(tmp_path):
+def test_a_table_with_no_row_for_the_task_is_refused(tmp_path):
     table_path = _write_table(tmp_path, "distance,gth_eq4_wilson\n3,20\n")
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(distance=5)
 
     with pytest.raises(ValueError) as refusal:
-        table.at_point(facts)
+        table.at_task(facts)
 
     assert str(refusal.value) == (
-        f"threshold_table {table_path} has no row for the point "
+        f"threshold_table {table_path} has no row for the task "
         "{'distance': 5}"
     )
 
@@ -440,13 +440,13 @@ def test_an_integer_key_matches_its_row_exactly(tmp_path):
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(distance=1000000001)
 
-    threshold = table.at_point(facts)
+    threshold = table.at_task(facts)
 
     assert threshold.threshold_decibels == 18.0
 
 
 def test_a_read_table_record_needs_its_file_no_more(tmp_path):
-    """The point's row, read once, is the record's own threshold.
+    """The task's row, read once, is the record's own threshold.
 
     A copy of the read record and the source it builds read no file, so
     the table may be gone by then.
@@ -454,7 +454,7 @@ def test_a_read_table_record_needs_its_file_no_more(tmp_path):
     table_path = _write_table(tmp_path, "distance,gth_eq4_wilson\n5,12.0\n")
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(distance=5)
-    read = table.at_point(facts)
+    read = table.at_task(facts)
     table_path.unlink()
 
     copied = dataclasses.replace(read)
@@ -464,12 +464,12 @@ def test_a_read_table_record_needs_its_file_no_more(tmp_path):
     assert source.threshold_nats == twelve_decibels
 
 
-def test_an_online_source_built_by_hand_is_seeded_by_the_points_facts():
-    """The seed text is the one the experiments layer's points use."""
+def test_an_online_source_built_by_hand_is_seeded_by_the_tasks_facts():
+    """The seed text is the one the experiments layer's tasks use."""
     settings = threshold_sources.OnlineThreshold.Settings(20.0)
     facts = _facts(distance=5, physical_error_probability=0.003)
 
-    source = settings.for_point(facts)
+    source = settings.for_task(facts)
 
     expected = random.Random("online-threshold d=5 p=0.003")
     twenty_decibels = threshold_sources.decibels_to_nats(20.0)
@@ -482,11 +482,11 @@ def test_an_online_source_with_no_error_probability_is_refused():
     facts = _facts(distance=5)
 
     with pytest.raises(ValueError, match="physical_error_probability"):
-        settings.for_point(facts)
+        settings.for_task(facts)
 
 
-# a table of two points, its three methods' thresholds in decibels; the
-# distance-7 point has an empty Wilson entry, too little evidence
+# a table of two tasks, its three methods' thresholds in decibels; the
+# distance-7 task has an empty Wilson entry, too little evidence
 CALIBRATION_TABLE = (
     "distance,physical_error_probability,gth_brute_force,gth_eq4,"
     "gth_eq4_wilson\n"
@@ -533,20 +533,20 @@ def test_a_table_entry_that_is_no_nonnegative_decibel_count_is_refused(
     facts = _facts(distance=3)
 
     with pytest.raises(ValueError, match=sentence):
-        table.at_point(facts)
+        table.at_task(facts)
 
 
 def test_a_table_with_no_key_column_is_refused(tmp_path):
-    """Headers that name no point fact would match every point to row one."""
+    """Headers that name no task fact would match every task to row one."""
     table_path = _write_table(tmp_path, "d,p,gth_eq4_wilson\n3,0.008,19.5\n")
     table = threshold_sources.TableThreshold.Settings(table_path)
     facts = _facts(**GATE_FACTS)
 
     with pytest.raises(ValueError, match="has no key column"):
-        table.at_point(facts)
+        table.at_task(facts)
 
 
-def test_the_column_named_is_the_method_the_point_reads(tmp_path):
+def test_the_column_named_is_the_method_the_task_reads(tmp_path):
     table_path = _write_table(tmp_path, CALIBRATION_TABLE)
     wilson = threshold_sources.TableThreshold.Settings(table_path)
     brute = threshold_sources.TableThreshold.Settings(
@@ -554,15 +554,15 @@ def test_the_column_named_is_the_method_the_point_reads(tmp_path):
     )
     facts = _facts(**GATE_FACTS)
 
-    wilson_threshold = wilson.at_point(facts)
-    brute_threshold = brute.at_point(facts)
+    wilson_threshold = wilson.at_task(facts)
+    brute_threshold = brute.at_task(facts)
 
     assert wilson_threshold.threshold_decibels == 19.5
     assert brute_threshold.threshold_decibels == 2.5
 
 
 def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
-    """The round period is a point fact, read off the qpu's settings."""
+    """The round period is a task fact, read off the qpu's settings."""
     table_path = _write_table(
         tmp_path,
         "distance,physical_error_probability,round_period_microseconds,"
@@ -575,10 +575,10 @@ def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
     half_qpu = dataclasses.replace(whole.qpu, round_period_microseconds=0.5)
     half = dataclasses.replace(whole, qpu=half_qpu)
 
-    half_point = half.at_point()
-    whole_point = whole.at_point()
-    half_threshold = half_point.switching.threshold
-    whole_threshold = whole_point.switching.threshold
+    half_read = half.at_task()
+    whole_read = whole.at_task()
+    half_threshold = half_read.switching.threshold
+    whole_threshold = whole_read.switching.threshold
 
     assert half_threshold.threshold_decibels == 12.0
     assert whole_threshold.threshold_decibels == 13.0
@@ -587,8 +587,8 @@ def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
 def test_a_window_only_sweep_finds_its_table_row_by_its_geometry(tmp_path):
     """A threshold is calibrated for one window geometry.
 
-    The commit and buffer rounds are point facts a table keys on, so a
-    sweep over the window alone finds each point's row.
+    The commit and buffer rounds are task facts a table keys on, so a
+    sweep over the window alone finds each task's row.
     """
     table_path = _write_table(
         tmp_path,
@@ -608,29 +608,29 @@ def test_a_window_only_sweep_finds_its_table_row_by_its_geometry(tmp_path):
 
 
 def _threshold_at_commit_rounds(gate, commit_rounds: int):
-    """The threshold the gate's point reads with these commit rounds."""
+    """The threshold the gate's task reads with these commit rounds."""
     scheme = sliding_scheme.SlidingWindowScheme.Settings(
         commit_rounds=commit_rounds, buffer_rounds=2
     )
     windows = dataclasses.replace(gate.windows, scheme=scheme)
-    point = dataclasses.replace(gate, windows=windows)
-    placed = point.at_point()
+    settings = dataclasses.replace(gate, windows=windows)
+    placed = settings.at_task()
     return placed.switching.threshold
 
 
-def test_a_table_read_from_two_folders_names_its_points_alike(tmp_path):
-    """The folder a table sits in is no part of what its points run."""
+def test_a_table_read_from_two_folders_names_its_tasks_alike(tmp_path):
+    """The folder a table sits in is no part of what its tasks run."""
     first_folder = tmp_path / "first"
     other_folder = tmp_path / "elsewhere"
 
-    first_id = _point_id_with_its_table_in(first_folder)
-    other_id = _point_id_with_its_table_in(other_folder)
+    first_id = _task_id_with_its_table_in(first_folder)
+    other_id = _task_id_with_its_table_in(other_folder)
 
     assert first_id == other_id
 
 
-def _point_id_with_its_table_in(folder: pathlib.Path) -> str:
-    """The id of the gate's point on the calibration table in this folder."""
+def _task_id_with_its_table_in(folder: pathlib.Path) -> str:
+    """The id of the gate's task on the calibration table in this folder."""
     folder.mkdir()
     table_path = _write_table(folder, CALIBRATION_TABLE)
     table = threshold_sources.TableThreshold.Settings(table_path)
@@ -655,7 +655,7 @@ def test_a_target_that_leaves_no_room_for_the_audits_is_refused():
         )
 
 
-def test_a_fixed_threshold_point_builds_no_calibrator():
+def test_a_fixed_threshold_task_builds_no_calibrator():
     fixed = threshold_sources.FixedThreshold.Settings(20.0)
     gate = _gate_on(fixed)
 
@@ -664,8 +664,8 @@ def test_a_fixed_threshold_point_builds_no_calibrator():
     assert task.online_threshold is None
 
 
-def test_one_calibrator_learns_across_every_shot_of_its_point():
-    """The point's task builds it once and every shot's machine takes it."""
+def test_one_calibrator_learns_across_every_shot_of_its_task():
+    """collect.Task builds it once and every shot's machine takes it."""
     gate = _online_gate()
     task = collect.Task("gate", gate, {})
     calibrator = task.online_threshold
@@ -680,26 +680,26 @@ def test_one_calibrator_learns_across_every_shot_of_its_point():
     assert after_two_shots["windows"] == 2 * first_shot_windows
 
 
-class _OwnPointThreshold:
-    """A threshold row a study adds that builds its own source per point.
+class _OwnTaskThreshold:
+    """A threshold row a study adds that builds its own source per task.
 
-    for_point is what built_per_sweep_point promises. This row keeps the
-    point's threshold in nats and learns nothing, which is all the law
-    needs: the instance the point's task builds is the one its shots run.
+    for_task is what built_per_task promises. This row keeps the
+    task's threshold in nats and learns nothing, which is all the law
+    needs: the instance collect.Task builds is the one its shots run.
     """
 
     audits_by_escalating = False
     reads_a_calibration_table = False
-    built_per_sweep_point = True
+    built_per_task = True
 
     @dataclasses.dataclass(frozen=True)
     class Settings(threshold_sources.FixedThreshold.Settings):
-        """The fixed record, building this row's source once a point."""
+        """The fixed record, building this row's source once a task."""
 
-        def for_point(self, facts) -> "_OwnPointThreshold":
-            """One instance of this row for the point."""
+        def for_task(self, facts) -> "_OwnTaskThreshold":
+            """One instance of this row for the task."""
             del facts
-            return _OwnPointThreshold(self.threshold_nats)
+            return _OwnTaskThreshold(self.threshold_nats)
 
     def __init__(self, threshold_nats: float) -> None:
         self.threshold_nats = threshold_nats
@@ -715,41 +715,41 @@ class _OwnPointThreshold:
         del result
 
 
-def test_a_row_built_per_point_is_the_source_its_shots_decide_on():
-    """The task installs what for_point returns, whatever the row's name.
+def test_a_row_built_per_task_is_the_source_its_shots_decide_on():
+    """The task installs what for_task returns, whatever the row's name.
 
-    collect.Task keeps the record's for_point instance, and Machine.build
+    collect.Task keeps the record's for_task instance, and Machine.build
     hands it to the policy it builds (build/escalation.py,
-    _threshold_source), so every shot of the point decides on it.
+    _threshold_source), so every shot of the task decides on it.
     """
-    own = _OwnPointThreshold.Settings(20.0)
+    own = _OwnTaskThreshold.Settings(20.0)
     gate = _gate_on(own)
     task = collect.Task("gate", gate, {})
 
     installed = task.online_threshold
     shot = collect.run_shot(task, 0)
 
-    assert type(installed) is _OwnPointThreshold
+    assert type(installed) is _OwnTaskThreshold
     assert installed.threshold_nats == own.threshold_nats
     assert shot.machine.switching.policy.threshold is installed
 
 
-def test_an_online_point_reproduces_its_decisions():
-    """The calibrator's random stream is seeded by the point's facts.
+def test_an_online_task_reproduces_its_decisions():
+    """The calibrator's random stream is seeded by the task's facts.
 
-    Rerunning the point reruns the same audits, so the same windows
+    Rerunning the task reruns the same audits, so the same windows
     escalate and every operation ends with the same observables. The
     decoders are charged their measured wall clock, so the times are
     not compared.
     """
-    first_run = _two_shots_of_a_fresh_online_point()
-    second_run = _two_shots_of_a_fresh_online_point()
+    first_run = _two_shots_of_a_fresh_online_task()
+    second_run = _two_shots_of_a_fresh_online_task()
 
     assert first_run == second_run
 
 
-def _two_shots_of_a_fresh_online_point() -> tuple:
-    """Each shot's observables, and what the point's calibrator did."""
+def _two_shots_of_a_fresh_online_task() -> tuple:
+    """Each shot's observables, and what the task's calibrator did."""
     gate = _online_gate()
     task = collect.Task("gate", gate, {})
     first_shot = collect.run_shot(task, 0)
@@ -763,11 +763,11 @@ def _two_shots_of_a_fresh_online_point() -> tuple:
     )
 
 
-def test_two_online_points_whose_rates_print_alike_have_two_ids():
+def test_two_online_tasks_whose_rates_print_alike_have_two_ids():
     """The seed text picks the windows the calibrator audits.
 
     A Stim circuit prints the two rates alike, so their circuits are one
-    and only the calibrator's seed text tells the points apart.
+    and only the calibrator's seed text tells the tasks apart.
     """
     plain_rate = 0.001
     nudged_rate = 0.0010000000000000002

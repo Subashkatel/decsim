@@ -1,6 +1,6 @@
-"""The workload record: a made workload is a value a point is built on.
+"""The workload record: a made workload is a value a task is built on.
 
-Every shot of a point builds from one record, so the record hashes and
+Every shot of a task builds from one record, so the record hashes and
 writes to json; a workload read from files is refused at the record when
 its circuit cannot be laid out.
 """
@@ -28,7 +28,7 @@ IS_DELTAKIT_ABSENT = DELTAKIT_SPECIFICATION is None
 NEEDS_DELTAKIT = pytest.mark.skipif(
     IS_DELTAKIT_ABSENT, reason="could not import 'deltakit_explorer'"
 )
-# Every maker decsim ships, with the arguments of a small point.
+# Every maker decsim ships, with the arguments of a small task.
 SHIPPED_MAKERS = [
     (
         producers.memory_circuit,
@@ -52,10 +52,10 @@ SHIPPED_MAKERS = [
 
 @pytest.mark.parametrize("maker, arguments", SHIPPED_MAKERS)
 def test_a_made_workload_hashes_and_writes_to_json(maker, arguments):
-    """One record builds every shot of a point, so it is a value.
+    """One record builds every shot of a task, so it is a value.
 
     Two records of one workload hash alike, and the record writes to
-    json, as a point's id and its machine.json read it.
+    json, as a task's id and its machine.json read it.
     """
     workload = maker(*arguments)
     settings = workload_settings.WorkloadSettings.running(workload)

@@ -3,7 +3,7 @@
 # Your first run
 
 This lesson takes about ten minutes. By the end you will have read a
-run file, run one shot of it, collected one point into a results folder
+run file, run one shot of it, collected one task into a results folder
 and followed one round of syndrome data through the machine.
 
 You do not need to know anything about decsim, and the words you need
@@ -45,7 +45,7 @@ lesson's ships with decsim as `examples/priced_cards_example.py`. Its
 heart is one loop:
 
 ```python examples/priced_cards_example.py
-points = []
+tasks = []
 for distance in DISTANCES:
     base = machine_settings.weak_decoder_baseline(
         distance,
@@ -73,8 +73,8 @@ for distance in DISTANCES:
   is. So every tick on this page is the same on your machine.
 
 After the loop, each machine becomes a `decsim.Task` with a name, `d3`
-for distance 3, and the points become a `decsim.Experiment`. Its
-`COLLECTION` says when a point stops: here at 20 shots.
+for distance 3, and the tasks become a `decsim.Experiment`. Its
+`COLLECTION` says when a task stops: here at 20 shots.
 
 ## Step 3. Run one shot
 
@@ -83,7 +83,7 @@ decsim run examples/priced_cards_example.py --seed 0 --trace --out results/first
 ```
 
 A **shot** is one complete run of the workload from start to finish,
-with one random seed. `--seed` runs one shot of the first point.
+with one random seed. `--seed` runs one shot of the first task.
 `--trace` asks for a record of the data path, which step 7 reads, and
 `--out` names the folder it goes in.
 
@@ -91,7 +91,7 @@ The output:
 
 ```
 config: priced_cards_example
-point: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001} seed 0
+task: {"qpu.distance": 3, "qpu.round_period_microseconds": 1.0, "workload.arguments.physical_error_probability": 0.001} seed 0
 terminal status: complete
 execution done: 30000000 ticks
 fully done: 31084000 ticks
@@ -101,7 +101,7 @@ run dir: results/first_shot
 
 Line by line:
 
-- `point: {...} seed 0`. The point's settings. `qpu.distance` is the
+- `task: {...} seed 0`. The task's settings. `qpu.distance` is the
   code distance, the size of the error correcting code: distance 3
   corrects one error. `qpu.round_period_microseconds` is how long one
   round of measurement takes on the QPU. The physical error probability
@@ -135,17 +135,17 @@ The log starts:
 [  1.008 us] Decoder manager: round 1 of memory arrived (op now has rounds 1..1)
 ```
 
-## Step 4. Collect one point
+## Step 4. Collect one task
 
-Without `--seed`, `decsim run` runs every point until its collection
-stops it. `--only` picks one point by its name:
+Without `--seed`, `decsim run` runs every task until its collection
+stops it. `--only` picks one task by its name:
 
 ```bash
 decsim run examples/priced_cards_example.py --only d3 --out results/d3
 ```
 
-It first prints the folder it writes, then one line per point as the
-point finishes:
+It first prints the folder it writes, then one line per task as the
+task finishes:
 
 ```
 run dir: results/d3
@@ -153,7 +153,7 @@ run dir: results/d3
 d3: 20 shots done (cap)
 ```
 
-The numbers are in the folder's `sweep.csv`, one row per point. These
+The numbers are in the folder's `sweep.csv`, one row per task. These
 are the columns this step reads:
 
 ```bash
@@ -199,7 +199,7 @@ ls results/d3
 
 ```
 pieces
-points
+tasks
 priced_cards_example.py
 run.json
 shot_links.csv
@@ -208,7 +208,7 @@ sweep.csv
 window_samples.csv
 ```
 
-`pieces/` holds the point's shots in pieces, each saved whole the moment
+`pieces/` holds the task's shots in pieces, each saved whole the moment
 it ends, and running the command again into the same folder runs only
 the pieces it has not saved. The csv files are folded from the pieces.
 `priced_cards_example.py` is a copy of the run file, and `run.json`
@@ -219,7 +219,7 @@ patch, and `run.json` records the patch's sha256. Without `--out`,
 `results/<date>_<name>/`.
 
 ```bash
-ls results/d3/points/*
+ls results/d3/tasks/*
 ```
 
 ```
@@ -227,14 +227,14 @@ inputs
 machine.json
 ```
 
-`points/` holds one folder per point, named by the point's name.
-`machine.json` holds every value the point ran with, and `inputs/` the
+`tasks/` holds one folder per task, named by the task's name.
+`machine.json` holds every value the task ran with, and `inputs/` the
 workload it ran. [The run folder](../reference/run_folder.md) has one
 row per file.
 
 ## Step 6. Read one row
 
-`sweep.csv` has one row per point and more than a hundred columns. The
+`sweep.csv` has one row per task and more than a hundred columns. The
 distance and the first counts:
 
 ```bash
@@ -246,7 +246,7 @@ qpu.distance,shots,logical_failures,state,logical_error_rate_estimate,logical_er
 3,20,0,cap,,,0.1684334709830853
 ```
 
-`state` says why the point stopped: `cap`, at the 20 shots its
+`state` says why the task stopped: `cap`, at the 20 shots its
 collection allows. `logical_error_rate_estimate` is the fraction of
 scored shots whose decoded observable did not match the truth, and the
 two limits bracket the true rate with 95 percent confidence. With no
@@ -255,8 +255,8 @@ the true rate is below 0.17. The next tutorial,
 [Your first sweep](first_sweep.md), explains the limits and runs enough
 shots to make them narrow.
 
-The row's first columns name its point: `point_id`, a hash of every
-setting the point ran with, then the point's settings as its metadata
+The row's first columns name its task: `task_id`, a hash of its
+settings and its metadata, then the task's settings as its metadata
 names them. Every other csv file of the folder names its rows the same
 way.
 
@@ -276,7 +276,7 @@ decsim trace follow \
 ```
 
 ```
-round 1:1 of point d3, decsim weak_baseline d3 seed0
+round 1:1 of task d3, decsim weak_baseline d3 seed0
 
 tick (us)  where                        what                                                                 dur (us)  transfer   bits
 0.000      weak syndrome buffer         hold registered                                                                reference
@@ -333,8 +333,8 @@ the correction and the commit into the frame.
 
 ## What you learned
 
-- A run file is Python: a list of points, each a machine.
-- One round, one window, one shot, one point.
+- A run file is Python: a list of tasks, each a machine.
+- One round, one window, one shot, one task.
 - The reaction time is the interval from a window having its rounds to
   its correction reaching the Pauli frame, and the results folder
   measures it.

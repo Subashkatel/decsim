@@ -32,8 +32,8 @@ def two_patch_memory(patch_rounds, distance):
 ```
 
 The arguments are yours: the run file calls the function once per
-point, so a point that sweeps `patch_rounds` calls it with each value,
-and every shot of the point runs what it returned.
+task, so a sweep over `patch_rounds` calls it with each value, and
+every shot of a task runs what it returned.
 
 ## 2. Hand it to the machine
 

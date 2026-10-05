@@ -44,7 +44,7 @@ def _traced_switching_run(trace_path, weak_unit_count=1, **arguments):
     traced = dataclasses.replace(
         settings, weak_decoder=weak_decoder, observation=observation
     )
-    task = measure_tests.point_task(
+    task = measure_tests.task_at(
         traced, measure_tests.SWITCHING_ERROR_PROBABILITY
     )
     return collect.run_shot(task, 0)

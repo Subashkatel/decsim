@@ -44,14 +44,14 @@ class RunResult:
 
 
 class UnitTask(Protocol):
-    """The task a unit ran, as an outcome carries it: the point it is.
+    """The task a unit ran, as an outcome carries it.
 
     decsim.experiments.collect.Task is one. Records import no component,
     so the task is typed by what it offers and not by its class.
     """
 
     def strong_id(self) -> str:
-        """The point's id, a hash of the settings it resolved to."""
+        """The task's id, a hash of its settings and its metadata."""
 
 
 @dataclasses.dataclass(frozen=True)

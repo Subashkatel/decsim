@@ -258,7 +258,7 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     stream's logical correction is the sum of its committed windows'
     effects). Both folds must agree.
     """
-    distance_three = two_tiers.points[0]
+    distance_three = two_tiers.tasks[0]
     workload = machine_settings.memory_workload(3, 0.01, 30)
     settings = dataclasses.replace(distance_three.machine, workload=workload)
     machine = machine_module.Machine.build(settings, 0)

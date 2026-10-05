@@ -1,8 +1,8 @@
-"""`decsim run --slurm`: one Slurm job per point, then one fold job.
+"""`decsim run --slurm`: one Slurm job per task, then one fold job.
 
 gem5 MultiSim's list-then-run-one-id pattern. The launcher records every
-point, which runs each build, so a refused point queues nothing, and
-writes run.sbatch, a job array whose job i runs point i to its stop
+task, which runs each build, so a refused task queues nothing, and
+writes run.sbatch, a job array whose job i runs task i to its stop
 from the saved pieces, and fold.sbatch, which waits on the array with
 afterany and folds every saved piece. Submitting again resumes.
 
@@ -63,7 +63,7 @@ def launch(
     *,
     dry_run: bool = False,
 ) -> None:
-    """Every point recorded, the two sbatch files written, then submitted.
+    """Every task recorded, the two sbatch files written, then submitted.
 
     A tree git does not vouch for is refused first, before the results
     folder is made: out_dir, or a new dated one. A dry run writes the
@@ -78,9 +78,9 @@ def launch(
     collect_command.start_the_folder(study, study, run_dir, run_path)
     logs_dir = run_dir / LOGS_FOLDER
     logs_dir.mkdir(exist_ok=True)
-    point_count = len(study.points)
+    task_count = len(study.tasks)
     run_script = run_dir / RUN_SCRIPT
-    run_lines = _run_lines(run_path, run_dir, point_count, job)
+    run_lines = _run_lines(run_path, run_dir, task_count, job)
     run_script.write_text(run_lines)
     fold_script = run_dir / FOLD_SCRIPT
     fold_lines = _fold_lines(run_dir)
@@ -140,10 +140,10 @@ def _dirty_text(is_dirty: Optional[bool]) -> str:
 def _run_lines(
     run_path: pathlib.Path,
     run_dir: pathlib.Path,
-    point_count: int,
+    task_count: int,
     job: JobShape,
 ) -> str:
-    """run.sbatch: the job array, job i running point i into the folder.
+    """run.sbatch: the job array, job i running task i into the folder.
 
     A job runs the run file where it stands, as MultiSim runs its
     config, so a file the run file reads beside itself is found.
@@ -152,7 +152,7 @@ def _run_lines(
     #SBATCH line both undo, and the job's array index is left for bash
     to expand.
     """
-    last_job = point_count - 1
+    last_job = task_count - 1
     shape = (
         f"--array=0-{last_job} --cpus-per-task={job.cores} "
         f"--mem={job.memory_mb}M --time={job.hours}:00:00"

@@ -12,7 +12,7 @@ plays which role.
 
 The per-value counts file stays small because every sample is whole
 ticks over the ticks in a microsecond: under a fixed-latency card a
-point's windows take a handful of spans. A wall-clock decoder spreads
+task's windows take a handful of spans. A wall-clock decoder spreads
 values wide, and those timing sweeps of hundreds of shots already write
 a row per window in latency_samples.csv.
 """
@@ -53,7 +53,7 @@ NON_COLUMN_FIELDS = (
 # of one shot
 REFERENCE_COUNTERS = ("references", "referenced_rounds")
 # the columns that tell harder windows from an overloaded strong side, in
-# sweep.csv order; a point whose shots did not keep them gets none
+# sweep.csv order; a task whose shots did not keep them gets none
 LOAD_MEANS = (
     "weak_syndrome_weight_mean",
     "weak_service_mean_us",
@@ -71,8 +71,8 @@ LOAD_MAXES = (
 # (Toshio et al. 2510.25222 Sec. III); every other point's tiers stay
 # apart in window_samples.csv
 TIER_SPLIT_POINT = "buffer0_ready_to_frame"
-# which role each field of shots.csv plays in a sweep point's row: a
-# mean over the point's shots, the largest over them, a sum, or how many
+# which role each field of shots.csv plays in a task's row: a
+# mean over the task's shots, the largest over them, a sum, or how many
 # shots hold it true. The latency points' own mean and max columns are
 # added to the first two per measure.POINTS.
 SHOT_MEANS = (
@@ -86,7 +86,7 @@ SHOT_MEANS = (
     *LOAD_MEANS,
 )
 SHOT_MAXES = (
-    # one value per point, the code card's, so its largest is that value
+    # one value per task, the code card's, so its largest is that value
     "commit_rounds",
     "window_period_us",
     "max_queued_windows",
@@ -96,7 +96,7 @@ SHOT_MAXES = (
     *LOAD_MAXES,
 )
 # the windows by final status and the replaced provisional ones left
-# uncorrected, summed per point
+# uncorrected, summed per task
 STATUS_SUMS = (
     *measure.WINDOW_STATUS_COLUMNS,
     "provisional_no_correction_windows",
@@ -116,7 +116,7 @@ SHOT_TRUE_COUNTS = (
     "is_scored",
 )
 # the files a fold reads row by row and writes back out, one header
-# each: every column any piece holds, the pieces of one point alike
+# each: every column any piece holds, the pieces of one task alike
 FOLDED_FILES = (
     "shots.csv",
     "shot_links.csv",
@@ -171,36 +171,36 @@ def percentile_of_counts(multiset: dict, fraction: float) -> float:
     return _value_at_index(multiset, index)
 
 
-def sweep_point_of(row: dict) -> tuple:
-    """The point a row belongs to: its id and its algorithm.
+def task_key_of(row: dict) -> tuple:
+    """The task a row belongs to: its id and its algorithm.
 
     The id is sinter's strong_id. A row read back off csv holds text and a
     measured row numbers, so the algorithm is read as the value it was
-    written from, and both name the same point.
+    written from, and both name the same task.
     """
-    return (row["point_id"], fold.number_of(row["algorithm"]))
+    return (row["task_id"], fold.number_of(row["algorithm"]))
 
 
-def measured_point(measurement: measure.ShotMeasurement) -> tuple:
-    """The sweep point one measured shot belongs to."""
-    return (measurement.point_id, measurement.algorithm)
+def measured_task_key(measurement: measure.ShotMeasurement) -> tuple:
+    """The task one measured shot belongs to."""
+    return (measurement.task_id, measurement.algorithm)
 
 
-def point_columns(point: tuple) -> dict:
-    """The two columns that name a sweep point."""
-    point_id, algorithm = point
-    return {"point_id": point_id, "algorithm": algorithm}
+def task_columns(task_key: tuple) -> dict:
+    """The two columns that name a task."""
+    task_id, algorithm = task_key
+    return {"task_id": task_id, "algorithm": algorithm}
 
 
-def summarize_point(
-    point: tuple,
+def summarize_task(
+    task_key: tuple,
     totals: fold.RowTotals,
     counts: dict,
     prefix: collection.PrefixTracker,
 ) -> dict:
-    """One sweep point: means over seeds of per-shot means, max of maxes.
+    """One task: means over seeds of per-shot means, max of maxes.
 
-    The counts cover every shot the point holds; the estimate and its
+    The counts cover every shot the task holds; the estimate and its
     limits cover its contiguous prefix up to its stop (prefix), which is
     what the stopping rule's intervals are exact for.
     """
@@ -208,7 +208,7 @@ def summarize_point(
     shot_count = totals.rows
     scored_shots = totals.true_counts["is_scored"]
     unscored_shots = shot_count - scored_shots
-    row = point_columns(point)
+    row = task_columns(task_key)
     row["shots"] = shot_count
     row["windows_per_shot"] = totals.mean("decoded_windows")
     row["logical_failures"] = failures
@@ -234,25 +234,25 @@ def summarize_point(
     _add_pool_columns(row, totals)
     _add_load_columns(row, totals)
     for name in _points_held(totals.means):
-        multiset = _multiset_over_tiers(counts, point, name)
+        multiset = _multiset_over_tiers(counts, task_key, name)
         _add_latency_point_columns(row, totals, name, multiset)
-    _add_tier_split_columns(row, counts, point)
+    _add_tier_split_columns(row, counts, task_key)
     return row
 
 
 def summary_rows(totals: dict, counts: dict, prefixes: dict) -> list:
-    """One row per sweep point whose shots were totalled, in point order.
+    """One row per task whose shots were totalled, in task order.
 
-    The totals hold the points in the order their first shots came,
+    The totals hold the tasks in the order their first shots came,
     which is the sweep's task order for one run and for a fold alike
     (a fold merges the pieces' rows in task order).
     """
     rows = []
-    for point in totals:
-        at_point = totals[point]
-        point_id, _algorithm = point
-        prefix = prefixes[point_id]
-        row = summarize_point(point, at_point, counts, prefix)
+    for task_key in totals:
+        task_totals = totals[task_key]
+        task_id, _algorithm = task_key
+        prefix = prefixes[task_id]
+        row = summarize_task(task_key, task_totals, counts, prefix)
         rows.append(row)
     return rows
 
@@ -260,7 +260,7 @@ def summary_rows(totals: dict, counts: dict, prefixes: dict) -> list:
 def write_csv(rows: list, path: Path, swept: Optional[dict] = None) -> None:
     """The rows as a csv file, every column any row holds, first seen first.
 
-    A point's swept values follow its point_id: the design's fixed values
+    A task's swept values follow its task_id: the design's fixed values
     first, then the measured ones, Wickham's order (Tidy Data, J. Stat.
     Softw. 59(10), 2014, section 2.3).
     """
@@ -288,9 +288,9 @@ def shot_data_movement_rows(measurements: list) -> list:
         counted = measurement.data_movement
         if counted is None:
             continue
-        point = measured_point(measurement)
+        task_key = measured_task_key(measurement)
         for path in _paths_counted(counted):
-            row = _shot_movement_row(point, measurement, counted, path)
+            row = _shot_movement_row(task_key, measurement, counted, path)
             rows.append(row)
     return rows
 
@@ -322,25 +322,25 @@ def shot_link_rows(measurements: list) -> list:
     """
     rows = []
     for measurement in measurements:
-        point = measured_point(measurement)
+        task_key = measured_task_key(measurement)
         for path in sorted(measurement.link_totals):
-            row = _shot_link_row(point, measurement, path)
+            row = _shot_link_row(task_key, measurement, path)
             rows.append(row)
     return rows
 
 
 def window_sample_rows(measurements: list) -> list:
-    """One row per point, latency point, tier and distinct value: its count.
+    """One row per task, latency point, tier and distinct value: its count.
 
     That multiset is all a median or p99 needs. Kept and escalated windows
     are two multisets; a round's sample names no tier.
     """
     counts = _counts_of_samples(measurements)
-    points = []
-    for point, _name, _tier in counts:
-        points.append(point)
-    unique_points = dict.fromkeys(points)
-    return _rows_of_counts(counts, list(unique_points))
+    task_keys = []
+    for task_key, _name, _tier in counts:
+        task_keys.append(task_key)
+    unique_task_keys = dict.fromkeys(task_keys)
+    return _rows_of_counts(counts, list(unique_task_keys))
 
 
 def latency_sample_rows(measurements: list) -> list:
@@ -355,11 +355,11 @@ def latency_sample_rows(measurements: list) -> list:
     for measurement in measurements:
         if not isinstance(measurement.algorithm, str):
             continue
-        point = measured_point(measurement)
+        task_key = measured_task_key(measurement)
         samples = measurement.samples["algorithm"]
         tiers = measurement.window_tiers
         for sample_us, tier in zip(samples, tiers, strict=True):
-            row = point_columns(point)
+            row = task_columns(task_key)
             row["seed"] = measurement.seed
             row["tier"] = tier
             row["algorithm_us"] = sample_us
@@ -398,8 +398,8 @@ def confidence_histogram_rows(measurements: list) -> list:
     counts = {}
     for measurement in measurements:
         _count_the_shots_gaps(counts, measurement)
-    points = _points_of_counts(counts)
-    return _confidence_histogram_rows_of(counts, points)
+    task_keys = _task_keys_of_counts(counts)
+    return _confidence_histogram_rows_of(counts, task_keys)
 
 
 def gap_bin_low_decibels(gap_nats: float) -> float:
@@ -475,21 +475,21 @@ def read_rows(path: Path) -> list:
 def fold_pieces(
     run_dir: Path,
     folders: list,
-    point_ids: list,
+    task_ids: list,
     out_dir: Path,
     rules: Optional[dict] = None,
 ) -> list:
     """Pieces' additive files folded into out_dir; the sweep rows.
 
-    A piece holds the files for a range of one point's seeds; rows come back
+    A piece holds the files for a range of one task's seeds; rows come back
     in the order one run over every piece would write them. Two pieces may
     not share a shot. 500 pieces of a million-shot sweep are 115 million
     link rows, so pieces are streamed one row at a time and only fold.py's
     totals stand between reading and writing.
     """
-    order = _refused_or_ordered(folders, point_ids)
+    order = _refused_or_ordered(folders, task_ids)
     out_dir.mkdir(parents=True, exist_ok=True)
-    swept = run_folder.swept_values(run_dir, point_ids)
+    swept = run_folder.swept_values(run_dir, task_ids)
     return _fold_the_folders(folders, order, out_dir, swept, rules)
 
 
@@ -516,13 +516,13 @@ def strong_service_bound_us(totals: fold.RowTotals) -> float:
     return generated_us / escalated_windows
 
 
-def _refused_or_ordered(folders: list, point_ids: list):
+def _refused_or_ordered(folders: list, task_ids: list):
     """The fold's row order, once the folders pass every refusal.
 
     The refusals run before anything is written, so a refused fold
     leaves no file behind.
     """
-    positions = _task_positions(point_ids)
+    positions = _task_positions(task_ids)
     order = functools.partial(_row_task_and_seed, positions)
     _refuse_folders_of_different_columns(folders)
     _refuse_pieces_that_recorded_confidence_apart(folders)
@@ -538,7 +538,7 @@ def _fold_the_folders(
     A pass reads one file of every folder at once, writes the folded
     file row by row and feeds the totals its summary needs, so no pass
     holds a folder's rows. The derived files come off the totals the
-    passes built, each point's swept values beside its rows.
+    passes built, each task's swept values beside its rows.
     """
     shot_totals, prefixes = _fold_shots(folders, order, out_dir, swept, rules)
     counts = _folded_counts(folders)
@@ -562,7 +562,7 @@ def _fold_the_folders(
 def _fold_shots(
     folders: list, order, out_dir: Path, swept: dict, rules
 ) -> tuple:
-    """Every folder's shots.csv into one; each point's totals and prefix."""
+    """Every folder's shots.csv into one; each task's totals and prefix."""
     totals = {}
     prefixes = {}
     add_a_shot = functools.partial(_add_a_folded_shot, totals, prefixes, rules)
@@ -573,7 +573,7 @@ def _fold_shots(
 def _add_a_folded_shot(
     totals: dict, prefixes: dict, rules: Optional[dict], row: dict
 ) -> None:
-    """One folded shot row into its point's totals and its prefix."""
+    """One folded shot row into its task's totals and its prefix."""
     _add_a_shot(totals, row)
     _add_to_the_prefix(prefixes, rules, row)
 
@@ -613,8 +613,8 @@ def _fold_one_file(
 ) -> None:
     """One additive file of every folder merged into out_dir's, row by row.
 
-    A piece holds bare rows, so each row takes its point's swept values
-    after its point_id here, as write_csv places them.
+    A piece holds bare rows, so each row takes its task's swept values
+    after its task_id here, as write_csv places them.
     """
     paths = _folder_files(folders, name)
     out_path = out_dir / name
@@ -629,10 +629,10 @@ def _fold_one_file(
 def _folded_columns(paths: list, swept: dict) -> list:
     """Every column a folded file's rows hold, first seen first.
 
-    Points of one grid can measure different columns; a cell a point did not
+    Tasks of one grid can measure different columns; a cell a task did not
     measure is empty.
     """
-    columns = {"point_id": None}
+    columns = {"task_id": None}
     for values in swept.values():
         swept_columns = dict.fromkeys(values)
         columns.update(swept_columns)
@@ -679,28 +679,28 @@ def _folder_files(folders: list, name: str) -> list:
 def _add_to_the_prefix(
     prefixes: dict, rules: Optional[dict], row: dict
 ) -> None:
-    """One shot row onto its point's prefix, its tracker made at first."""
-    point_id = row["point_id"]
-    tracker = prefixes.get(point_id)
+    """One shot row onto its task's prefix, its tracker made at first."""
+    task_id = row["task_id"]
+    tracker = prefixes.get(task_id)
     if tracker is None:
-        rule = _rule_of(rules, point_id)
+        rule = _rule_of(rules, task_id)
         tracker = collection.PrefixTracker(rule)
-        prefixes[point_id] = tracker
+        prefixes[task_id] = tracker
     tracker.add(row)
 
 
-def _rule_of(rules: Optional[dict], point_id: str) -> collection.PointRule:
-    """The point's rule, or a shot count fixed in advance when none."""
-    if rules is None or point_id not in rules:
-        return collection.PointRule()
-    return rules[point_id]
+def _rule_of(rules: Optional[dict], task_id: str) -> collection.TaskRule:
+    """The task's rule, or a shot count fixed in advance when none."""
+    if rules is None or task_id not in rules:
+        return collection.TaskRule()
+    return rules[task_id]
 
 
 def _add_estimate_columns(row: dict, prefix: collection.PrefixTracker) -> None:
     """The prefix's state, counts, estimate and exact limits.
 
     failures over scored shots is sinter's errors over shots less
-    discards (sinter/_plotting.py:389). An adaptive point's shots are
+    discards (sinter/_plotting.py:389). An adaptive task's shots are
     not independent draws, so it shows its counts and no estimate.
     """
     counts = prefix.counts
@@ -723,7 +723,7 @@ def _add_estimate_columns(row: dict, prefix: collection.PrefixTracker) -> None:
 def _prefix_estimate(
     prefix: collection.PrefixTracker,
 ) -> failure_statistics.Estimate:
-    """The prefix's estimate and limits; none for an adaptive point."""
+    """The prefix's estimate and limits; none for an adaptive task."""
     if prefix.rule.is_adaptive:
         return failure_statistics.Estimate(None, None, None)
     counts = prefix.counts
@@ -794,7 +794,7 @@ def _add_pool_columns(row: dict, totals) -> None:
 
 
 def _add_load_columns(row: dict, totals) -> None:
-    """The difficulty and overload columns the point's shots hold.
+    """The difficulty and overload columns the task's shots hold.
 
     The escalated share rides with them: the windows the strong tier
     committed over the windows decoded.
@@ -813,7 +813,7 @@ def _add_load_columns(row: dict, totals) -> None:
 
 
 def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
-    """The point's strong service over its strong decodes; None for none.
+    """The task's strong service over its strong decodes; None for none.
 
     A ratio of two sums, as gem5's avgMissLatency = missLatency / misses
     (src/mem/cache/base.cc:2187-2188) and sinter divide at read time; a mean
@@ -826,7 +826,7 @@ def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
 
 
 def _shot_totals(row: dict) -> fold.RowTotals:
-    """What one sweep point's shot rows add up to, role by role.
+    """What one task's shot rows add up to, role by role.
 
     A role's column is totalled only when the row holds it, the rule of
     _points_held, so a folder an older tree wrote still folds.
@@ -872,13 +872,13 @@ def _points_held(fields) -> list:
 
 
 def _add_a_shot(totals: dict, row: dict) -> None:
-    """One shot row into its own sweep point's totals."""
-    point = sweep_point_of(row)
-    at_point = totals.get(point)
-    if at_point is None:
-        at_point = _shot_totals(row)
-        totals[point] = at_point
-    at_point.add(row)
+    """One shot row into its own task's totals."""
+    task_key = task_key_of(row)
+    task_totals = totals.get(task_key)
+    if task_totals is None:
+        task_totals = _shot_totals(row)
+        totals[task_key] = task_totals
+    task_totals.add(row)
 
 
 def _write_rows(rows: list, path: Path, swept: dict) -> None:
@@ -889,7 +889,7 @@ def _write_rows(rows: list, path: Path, swept: dict) -> None:
 
 
 def _with_swept_values(rows: list, swept: dict) -> list:
-    """Each row with its point's swept values right after its point_id."""
+    """Each row with its task's swept values right after its task_id."""
     placed = []
     for row in rows:
         with_values = _with_swept_row(row, swept)
@@ -898,10 +898,10 @@ def _with_swept_values(rows: list, swept: dict) -> list:
 
 
 def _with_swept_row(row: dict, swept: dict) -> dict:
-    """One row with its point's swept values right after its point_id."""
-    point_id = row["point_id"]
-    with_values = {"point_id": point_id}
-    with_values.update(swept[point_id])
+    """One row with its task's swept values right after its task_id."""
+    task_id = row["task_id"]
+    with_values = {"task_id": task_id}
+    with_values.update(swept[task_id])
     with_values.update(row)
     return with_values
 
@@ -928,13 +928,13 @@ def _value_at_index(multiset: dict, index: int) -> float:
 
 
 def _counts_of_samples(measurements: list) -> dict:
-    """(point, latency point, tier) -> value -> how many carried it."""
+    """(task, latency point, tier) -> value -> how many carried it."""
     counts = {}
     for measurement in measurements:
-        point = measured_point(measurement)
+        task_key = measured_task_key(measurement)
         for name, values in measurement.samples.items():
             tiers = _tiers_of_samples(measurement, name)
-            _count_the_values(counts, (point, name), tiers, values)
+            _count_the_values(counts, (task_key, name), tiers, values)
     return counts
 
 
@@ -957,11 +957,11 @@ def _count_the_values(
         multiset[value] = already + 1
 
 
-def _multiset_over_tiers(counts: dict, point: tuple, name: str) -> dict:
-    """One latency point's multiset at one sweep point, every tier's added."""
+def _multiset_over_tiers(counts: dict, task_key: tuple, name: str) -> dict:
+    """One latency point's multiset at one task, every tier's added."""
     merged = {}
-    for (at_point, at_name, _tier), multiset in counts.items():
-        if (at_point, at_name) != (point, name):
+    for (at_task_key, at_name, _tier), multiset in counts.items():
+        if (at_task_key, at_name) != (task_key, name):
             continue
         for value, count in multiset.items():
             already = merged.get(value, 0)
@@ -970,24 +970,24 @@ def _multiset_over_tiers(counts: dict, point: tuple, name: str) -> dict:
 
 
 def _add_counts_of_rows(counts: dict, window_samples: list) -> None:
-    """One file's rows added to the multisets their points own.
+    """One file's rows added to the multisets their tasks own.
 
     The counts add, so the multisets of several folders' files are the
     multisets one run over the same shots would have written.
     """
     for row in window_samples:
-        point = sweep_point_of(row)
-        key = (point, row["name"], row["tier"])
+        task_key = task_key_of(row)
+        key = (task_key, row["name"], row["tier"])
         at_this_name = counts.setdefault(key, {})
         value = row["value_us"]
         already = at_this_name.get(value, 0)
         at_this_name[value] = already + row["count"]
 
 
-def _rows_of_counts(counts: dict, points: list) -> list:
-    """The multisets as rows: points' order, then point-list order, value."""
-    positions = _task_positions(points)
-    order = functools.partial(_point_and_name_order, positions)
+def _rows_of_counts(counts: dict, task_keys: list) -> list:
+    """The multisets as rows: tasks' order, then POINTS order, value."""
+    positions = _task_positions(task_keys)
+    order = functools.partial(_task_and_name_order, positions)
     rows = []
     for key in sorted(counts, key=order):
         multiset = counts[key]
@@ -997,9 +997,9 @@ def _rows_of_counts(counts: dict, points: list) -> list:
 
 
 def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
-    """One latency point's counts at one sweep point, by rising value."""
-    point, name, tier = key
-    columns = point_columns(point)
+    """One latency point's counts at one task, by rising value."""
+    task_key, name, tier = key
+    columns = task_columns(task_key)
     rows = []
     for value in sorted(multiset):
         row = dict(columns)
@@ -1011,50 +1011,50 @@ def _rows_of_one_multiset(key: tuple, multiset: dict) -> list:
     return rows
 
 
-def _point_and_name_order(positions: dict, key: tuple) -> tuple:
-    """A (point, latency point, tier) key where a single run writes it."""
-    point, name, tier = key
+def _task_and_name_order(positions: dict, key: tuple) -> tuple:
+    """A (task, latency point, tier) key where a single run writes it."""
+    task_key, name, tier = key
     place = measure.POINTS.index(name)
-    point_order = positions[point]
-    return (point_order, place, tier)
+    task_order = positions[task_key]
+    return (task_order, place, tier)
 
 
-def _task_positions(points: list) -> dict:
-    """Each point's place in the list, the order a single run meets them."""
+def _task_positions(task_keys: list) -> dict:
+    """Each task's place in the list, the order a single run meets them."""
     positions = {}
-    for position, point in enumerate(points):
-        positions[point] = position
+    for position, task_key in enumerate(task_keys):
+        positions[task_key] = position
     return positions
 
 
 def _refuse_folders_of_different_columns(run_dirs: list) -> None:
-    """The pieces of one point record the same columns in a folded file."""
+    """The pieces of one task record the same columns in a folded file."""
     for name in FOLDED_FILES:
         _refuse_one_files_different_columns(run_dirs, name)
 
 
 def _refuse_one_files_different_columns(run_dirs: list, name: str) -> None:
-    """One folded file's columns, the same in every piece of one point.
+    """One folded file's columns, the same in every piece of one task.
 
     Pieces from two trees differ when a column was added between them, and
     folding them would leave it silently empty for the older shots.
     """
-    first_by_point = {}
+    first_by_task = {}
     for run_dir in run_dirs:
         path = Path(run_dir) / name
-        point_id = _point_of_file(path)
-        if point_id is None:
+        task_id = _task_of_file(path)
+        if task_id is None:
             continue
         columns = fold.header_of(path)
-        first = first_by_point.setdefault(point_id, (run_dir, columns))
+        first = first_by_task.setdefault(task_id, (run_dir, columns))
         first_dir, first_columns = first
         if columns == first_columns:
             continue
         _refuse_the_columns(run_dir, first_dir, name, columns, first_columns)
 
 
-def _point_of_file(path: Path) -> Optional[str]:
-    """The point a piece's file holds rows of, or None for no row."""
+def _task_of_file(path: Path) -> Optional[str]:
+    """The task a piece's file holds rows of, or None for no row."""
     if not path.is_file():
         return None
     rows = fold.row_stream(path)
@@ -1062,7 +1062,7 @@ def _point_of_file(path: Path) -> Optional[str]:
     rows.close()
     if first_row is None:
         return None
-    return first_row["point_id"]
+    return first_row["task_id"]
 
 
 def _refuse_the_columns(
@@ -1090,7 +1090,7 @@ def _refuse_the_columns(
         extra = []
     raise refusal.RefusalError(
         f"{lacking} does not hold the columns {compared} holds in {name}: "
-        f"missing {missing}, extra {extra}; the pieces of one point record "
+        f"missing {missing}, extra {extra}; the pieces of one task record "
         "the same columns, and two trees' pieces differ when a column was "
         "added between them"
     )
@@ -1099,42 +1099,42 @@ def _refuse_the_columns(
 def _refuse_a_repeated_shot(run_dirs: list, order) -> None:
     """One seeded run in two folders would be counted twice.
 
-    Rows arrive merged in seed order per point, so the check keeps each
-    point's last seed. It runs before anything is written.
+    Rows arrive merged in seed order per task, so the check keeps each
+    task's last seed. It runs before anything is written.
     """
     paths = _folder_files(run_dirs, "shots.csv")
     seen = {}
     for row in fold.merged_rows(paths, order):
-        point = sweep_point_of(row)
+        task_key = task_key_of(row)
         seed = row["seed"]
-        if seen.get(point) == seed:
+        if seen.get(task_key) == seed:
             _refuse_the_folders(row, run_dirs)
-        seen[point] = seed
+        seen[task_key] = seed
 
 
 def _refuse_pieces_that_recorded_confidence_apart(run_dirs: list) -> None:
-    """A point's pieces must have recorded confidence for the same shots.
+    """A task's pieces must have recorded confidence for the same shots.
 
     Otherwise the confidence files would count fewer shots than the sweep
     row. A piece.json without the line reads as None.
     """
-    coverage_by_point = _pieces_by_point_and_value(
+    coverage_by_task = _pieces_by_task_and_value(
         run_dirs, _confidence_coverage_of
     )
-    for point_id, by_coverage in coverage_by_point.items():
+    for task_id, by_coverage in coverage_by_task.items():
         if len(by_coverage) > 1:
-            _refuse_the_confidence_coverage(point_id, by_coverage)
+            _refuse_the_confidence_coverage(task_id, by_coverage)
 
 
-def _pieces_by_point_and_value(run_dirs: list, value_of) -> dict:
-    """Each point's first piece folder for every value value_of reads."""
-    folders_by_point = {}
+def _pieces_by_task_and_value(run_dirs: list, value_of) -> dict:
+    """Each task's first piece folder for every value value_of reads."""
+    folders_by_task = {}
     for run_dir in run_dirs:
         piece = _piece_of(run_dir)
         value = value_of(piece)
-        by_value = folders_by_point.setdefault(piece["point_id"], {})
+        by_value = folders_by_task.setdefault(piece["task_id"], {})
         by_value.setdefault(value, run_dir)
-    return folders_by_point
+    return folders_by_task
 
 
 def _confidence_coverage_of(piece: dict):
@@ -1149,27 +1149,27 @@ def _piece_of(run_dir) -> dict:
     return json.loads(piece_text)
 
 
-def _refuse_the_confidence_coverage(point_id: str, by_coverage: dict):
-    """Say which pieces of the point recorded confidence for which shots."""
+def _refuse_the_confidence_coverage(task_id: str, by_coverage: dict):
+    """Say which pieces of the task recorded confidence for which shots."""
     pieces_named = []
     for coverage, run_dir in by_coverage.items():
         pieces_named.append(f"{run_dir} ({coverage})")
     listed = ", ".join(pieces_named)
     raise refusal.RefusalError(
-        f"the pieces of point {point_id} recorded confidence for different "
+        f"the pieces of task {task_id} recorded confidence for different "
         f"shots (confidence_shot_count): {listed}; folding them would "
         "leave the confidence files short of the shots shots.csv counts, "
-        "so collect the point again into a new results folder"
+        "so collect the task again into a new results folder"
     )
 
 
 def _refuse_the_folders(row: dict, run_dirs: list) -> None:
     """Say which shot is doubled and in which folders it was found."""
     listed = _named(run_dirs)
-    shot = f"{row['point_id']} seed {row['seed']}"
+    shot = f"{row['task_id']} seed {row['seed']}"
     raise refusal.RefusalError(
         f"the shot {shot} is in more than one of {listed}; a shot is one "
-        "seeded run of one sweep point, so folding both folders would "
+        "seeded run of one task, so folding both folders would "
         "count it twice"
     )
 
@@ -1183,14 +1183,14 @@ def _named(run_dirs: list) -> str:
 
 
 def _row_task_and_seed(positions: dict, row: dict) -> tuple:
-    """One per-shot row's place: its point's task position, then its seed.
+    """One per-shot row's place: its task's position, then its seed.
 
     It is the order a single run wrote its rows in, so the folders'
-    rows merge back into that order and a point's several rows for one
+    rows merge back into that order and a task's several rows for one
     seed (one per decoded window, or one per link) keep the order the
     run wrote them.
     """
-    position = positions[row["point_id"]]
+    position = positions[row["task_id"]]
     seed = fold.number_of(row["seed"])
     return (position, seed)
 
@@ -1210,9 +1210,9 @@ def _scalar_fields(measurement) -> dict:
     return row
 
 
-def _shot_link_row(point: tuple, measurement, path: str) -> dict:
+def _shot_link_row(task_key: tuple, measurement, path: str) -> dict:
     """One shot's ledger counters on one link."""
-    row = point_columns(point)
+    row = task_columns(task_key)
     row["seed"] = measurement.seed
     row["link"] = path
     counters = measurement.link_totals[path]
@@ -1228,7 +1228,7 @@ def _add_latency_point_columns(
 
     The mean averages the per-shot means and the max takes the largest
     per-shot max, both off the per-shot rows; the median and p99 come
-    from the multiset of every decoded window of the point.
+    from the multiset of every decoded window of the task.
     """
     row[f"{name}_mean_us"] = totals.mean(f"{name}_mean_us")
     row[f"{name}_median_us"] = percentile_of_counts(multiset, 0.50)
@@ -1236,14 +1236,14 @@ def _add_latency_point_columns(
     row[f"{name}_max_us"] = totals.maxes[f"{name}_max_us"]
 
 
-def _add_tier_split_columns(row: dict, counts: dict, point: tuple) -> None:
+def _add_tier_split_columns(row: dict, counts: dict, task_key: tuple) -> None:
     """TIER_SPLIT_POINT's median and p99 over each tier's own windows.
 
-    A tier that committed no window at the point gets no column, since
+    A tier that committed no window at the task gets no column, since
     a percentile of no sample is no number.
     """
     for tier in window_records.DecoderTier:
-        key = (point, TIER_SPLIT_POINT, tier.value)
+        key = (task_key, TIER_SPLIT_POINT, tier.value)
         multiset = counts.get(key)
         if not multiset:
             continue
@@ -1261,10 +1261,10 @@ def _paths_counted(counted: dict) -> list:
 
 
 def _shot_movement_row(
-    point: tuple, measurement, counted: dict, path: str
+    task_key: tuple, measurement, counted: dict, path: str
 ) -> dict:
     """One shot's copies and moves on one path, plus its own references."""
-    row = point_columns(point)
+    row = task_columns(task_key)
     row["seed"] = measurement.seed
     row["path"] = path
     copied = counted["copies_by_path"].get(path)
@@ -1301,9 +1301,9 @@ def _window_confidence_row(
     window,
 ) -> dict:
     """One window of one shot, as window_confidence.csv writes it."""
-    point = measured_point(measurement)
+    task_key = measured_task_key(measurement)
     operation_id, window_index = window.window_key
-    row = point_columns(point)
+    row = task_columns(task_key)
     row["seed"] = measurement.seed
     row["signal"] = confidence.signal
     row["operation_id"] = operation_id
@@ -1324,17 +1324,17 @@ def _count_the_shots_gaps(
     confidence = measurement.confidence
     if not confidence.windows:
         return
-    point = measured_point(measurement)
+    task_key = measured_task_key(measurement)
     failed = measurement.logical_failure
     for window in confidence.windows:
         key = _histogram_key(
-            point, confidence.signal, WINDOW_HISTOGRAM, window.gap_nats
+            task_key, confidence.signal, WINDOW_HISTOGRAM, window.gap_nats
         )
         window_cell = key + (window.is_escalated, failed)
         _add_count(counts, window_cell, 1)
     smallest = _smallest_gap(confidence.windows)
     shot_key = _histogram_key(
-        point, confidence.signal, SHOT_MINIMUM_HISTOGRAM, smallest
+        task_key, confidence.signal, SHOT_MINIMUM_HISTOGRAM, smallest
     )
     shot_cell = shot_key + (None, failed)
     _add_count(counts, shot_cell, 1)
@@ -1366,15 +1366,15 @@ def _smallest_gap(windows: tuple) -> Optional[float]:
     return min(gaps)
 
 
-def _histogram_key(point: tuple, signal: str, kind: str, gap_nats) -> tuple:
-    """A gap's place in the histogram: point, signal, kind and bin.
+def _histogram_key(task_key: tuple, signal: str, kind: str, gap_nats) -> tuple:
+    """A gap's place in the histogram: task, signal, kind and bin.
 
     A window with no gap has the bin None, written empty.
     """
     low = None
     if gap_nats is not None:
         low = gap_bin_low_decibels(gap_nats)
-    return (point, signal, kind, low)
+    return (task_key, signal, kind, low)
 
 
 def _add_count(counts: dict, key: tuple, count: int) -> None:
@@ -1383,22 +1383,22 @@ def _add_count(counts: dict, key: tuple, count: int) -> None:
     counts[key] = already + count
 
 
-def _points_of_counts(counts: dict) -> list:
-    """The points the counts name, in the order they first came."""
-    points = {}
+def _task_keys_of_counts(counts: dict) -> list:
+    """The tasks the counts name, in the order they first came."""
+    task_keys = {}
     for key in counts:
-        points[key[0]] = None
-    return list(points)
+        task_keys[key[0]] = None
+    return list(task_keys)
 
 
-def _confidence_histogram_rows_of(counts: dict, points: list) -> list:
-    """The counts as rows: points' order, kind, bin, escalated, failed."""
-    positions = _task_positions(points)
+def _confidence_histogram_rows_of(counts: dict, task_keys: list) -> list:
+    """The counts as rows: tasks' order, kind, bin, escalated, failed."""
+    positions = _task_positions(task_keys)
     order = functools.partial(_histogram_order, positions)
     rows = []
     for key in sorted(counts, key=order):
-        point, signal, kind, low, escalated, failed = key
-        row = point_columns(point)
+        task_key, signal, kind, low, escalated, failed = key
+        row = task_columns(task_key)
         row["signal"] = signal
         row["histogram"] = kind
         row["gap_low_decibels"] = low
@@ -1411,12 +1411,12 @@ def _confidence_histogram_rows_of(counts: dict, points: list) -> list:
 
 def _histogram_order(positions: dict, key: tuple) -> tuple:
     """A histogram cell where a single run would write it."""
-    point, signal, kind, low, escalated, failed = key
-    point_order = positions[point]
+    task_key, signal, kind, low, escalated, failed = key
+    task_order = positions[task_key]
     kind_order = kind != WINDOW_HISTOGRAM
     low_order = _bin_order(low)
     escalated_order = escalated is True
-    return (point_order, signal, kind_order, low_order, escalated_order, failed)
+    return (task_order, signal, kind_order, low_order, escalated_order, failed)
 
 
 def _bin_order(low: Optional[float]) -> float:
@@ -1440,11 +1440,11 @@ def _folded_confidence_histogram(folders: list) -> dict:
 
 def _add_a_histogram_row(counts: dict, row: dict) -> None:
     """One histogram row read back, added to its cell."""
-    point = sweep_point_of(row)
+    task_key = task_key_of(row)
     low = _empty_as_none(row["gap_low_decibels"])
     escalated = _empty_as_none(row["escalated"])
     key = (
-        point,
+        task_key,
         row["signal"],
         row["histogram"],
         low,

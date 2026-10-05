@@ -79,38 +79,38 @@ def _place_of(row):
     return int(row["place"])
 
 
-# A shot of the one point below runs fifteen QEC rounds, the minimal
+# A shot of the one task below runs fifteen QEC rounds, the minimal
 # machine's, which its resolved record reads back.
 ROUNDS_PER_SHOT = run_files.ROUNDS_PER_SHOT
 
 
-def _one_point_config(folder, shots, piece_shots):
+def _one_task_config(folder, shots, piece_shots):
     piece_rounds = piece_shots * ROUNDS_PER_SHOT
     collection = {"max_shots": shots, "piece_rounds": piece_rounds}
     return run_files.write_run_file(folder, collection=collection)
 
 
-def _pieces_of_one_point(tmp_path, shots, piece_shots):
-    """One point's shots collected in pieces; the results folder."""
+def _pieces_of_one_task(tmp_path, shots, piece_shots):
+    """One task's shots collected in pieces; the results folder."""
     folder = tmp_path / f"of_{shots}"
     folder.mkdir()
-    config_path = _one_point_config(folder, shots, piece_shots)
+    config_path = _one_task_config(folder, shots, piece_shots)
     experiment_dir = folder / "experiment"
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
     return experiment_dir
 
 
 def _piece_folders(experiment_dir) -> list:
-    """The experiment's piece folders, the one point's, in seed order."""
-    point_dirs = experiment_dir.glob("pieces/*")
-    point_ids = [point_dir.name for point_dir in point_dirs]
-    return pieces.folders_of(experiment_dir, point_ids)
+    """The experiment's piece folders, the one task's, in seed order."""
+    task_dirs = experiment_dir.glob("pieces/*")
+    task_ids = [task_dir.name for task_dir in task_dirs]
+    return pieces.folders_of(experiment_dir, task_ids)
 
 
 def _folded(experiment_dir, folders, out_dir) -> list:
     """The pieces folded into out_dir as the collect that saved them does."""
-    point_ids = [folders[0].parent.name]
-    return report.fold_pieces(experiment_dir, folders, point_ids, out_dir)
+    task_ids = [folders[0].parent.name]
+    return report.fold_pieces(experiment_dir, folders, task_ids, out_dir)
 
 
 def _peak_rows_alive(monkeypatch, experiment_dir, out_dir):
@@ -324,10 +324,10 @@ def test_merged_rows_are_the_stable_sort_of_the_files_rows(tmp_path):
 
 
 def test_a_merge_of_disjoint_pieces_holds_one_file_open_at_a_time(tmp_path):
-    """A capped point's pieces are too many to open at once.
+    """A capped task's pieces are too many to open at once.
 
     Three hundred files of three rows each, seed ranges apart as a
-    point's pieces are, given in reverse. The order's referent is the
+    task's pieces are, given in reverse. The order's referent is the
     stable sort of their rows; the open files are the process's own
     descriptors, /proc/self/fd.
     """
@@ -444,8 +444,8 @@ def test_a_fold_holds_one_row_of_each_folder_however_many_shots_they_hold(
     piece's rows, so an experiment's pieces cost what a smoke test's do.
     """
     piece_count = 3
-    one_shot_dir = _pieces_of_one_point(tmp_path, 3, 1)
-    three_shot_dir = _pieces_of_one_point(tmp_path, 9, 3)
+    one_shot_dir = _pieces_of_one_task(tmp_path, 3, 1)
+    three_shot_dir = _pieces_of_one_task(tmp_path, 9, 3)
     one_shot_out = tmp_path / "folded_of_3"
     three_shot_out = tmp_path / "folded_of_9"
     one_shot_peak = _peak_rows_alive(monkeypatch, one_shot_dir, one_shot_out)
@@ -503,7 +503,7 @@ def test_a_fold_reports_the_latency_points_the_folders_rows_hold(tmp_path):
     them, and the fold reports the points they hold and every other
     column exactly as the fold of the same pieces whole does.
     """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    experiment_dir = _pieces_of_one_task(tmp_path, 4, 2)
     folders = _piece_folders(experiment_dir)
     whole_dir = tmp_path / "whole"
     older_dir = tmp_path / "older"
@@ -531,12 +531,12 @@ def test_a_fold_reports_no_strong_service_mean_for_folders_without_its_sum(
 ):
     """A folder whose shots hold no strong service sum gets no mean.
 
-    The point's mean is the shots' summed service over their strong
+    The task's mean is the shots' summed service over their strong
     decodes, so a folder without the sum reports no strong_service_mean_us
     and every other column as the whole fold does, the rule a latency
     point the folder did not measure keeps.
     """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    experiment_dir = _pieces_of_one_task(tmp_path, 4, 2)
     folders = _piece_folders(experiment_dir)
     whole_dir = tmp_path / "whole"
     older_dir = tmp_path / "older"
@@ -562,10 +562,10 @@ def _each_without_a_shot_column(folders, column) -> None:
         _write_rows(shots_path, rows)
 
 
-def test_pieces_of_one_point_that_hold_different_columns_are_refused(
+def test_pieces_of_one_task_that_hold_different_columns_are_refused(
     tmp_path,
 ):
-    """A point's pieces were measured by one tree, so they hold one set.
+    """A task's pieces were measured by one tree, so they hold one set.
 
     Folding them would write the older piece's shots with that column
     empty, which reads as a measurement of nothing. The sentence names
@@ -573,7 +573,7 @@ def test_pieces_of_one_point_that_hold_different_columns_are_refused(
     given, because the folder the walk reaches second is not always the
     one that lacks anything.
     """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 2)
+    experiment_dir = _pieces_of_one_task(tmp_path, 4, 2)
     folders = _piece_folders(experiment_dir)
     _without_a_point(folders[0], "confidence")
     lacking = folders[0]
@@ -593,7 +593,7 @@ def test_pieces_of_one_point_that_hold_different_columns_are_refused(
     assert not out_dir.exists()
 
 
-# A switching point that records each tier's waits and services, and the
+# A switching task that records each tier's waits and services, and the
 # weak tier alone, which has none to record, as Experiment 1 mixes them.
 MIXED_RUN_FILE = """
 import dataclasses
@@ -607,23 +607,23 @@ switching = shape_tests.gate_switching()
 recording = observe_settings.ObservationSettings(record_switching_windows=True)
 switching = dataclasses.replace(switching, observation=recording)
 weak_alone = machine_settings.weak_decoder_baseline(3, 0.008, 1.0)
-points = [
+tasks = [
     decsim.Task("switching", switching, {}),
     decsim.Task("weak_alone", weak_alone, {}),
 ]
 collection = decsim.CollectionSettings(max_shots=1)
-experiment = decsim.Experiment("mixed", points, collection)
+experiment = decsim.Experiment("mixed", tasks, collection)
 """
 
 
-def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
-    """A switching point and a weak-alone point fold into one run folder.
+def test_tasks_that_measured_different_columns_fold_to_one_header(tmp_path):
+    """A switching task and a weak-alone task fold into one run folder.
 
-    The switching point measures its weak decodes' service and its
-    strong decodes' waits, and the weak-alone point has no tiers to
+    The switching task measures its weak decodes' service and its
+    strong decodes' waits, and the weak-alone task has no tiers to
     measure, so their pieces hold different columns. The folded file
-    takes every column any point holds, first seen first, as write_csv
-    does for a run's own rows, and a point's cell for a column it did
+    takes every column any task holds, first seen first, as write_csv
+    does for a run's own rows, and a task's cell for a column it did
     not measure is empty.
     """
     run_file = tmp_path / "mixed.py"
@@ -636,8 +636,8 @@ def test_points_that_measured_different_columns_fold_to_one_header(tmp_path):
     shots = _rows_of(shots_path)
     run_text = run_path.read_text()
     run_record = json.loads(run_text)
-    switching_id, weak_alone_id = run_record["points"]
-    services = {row["point_id"]: row["weak_service_mean_us"] for row in shots}
+    switching_id, weak_alone_id = run_record["tasks"]
+    services = {row["task_id"]: row["weak_service_mean_us"] for row in shots}
     assert services[switching_id] != ""
     assert services[weak_alone_id] == ""
 
@@ -648,7 +648,7 @@ def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
     Four pieces of one shot, folded as listed and again reversed, write
     every file byte for byte alike.
     """
-    experiment_dir = _pieces_of_one_point(tmp_path, 4, 1)
+    experiment_dir = _pieces_of_one_task(tmp_path, 4, 1)
     folders = _piece_folders(experiment_dir)
     backwards = list(reversed(folders))
     forwards_dir = tmp_path / "forwards"
@@ -664,16 +664,16 @@ def test_pieces_fold_to_the_same_bytes_whichever_order_they_come_in(tmp_path):
 
 def test_a_collect_run_on_to_a_raised_cap_records_every_seed(tmp_path):
     """A resumed collect's record holds the saved seeds and the new ones."""
-    config_path = _one_point_config(tmp_path, 2, 1)
+    config_path = _one_task_config(tmp_path, 2, 1)
     experiment_dir = tmp_path / "experiment"
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
-    first_seeds = _seeds_of_the_one_point(experiment_dir)
-    _one_point_config(tmp_path, 4, 1)
+    first_seeds = _seeds_of_the_one_task(experiment_dir)
+    _one_task_config(tmp_path, 4, 1)
 
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
 
     assert first_seeds == [[0, 2]]
-    assert _seeds_of_the_one_point(experiment_dir) == [[0, 4]]
+    assert _seeds_of_the_one_task(experiment_dir) == [[0, 4]]
     assert _seeds_of_every_shot(experiment_dir) == ["0", "1", "2", "3"]
 
 
@@ -700,15 +700,15 @@ def _seeds_of_every_shot(run_dir) -> list:
     return [row["seed"] for row in rows]
 
 
-def _seeds_of_the_one_point(run_dir) -> list:
-    """The seed ranges the results folder's one point record names."""
-    (record_path,) = run_dir.glob("points/*/machine.json")
+def _seeds_of_the_one_task(run_dir) -> list:
+    """The seed ranges the results folder's one task record names."""
+    (record_path,) = run_dir.glob("tasks/*/machine.json")
     record_text = record_path.read_text()
     record = json.loads(record_text)
     return record["seeds"]
 
 
-# the one point a confidence run collects
+# the one task a confidence run collects
 CONFIDENCE_AXES = {
     run_files.DISTANCE_PATH: (3,),
     run_files.ROUND_PERIOD_PATH: (1.0,),
@@ -797,7 +797,7 @@ def test_a_piece_records_the_shots_its_confidence_rows_cover(tmp_path):
     assert plain["confidence_shot_count"] is None
 
 
-def test_pieces_of_one_point_that_recorded_confidence_apart_are_refused(
+def test_pieces_of_one_task_that_recorded_confidence_apart_are_refused(
     tmp_path,
 ):
     """A piece from before the confidence files would leave them short.
@@ -822,7 +822,7 @@ def test_pieces_of_one_point_that_recorded_confidence_apart_are_refused(
     assert not out_dir.exists()
 
 
-def test_pieces_of_one_point_that_ran_different_commits_are_refused(
+def test_pieces_of_one_task_that_ran_different_commits_are_refused(
     tmp_path,
 ):
     """A resumed collect from another tree would pool two simulators.
@@ -830,7 +830,7 @@ def test_pieces_of_one_point_that_ran_different_commits_are_refused(
     The second piece is saved as a process at another commit saves it;
     the fold names it and the tree run.json names, and writes nothing.
     """
-    experiment_dir = _pieces_of_one_point(tmp_path, 2, 1)
+    experiment_dir = _pieces_of_one_task(tmp_path, 2, 1)
     folders = _piece_folders(experiment_dir)
     later = folders[1]
     other_commit = "b" * 40
@@ -849,7 +849,7 @@ def test_pieces_of_one_point_that_ran_different_commits_are_refused(
 def _confidence_run(
     tmp_path, arguments, shots, piece_shots=None, out="experiment"
 ):
-    """A one-point d3 collect of shots, in pieces if asked; its run folder.
+    """A one-task d3 collect of shots, in pieces if asked; its run folder.
 
     arguments are run_files.sweep's, the axes and collection aside.
     """

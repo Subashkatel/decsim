@@ -17,7 +17,7 @@ This lesson's run file ships with decsim as `examples/my_first_sweep.py`.
 Its loop:
 
 ```python examples/my_first_sweep.py
-points = []
+tasks = []
 for distance in DISTANCES:
     base = machine_settings.weak_decoder_baseline(
         distance,
@@ -36,7 +36,7 @@ computer. The base prices its decoder with a number instead, which is
 right for a timing study and wrong for an accuracy one.
 
 `DISTANCES` is 3, 5 and 7, and the physical error probability is 0.003,
-so the sweep is three points. Its `COLLECTION` stops a point at
+so the sweep is three tasks. Its `COLLECTION` stops a task at
 `max_shots`, 400 shots, so 1,200 shots in all.
 
 ## Step 2. Run it, on four processes
@@ -46,12 +46,12 @@ decsim run examples/my_first_sweep.py --processes 4 --out results/first_sweep
 ```
 
 `--processes` gives each worker one piece at a time. A piece is a block
-of one point's shots that one process runs from start to finish and
+of one task's shots that one process runs from start to finish and
 saves whole the moment it ends; step 5 shows what that buys. Shots
 inside a piece stay serial, which is what keeps a shot's result a
 function of its seed alone.
 
-It prints the folder it writes, then one line per point as the point
+It prints the folder it writes, then one line per task as the task
 finishes:
 
 ```
@@ -73,10 +73,10 @@ its correction without the rounds a whole-circuit decode can see, so
 windowed decoding approximates global decoding: Skoric et al.
 (arXiv:2209.08552, Sec. I B) find a fidelity close to the global
 decoder's when the window buffers a whole distance of rounds, which is
-what decsim's default window does. To see it, add a point whose
+what decsim's default window does. To see it, add a task whose
 `SlidingWindowScheme.Settings` has `commit_rounds` long enough to hold
 the whole shot, so one window decodes the full history. At one seed the
-two points draw the same shot (their `sample_digest` cells in
+two tasks draw the same shot (their `sample_digest` cells in
 `shots.csv` are equal), so a seed where their `predictions` differ is a
 shot the window's missing rounds decided. Expect a few in a large
 sweep; a noticeable fraction of the shots is a broken machine.
@@ -95,7 +95,7 @@ qpu.distance,shots,logical_failures,state,logical_error_rate_estimate,logical_er
 ```
 
 The rows come in the run file's order, distance 3, 5 and 7. Each row's
-first columns name its point: its id, then the point's settings as its
+first columns name its task: its id, then the task's settings as its
 metadata names them.
 
 `logical_error_rate_estimate` is the failures divided by the scored
@@ -106,8 +106,8 @@ differently.
 The limits are a 95 percent **confidence interval**: a range of true
 failure probabilities that would plausibly produce the count you saw,
 built so that 95 runs in 100 bracket the true rate. decsim computes it
-exactly for the rule the point stopped by (`estimate` in
-`decsim/experiments/failure_statistics.py`). Every point here stopped
+exactly for the rule the task stopped by (`estimate` in
+`decsim/experiments/failure_statistics.py`). Every task here stopped
 at its shot cap, `state` `cap`, so its shot count was fixed and its
 limits are Clopper and Pearson's. Read the distance 3 row as: the true
 rate is somewhere between about 2.3 percent and about 6.4 percent, and
@@ -129,18 +129,18 @@ distance 5, even though its estimate is lower. That is the honest
 reading, and it is the reason a real sweep runs a million shots at its
 lowest error rates.
 
-The rule of thumb: aim for at least 100 failures at a point you want to
-quote. A point can stop there by itself:
+The rule of thumb: aim for at least 100 failures at a task you want to
+quote. A task can stop there by itself:
 `decsim.CollectionSettings(max_failures=100, max_shots=...)` stops it at
 its hundredth failure, `state` `target`, and its limits are then the
 ones exact for a failure count fixed in advance. Below that, quote the
-interval, or quote the point as an upper bound.
+interval, or quote the task as an upper bound.
 
 ## Step 4. Draw it
 
 decsim writes the numbers and leaves the figure to you, since only you
-know what it should show. `sweep.csv` holds one row per point: its
-`point_id`, one column per swept path, its counts, and the estimate
+know what it should show. `sweep.csv` holds one row per task: its
+`task_id`, one column per swept path, its counts, and the estimate
 with its limits, `logical_error_rate_estimate`, `logical_error_rate_low`
 and `logical_error_rate_high`. Read it with any csv reader and draw the
 error bars from the limit columns you just read.
@@ -151,12 +151,12 @@ A sweep that takes a minute is never stopped halfway. A sweep that
 takes 350 core hours is, by a time limit or a node going down, and the
 mechanism is worth seeing on something small.
 
-`decsim run` saves each point's shots as pieces under
-`results/first_sweep/pieces/`, one folder per point and one per piece,
+`decsim run` saves each task's shots as pieces under
+`results/first_sweep/pieces/`, one folder per task and one per piece,
 named by its first and last seed. A piece holds a set number of QEC
-rounds, 20,000 unless the point's `CollectionSettings` says otherwise
+rounds, 20,000 unless the task's `CollectionSettings` says otherwise
 (`piece_rounds`), and a piece's folder appears only once the piece is
-whole. Delete each point's first piece, as a killed job would leave
+whole. Delete each task's first piece, as a killed job would leave
 them missing, and run the same command again:
 
 ```bash
@@ -183,17 +183,17 @@ decoder's measured wall clock.
 
 On a cluster the same pieces run as Slurm jobs. `decsim run
 examples/my_first_sweep.py --slurm --out $PWD/results/first_sweep`
-records every point, so a machine that cannot be built stops it before
+records every task, so a machine that cannot be built stops it before
 anything is queued. It writes `run.sbatch`, a job array whose job `i`
-runs point `i` until the point stops, and `fold.sbatch`, one job that
+runs task `i` until the task stops, and `fold.sbatch`, one job that
 folds every saved piece after the array ends, however its jobs ended.
 Then it submits both; `--dry-run` writes them and submits nothing. A
 job asks for `--cores` cores (4), `--hours` hours (24) and
 `--memory-mb` megabytes (16384), and logs to `logs/<i>.log`. A job
-starts no piece past its point's stop, so a point with `max_failures`
+starts no piece past its task's stop, so a task with `max_failures`
 stops near its target. If a job dies or runs out of time, submit the
-same command again: each job starts from its point's saved pieces, and
-a point that stopped runs nothing. `decsim run --fold --out
+same command again: each job starts from its task's saved pieces, and
+a task that stopped runs nothing. `decsim run --fold --out
 results/first_sweep` folds the saved pieces at any time, even while
 jobs run. The launch refuses a checkout with uncommitted changes
 unless `ALLOW_DIRTY=1` is set, and sbatch reads the account, partition
@@ -201,7 +201,7 @@ and QOS from SBATCH_ACCOUNT, SBATCH_PARTITION and SBATCH_QOS.
 
 ## What you learned
 
-- A sweep is a set of points; a point is a machine; a shot is one run of
+- A sweep is a set of tasks; a task is a machine; a shot is one run of
   it.
 - A logical error rate is an estimate, and its exact interval is how
   much to trust it.

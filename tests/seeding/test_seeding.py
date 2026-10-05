@@ -3,7 +3,7 @@
 A component's seed is blake2b-8 over a versioned namespace, the run's
 root seed and the component's framed path in the machine, so a component
 draws the same numbers whatever else the run holds and a rerun of one
-point reproduces it. The framed path bytes are pinned in
+task reproduces it. The framed path bytes are pinned in
 tests/records/test_seeds.py; here the derivation over them, checked
 against hashlib computed independently in the test.
 

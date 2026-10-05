@@ -470,7 +470,7 @@ kind; it may not end larger for the wrong kind.
 
 The gate's wall time is measured before and after for the same reason.
 One action per line adds loads and stores, and a sweep multiplies the
-engine, the buffers, the links and the decoder unit by shots and points.
+engine, the buffers, the links and the decoder unit by shots and tasks.
 
 A commit message is a title, "component: what changed", and a body of
 up to five lines saying why, what and how, in Google's and LLVM's

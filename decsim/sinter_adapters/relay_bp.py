@@ -1,4 +1,4 @@
-"""decsim's Relay-BP as a sinter decoder, built from the point's circuit.
+"""decsim's Relay-BP as a sinter decoder, built from the task's circuit.
 
 sinter hands a decoder only the decompose_errors=True model
 (sinter/_collection/_collection_worker_state.py:28-33). Joined at its
@@ -26,9 +26,9 @@ import decsim.records.fault_model_contracts as fault_models
 
 
 class RelayBeliefPropagationDecoder(sinter.Decoder):
-    """The factory sinter pickles to each worker, for one point's circuit.
+    """The factory sinter pickles to each worker, for one task's circuit.
 
-    seed draws the row's gamma table, so every worker of a point decodes
+    seed draws the row's gamma table, so every worker of a task decodes
     with one table and a rerun repeats it.
     """
 
@@ -59,7 +59,7 @@ class RelayBeliefPropagationDecoder(sinter.Decoder):
 
 
 class CompiledRelayBeliefPropagationDecoder(sinter.CompiledDecoder):
-    """One point's row, decoding bit-packed shots one at a time.
+    """One task's row, decoding bit-packed shots one at a time.
 
     relay-bp's decode_batch runs decode on each shot in turn
     (crates/relay_bp/src/decoder.rs:52-58), so the row's own call per

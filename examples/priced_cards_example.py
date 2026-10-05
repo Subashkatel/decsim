@@ -3,7 +3,7 @@
 The weak decoder baseline with its decoder priced at 1.0 us a window:
 PyMatching still answers every window, but the time it is charged is
 the card's, so the timing is the same on every host. At d = 3, 5 and 7
-and p = 0.001, a point stops at 20 shots.
+and p = 0.001, a task stops at 20 shots.
 
 Usage
 -----
@@ -28,7 +28,7 @@ ROUND_PERIOD_MICROSECONDS = 1.0
 DECODE_MICROSECONDS = 1.0
 COLLECTION = decsim.CollectionSettings(max_shots=20)
 
-points = []
+tasks = []
 for distance in DISTANCES:
     base = machine_settings.weak_decoder_baseline(
         distance,
@@ -40,7 +40,7 @@ for distance in DISTANCES:
     )
     weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=card)
     machine = dataclasses.replace(base, weak_decoder=weak_decoder)
-    # the point's settings, named as the results' columns name them
+    # the task's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (
             PHYSICAL_ERROR_PROBABILITY
@@ -48,7 +48,7 @@ for distance in DISTANCES:
         "qpu.distance": distance,
         "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
     }
-    point = decsim.Task(f"d{distance}", machine, metadata)
-    points.append(point)
+    task = decsim.Task(f"d{distance}", machine, metadata)
+    tasks.append(task)
 
-experiment = decsim.Experiment(NAME, points, COLLECTION)
+experiment = decsim.Experiment(NAME, tasks, COLLECTION)

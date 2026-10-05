@@ -147,7 +147,7 @@ def weak_base_switching(
 ) -> machine_settings.MachineSettings:
     """The weak base switching on the gate's slot, over one-cycle hops.
 
-    The switching experiment's redo window point: real PyMatching on the
+    The switching experiment's redo window task: real PyMatching on the
     weak base's chip unit escalates to belief matching on the host, the
     strong side's four hops one room cycle each.
     """

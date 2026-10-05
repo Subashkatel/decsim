@@ -1,6 +1,6 @@
 """Estimates and exact intervals of logical failure rates.
 
-Pure functions over failure counts. A point stops by a truncated inverse
+Pure functions over failure counts. A task stops by a truncated inverse
 binomial rule: at the shot where its scored failures reach the target,
 no earlier than a minimum shot count, or at a cap. The intervals are
 exact for that rule.
@@ -20,13 +20,13 @@ UPPER_QUANTILE = 0.975
 
 
 class StopKind(enum.Enum):
-    """Why a point's contiguous prefix of shots stopped.
+    """Why a task's contiguous prefix of shots stopped.
 
     TARGET: the scored failures reached the target after the minimum shot
     count. The target's failure on the cap's own shot is a TARGET stop,
     since the rule stops on that failure. MINIMUM: the target was reached
-    by the minimum shot count, which stopped the point. CAP: a shot or
-    time cap stopped the point before its target, so it is incomplete; a
+    by the minimum shot count, which stopped the task. CAP: a shot or
+    time cap stopped the task before its target, so it is incomplete; a
     time cap is exact only when run time does not depend on failure.
     """
 
@@ -41,7 +41,7 @@ class Estimate:
 
     low and high bound its exact 95 percent interval. A field is None
     where the stop gives no value: a cap with no failure has an upper
-    limit alone, and a point with no scored shot has nothing.
+    limit alone, and a task with no scored shot has nothing.
     """
 
     rate: Optional[float]
@@ -86,7 +86,7 @@ def plan_unbiased_estimate(
     target stop the last shot is the r-th failure, which gives
     (r - 1)/(N - 1); at a minimum or cap stop every path to (n, x)
     counts, which gives x/n. It is not unbiased among the outcomes that
-    reached the target: when a cap can stop the point first, it is
+    reached the target: when a cap can stop the task first, it is
     biased given that the target was reached.
     """
     if scored_shots == 0:

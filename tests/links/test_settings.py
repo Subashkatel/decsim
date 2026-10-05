@@ -69,7 +69,7 @@ def test_an_aggregate_rate_is_read_as_the_decimal_on_the_card():
     assert exact == fractions.Fraction("0.20846")
 
 
-def test_a_rate_written_as_a_float_or_as_its_fraction_has_one_point_id():
+def test_a_rate_written_as_a_float_or_as_its_fraction_has_one_task_id():
     """The rate is one exact type, so equal rates write equal json."""
     half = fractions.Fraction(1, 2)
     float_rate = capacity(0.5)

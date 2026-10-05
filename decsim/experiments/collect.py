@@ -2,9 +2,9 @@
 
 sinter's shape (sinter/_data/_task.py Task, _collection/_collection.py,
 _data/_task_stats.py) with a work unit of one seeded run. A Task is one
-settings record at one sweep point with json metadata; two tasks with
+machine's settings record with json metadata; two tasks with
 one strong id (sinter's sha256 of the values' json) are one task. The
-online threshold calibrator lives on the task so every shot of a point
+online threshold calibrator lives on the task so every shot of a task
 shares it, which is why shots stay serial inside a unit.
 
 A unit is one task's range of seeds, as sinter splits a task's shots
@@ -45,7 +45,7 @@ import decsim.windows.built_window_models as built_window_models
 # The key a record's class is written under beside its fields. No field
 # can take it, since class is a Python keyword.
 RECORD_CLASS_KEY = "class"
-# confidence_shot_count's word for every shot of a point in a piece's
+# confidence_shot_count's word for every shot of a task in a piece's
 # record
 EVERY_SHOT = "all"
 # A name a folder can take on any filesystem the results go to.
@@ -54,11 +54,11 @@ FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 @dataclasses.dataclass(frozen=True)
 class RecordOptions:
-    """What the run records of a point's shots beside their results.
+    """What the run records of a task's shots beside their results.
 
     confidence_shot_count is how many shots, from seed 0, write their
     windows' gaps to window_confidence.csv; None writes every scored shot's.
-    The machine does not read it, so it is no part of a point's id, as
+    The machine does not read it, so it is no part of a task's id, as
     sinter keeps output options out of a strong id
     (sinter/_data/_task.py:167-204).
     """
@@ -84,9 +84,9 @@ class RecordOptions:
 class Task:
     """One machine to collect shots of, under a name.
 
-    This is sinter's Task (sinter/_data/_task.py:18-75). name is the task's
+    It follows sinter's Task (sinter/_data/_task.py:18-75). name is the task's
     results folder, and --only picks a task by it. machine is read at the
-    task (MachineSettings.at_point), so the strong id covers the number a
+    task (MachineSettings.at_task), so the strong id covers the number a
     calibration table gives it. metadata is sinter's json_metadata.
     collection overrides the experiment's, as sinter's collection_options
     does. online_threshold is the task's calibrator when its threshold
@@ -105,10 +105,10 @@ class Task:
     def __post_init__(self) -> None:
         check_folder_name(self.name, "task")
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
-        machine = self.machine.at_point()
+        machine = self.machine.at_task()
         object.__setattr__(self, "machine", machine)
         if self.online_threshold is None:
-            calibrator = _point_calibrator(machine)
+            calibrator = _task_calibrator(machine)
             object.__setattr__(self, "online_threshold", calibrator)
 
     def strong_id(self) -> str:
@@ -234,9 +234,9 @@ def run_shot(
 
 
 def metadata_text(metadata: Mapping[str, object]) -> str:
-    """A point's metadata as one line of json, its keys sorted.
+    """A task's metadata as one line of json, its keys sorted.
 
-    The text a shot's narration names its point by, sinter's
+    The text a shot's narration names its task by, sinter's
     json_metadata form (sinter/_data/_csv_out.py:35-37).
     """
     value = json_value(metadata)
@@ -269,15 +269,15 @@ def check_folder_name(name: object, what: str) -> None:
     )
 
 
-def _point_calibrator(
+def _task_calibrator(
     settings: machine_settings.MachineSettings,
 ) -> Optional[ports.ThresholdSource]:
-    """The calibrator a point's shots share, when its threshold learns one."""
+    """The calibrator a task's shots share, when its threshold learns one."""
     switching = settings.switching
     if switching is None:
         return None
-    facts = settings.point_facts()
-    return switching.threshold.for_point(facts)
+    facts = settings.task_facts()
+    return switching.threshold.for_task(facts)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -429,7 +429,7 @@ def _json_record(record: object, form: _JsonForm) -> dict:
 
     The class sits beside the fields, as gem5's config.json writes each
     object's type (src/python/m5/SimObject.py:1175-1178), so two records
-    with the same fields, two rows that take no settings, are two points.
+    with the same fields, two rows that take no settings, are two tasks.
     """
     fields = {}
     if form.record_classes:
@@ -459,7 +459,7 @@ def _json_mapping(mapping: Mapping, form: _JsonForm) -> dict:
 def _refuse_a_key_that_is_not_text(value: object, where: str) -> None:
     """The id is json of the metadata, whose keys are text, at any depth.
 
-    A point's metadata enters here, so 1 and "1" cannot name one point.
+    A task's metadata enters here, so 1 and "1" cannot name one task.
     """
     if isinstance(value, (list, tuple)):
         for item in value:
@@ -471,8 +471,8 @@ def _refuse_a_key_that_is_not_text(value: object, where: str) -> None:
         if not isinstance(key, str):
             raise ValueError(
                 f"{where} holds the key {key!r}, which is not text; a "
-                "point's id is the json of its metadata, whose keys are "
-                f"text, so {key!r} and {str(key)!r} would name one point"
+                "task's id is the json of its metadata, whose keys are "
+                f"text, so {key!r} and {str(key)!r} would name one task"
             )
         _refuse_a_key_that_is_not_text(item, f"{where}.{key}")
 

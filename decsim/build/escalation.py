@@ -55,8 +55,8 @@ class Switching:
         """The signal from the weak decoder, the policy, the strong side.
 
         The confidence is built from the weak decoder's own settings and
-        the point's threshold. The policy decides on online_threshold,
-        the point's calibrator, when the threshold learns across shots.
+        the task's threshold. The policy decides on online_threshold,
+        the task's calibrator, when the threshold learns across shots.
         """
         threshold_nats = settings.threshold.threshold_nats
         signal = settings.confidence.build(
@@ -149,7 +149,7 @@ def _threshold_source(
     settings: escalation_settings.SwitchingSettings,
     online_threshold: Optional[ports.ThresholdSource],
 ):
-    """online_threshold, built once per point, else one from the settings."""
+    """online_threshold, built once per task, else one from the settings."""
     if online_threshold is not None:
         return online_threshold
     return settings.threshold.build()

@@ -30,12 +30,12 @@ class CapacitySettings:
     Parallel lanes are one wire with aggregate bandwidth (a PCIe x4 link
     stripes one transfer over four), so a card folds its lane count in. The
     rate is one exact Fraction of the number as written, so an int, a float
-    or a Fraction is one value with one point id, and a whole-tick duration
+    or a Fraction is one value with one task id, and a whole-tick duration
     is never inflated by float error, as ns-3's integer DataRate arithmetic.
     """
 
     input_bits_per_microsecond: fractions.Fraction
-    # where the rate was written, a label: no part of a point's id
+    # where the rate was written, a label: no part of a task's id
     source: str = dataclasses.field(compare=False)
 
     def __post_init__(self) -> None:
@@ -111,7 +111,7 @@ class ChannelSettings:
     name: str
     propagation_latency_ticks: int
     capacity: Optional[CapacitySettings]
-    # where the card was written, a label: no part of a point's id
+    # where the card was written, a label: no part of a task's id
     configuration_source: str = dataclasses.field(compare=False)
     protocol: Optional["PacketProtocolSettings"] = None
 
@@ -219,7 +219,7 @@ class FabricSettings:
     controller_to_qpu: PathSettings
     controller_to_strong_buffer: PathSettings
     # the card's name for the run's description, a label: no part of a
-    # point's id
+    # task's id
     profile_name: str = dataclasses.field(compare=False)
     readout_routes: tuple[ReadoutRoute, ...] = ()
 

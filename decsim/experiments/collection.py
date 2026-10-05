@@ -1,12 +1,12 @@
-"""The collection: how a point's shots are cut and stopped.
+"""The collection: how a task's shots are cut and stopped.
 
 sinter's CollectionOptions (sinter/_data/_collection_options.py:34-38):
-an experiment's default and a point's own. None of its keys enters a
-point's id, as sinter's strong id leaves the collection options out
-(sinter/_data/_task.py:167-204): collecting longer is the same point
+an experiment's default and a task's own. None of its keys enters a
+task's id, as sinter's strong id leaves the collection options out
+(sinter/_data/_task.py:167-204): collecting longer is the same task
 run longer.
 
-A point stops on its contiguous prefix of seeds, sinter's rule
+A task stops on its contiguous prefix of seeds, sinter's rule
 (sinter/_collection/_collection_manager.py:66-67) with a minimum: at the
 first shot where its scored failures reach max_failures and its scored
 shots reach min_shots, or where its shots reach max_shots or its core
@@ -35,7 +35,7 @@ TIME_CAP_STATE = "time cap"
 
 @dataclasses.dataclass(frozen=True)
 class CollectionSettings:
-    """The settings of one point's collection.
+    """The settings of one task's collection.
 
     max_failures is the target, None for none; min_shots the scored shots
     run whatever the failures; max_shots and max_core_seconds the caps, at
@@ -122,7 +122,7 @@ class CollectionSettings:
 
 @dataclasses.dataclass
 class PrefixCounts:
-    """A point's counts over its contiguous prefix of seeds."""
+    """A task's counts over its contiguous prefix of seeds."""
 
     shots: int = 0
     scored_shots: int = 0
@@ -138,8 +138,8 @@ class PrefixCounts:
 
 
 @dataclasses.dataclass(frozen=True)
-class PointRule:
-    """What a point's summary reads its prefix by.
+class TaskRule:
+    """What a task's summary reads its prefix by.
 
     settings is its collection, None for shots a caller fixed in advance,
     whose run is a cap at the shots it ran. is_adaptive says its
@@ -151,11 +151,11 @@ class PointRule:
     is_adaptive: bool = False
 
     @classmethod
-    def from_record(cls, record: Mapping) -> "PointRule":
-        """The rule a point's machine.json says its prefix is read by.
+    def from_record(cls, record: Mapping) -> "TaskRule":
+        """The rule a task's machine.json says its prefix is read by.
 
         The record's experiment facts are what collect_command wrote when
-        it recorded the point, so a fold reads a point by the collection
+        it recorded the task, so a fold reads a task by the collection
         it was run under, whatever its run file says now.
         """
         facts = record["experiment"]
@@ -164,14 +164,14 @@ class PointRule:
 
 
 class PrefixTracker:
-    """One point's contiguous prefix of seeds as its shot rows arrive.
+    """One task's contiguous prefix of seeds as its shot rows arrive.
 
     The rows come in seed order, as a fold merges them. The prefix ends
     at the shot its rule stops on, or at the first missing seed, which
     holds the stop until the gap is filled; later rows count nowhere.
     """
 
-    def __init__(self, rule: PointRule) -> None:
+    def __init__(self, rule: TaskRule) -> None:
         self.rule = rule
         self.counts = PrefixCounts()
         self.stop_kind = None
@@ -265,14 +265,14 @@ def _round_shape_of(row: Mapping) -> tuple:
 
 
 def _check_caps(settings: CollectionSettings) -> None:
-    """A point stops only at a cap it is given, so it needs one."""
+    """A task stops only at a cap it is given, so it needs one."""
     if settings.max_shots is not None:
         return
     if settings.max_core_seconds is not None:
         return
     raise ValueError(
         "collection has no cap; it sets max_shots or max_core_seconds, or a "
-        "point may never stop"
+        "task may never stop"
     )
 
 
@@ -296,7 +296,7 @@ def _check_count(value, key: str) -> None:
 def _check_core_seconds(value) -> None:
     """The time cap, when given, is a finite number of seconds above zero.
 
-    An infinite cap is no cap: a point with no other would never stop.
+    An infinite cap is no cap: a task with no other would never stop.
     """
     if value is None:
         return

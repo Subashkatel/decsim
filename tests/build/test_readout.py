@@ -183,7 +183,7 @@ def test_a_strong_store_cost_is_refused():
 
 
 def _strong_store_refusal(strong_store) -> str:
-    """The build refusal of a switching point given the strong store."""
+    """The build refusal of a switching task given the strong store."""
     settings = shape_tests.weak_base_switching(3, 0.001, 1.0)
     settings = dataclasses.replace(
         settings, strong_syndrome_buffer=strong_store

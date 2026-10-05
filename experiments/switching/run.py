@@ -1,4 +1,4 @@
-"""Two switching points on the weak decoder baseline, at p = 0.008.
+"""Two switching tasks on the weak decoder baseline, at p = 0.008.
 
 Near threshold, escalations and logical errors are frequent enough to
 measure. Each keeps a weak result whose confidence is at least the
@@ -104,30 +104,30 @@ def redo_window_switching(distance: int) -> machine_settings.MachineSettings:
     return _switching(base, complementary_gap, weak_decoder, strong_decoder)
 
 
-def switching_points() -> list:
-    """The cluster-gap points, then the redo-window points, by distance."""
-    points = []
+def switching_tasks() -> list:
+    """The cluster-gap tasks, then the redo-window tasks, by distance."""
+    tasks = []
     for distance in DISTANCES:
         machine = cluster_gap_switching(distance)
         metadata = _metadata(distance)
-        point = decsim.Task(
+        task = decsim.Task(
             f"cluster_gap_d{distance}",
             machine,
             metadata,
             CLUSTER_GAP_COLLECTION,
         )
-        points.append(point)
+        tasks.append(task)
     for distance in DISTANCES:
         machine = redo_window_switching(distance)
         metadata = _metadata(distance)
-        point = decsim.Task(
+        task = decsim.Task(
             f"redo_window_d{distance}",
             machine,
             metadata,
             REDO_WINDOW_COLLECTION,
         )
-        points.append(point)
-    return points
+        tasks.append(task)
+    return tasks
 
 
 def _switching(
@@ -174,5 +174,5 @@ def _metadata(distance: int) -> dict:
     }
 
 
-points = switching_points()
-experiment = decsim.Experiment(NAME, points)
+tasks = switching_tasks()
+experiment = decsim.Experiment(NAME, tasks)

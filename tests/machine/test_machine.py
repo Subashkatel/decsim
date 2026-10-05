@@ -367,7 +367,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     bound only by assemble, and the machine assembled by hand gives the
     result Machine.build gives.
     """
-    distance_three = two_tiers.points[0]
+    distance_three = two_tiers.tasks[0]
     settings = distance_three.machine
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
@@ -1804,8 +1804,8 @@ def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused(
 def test_a_machine_built_from_its_record_reads_the_tables_row(tmp_path):
     """Machine.build(settings, seed) builds a shot from the record alone.
 
-    A table threshold no point's task has read is read at the build,
-    from the record's own point facts: here its distance, 3.
+    A table threshold no collect.Task has read is read at the build,
+    from the record's own task facts: here its distance, 3.
     """
     table_path = tmp_path / "calibration.csv"
     table_path.write_text("distance,gth_eq4_wilson\n3,12.0\n5,18.0\n")
@@ -1822,10 +1822,10 @@ def test_a_machine_built_from_its_record_reads_the_tables_row(tmp_path):
 
 
 def test_settings_whose_threshold_reads_no_table_are_their_own_reading():
-    """A fixed threshold is the same at every point: nothing is rebuilt."""
+    """A fixed threshold is the same at every task: nothing is rebuilt."""
     settings = _switching_memory("pymatching", "complementary_gap")
 
-    read = settings.at_point()
+    read = settings.at_task()
 
     assert read is settings
 

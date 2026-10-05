@@ -29,10 +29,10 @@ __pycache__/
 
 # Run output. A results folder's summaries (sweep.csv, stats.csv and
 # the like), run.json, code state and script copy are tracked, so
-# every experiment's evidence has one place; each point's records and
+# every experiment's evidence has one place; each task's records and
 # working CSV, the pieces, the batches, the traces and the logs stay
 # with the run.
-/results/*/points/
+/results/*/tasks/
 /results/*/pieces/
 /results/*/batches/
 /results/*/trace/

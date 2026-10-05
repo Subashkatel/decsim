@@ -4,14 +4,14 @@ A union-find weak tier on Helios's cycle law beside a Relay-BP-5 strong
 tier at its measured A100 time, escalating windows whose cluster gap is
 under 20 dB into double windows (Toshio et al. 2510.25222 Sec. III C),
 at d = 5 to 13 and six physical error rates, 100 rounds a shot. The
-weak-alone points run the same machine with no escalation, every window
+weak-alone tasks run the same machine with no escalation, every window
 kept by the weak tier; a shot's samples depend on its seed alone, so
 each pairs with the switching shot of its seed. Every latency is held
 at one sourced value, the source beside each preset, so later
 experiments move one at a time.
 
-A point stops at 100 failures or five million shots. A switching piece
-is 50 shots: the slowest point, d = 13 at p = 0.005, is estimated at up
+A task stops at 100 failures or five million shots. A switching piece
+is 50 shots: the slowest task, d = 13 at p = 0.005, is estimated at up
 to 600 s a shot (a measured 32 s at d = 9, p = 0.003, about three times
 the region's detectors, twice the escalations), so a piece is at most
 about 8 hours, a third of a 24-hour Slurm job. A weak-alone piece is 2,000
@@ -54,7 +54,7 @@ DISTANCES = (5, 7, 9, 11, 13)
 PHYSICAL_ERROR_PROBABILITIES = (0.0005, 0.001, 0.002, 0.003, 0.004, 0.005)
 ROUND_PERIOD_MICROSECONDS = 1.0
 ROUNDS_PER_SHOT = 100
-# a chosen cluster-gap threshold, not a calibrated point: the paper's
+# a chosen cluster-gap threshold, not a calibrated one: the paper's
 # 20 dB is on the complementary gap
 THRESHOLD_DECIBELS = 20.0
 # the three strong-side legs that cross the cable to the host
@@ -326,8 +326,8 @@ def experiment_one_links() -> link_settings.FabricSettings:
     )
 
 
-def switching_baseline_points() -> list:
-    """Every switching point, then every weak-alone point.
+def switching_baseline_tasks() -> list:
+    """Every switching task, then every weak-alone task.
 
     Each set runs rate by distance, the distance fastest, as its earlier
     runs did.
@@ -336,30 +336,30 @@ def switching_baseline_points() -> list:
         physical_error_probability=PHYSICAL_ERROR_PROBABILITIES,
         distance=DISTANCES,
     )
-    switching_points = []
-    weak_alone_points = []
+    switching_tasks = []
+    weak_alone_tasks = []
     for values in grid:
         probability = values["physical_error_probability"]
         distance = values["distance"]
         metadata = _metadata(distance, probability)
         cell_name = f"d{distance}_p{probability}"
         switching_machine = switching(distance, probability)
-        switching_point = decsim.Task(
+        switching_task = decsim.Task(
             f"switching_{cell_name}",
             switching_machine,
             metadata,
             SWITCHING_COLLECTION,
         )
-        switching_points.append(switching_point)
+        switching_tasks.append(switching_task)
         weak_alone_machine = weak_alone(distance, probability)
-        weak_alone_point = decsim.Task(
+        weak_alone_task = decsim.Task(
             f"weak_alone_{cell_name}",
             weak_alone_machine,
             metadata,
             WEAK_ALONE_COLLECTION,
         )
-        weak_alone_points.append(weak_alone_point)
-    return switching_points + weak_alone_points
+        weak_alone_tasks.append(weak_alone_task)
+    return switching_tasks + weak_alone_tasks
 
 
 def _fridge_path(links, path_name, latency_cycles, bits_per_lane_cycle):
@@ -394,5 +394,5 @@ def _metadata(distance: int, physical_error_probability: float) -> dict:
     }
 
 
-points = switching_baseline_points()
-experiment = decsim.Experiment(NAME, points)
+tasks = switching_baseline_tasks()
+experiment = decsim.Experiment(NAME, tasks)

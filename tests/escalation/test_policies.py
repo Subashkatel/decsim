@@ -307,7 +307,7 @@ def test_an_online_source_beside_run_both_at_once_is_refused():
 class _KeepEverything:
     """A threshold source written outside decsim: the port, and no more.
 
-    Its one constructor argument is the sweep point's threshold in nats,
+    Its one constructor argument is the task's threshold in nats,
     and its Settings record is the fixed row's, which builds this row.
     """
 

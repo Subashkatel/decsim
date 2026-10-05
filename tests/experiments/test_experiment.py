@@ -1,14 +1,17 @@
 """The Python experiment a run file defines (experiment.py).
 
 The shape is gem5 MultiSim's, a script adding named simulators
-(src/python/gem5/utils/multisim/multisim.py:285-353), and sinter's point,
+(src/python/gem5/utils/multisim/multisim.py:285-353), and sinter's task,
 settings and json metadata whose hash is its id
 (sinter/_data/_task.py:167-204).
 """
 
+import ast
 import dataclasses
 import os
+import pathlib
 import random
+import re
 
 import pytest
 
@@ -24,8 +27,24 @@ import decsim.producers as producers
 import tests.experiments.run_files as run_files
 
 CAPPED = collection.CollectionSettings(max_shots=4)
-# a switching point whose threshold learns online from 15 dB
+# a switching task whose threshold learns online from 15 dB
 ONLINE = {"machine": "switching", "machine_arguments": {"online": {}}}
+EXPERIMENT_FILE = pathlib.Path(experiment.__file__)
+PACKAGE_DIR = EXPERIMENT_FILE.parent.parent
+# The names that keep the word point: the latency points of a window's
+# path (measure.POINTS), and another library's entry point or code point.
+OTHER_POINT_NAMES = frozenset(
+    {
+        "POINTS",
+        "ROUND_POINTS",
+        "TIER_SPLIT_POINT",
+        "window_points_us",
+        "_points_held",
+        "_add_latency_point_columns",
+    }
+)
+OTHER_POINT_PHRASES = ("entry_point", "code_point")
+IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _minimal_settings():
@@ -33,8 +52,8 @@ def _minimal_settings():
     return task.machine
 
 
-def _online_point_at_distance_5(workload) -> collect.Task:
-    """A Python switching point on the online threshold, running workload."""
+def _online_task_at_distance_5(workload) -> collect.Task:
+    """A Python switching task on the online threshold, running workload."""
     machine = _minimal_settings()
     confidence = complementary.ComplementaryGap.Settings()
     card = threshold_sources.OnlineThreshold.Settings(threshold_decibels=15.0)
@@ -52,11 +71,11 @@ def _online_point_at_distance_5(workload) -> collect.Task:
 
 
 def test_a_grid_runs_the_last_axis_fastest_in_the_order_given():
-    points = experiment.grid(
+    cells = experiment.grid(
         distance=(3, 5), physical_error_probability=(0.1, 0.2)
     )
 
-    assert points == [
+    assert cells == [
         {"distance": 3, "physical_error_probability": 0.1},
         {"distance": 3, "physical_error_probability": 0.2},
         {"distance": 5, "physical_error_probability": 0.1},
@@ -64,7 +83,7 @@ def test_a_grid_runs_the_last_axis_fastest_in_the_order_given():
     ]
 
 
-def test_two_points_of_one_name_are_refused():
+def test_two_tasks_of_one_name_are_refused():
     settings = _minimal_settings()
     first = collect.Task("d3", settings, {"distance": 3})
     second = collect.Task("d3", settings, {"distance": 5})
@@ -73,10 +92,10 @@ def test_two_points_of_one_name_are_refused():
         experiment.Experiment("study", [first, second], CAPPED)
 
     message = str(refused.value)
-    assert message.startswith("two points are named d3")
+    assert message.startswith("two tasks are named d3")
 
 
-def test_a_point_name_that_is_no_folder_name_is_refused():
+def test_a_task_name_that_is_no_folder_name_is_refused():
     settings = _minimal_settings()
 
     with pytest.raises(ValueError) as refused:
@@ -85,25 +104,40 @@ def test_a_point_name_that_is_no_folder_name_is_refused():
     assert "is not a folder name" in str(refused.value)
 
 
-def test_an_experiment_with_no_points_is_refused():
+def test_no_name_in_the_package_calls_a_task_a_point():
+    """One configuration of an experiment is a task, sinter's word.
+
+    A name with the word point is a latency point's or another library's.
+    Names, imports and json keys are read, so a second word for a task
+    does not come back.
+    """
+    point_names = []
+    module_paths = PACKAGE_DIR.rglob("*.py")
+    for path in sorted(module_paths):
+        point_names += _point_names_in(path)
+
+    assert point_names == []
+
+
+def test_an_experiment_with_no_tasks_is_refused():
     with pytest.raises(ValueError) as refused:
         experiment.Experiment("study", [], CAPPED)
 
-    assert str(refused.value) == "the experiment study has no points"
+    assert str(refused.value) == "the experiment study has no tasks"
 
 
-def test_a_point_no_collection_stops_is_refused():
+def test_a_task_no_collection_stops_is_refused():
     settings = _minimal_settings()
-    point = collect.Task("d3", settings)
+    task = collect.Task("d3", settings)
 
     with pytest.raises(ValueError) as refused:
-        experiment.Experiment("study", [point])
+        experiment.Experiment("study", [task])
 
     message = str(refused.value)
-    assert message.startswith("the point d3 has no collection")
+    assert message.startswith("the task d3 has no collection")
 
 
-def test_a_points_own_collection_wins_over_the_experiments():
+def test_a_tasks_own_collection_wins_over_the_experiments():
     settings = _minimal_settings()
     own = collection.CollectionSettings(max_shots=9)
     first = collect.Task("own", settings, {"distance": 3}, own)
@@ -114,20 +148,20 @@ def test_a_points_own_collection_wins_over_the_experiments():
     assert study.collection_of(second) == CAPPED
 
 
-def test_an_unknown_point_name_is_refused_with_the_names():
+def test_an_unknown_task_name_is_refused_with_the_names():
     settings = _minimal_settings()
-    point = collect.Task("d3", settings)
-    study = experiment.Experiment("study", [point], CAPPED)
+    task = collect.Task("d3", settings)
+    study = experiment.Experiment("study", [task], CAPPED)
 
     with pytest.raises(refusal.RefusalError) as refused:
-        study.point_named("d5")
+        study.task_named("d5")
 
     assert str(refused.value) == (
-        "the experiment study has no point d5; its points are d3"
+        "the experiment study has no task d5; its tasks are d3"
     )
 
 
-def test_a_python_points_task_builds_its_online_calibrator():
+def test_a_python_task_builds_its_online_calibrator():
     """The calibrator is task state, built with the task."""
     online_task = run_files.first_task(**ONLINE)
 
@@ -140,8 +174,8 @@ def test_a_python_points_task_builds_its_online_calibrator():
     assert generator.getstate() == expected.getstate()
 
 
-def test_a_python_point_states_its_distance_and_error_probability_once():
-    """The threshold record names no fact; the seed reads the point's.
+def test_a_python_task_states_its_distance_and_error_probability_once():
+    """The threshold record names no fact; the seed reads the task's.
 
     The distance is the qpu's and the error probability the one the
     workload was made at, so the online card restates neither.
@@ -150,7 +184,7 @@ def test_a_python_point_states_its_distance_and_error_probability_once():
         "surface_code:rotated_memory_x", 6, 5, 0.002
     )
 
-    task = _online_point_at_distance_5(workload)
+    task = _online_task_at_distance_5(workload)
 
     calibrator = task.online_threshold
 
@@ -167,7 +201,7 @@ def test_a_python_workload_that_states_no_probability_is_refused_by_name():
     workload = dataclasses.replace(made, physical_error_probability=None)
 
     with pytest.raises(ValueError, match="physical_error_probability=None"):
-        _online_point_at_distance_5(workload)
+        _online_task_at_distance_5(workload)
 
 
 def test_a_run_file_is_loaded_by_its_experiment(tmp_path):
@@ -188,7 +222,7 @@ def test_a_run_file_is_loaded_by_its_experiment(tmp_path):
     study = experiment.load(run_file)
 
     assert study.name == "study"
-    assert [point.name for point in study.points] == ["d3"]
+    assert [task.name for task in study.tasks] == ["d3"]
 
 
 def test_a_run_file_rewritten_within_its_second_runs_its_new_text(tmp_path):
@@ -206,8 +240,8 @@ def test_a_run_file_rewritten_within_its_second_runs_its_new_text(tmp_path):
 
     study = experiment.load(run_path)
 
-    first_point = study.points[0]
-    collection = study.collection_of(first_point)
+    first_task = study.tasks[0]
+    collection = study.collection_of(first_task)
     assert collection.max_shots == 4
 
 
@@ -225,12 +259,70 @@ def test_a_run_file_that_defines_no_experiment_is_refused(tmp_path):
     )
 
 
-def test_an_online_point_with_a_target_is_refused_when_built():
+def test_an_online_task_with_a_target_is_refused_when_built():
     """The stop it cannot keep is refused before anything is planned."""
     study = run_files.sweep(**ONLINE)
-    (point,) = study.points
+    (task,) = study.tasks
     target = collection.CollectionSettings(max_shots=10, max_failures=5)
-    targeted = dataclasses.replace(point, collection=target)
+    targeted = dataclasses.replace(task, collection=target)
 
     with pytest.raises(refusal.RefusalError, match="max_shots alone"):
         experiment.Experiment("online", [targeted])
+
+
+def _point_names_in(path: pathlib.Path) -> list:
+    """The module's names that call a task a point, each after its file."""
+    names = _names_in(path)
+    point_names = []
+    for name in sorted(names):
+        if _calls_a_task_a_point(name):
+            point_names.append(f"{path.name}: {name}")
+    return point_names
+
+
+def _names_in(path: pathlib.Path) -> set:
+    """Every name a module defines, reads, passes, imports or quotes."""
+    source = path.read_text()
+    tree = ast.parse(source)
+    names = set()
+    for node in ast.walk(tree):
+        name = _name_of(node)
+        imported_or_quoted = _imported_or_quoted_name_of(node)
+        names.update((name, imported_or_quoted))
+    names.discard("")
+    return names
+
+
+def _name_of(node: ast.AST) -> str:
+    """The name the node holds, or an empty string when it holds none."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, (ast.arg, ast.keyword)):
+        return node.arg or ""
+    if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+        return node.name
+    return ""
+
+
+def _imported_or_quoted_name_of(node: ast.AST) -> str:
+    """The name an import binds, or a string that is one (a json key)."""
+    if isinstance(node, ast.alias):
+        return node.asname or node.name
+    if not isinstance(node, ast.Constant):
+        return ""
+    if isinstance(node.value, str) and IDENTIFIER.fullmatch(node.value):
+        return node.value
+    return ""
+
+
+def _calls_a_task_a_point(name: str) -> bool:
+    if name in OTHER_POINT_NAMES:
+        return False
+    if any(phrase in name for phrase in OTHER_POINT_PHRASES):
+        return False
+    split_camel_case = re.sub(r"(?<=[a-z])(?=[A-Z])", "_", name)
+    lowered = split_camel_case.lower()
+    words = lowered.split("_")
+    return "point" in words or "points" in words

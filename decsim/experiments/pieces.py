@@ -1,6 +1,6 @@
-"""A piece: seeds [first, first + count) of one sweep point, kept as one folder.
+"""A piece: seeds [first, first + count) of one task, kept as one folder.
 
-pieces/<point id>/<first>-<last>/ holds the piece's additive files and
+pieces/<task id>/<first>-<last>/ holds the piece's additive files and
 piece.json. They are written into a hidden staging folder beside it,
 piece.json last, and the folder is renamed into place last, so a piece
 folder exists only whole: a rename within one directory is atomic under
@@ -29,22 +29,22 @@ import decsim.ports as ports
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
-# an adaptive point's calibrator as its piece left it
+# an adaptive task's calibrator as its piece left it
 STATE_FILE = "state.pickle"
 
 
 def piece_dir(
-    experiment_dir: pathlib.Path, point_id: str, first_seed: int, count: int
+    experiment_dir: pathlib.Path, task_id: str, first_seed: int, count: int
 ) -> pathlib.Path:
-    """Where the piece's folder is: its point, then its first and last seed."""
+    """Where the piece's folder is: its task, then its first and last seed."""
     last_seed = first_seed + count - 1
-    point_dir = experiment_dir / PIECES_FOLDER / point_id
-    return point_dir / f"{first_seed}-{last_seed}"
+    task_dir = experiment_dir / PIECES_FOLDER / task_id
+    return task_dir / f"{first_seed}-{last_seed}"
 
 
 def write(
     experiment_dir: pathlib.Path,
-    point_id: str,
+    task_id: str,
     first_seed: int,
     measurements: list,
     facts: dict,
@@ -52,12 +52,12 @@ def write(
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
-    state is an adaptive point's calibrator after the piece's last shot,
+    state is an adaptive task's calibrator after the piece's last shot,
     which its next piece starts from; it is pickled beside the files with
     its sha256 in piece.json.
     """
     count = len(measurements)
-    folder = piece_dir(experiment_dir, point_id, first_seed, count)
+    folder = piece_dir(experiment_dir, task_id, first_seed, count)
     staging = _staging_dir(folder)
     staging.mkdir(parents=True)
     record = report.record_of(measurements)
@@ -65,7 +65,7 @@ def write(
     identity = run_folder.piece_identity()
     confidence_shot_count = report.confidence_shot_count_of(measurements)
     piece = {
-        "point_id": point_id,
+        "task_id": task_id,
         "first_seed": first_seed,
         "count": count,
         "confidence_shot_count": confidence_shot_count,
@@ -80,28 +80,28 @@ def write(
     return folder
 
 
-def folders_of(experiment_dir: pathlib.Path, point_ids: list) -> list:
-    """Every whole piece of these points, point by point, in seed order.
+def folders_of(experiment_dir: pathlib.Path, task_ids: list) -> list:
+    """Every whole piece of these tasks, task by task, in seed order.
 
     A staging folder is no piece and is passed over.
     """
     folders = []
-    for point_id in point_ids:
-        point_dir = experiment_dir / PIECES_FOLDER / point_id
-        if not point_dir.is_dir():
+    for task_id in task_ids:
+        task_dir = experiment_dir / PIECES_FOLDER / task_id
+        if not task_dir.is_dir():
             continue
-        written = _whole_pieces(point_dir)
+        written = _whole_pieces(task_dir)
         folders.extend(written)
     return folders
 
 
 def every_folder(experiment_dir: pathlib.Path) -> list:
-    """Every whole piece the folder holds, of whichever point."""
+    """Every whole piece the folder holds, of whichever task."""
     pieces_dir = experiment_dir / PIECES_FOLDER
-    every_point_dir = pieces_dir.glob("*")
-    point_dirs = sorted(every_point_dir)
-    point_ids = [point_dir.name for point_dir in point_dirs]
-    return folders_of(experiment_dir, point_ids)
+    every_task_dir = pieces_dir.glob("*")
+    task_dirs = sorted(every_task_dir)
+    task_ids = [task_dir.name for task_dir in task_dirs]
+    return folders_of(experiment_dir, task_ids)
 
 
 def refuse_pieces_of_another_tree(run_dir: pathlib.Path, folders: list) -> None:
@@ -129,15 +129,15 @@ def refuse_pieces_of_another_tree(run_dir: pathlib.Path, folders: list) -> None:
         raise refusal.RefusalError(message)
 
 
-def point_folders(folders: list, point_id: str) -> list:
-    """The pieces of one point among folders, in their order."""
-    return [folder for folder in folders if folder.parent.name == point_id]
+def task_folders(folders: list, task_id: str) -> list:
+    """The pieces of one task among folders, in their order."""
+    return [folder for folder in folders if folder.parent.name == task_id]
 
 
 def saved_counts(folders: list) -> dict:
-    """One point's whole pieces, each first seed mapped to its count.
+    """One task's whole pieces, each first seed mapped to its count.
 
-    folders are the point's pieces as folders_of gave them, so a caller
+    folders are the task's pieces as folders_of gave them, so a caller
     that read them once counts what it folds.
     """
     counts = {}
@@ -163,16 +163,16 @@ def contiguous_ranges(saved: dict, first_seed: int) -> list:
 
 
 def seed_ranges_of(folders: list) -> dict:
-    """Each point's seed ranges, [first, count], from its pieces' names."""
+    """Each task's seed ranges, [first, count], from its pieces' names."""
     ranges = {}
     for folder in folders:
-        point_id = folder.parent.name
+        task_id = folder.parent.name
         first_seed, count = _range_of(folder)
-        point_ranges = ranges.setdefault(point_id, [])
-        point_ranges.append((first_seed, count))
+        task_ranges = ranges.setdefault(task_id, [])
+        task_ranges.append((first_seed, count))
     joined = {}
-    for point_id, point_ranges in ranges.items():
-        joined[point_id] = run_folder.seed_ranges(point_ranges)
+    for task_id, task_ranges in ranges.items():
+        joined[task_id] = run_folder.seed_ranges(task_ranges)
     return joined
 
 
@@ -220,7 +220,7 @@ def _publish(staging: pathlib.Path, folder: pathlib.Path) -> None:
 
     A rename onto a folder that holds files fails (rename(2), ENOTEMPTY),
     so of two writers of one piece the first to rename wins. The other's
-    copy holds the same seeds of the same point, the same piece, and is
+    copy holds the same seeds of the same task, the same piece, and is
     dropped.
     """
     try:
@@ -240,10 +240,10 @@ def _write_state(staging: pathlib.Path, state: ports.ThresholdSource) -> str:
     return digest.hexdigest()
 
 
-def _whole_pieces(point_dir: pathlib.Path) -> list:
-    """One point's piece folders in first-seed order, staging ones left out."""
+def _whole_pieces(task_dir: pathlib.Path) -> list:
+    """One task's piece folders in first-seed order, staging ones left out."""
     pieces = []
-    for folder in point_dir.iterdir():
+    for folder in task_dir.iterdir():
         if folder.name.startswith("."):
             continue
         pieces.append(folder)

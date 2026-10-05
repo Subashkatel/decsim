@@ -68,18 +68,18 @@ EXAMPLES = (
     "recipes.py",
     "two_tiers.py",
 )
-FOUR_POINTS = {
-    "axes": run_files.FOUR_POINT_AXES,
+FOUR_TASKS = {
+    "axes": run_files.FOUR_TASK_AXES,
     "collection": {"max_shots": 2},
 }
-# the four points in pieces of one shot each
-FOUR_POINTS_CUT = {
-    "axes": run_files.FOUR_POINT_AXES,
+# the four tasks in pieces of one shot each
+FOUR_TASKS_CUT = {
+    "axes": run_files.FOUR_TASK_AXES,
     "collection": {"max_shots": 2, "piece_rounds": 1},
 }
-# a switching point whose threshold learns online
+# a switching task whose threshold learns online
 ONLINE = {"machine": "switching", "machine_arguments": {"online": {}}}
-# one noisy point, which fails often enough for a stop rule to stop it
+# one noisy task, which fails often enough for a stop rule to stop it
 NOISY_AXES = {
     run_files.DISTANCE_PATH: (3,),
     run_files.ROUND_PERIOD_PATH: (1.0,),
@@ -88,9 +88,9 @@ NOISY_AXES = {
 
 
 def _run_one_shot(config_path, seed=0, out_dir=None, *, trace=False):
-    """`decsim run <file> --seed S`: the first point's one narrated shot."""
+    """`decsim run <file> --seed S`: the first task's one narrated shot."""
     run_path = pathlib.Path(config_path)
-    study = experiment.load_one_point(run_path)
+    study = experiment.load_one_task(run_path)
     return collect_command.run_one_shot(
         study, run_path, seed, out_dir, trace=trace
     )
@@ -182,8 +182,8 @@ def test_help_prints_the_verbs_without_failing(capsys):
     assert printed.err.strip() == command.usage()
 
 
-def test_run_builds_a_point_whose_threshold_learns_online(tmp_path):
-    """The one shot runs its point's threshold, as a collect's shot does."""
+def test_run_builds_a_task_whose_threshold_learns_online(tmp_path):
+    """The one shot runs its task's threshold, as a collect's shot does."""
     run_file = run_files.write_run_file(tmp_path, **ONLINE)
     out_dir = tmp_path / "run"
 
@@ -195,8 +195,8 @@ def test_run_builds_a_point_whose_threshold_learns_online(tmp_path):
 def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
     run_file = run_files.write_run_file(tmp_path)
     lines = _run_one_shot(run_file, seed=0, out_dir=tmp_path)
-    point = run_files.first_task()
-    settings = point.machine
+    task = run_files.first_task()
+    settings = task.machine
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     row = result.operation_results[0]
@@ -217,16 +217,16 @@ def test_run_with_trace_writes_the_shots_trace_file(tmp_path):
     assert len(written) == 1
 
 
-def _four_point_names(tmp_path) -> tuple:
-    """The four-point sweep's run file, and its point names in order."""
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+def _four_task_names(tmp_path) -> tuple:
+    """The four-task sweep's run file, and its task names in order."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     study = experiment.load(config_path)
-    names = [point.name for point in study.points]
+    names = [task.name for task in study.tasks]
     return config_path, names
 
 
-def test_run_list_prints_the_point_names_in_order(tmp_path, capsys):
-    config_path, names = _four_point_names(tmp_path)
+def test_run_list_prints_the_task_names_in_order(tmp_path, capsys):
+    config_path, names = _four_task_names(tmp_path)
 
     command.main(["run", str(config_path), "--list"])
 
@@ -234,26 +234,26 @@ def test_run_list_prints_the_point_names_in_order(tmp_path, capsys):
     assert printed.out.splitlines() == names
 
 
-def test_run_only_collects_the_one_point_it_names(tmp_path):
-    config_path, names = _four_point_names(tmp_path)
+def test_run_only_collects_the_one_task_it_names(tmp_path):
+    config_path, names = _four_task_names(tmp_path)
     out_dir = tmp_path / "out"
 
     command.main(
         ["run", str(config_path), "--out", str(out_dir), "--only", names[1]]
     )
 
-    points_dir = out_dir / "points"
-    recorded = sorted(path.name for path in points_dir.iterdir())
+    tasks_dir = out_dir / "tasks"
+    recorded = sorted(path.name for path in tasks_dir.iterdir())
     assert recorded == [names[1]]
     manifest = _manifest_of(out_dir)
-    assert len(manifest["points"]) == 4
+    assert len(manifest["tasks"]) == 4
     sweep_path = out_dir / "sweep.csv"
     sweep_rows = _rows(sweep_path)
     assert len(sweep_rows) == 1
 
 
 def test_run_shots_gives_the_first_shots_of_the_full_collection(tmp_path):
-    config_path, names = _four_point_names(tmp_path)
+    config_path, names = _four_task_names(tmp_path)
     full_dir = tmp_path / "full"
     first_dir = tmp_path / "first"
 
@@ -270,7 +270,7 @@ def test_run_shots_gives_the_first_shots_of_the_full_collection(tmp_path):
 
 
 @pytest.mark.parametrize("name", EXAMPLES)
-def test_run_collects_a_first_shot_of_every_point_of_an_example(tmp_path, name):
+def test_run_collects_a_first_shot_of_every_task_of_an_example(tmp_path, name):
     example_path = EXAMPLES_DIR / name
     study = experiment.load(example_path)
     out_dir = tmp_path / "out"
@@ -280,15 +280,15 @@ def test_run_collects_a_first_shot_of_every_point_of_an_example(tmp_path, name):
     )
 
     shot_rows = _rows_without_wall_clock(out_dir, "shots.csv")
-    point_ids = {row["point_id"] for row in shot_rows}
+    task_ids = {row["task_id"] for row in shot_rows}
     seeds = {row["seed"] for row in shot_rows}
-    assert len(shot_rows) == len(study.points)
-    assert len(point_ids) == len(study.points)
+    assert len(shot_rows) == len(study.tasks)
+    assert len(task_ids) == len(study.tasks)
     assert seeds == {"0"}
 
 
-def test_run_seed_narrates_the_shot_of_the_point_only_names(tmp_path):
-    config_path, names = _four_point_names(tmp_path)
+def test_run_seed_narrates_the_shot_of_the_task_only_names(tmp_path):
+    config_path, names = _four_task_names(tmp_path)
     out_dir = tmp_path / "out"
 
     command.main(
@@ -304,7 +304,7 @@ def test_run_seed_narrates_the_shot_of_the_point_only_names(tmp_path):
         ]
     )
 
-    record_path = out_dir / "points" / names[2] / "machine.json"
+    record_path = out_dir / "tasks" / names[2] / "machine.json"
     record = run_folder.read_json(record_path)
     assert record["seeds"] == [[1, 1]]
     assert (out_dir / "result.json").exists()
@@ -360,12 +360,12 @@ def _hashes_of(folder: pathlib.Path, *names: str) -> dict:
     return hashes
 
 
-def test_a_run_folder_holds_the_points_values_and_workload(tmp_path):
+def test_a_run_folder_holds_the_tasks_values_and_workload(tmp_path):
     """What the run ran, every value of it, and the workload as files."""
     config_path = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
     lines = _run_one_shot(config_path, seed=0, out_dir=out_dir)
-    resolved_dir = out_dir / "points"
+    resolved_dir = out_dir / "tasks"
     resolved_path = _one_file(resolved_dir, "*/machine.json")
     resolved_text = resolved_path.read_text()
     resolved = json.loads(resolved_text)
@@ -391,13 +391,13 @@ def test_a_shots_rounds_add_up_every_patchs_rounds():
     """
     task = three_patch_task()
 
-    record = run_folder.point_record(task)
+    record = run_folder.task_record(task)
 
     assert record["rounds_per_shot"] == 45
 
 
 def three_patch_task() -> collect.Task:
-    """The minimal machine's point running three 15-round memory patches."""
+    """The minimal machine's task running three 15-round memory patches."""
     cells = {
         run_files.ERROR_RATE_PATH: 0.001,
         run_files.DISTANCE_PATH: 3,
@@ -445,20 +445,20 @@ def test_a_streams_rounds_are_its_segments_counted_once():
     )
     task = collect.Task("segment", settings, {})
 
-    record = run_folder.point_record(task)
+    record = run_folder.task_record(task)
 
     assert record["rounds_per_shot"] == 3
 
 
-def test_a_point_recorded_again_hashes_only_its_inputs(tmp_path):
-    """A retried folder records its points again over the first record."""
+def test_a_task_recorded_again_hashes_only_its_inputs(tmp_path):
+    """A retried folder records its tasks again over the first record."""
     task = run_files.first_task()
     run_dir = tmp_path / "run"
 
-    run_folder.record_point(run_dir, task)
-    run_folder.record_point(run_dir, task)
+    run_folder.record_task(run_dir, task)
+    run_folder.record_task(run_dir, task)
 
-    inputs_dir = run_dir / "points" / task.name / "inputs"
+    inputs_dir = run_dir / "tasks" / task.name / "inputs"
     hashes_path = inputs_dir / "hashes.json"
     hashes_text = hashes_path.read_text()
     hashes = json.loads(hashes_text)
@@ -641,10 +641,10 @@ def test_a_cut_run_with_a_deleted_piece_run_again_is_the_uncut_run(tmp_path):
     it missing, then the same collect again: it runs that piece alone
     and every folded file is the uncut run's.
     """
-    whole_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    whole_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     cut_folder = tmp_path / "cut_config"
     cut_folder.mkdir()
-    cut_path = run_files.write_run_file(cut_folder, **FOUR_POINTS_CUT)
+    cut_path = run_files.write_run_file(cut_folder, **FOUR_TASKS_CUT)
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     command.main(["run", str(whole_path), "--out", str(whole_dir)])
@@ -674,11 +674,11 @@ def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
     command.main(["run", str(config_path), "--out", str(whole_dir)])
     pieces_dir = whole_dir / "pieces"
     piece_path = _one_file(pieces_dir, "*/*/piece.json")
-    point_dir = piece_path.parent.parent
+    task_dir = piece_path.parent.parent
     partial = (
         out_dir
         / "pieces"
-        / point_dir.name
+        / task_dir.name
         / f".{piece_path.parent.name}.0123abcd.partial"
     )
     partial.mkdir(parents=True)
@@ -686,7 +686,7 @@ def test_a_staging_folder_a_killed_run_left_is_no_piece(tmp_path):
 
     command.main(["run", str(config_path), "--out", str(out_dir)])
 
-    written = out_dir / "pieces" / point_dir.name / piece_path.parent.name
+    written = out_dir / "pieces" / task_dir.name / piece_path.parent.name
     whole_rows = _rows_of_every_file(whole_dir)
     out_rows = _rows_of_every_file(out_dir)
     assert (written / "piece.json").exists()
@@ -703,16 +703,16 @@ def test_two_writers_of_one_piece_both_leave_it_whole(tmp_path, monkeypatch):
     task = run_files.first_task()
     measurements = run_files.run_sweep([task], 1)
     experiment_dir = tmp_path / "experiment"
-    point_id = task.strong_id()
+    task_id = task.strong_id()
     write_json = run_folder.write_json
 
     def second_writer_first(path, value):
         monkeypatch.setattr(run_folder, "write_json", write_json)
-        pieces.write(experiment_dir, point_id, 0, measurements, {})
+        pieces.write(experiment_dir, task_id, 0, measurements, {})
         write_json(path, value)
 
     monkeypatch.setattr(run_folder, "write_json", second_writer_first)
-    folder = pieces.write(experiment_dir, point_id, 0, measurements, {})
+    folder = pieces.write(experiment_dir, task_id, 0, measurements, {})
 
     beside = folder.parent.iterdir()
     names = sorted(entry.name for entry in beside)
@@ -741,7 +741,7 @@ def test_a_collect_stops_on_the_shot_its_target_is_reached(tmp_path):
     """The rule's referent is the uncut run's own failures, seed by seed.
 
     One collect runs thirty shots with no target. Another cuts the same
-    point into pieces of one shot with a target of three failures: it
+    task into pieces of one shot with a target of three failures: it
     starts no piece past the shot of the third failure, so it holds the
     uncut run's shots up to that one and no more.
     """
@@ -782,17 +782,17 @@ def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path, monkeypatch):
     """
     whole_dir = tmp_path / "whole"
     raised_dir = tmp_path / "raised"
-    whole_run_dir = _collected_noisy_point(
+    whole_run_dir = _collected_noisy_task(
         tmp_path, "whole_config", {"max_shots": 4}, whole_dir
     )
-    _collected_noisy_point(tmp_path, "first", {"max_shots": 3}, raised_dir)
+    _collected_noisy_task(tmp_path, "first", {"max_shots": 3}, raised_dir)
     ran_seeds = []
     noting = functools.partial(
         _run_the_unit_and_note, ran_seeds, collect.run_unit
     )
     monkeypatch.setattr(collect, "run_unit", noting)
 
-    raised_run_dir = _collected_noisy_point(
+    raised_run_dir = _collected_noisy_task(
         tmp_path, "second", {"max_shots": 4}, raised_dir
     )
 
@@ -806,7 +806,7 @@ def test_a_raised_shot_cap_runs_on_from_the_saved_pieces(tmp_path, monkeypatch):
 def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     """The referent is one collect run to the raised target from the start.
 
-    A point stopped at one failure is collected again for three, as a
+    A task stopped at one failure is collected again for three, as a
     pilot's target is raised for the final run: it runs on from its
     saved pieces and folds to what the three-failure run folds to.
     """
@@ -814,13 +814,13 @@ def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     raised_dir = tmp_path / "raised"
     three = {"max_shots": 30, "max_failures": 3}
     one = {"max_shots": 30, "max_failures": 1}
-    whole_run_dir = _collected_noisy_point(
+    whole_run_dir = _collected_noisy_task(
         tmp_path, "whole_config", three, whole_dir
     )
-    _collected_noisy_point(tmp_path, "first", one, raised_dir)
+    _collected_noisy_task(tmp_path, "first", one, raised_dir)
     first_pieces = _piece_names(raised_dir)
 
-    raised_run_dir = _collected_noisy_point(
+    raised_run_dir = _collected_noisy_task(
         tmp_path, "second", three, raised_dir
     )
 
@@ -831,8 +831,8 @@ def test_a_raised_failure_target_runs_on_from_the_saved_pieces(tmp_path):
     assert raised_rows == whole_rows
 
 
-def _collected_noisy_point(tmp_path, name: str, collection: dict, out_dir):
-    """The NOISY_AXES point collected into out_dir under this collection."""
+def _collected_noisy_task(tmp_path, name: str, collection: dict, out_dir):
+    """The NOISY_AXES task collected into out_dir under this collection."""
     folder = tmp_path / name
     folder.mkdir()
     keys = {**collection, "piece_rounds": TWO_SHOT_PIECE_ROUNDS}
@@ -849,7 +849,7 @@ def _piece_names(experiment_dir) -> list:
 
 
 def _sweep_row_of(run_dir) -> dict:
-    """The one point's sweep.csv row, its cells read as numbers."""
+    """The one task's sweep.csv row, its cells read as numbers."""
     sweep_path = run_dir / "sweep.csv"
     (row,) = fold.row_stream(sweep_path)
     return fold.typed_row(row)
@@ -937,7 +937,7 @@ def _values_of(row: dict, columns: tuple) -> tuple:
     return tuple(values)
 
 
-def test_a_point_that_saved_its_stop_starts_no_piece_when_run_again(
+def test_a_task_that_saved_its_stop_starts_no_piece_when_run_again(
     tmp_path, capsys
 ):
     """A rerun counts the saved pieces, finds the stop, and runs nothing."""
@@ -966,22 +966,24 @@ def test_a_gap_in_the_saved_pieces_holds_the_stop(tmp_path):
 
     Seeds 0 and 2 are saved with a failure each and seed 1 is missing.
     Their failures would reach a target of two, but the prefix is seed 0
-    alone, so the point runs seed 1 and does not stop.
+    alone, so the task runs seed 1 and does not stop.
     """
     task = run_files.first_task()
-    point_id = task.strong_id()
-    _write_a_saved_piece(tmp_path, point_id, 0, [True])
-    _write_a_saved_piece(tmp_path, point_id, 2, [True])
+    task_id = task.strong_id()
+    _write_a_saved_piece(tmp_path, task_id, 0, [True])
+    _write_a_saved_piece(tmp_path, task_id, 2, [True])
     settings = collection_module.CollectionSettings(max_shots=3, max_failures=2)
-    point_folders = pieces.folders_of(tmp_path, [point_id])
-    saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection("d3", task, settings, 1, 15, saved)
+    task_folders = pieces.folders_of(tmp_path, [task_id])
+    saved = pieces.saved_counts(task_folders)
+    collection = collect_command.TaskCollection(
+        "d3", task, settings, 1, 15, saved
+    )
 
-    units = point.next_units(tmp_path, 1)
+    units = collection.next_units(tmp_path, 1)
 
     assert units == [collect.Unit(task, 1, 1)]
-    assert point.tracker.stop_kind is None
-    assert point.tracker.counts.failures == 1
+    assert collection.tracker.stop_kind is None
+    assert collection.tracker.counts.failures == 1
 
 
 def test_a_new_piece_ends_where_the_next_saved_piece_starts(tmp_path):
@@ -992,20 +994,22 @@ def test_a_new_piece_ends_where_the_next_saved_piece_starts(tmp_path):
     seed 2 again; the piece after seed 2 is whole.
     """
     task = run_files.first_task()
-    point_id = task.strong_id()
-    _write_a_saved_piece(tmp_path, point_id, 0, [False])
-    _write_a_saved_piece(tmp_path, point_id, 2, [False])
+    task_id = task.strong_id()
+    _write_a_saved_piece(tmp_path, task_id, 0, [False])
+    _write_a_saved_piece(tmp_path, task_id, 2, [False])
     settings = collection_module.CollectionSettings(max_shots=6)
-    point_folders = pieces.folders_of(tmp_path, [point_id])
-    saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection("d3", task, settings, 3, 15, saved)
+    task_folders = pieces.folders_of(tmp_path, [task_id])
+    saved = pieces.saved_counts(task_folders)
+    collection = collect_command.TaskCollection(
+        "d3", task, settings, 3, 15, saved
+    )
 
-    units = point.next_units(tmp_path, 2)
+    units = collection.next_units(tmp_path, 2)
 
     assert units == [collect.Unit(task, 1, 1), collect.Unit(task, 3, 3)]
 
 
-def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
+def test_a_task_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     tmp_path, capsys
 ):
     """The collector stops where the report's prefix does: on a shot.
@@ -1017,51 +1021,55 @@ def test_a_point_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
     past the stop, and the progress line says so.
     """
     task = run_files.first_task()
-    point_id = task.strong_id()
+    task_id = task.strong_id()
     failed = [False, True, False, False]
-    _write_a_saved_piece(tmp_path, point_id, 0, failed)
+    _write_a_saved_piece(tmp_path, task_id, 0, failed)
     settings = collection_module.CollectionSettings(
         max_shots=10, max_failures=1, min_shots=2
     )
-    point_folders = pieces.folders_of(tmp_path, [point_id])
-    saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection("d3", task, settings, 4, 15, saved)
+    task_folders = pieces.folders_of(tmp_path, [task_id])
+    saved = pieces.saved_counts(task_folders)
+    collection = collect_command.TaskCollection(
+        "d3", task, settings, 4, 15, saved
+    )
 
-    units = point.next_units(tmp_path, 1)
+    units = collection.next_units(tmp_path, 1)
 
     printed = capsys.readouterr()
     assert units == []
-    assert point.tracker.stop_kind is failure_statistics.StopKind.MINIMUM
-    assert point.tracker.counts.shots == 2
+    assert collection.tracker.stop_kind is failure_statistics.StopKind.MINIMUM
+    assert collection.tracker.counts.shots == 2
     assert (
         printed.err == "d3: 2 shots done (minimum); 2 more ran past the stop\n"
     )
 
 
-def test_a_stopped_point_says_so_once(tmp_path, capsys):
-    """The collector counts every point after each share; one line a stop."""
+def test_a_stopped_task_says_so_once(tmp_path, capsys):
+    """The collector counts every task after each share; one line a stop."""
     task = run_files.first_task()
-    point_id = task.strong_id()
-    _write_a_saved_piece(tmp_path, point_id, 0, [True, False])
+    task_id = task.strong_id()
+    _write_a_saved_piece(tmp_path, task_id, 0, [True, False])
     settings = collection_module.CollectionSettings(max_shots=2)
-    point_folders = pieces.folders_of(tmp_path, [point_id])
-    saved = pieces.saved_counts(point_folders)
-    point = collect_command.PointCollection("d3", task, settings, 2, 15, saved)
-    point.next_units(tmp_path, 1)
+    task_folders = pieces.folders_of(tmp_path, [task_id])
+    saved = pieces.saved_counts(task_folders)
+    collection = collect_command.TaskCollection(
+        "d3", task, settings, 2, 15, saved
+    )
+    collection.next_units(tmp_path, 1)
     capsys.readouterr()
 
-    point.count_the_pending(tmp_path)
+    collection.count_the_pending(tmp_path)
 
     printed = capsys.readouterr()
     assert printed.err == ""
 
 
 def _write_a_saved_piece(
-    experiment_dir, point_id: str, first_seed: int, failed: list
+    experiment_dir, task_id: str, first_seed: int, failed: list
 ):
     """A saved piece of scored shots, failed or not, as pieces.write lays it."""
     count = len(failed)
-    folder = pieces.piece_dir(experiment_dir, point_id, first_seed, count)
+    folder = pieces.piece_dir(experiment_dir, task_id, first_seed, count)
     folder.mkdir(parents=True)
     lines = [
         "seed,is_scored,logical_failure,sim_wall_seconds,scored_outputs,"
@@ -1100,12 +1108,12 @@ def test_a_collect_of_no_processes_is_refused_before_its_folder(
     assert not out_dir.exists()
 
 
-def test_a_point_whose_shot_runs_no_round_is_refused_before_its_record(
+def test_a_task_whose_shot_runs_no_round_is_refused_before_its_record(
     tmp_path,
 ):
     """A shot of no round sizes no piece and decodes nothing.
 
-    MachineSettings() holds the empty workload, so the point is refused
+    MachineSettings() holds the empty workload, so the task is refused
     where its record is built, before the folder holds any of it.
     """
     run_file = tmp_path / "empty.py"
@@ -1124,16 +1132,16 @@ def test_a_point_whose_shot_runs_no_round_is_refused_before_its_record(
         collect_command.run_experiment(run_file, out_dir)
 
     assert str(refused.value) == (
-        "the point empty runs no QEC round: no operation of its workload "
+        "the task empty runs no QEC round: no operation of its workload "
         "runs a round that emits detector data, so its shots would decode "
         "nothing; give it a workload, as decsim.settings.memory_workload "
         "makes one"
     )
-    assert not (out_dir / "points").exists()
+    assert not (out_dir / "tasks").exists()
 
 
-def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
-    """An online point's shots are not independent, so no target stops it."""
+def test_an_online_task_given_a_target_is_refused(tmp_path, capsys):
+    """An online task's shots are not independent, so no target stops it."""
     collection = {"max_shots": 1, "max_failures": 5}
     config_path = run_files.write_run_file(
         tmp_path, collection=collection, **ONLINE
@@ -1150,7 +1158,7 @@ def test_an_online_point_given_a_target_is_refused(tmp_path, capsys):
     assert not list(saved_pieces)
 
 
-def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
+def test_an_online_task_cut_and_resumed_is_the_uncut_task(tmp_path):
     """The referent is the uncut collect: one piece of all four shots.
 
     Cut into pieces of one shot, each piece starts from the calibrator
@@ -1182,7 +1190,7 @@ def test_an_online_point_cut_and_resumed_is_the_uncut_point(tmp_path):
     assert cut_trajectory == whole_trajectory
 
 
-def test_an_online_points_threshold_summary_is_its_end_counters(tmp_path):
+def test_an_online_tasks_threshold_summary_is_its_end_counters(tmp_path):
     """threshold_summary.csv holds the counters the stderr line prints.
 
     The referents are files the run writes apart from the calibrator's
@@ -1211,7 +1219,7 @@ def test_an_online_points_threshold_summary_is_its_end_counters(tmp_path):
     columns = list(summary)
     sweep_columns = list(sweep_row)
     assert columns[:5] == sweep_columns[:5]
-    assert summary["point_id"] == sweep_row["point_id"]
+    assert summary["task_id"] == sweep_row["task_id"]
     assert int(summary["windows"]) == decoded == 20
     assert int(summary["escalated"]) + audits_started == escalated
     assert int(summary["audited"]) == labeled == 1
@@ -1229,10 +1237,10 @@ def test_a_saved_calibrator_whose_bytes_changed_is_refused(tmp_path):
     task = run_files.first_task(**ONLINE)
     measurements = run_files.run_sweep([task], 1)
     experiment_dir = tmp_path / "experiment"
-    point_id = task.strong_id()
+    task_id = task.strong_id()
     calibrator = task.online_threshold
     folder = pieces.write(
-        experiment_dir, point_id, 0, measurements, {}, calibrator
+        experiment_dir, task_id, 0, measurements, {}, calibrator
     )
     saved = pieces.read_state(folder)
     state_path = folder / pieces.STATE_FILE
@@ -1254,7 +1262,7 @@ def _lose_the_piece(experiment_dir, name: str) -> None:
 
 
 def _online_config(tmp_path, piece_rounds: int):
-    """The noisy point with an online threshold that audits often.
+    """The noisy task with an online threshold that audits often.
 
     Written over the same file each time; the collect that read it has
     run by then.
@@ -1300,14 +1308,14 @@ def _online_trajectory_rows(run_dir) -> list:
     return _csv_rows(trajectory_path)
 
 
-def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
+def test_every_file_names_a_task_by_its_id_then_its_swept_values(tmp_path):
     """The values the design fixed first, then what was measured.
 
     Wickham's tidy order (Tidy Data, J. Stat. Softw. 59(10), 2014,
     section 2.3): one column per path the sweep sets, right after
-    the point id, in every file a point's rows are in.
+    the task id, in every file a task's rows are in.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     out_dir = tmp_path / "out"
 
     command.main(["run", str(config_path), "--out", str(out_dir)])
@@ -1320,18 +1328,20 @@ def test_every_file_names_a_point_by_its_id_then_its_swept_values(tmp_path):
     links_header = fold.header_of(links_path)
     sweep_rows = _csv_rows(sweep_path)
     first_columns = [
-        "point_id",
+        "task_id",
         "qpu.distance",
         "qpu.round_period_microseconds",
         "workload.arguments.physical_error_probability",
         "algorithm",
     ]
     error_rate = "workload.arguments.physical_error_probability"
-    points = {(row["qpu.distance"], row[error_rate]) for row in sweep_rows}
+    parameter_pairs = {
+        (row["qpu.distance"], row[error_rate]) for row in sweep_rows
+    }
     assert sweep_header[:5] == first_columns
     assert shots_header[:5] == first_columns
     assert links_header[:5] == first_columns
-    assert points == {
+    assert parameter_pairs == {
         ("3", "0.001"),
         ("5", "0.001"),
         ("3", "0.003"),
@@ -1400,10 +1410,10 @@ def test_a_manifest_names_a_library_loaded_from_outside_the_package(
     assert manifest["compiled_libraries"] == expected
 
 
-def test_a_run_file_with_other_points_is_refused_in_the_folder(tmp_path):
+def test_a_run_file_with_other_tasks_is_refused_in_the_folder(tmp_path):
     """A folder's copy of its run file is the one that made its rows.
 
-    A grid split one file a distance names other points in each file,
+    A grid split one file a distance names other tasks in each file,
     so the second file into the first one's folder is refused and the
     folder keeps its copy.
     """
@@ -1422,20 +1432,20 @@ def test_a_run_file_with_other_points_is_refused_in_the_folder(tmp_path):
 
 
 def _one_distance_config(tmp_path, distance: int) -> pathlib.Path:
-    """The four-point sweep at one distance, in a folder of its own."""
+    """The four-task sweep at one distance, in a folder of its own."""
     folder = tmp_path / f"d{distance}"
     folder.mkdir()
-    axes = {**run_files.FOUR_POINT_AXES, run_files.DISTANCE_PATH: (distance,)}
+    axes = {**run_files.FOUR_TASK_AXES, run_files.DISTANCE_PATH: (distance,)}
     collection = {"max_shots": 2, "piece_rounds": 1}
     return run_files.write_run_file(folder, axes=axes, collection=collection)
 
 
 def test_a_raised_stop_rule_replaces_the_folders_run_file_copy(tmp_path):
-    """The same points run further: the copy is the file that ran last."""
+    """The same tasks run further: the copy is the file that ran last."""
     out_dir = tmp_path / "out"
-    _collected_noisy_point(tmp_path, "first", {"max_shots": 2}, out_dir)
+    _collected_noisy_task(tmp_path, "first", {"max_shots": 2}, out_dir)
 
-    _collected_noisy_point(tmp_path, "second", {"max_shots": 3}, out_dir)
+    _collected_noisy_task(tmp_path, "second", {"max_shots": 3}, out_dir)
 
     second_path = tmp_path / "second" / "unit_test_config.py"
     copy_path = out_dir / "unit_test_config.py"
@@ -1443,39 +1453,39 @@ def test_a_raised_stop_rule_replaces_the_folders_run_file_copy(tmp_path):
 
 
 def test_a_shot_replayed_into_a_collection_keeps_its_records(tmp_path):
-    """The collection's machine.json and run.json points stay as written.
+    """The collection's machine.json and run.json tasks stay as written.
 
     The collection's record holds what its fold needs (experiment), which
     a one-shot record does not, so a replay must not write over it.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     out_dir = tmp_path / "out"
     collect_command.run_experiment(config_path, out_dir)
-    point_records = out_dir.glob("points/*/machine.json")
-    record_paths = sorted(point_records)
+    task_records = out_dir.glob("tasks/*/machine.json")
+    record_paths = sorted(task_records)
     records_before = [path.read_bytes() for path in record_paths]
     manifest_before = _manifest_of(out_dir)
-    points_before = manifest_before["points"]
+    tasks_before = manifest_before["tasks"]
 
     _run_one_shot(config_path, seed=0, out_dir=out_dir)
 
     records_after = [path.read_bytes() for path in record_paths]
     assert records_after == records_before
     manifest_after = _manifest_of(out_dir)
-    assert manifest_after["points"] == points_before
+    assert manifest_after["tasks"] == tasks_before
     assert (out_dir / "result.json").exists()
 
 
-def test_a_replay_of_a_point_recorded_with_other_settings_is_refused(
+def test_a_replay_of_a_task_recorded_with_other_settings_is_refused(
     tmp_path,
 ):
     """A saved record of another id under the name is another machine."""
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     out_dir = tmp_path / "out"
     collect_command.run_experiment(config_path, out_dir)
-    study = experiment.load_one_point(config_path)
-    (point,) = study.points
-    record_path = out_dir / "points" / point.name / "machine.json"
+    study = experiment.load_one_task(config_path)
+    (task,) = study.tasks
+    record_path = out_dir / "tasks" / task.name / "machine.json"
     record = run_folder.read_json(record_path)
     record["id"] = "0" * 64
     record_text = json.dumps(record)
@@ -1494,12 +1504,12 @@ def test_a_record_class_names_settings_and_not_results(tmp_path):
     The class tells two records with the same fields apart, which is a
     setting's identity; a result's fields are all it holds.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     out_dir = tmp_path / "out"
 
     _run_one_shot(config_path, seed=0, out_dir=out_dir)
 
-    (record_path,) = out_dir.glob("points/*/machine.json")
+    (record_path,) = out_dir.glob("tasks/*/machine.json")
     record = run_folder.read_json(record_path)
     result_text = (out_dir / "result.json").read_text()
     assert record["settings"]["class"] == "decsim.settings.MachineSettings"
@@ -1541,7 +1551,7 @@ def test_two_dirty_trees_of_one_commit_are_two_trees(
     One run file runs from two trees at one commit with other
     uncommitted changes, each into its own folder, whose run.json names
     the sha256 of its code_state.patch. The second tree's run into the
-    first folder is refused, and so is the fold of a point whose pieces
+    first folder is refused, and so is the fold of a task whose pieces
     the two trees ran, as a piece copied in by hand leaves it.
     """
     config_path = _capped_noisy_config(tmp_path, 2, 15)
@@ -1584,7 +1594,7 @@ def test_two_dirty_trees_of_one_commit_are_two_trees(
 def test_a_run_onto_pieces_another_tree_saved_is_refused_before_a_shot(
     tmp_path, capsys
 ):
-    """A capped point whose saved pieces all ran another tree.
+    """A capped task whose saved pieces all ran another tree.
 
     They reach its cap, so a run again would skip them as done and fold
     them under this folder's run.json as this tree's. The run is refused
@@ -1611,19 +1621,19 @@ def test_a_run_onto_pieces_another_tree_saved_is_refused_before_a_shot(
     assert _run_folder_bytes(out_dir) == before
 
 
-def test_a_fold_of_two_points_saved_by_two_trees_is_refused(tmp_path, capsys):
+def test_a_fold_of_pieces_saved_by_two_trees_is_refused(tmp_path, capsys):
     """Every piece of a folder ran the tree its run.json names.
 
-    One point's pieces all ran another tree, which agrees with itself
-    point by point, and the fold still refuses, publishing nothing.
+    One task's pieces all ran another tree, which agrees with itself
+    task by task, and the fold still refuses, publishing nothing.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     out_dir = tmp_path / "out"
     command.main(["run", str(config_path), "--out", str(out_dir)])
-    point_dirs = out_dir.glob("pieces/*")
-    first_point_dir = min(point_dirs)
+    task_dirs = out_dir.glob("pieces/*")
+    first_task_dir = min(task_dirs)
     other_commit = "b" * 40
-    piece_paths = first_point_dir.glob("*/piece.json")
+    piece_paths = first_task_dir.glob("*/piece.json")
     _as_pieces_run_at_commit(piece_paths, other_commit)
     before = _run_folder_bytes(out_dir)
     capsys.readouterr()
@@ -1632,7 +1642,7 @@ def test_a_fold_of_two_points_saved_by_two_trees_is_refused(tmp_path, capsys):
         command.main(["run", "--fold", "--out", str(out_dir)])
 
     printed = capsys.readouterr()
-    assert f"{first_point_dir}" in printed.err
+    assert f"{first_task_dir}" in printed.err
     assert f"ran commit {other_commit}" in printed.err
     assert _run_folder_bytes(out_dir) == before
 
@@ -1722,7 +1732,7 @@ def test_a_new_folder_from_a_tree_with_no_commit_is_refused(
     monkeypatch.delenv(run_folder.ALLOW_DIRTY_VARIABLE)
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
     monkeypatch.setattr(run_folder, "_commit_from_git_files", lambda _: None)
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     refused_dir = tmp_path / "refused"
     allowed_dir = tmp_path / "allowed"
 
@@ -1831,7 +1841,7 @@ def test_a_results_folder_in_the_checkout_leaves_the_tree_clean(
 
 
 def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     serial_dir = tmp_path / "serial"
     pooled_dir = tmp_path / "pooled"
     command.main(["run", str(config_path), "--out", str(serial_dir)])
@@ -1850,17 +1860,17 @@ def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
     assert pooled_rows == serial_rows
 
 
-def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_point(tmp_path):
-    """The additive record's whole point: a folded point is the point.
+def test_pieces_of_one_shot_fold_to_the_rows_of_one_piece_a_task(tmp_path):
+    """The additive record loses nothing: a folded task is the task.
 
-    One collect saves each point as one piece; another cuts each point
+    One collect saves each task as one piece; another cuts each task
     into pieces of one shot, serially and in a pool. Every file the
     three fold to is the same, row for row, but for the wall clock.
     """
-    whole_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    whole_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     cut_folder = tmp_path / "cut_config"
     cut_folder.mkdir()
-    cut_path = run_files.write_run_file(cut_folder, **FOUR_POINTS_CUT)
+    cut_path = run_files.write_run_file(cut_folder, **FOUR_TASKS_CUT)
     whole_dir = tmp_path / "whole"
     cut_dir = tmp_path / "cut"
     pooled_dir = tmp_path / "pooled"
@@ -1897,7 +1907,7 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     head = subprocess.run(rev_parse, check=True, capture_output=True, text=True)
     commit_of_this_tree = head.stdout.strip()
     monkeypatch.setattr(run_folder, "_git_output", lambda *_: None)
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     out_dir = tmp_path / "run"
     monkeypatch.chdir(tmp_path)
     command.main(["run", str(config_path), "--out", str(out_dir)])
@@ -1922,7 +1932,7 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     each on purpose: one process launched by two different launchers is
     the test bench's own shape and never a cluster job's.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     dirty_dir = tmp_path / "dirty"
     clean_dir = tmp_path / "clean"
     monkeypatch.setenv(run_folder.TREE_DIRTY_VARIABLE, "1")
@@ -1950,7 +1960,7 @@ def test_both_manifests_of_a_run_name_the_tree_it_started_on(
     one commit for the first write and another for the second, and both
     manifests name the first, which is the code the run imported.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     out_dir = tmp_path / "run"
     started_utc = run_folder.utc_now()
     out_dir.mkdir()
@@ -2079,15 +2089,15 @@ def test_a_slurm_job_asking_for_no_core_hour_or_memory_is_refused(
 
 
 def test_array_jobs_then_the_fold_write_the_local_runs_rows(tmp_path):
-    """The referent is one local run of the same four points.
+    """The referent is one local run of the same four tasks.
 
-    The launcher records the points; each job of the array then runs the
+    The launcher records the tasks; each job of the array then runs the
     line run.sbatch holds, in whatever order the array runs them, and the
     fold job's fold writes every file the local run wrote, row for row
     but the wall clock. The run file reads a file beside it, as a
     threshold table is read, and every job finds it.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     _read_a_file_beside(config_path)
     local_dir = tmp_path / "local"
     split_dir = tmp_path / "split"
@@ -2111,8 +2121,8 @@ def test_array_jobs_then_the_fold_write_the_local_runs_rows(tmp_path):
 def test_an_array_job_refuses_a_run_file_edited_since_the_launch(
     tmp_path, capsys
 ):
-    """Job i of an edited run file may name another point, so it stops."""
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    """Job i of an edited run file may name another task, so it stops."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     split_dir = tmp_path / "split"
     job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
@@ -2184,7 +2194,7 @@ def _estimate_of(row: dict) -> tuple:
 def test_a_sweep_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
     """The referent is failure_statistics on the row's own counts and stop.
 
-    One noisy point with a target of three failures runs until it
+    One noisy task with a target of three failures runs until it
     stops; its row has the target state, and its estimate and exact
     limits are the ones the statistics module gives the same failures,
     scored shots and stop.
@@ -2203,18 +2213,18 @@ def test_a_sweep_rows_estimate_is_failure_statistics_on_its_counts(tmp_path):
     assert _estimate_of(row) == _estimate_by_the_statistics(row)
 
 
-def test_a_fold_keeps_a_point_its_run_file_no_longer_sweeps(tmp_path):
+def test_a_fold_keeps_a_task_its_run_file_no_longer_sweeps(tmp_path):
     """A fold folds what was recorded, not what the run file makes now.
 
-    Four points are collected; the run file then drops one error rate. The
-    two points it no longer makes keep their pieces, and a fold still
+    Four tasks are collected; the run file then drops one error rate. The
+    two tasks it no longer makes keep their pieces, and a fold still
     counts them, every saved shot once.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_POINTS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     experiment_dir = tmp_path / "experiment"
     command.main(["run", str(config_path), "--out", str(experiment_dir)])
     narrower_axes = {
-        **run_files.FOUR_POINT_AXES,
+        **run_files.FOUR_TASK_AXES,
         run_files.ERROR_RATE_PATH: (0.001,),
     }
     run_files.write_run_file(
@@ -2236,7 +2246,7 @@ def _total_shots(rows: list) -> int:
 
 
 def _capped_noisy_config(tmp_path, max_shots: int, piece_rounds: int):
-    """The noisy point with a shot cap and no target, written in place."""
+    """The noisy task with a shot cap and no target, written in place."""
     collection = {"max_shots": max_shots, "piece_rounds": piece_rounds}
     return run_files.write_run_file(
         tmp_path, axes=NOISY_AXES, collection=collection
@@ -2306,14 +2316,14 @@ def test_a_fold_that_fails_part_way_leaves_the_last_run_folder_as_it_was(
 
 def _write_part_then_fill_the_disk(_rows, path, _swept=None) -> None:
     """write_csv on a disk that fills after the header's first column."""
-    path.write_text("point_id,")
+    path.write_text("task_id,")
     raise OSError(errno.ENOSPC, "No space left on device", str(path))
 
 
 def _run_folder_bytes(experiment_dir: pathlib.Path) -> dict:
     """Each file of the fold and the records, and its bytes."""
     csv_paths = experiment_dir.glob("*.csv")
-    record_paths = experiment_dir.glob("points/*/machine.json")
+    record_paths = experiment_dir.glob("tasks/*/machine.json")
     paths = [*csv_paths, *record_paths]
     return {str(path): path.read_bytes() for path in paths}
 

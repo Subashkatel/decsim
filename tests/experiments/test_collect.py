@@ -1,8 +1,8 @@
 """The experiments layer's referents: sinter's collect, and a recorded sweep.
 
 Referent one is a sweep of the reference machine recorded before
-decsim.collect existed, rerun on its machine (run_files.REFERENCE), its
-sweep.csv and its per-link means kept in data/, each mean
+the collect module existed, rerun on its machine (run_files.REFERENCE),
+its sweep.csv and its per-link means kept in data/, each mean
 the one shot_links.csv gives a link over the point's shots. Ten of its
 numbers
 were amended when the controller-to-store hop stopped being priced at
@@ -60,8 +60,8 @@ import numpy
 import pytest
 import stim
 
-import decsim.collect as collect
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
+import decsim.experiments.collect as collect
 import decsim.experiments.collect_command as run
 import decsim.experiments.measure as measure_shot
 import decsim.experiments.report as sweep_report

@@ -10,7 +10,7 @@ import fractions
 
 import pytest
 
-import decsim.collect as collect
+import decsim.experiments.collect as collect
 import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
 

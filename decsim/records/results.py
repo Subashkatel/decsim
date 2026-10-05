@@ -46,8 +46,8 @@ class RunResult:
 class UnitTask(Protocol):
     """The task a unit ran, as an outcome carries it: the point it is.
 
-    decsim.collect.Task is one. Records import no component, so the
-    task is typed by what it offers and not by its class.
+    decsim.experiments.collect.Task is one. Records import no component,
+    so the task is typed by what it offers and not by its class.
     """
 
     def strong_id(self) -> str:

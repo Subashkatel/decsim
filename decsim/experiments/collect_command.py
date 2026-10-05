@@ -18,8 +18,8 @@ import sys
 import tempfile
 from typing import Optional, Union
 
-import decsim.collect as collect
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold

@@ -38,7 +38,6 @@ from typing import Optional
 import numpy
 import pytest
 
-import decsim.collect as collect
 import decsim.confidence.complementary as complementary
 import decsim.config as config_module
 import decsim.decoders.backend_outcome as backend_outcome
@@ -55,6 +54,7 @@ import decsim.decoders.verify_windows as verify_windows
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
 import decsim.experiments.measure as measure
@@ -2110,8 +2110,8 @@ def test_no_runner_module_names_a_row_of_the_decoder_table():
     """A new decoder is one table row and one axis value, no runner edit.
 
     The referent is the decoder rows themselves (DECODER_ROWS). The
-    runner is every module below the experiments package,
-    with collect.py. None imports a row's package, or a
+    runner is every module below the experiments package. None imports
+    a row's package, or a
     package only the rows import (a decoder backend), under any alias,
     and no string constant in it is a row's key (NOTE section 9 item
     10), so what it measures holds for every row.
@@ -2154,12 +2154,11 @@ def test_the_row_check_reads_imports_and_keys_and_not_prose(source, expected):
 
 
 def _runner_paths() -> list:
-    """Every module below the experiments package, and collect.py."""
+    """Every module below the experiments package."""
     measure_file = pathlib.Path(measure.__file__)
     experiments_dir = measure_file.parent
     experiment_files = experiments_dir.rglob("*.py")
-    collect_file = pathlib.Path(collect.__file__)
-    return sorted([*experiment_files, collect_file])
+    return sorted(experiment_files)
 
 
 def _rows_named_in(paths: list) -> list:
@@ -2234,8 +2233,8 @@ def _decoder_rows() -> tuple:
 
 def _packages_imported(row_packages: set, *, inside: bool) -> set:
     """The top-level packages decsim's modules import, in or out of rows."""
-    collect_file = pathlib.Path(collect.__file__)
-    package_dir = collect_file.parent
+    machine_file = pathlib.Path(machine_module.__file__)
+    package_dir = machine_file.parent
     packages = set()
     for path in package_dir.rglob("*.py"):
         module = _module_name(path, package_dir.parent)

@@ -15,10 +15,10 @@ import pathlib
 import statistics
 from typing import Optional, Union
 
-import decsim.collect as collect
 import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
+import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module

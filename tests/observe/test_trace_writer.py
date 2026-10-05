@@ -14,9 +14,9 @@ import json
 
 import pytest
 
-import decsim.collect as collect
 import decsim.decoders.decoders as decoders
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.experiments.collect as collect
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.qpu.magic_state_factories as magic_state_factories

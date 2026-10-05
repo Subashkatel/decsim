@@ -35,7 +35,6 @@ import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
-import decsim.collect as collect
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.config as config
@@ -57,6 +56,7 @@ import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles

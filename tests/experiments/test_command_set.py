@@ -29,10 +29,10 @@ import scipy.stats
 import sinter
 import stim
 
-import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim.experiments.collect as collect
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.collection as collection_module
 import decsim.experiments.command as command
@@ -607,7 +607,7 @@ def test_the_standard_library_and_submodules_are_left_out():
 
     assert "json" not in versions
     assert "stim" in versions
-    assert "decsim.collect" not in versions
+    assert "decsim.experiments.collect" not in versions
 
 
 def test_a_piece_names_the_processor_linux_lists(tmp_path, monkeypatch):

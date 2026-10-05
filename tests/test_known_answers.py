@@ -26,12 +26,12 @@ import dataclasses
 
 import pytest
 
-import decsim.collect as collect
 import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.qpu.round_policies as round_policies

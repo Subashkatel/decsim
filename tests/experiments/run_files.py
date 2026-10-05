@@ -25,12 +25,12 @@ from typing import Optional
 import numpy
 import pymatching
 
-import decsim.collect as collect
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
 import decsim.experiments.experiment as experiment
 import decsim.experiments.measure as measure

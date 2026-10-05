@@ -17,8 +17,8 @@ import random
 
 import pytest
 
-import decsim.collect as collect
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
 import decsim.windows.schemes.sliding as sliding_scheme

@@ -11,9 +11,9 @@ import argparse
 import json
 import pathlib
 
-import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.experiments.collect as collect
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files

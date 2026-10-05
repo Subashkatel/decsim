@@ -24,9 +24,9 @@ from typing import Optional
 
 import decsim.build.escalation as escalation_build
 import decsim.build.plan as plan_build
-import decsim.collect as collect
 import decsim.compiled_libraries as compiled_libraries
 import decsim.engine as engine_module
+import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module

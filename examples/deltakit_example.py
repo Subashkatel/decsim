@@ -14,9 +14,9 @@ from typing import Optional
 
 import stim
 
-import decsim.collect as collect
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
+import decsim.experiments.collect as collect
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings

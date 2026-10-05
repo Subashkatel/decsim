@@ -33,7 +33,6 @@ import types
 
 import pytest
 
-import decsim.collect as collect
 import decsim.confidence.cluster as cluster
 import decsim.confidence.extra_cluster as extra_cluster
 import decsim.decoders.decoder as decoder_module
@@ -41,6 +40,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.engine as engine_module
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
 import decsim.links.link_profiles as link_profiles

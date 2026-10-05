@@ -11,7 +11,7 @@ import json
 import pytest
 import stim
 
-import decsim.collect as collect
+import decsim.experiments.collect as collect
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
 import decsim.producers as producers

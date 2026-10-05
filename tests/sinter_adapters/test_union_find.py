@@ -17,9 +17,9 @@ import pytest
 import sinter
 import stim
 
-import decsim.collect as collect
 import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
+import decsim.experiments.collect as collect
 import decsim.frontends.settings as workload_settings
 import decsim.producers as producers
 import decsim.settings as machine_settings

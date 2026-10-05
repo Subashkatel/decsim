@@ -20,7 +20,7 @@ import types
 from collections.abc import Mapping, Sequence
 from typing import Optional, Union
 
-import decsim.collect as collect
+import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
 import decsim.settings as machine_settings

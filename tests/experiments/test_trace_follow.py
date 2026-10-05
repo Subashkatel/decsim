@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-import decsim.collect as collect
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.experiments.collect as collect
 import decsim.experiments.trace_file as trace_file
 import decsim.experiments.trace_follow as trace_follow
 import decsim.machine as machine_module

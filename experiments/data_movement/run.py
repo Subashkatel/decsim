@@ -175,7 +175,7 @@ def data_movement_points() -> list:
             machine = machine_at(distance)
             metadata = reported_cells(machine, distance)
             point_name = f"{block_name}_d{distance}"
-            point = decsim.Point(point_name, machine, metadata)
+            point = decsim.Task(point_name, machine, metadata)
             points.append(point)
     return points
 

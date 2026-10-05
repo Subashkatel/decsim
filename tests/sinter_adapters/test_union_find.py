@@ -49,7 +49,7 @@ def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
     task = baseline_task(distance, code_task, ERROR_RATE, UNION_FIND)
     seeds = range(SHOT_COUNT)
     events, machine_answers = machine_shots(task, seeds)
-    (operation,) = task.settings.workload.operations
+    (operation,) = task.machine.workload.operations
     circuit = operation.circuit
     model = circuit.detector_error_model(
         decompose_errors=True, approximate_disjoint_errors=True
@@ -130,7 +130,7 @@ def baseline_task(distance: int, code_task: str, error_rate, algorithm):
     settings = dataclasses.replace(
         base, workload=workload, windows=windows, weak_decoder=weak_decoder
     )
-    return collect.Task(settings, {})
+    return collect.Task("task", settings, {})
 
 
 def machine_shots(task, seeds) -> tuple:
@@ -141,7 +141,7 @@ def machine_shots(task, seeds) -> tuple:
     committed for it.
     """
     built_models = built_window_models.BuiltWindowModels()
-    (operation,) = task.settings.workload.operations
+    (operation,) = task.machine.workload.operations
     events = []
     answers = []
     for seed in seeds:

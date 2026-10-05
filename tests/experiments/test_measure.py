@@ -196,7 +196,7 @@ def point_task(
     The probability is the one the settings' circuit was built at.
     """
     cells = cells_at(probability)
-    return collect.Task(settings, cells)
+    return collect.Task("task", settings, cells)
 
 
 def measured(task: collect.Task, seed: int = 0) -> measure.ShotMeasurement:
@@ -644,8 +644,8 @@ def test_patches_named_by_an_int_and_a_str_are_measured():
         workload, operations=(first, named), round_counts=round_counts
     )
     lowered = workload_settings.WorkloadSettings.running(mixed)
-    settings = dataclasses.replace(task.settings, workload=lowered)
-    mixed_task = collect.Task(settings, {})
+    settings = dataclasses.replace(task.machine, workload=lowered)
+    mixed_task = collect.Task("mixed", settings, {})
     shot = collect.run_shot(mixed_task, 0)
 
     measured = measure.measure_shot(shot)
@@ -669,9 +669,9 @@ def test_the_window_sizes_and_period_are_the_card_the_qpu_ran():
         buffer_rounds_override=1,
     )
     card_record = declared_run.GivenCard(card)
-    qpu = dataclasses.replace(task.settings.qpu, code_card=card_record)
-    settings = dataclasses.replace(task.settings, qpu=qpu)
-    carded = collect.Task(settings, {})
+    qpu = dataclasses.replace(task.machine.qpu, code_card=card_record)
+    settings = dataclasses.replace(task.machine, qpu=qpu)
+    carded = collect.Task("carded", settings, {})
     shot = collect.run_shot(carded, 0)
 
     measured = measure.measure_shot(shot)
@@ -986,8 +986,7 @@ def shipped_shot(run_file: str, point_name: str):
     run_path = REPOSITORY / run_file
     study = experiment.load(run_path)
     (point,) = [point for point in study.points if point.name == point_name]
-    task = experiment.task_of(point)
-    return collect.run_shot(task, 0)
+    return collect.run_shot(point, 0)
 
 
 def base_shot(base) -> collect.Shot:
@@ -1354,7 +1353,7 @@ def seam_only_fabric():
 def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
     """One shot of those streams on that fabric."""
     settings = seam_streams_settings(stream_count, stagger_rounds)
-    task = collect.Task(settings, {})
+    task = collect.Task("task", settings, {})
     return collect.run_shot(task, 0)
 
 
@@ -1482,7 +1481,7 @@ def test_a_shot_with_no_pauli_frame_got_no_window_through():
     """
     settings = seam_streams_settings(1)
     frameless = dataclasses.replace(settings, pauli_frame=None)
-    task = collect.Task(frameless, {})
+    task = collect.Task("frameless", frameless, {})
     shot = collect.run_shot(task, 0)
     measured = measure.measure_shot(shot)
 
@@ -1851,7 +1850,7 @@ def test_a_live_stream_is_scored_through_its_owner_over_its_run_rounds():
     )
     frame = pauli_frame_module.PauliFrameConfig()
     settings = dataclasses.replace(live, pauli_frame=frame)
-    task = collect.Task(settings, {})
+    task = collect.Task("task", settings, {})
     shot = collect.run_shot(task, 17)
     measured = measure.measure_shot(shot)
     sampled = shot.machine.observation.sampled_shots.shots_by_operation
@@ -2308,7 +2307,7 @@ def test_a_windows_confidence_is_the_gap_its_verdict_request_ended_with():
     cells = cells_at(0.003)
     switching = run_files.switching_machine(cells)
     task = point_task(switching, 0.003)
-    settings = task.settings
+    settings = task.machine
     machine = machine_module.Machine.build(settings, 0)
     requests = declared_run.EndedRequests()
     requests.attach(machine)

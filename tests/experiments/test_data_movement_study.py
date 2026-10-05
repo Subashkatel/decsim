@@ -133,6 +133,6 @@ def test_the_study_holds_the_four_blocks_and_every_point_builds_its_task():
     """No point names both in place, since its decoder pool would refuse it."""
     study = experiment.load(STUDY)
 
-    tasks = [experiment.task_of(point) for point in study.points]
+    tasks = study.points
 
     assert len(tasks) == len(STUDY_BLOCKS) * 3

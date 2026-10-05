@@ -110,7 +110,7 @@ def switching_points() -> list:
     for distance in DISTANCES:
         machine = cluster_gap_switching(distance)
         metadata = _metadata(distance)
-        point = decsim.Point(
+        point = decsim.Task(
             f"cluster_gap_d{distance}",
             machine,
             metadata,
@@ -120,7 +120,7 @@ def switching_points() -> list:
     for distance in DISTANCES:
         machine = redo_window_switching(distance)
         metadata = _metadata(distance)
-        point = decsim.Point(
+        point = decsim.Task(
             f"redo_window_d{distance}",
             machine,
             metadata,

@@ -1,29 +1,26 @@
-"""An experiment: named points, each a machine to collect shots of.
+"""An experiment: named tasks, each a machine to collect shots of.
 
 A run file is a Python file that sets `experiment = Experiment(...)` at
 module level; `decsim run` loads it (load). This is gem5 MultiSim's
 shape, one script adding simulators by id
 (src/python/gem5/utils/multisim/multisim.py:285-353), with sinter's
-point: a machine's settings and json metadata, collected until a stop
-rule (sinter/_data/_task.py:36-52). The machine knows nothing of
-experiments; a point holds its settings and every shot builds a fresh
-machine from them.
+Task (collect.Task): a machine's settings and json metadata, collected
+until a stop rule. The machine knows nothing of experiments; a task
+holds its settings and every shot builds a fresh machine from them.
 """
 
 import contextlib
 import dataclasses
 import itertools
 import pathlib
-import re
 import sys
 import types
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Optional, Union
 
 import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
-import decsim.settings as machine_settings
 
 _THIS_FILE = pathlib.Path(__file__)
 _RESOLVED_FILE = _THIS_FILE.resolve()
@@ -32,30 +29,8 @@ _REPOSITORY_ROOT = _RESOLVED_FILE.parents[2]
 # binary; the shipped run files are what a refused path is listed with.
 EXPERIMENTS_DIR = _REPOSITORY_ROOT / "experiments"
 SHIPPED_RUN_FILE = "run.py"
-# A name a folder can take on any filesystem the results go to.
-FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 # The module-level name a run file binds its experiment to.
 EXPERIMENT_NAME_IN_A_RUN_FILE = "experiment"
-
-
-@dataclasses.dataclass(frozen=True)
-class Point:
-    """One machine to collect shots of, under a name.
-
-    name is the point's results folder and what --only picks. metadata is
-    sinter's json_metadata, part of the point's id as of a sinter task's
-    strong id. collection overrides the experiment's. record_options are no
-    part of the id.
-    """
-
-    name: str
-    machine: machine_settings.MachineSettings
-    metadata: Mapping = dataclasses.field(default_factory=dict)
-    collection: Optional[collection_module.CollectionSettings] = None
-    record_options: collect.RecordOptions = collect.RecordOptions()
-
-    def __post_init__(self) -> None:
-        _check_folder_name(self.name, "point")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,11 +42,11 @@ class Experiment:
     """
 
     name: str
-    points: Sequence[Point]
+    points: Sequence[collect.Task]
     collection: Optional[collection_module.CollectionSettings] = None
 
     def __post_init__(self) -> None:
-        _check_folder_name(self.name, "experiment")
+        collect.check_folder_name(self.name, "experiment")
         if not self.points:
             raise ValueError(f"the experiment {self.name} has no points")
         _refuse_a_repeated_name(self.points)
@@ -80,14 +55,14 @@ class Experiment:
             self._refuse_an_online_stop(point)
 
     def collection_of(
-        self, point: Point
+        self, point: collect.Task
     ) -> collection_module.CollectionSettings:
         """The collection a point stops by: its own, else the experiment's."""
         if point.collection is not None:
             return point.collection
         return self.collection
 
-    def point_named(self, name: str) -> Point:
+    def point_named(self, name: str) -> collect.Task:
         """The point of this name; a name it does not have is refused."""
         for point in self.points:
             if point.name == name:
@@ -117,7 +92,7 @@ class Experiment:
             points.append(capped_point)
         return Experiment(self.name, points, self.collection)
 
-    def _refuse_a_point_without_a_collection(self, point: Point) -> None:
+    def _refuse_a_point_without_a_collection(self, point: collect.Task) -> None:
         if self.collection_of(point) is not None:
             return
         raise ValueError(
@@ -125,7 +100,7 @@ class Experiment:
             "a collection, or the point one of its own"
         )
 
-    def _refuse_an_online_stop(self, point: Point) -> None:
+    def _refuse_an_online_stop(self, point: collect.Task) -> None:
         """An online point stops at max_shots alone; any other stop is refused.
 
         Its shots are not independent draws, since each one's threshold
@@ -133,8 +108,7 @@ class Experiment:
         a target stop could rest on, and a time cap would end its learning
         wherever the machine was fast.
         """
-        task = task_of(point)
-        if task.online_threshold is None:
+        if point.online_threshold is None:
             return
         settings = self.collection_of(point)
         has_only_a_shot_cap = settings.max_shots is not None
@@ -197,27 +171,6 @@ def load_one_point(
         first_point = study.points[0]
         name = first_point.name
     return study.only(name)
-
-
-def task_of(point: Point) -> collect.Task:
-    """The task a point's shots run: its settings, metadata and state.
-
-    The task builds the point's online calibrator, when its threshold
-    learns one, which every shot's Machine.build receives.
-    """
-    return collect.Task(
-        point.machine, point.metadata, record_options=point.record_options
-    )
-
-
-def _check_folder_name(name, what: str) -> None:
-    """A name that becomes a folder: letters, digits, '.', '_' and '-'."""
-    if isinstance(name, str) and FOLDER_NAME.fullmatch(name):
-        return
-    raise ValueError(
-        f"the {what} name {name!r} is not a folder name; a name is letters, "
-        "digits, '.', '_' and '-', starting with a letter or a digit"
-    )
 
 
 def _refuse_a_repeated_name(points: Sequence) -> None:

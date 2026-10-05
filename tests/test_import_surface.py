@@ -22,7 +22,7 @@ import decsim
 # Each name the root exports, and the module a run file reads it from.
 ROOT_EXPORTS = (
     ("Experiment", "decsim.experiments.experiment"),
-    ("Point", "decsim.experiments.experiment"),
+    ("Task", "decsim.experiments.collect"),
     ("grid", "decsim.experiments.experiment"),
     ("CollectionSettings", "decsim.experiments.collection"),
     ("MachineSettings", "decsim.settings"),

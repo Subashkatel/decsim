@@ -635,7 +635,7 @@ def _point_id_with_its_table_in(folder: pathlib.Path) -> str:
     table_path = _write_table(folder, CALIBRATION_TABLE)
     table = threshold_sources.TableThreshold.Settings(table_path)
     gate = _gate_on(table)
-    task = collect.Task(gate, {})
+    task = collect.Task("gate", gate, {})
     return task.strong_id()
 
 
@@ -659,7 +659,7 @@ def test_a_fixed_threshold_point_builds_no_calibrator():
     fixed = threshold_sources.FixedThreshold.Settings(20.0)
     gate = _gate_on(fixed)
 
-    task = collect.Task(gate, {})
+    task = collect.Task("gate", gate, {})
 
     assert task.online_threshold is None
 
@@ -667,7 +667,7 @@ def test_a_fixed_threshold_point_builds_no_calibrator():
 def test_one_calibrator_learns_across_every_shot_of_its_point():
     """The point's task builds it once and every shot's machine takes it."""
     gate = _online_gate()
-    task = collect.Task(gate, {})
+    task = collect.Task("gate", gate, {})
     calibrator = task.online_threshold
 
     collect.run_shot(task, 0)
@@ -724,7 +724,7 @@ def test_a_row_built_per_point_is_the_source_its_shots_decide_on():
     """
     own = _OwnPointThreshold.Settings(20.0)
     gate = _gate_on(own)
-    task = collect.Task(gate, {})
+    task = collect.Task("gate", gate, {})
 
     installed = task.online_threshold
     shot = collect.run_shot(task, 0)
@@ -751,7 +751,7 @@ def test_an_online_point_reproduces_its_decisions():
 def _two_shots_of_a_fresh_online_point() -> tuple:
     """Each shot's observables, and what the point's calibrator did."""
     gate = _online_gate()
-    task = collect.Task(gate, {})
+    task = collect.Task("gate", gate, {})
     first_shot = collect.run_shot(task, 0)
     second_shot = collect.run_shot(task, 1)
     calibrator = task.online_threshold
@@ -774,10 +774,10 @@ def test_two_online_points_whose_rates_print_alike_have_two_ids():
     plain_gate = _online_gate(plain_rate)
     nudged_gate = _online_gate(nudged_rate)
 
-    plain = collect.Task(plain_gate, {})
-    nudged = collect.Task(nudged_gate, {})
-    (plain_operation,) = plain.settings.workload.operations
-    (nudged_operation,) = nudged.settings.workload.operations
+    plain = collect.Task("plain", plain_gate, {})
+    nudged = collect.Task("nudged", nudged_gate, {})
+    (plain_operation,) = plain.machine.workload.operations
+    (nudged_operation,) = nudged.machine.workload.operations
 
     assert str(plain_operation.circuit) == str(nudged_operation.circuit)
     assert plain.strong_id() != nudged.strong_id()

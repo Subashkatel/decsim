@@ -608,8 +608,8 @@ recording = observe_settings.ObservationSettings(record_switching_windows=True)
 switching = dataclasses.replace(switching, observation=recording)
 weak_alone = machine_settings.weak_decoder_baseline(3, 0.008, 1.0)
 points = [
-    decsim.Point("switching", switching, {}),
-    decsim.Point("weak_alone", weak_alone, {}),
+    decsim.Task("switching", switching, {}),
+    decsim.Task("weak_alone", weak_alone, {}),
 ]
 collection = decsim.CollectionSettings(max_shots=1)
 experiment = decsim.Experiment("mixed", points, collection)

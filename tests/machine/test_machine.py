@@ -281,7 +281,7 @@ def test_a_part_on_its_own_clock_keeps_it_whatever_the_machines():
 def _shot_on_own_clocks(machine_clock):
     """The gate's shot 0 with every clocked part on PART_CLOCK, as json."""
     settings = _gate_on_own_clocks(machine_clock)
-    task = collect.Task(settings, {})
+    task = collect.Task("task", settings, {})
     shot = collect.run_shot(task, 0)
     return collect.json_value(shot.result)
 

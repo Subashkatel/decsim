@@ -300,7 +300,7 @@ def test_a_shot_gives_its_recorded_results(name):
 def shot_digest(shape) -> dict:
     """One shot of the shape: its result, seeds, final tick and events."""
     settings = shape()
-    task = collect.Task(settings, {})
+    task = collect.Task("task", settings, {})
     seed_rows = []
     event_counter = itertools.count()
     derive = _recording_derive(seeding.derive_component_seed, seed_rows)

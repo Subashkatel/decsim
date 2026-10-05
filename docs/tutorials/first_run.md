@@ -72,7 +72,7 @@ for distance in DISTANCES:
   `DECODE_MICROSECONDS`, 1.0 microseconds, however fast your computer
   is. So every tick on this page is the same on your machine.
 
-After the loop, each machine becomes a `decsim.Point` with a name, `d3`
+After the loop, each machine becomes a `decsim.Task` with a name, `d3`
 for distance 3, and the points become a `decsim.Experiment`. Its
 `COLLECTION` says when a point stops: here at 20 shots.
 

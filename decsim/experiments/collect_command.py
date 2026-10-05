@@ -291,19 +291,18 @@ def run_one_shot(
     recorded with other settings is refused. Returns the lines to print.
     """
     point = study.points[0]
-    task = experiment.task_of(point)
-    settings = _with_observation(task.settings, log, trace)
-    task = dataclasses.replace(task, settings=settings)
+    settings = _with_observation(point.machine, log, trace)
+    task = dataclasses.replace(point, machine=settings)
     machine = machine_module.Machine.build(
-        task.settings, seed, online_threshold=task.online_threshold
+        task.machine, seed, online_threshold=task.online_threshold
     )
     run_dir = run_folder.run_dir_for(study.name, out_dir)
     _refuse_another_tree(run_dir)
     point_id = task.strong_id()
-    _refuse_a_name_recorded_for_another_point(run_dir, point.name, point_id)
+    _refuse_a_name_recorded_for_another_point(run_dir, task.name, point_id)
     run_points = _run_points(run_dir, point_id)
     started_utc = run_folder.start_run(run_dir, run_file, run_points)
-    _record_a_new_point(run_dir, point, task, seed)
+    _record_a_new_point(run_dir, task, seed)
     result = machine.run()
     label = measure.shot_label(point_id, seed)
     run_folder.write_shot(machine, settings, run_dir, label, result)
@@ -459,7 +458,7 @@ def _traces_one_shot(tasks: list) -> bool:
     """Whether the run is one point that traces one shot."""
     if len(tasks) != 1:
         return False
-    observation = tasks[0].settings.observation
+    observation = tasks[0].machine.observation
     return len(observation.trace_shots) == 1
 
 
@@ -467,8 +466,7 @@ def _experiment_point_ids(study: experiment.Experiment) -> list:
     """Every point's id, in the experiment's order."""
     point_ids = []
     for point in study.points:
-        task = experiment.task_of(point)
-        point_id = task.strong_id()
+        point_id = point.strong_id()
         point_ids.append(point_id)
     return point_ids
 
@@ -552,16 +550,15 @@ def _resolved_points(study: experiment.Experiment) -> list:
     resolved = []
     names_by_id = {}
     for point in study.points:
-        task = experiment.task_of(point)
-        point_id = task.strong_id()
+        point_id = point.strong_id()
         earlier_name = names_by_id.setdefault(point_id, point.name)
         if earlier_name != point.name:
             _refuse_two_points_of_one_id(earlier_name, point.name)
         settings = study.collection_of(point)
-        facts = _experiment_facts(task, settings)
-        record = run_folder.point_record(point.name, task, None, facts)
+        facts = _experiment_facts(point, settings)
+        record = run_folder.point_record(point, None, facts)
         _refuse_a_point_that_runs_no_round(record)
-        resolved_point = _ResolvedPoint(task, settings, record)
+        resolved_point = _ResolvedPoint(point, settings, record)
         resolved.append(resolved_point)
     return resolved
 
@@ -623,17 +620,14 @@ def _record_path(run_dir: pathlib.Path, name: str) -> pathlib.Path:
 
 
 def _record_a_new_point(
-    run_dir: pathlib.Path,
-    point: experiment.Point,
-    task: collect.Task,
-    seed: int,
+    run_dir: pathlib.Path, task: collect.Task, seed: int
 ) -> None:
     """The shot's point recorded, unless the folder recorded it already."""
-    record_path = _record_path(run_dir, point.name)
+    record_path = _record_path(run_dir, task.name)
     if record_path.is_file():
         return
     seeds = [(seed, 1)]
-    run_folder.record_point(run_dir, point.name, task, seeds)
+    run_folder.record_point(run_dir, task, seeds)
 
 
 def _run_points(run_dir: pathlib.Path, point_id: str) -> list:
@@ -681,7 +675,7 @@ def _experiment_facts(
     return {
         "collection": dataclasses.asdict(settings),
         "adaptive": task.online_threshold is not None,
-        "algorithm": measure.active_decoder_kind(task.settings),
+        "algorithm": measure.active_decoder_kind(task.machine),
     }
 
 

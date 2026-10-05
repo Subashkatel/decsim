@@ -15,6 +15,7 @@ import pytest
 import decsim.confidence.complementary as complementary
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
@@ -29,10 +30,10 @@ ONLINE = {"machine": "switching", "machine_arguments": {"online": {}}}
 
 def _minimal_settings():
     task = run_files.first_task()
-    return task.settings
+    return task.machine
 
 
-def _online_point_at_distance_5(workload) -> experiment.Point:
+def _online_point_at_distance_5(workload) -> collect.Task:
     """A Python switching point on the online threshold, running workload."""
     machine = _minimal_settings()
     confidence = complementary.ComplementaryGap.Settings()
@@ -47,7 +48,7 @@ def _online_point_at_distance_5(workload) -> experiment.Point:
         strong_decoder=machine.weak_decoder,
         switching=switching,
     )
-    return experiment.Point("online", machine)
+    return collect.Task("online", machine)
 
 
 def test_a_grid_runs_the_last_axis_fastest_in_the_order_given():
@@ -65,8 +66,8 @@ def test_a_grid_runs_the_last_axis_fastest_in_the_order_given():
 
 def test_two_points_of_one_name_are_refused():
     settings = _minimal_settings()
-    first = experiment.Point("d3", settings, {"distance": 3})
-    second = experiment.Point("d3", settings, {"distance": 5})
+    first = collect.Task("d3", settings, {"distance": 3})
+    second = collect.Task("d3", settings, {"distance": 5})
 
     with pytest.raises(ValueError) as refused:
         experiment.Experiment("study", [first, second], CAPPED)
@@ -79,7 +80,7 @@ def test_a_point_name_that_is_no_folder_name_is_refused():
     settings = _minimal_settings()
 
     with pytest.raises(ValueError) as refused:
-        experiment.Point("d3/p1", settings)
+        collect.Task("d3/p1", settings)
 
     assert "is not a folder name" in str(refused.value)
 
@@ -93,7 +94,7 @@ def test_an_experiment_with_no_points_is_refused():
 
 def test_a_point_no_collection_stops_is_refused():
     settings = _minimal_settings()
-    point = experiment.Point("d3", settings)
+    point = collect.Task("d3", settings)
 
     with pytest.raises(ValueError) as refused:
         experiment.Experiment("study", [point])
@@ -105,8 +106,8 @@ def test_a_point_no_collection_stops_is_refused():
 def test_a_points_own_collection_wins_over_the_experiments():
     settings = _minimal_settings()
     own = collection.CollectionSettings(max_shots=9)
-    first = experiment.Point("own", settings, {"distance": 3}, own)
-    second = experiment.Point("shared", settings, {"distance": 5})
+    first = collect.Task("own", settings, {"distance": 3}, own)
+    second = collect.Task("shared", settings, {"distance": 5})
     study = experiment.Experiment("study", [first, second], CAPPED)
 
     assert study.collection_of(first) == own
@@ -115,7 +116,7 @@ def test_a_points_own_collection_wins_over_the_experiments():
 
 def test_an_unknown_point_name_is_refused_with_the_names():
     settings = _minimal_settings()
-    point = experiment.Point("d3", settings)
+    point = collect.Task("d3", settings)
     study = experiment.Experiment("study", [point], CAPPED)
 
     with pytest.raises(refusal.RefusalError) as refused:
@@ -127,11 +128,10 @@ def test_an_unknown_point_name_is_refused_with_the_names():
 
 
 def test_a_python_points_task_builds_its_online_calibrator():
-    """The calibrator is point state the task builds, seeded as today."""
+    """The calibrator is task state, built with the task."""
     online_task = run_files.first_task(**ONLINE)
-    point = experiment.Point("online", online_task.settings)
 
-    task = experiment.task_of(point)
+    task = collect.Task("online", online_task.machine)
 
     calibrator = task.online_threshold
 
@@ -149,9 +149,8 @@ def test_a_python_point_states_its_distance_and_error_probability_once():
     workload = producers.memory_circuit(
         "surface_code:rotated_memory_x", 6, 5, 0.002
     )
-    point = _online_point_at_distance_5(workload)
 
-    task = experiment.task_of(point)
+    task = _online_point_at_distance_5(workload)
 
     calibrator = task.online_threshold
 
@@ -166,22 +165,22 @@ def test_a_python_workload_that_states_no_probability_is_refused_by_name():
         "surface_code:rotated_memory_x", 6, 5, 0.002
     )
     workload = dataclasses.replace(made, physical_error_probability=None)
-    point = _online_point_at_distance_5(workload)
 
     with pytest.raises(ValueError, match="physical_error_probability=None"):
-        experiment.task_of(point)
+        _online_point_at_distance_5(workload)
 
 
 def test_a_run_file_is_loaded_by_its_experiment(tmp_path):
     run_file = tmp_path / "study.py"
     run_file.write_text(
+        "import decsim.experiments.collect as collect\n"
         "import decsim.experiments.collection as collection\n"
         "import decsim.experiments.experiment as experiment\n"
         "import tests.experiments.run_files as run_files\n"
         "_settings = run_files.minimal_machine()\n"
         "experiment = experiment.Experiment(\n"
         "    'study',\n"
-        "    [experiment.Point('d3', _settings, {'d': 3})],\n"
+        "    [collect.Task('d3', _settings, {'d': 3})],\n"
         "    collection.CollectionSettings(max_shots=2),\n"
         ")\n"
     )

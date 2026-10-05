@@ -24,6 +24,7 @@ import inspect
 import json
 import numbers
 import pathlib
+import re
 import resource
 import sys
 import time
@@ -34,6 +35,7 @@ import numpy
 import stim
 
 import decsim.config as config
+import decsim.experiments.collection as collection_module
 import decsim.machine as machine_module
 import decsim.ports as ports
 import decsim.records.results as result_records
@@ -46,6 +48,8 @@ RECORD_CLASS_KEY = "class"
 # confidence_shot_count's word for every shot of a point in a piece's
 # record
 EVERY_SHOT = "all"
+# A name a folder can take on any filesystem the results go to.
+FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -78,38 +82,45 @@ class RecordOptions:
 
 @dataclasses.dataclass(frozen=True)
 class Task:
-    """One machine settings record, a sweep point, to run seeds of.
+    """One machine to collect shots of, under a name.
 
-    settings are read at the point (MachineSettings.at_point), so the strong
-    id covers the number a calibration table gives it. online_threshold is
-    the point's calibrator when its threshold learns across shots, built
-    once here and handed to every shot's build; a resumed piece's saved
-    state is kept. The strong id leaves out the calibrator and
-    record_options.
+    This is sinter's Task (sinter/_data/_task.py:18-75). name is the task's
+    results folder, and --only picks a task by it. machine is read at the
+    task (MachineSettings.at_point), so the strong id covers the number a
+    calibration table gives it. metadata is sinter's json_metadata.
+    collection overrides the experiment's, as sinter's collection_options
+    does. online_threshold is the task's calibrator when its threshold
+    learns across shots: it is built once here and every shot's build gets
+    it, and a resumed piece keeps its saved state. The strong id holds the
+    machine and the metadata only.
     """
 
-    settings: machine_settings.MachineSettings
-    metadata: Mapping[str, object]
-    online_threshold: Optional[ports.ThresholdSource] = None
+    name: str
+    machine: machine_settings.MachineSettings
+    metadata: Mapping[str, object] = dataclasses.field(default_factory=dict)
+    collection: Optional[collection_module.CollectionSettings] = None
     record_options: RecordOptions = RecordOptions()
+    online_threshold: Optional[ports.ThresholdSource] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        check_folder_name(self.name, "task")
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
-        settings = self.settings.at_point()
-        object.__setattr__(self, "settings", settings)
+        machine = self.machine.at_point()
+        object.__setattr__(self, "machine", machine)
         if self.online_threshold is None:
-            calibrator = _point_calibrator(settings)
+            calibrator = _point_calibrator(machine)
             object.__setattr__(self, "online_threshold", calibrator)
 
     def strong_id(self) -> str:
-        """sha256 of the json text of the settings and the metadata.
+        """sha256 of the json text of the machine and the metadata.
 
         A compare=False field is a label that changes nothing the machine does
         and is left out, as sinter leaves circuit_path out of its strong id
         (sinter/_data/_task.py:157, 167-204).
         """
+        # The key stays "settings", so every recorded id stays valid.
         value = {
-            "settings": json_value(self.settings, keep_labels=False),
+            "settings": json_value(self.machine, keep_labels=False),
             "metadata": json_value(self.metadata),
         }
         text = json.dumps(value, sort_keys=True)
@@ -214,7 +225,7 @@ def run_shot(
     """
     wall_start = time.perf_counter()
     machine = machine_module.Machine.build(
-        task.settings, seed, built_models, task.online_threshold
+        task.machine, seed, built_models, task.online_threshold
     )
     result = machine.run()
     wall_end = time.perf_counter()
@@ -246,6 +257,16 @@ def json_value(
     """
     form = _JsonForm(keep_labels, record_classes)
     return _json_in(value, form)
+
+
+def check_folder_name(name: object, what: str) -> None:
+    """A name that becomes a folder: letters, digits, '.', '_' and '-'."""
+    if isinstance(name, str) and FOLDER_NAME.fullmatch(name):
+        return
+    raise ValueError(
+        f"the {what} name {name!r} is not a folder name; a name is letters, "
+        "digits, '.', '_' and '-', starting with a letter or a digit"
+    )
 
 
 def _point_calibrator(

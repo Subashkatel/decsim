@@ -164,8 +164,7 @@ EXACT_NUMBERS = [
 
 def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):
     study = run_files.sweep(**run_files.REFERENCE)
-    tasks = run_files.tasks_of(study)
-    measurements = run_files.run_sweep(tasks, 2)
+    measurements = run_files.run_sweep(study.points, 2)
     _rows, run_dir = run_files.folded_run(tmp_path, measurements)
     folded_sweep_path = run_dir / "sweep.csv"
     shot_links_path = run_dir / "shot_links.csv"
@@ -255,7 +254,7 @@ def test_the_first_shot_builds_the_models_and_the_rest_read_them():
 
 def test_a_machine_built_alone_builds_its_own_models():
     task = _reference_task()
-    settings = task.settings
+    settings = task.machine
 
     first = machine_module.Machine.build(settings, 0)
     second = machine_module.Machine.build(settings, 1)
@@ -326,8 +325,8 @@ def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
     merge_workload = workload_settings.WorkloadSettings(operations=[merge])
     memory_settings = machine_settings.MachineSettings(workload=memory_workload)
     merge_settings = machine_settings.MachineSettings(workload=merge_workload)
-    memory_task = collect.Task(memory_settings, {"point": 1})
-    merge_task = collect.Task(merge_settings, {"point": 1})
+    memory_task = collect.Task("memory", memory_settings, {"point": 1})
+    merge_task = collect.Task("merge", merge_settings, {"point": 1})
 
     assert memory_task.strong_id() != merge_task.strong_id()
 
@@ -344,8 +343,8 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     )
     three_settings = machine_settings.MachineSettings(workload=three_workload)
     five_settings = machine_settings.MachineSettings(workload=five_workload)
-    three_task = collect.Task(three_settings, {"point": 1})
-    five_task = collect.Task(five_settings, {"point": 1})
+    three_task = collect.Task("three", three_settings, {"point": 1})
+    five_task = collect.Task("five", five_settings, {"point": 1})
 
     assert three_task.strong_id() != five_task.strong_id()
 
@@ -428,9 +427,9 @@ def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     """machine.json is where a label is read, so it keeps them all."""
     task = _reference_task()
 
-    run_folder.record_point(tmp_path, "point", task)
+    run_folder.record_point(tmp_path, task)
 
-    record_path = tmp_path / "points" / "point" / "machine.json"
+    record_path = tmp_path / "points" / task.name / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     links = record["settings"]["links"]
@@ -442,7 +441,7 @@ def test_a_points_record_keeps_the_labels_its_id_leaves_out(tmp_path):
 def test_settings_that_differ_only_in_labels_are_one_point():
     """A label changes no id; a latency, which changes the run, does."""
     task = _reference_task()
-    links = task.settings.links
+    links = task.machine.links
     relabelled = dataclasses.replace(links, profile_name="other")
     channel = links.qpu_to_controller.channel
     slower_ticks = channel.propagation_latency_ticks + 1
@@ -458,7 +457,7 @@ def test_settings_that_differ_only_in_labels_are_one_point():
     slower_task = _task_with_links(task, slower)
 
     assert relabelled_task.strong_id() == task.strong_id()
-    assert relabelled_task.settings == task.settings
+    assert relabelled_task.machine == task.machine
     assert slower_task.strong_id() != task.strong_id()
 
 
@@ -477,9 +476,9 @@ def test_a_point_traced_and_logged_is_the_point_run_plain(tmp_path, capsys):
     plain_rows = _shot_rows_without_wall_clock(plain)
     recorded_rows = _shot_rows_without_wall_clock(recorded)
     printed = capsys.readouterr()
-    run_folder.record_point(tmp_path, "point", recorded)
+    run_folder.record_point(tmp_path, recorded)
 
-    record_path = tmp_path / "points" / "point" / "machine.json"
+    record_path = tmp_path / "points" / recorded.name / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
     recorded_observation = record["settings"]["observation"]
@@ -510,7 +509,7 @@ def test_a_metadata_key_that_is_not_text_is_refused_at_any_depth(
     pattern = re.escape(sentence)
 
     with pytest.raises(ValueError, match=pattern):
-        collect.Task(first_point.settings, metadata)
+        collect.Task("task", first_point.machine, metadata)
 
 
 @pytest.mark.parametrize(("value", "written"), EXACT_NUMBERS)
@@ -702,7 +701,7 @@ def _memory_task(rounds: int) -> collect.Task:
     )
     workload = workload_settings.WorkloadSettings(operations=(operation,))
     settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task(settings, {"point": 1})
+    return collect.Task("task", settings, {"point": 1})
 
 
 def _seed_after_the_release(release_path: pathlib.Path, shot) -> int:
@@ -743,7 +742,7 @@ def _slotted_rounds_task(round_count: int) -> collect.Task:
 def _rounds_task(rounds_policy) -> collect.Task:
     workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
     settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task(settings, {"point": 1})
+    return collect.Task("task", settings, {"point": 1})
 
 
 def _device_task(round_count: int) -> collect.Task:
@@ -752,7 +751,7 @@ def _device_task(round_count: int) -> collect.Task:
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task(settings, {"point": 1})
+    return collect.Task("task", settings, {"point": 1})
 
 
 def _recorded_device_task(flip: int) -> collect.Task:
@@ -762,7 +761,7 @@ def _recorded_device_task(flip: int) -> collect.Task:
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(source=source)
     settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task(settings, {"point": 1})
+    return collect.Task("task", settings, {"point": 1})
 
 
 def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
@@ -829,8 +828,8 @@ def _shot_rows_without_wall_clock(task: collect.Task) -> list:
 
 
 def _task_with_links(task: collect.Task, links) -> collect.Task:
-    settings = dataclasses.replace(task.settings, links=links)
-    return collect.Task(settings, task.metadata)
+    settings = dataclasses.replace(task.machine, links=links)
+    return collect.Task(task.name, settings, task.metadata)
 
 
 class _CrashingRelayDecoder:

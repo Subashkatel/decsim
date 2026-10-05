@@ -47,7 +47,7 @@ These are not from the papers. The pages use them everywhere.
 
 - **experiment**: one Python run file that names its points and how
   each stops (`decsim.Experiment`).
-- **point**: one machine at one set of values (`decsim.Point`). It has a
+- **point**: one machine at one set of values (`decsim.Task`). It has a
   name and an id, a hash of its record. Its optional `collection`
   replaces the experiment's stop rule for it, and its `record_options`
   say how many shots write their windows' confidence.

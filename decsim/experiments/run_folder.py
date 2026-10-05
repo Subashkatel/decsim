@@ -302,7 +302,6 @@ def recorded_point_ids(run_dir: pathlib.Path, first_ids: list) -> list:
 
 def record_point(
     run_dir: pathlib.Path,
-    name: str,
     task: collect.Task,
     seeds: Optional[list] = None,
 ) -> str:
@@ -311,12 +310,11 @@ def record_point(
     point_record says what machine.json holds; inputs/ holds the
     workload's files (write_point_record). Returns the point's id.
     """
-    record = point_record(name, task, seeds)
+    record = point_record(task, seeds)
     return write_point_record(run_dir, task, record)
 
 
 def point_record(
-    name: str,
     task: collect.Task,
     seeds: Optional[list] = None,
     experiment_facts: Optional[Mapping] = None,
@@ -328,11 +326,11 @@ def point_record(
     Building runs the point's build, so a refused build stops here, before
     anything is written.
     """
-    settings = task.settings
+    settings = task.machine
     plan = _plan(task)
     record = {
         "id": task.strong_id(),
-        "name": name,
+        "name": task.name,
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
         "settings": collect.json_value(settings),
@@ -357,7 +355,7 @@ def write_point_record(
     point_dir.mkdir(parents=True, exist_ok=True)
     record_path = point_dir / RECORD_FILE
     write_json(record_path, record)
-    workload_record = task.settings.workload.workload_record
+    workload_record = task.machine.workload.workload_record
     if workload_record is not None:
         inputs_dir = point_dir / INPUTS_FOLDER
         _write_inputs(inputs_dir, workload_record)
@@ -653,7 +651,7 @@ def _how_it_ran() -> dict:
 
 def _plan(task: collect.Task) -> plan_build.Plan:
     """The plan the build derives from the task, before it wires."""
-    settings = task.settings
+    settings = task.machine
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
         settings.switching,

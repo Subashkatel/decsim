@@ -158,7 +158,7 @@ machines = {
 }
 points = []
 for name, machine in machines.items():
-    point = decsim.Point(name, machine, {"recipe": name})
+    point = decsim.Task(name, machine, {"recipe": name})
     points.append(point)
 cells = decsim.grid(
     cycles_per_access=CYCLES_PER_ACCESS, link_microseconds=LINK_MICROSECONDS
@@ -168,7 +168,7 @@ for cell in cells:
     cycles_per_access = cell["cycles_per_access"]
     link_microseconds = cell["link_microseconds"]
     name = f"read_cycles_{cycles_per_access}_link_{link_microseconds}us"
-    point = decsim.Point(name, machine, cell)
+    point = decsim.Task(name, machine, cell)
     points.append(point)
 
 experiment = decsim.Experiment(NAME, points, COLLECTION)

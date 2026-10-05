@@ -81,11 +81,11 @@ def main() -> None:
     metadata = {}
     for name, path in METADATA_PATHS.items():
         metadata[path] = parameters[name]
-    task = collect.Task(settings, metadata)
+    task = collect.Task(POINT_NAME, settings, metadata)
     point_ids = [task.strong_id()]
     started_utc = run_folder.start_run(arguments.output, None, point_ids)
     seeds = [(arguments.seed, 1)]
-    run_folder.record_point(arguments.output, POINT_NAME, task, seeds)
+    run_folder.record_point(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
     run_folder.write_shot(machine, settings, arguments.output, label, result)

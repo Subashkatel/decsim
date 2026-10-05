@@ -582,7 +582,7 @@ import decsim.settings as machine_settings
 points = []
 for distance in (3, 5):
     machine = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
-    point = decsim.Point(f"d{distance}", machine, {"qpu.distance": distance})
+    point = decsim.Task(f"d{distance}", machine, {"qpu.distance": distance})
     points.append(point)
 collection = decsim.CollectionSettings(max_shots=4)
 experiment = decsim.Experiment("two_points", points, collection)

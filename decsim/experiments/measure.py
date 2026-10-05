@@ -299,7 +299,7 @@ def measure_shot(
     run_dir receives the log file and the Chrome trace when asked; None
     writes nothing. only_traced_shot writes a named trace path as it stands.
     """
-    settings = shot.task.settings
+    settings = shot.task.machine
     point_id = shot.task.strong_id()
     label = shot_label(point_id, shot.seed)
     observation = shot.machine.observation
@@ -1636,7 +1636,7 @@ def _write_trace(shot, run_dir, label: str, only_traced_shot: bool) -> None:
     Each file carries the shot's label, so no shot overwrites another's;
     only trace_shots are written.
     """
-    observation = shot.task.settings.observation
+    observation = shot.task.machine.observation
     if not observation.writes_trace:
         return
     if shot.seed not in observation.trace_shots:

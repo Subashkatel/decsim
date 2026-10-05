@@ -344,8 +344,7 @@ def write_run_file(directory: pathlib.Path, **arguments) -> pathlib.Path:
 def first_task(**arguments) -> collect.Task:
     """The task of sweep(**arguments)'s first point."""
     study = sweep(**arguments)
-    first_point = study.points[0]
-    return experiment.task_of(first_point)
+    return study.points[0]
 
 
 def run_one_shot(seed: int = 0, **arguments) -> collect.Shot:
@@ -368,11 +367,6 @@ def run_sweep(tasks: list, shots: int) -> list:
         outcome = collect.run_unit(unit, measure.measure_shot)
         measurements.extend(outcome.rows)
     return measurements
-
-
-def tasks_of(study: experiment.Experiment) -> list:
-    """Every point's task, in the experiment's order."""
-    return [experiment.task_of(point) for point in study.points]
 
 
 def folded_run(tmp_path, measurements: list) -> tuple:
@@ -448,15 +442,18 @@ def _named_point(
     cells: Mapping,
     collection: collection_module.CollectionSettings,
     record_options: collect.RecordOptions,
-) -> experiment.Point:
-    """The point of these settings and cells, named by its id."""
+) -> collect.Task:
+    """The point of these settings and cells, named by its id.
+
+    The strong id leaves the name out, so the unnamed task gives it.
+    """
     metadata = dict(cells)
-    task = collect.Task(settings, metadata, record_options=record_options)
-    point_id = task.strong_id()
-    name = point_id[:12]
-    return experiment.Point(
-        name, settings, metadata, collection, record_options=record_options
+    unnamed = collect.Task(
+        "unnamed", settings, metadata, collection, record_options
     )
+    point_id = unnamed.strong_id()
+    name = point_id[:12]
+    return dataclasses.replace(unnamed, name=name)
 
 
 def _windows_committing(

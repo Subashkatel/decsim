@@ -196,7 +196,7 @@ def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
     run_file = run_files.write_run_file(tmp_path)
     lines = _run_one_shot(run_file, seed=0, out_dir=tmp_path)
     point = run_files.first_task()
-    settings = point.settings
+    settings = point.machine
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     row = result.operation_results[0]
@@ -391,7 +391,7 @@ def test_a_shots_rounds_add_up_every_patchs_rounds():
     """
     task = three_patch_task()
 
-    record = run_folder.point_record("point", task)
+    record = run_folder.point_record(task)
 
     assert record["rounds_per_shot"] == 45
 
@@ -407,7 +407,7 @@ def three_patch_task() -> collect.Task:
     patches = producers.memory_patches(run_files.CODE_TASK, 15, 3, 3, 0.001)
     workload = workload_settings.WorkloadSettings.running(patches)
     settings = dataclasses.replace(base, workload=workload)
-    return collect.Task(settings, cells)
+    return collect.Task("three_patches", settings, cells)
 
 
 def test_a_streams_rounds_are_its_segments_counted_once():
@@ -443,9 +443,9 @@ def test_a_streams_rounds_are_its_segments_counted_once():
     settings = machine_settings.MachineSettings(
         workload=workload, qpu=qpu, weak_decoder=weak_decoder
     )
-    task = collect.Task(settings, {})
+    task = collect.Task("segment", settings, {})
 
-    record = run_folder.point_record("point", task)
+    record = run_folder.point_record(task)
 
     assert record["rounds_per_shot"] == 3
 
@@ -455,10 +455,10 @@ def test_a_point_recorded_again_hashes_only_its_inputs(tmp_path):
     task = run_files.first_task()
     run_dir = tmp_path / "run"
 
-    run_folder.record_point(run_dir, "point", task)
-    run_folder.record_point(run_dir, "point", task)
+    run_folder.record_point(run_dir, task)
+    run_folder.record_point(run_dir, task)
 
-    inputs_dir = run_dir / "points" / "point" / "inputs"
+    inputs_dir = run_dir / "points" / task.name / "inputs"
     hashes_path = inputs_dir / "hashes.json"
     hashes_text = hashes_path.read_text()
     hashes = json.loads(hashes_text)
@@ -1113,7 +1113,7 @@ def test_a_point_whose_shot_runs_no_round_is_refused_before_its_record(
         "\n"
         "experiment = decsim.Experiment(\n"
         '    "empty",\n'
-        '    [decsim.Point("empty", decsim.MachineSettings())],\n'
+        '    [decsim.Task("empty", decsim.MachineSettings())],\n'
         "    decsim.CollectionSettings(max_shots=1),\n"
         ")\n"
     )

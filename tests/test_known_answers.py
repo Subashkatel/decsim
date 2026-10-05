@@ -67,7 +67,7 @@ UNIT_COUNTS = (1, 2, 3, 4)
 
 def run(settings, seed: int = 0) -> collect.Shot:
     """One seeded shot of the settings, run."""
-    task = collect.Task(settings, {})
+    task = collect.Task("task", settings, {})
     return collect.run_shot(task, seed)
 
 

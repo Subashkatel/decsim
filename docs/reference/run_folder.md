@@ -289,7 +289,7 @@ with no rows writes no file.
 
 One row per window whose confidence the escalation verdict read, for
 the shots of seed 0 up to the point's `confidence_shot_count`, 100 by
-default; `decsim.Point(..., record_options=decsim.experiments.collect.RecordOptions(
+default; `decsim.Task(..., record_options=decsim.experiments.collect.RecordOptions(
 confidence_shot_count=None))` writes every scored shot's (`all`). A run whose escalation reads no confidence writes no file.
 A window has no truth of its own, so a row carries its shot's failure
 and whether the strong decode changed the window's answer. An unscored

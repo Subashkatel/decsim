@@ -344,7 +344,7 @@ def switching_baseline_points() -> list:
         metadata = _metadata(distance, probability)
         cell_name = f"d{distance}_p{probability}"
         switching_machine = switching(distance, probability)
-        switching_point = decsim.Point(
+        switching_point = decsim.Task(
             f"switching_{cell_name}",
             switching_machine,
             metadata,
@@ -352,7 +352,7 @@ def switching_baseline_points() -> list:
         )
         switching_points.append(switching_point)
         weak_alone_machine = weak_alone(distance, probability)
-        weak_alone_point = decsim.Point(
+        weak_alone_point = decsim.Task(
             f"weak_alone_{cell_name}",
             weak_alone_machine,
             metadata,

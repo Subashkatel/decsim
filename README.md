@@ -81,7 +81,7 @@ for distance in DISTANCES:
         "qpu.distance": distance,
         "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
     }
-    point = decsim.Point(f"d{distance}", machine, metadata)
+    point = decsim.Task(f"d{distance}", machine, metadata)
     points.append(point)
 
 experiment = decsim.Experiment(NAME, points, COLLECTION)

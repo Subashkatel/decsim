@@ -683,14 +683,12 @@ def test_one_calibrator_learns_across_every_shot_of_its_task():
 class _OwnTaskThreshold:
     """A threshold row a study adds that builds its own source per task.
 
-    for_task is what built_per_task promises. This row keeps the
-    task's threshold in nats and learns nothing, which is all the law
-    needs: the instance collect.Task builds is the one its shots run.
+    This row keeps the task's threshold in nats and learns nothing, which
+    is all the law needs: the instance collect.Task builds is the one its
+    shots run.
     """
 
     audits_by_escalating = False
-    reads_a_calibration_table = False
-    built_per_task = True
 
     @dataclasses.dataclass(frozen=True)
     class Settings(threshold_sources.FixedThreshold.Settings):

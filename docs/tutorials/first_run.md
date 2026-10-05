@@ -199,12 +199,12 @@ ls results/d3
 
 ```
 pieces
-tasks
 priced_cards_example.py
 run.json
 shot_links.csv
 shots.csv
 sweep.csv
+tasks
 window_samples.csv
 ```
 

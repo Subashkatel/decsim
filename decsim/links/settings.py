@@ -199,7 +199,7 @@ class ReadoutRoute:
 class FabricSettings:
     """A fabric card: one path setting per hop.
 
-    Every hop of the reaction path is priced, so a card names all eleven. A
+    Every hop of the reaction path is priced, so a card names all twelve. A
     card whose QPU-to-controller latency leaves out the controller's
     readout processing says so, since the timing card prices it apart.
     readout_routes picks a path by the complete contributing footprint;
@@ -218,6 +218,7 @@ class FabricSettings:
     frame_to_controller: PathSettings
     controller_to_qpu: PathSettings
     controller_to_strong_buffer: PathSettings
+    strong_decoder_to_weak_decoder: PathSettings
     # the card's name for the run's description, a label: no part of a
     # task's id
     profile_name: str = dataclasses.field(compare=False)

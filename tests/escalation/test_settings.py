@@ -38,6 +38,32 @@ def test_a_switching_record_refuses_a_cost_by_its_own_field():
         _switching(threshold_cycles=-1)
 
 
+def test_a_switching_record_refuses_a_strong_answer_route_it_lacks():
+    with pytest.raises(ValueError) as refusal:
+        _switching(strong_answer_route="by_courier")
+    assert str(refusal.value) == (
+        "switching.strong_answer_route must be one of "
+        "('direct', 'through_weak_chip'), got 'by_courier'"
+    )
+
+
+def test_a_route_through_the_weak_chip_with_no_clock_is_refused():
+    """The chip's commit is one cycle, and a run with no clock has none."""
+    settings = shape_tests.gate_switching()
+    switching = dataclasses.replace(
+        settings.switching, strong_answer_route="through_weak_chip"
+    )
+    clockless = dataclasses.replace(settings, clock=None, switching=switching)
+
+    with pytest.raises(ValueError) as refusal:
+        machine_module.Machine.build(clockless, 0)
+    assert str(refusal.value) == (
+        "switching.strong_answer_route 'through_weak_chip' commits on the "
+        "weak chip in clock cycles, so it needs switching.clock or the "
+        "machine's clock"
+    )
+
+
 def test_two_decoders_without_switching_are_refused():
     """With no switching every window decodes on one decoder.
 

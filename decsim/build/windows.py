@@ -88,7 +88,9 @@ class Windows:
         is_switching = switching_settings is not None
         retention = _retention(plan, window_tier, is_switching)
         window_transfers = window_transfers_module.WindowTransfers(engine)
-        decoder_output = decoder_output_module.DecoderOutput(engine)
+        decoder_output = _decoder_output(
+            switching_settings, machine_clock, engine
+        )
         copies_the_window_fold = _copies_the_boundary_fold(window_decoder)
         copies_the_strong_fold = _copies_the_boundary_fold(strong_decoder)
         gate = decode_requests.WindowInputGate(
@@ -281,6 +283,35 @@ def _verdict(
         clock=clocked_switching.clock,
         threshold_cycles=clocked_switching.threshold_cycles,
         switch_cycles=clocked_switching.switch_cycles,
+    )
+
+
+def _decoder_output(
+    switching: Optional[escalation_settings.SwitchingSettings],
+    machine_clock: Optional[config.Clock],
+    engine: engine_module.Engine,
+) -> decoder_output_module.DecoderOutput:
+    """The decoder side's sends, a strong answer on the switching route.
+
+    A run with no switching sends a strong answer direct. A route that
+    commits on the weak chip counts its cycles on the switching clock,
+    so a run with no clock for it is refused.
+    """
+    if switching is None:
+        return decoder_output_module.DecoderOutput(engine)
+    clocked_switching = config.with_machine_clock(switching, machine_clock)
+    route_name = switching.strong_answer_route
+    route = decoder_output_module.STRONG_ANSWER_ROUTES[route_name]
+    if route.commit_cycles > 0 and clocked_switching.clock is None:
+        raise ValueError(
+            f"switching.strong_answer_route {route_name!r} commits on the "
+            "weak chip in clock cycles, so it needs switching.clock or the "
+            "machine's clock"
+        )
+    return decoder_output_module.DecoderOutput(
+        engine,
+        strong_answer_route=switching.strong_answer_route,
+        clock=clocked_switching.clock,
     )
 
 

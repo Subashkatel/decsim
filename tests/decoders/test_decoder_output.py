@@ -3,17 +3,23 @@
 A send is executed by an end of its hop
 (omnetpp-6.1.0 src/sim/csimplemodule.cc:333-334;
 gem5 coherent_xbar.cc:354-357 bills the port a packet left by), so the
-correction that leaves a decoder for the Pauli frame leaves by the tier's
-own output link, and the frame's priced write gates the commit.
+correction that leaves a decoder for the Pauli frame leaves by its
+route's hops, and the frame's priced write gates the commit. Through the
+weak chip, the chip's frame update is one cycle (Yang et al. 2605.04892
+Table I).
 """
 
 import functools
 
+import numpy
 import pytest
+import scipy.sparse
 
+import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
@@ -29,11 +35,13 @@ class _Transfers:
         self.engine = engine
         self.delay_ticks = delay_ticks
         self.sent = []
+        self.sent_ticks = []
 
     def send_for_window(
         self, path, window, _operation, request_key, payload_bits, on_delivered
     ):
         self.sent.append((path, window.key, request_key.tier, payload_bits))
+        self.sent_ticks.append(self.engine.now)
         self.engine.schedule(self.delay_ticks, on_delivered)
 
     def send_for_job(
@@ -134,7 +142,10 @@ def _published_bits(tier, logical_observables: tuple) -> int:
 
 
 def test_each_tier_publishes_over_its_own_output_link():
-    """A weak result rides weak_decoder_to_frame, a strong one its own."""
+    """A weak result rides weak_decoder_to_frame, a direct strong one its own.
+
+    The direct route is the default: the strong host sends home itself.
+    """
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
@@ -149,10 +160,10 @@ def test_each_tier_publishes_over_its_own_output_link():
     output.publish(window, operation, result, weak_key, _ignore)
     output.publish(window, operation, result, strong_key, _ignore)
     engine.run()
-    paths = [path for path, _key, _tier, _bits in transfers.sent]
-    assert paths == [
-        transfer_records.LinkPath.WEAK_DECODER_TO_FRAME,
-        transfer_records.LinkPath.STRONG_DECODER_TO_FRAME,
+    sends = [(path, bits) for path, _key, _tier, bits in transfers.sent]
+    assert sends == [
+        (transfer_records.LinkPath.WEAK_DECODER_TO_FRAME, 1),
+        (transfer_records.LinkPath.STRONG_DECODER_TO_FRAME, 64 + 1),
     ]
 
 
@@ -170,20 +181,123 @@ def test_a_weak_answer_is_its_flip_alone():
     assert _published_bits(weak, one_flip) == 1
 
 
-def test_a_selection_is_the_requests_name_alone():
-    """A message that only names a request is still 8 bytes on the wire."""
+def test_a_strong_answer_through_the_weak_chip_commits_there_then_goes_home():
+    """Down with its name, one chip cycle later home as its flip alone.
+
+    The frame takes one write, and the commit is heard once.
+    """
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
-    output = decoder_output_module.DecoderOutput(engine)
-    output.transfers = transfers
-    weak_job = decoding_records.DecodeJob(
-        operation_id=4, window_id=1, round_count=5, label="weak"
+    frame = _Frame(engine, 3)
+    clock = config.Clock(4)
+    output = decoder_output_module.DecoderOutput(
+        engine, strong_answer_route="through_weak_chip", clock=clock
     )
+    output.transfers = transfers
+    output.frame = frame
+    committed = []
+    on_committed = functools.partial(_note, committed, engine)
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
+    strong = window_records.DecoderTier.STRONG
+    strong_key = _request_key(strong)
+    window = _window()
+    operation = _operation(1)
+    output.publish(window, operation, result, strong_key, on_committed)
+    engine.run()
+    paths = transfer_records.LinkPath
+    assert transfers.sent == [
+        (paths.STRONG_DECODER_TO_WEAK_DECODER, (4, 1), strong, 64 + 1),
+        (paths.WEAK_DECODER_TO_FRAME, (4, 1), strong, 1),
+    ]
+    assert transfers.sent_ticks == [0, 8]
+    assert frame.commits == [(12, (4, 1), (1,))]
+    assert committed == [15]
+
+
+def _selection_bits(route: str, weak_job) -> int:
+    """The bits one selection puts on the escalation hop under a route."""
+    engine = engine_module.Engine()
+    transfers = _Transfers(engine, 4)
+    output = decoder_output_module.DecoderOutput(
+        engine, strong_answer_route=route
+    )
+    output.transfers = transfers
     strong_key = _request_key(window_records.DecoderTier.STRONG)
     output.send_selection(weak_job, strong_key, _ignore)
-    escalation_path = transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
-    tiers = window_records.DecoderTier
-    assert transfers.sent == [(escalation_path, "weak", tiers.STRONG, 64)]
+    ((path, _label, _tier, payload_bits),) = transfers.sent
+    assert path is transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
+    return payload_bits
+
+
+def _timing_only_job(patch_ids: tuple) -> decoding_records.DecodeJob:
+    """A weak job with no error model, reading one round of those patches."""
+    fragment = round_records.RetainedSyndromeFragment(
+        operation_id=4,
+        patch_ids=patch_ids,
+        round_index=2,
+        bits=None,
+        size_bits=8,
+        fragment_index=0,
+    )
+    return decoding_records.DecodeJob(
+        operation_id=4, window_id=1, round_count=5, payloads=[fragment]
+    )
+
+
+def test_a_selection_through_the_weak_chip_is_the_requests_name_alone():
+    """The chip keeps its crossing commit, so only the 8-byte name goes up."""
+    weak_job = _timing_only_job((0,))
+    assert _selection_bits("through_weak_chip", weak_job) == 64
+
+
+def test_a_direct_selection_carries_a_crossing_bit_per_observable():
+    """The host joins the crossing commit, so it rides with the name.
+
+    The count is the window model's observables, here two.
+    """
+    observables = scipy.sparse.csc_matrix([[0], [0]], dtype=numpy.uint8)
+    check = scipy.sparse.csc_matrix([[1]], dtype=numpy.uint8)
+    placed = fault_models.PlacedFaultModel(
+        representation=fault_models.FaultRepresentation.PHYSICAL,
+        check=check,
+        priors=[0.1],
+        observables=observables,
+        owned=[True],
+        source_fault_ids=[0],
+        boundary_flips={0: [0]},
+    )
+    model = fault_models.WindowErrorModel(
+        detector_ids=(0,),
+        detector_coordinates=None,
+        defect_positions={0: (4, 0)},
+        first_commit_round=4,
+        graphlike_faults=None,
+        physical_faults=placed,
+    )
+    weak_job = decoding_records.DecodeJob(
+        operation_id=4, window_id=1, round_count=5, detector_error_model=model
+    )
+    assert _selection_bits("direct", weak_job) == 64 + 2
+
+
+def test_a_direct_timing_only_selection_carries_a_bit_per_patch():
+    """With no model, as result_payload_bits: one observable per patch."""
+    weak_job = _timing_only_job((0, 1, 2))
+    assert _selection_bits("direct", weak_job) == 64 + 3
+
+
+def test_a_model_with_no_fault_view_selects_as_timing_only():
+    """A run that asks for no fault view still builds a model, holding none."""
+    weak_job = _timing_only_job((0, 1))
+    weak_job.detector_error_model = fault_models.WindowErrorModel(
+        detector_ids=(0,),
+        detector_coordinates=None,
+        defect_positions={0: (4, 0)},
+        first_commit_round=4,
+        graphlike_faults=None,
+        physical_faults=None,
+    )
+    assert _selection_bits("direct", weak_job) == 64 + 2
 
 
 def test_a_result_is_one_bit_per_logical_observable():

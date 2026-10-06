@@ -23,17 +23,16 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     2  ports
     3  controller, detector_error_model, links, pauli_frame,
        syndrome_buffer, windows
-    4  decoders, escalation, qpu
-    5  confidence, frontends, sinter_adapters
+    4  decoders, qpu
+    5  confidence, escalation, frontends, sinter_adapters
     6  build, producers
     7  observe
     8  settings
     9  machine (this file)
-    10 collect
-    11 experiments
-    12 __main__
+    10 experiments
+    11 __main__
 
-The eleven priced hops are the line where a call stops being local
+The twelve priced hops are the line where a call stops being local
 (Waldo 1994, waldo1994.txt 302-304 and 852-855): a call across a hop
 has a card, a payload a record names, and a send at one end; a call
 inside a unit is never priced. A component above a hop never sees a

@@ -50,6 +50,8 @@ DECLARED_MICROSECONDS = {
     "weak_decoder_to_frame": 2.0,
     "decoder_to_decoder": 0.5,
     "strong_decoder_to_frame": 4.0,
+    # the strong answer's hop to the weak chip, as long as the one home
+    "strong_decoder_to_weak_decoder": 4.0,
     "frame": 1.0,
     "frame_to_controller": 2.0,
     "controller_to_qpu": 2.0,
@@ -106,6 +108,7 @@ DECLARED_EDGE_NAMES = (
     "strong_decoder_to_frame",
     "frame_to_controller",
     "controller_to_qpu",
+    "strong_decoder_to_weak_decoder",
 )
 # 0.5 nats, which decibels_to_nats gives back exactly
 ESCALATION_THRESHOLD_DECIBELS = threshold_sources.nats_to_decibels(0.5)

@@ -417,6 +417,8 @@ restart_reread_buffer_regions is the double window's re-read width.
 
 Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier reports (decsim/confidence/), and the build refuses a weak decoder that cannot produce its evidence. threshold is a threshold row (threshold_sources.py); a weak result whose gap is at or above it is kept (the paper uses 20 dB). run_both_at_once is Step 1, the strong decoder started with the weak one and cancelled on confidence; False is the same section's on-demand variant (lines 631-640). strong_window is the shape the strong tier re-decodes (strong_window_shapes.py): redo_window, the default, or double_window, Sec. III C. clock, threshold_cycles and switch_cycles price the verdict's threshold and switch logic; clock None is the machine's clock. The complementary gap's two solves are two jobs of the weak pool, so its unit_count decides whether they overlap.
 
+strong_answer_route names a row of decoder_output.STRONG_ANSWER_ROUTES, the way a strong answer reaches the frame. direct, the default: the strong host joins the weak crossing commit, which rides up with the selection, and sends the answer on strong_decoder_to_frame (Toshio 2510.25222 Fig. 1). through_weak_chip: the answer goes down on strong_decoder_to_weak_decoder, the weak chip joins it in one cycle of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892 Table I, the Pauli frame update). A run with no switching sends a strong answer direct.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `confidence` | `ports.ConfidenceSettings` | required |
@@ -426,6 +428,7 @@ Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier repo
 | `switch_cycles` | `int` | `0` |
 | `run_both_at_once` | `bool` | `False` |
 | `strong_window` | `StrongWindowSettings` | `strong_window_shapes.RedoWindow.Settings()` |
+| `strong_answer_route` | `str` | `'direct'` |
 
 ### `RedoWindow.Settings`
 
@@ -648,7 +651,7 @@ excludes_receiver_processing says what the latency covers: a number measured end
 
 `decsim/links/settings.py`. A fabric card: one path setting per hop.
 
-Every hop of the reaction path is priced, so a card names all eleven. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
+Every hop of the reaction path is priced, so a card names all twelve. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -663,6 +666,7 @@ Every hop of the reaction path is priced, so a card names all eleven. A card who
 | `frame_to_controller` | `PathSettings` | required |
 | `controller_to_qpu` | `PathSettings` | required |
 | `controller_to_strong_buffer` | `PathSettings` | required |
+| `strong_decoder_to_weak_decoder` | `PathSettings` | required |
 | `profile_name` | `str` | required |
 | `readout_routes` | `tuple[ReadoutRoute, ...]` | `()` |
 

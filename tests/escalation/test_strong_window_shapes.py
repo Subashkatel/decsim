@@ -68,6 +68,7 @@ GATE_PATH_CLOCKS = {
     "decoder_to_decoder": FRIDGE_CLOCK,
     "weak_decoder_to_frame": FRIDGE_CLOCK,
     "strong_decoder_to_frame": ROOM_CLOCK,
+    "strong_decoder_to_weak_decoder": ROOM_CLOCK,
 }
 GATE_PHYSICAL_ERROR_PROBABILITY = 0.008
 
@@ -149,7 +150,7 @@ def weak_base_switching(
 
     The switching experiment's redo window task: real PyMatching on the
     weak base's chip unit escalates to belief matching on the host, the
-    strong side's four hops one room cycle each.
+    strong side's five hops one room cycle each.
     """
     base = machine_settings.weak_decoder_baseline(
         distance, physical_error_probability, round_period_microseconds

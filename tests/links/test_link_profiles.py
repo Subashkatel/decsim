@@ -27,11 +27,12 @@ import decsim.machine as machine
 import decsim.records.transfers as transfer_records
 import decsim.settings as machine_settings
 
-# the three hops a strong-node card prices as a cable or chassis crossing
+# the four hops a strong-node card prices as a cable or chassis crossing
 STRONG_NODE_CROSSINGS = (
     transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
     transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
     transfer_records.LinkPath.STRONG_DECODER_TO_FRAME,
+    transfer_records.LinkPath.STRONG_DECODER_TO_WEAK_DECODER,
 )
 INSTRUCTION_PATHS = (
     transfer_records.LinkPath.FRAME_TO_CONTROLLER,
@@ -315,15 +316,17 @@ def test_the_bandwidth_card_provisions_each_path_for_one_commit_region():
         "controller_to_weak_buffer": 24.0,
         "controller_to_strong_buffer": 24.0,
         "weak_buffer_to_weak_decoder": 48.0,
-        # a selection and a region of 360 bits, each behind a 64-bit name
-        "weak_decoder_to_strong_decoder": fractions.Fraction("97.6"),
+        # a selection with one crossing-commit bit and a region of 360
+        # bits, each behind a 64-bit name
+        "weak_decoder_to_strong_decoder": fractions.Fraction("97.8"),
         "strong_buffer_to_strong_decoder": 72.0,
         "weak_decoder_to_frame": fractions.Fraction("0.2"),
         "decoder_to_decoder": fractions.Fraction("4.8"),
-        # one flip behind the same name
+        # one flip behind the same name, home or to the weak chip
         "strong_decoder_to_frame": 13,
         "frame_to_controller": fractions.Fraction("6.4"),
         "controller_to_qpu": fractions.Fraction("25.6"),
+        "strong_decoder_to_weak_decoder": 13,
     }
     assert profile.profile_name == "bandwidth_limited"
 
@@ -533,14 +536,15 @@ def test_every_reference_number_cites_a_paper():
     assert uncited == []
 
 
-# The hops the measured RoCE v2 rows reprice: the write into syndrome
-# strong syndrome buffer, the escalation, the strong window's input, and the
-# reply.
+# The hops the measured RoCE v2 rows reprice: the write into the strong
+# syndrome buffer, the escalation, the strong window's input, and the
+# reply to the frame or to the weak chip.
 STRONG_SIDE_PATHS = (
     "controller_to_strong_buffer",
     "weak_decoder_to_strong_decoder",
     "strong_buffer_to_strong_decoder",
     "strong_decoder_to_frame",
+    "strong_decoder_to_weak_decoder",
 )
 
 
@@ -556,7 +560,7 @@ def _priced(path_settings) -> tuple:
 
 
 def paths_outside_the_strong_side(profile) -> dict:
-    """What every hop but the four strong-side ones is priced at."""
+    """What every hop but the five strong-side ones is priced at."""
     priced = {}
     for path in transfer_records.LinkPath:
         if path.value in STRONG_SIDE_PATHS:
@@ -633,25 +637,28 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
 ):
     """Backline 2609.09270 lines 1229-1230: a 100 Gb direct-attach cable.
 
-    The write, the escalation and the reply cross it at 100000 bits per
-    microsecond; the poll reads the coprocessor's own memory, so it
+    The write, the escalation and both replies cross it at 100000 bits
+    per microsecond; the poll reads the coprocessor's own memory, so it
     crosses no cable and is unbounded.
     """
     profile = measured_row.base_card()
     write = profile.controller_to_strong_buffer.channel.capacity
     escalation = profile.weak_decoder_to_strong_decoder.channel.capacity
     reply = profile.strong_decoder_to_frame.channel.capacity
+    reply_to_chip = profile.strong_decoder_to_weak_decoder.channel.capacity
     poll = profile.strong_buffer_to_strong_decoder.channel.capacity
     write_rate = write.input_bits_per_microsecond
     escalation_rate = escalation.input_bits_per_microsecond
     reply_rate = reply.input_bits_per_microsecond
+    reply_to_chip_rate = reply_to_chip.input_bits_per_microsecond
+    rates = (write_rate, escalation_rate, reply_rate, reply_to_chip_rate)
 
-    assert (write_rate, escalation_rate, reply_rate) == (100000,) * 3
+    assert rates == (100000,) * 4
     assert poll is None
 
 
 def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
-    """Only the four strong-side hops move: the rest is the default card."""
+    """Only the five strong-side hops move: the rest is the default card."""
     reference = link_profiles.logical_reference_profile()
     measured_cpu = link_profiles.RoceV2CpuFabric.base_card()
     measured_gpu = link_profiles.RoceV2GpuFabric.base_card()
@@ -661,7 +668,7 @@ def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
 
 
 def test_the_cpu_rows_strong_side_sources_cite_backline():
-    """Four hops read one measurement, and none of them is a choice now.
+    """Five hops read one measurement, and none of them is a choice now.
 
     On the reference card the weak-to-strong hop names no paper and says
     "repository weak-to-strong model choice"; on this row it is a leg of
@@ -674,6 +681,7 @@ def test_the_cpu_rows_strong_side_sources_cite_backline():
         "controller_to_strong_buffer",
         "strong_buffer_to_strong_decoder",
         "strong_decoder_to_frame",
+        "strong_decoder_to_weak_decoder",
         "weak_decoder_to_strong_decoder",
     ]
     declared = _named_where(sources, _declares_a_choice)
@@ -681,7 +689,7 @@ def test_the_cpu_rows_strong_side_sources_cite_backline():
 
 
 def test_the_gpu_rows_strong_side_sources_cite_backline():
-    """The same four hops, read from the GPU echo row."""
+    """The same five hops, read from the GPU echo row."""
     profile = link_profiles.RoceV2GpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_backline)
@@ -689,6 +697,7 @@ def test_the_gpu_rows_strong_side_sources_cite_backline():
         "controller_to_strong_buffer",
         "strong_buffer_to_strong_decoder",
         "strong_decoder_to_frame",
+        "strong_decoder_to_weak_decoder",
         "weak_decoder_to_strong_decoder",
     ]
     declared = _named_where(sources, _declares_a_choice)
@@ -721,7 +730,7 @@ def strong_buffer_source_of(built) -> str:
 
 
 def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
-    """The four strong-side hops read one measurement, 2510.25213."""
+    """The five strong-side hops read one measurement, 2510.25213."""
     profile = link_profiles.NvqlinkGpuFabric.base_card()
     sources = sources_of(profile)
     cited = _named_where(sources, _cites_nvqlink)
@@ -729,6 +738,7 @@ def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
         "controller_to_strong_buffer",
         "strong_buffer_to_strong_decoder",
         "strong_decoder_to_frame",
+        "strong_decoder_to_weak_decoder",
         "weak_decoder_to_strong_decoder",
     ]
 
@@ -741,9 +751,10 @@ def test_the_nvqlink_rows_strong_side_retransmits_nothing():
         profile.weak_decoder_to_strong_decoder,
         profile.strong_buffer_to_strong_decoder,
         profile.strong_decoder_to_frame,
+        profile.strong_decoder_to_weak_decoder,
     )
     protocols = [path.channel.protocol for path in strong_side]
-    assert protocols == [None] * 4
+    assert protocols == [None] * 5
 
 
 @pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)

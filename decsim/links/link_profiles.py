@@ -27,7 +27,7 @@ import decsim.records.windows as window_records
 RESULT_PAYLOAD_SOURCE = "DecodeResult.logical_observables bits"
 # A strong answer crosses the wall while other requests are open, so it
 # carries the name of the request it answers in front of those bits
-# (decoders/decoder_output.py ANSWER_NAME_BITS_BY_TIER).
+# (decoders/decoder_output.py ANSWER_NAME_BITS_BY_PATH).
 STRONG_RESULT_PAYLOAD_SOURCE = (
     "DecodeResult.logical_observables bits behind the request's name"
 )
@@ -56,8 +56,9 @@ READOUT_PAYLOAD_SOURCE = "QPUReadout.size_bits"
 # (Toshio et al. 2510.25222 lines 1247 to 1250 assign the region's
 # syndrome data to the strong decoder at the switch; decoders/
 # decoder_output.py send_region). The selection rides the same hop first
-# as the request's name alone, and the region carries that name in front
-# of its rounds (records/windows.py REQUEST_KEY_WIRE_BITS).
+# as the request's name, with the weak crossing commit behind it when the
+# strong host joins it, and the region carries that name in front of its
+# rounds (records/windows.py REQUEST_KEY_WIRE_BITS).
 ESCALATION_PAYLOAD_SOURCE = "EscalatedRegion.message_bits()"
 
 # The two controller-to-store hops carry the packed round at the width
@@ -348,6 +349,15 @@ def logical_reference_profile() -> settings.FabricSettings:
         STRONG_RESULT_PAYLOAD_SOURCE,
         off_board_rate,
     )
+    # the frame is in the controller beside the weak chip, so the strong
+    # answer's hop to either is the one inter-chassis hop
+    strong_decoder_to_weak_decoder = _actual_path(
+        "strong_decoder_to_weak_decoder",
+        STRONG_STORE_LATENCY_MICROSECONDS,
+        STRONG_STORE_SOURCE,
+        STRONG_RESULT_PAYLOAD_SOURCE,
+        off_board_rate,
+    )
     frame_to_controller = _default_path(
         "frame_to_controller",
         0.0,
@@ -376,6 +386,7 @@ def logical_reference_profile() -> settings.FabricSettings:
         frame_to_controller=frame_to_controller,
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
+        strong_decoder_to_weak_decoder=strong_decoder_to_weak_decoder,
         profile_name="logical_reference",
     )
 
@@ -412,10 +423,13 @@ def bandwidth_limited_profile(
     )
     strong_window_bits = strong_window_rounds * syndrome_bits_per_round
     # one escalation is a selection and a region, each behind the
-    # request's name, and its answer is one flip behind the same name
+    # request's name, and its answer is one flip behind the same name;
+    # on the default direct route the selection also carries the weak
+    # crossing commit, one bit per logical observable
     name_bits = window_records.REQUEST_KEY_WIRE_BITS
     region_message_bits = name_bits + strong_window_bits
-    escalation_bits = name_bits + region_message_bits
+    selection_bits = name_bits + 1
+    escalation_bits = selection_bits + region_message_bits
     strong_answer_bits = name_bits + 1
     one_per_region = 1 / commit_region_microseconds
     round_bits_per_microsecond = (
@@ -520,6 +534,14 @@ def bandwidth_limited_profile(
         "behind the request's name",
         STRONG_RESULT_PAYLOAD_SOURCE,
     )
+    strong_decoder_to_weak_decoder = provisioning.path(
+        "strong_decoder_to_weak_decoder",
+        strong_answer_bits,
+        strong_answer_bits_per_microsecond,
+        "one frame-update bit per logical observable per commit region, "
+        "behind the request's name",
+        STRONG_RESULT_PAYLOAD_SOURCE,
+    )
     frame_to_controller = provisioning.path(
         "frame_to_controller",
         BUS_WORD_BITS,
@@ -546,6 +568,7 @@ def bandwidth_limited_profile(
         frame_to_controller=frame_to_controller,
         controller_to_qpu=controller_to_qpu,
         controller_to_strong_buffer=controller_to_strong_buffer,
+        strong_decoder_to_weak_decoder=strong_decoder_to_weak_decoder,
         profile_name="bandwidth_limited",
     )
 
@@ -694,12 +717,13 @@ def _measured_round_trip_card(
     2510.25213, Sec. 2.4) each measure one FPGA-to-coprocessor round trip
     over RoCE, with the coprocessor polling its own memory. Neither gives a
     per-direction number, so the split is decsim's rule: the write into the
-    strong syndrome buffer, the escalation request and the reply to the
-    frame each carry half the round trip, and the strong store's read is
-    zero because the coprocessor polls its own memory. The three cable legs
-    serialize at 100 Gb/s, and each leg's latency is its half less the echo
-    payload's time on the cable, so an echo takes the measured median
-    exactly: not a warm-up round trip nor the tail.
+    strong syndrome buffer, the escalation request and the reply, to the
+    frame or to the weak chip, each carry half the round trip, and the
+    strong store's read is zero because the coprocessor polls its own
+    memory. The cable legs serialize at 100 Gb/s, and each leg's latency
+    is its half less the echo payload's time on the cable, so an echo
+    takes the measured median exactly: not a warm-up round trip nor the
+    tail.
     """
     cable_rate = settings.CapacitySettings(
         _OFF_BOARD_BITS_PER_MICROSECOND, rate_source
@@ -720,9 +744,12 @@ def _roce_v2_strong_paths(
     cable_rate: settings.CapacitySettings,
     echo_payload_bits: int,
 ) -> dict:
-    """The four strong-side paths, priced from one measured round trip.
+    """The five strong-side paths, priced from one measured round trip.
 
-    The three cable legs serialize at its rate, so the echo payload's time
+    The measured round trips end at the requesting FPGA (Backline
+    2609.09270 lines 1617-1620, NVQLink 2510.25213 line 400), so a reply
+    to the weak chip is the same leg as a reply to the frame. The four
+    cable legs serialize at its rate, so the echo payload's time
     on the cable comes out of each leg's half; the poll crosses no cable and
     stays unbounded.
     """
@@ -762,11 +789,19 @@ def _roce_v2_strong_paths(
         STRONG_RESULT_PAYLOAD_SOURCE,
         cable_rate,
     )
+    strong_decoder_to_weak_decoder = _actual_path(
+        "strong_decoder_to_weak_decoder",
+        leg_microseconds,
+        reply_source,
+        STRONG_RESULT_PAYLOAD_SOURCE,
+        cable_rate,
+    )
     return {
         "controller_to_strong_buffer": controller_to_strong_buffer,
         "weak_decoder_to_strong_decoder": weak_decoder_to_strong_decoder,
         "strong_buffer_to_strong_decoder": strong_buffer_to_strong_decoder,
         "strong_decoder_to_frame": strong_decoder_to_frame,
+        "strong_decoder_to_weak_decoder": strong_decoder_to_weak_decoder,
     }
 
 

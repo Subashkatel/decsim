@@ -113,6 +113,7 @@ TWO_TIER_HOPS = {
     "decoder_to_decoder": 1,
     "weak_decoder_to_frame": 1,
     "strong_decoder_to_frame": 3,
+    "strong_decoder_to_weak_decoder": 3,
 }
 HOPS_SOURCE = "a measurement test's hops, in fridge cycles"
 FRIDGE_CLOCK = machine_settings.FRIDGE_CLOCK
@@ -252,6 +253,7 @@ def switching_settings(
     weak_microseconds: float = 1.0,
     strong_algorithm=None,
     strong_window=None,
+    strong_answer_route: str = "direct",
 ) -> machine_settings.MachineSettings:
     """A 1.0 us weak tier beside a 10.0 us one, on the two-tier fabric.
 
@@ -263,7 +265,8 @@ def switching_settings(
     turns on; more than one patch runs memory_patches; commit_rounds
     sets the sliding windows' commit, the code distance when None.
     weak_microseconds, strong_algorithm and strong_window replace the
-    weak card, the strong row and the redo window.
+    weak card, the strong row and the redo window. strong_answer_route
+    names the strong answer's route home.
     """
     cells = cells_at(SWITCHING_ERROR_PROBABILITY)
     base = run_files.minimal_machine(cells, rounds_per_shot=SHOT_ROUNDS)
@@ -293,6 +296,7 @@ def switching_settings(
         threshold=threshold,
         run_both_at_once=run_both_at_once,
         strong_window=strong_window,
+        strong_answer_route=strong_answer_route,
     )
     windows = window_settings.switching_windows(windows, strong_window)
     weak_algorithm = charged(weak_microseconds)
@@ -925,6 +929,23 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10
     assert samples["weak_attempt"][2] == 13.304
+
+
+def test_a_strong_answer_through_the_weak_chip_comes_home_over_its_route():
+    """The way home is the hop down, the chip's commit and the hop home.
+
+    The strong answer crosses strong_decoder_to_weak_decoder (0.012 us),
+    the weak chip joins it on the next edge of the machine's clock
+    (0.004 us), and it crosses weak_decoder_to_frame (0.004 us), so
+    output_link_per_window is 0.020 us, and the points still sum to the
+    window's reaction time.
+    """
+    shot = switching_run(1000000.0, strong_answer_route="through_weak_chip")
+    measurement = measure.measure_shot(shot)
+
+    samples = measurement.samples
+    assert samples["output_link_per_window"] == [0.020] * 10
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
 
 
 def test_an_escalated_windows_points_sum_to_its_reaction_time():

@@ -88,7 +88,7 @@ def strong_only(physical_error_probability: float):
 def switching(physical_error_probability: float, strong_window=REDO_WINDOW):
     """The weak base escalating every window to the strong base's tier.
 
-    The strong side's four hops are one room cycle each.
+    The strong side's five hops are one room cycle each.
     """
     base = weak_only(physical_error_probability)
     strong_base = strong_only(physical_error_probability)

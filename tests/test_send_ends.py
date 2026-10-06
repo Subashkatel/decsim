@@ -32,6 +32,8 @@ ENDS_OF_PATH = {
     "FRAME_TO_CONTROLLER": ("pauli_frame", "controller"),
     "CONTROLLER_TO_QPU": ("controller", "qpu"),
     "CONTROLLER_TO_STRONG_BUFFER": ("controller", "syndrome_buffer"),
+    # the strong answer to the weak chip's commit step, both decoder ends
+    "STRONG_DECODER_TO_WEAK_DECODER": ("decoders",),
 }
 
 # the components on the reaction path; the root wires the paths onto the

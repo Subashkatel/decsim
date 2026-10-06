@@ -2,8 +2,9 @@
 
 `python plot.py <results folder>` writes the folder's plots/, one
 figure per question: how many windows each cluster-gap threshold sends
-to Relay-BP-5, what logical error rate that share buys, and what it
-costs in latency. A panel is one physical error rate and a curve one
+to Relay-BP-5, what logical error rate that share buys, what it costs
+in latency for kept and for escalated windows, and whether the strong
+decoder keeps up. A panel is one physical error rate and a curve one
 distance. A point with no failures is a hollow marker at its upper
 bound, as decsim.plots.bounds draws it, and a point failing more than
 half its shots has no per-round rate and is left out.
@@ -22,6 +23,12 @@ X = "physical error rate"
 THRESHOLD = "cluster-gap threshold (dB)"
 SHARE = "windows escalated (%)"
 RATE = "logical_error_rate_per_round"
+WINDOW = "window"
+TIERS = {"kept": "weak", "escalated": "strong"}
+TIER_CURVES = [
+    f"d={distance} {tier}" for distance in DISTANCES for tier in TIERS
+]
+KEEP_UP = "strong decode time / Toshio bound"
 
 
 def main(folder: pathlib.Path) -> None:
@@ -32,6 +39,7 @@ def main(folder: pathlib.Path) -> None:
     escalated_figure(rows, plots_folder / "escalated.png")
     error_rate_figure(rows, plots_folder / "logical_error_rate.png")
     latency_figure(rows, plots_folder / "latency.png")
+    keep_up_figure(rows, plots_folder / "strong_keeps_up.png")
 
 
 def rows_of(folder: pathlib.Path) -> list:
@@ -48,6 +56,8 @@ def rows_of(folder: pathlib.Path) -> list:
         row[X] = float(status["workload.arguments.physical_error_probability"])
         row[THRESHOLD] = float(status["escalation.gap_threshold_db"])
         row[SHARE] = 100 * row["escalated_fraction"]
+        service = row["strong_service_mean_us"]
+        row[KEEP_UP] = service / row["strong_service_bound_us"]
         rows.append(row)
     return rows
 
@@ -124,7 +134,11 @@ def has_per_round_rate(row: dict) -> bool:
 
 
 def latency_figure(rows: list, path: pathlib.Path) -> None:
-    """Window formed to correction committed, median and p99, by threshold."""
+    """Window formed to Pauli frame, median and p99, kept against escalated.
+
+    A kept window's correction is the union-find answer; an escalated
+    window's is Relay-BP-5's, so its time holds the strong side's wait.
+    """
     statistics = ["median", "p99"]
     panel_names = [
         f"{X} = {error_rate:g}, {statistic}"
@@ -135,12 +149,47 @@ def latency_figure(rows: list, path: pathlib.Path) -> None:
     for panel_name, axis in axis_by_panel.items():
         rate_text, statistic = panel_name.split(", ")
         error_rate = float(rate_text.split(" = ")[1])
-        column = f"buffer0_ready_to_frame_{statistic}_us"
         rate_rows = [row for row in rows if row[X] == error_rate]
-        plots.values(axis, rate_rows, THRESHOLD, column, "d", order=DISTANCES)
+        tier_rows = rows_by_tier(rate_rows, statistic)
+        plots.values(
+            axis, tier_rows, THRESHOLD, statistic, WINDOW, order=TIER_CURVES
+        )
         axis.set_title(panel_name)
         axis.set_ylabel("window formed to Pauli frame (µs)")
         axis.set_yscale("log")
+        threshold_axis(axis)
+    plots.save(figure, path)
+
+
+def rows_by_tier(rows: list, statistic: str) -> list:
+    """One row per point and tier, its latency under the statistic's name."""
+    tier_rows = []
+    for row in rows:
+        for tier, column_tier in TIERS.items():
+            column = f"buffer0_ready_to_frame_{column_tier}_{statistic}_us"
+            tier_row = {
+                THRESHOLD: row[THRESHOLD],
+                WINDOW: f"d={row['d']} {tier}",
+                statistic: row[column],
+            }
+            tier_rows.append(tier_row)
+    return tier_rows
+
+
+def keep_up_figure(rows: list, path: pathlib.Path) -> None:
+    """The strong decoder's mean decode time over Toshio's Theorem 1 bound.
+
+    Above 1 the strong decoder cannot keep up with the windows it is
+    sent (2510.25222 Eq. (6)); report.strong_service_bound_us gives the
+    bound for the point's own escalation rate.
+    """
+    figure, axis_by_rate = plots.panels(X, ERROR_RATES, columns=2)
+    for error_rate, axis in axis_by_rate.items():
+        rate_rows = [row for row in rows if row[X] == error_rate]
+        plots.values(axis, rate_rows, THRESHOLD, KEEP_UP, "d", order=DISTANCES)
+        axis.axhline(1, color="black", linewidth=0.8, linestyle="--")
+        axis.set_yscale("log")
+        axis.set_ylabel(KEEP_UP)
         threshold_axis(axis)
     plots.save(figure, path)
 

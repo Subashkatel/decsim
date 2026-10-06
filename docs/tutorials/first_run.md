@@ -162,7 +162,7 @@ cut -d, -f5,35,77,101,134,135 results/d3/sweep.csv
 
 ```
 algorithm,load,queue_wait_mean_us,service_mean_us,buffer0_ready_to_frame_median_us,buffer0_ready_to_frame_p99_us
-1.0,0.35585185185185186,0.0,1.064,1.076,1.076
+1.0,0.3571851851851852,0.0,1.064,1.076,1.076
 ```
 
 Two new words for these columns:

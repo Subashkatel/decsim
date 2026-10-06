@@ -409,7 +409,7 @@ class DoubleWindow(StrongWindowPorts):
         """Take back the weak decodes the strong window supersedes.
 
         An absorbed window's request, and the restart window's request
-        built on its old shape, parked on a boundary that never arrives.
+        built on its old shape, wait on a boundary that never arrives.
         The restart window's potential restart hold keeps every round
         its re-sliced decode reads until the plan ends.
         """

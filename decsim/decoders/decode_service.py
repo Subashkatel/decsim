@@ -1,15 +1,14 @@
-"""One decode on one unit: staged, started once landed and allowed, freed.
+"""One decode on one unit: staged, started once landed, freed.
 
 As gem5's IEW stage executes what the queue issued
 (src/cpu/o3/iew.hh:70-87), the service takes the unit the dispatcher
 chose, moves the job's rounds into that unit's memory (invoke the unit,
 DMA its input, then compute; gem5-Aladdin aladdin_sys_connection.h and
 dma_interface.h), starts the decoder when every transfer landed and the
-window owes no boundary, and frees the unit when the decode, and any
-confidence walk charged on it, has ended. A landed job whose window
-still owes a boundary parks in its slot and releases its compute claim
-(Tomasulo's rule at the boundary hazard), so a dependent that fills
-early never deadlocks the unit against its own predecessor.
+unit's compute is free, and frees the unit when the decode, and any
+confidence walk charged on it, has ended. The dispatcher hands over a
+job only once its window owes no boundary, so a landed input never
+waits for one.
 """
 
 import dataclasses
@@ -192,14 +191,9 @@ class DecodeService:
         if claim_compute:
             self._predict_compute_free(job)
 
-    def begin(
-        self, job: decoding_records.DecodeJob, gated: bool = True
-    ) -> None:
+    def begin(self, job: decoding_records.DecodeJob) -> None:
         """The unit's memory holds the input: start the decode."""
         if job.cancelled:  # cancelled while its input was in flight
-            return
-        if gated and is_boundary_owed(job):
-            self._park(job)
             return
         if job.gate is not None:
             # the seam mask is XORed into the landed input exactly once,
@@ -210,28 +204,6 @@ class DecodeService:
             job.window.service_began = True
             job.window.t_compute_start = self.engine.now
         self._start_decoder(job)
-
-    def restart_parked(self, job: decoding_records.DecodeJob) -> None:
-        """A released job takes the unit's compute if it can have it now."""
-        unit = job.unit
-        holder = unit.holder
-        if holder is None and self.pool.is_free(unit):
-            self.pool.claim(unit, job)
-            self.begin(job, gated=False)
-            return
-        if holder is None:
-            return
-        if holder.service_started:
-            # the unit is decoding: no longer parked, so the compute
-            # offer starts this job at the next compute end
-            return
-        if holder.input_landed:
-            return
-        # steal a reservation held for an input still in flight:
-        # ready work issues first; the in-flight job re-competes
-        # at its own landing
-        unit.claim_compute(job)
-        self.begin(job, gated=False)
 
     # ------------------------------------------------------- the unit's end
 
@@ -257,7 +229,6 @@ class DecodeService:
         unit = job.unit
         self.staging.cancel(job)
         unit.evict(job)
-        job.is_parked = False
         if unit.holder is job:
             unit.release_compute()
             self._offer_compute(unit)
@@ -286,14 +257,6 @@ class DecodeService:
         return len(self.pool.free)
 
     # ------------------------------------------------- the units' state
-
-    def parked_jobs(self) -> list:
-        """Every resident landed with a boundary still owed, unit by unit."""
-        parked = []
-        for unit in self.pool.units:
-            unit_parked = unit.parked_residents()
-            parked.extend(unit_parked)
-        return parked
 
     def resident_jobs(self) -> list:
         """Every job holding a slot of any unit, unit by unit."""
@@ -331,20 +294,6 @@ class DecodeService:
             if unit.memory.resident_input_count:
                 held.append(unit.name)
         return held
-
-    def check_settled(self) -> None:
-        """Refuse a quiescent run with a decode parked.
-
-        A parked decode means the event that releases it never came.
-        """
-        parked = []
-        for job in self.parked_jobs():
-            parked.append(job.label)
-        if parked:
-            parked = sorted(parked)
-            raise RuntimeError(
-                f"run ended with parked decodes never released: {parked}"
-            )
 
     # ------------------------------------------------- dispatch, private
 
@@ -448,8 +397,7 @@ class DecodeService:
     ) -> None:
         """Every transfer landed: start now, or wait for the unit's compute."""
         job.input_landed = True
-        if not is_boundary_owed(job):
-            self._mark_ready(job)
+        job.ready_ticks = self.engine.now
         self.engine.log_io(
             f"unit {unit.name} SRAM",
             lambda: _landed_description(job, unit),
@@ -460,62 +408,13 @@ class DecodeService:
             # this job holds or was reserved the unit's compute
             self.begin(job)
             return
-        if holder is None and self.pool.is_free(unit):
-            # compute went back to the pool (a resident parked and
-            # released its claim); take it now
-            self.pool.claim(unit, job)
-            self.begin(job)
-        # otherwise the compute is busy: the compute offer picks this
-        # job up at the next compute end
-
-    def mark_startable(self, window_key: tuple) -> None:
-        """The window's boundary is in: its landed decodes may start now.
-
-        The tick a decode may start is the tick its dependency was met,
-        whether or not a unit is free then: gem5's queue wakes an
-        instruction when its operands arrive (inst_queue.cc
-        wakeDependents at 1074, addIfReady at 1536-1562) and counts the
-        wait for a functional unit apart (NoFreeFU and fuBusy,
-        inst_queue.cc:1009-1014).
-        """
-        for job in self.resident_jobs():
-            if (job.operation_id, job.window_id) != window_key:
-                continue
-            if not job.input_landed:
-                continue
-            if is_boundary_owed(job):
-                continue
-            self._mark_ready(job)
-
-    def _mark_ready(self, job: decoding_records.DecodeJob) -> None:
-        """Stamp the first tick this decode may compute, and only the first."""
-        if job.ready_ticks is not None:
-            return
-        job.ready_ticks = self.engine.now
-
-    def _park(self, job: decoding_records.DecodeJob) -> None:
-        job.is_parked = True
-        self.engine.log(
-            log_sources.DECODER_MANAGER,
-            f"PARK DECODE {job.label} (boundary pending)",
-        )
-        self._release_compute_claim(job)
+        # the compute offer picks this job up at the next compute end
+        assert holder is not None, f"{job.label} landed on a free unit"
 
     # ------------------------------------------------- the compute, private
 
-    def _release_compute_claim(self, job: decoding_records.DecodeJob) -> None:
-        """Tomasulo's rule at the boundary hazard.
-
-        A parked job keeps its input slot but never the unit's compute.
-        """
-        unit = job.unit
-        if unit.holder is job:
-            unit.release_compute()
-            self._offer_compute(unit)
-            self.manager.dispatch()
-
     def _offer_compute(self, unit: decoder_unit_module.DecoderUnit) -> None:
-        """Free compute goes to the oldest startable resident.
+        """Free compute goes to the oldest landed resident.
 
         Otherwise it stays reserved for the oldest one still in flight,
         or returns to the pool. As in gem5 O3's scheduleReadyInsts, only
@@ -529,7 +428,7 @@ class DecodeService:
             unit.claim_compute(ready)
             self.begin(ready)
             return
-        landing = unit.oldest_landing_resident_that_may_start()
+        landing = unit.oldest_landing_resident()
         if landing is not None:
             unit.claim_compute(landing)  # starts at its landing
             self._predict_compute_free(landing)
@@ -577,13 +476,6 @@ def job_defects_text(job: decoding_records.DecodeJob) -> str:
         defect_texts.append(str(defect))
     listed = ", ".join(defect_texts)
     return f"defects {{{listed}}}"
-
-
-def is_boundary_owed(job: decoding_records.DecodeJob) -> bool:
-    """Whether the job's window gate still holds its start back."""
-    if job.gate is None:
-        return False
-    return not job.gate.may_start(job)
 
 
 def _emitted_description(

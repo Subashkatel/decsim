@@ -1,9 +1,9 @@
 """The decoder manager: the facade that gives ready windows a decoder unit.
 
-A job waits in the WaitingJobs; the DecodeDispatcher places it on the
-DecoderUnit the DecoderPool offers; the DecodeService stages its input
-into that unit's memory and starts the decoder once the input landed and
-the window owes no boundary; the StrongRequests say which destination
+A job waits in the WaitingJobs; once its window owes no boundary, the
+DecodeDispatcher places it on the DecoderUnit the DecoderPool offers;
+the DecodeService stages its input into that unit's memory and starts
+the decoder once the input landed; the StrongRequests say which destination
 waits for which strong result; and the DecodeOutcomes deliver a finished
 decode through the job's on_decoded. The manager schedules, says when an
 input moves and returns results; it executes no send and holds no join.
@@ -227,25 +227,21 @@ class DecoderManager:
         self.queue.add(job)
         self.dispatcher.run()
 
-    def dispatch(self) -> None:
-        """Place every waiting job that fits; the service's trigger."""
-        self.dispatcher.run()
+    def release_window(self, window_key: tuple) -> None:
+        """The window's last boundary arrived: its queued jobs may start.
 
-    def release_parked(self, window_key: tuple) -> None:
-        """The window's last boundary arrived: start its parked decode.
-
-        A job still in transfer passes the gate at its own landing instead.
+        Each one's wait for a unit starts now, so its queue wait holds no
+        boundary wait: gem5 counts a ready instruction's wait for a
+        functional unit apart (inst_queue.cc:1009-1014).
         """
-        self.service.mark_startable(window_key)
-        for job in self.service.parked_jobs():
-            key = (job.operation_id, job.window_id)
-            if key != window_key:
+        now = self.engine.now
+        for job in self.queue.waiting:
+            if job.window is None:
                 continue
-            if decode_service.is_boundary_owed(job):
-                continue  # another dependency still owed
-            job.is_parked = False
-            self.service.restart_parked(job)
-        self.dispatcher.run()  # a started decode may admit blocked stages
+            if job.window.key == window_key:
+                job.ready_time = now
+                job.window.t_released = now
+        self.dispatcher.run()
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back one window's submitted, not-yet-started weak decode.
@@ -408,7 +404,6 @@ class DecoderManager:
         Nothing may still hold rounds, wait for round credits, or hold
         returned credits nobody drained.
         """
-        self.service.check_settled()
         unsettled = self.strong_requests.unsettled()
         unclaimed = self.service.windows_holding_output()
         if unclaimed:

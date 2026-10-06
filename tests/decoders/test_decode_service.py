@@ -1,14 +1,12 @@
-"""The service's laws: the start, the park, the overlap.
+"""The service's laws: the start and the overlap.
 
-Smith 1982 decoupled access-execute:
-with two slots the next window's transfer overlaps the compute, one
-window per max(T, C). Tomasulo's rule at the boundary hazard: a landed
-job whose window owes a boundary keeps its slot and never the compute.
-The laws are computed inside the tests. The strong-primary law needs
-the whole declared fabric (tests/declared_run.py), because only a run
-builds the request that rides the strong-buffer path. A withdrawn job's
-landing follows the transport that carries it: once the transfer is
-cancelled, no landing is awaited.
+Smith 1982 decoupled access-execute: with two slots the next window's
+transfer overlaps the compute, one window per max(T, C). The laws are
+computed inside the tests. The strong-primary law needs the whole
+declared fabric (tests/declared_run.py), because only a run builds the
+request that rides the strong-buffer path. A withdrawn job's landing
+follows the transport that carries it: once the transfer is cancelled,
+no landing is awaited.
 """
 
 import decsim.config as config
@@ -31,25 +29,16 @@ DISPATCH_CLOCK = config.Clock(1)
 
 
 class _Gate:
-    """A gate the test opens by hand."""
+    """A gate that records each job whose input it masks."""
 
     def __init__(self):
-        self.is_open = True
         self.masked = []
-
-    def may_stage(self, job):
-        del job
-        return True
-
-    def may_start(self, job):
-        del job
-        return self.is_open
 
     def mask_input(self, job):
         self.masked.append(job.label)
 
 
-def _job(index, gate=None, deps_remaining=0):
+def _job(index, gate=None):
     payload = round_records.RetainedSyndromeFragment(
         operation_id=1,
         patch_ids=("p",),
@@ -68,7 +57,6 @@ def _job(index, gate=None, deps_remaining=0):
         commit_hi=1,
         buffer_hi=1,
         round_count=1,
-        deps_remaining=deps_remaining,
     )
     return decoding_records.DecodeJob(
         operation_id=1,
@@ -184,9 +172,9 @@ def _recording(manager, engine):
     starts = {}
     original_begin = manager.service.begin
 
-    def recording_begin(job, gated=True):
+    def recording_begin(job):
         starts[job.label] = engine.now
-        original_begin(job, gated)
+        original_begin(job)
 
     manager.service.begin = recording_begin
     return starts
@@ -219,7 +207,7 @@ def strong_primary_run(decoder):
     return declared_run.run_machine(settings, 0)
 
 
-def test_a_job_starts_when_its_input_landed_and_the_gate_allows():
+def test_a_job_starts_when_its_input_landed_and_masks_it_once():
     engine = engine_module.Engine()
     decoder = decoders.PresetLatencyDecoder(1.0)
     manager = _manager(engine, decoder)
@@ -235,30 +223,6 @@ def test_a_job_starts_when_its_input_landed_and_the_gate_allows():
     assert starts["w0"] == transfer_ticks
     assert gate.masked == ["w0"]
     assert done["w0"] == transfer_ticks + config.microseconds_to_ticks(1.0)
-
-
-def test_a_parked_job_keeps_its_slot_and_releases_the_compute():
-    engine = engine_module.Engine()
-    decoder = decoders.PresetLatencyDecoder(1.0)
-    manager = _manager(engine, decoder)
-    starts = _recording(manager, engine)
-    gate = _Gate()
-    gate.is_open = False
-    job = _job(0, gate)
-    on_decoded = _resolving(manager)
-    manager.enqueue(job, None, on_decoded)
-    (unit,) = manager.pool.units
-    assert job.is_parked is True
-    assert unit.residents == [job]
-    assert unit.holder is None
-    assert manager.pool.free == [unit]
-    gate.is_open = True
-    release_ticks = config.microseconds_to_ticks(3.0)
-    window_key = (1, 0)
-    engine.schedule(release_ticks, lambda: manager.release_parked(window_key))
-    engine.run()
-    assert starts["w0"] == release_ticks
-    manager.check_decode_work_settled()
 
 
 def test_the_second_slots_transfer_overlaps_the_compute():

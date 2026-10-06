@@ -4,13 +4,13 @@ The unit is Smith's decoupled access-execute machine with two input
 slots (Smith 1982; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin's
 double-buffering full/empty bits, Shao et al. MICRO 2016 Sec. IV-B-2):
 the next window's transfer lands in the second slot while the current
-decode computes. Compute is claimed apart from the slots, by Tomasulo's
-rule that work whose operands are not ready waits in its reservation
-station, never on the functional unit (gem5 O3 inst_queue.hh
-scheduleReadyInsts). The compute takes one decode at a time, as Helios's
-controller takes no input while it decodes (control_node_single_FPGA.v
-lines 234-243). The unit records who holds what; the service starts and
-ends the decodes.
+decode computes. A job takes a slot only once its window owes no
+boundary (decode_dispatch.py). It claims the compute apart from the
+slot: at once when the compute is free, else when the decode before it
+ends, and it starts when its input has landed. The compute
+takes one decode at a time, as Helios's controller takes no input while
+it decodes (control_node_single_FPGA.v lines 234-243). The unit records
+who holds what; the service starts and ends the decodes.
 
 A finished result nobody has asked for yet waits in the unit's output
 slot, not in the manager: AFS keeps the finished error log in the unit
@@ -153,37 +153,20 @@ class DecoderUnit:
                 continue
             if not resident.input_landed:
                 continue
-            if resident.is_parked:
-                continue
             return resident
         return None
 
-    def oldest_landing_resident_that_may_start(
+    def oldest_landing_resident(
         self,
     ) -> Optional[decoding_records.DecodeJob]:
-        """The first resident in flight whose window owes no boundary."""
+        """The first resident not started whose input is still in flight."""
         for resident in self.residents:
             if is_past_start(resident):
                 continue
             if resident.input_landed:
                 continue
-            if not is_startable(resident):
-                continue
             return resident
         return None
-
-    def residents_awaiting_compute_count(self) -> int:
-        """How many residents still need this unit's compute.
-
-        A resident not started, cancelled or completed holds an input
-        slot and takes the compute as soon as it may.
-        """
-        awaiting_count = 0
-        for resident in self.residents:
-            if is_past_start(resident):
-                continue
-            awaiting_count += 1
-        return awaiting_count
 
     def work_left_ticks(
         self, now: int, occupancy_ticks_of: Callable[..., float]
@@ -191,9 +174,8 @@ class DecoderUnit:
         """Ticks of compute this unit may still owe the jobs it holds.
 
         The time until the holder is expected to free the compute, then
-        the declared cost of every other resident not started. A parked
-        resident's decode is counted whole, the most a newcomer can wait
-        behind it. A holder that outlived its prediction, its result not
+        the declared cost of every other resident not started. A holder
+        that outlived its prediction, its result not
         yet read, makes the work unbounded.
         """
         work_left = 0.0
@@ -207,14 +189,6 @@ class DecoderUnit:
                 continue
             work_left += occupancy_ticks_of(resident)
         return work_left
-
-    def parked_residents(self) -> list:
-        """The residents landed with a boundary still owed."""
-        parked = []
-        for resident in self.residents:
-            if resident.is_parked:
-                parked.append(resident)
-        return parked
 
     def describe_residents(self) -> str:
         """One compact line of the residents and their phase."""
@@ -290,15 +264,13 @@ class DecoderUnit:
     def _resident_phase(self, resident: decoding_records.DecodeJob) -> str:
         if self.compute.holder is resident and resident.service_started:
             return "computing"
-        if resident.is_parked:
-            return "parked"
         if resident.input_landed:
             return "ready"
         return "capturing"
 
 
 def is_startable(job: decoding_records.DecodeJob) -> bool:
-    """A job whose window owes no boundary may hold compute.
+    """A job whose window owes no boundary may take a unit.
 
     Anything windowless (external, strong context, merged batch) may.
     """

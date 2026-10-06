@@ -349,9 +349,9 @@ class WindowManager:
         self.requester.request_if_ready(window, self.strong_redecode)
 
     def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
-        """A boundary landed: wake the parked decode, or request the window."""
+        """A boundary landed: release the waiting decode, or request it."""
         if is_unblocked:
-            self.requester.release_parked(key, self.strong_redecode)
+            self.requester.release_window(key, self.strong_redecode)
         self.check_window(key)
 
     def check_settled(self) -> None:

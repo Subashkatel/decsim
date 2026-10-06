@@ -447,27 +447,29 @@ def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
     ) in resliced[0]
 
 
-def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
-    """Four weak units: the absorbed W5 and the restart W6 land first.
+def test_the_re_read_rounds_survive_the_absorbed_windows_withdrawal():
+    """Four weak units: the absorbed W5 and the restart W6 never land early.
 
-    Both inputs are in unit memory before W3's verdict. A landed
-    input's the weak syndrome buffer request hold ends at the landing, so with
-    one holder the re-read rounds 16-18 and W6's own 19-21 would be gone
-    before the plan runs; W6's claim keeps them past both landings.
-    Four units hold two windows at once, since a window's confidence
-    is two forced-class solves and each takes a unit.
+    Both wait in the queue on a boundary until W3's verdict withdraws
+    them, so neither input moves. Withdrawing W5 ends its request hold,
+    so with one holder the re-read rounds 16-18 would be gone before the
+    plan runs; W6's claim keeps them, and the re-sliced W6 lands nine
+    rounds, 16 to 24. Four units hold two windows at once, since a
+    window's confidence is two forced-class solves and each takes a unit.
     """
     machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 4, 1)
     result = machine.run()
-    landed_absorbed = _log_index(
+    absorbed_landings = fabric.log_lines_containing(
         machine, "memory W5 [commit 16-18] input landed"
     )
-    landed_restart = _log_index(
+    restart_withdrawn = _log_index(machine, "WITHDRAW memory W6")
+    restart_landed = _log_index(
         machine, "memory W6 [commit 19-21] input landed"
     )
-    escalated = _log_index(machine, "WITHDRAW memory W4")
-    assert landed_absorbed < escalated
-    assert landed_restart < escalated
+    restart_landing = machine.observation.log.lines[restart_landed]
+    assert absorbed_landings == []
+    assert restart_withdrawn < restart_landed
+    assert "9 rounds" in restart_landing
     assert _run_statuses(result) == [(1, "logical_observables")]
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
@@ -480,10 +482,9 @@ def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
 
 
 def test_width_zero_restarts_on_the_round_after_the_strong_region():
-    """Re-read width 0 with two weak units, both restart inputs landed.
+    """Re-read width 0 with two weak units.
 
-    The absorbed W5 and the restart W6 land in unit memory before W3's
-    verdict. With no re-read W6 begins at round 19, the round after the
+    With no re-read W6 begins at round 19, the round after the
     strong region, and owns the faults of the rounds it reads (Toshio
     2510.25222 Sec. III C); the run completes, and commits the
     same tiers, as it does with one buffer region of re-read.

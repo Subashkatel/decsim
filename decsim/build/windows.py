@@ -202,7 +202,6 @@ class Windows:
         self.window_transfers.retention = retention
         self.decoder_output.transfers = self.window_transfers
         self.decoder_output.link = links
-        self.gate.planner = planner
         self.builder.planner = planner
         self.builder.tracker = tracker
         self.builder.gate = self.gate

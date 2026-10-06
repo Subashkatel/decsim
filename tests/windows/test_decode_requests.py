@@ -1,8 +1,8 @@
 """The decode requests' laws through the DecodeQueue port.
 
-A complete window is requested once; a blocked window ships its raw
-rounds and is masked when its decode starts (qLDPC's net_error folded
-into the next window's syndrome, qldpc/decoders/sinter.py
+A complete window is requested once; a blocked window is requested
+with its raw rounds and is masked when its decode starts (qLDPC's
+net_error folded into the next window's syndrome, qldpc/decoders/sinter.py
 decode_shots_to_error); a withdrawn window is requested again fresh. A
 request is priced for the rounds it reads, which the declared run shows
 on its lookahead tail (Skoric et al. 2209.08552, Tan et al. 2209.09219).
@@ -51,7 +51,7 @@ class _RecordingQueue:
     def withdraw_window(self, window_key) -> None:
         self.withdrawn.append(window_key)
 
-    def release_parked(self, window_key) -> None:
+    def release_window(self, window_key) -> None:
         del window_key
 
 
@@ -167,7 +167,6 @@ class _Fixture:
             None, self.engine
         )
         gate = decode_requests.WindowInputGate()
-        gate.planner = self.planner
         gate.interaction = interaction
         gate.input_fold = input_fold
         self.gate = gate
@@ -246,14 +245,13 @@ def test_a_complete_window_is_requested_once():
     assert send_input(lambda: None) == 3
 
 
-def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
+def test_a_blocked_window_is_requested_raw_and_is_masked_at_start():
     fixture = _Fixture()
     fixture.window.deps = [(1, 9)]
     fixture.window.deps_remaining = 1
     fixture.deliver_boundary({5: [1, 0, 1]})
     _arrive_all(fixture, (1, 2, 3, 4, 5))
     (job, _send_input) = fixture.queue.enqueued[0]
-    assert fixture.gate.may_start(job) is False
     raw = job.payloads[4]
     assert raw.bits is None
     landed = decoding_records.MaterializedSyndromeRound(1, 5, (raw,))
@@ -264,8 +262,6 @@ def test_a_blocked_window_ships_raw_rounds_and_is_masked_at_start():
     fixture.gate.mask_input(job)
     (masked,) = job.decoder_input.rounds[0].fragments
     assert masked.bits == (1, 0, 1)
-    fixture.window.deps_remaining = 0
-    assert fixture.gate.may_start(job) is True
 
 
 def test_a_boundary_that_flipped_nothing_is_still_folded():

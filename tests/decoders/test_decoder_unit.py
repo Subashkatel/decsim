@@ -114,16 +114,15 @@ def test_a_second_window_waits_while_a_landed_one_fills_the_memory():
     assert unit.has_room(second, 2, _payload_demand) is False
 
 
-def test_the_compute_goes_to_the_oldest_landed_resident_not_parked():
+def test_the_compute_goes_to_the_oldest_landed_resident():
     unit = _unit()
-    parked = _job("parked")
-    parked.input_landed = True
-    parked.is_parked = True
+    landing = _job("landing")
     ready = _job("ready")
     ready.input_landed = True
-    unit.admit(parked)
+    unit.admit(landing)
     unit.admit(ready)
     assert unit.oldest_landed_resident_ready_to_start() is ready
+    assert unit.oldest_landing_resident() is landing
 
 
 def test_the_output_slot_holds_one_finished_result_until_it_is_taken():

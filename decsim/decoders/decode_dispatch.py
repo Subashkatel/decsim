@@ -1,9 +1,14 @@
-"""Dispatch: startable jobs first, in scheduler order, onto an offered unit.
+"""Dispatch: jobs that may start, in scheduler order, onto an offered unit.
 
-gem5 O3 issues from its ready set oldest-first and never lets non-ready
-work displace ready work (src/cpu/o3/inst_queue.hh scheduleReadyInsts):
-the scan passes over jobs with no eligible unit, and a boundary-blocked
-job is placed only when no startable job can be. The loop is not
+A job takes a unit only when its window owes no boundary. A blocked job
+stays in the queue with no slot and no input copy, and when its boundary
+arrives the next dispatch puts it on any free unit. gem5 O3 picks a
+functional unit at issue, for ready instructions only
+(src/cpu/o3/inst_queue.cc:920, fu_pool.cc:165-190), and CUDA-Q's host
+dispatcher picks an idle worker when data is present, then copies the
+input to it (host_side_dispatcher_design.md lines 36-42); a job bound
+early waits for its one unit while another is idle (lines 22 and 118).
+The scan passes over jobs with no eligible unit. The loop is not
 reentrant: a call from inside it returns at once and the outer loop runs
 while the queue has work, so no event leaves a pool holding both free
 compute and a waiting request that fits.
@@ -45,7 +50,7 @@ class DecodeDispatcher:
     def _dispatch(self) -> None:
         while self.queue.waiting:
             ordered = self.queue.drain_in_scheduler_order()
-            selection = self._select_placement(ordered)
+            selection = self._first_placement(ordered)
             if selection is None:
                 self.queue.restore(ordered)
                 return
@@ -55,22 +60,13 @@ class DecodeDispatcher:
             self.queue.sample_depth()
             self.service.dispatch_to(job, unit, claim_compute)
 
-    def _select_placement(self, ordered: list) -> Optional[tuple]:
+    def _first_placement(self, ordered: list) -> Optional[tuple]:
         """(index, job, unit, claim_compute) of the first placeable job.
 
-        Startable jobs are tried before boundary-blocked ones.
+        A job whose window owes a boundary is passed over.
         """
-        startable = self._first_placement(ordered, True)
-        if startable is not None:
-            return startable
-        return self._first_placement(ordered, False)
-
-    def _first_placement(
-        self, ordered: list, startable: bool
-    ) -> Optional[tuple]:
         for index, job in enumerate(ordered):
-            is_startable = decoder_unit_module.is_startable(job)
-            if is_startable is not startable:
+            if not decoder_unit_module.is_startable(job):
                 continue
             placement = self._eligible_unit(job)
             if placement is None:
@@ -84,20 +80,11 @@ class DecodeDispatcher:
     ) -> Optional[tuple]:
         """(unit, claim_compute) for this job, or None.
 
-        A startable job takes any unit with a free input slot and claims
-        compute when that unit's is free. A boundary-blocked job takes
-        an input slot only (its DMA overlaps other work, Tomasulo's
-        reservation station), and only once its gate
-        (WindowInputGate.may_stage) says its release is already
-        resolving, so parked work never squats a slot against the decode
-        that must free it. The unit is the pool's offer
-        (decoder_pool.py).
+        The job takes the unit the pool offers (decoder_pool.py) and
+        claims its compute when that compute is free.
         """
-        startable = decoder_unit_module.is_startable(job)
-        if not startable and _is_staging_refused(job):
-            return None
         carries_input = self.service.carries_input(job)
-        placement = self.pool.offer(
+        return self.pool.offer(
             job,
             now=self.service.engine.now,
             carries_input=carries_input,
@@ -105,14 +92,3 @@ class DecodeDispatcher:
             memory_demand_of=self.service.memory_demand,
             input_is_on_the_unit=self.service.input_is_on_the_unit,
         )
-        if placement is None:
-            return None
-        unit, has_free_compute = placement
-        claim_compute = has_free_compute and startable
-        return unit, claim_compute
-
-
-def _is_staging_refused(job: decoding_records.DecodeJob) -> bool:
-    if job.gate is None:
-        return False
-    return not job.gate.may_stage(job)

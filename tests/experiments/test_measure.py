@@ -7,11 +7,13 @@ distance 3, and sliding windows that commit 3 rounds and buffer 3. The
 chain is the one Skoric et al. 2209.08552 describe: each window's decode
 takes its own time (tau_W, lines 429-435) and waits for the seam before
 it starts (the artificial defects of the block before it, lines
-268-275). The two must not be one number, so the tests read service and the park
-apart, and the park itself is two points by cause: dep_block until the
-boundary it waits for is in, compute_wait until the unit's compute is
-free. The points of one window still sum to the window's whole reaction
-time.
+268-275). The two must not be one number, so the tests read service and
+the waits apart. A window that owes the seam waits for it in the queue,
+since it takes a unit only once its boundary is in, and that wait is
+dep_block, not queue_wait, which is the wait for a unit; the park after
+its input landed is two points by cause, dep_block for an escalation's
+message and compute_wait for the unit's compute. The points of one
+window still sum to the window's whole reaction time.
 
 The two-tier machine gives every hop of the strong path a card of its
 own, so a point's value names the wire it was read from: the strong
@@ -386,45 +388,36 @@ def reaction_ticks(measurement) -> list:
     return totals
 
 
-def test_service_is_the_compute_and_the_park_is_its_own_point():
+def test_service_is_the_compute_and_the_seam_wait_is_dep_block():
     """One 5.0 us unit at distance 3: the same compute on every window.
 
     The unit's compute is fetch 0.024 + algorithm 5.0 + release 0.040 =
     5.064 us, and it is the same on all nine windows however long they
-    waited. What grows with the backlog is the wait: the ready-queue
-    wait before a unit takes the job, and the park after the input has
-    landed, which holds until the window before it hands over its
-    boundary 0.004 us after its own decode ends. That park is all
-    dependency: the one unit ended the predecessor's decode before it
-    handed the boundary over, so its compute was already free when the
-    window became startable and compute_wait is zero on every window.
+    waited. What grows with the backlog is the wait. A window takes a
+    unit only once the window before it hands over its boundary, 0.004
+    us after its own decode ends, so window i is dispatched 5.064 +
+    0.004 + 0.004 = 5.072 us after window i - 1 (the boundary hop, then
+    its own input hop), while its data completes 3 us after window i -
+    1's. Its wait for the boundary is 2.072 us times i, and that is
+    dep_block: the unit is idle when the boundary lands, so queue_wait is
+    zero, and its input lands on an idle unit, so compute_wait is zero.
     """
     measurement = slow_unit_shot(1)
 
     samples = measurement.samples
     assert samples["service"] == [5.064] * 9
     assert samples["compute_wait"] == [0.0] * 9
+    assert samples["queue_wait"] == [0.0] * 9
     assert samples["dep_block"] == [
         0.0,
-        2.068,
-        4.136,
-        5.068,
-        5.068,
-        5.068,
-        5.068,
-        5.068,
-        5.068,
-    ]
-    assert samples["queue_wait"] == [
-        0.0,
-        0.0,
-        0.0,
-        1.136,
-        3.204,
-        5.272,
-        7.340,
-        9.408,
-        11.476,
+        2.072,
+        4.144,
+        6.216,
+        8.288,
+        10.360,
+        12.432,
+        14.504,
+        16.576,
     ]
     assert samples["input_link_per_window"] == [0.004] * 9
     assert measurement.means["service"] == 5.064
@@ -443,14 +436,14 @@ def test_one_windows_points_sum_to_its_reaction_time():
     assert totals == reaction_ticks(measurement)
     assert measurement.samples["buffer0_ready_to_frame"] == [
         5.076,
-        7.144,
-        9.212,
-        11.280,
-        13.348,
-        15.416,
-        17.484,
-        19.552,
-        21.620,
+        7.148,
+        9.220,
+        11.292,
+        13.364,
+        15.436,
+        17.508,
+        19.580,
+        21.652,
     ]
 
 
@@ -539,34 +532,33 @@ def test_a_withdrawn_request_waits_in_the_admission_point():
 
 
 def test_load_is_the_units_occupancy_over_the_window_period():
-    """Load is the compute plus the seam handoff over the period.
+    """Load is the compute, the seam handoff and the input hop over the period.
 
     Three one-microsecond rounds commit per window, so a 5.064 us
-    compute plus the 0.004 us seam handoff on eight of the nine windows
-    is a chain 1.689 times too slow, which is the backlog condition of
-    Skoric et al. 2209.08552 lines 429-435 read as a ratio.
+    compute, the 0.004 us seam handoff on eight of the nine windows and
+    the 0.004 us input hop each window takes after its boundary is a
+    chain 1.69 times too slow, which is the backlog condition of Skoric
+    et al. 2209.08552 lines 429-435 read as a ratio.
     """
     measurement = slow_unit_shot(1)
 
     handoff_us = 8 * 0.004 / 9
-    expected = (5.064 + handoff_us) / 3.0
+    input_us = 0.004
+    expected = (5.064 + handoff_us + input_us) / 3.0
     assert measurement.load == expected
 
 
-def test_a_second_unit_moves_the_wait_and_leaves_service_alone():
+def test_a_second_unit_leaves_the_seam_chain_where_it_was():
     """Two units decode the same chain at the same ticks.
 
-    The seam serialises the commits whatever the unit count, so every
-    window commits at the tick it did on one unit and the reaction time
-    does not move. What moves is where the wait is booked: the second
-    unit takes each window as it arrives, so the ready-queue wait almost
-    disappears and the same microseconds appear in the park instead.
-    They appear in the dependency half of it and not in the structural
-    half: the boundary a window waits for leaves after its
-    predecessor's decode has ended, and by then the unit holding the
-    window is idle, so compute_wait stays zero however many units the
-    pool has. The two halves trade places where two decodes of one
-    window share a unit, which is the forced-class pair of
+    The seam serialises the decodes whatever the unit count: a window
+    takes a unit only once its predecessor's boundary is in, and by then
+    the unit that decoded the predecessor is idle. So every window
+    commits at the tick it did on one unit, and every wait is booked
+    where it was, as the seam's dep_block. The structural wait,
+    compute_wait, is
+    where two decodes of one window share a unit, which is the
+    forced-class pair of
     test_a_kept_weak_result_is_measured_on_the_weak_hops.
     """
     one_unit = slow_unit_shot(1)
@@ -578,37 +570,29 @@ def test_a_second_unit_moves_the_wait_and_leaves_service_alone():
         two_units.samples["buffer0_ready_to_frame"]
         == one_unit.samples["buffer0_ready_to_frame"]
     )
-    assert two_units.samples["queue_wait"] == [0.0] * 8 + [1.340]
+    assert two_units.samples["dep_block"] == one_unit.samples["dep_block"]
     assert two_units.samples["compute_wait"] == [0.0] * 9
-    assert two_units.samples["dep_block"] == [
-        0.0,
-        2.068,
-        4.136,
-        6.204,
-        8.272,
-        10.340,
-        12.408,
-        14.476,
-        15.204,
-    ]
+    assert two_units.samples["queue_wait"] == [0.0] * 9
 
 
 def test_the_pool_columns_read_each_tiers_own_queue_and_units():
     """A weak-only run's pool columns are the default pool's, the strong zero.
 
     The deepest the weak tier's own queue got is the deepest the ready
-    queue got, since only that pool exists; a second unit halves the
-    busy fraction exactly, because the same nine decodes of 5.064 us
-    each run on two units over the same span
-    (test_a_second_unit_moves_the_wait_and_leaves_service_alone), which
-    is Triage's utilization rate read per tier (2605.04459 lines
+    queue got, since only that pool exists: four windows, 5 to 8, wait
+    there for their seams when window 5 is dispatched at 25.360 us after
+    window 0. A second unit leaves that depth and halves the busy
+    fraction exactly, because the same nine decodes of 5.064 us each run
+    on two units over the same span
+    (test_a_second_unit_leaves_the_seam_chain_where_it_was), which is
+    Triage's utilization rate read per tier (2605.04459 lines
     1024-1031).
     """
     one_unit = slow_unit_shot(1)
     two_units = slow_unit_shot(2)
 
-    assert one_unit.weak_queue_max == one_unit.max_queued_windows == 3
-    assert two_units.weak_queue_max == 1
+    assert one_unit.weak_queue_max == one_unit.max_queued_windows == 4
+    assert two_units.weak_queue_max == 4
     assert one_unit.strong_queue_max == 0
     assert one_unit.strong_busy_fraction == 0.0
     assert one_unit.escalated_windows == 0
@@ -907,17 +891,27 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     carried the selection and then the window's rounds to the strong
     tier (0.020 us, the two transfers side by side on a latency-only
     card) is its own point, outside the sum. What it costs the decode
-    is dep_block: the strong input hop starts when the rounds land, so
-    the 0.020 us before it is the wait for the rounds. The last window's
-    rounds were carried up with the window before it, so its input hop
-    starts at the verdict beside the selection and waits 0.012 us for
-    it after landing. The weak attempt starts where a unit took the
-    window's first decode,
-    so on window 2, whose complementary gap ran its two forced-class
-    solves one after the other, it is both of them: 1.064 us of the
-    first solve on top of the 12.240 us from the second one's dispatch,
-    which waits on window 1's held boundary and so on window 1's strong
-    decode, 0.008 us of input hop after its rounds landed.
+    is dep_block: the strong job is built when the rounds land, 0.020
+    us after the verdict, and from window 1 on it pins its past face on
+    the window before, whose committed boundary crosses
+    decoder_to_decoder in 0.004 us; the job takes a unit only then, so
+    its input hop follows both, 0.024 us. The last window's rounds were
+    carried up with the window before it, so its input hop starts 0.004
+    us after the verdict and waits 0.008 us after landing for the
+    selection's 0.020 us. The weak attempt starts where a unit took the
+    window's first decode, which is after the window before it
+    committed, so on every window it is the input hop and the two
+    forced-class solves of its complementary gap one after the other,
+    0.004 + 2 x 1.064 = 2.132 us; the last window's solves read fewer
+    rounds.
+
+    From window 1 on, dep_block also holds the wait in the queue for the
+    window before it: that window's whole path, 12.240 us on window 0
+    and 12.244 us after, and its boundary's 0.004 us hop, less the 3 us
+    between the two windows' data. It is 9.244 us on window 1 and grows
+    by 9.248 us a window; the last window's data completes with the
+    window before it's, so it waits 3 us more. The unit is idle when the
+    boundary lands, so queue_wait is zero.
     """
     measurement = switching_shot(1000000.0)
 
@@ -925,10 +919,22 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     assert samples["input_link_per_window"] == [0.008] * 10
     assert samples["output_link_per_window"] == [0.012] * 10
     assert samples["escalation_link_per_window"] == [0.020] * 10
-    assert samples["dep_block"] == [0.020] * 9 + [0.012]
+    assert samples["queue_wait"] == [0.0] * 10
+    assert samples["dep_block"] == [
+        0.020,
+        9.268,
+        18.516,
+        27.764,
+        37.012,
+        46.260,
+        55.508,
+        64.756,
+        74.004,
+        86.240,
+    ]
     assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10
-    assert samples["weak_attempt"][2] == 13.304
+    assert samples["weak_attempt"] == [2.132] * 9 + [2.108]
 
 
 def test_a_strong_answer_through_the_weak_chip_comes_home_over_its_route():
@@ -976,20 +982,23 @@ def test_a_kept_weak_result_is_measured_on_the_weak_hops():
     rounds still crossed once, and shot_links.csv still counts that
     crossing.
 
-    Window 3 is where the park's two halves trade places. Its decode
-    was dispatched with its other forced-class solve and waited 0.004 us
+    Window 3 is where the park has both halves. Its decode was
+    dispatched with its other forced-class solve and waited 0.004 us
     for the input that solve's transfer brought, which is the dependency
     it had, and then 1.064 us more for the unit's compute to finish that
     solve, which is the structural wait gem5 counts as fuBusy. Window 9
-    is the plain case beside it: 1.064 us of dependency wait and no
-    structural wait at all.
+    is the plain case beside it: its data completes with window 8's, so
+    it waits in the queue for window 8's input hop and two solves, 2.132
+    us, and its boundary's 0.004 us hop. That wait is dep_block, the
+    unit is idle when the boundary lands, and it has no park at all.
     """
     measurement = switching_shot(0.0, seed=50)
 
     samples = measurement.samples
     weak_hops = [0.004] * 3 + [0.0] + [0.004] * 6
     assert samples["input_link_per_window"] == weak_hops
-    assert samples["dep_block"] == [0.0] * 3 + [0.004] + [0.0] * 5 + [1.064]
+    assert samples["queue_wait"] == [0.0] * 10
+    assert samples["dep_block"] == [0.0] * 3 + [0.004] + [0.0] * 5 + [2.136]
     assert samples["compute_wait"] == [0.0] * 3 + [1.064] + [0.0] * 6
     assert samples["output_link_per_window"] == [0.004] * 10
     assert samples["escalation_link_per_window"] == [0.0] * 10
@@ -1251,26 +1260,29 @@ def test_a_cancelled_speculative_decode_ends_at_the_cancel():
 def test_a_full_buffer_0_holds_rounds_and_the_wait_is_a_point():
     """The store's back-pressure on the controller, round by round.
 
-    Rounds 1 to 15 find room. Round 16 is packed at 16.004 us into a
-    full store and waits 0.144 us for the slot window 3's input frees at
-    16.148; rounds 19 to 21 wait 2.212, 1.212 and 0.212 us for the three
-    slots window 4 frees at 21.216, and the pattern repeats to round 30,
-    the worst wait being 8.416 us on round 28. Thirteen rounds wait,
-    51.912 us in all.
+    Rounds 1 to 9 find room. Window 0's input lands at 6.012 us and
+    frees rounds 1 to 3. Each later window takes a unit only once the
+    window before it has decoded and handed over its boundary, so window
+    i's input lands at 6.012 + 5.072 i us and frees its three committed
+    rounds then. Round 10 is packed at 10.004 us into a full store and
+    waits 1.080 us for window 1's landing at 11.084, and round 11 waits
+    0.080; rounds 13 to 15 wait 3.152, 2.152 and 1.152 us for window 2's
+    at 16.156, and the pattern repeats to round 30, the worst wait being
+    13.512 us on round 28. Twenty rounds wait, 133.136 us in all.
     """
     measurement = bounded_store_shot()
 
     stalls = measurement.samples["cwb_stall_per_round"]
-    assert stalls[:15] == [0.0] * 15
-    assert stalls[15] == 0.144
-    assert stalls[18:21] == [2.212, 1.212, 0.212]
-    assert stalls[27] == 8.416
+    assert stalls[:9] == [0.0] * 9
+    assert stalls[9:12] == [1.080, 0.080, 0.0]
+    assert stalls[12:15] == [3.152, 2.152, 1.152]
+    assert stalls[27] == 13.512
     is_waiting = [stall > 0.0 for stall in stalls]
     waiting_count = sum(is_waiting)
     stall_ticks = [ticks_of(stall) for stall in stalls]
     total_ticks = sum(stall_ticks)
-    assert waiting_count == 13
-    assert total_ticks == 51912000
+    assert waiting_count == 20
+    assert total_ticks == 133136000
 
 
 def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses():
@@ -1284,7 +1296,7 @@ def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses():
     measurement = bounded_store_shot()
 
     assert measurement.samples["cwb_per_round"] == [0.004] * 30
-    assert measurement.means["cwb_stall_per_round"] == 51.912 / 30
+    assert measurement.means["cwb_stall_per_round"] == 133.136 / 30
 
 
 def test_a_hops_setup_is_in_the_hop_and_not_in_the_wait_before_it():
@@ -1725,8 +1737,8 @@ def test_a_strong_requests_wait_is_lindleys_one_server_wait():
 class StrongResidentsWaitingOnCompute:
     """Each tick's strong decodes held in a unit, off the units' own slots.
 
-    A resident whose input landed, that is not parked on a boundary and
-    has not started, is in the unit's memory waiting for its compute.
+    A resident whose input landed and that has not started is in the
+    unit's memory waiting for its compute.
     The last sample of a tick is the depth the tick ends at.
     """
 
@@ -1757,11 +1769,11 @@ def _strong_residents_waiting(unit) -> int:
 
 
 def _is_strong_and_waiting(resident) -> bool:
-    """A strong decode landed, not parked, and not started."""
+    """A strong decode landed and not started."""
     strong = window_records.DecoderTier.STRONG
     if resident.request_key.tier is not strong:
         return False
-    if resident.is_parked or resident.service_started:
+    if resident.service_started:
         return False
     return resident.input_landed
 

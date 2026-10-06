@@ -1,9 +1,9 @@
-"""The pool's offer: the unit with the rounds, the least loaded, least work.
+"""The pool's offer: a free unit with the rounds, then least work left.
 
-A job that may not start yet is staged where the least work is left,
-and a free unit a staged job waits on is not an empty one: the two
-forced-class solves of one window are two ordinary jobs, so the unit
-count alone decides whether they overlap.
+A job is offered a unit only once it may start. A free unit takes it
+with its compute; when every unit computes, it is staged where the
+least work is left: the two forced-class solves of one window are two
+ordinary jobs, so the unit count alone decides whether they overlap.
 
 The law: with known deterministic work, dispatching each job to the
 server with the least work left starts it at the tick a central FIFO
@@ -21,7 +21,6 @@ import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.records.decoding as decoding_records
-import decsim.records.windows as window_records
 
 DECODE_TICKS = config.microseconds_to_ticks(1.0)
 
@@ -43,20 +42,13 @@ def _job(label):
     )
 
 
-def _blocked_job(label):
-    """A job whose window still owes a boundary, so it may not start."""
-    window = window_records.Window(
-        operation_id=1,
-        window_index=0,
-        commit_lo=1,
-        commit_hi=1,
-        buffer_hi=1,
-        round_count=1,
-        deps_remaining=1,
-    )
-    return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=1, label=label, window=window
-    )
+def _busy_until(pool, unit, label, free_ticks):
+    """The unit computes a job expected to free it at that tick."""
+    running = _job(label)
+    running.service_started = True
+    unit.admit(running)
+    pool.claim(unit, running)
+    unit.expect_compute_free(free_ticks)
 
 
 class _MeasuredDecoder:
@@ -91,17 +83,6 @@ def test_a_free_unit_with_room_is_offered_with_its_compute():
     first, second = pool.units
     busy = _job("busy")
     pool.claim(first, busy)
-    next_job = _job("next")
-    unit, has_free_compute = _offer(pool, next_job, carries_input=True)
-    assert unit is second
-    assert has_free_compute is True
-
-
-def test_the_free_unit_the_fewest_residents_await_is_offered():
-    pool = _pool(2)
-    first, second = pool.units
-    waiting = _job("waiting")
-    first.admit(waiting)
     next_job = _job("next")
     unit, has_free_compute = _offer(pool, next_job, carries_input=True)
     assert unit is second
@@ -143,39 +124,17 @@ def test_a_job_with_input_is_staged_on_the_busy_unit_that_frees_earliest():
     assert has_free_compute is False
 
 
-def test_a_blocked_job_is_staged_on_the_unit_with_the_least_work_left():
-    """A free unit a staged job waits on owes a whole decode."""
-    pool = _pool(2)
-    first, second = pool.units
-    running = _job("running")
-    running.service_started = True
-    first.admit(running)
-    pool.claim(first, running)
-    half_a_decode_ticks = DECODE_TICKS // 2
-    first.expect_compute_free(half_a_decode_ticks)
-    staged = _job("staged")
-    second.admit(staged)
-    blocked = _blocked_job("blocked")
-    unit, has_free_compute = _offer(pool, blocked, carries_input=True)
-    assert unit is first
-    assert has_free_compute is False
-
-
 def test_a_holder_past_its_predicted_free_tick_is_unbounded_work():
     """A result not yet read holds the unit for a time nobody declared."""
     pool = _pool(2)
     first, second = pool.units
-    finished = _job("finished")
-    finished.service_started = True
-    first.admit(finished)
-    pool.claim(first, finished)
-    first.expect_compute_free(DECODE_TICKS)
-    staged = _job("staged")
-    second.admit(staged)
-    blocked = _blocked_job("blocked")
+    _busy_until(pool, first, "finished", DECODE_TICKS)
+    later_ticks = 6 * DECODE_TICKS
+    _busy_until(pool, second, "running", later_ticks)
+    next_job = _job("next")
     long_after_ticks = 5 * DECODE_TICKS
     unit, has_free_compute = pool.offer(
-        blocked,
+        next_job,
         now=long_after_ticks,
         carries_input=True,
         resident_capacity=2,
@@ -183,41 +142,42 @@ def test_a_holder_past_its_predicted_free_tick_is_unbounded_work():
         input_is_on_the_unit=_input_nowhere,
     )
     assert unit is second
-    assert has_free_compute is True
+    assert has_free_compute is False
 
 
-def test_a_blocked_job_leaves_the_unit_its_companion_is_staged_on():
-    """The rounds being there never outweigh a decode to wait behind."""
+def test_the_rounds_being_there_never_outweigh_a_decode_to_wait_behind():
     pool = _pool(2)
     first, second = pool.units
-    companion = _blocked_job("companion")
-    first.admit(companion)
-    blocked = _blocked_job("blocked")
+    longer_ticks = 2 * DECODE_TICKS
+    _busy_until(pool, first, "longer", longer_ticks)
+    _busy_until(pool, second, "shorter", DECODE_TICKS)
+    next_job = _job("next")
 
     def input_is_on_the_first_unit(_job, unit):
         return unit is first
 
-    unit, has_free_compute = _offer(
+    unit, _has_free_compute = _offer(
         pool,
-        blocked,
+        next_job,
         carries_input=True,
         input_is_on_the_unit=input_is_on_the_first_unit,
     )
     assert unit is second
-    assert has_free_compute is True
 
 
-def test_a_blocked_job_takes_the_rounds_in_place_when_the_work_is_equal():
+def test_a_staged_job_takes_the_rounds_in_place_when_the_work_is_equal():
     pool = _pool(2)
-    _first, second = pool.units
-    blocked = _blocked_job("blocked")
+    first, second = pool.units
+    _busy_until(pool, first, "first running", DECODE_TICKS)
+    _busy_until(pool, second, "second running", DECODE_TICKS)
+    next_job = _job("next")
 
     def input_is_on_the_second_unit(_job, unit):
         return unit is second
 
     unit, _has_free_compute = _offer(
         pool,
-        blocked,
+        next_job,
         carries_input=True,
         input_is_on_the_unit=input_is_on_the_second_unit,
     )
@@ -230,15 +190,17 @@ def test_where_no_cost_is_declared_the_unit_with_the_fewest_jobs_is_taken():
     settings = _settings(2)
     pool = decoder_pool.DecoderPool(manager, settings)
     first, second = pool.units
+    first_running = _job("first running")
+    first.admit(first_running)
+    pool.claim(first, first_running)
     first_waiting = _job("first waiting")
     first.admit(first_waiting)
-    second_waiting = _job("second waiting")
-    first.admit(second_waiting)
-    third_waiting = _job("third waiting")
-    second.admit(third_waiting)
-    blocked = _blocked_job("blocked")
+    second_running = _job("second running")
+    second.admit(second_running)
+    pool.claim(second, second_running)
+    next_job = _job("next")
     unit, _has_free_compute = pool.offer(
-        blocked,
+        next_job,
         now=0,
         carries_input=True,
         resident_capacity=3,

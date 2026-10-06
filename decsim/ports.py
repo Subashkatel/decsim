@@ -843,13 +843,14 @@ class StrongRedecode(Protocol):
     ) -> Optional[decoding_records.Submission]:
         """The speculative strong decode started beside the weak job.
 
-        None when the weak job is parked or the strong job is held.
+        None when the weak job's window owes a boundary or the strong job
+        is held.
         """
 
-    def unparked_submission(
+    def released_submission(
         self, window_key: tuple
     ) -> Optional[decoding_records.Submission]:
-        """The weak job left its park: its speculative decode, or None."""
+        """The weak job's last boundary arrived: its speculative decode."""
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the strong tier to re-decode the weak job's window."""
@@ -922,17 +923,10 @@ class DecoderInputFold(Protocol):
 class WindowInputGate(Protocol):
     """The window side's say over a job's input, carried on the job.
 
-    The decoder manager asks may_stage before a boundary-blocked job
-    takes an input slot, may_start before a landed job decodes, and
-    calls mask_input once at the start so the landed input carries the
-    window's boundary (qLDPC's net_error folded into the next window).
+    The decoder manager calls mask_input once at the start so the landed
+    input carries the window's boundary (qLDPC's net_error folded into
+    the next window).
     """
-
-    def may_stage(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether a job that cannot decode yet may take a unit's input slot."""
-
-    def may_start(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether the landed job owes no boundary and may decode."""
 
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """Fold the window's boundary into the landed input, once."""
@@ -1030,8 +1024,8 @@ class DecodeQueue(Protocol):
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back a window's not-yet-started decode; it is superseded."""
 
-    def release_parked(self, window_key: tuple) -> None:
-        """The window's last boundary arrived: start its parked decode."""
+    def release_window(self, window_key: tuple) -> None:
+        """The window's last boundary arrived: its queued jobs may start."""
 
     def await_strong_result(
         self, window_key: tuple, request_key: window_records.DecoderRequestKey

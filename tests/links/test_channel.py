@@ -1,15 +1,15 @@
 """A channel delivers when the point-to-point law says, and setups queue.
 
 Sources: ns-3 point-to-point-net-device.cc (Send enqueues, TransmitStart
-runs when the transmitter is READY, one packet on the wire at a time, the
-receiver has it txTime plus the channel delay later; a fractional tick of
-serialization rounds up); gem5 src/dev/dma_device.cc (one transmitList
-per DmaPort, so a setup queue belongs to a channel and two channels'
-setups are independent); Shao et al., MICRO 2016, section III.C (the DMA
-engine services descriptors one by one while the processor is free, so a
-request with no setup never waits for another's setup); the closed form
-of that queue, run here over random traces. One microsecond is
-1_000_000 ticks.
+runs when the transmitter is READY, one packet on the wire at a time,
+the receiver has it txTime plus the channel delay later; ns-3's Time
+rounds a fractional tick to the nearest, a half up); gem5
+src/dev/dma_device.cc (one transmitList per DmaPort, so a setup queue
+belongs to a channel and two channels' setups are independent); Shao et
+al., MICRO 2016, section III.C (the DMA engine services descriptors one
+by one while the processor is free, so a request with no setup never
+waits for another's setup); the closed form of that queue, run here over
+random traces. One microsecond is 1_000_000 ticks.
 """
 
 import fractions
@@ -60,7 +60,9 @@ def closed_form(arrivals, bits, rate_bits_per_us, propagation_ticks):
         start = max(arrival, serializer_free)
         payload_fraction = fractions.Fraction(payload)
         exact = payload_fraction * config.TICKS_PER_MICROSECOND / rate
-        serialization = math.ceil(exact)
+        half_tick = fractions.Fraction(1, 2)
+        half_up = exact + half_tick
+        serialization = math.floor(half_up)
         end = start + serialization
         serializer_free = end
         delivery = end + propagation_ticks
@@ -183,6 +185,17 @@ def test_a_setup_ending_as_a_zero_setup_request_arrives_follows_event_order():
     assert with_setup.send_ticks == 15
     assert with_setup.serializer_start_ticks == 8015
     assert with_setup.physical_sequence == 1
+
+
+def test_a_part_tick_of_serialization_rounds_to_the_nearest_tick():
+    """4 bits at 750 bits/us are 5333.33 ticks; 1 bit at 400000 is 2.5.
+
+    ns-3's Time rounds both to the nearest tick, a half up.
+    """
+    a_third_capacity = link_settings.CapacitySettings(750.0, "test")
+    a_half_capacity = link_settings.CapacitySettings(400_000.0, "test")
+    assert channel_module.serialization_ticks(4, a_third_capacity) == 5333
+    assert channel_module.serialization_ticks(1, a_half_capacity) == 3
 
 
 def test_setup_serialization_and_propagation_add_up():

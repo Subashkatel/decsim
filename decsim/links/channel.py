@@ -8,7 +8,8 @@ and never waits for another path's setup. The wire takes ready transfers
 in order, serializes each with its path's header at the channel's rate,
 and delivers it one propagation later, as ns-3's point-to-point device
 does (point-to-point-net-device.cc). A fractional tick of serialization
-rounds up. An unbounded channel serializes nothing and never queues.
+rounds to the nearest tick, as ns-3's Time does. An unbounded channel
+serializes nothing and never queues.
 
 This is the protocol row `ideal`: one whole frame, an unbounded receive
 buffer and nothing lost, the lossless reference of gem5's SimpleNetwork
@@ -31,6 +32,7 @@ import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
 
 OnDelivered = Callable[[transfer_records.Transfer], None]
+HALF_TICK = fractions.Fraction(1, 2)
 
 
 class Channel:
@@ -247,14 +249,17 @@ def serialization_ticks(
 ) -> int:
     """Whole ticks to put the bits on the wire at the channel's rate.
 
-    A fractional tick rounds up: serialization never ends early. Fraction
-    arithmetic keeps a whole-tick duration from float inflation.
+    The time rounds to the nearest tick and a half tick rounds up, as
+    ns-3's Time does (src/core/model/nstime.h lines 237-238 and
+    int64x64-128.h lines 267-281, Round). Fraction arithmetic keeps a
+    whole-tick duration from float inflation.
     """
     rate = capacity.input_bits_per_microsecond
     bits = fractions.Fraction(wire_bits)
     bits_times_ticks = bits * config.TICKS_PER_MICROSECOND
     exact_ticks = bits_times_ticks / rate
-    return math.ceil(exact_ticks)
+    half_up_ticks = exact_ticks + HALF_TICK
+    return math.floor(half_up_ticks)
 
 
 @dataclasses.dataclass(frozen=True)

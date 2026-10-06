@@ -5,10 +5,11 @@ the wire when the wire is free and the sender holds a credit; the
 receive buffer holds C frames, and a frame's credit is back L_c after
 it lands. So frame k starts at
 
-    s_k = max(ready, e_(k-1), c_(k-C)),   e_k = s_k + ceil(w_k / R),
+    s_k = max(ready, e_(k-1), c_(k-C)),   e_k = s_k + floor(w_k / R + 1/2),
     c_k = e_k + L + L_c,
 
-and the message is delivered at e_n + L. This is Garnet's credit loop
+where a half tick rounds up, as ns-3's Time rounds, and the message is
+delivered at e_n + L. This is Garnet's credit loop
 (gem5 src/mem/ruby/network/garnet/OutVcState.cc:56-63,
 NetworkInterface.cc:506, 530, InputUnit.cc:140-150), with credits on
 CreditLinks of their own (GarnetLink.py), so a credit takes no time on

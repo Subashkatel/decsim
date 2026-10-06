@@ -400,8 +400,8 @@ def bandwidth_limited_profile(
     per device.
 
     Each rate is an exact fraction, so a nominal payload serializes in
-    exactly its period: a float such as 8 / 1.1 lands below the true rate,
-    and the rounded-up serialization then queues one tick more every round.
+    exactly its period: a float such as 8 / 1.1 is not the true rate, and
+    its error would reach the tick count.
     """
     round_period_microseconds = fractions.Fraction(str(round_microseconds))
     commit_region_microseconds = commit_rounds * round_period_microseconds

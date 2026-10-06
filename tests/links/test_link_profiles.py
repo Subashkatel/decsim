@@ -97,7 +97,7 @@ def test_a_reference_hop_delivers_its_latency_after_its_bits_serialize():
 
     point-to-point-net-device.cc:243 times the packet from its size and
     the DataRate, and the receiver has it the channel delay later. A d=11
-    round of 120 bits on the weak store's hop, rounded up to whole ticks.
+    round of 120 bits on the weak store's hop, rounded to the nearest tick.
     """
     profile = link_profiles.logical_reference_profile()
     weak_store = profile.controller_to_weak_buffer.channel
@@ -110,7 +110,9 @@ def test_a_reference_hop_delivers_its_latency_after_its_bits_serialize():
     transfer = delivered[0]
     rate = weak_store.capacity.input_bits_per_microsecond
     exact_ticks = 120 * config.TICKS_PER_MICROSECOND / rate
-    serialization_ticks = math.ceil(exact_ticks)
+    half_tick = fractions.Fraction(1, 2)
+    half_up_ticks = exact_ticks + half_tick
+    serialization_ticks = math.floor(half_up_ticks)
     latency_ticks = weak_store.propagation_latency_ticks
     assert transfer.delivery_ticks == serialization_ticks + latency_ticks
 

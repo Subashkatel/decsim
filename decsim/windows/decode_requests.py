@@ -34,14 +34,12 @@ import decsim.windows.window_planner as window_planner
 class WindowInputGate:
     """The boundary gate a window's decode job passes through.
 
-    It says whether the job may take a slot, whether it may start, and
-    what its input reads. The decoder side calls it through job.gate. It
-    decides the mask and the row the tier declares; the write is the
-    decoder side's, which owns the memory (<tier>.boundary_fold,
-    decoders/settings.py).
+    It says what the job's input reads when its decode starts. The
+    decoder side calls it through job.gate. It decides the mask and the
+    row the tier declares; the write is the decoder side's, which owns
+    the memory (<tier>.boundary_fold, decoders/settings.py).
     """
 
-    planner = ports.Port(window_planner.WindowPlanner)
     interaction = ports.Port(window_interactions.WindowInteraction)
     # the decoder side's input, which installs what this hands it
     input_fold = ports.Port(ports.DecoderInputFold)
@@ -57,32 +55,6 @@ class WindowInputGate:
         # windows, a strong re-decode by the strong tier.
         self.copies_the_window_fold = copies_the_window_fold
         self.copies_the_strong_fold = copies_the_strong_fold
-
-    def may_stage(self, job: decoding_records.DecodeJob) -> bool:
-        """May this boundary-blocked job occupy an input slot yet?
-
-        Only when every unmet dependency is already resolving without
-        needing a slot of its own: decoded, decoding, or itself dispatched
-        with resolving dependencies all the way down. Admitted earlier, a
-        job like the Tan seam (which reads both neighbors) squats a slot
-        against the very decode that must release it.
-        """
-        window = job.window
-        if window is None or window.deps_remaining <= 0:
-            return True
-        visiting = {(window.operation_id, window.window_index)}
-        return self._every_dependency_resolving(window.deps, visiting)
-
-    def may_start(self, job: decoding_records.DecodeJob) -> bool:
-        """May this landed job start its decode?
-
-        False parks the job in its slot until its last boundary arrives.
-        It only checks; mask_input folds the mask at the start, once.
-        """
-        window = job.window
-        if window is None:
-            return True
-        return window.deps_remaining <= 0
 
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the input the decode reads.
@@ -123,23 +95,6 @@ class WindowInputGate:
         if job.kind is decoding_records.DecodeJobKind.WINDOW:
             return self.copies_the_window_fold
         return self.copies_the_strong_fold
-
-    def _every_dependency_resolving(self, dependencies, visiting: set) -> bool:
-        for dependency in dependencies:
-            if not self._resolving_without_new_slots(dependency, visiting):
-                return False
-        return True
-
-    def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
-        if key in visiting:
-            return False
-        window = self.planner.windows_by_key.get(key)
-        if _needs_no_slot(window):
-            return True
-        if window.t_dispatch is None:
-            return False
-        visited = visiting | {key}
-        return self._every_dependency_resolving(window.deps, visited)
 
     def _masked_round(self, state, window_info, round_input):
         fragments = []
@@ -388,7 +343,7 @@ class DecodeRequestBuilder:
 
 
 class DecodeRequester:
-    """Requests a decode for every complete, unblocked window, once.
+    """Requests a decode for every complete window, once.
 
     gap_join is the confidence join of a run whose gap is two
     forced-class solves; it is both jobs' on_decoded and None when the
@@ -453,10 +408,10 @@ class DecodeRequester:
             window.operation_id, window.start_round, window.buffer_hi, window
         )
         self.builder.note_data_complete(window, operation, read_keys)
-        # a window still owed a boundary ships its raw rounds now; the
-        # boundary is XORed into the landed input at the decoder when it
-        # arrives (qLDPC net_error / cudaq-x syndrome_mods / LILLIPUT's
-        # state register)
+        # a window still owed a boundary is queued now and takes a unit
+        # when the boundary arrives; the boundary is XORed into the landed
+        # input at the decode's start (qLDPC net_error / cudaq-x
+        # syndrome_mods / LILLIPUT's state register)
         self.request(window, operation, strong_redecode)
 
     def request(
@@ -606,14 +561,12 @@ class DecodeRequester:
         )
 
     def withdraw(self, window: window_records.Window) -> None:
-        """Withdraw one window's early-shipped, unstarted decode.
+        """Withdraw one window's unstarted decode.
 
         Its submission bookkeeping is reset first, so it can be
-        resubmitted fresh: taking the decode back frees its slot and the
-        manager dispatches at once, and a later window staged then must
-        not read this one as dispatched. gem5's IEW takes a squash
-        before it dispatches in the same order (src/cpu/o3/iew.cc
-        1451-1452).
+        resubmitted fresh: taking the decode back may free a slot, and
+        the manager dispatches at once. gem5's IEW takes a squash before
+        it dispatches in the same order (src/cpu/o3/iew.cc 1451-1452).
         """
         window.queued = False
         window.t_queued = None
@@ -623,24 +576,25 @@ class DecodeRequester:
         if not has_dropped_decision:
             self.decode_queue.withdraw_window(window.key)
 
-    def release_parked(
+    def release_window(
         self, window_key: tuple, strong_redecode: Optional[ports.StrongRedecode]
     ) -> None:
-        """The window's last boundary arrived: its parked decodes may start.
+        """The window's last boundary arrived: its waiting decodes may start.
 
-        The window's weak decode parks on the chip's manager; a speculative
-        strong decode or a re-decode of the same window parks on the host's. A
-        speculative strong decode the strong side waited to plan until the weak
-        job left its park is submitted first, so the two start together.
+        The window's weak decode waits in the chip's manager's queue; a
+        speculative strong decode or a re-decode of the same window waits
+        in the host's. A speculative strong decode the strong side waited
+        to plan until this boundary is submitted first; then both
+        managers release the window.
         """
         if strong_redecode is not None:
-            speculative = strong_redecode.unparked_submission(window_key)
+            speculative = strong_redecode.released_submission(window_key)
             started = _speculative_submissions(speculative)
             for submission in started:
                 self._admit(submission)
-        self.decode_queue.release_parked(window_key)
+        self.decode_queue.release_window(window_key)
         if self.strong_decode_queue is not None:
-            self.strong_decode_queue.release_parked(window_key)
+            self.strong_decode_queue.release_window(window_key)
 
     def _admit(self, submission: decoding_records.Submission) -> None:
         job = submission.job
@@ -700,17 +654,6 @@ class _DecidingWindow:
     primary_submissions: list
     # the strong tier's window side; None on a run that never escalates
     strong_redecode: Optional[ports.StrongRedecode]
-
-
-def _needs_no_slot(window: Optional[window_records.Window]) -> bool:
-    """Unplanned, absorbed, decoded or decoding: it asks for no slot."""
-    if window is None:
-        return True
-    if window.is_absorbed:
-        return True
-    if window.t_done is not None:
-        return True
-    return window.service_began
 
 
 def _speculative_submissions(speculative) -> list:

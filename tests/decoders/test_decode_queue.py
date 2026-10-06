@@ -10,6 +10,7 @@ III C, where the accurate decoder processes its assigned data in bulk.
 The withdrawal's referent is Ciw's reneging (ciw/node.py renege).
 """
 
+import dataclasses
 import functools
 import random
 import statistics
@@ -21,8 +22,11 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
+import decsim.machine as machine_module
 import decsim.observe.queue_depth as queue_depth
+import decsim.records.decoding as decoding_records
 import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as declared_fabric
 
 SERVICE_MICROSECONDS = 1.0
 SERVICE_TICKS = config.microseconds_to_ticks(SERVICE_MICROSECONDS)
@@ -63,9 +67,9 @@ def _start_ticks(arrivals, units, scheduler=None):
     starts = {}
     original_begin = manager.service.begin
 
-    def recording_begin(job, gated=True):
+    def recording_begin(job):
         starts[job.label] = engine.now
-        original_begin(job, gated)
+        original_begin(job)
 
     manager.service.begin = recording_begin
     for index, arrival in enumerate(arrivals):
@@ -152,9 +156,9 @@ def test_a_job_waits_in_scheduler_order():
     starts = {}
     original_begin = manager.service.begin
 
-    def recording_begin(job, gated=True):
+    def recording_begin(job):
         starts[job.label] = engine.now
-        original_begin(job, gated)
+        original_begin(job)
 
     manager.service.begin = recording_begin
     _submit(manager, "a", 1)
@@ -245,6 +249,61 @@ def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
         ((4, 0), "strong"),
         ((4, 1), "strong"),
     ]
+
+
+def test_a_bulk_strong_batch_holds_no_member_that_owes_a_boundary():
+    """A strong decode, batched or not, starts only when it owes nothing.
+
+    Four patches escalate both windows, and the boundary between them
+    takes 100 us, so the second windows' strong requests queue long
+    before their boundaries land. A batch started then would decode
+    them without the boundary; they wait instead, and each of the eight
+    strong requests starts owing nothing.
+    """
+    base_machine = declared_fabric.switching_machine(
+        rounds=6, escalated_windows={0, 1}
+    )
+    base = base_machine.settings
+    boundary_path = base.links.decoder_to_decoder
+    slow_channel = dataclasses.replace(
+        boundary_path.channel, propagation_latency_ticks=100_000_000
+    )
+    slow_boundary = dataclasses.replace(boundary_path, channel=slow_channel)
+    links = dataclasses.replace(base.links, decoder_to_decoder=slow_boundary)
+    operations = tuple(
+        declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
+    )
+    workload = dataclasses.replace(base.workload, operations=operations)
+    weak_decoder = dataclasses.replace(base.weak_decoder, unit_count=4)
+    strong_decoder = dataclasses.replace(base.strong_decoder, unit_count=4)
+    decoder_manager = dataclasses.replace(
+        base.decoder_manager, bulk_strong=True
+    )
+    settings = dataclasses.replace(
+        base,
+        workload=workload,
+        links=links,
+        weak_decoder=weak_decoder,
+        strong_decoder=strong_decoder,
+        decoder_manager=decoder_manager,
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    manager = machine.decoders.strong_decoder_manager
+    debts_at_start = []
+
+    def record_debts(job, unit):
+        del unit
+        members = [job]
+        if job.kind is decoding_records.DecodeJobKind.STRONG_BATCH:
+            members = manager.strong_requests.members_of(job)
+        for member in members:
+            debts_at_start.append(member.window.deps_remaining)
+
+    manager.service.trace.job_started.connect(record_debts)
+    machine.run()
+
+    assert len(debts_at_start) == 8
+    assert max(debts_at_start) <= 0
 
 
 def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():

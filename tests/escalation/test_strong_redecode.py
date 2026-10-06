@@ -288,23 +288,24 @@ def test_a_speculative_decode_started_with_the_weak_job_is_selected():
     assert queue.calls == [("await", WINDOW_KEY, strong_job.request_key)]
 
 
-def test_a_speculative_decode_is_planned_when_its_weak_job_unparks():
+def test_a_speculative_decode_is_planned_when_its_weak_job_is_released():
     """Step 1 starts both decoders together (2510.25222 lines 598-601).
 
-    A weak job that still owes a boundary parks, so its speculative strong
-    decode is planned at the unpark and not at the submission.
+    A weak job whose window still owes a boundary waits in the queue, so
+    its speculative strong decode is planned at the release and not at
+    the submission.
     """
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)
     redecode, _output, _strong, _queue, _done = _redecode(shape)
     weak_job = _weak_job(owed_boundaries=1)
-    parked = redecode.parallel_strong_submission(weak_job)
-    planned_while_parked = len(shape.planned)
-    submission = redecode.unparked_submission(WINDOW_KEY)
-    assert parked is None
-    assert planned_while_parked == 0
+    deferred = redecode.parallel_strong_submission(weak_job)
+    planned_while_blocked = len(shape.planned)
+    submission = redecode.released_submission(WINDOW_KEY)
+    assert deferred is None
+    assert planned_while_blocked == 0
     assert submission.job is strong_job
-    assert redecode.unparked_submission(WINDOW_KEY) is None
+    assert redecode.released_submission(WINDOW_KEY) is None
 
 
 def test_a_strong_input_landed_before_its_selection_waits_for_it():

@@ -298,9 +298,11 @@ def test_the_serial_escalation_timeline_is_exact():
     rounds over weak_decoder_to_strong_decoder, 3 us; they land in the
     strong syndrome buffer at 33 us, the job is built and its input
     crosses strong_buffer_to_strong_decoder, 6 us, so the strong decode
-    starts at 39 us; and the Held boundary keeps the next window's
-    decode parked until the strong correction has committed, one
-    decoder_to_decoder hop away.
+    starts at 39 us. The Held boundary keeps the next window's job in
+    the queue until the strong correction has committed at 74 us and
+    its boundary crossed decoder_to_decoder, 0.5 us; only then does the
+    job take a unit and its input cross weak_buffer_to_weak_decoder,
+    5 us, so it starts at 79.5 us.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
     machine.run()
@@ -309,14 +311,14 @@ def test_the_serial_escalation_timeline_is_exact():
     strong_start = declared_run.log_tick(
         log_lines, "START DECODE strong(mem1 W0)"
     )
-    parked_start = declared_run.log_tick(log_lines, "START DECODE mem1 W1")
+    released_start = declared_run.log_tick(log_lines, "START DECODE mem1 W1")
     snapshot = machine.control.pauli_frame.snapshot()
     first_record = snapshot.records[0]
     expected_weak_done = decsim_config.microseconds_to_ticks(30.0)
     expected_strong_start = decsim_config.microseconds_to_ticks(39.0)
     expected_accepted = decsim_config.microseconds_to_ticks(73.0)
     expected_committed = decsim_config.microseconds_to_ticks(74.0)
-    expected_parked_start = decsim_config.microseconds_to_ticks(74.5)
+    expected_released_start = decsim_config.microseconds_to_ticks(79.5)
 
     assert weak_done == expected_weak_done
     assert strong_start == expected_strong_start
@@ -324,7 +326,7 @@ def test_the_serial_escalation_timeline_is_exact():
     assert first_record.tier == "strong"
     assert first_record.accepted_ticks == expected_accepted
     assert first_record.committed_ticks == expected_committed
-    assert parked_start == expected_parked_start
+    assert released_start == expected_released_start
 
 
 def test_through_the_weak_chip_the_frame_waits_a_hop_and_a_chip_cycle_more():
@@ -566,13 +568,13 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
     assert counts.cancelled == 0
 
 
-def test_a_pinned_speculative_decode_is_planned_when_its_weak_job_unparks():
-    """Step 1 on a pinned row starts the speculative decode at the unpark.
+def test_a_pinned_speculative_decode_is_planned_at_its_weak_jobs_release():
+    """Step 1 on a pinned row starts the speculative decode at the release.
 
     Toshio arXiv:2510.25222 Sec. III A, Step 1 feeds both decoders the
     window at once (lines 598-601), and redo_window pins its past
     face on the earlier neighbour's final commit (Bombin arXiv:2303.04846
-    lines 775-788). Under held boundaries that commit is what unparks
+    lines 775-788). Under held boundaries that commit is what releases
     the weak job, so the speculative decode is planned at that instant and every
     window's strong result pins on a committed neighbour.
     """
@@ -633,7 +635,9 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
     holder once window 0's strong input lands in the unit, 39.0 us here:
     the weak commit at 30.0, the escalation hop of 3.0 and the strong
     buffer's hop of 6.0. Rounds 4 to 6 stay for window 1 until its own
-    commit releases them at 87.5 us, after the strong commit at 74.0.
+    commit releases them at 92.5 us: window 1 takes a unit only after
+    the strong commit at 74.0 and the boundary hop of 0.5, so its own
+    input hop of 5.0 follows them.
     """
     machine = fabric.switching_machine(rounds=6, escalated_windows={0})
     probe = declared_run.OccupancyProbe(machine.windows.window_manager)
@@ -647,7 +651,7 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
         (decsim_config.microseconds_to_ticks(0.0), 0),
         (decsim_config.microseconds_to_ticks(33.0), 6),
         (decsim_config.microseconds_to_ticks(39.0), 3),
-        (decsim_config.microseconds_to_ticks(87.5), 0),
+        (decsim_config.microseconds_to_ticks(92.5), 0),
     ]
 
     assert strong_record.window_key == (1, 0)

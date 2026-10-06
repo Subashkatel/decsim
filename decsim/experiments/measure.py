@@ -56,19 +56,23 @@ POINTS = (
     # dispatch that asked for it -> the read's end, its port waits
     # included, before the input hop
     "store_read",
-    # the dependency wait around the committing decode's own hop: from
-    # where its path started, the dispatch or the verdict that escalated
-    # the window, to the first tick it may compute, less the input hop
-    # and the store's read. It is the wait for the escalated rounds to
-    # land in the strong store before the input hop, the predecessor's
-    # boundary and the escalation's selection after it, and zero when
-    # nothing was owed
+    # the dependency wait: in the queue, from the job's entry to its
+    # predecessor's boundary arriving, and around the committing decode's
+    # own hop, from where its path started, the dispatch or the verdict
+    # that escalated the window, to the first tick it may compute, less
+    # the input hop and the store's read. It is the wait for the
+    # predecessor's boundary, for the escalated rounds to land in the
+    # strong store and for a pinned face's boundary before the input hop,
+    # and for the escalation's selection after it, and zero when nothing
+    # was owed
     "dep_block",
     # that first startable tick -> the compute started: the wait for the
     # unit's own compute, busy with another decode (gem5's fuBusy)
     "compute_wait",
-    # the job entered the decode queue -> a unit took the window's first
-    # decode
+    # the job entered the decode queue, or its predecessor's boundary
+    # arrived when later -> a unit took the window's first decode: the
+    # wait for a unit only, since a window that owes a boundary takes no
+    # unit before it arrives
     "queue_wait",
     # the committing decode's own input hop, from its tier's store into
     # the unit's memory: zero when that decode read an input already
@@ -534,11 +538,14 @@ def window_points_us(
     than once (two forced-class solves) has several dispatches, and the
     window record keeps only the last, so they must not be mixed.
 
-    The decode's time and its wait are separate points, and the wait is two
-    by cause. dep_block runs from the verdict to the input hop's request
-    (escalated rounds landing in the strong store) and from the input
-    landing to the first tick the decode may start (the predecessor's
-    boundary). compute_wait is the rest, the unit busy with another decode.
+    The decode's time and its wait are separate points, and the wait is
+    split by cause. dep_block runs from the queue entry to the
+    predecessor's boundary arriving (the window takes no unit before it),
+    from the verdict to the input hop's request (escalated rounds landing
+    in the strong store, a pinned face's boundary) and from the input
+    landing to the first tick the decode may start (the escalation's
+    selection). queue_wait is the wait for a unit after the boundary, and
+    compute_wait the unit busy with another decode after the input landed.
     Skoric et al. 2209.08552 keep tau_W and tau_0 apart (lines 429-435,
     1004-1008); gem5 counts a ready instruction with no free unit apart
     (inst_queue.cc:1009-1014); Ciw keeps the pre-service wait in named parts
@@ -562,10 +569,15 @@ def window_points_us(
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
     input_sent = input_landed - input_ticks
     startable = _startable_ticks(decode, input_landed)
-    park = _span_microseconds(startable, input_landed)
-    rounds_wait = _span_microseconds(input_sent, attempt_end)
+    park_ticks = startable - input_landed
+    rounds_wait_ticks = input_sent - attempt_end
     store_read = config_module.ticks_to_microseconds(decode.store_read_ticks)
-    dependency_block_with_read = rounds_wait + park
+    released = _released_ticks(window)
+    boundary_wait_ticks = released - window.t_queued
+    # summed in ticks, so the point is exact however many parts it has
+    dependency_ticks = boundary_wait_ticks + rounds_wait_ticks + park_ticks
+    dependency_ticks -= decode.store_read_ticks
+    dependency_block = config_module.ticks_to_microseconds(dependency_ticks)
     confidence_ticks = _confidence_ticks(window, decode)
     answered = max(window.t_done, decode.done_ticks)
     last_required_send = qpu_send[(operation_id, last_required_round)]
@@ -578,11 +590,11 @@ def window_points_us(
             window.t_queued, window.t_data_complete
         ),
         "store_read": store_read,
-        "dep_block": dependency_block_with_read - store_read,
+        "dep_block": dependency_block,
         "compute_wait": _span_microseconds(
             decode.compute_start_ticks, startable
         ),
-        "queue_wait": _span_microseconds(first_dispatch, window.t_queued),
+        "queue_wait": _span_microseconds(first_dispatch, released),
         "input_link_per_window": config_module.ticks_to_microseconds(
             input_ticks
         ),
@@ -697,17 +709,20 @@ def collect_samples(
 def chain_load(samples: dict, window_period_us: float) -> float:
     """rho: the serial chain's service per window over the window period.
 
-    Service is the unit's occupancy per window plus the boundary handoff
-    that serialises the chain; the period is commit rounds times the round
-    period. Above 1 the chain cannot keep up: Skoric et al. 2209.08552's
-    backlog condition as a ratio (lines 429-435). The occupancy includes
-    the confidence step, charged on the same weak unit, and under
-    complementary_gap the second forced-class solve.
+    Service is the unit's occupancy per window, the boundary handoff
+    that serialises the chain, and the input hop, which a window waiting
+    for its boundary starts only once the boundary arrives. The period
+    is commit rounds times the round period. Above 1 the chain cannot
+    keep up: Skoric et al. 2209.08552's backlog condition as a ratio
+    (lines 429-435). The occupancy includes the confidence step, charged
+    on the same weak unit, and under complementary_gap the second
+    forced-class solve.
     """
     service_us = _mean_or_zero(samples["service"])
     confidence_us = _mean_or_zero(samples["confidence"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
-    chain_us = service_us + confidence_us + handoff_us
+    input_us = _mean_or_zero(samples["input_link_per_window"])
+    chain_us = service_us + confidence_us + handoff_us + input_us
     return chain_us / window_period_us
 
 
@@ -1561,6 +1576,17 @@ def _confidence_ticks(window, decode: _CommittedDecode) -> int:
     if window.t_done <= decode.done_ticks:
         return 0
     return window.t_done - decode.done_ticks
+
+
+def _released_ticks(window) -> int:
+    """The tick the window's first decode began to wait for a unit.
+
+    Its entry into the queue, or its last owed boundary arriving after
+    that: before it the decode waits for its predecessor, not for a unit.
+    """
+    if window.t_released is None:
+        return window.t_queued
+    return max(window.t_queued, window.t_released)
 
 
 def _startable_ticks(decode: _CommittedDecode, input_landed: int) -> int:

@@ -321,22 +321,7 @@ def _later_than(smaller: dict, bigger: dict, unit_count: int) -> list:
     return later
 
 
-# a parked decode is bound to its unit: on parallel windows the second
-# unit takes a startable decode beside it and the parked one waits
-PARKED_DECODE_HOLDS_ITS_UNIT = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "a decode parked on a busy unit waits for that unit while another "
-        "idles: on two units window (1, 1) commits at 70.160 us, on one at "
-        "69.252 us"
-    ),
-)
-POOLS = (
-    strong_units_on_double_windows,
-    pytest.param(
-        weak_units_on_parallel_windows, marks=PARKED_DECODE_HOLDS_ITS_UNIT
-    ),
-)
+POOLS = (strong_units_on_double_windows, weak_units_on_parallel_windows)
 
 
 @pytest.mark.parametrize(

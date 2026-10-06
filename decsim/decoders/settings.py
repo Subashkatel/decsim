@@ -95,7 +95,11 @@ class DecoderPoolSettings:
     unit_memory is one unit's input SRAM (UnitMemorySettings); a unit
     overlaps input transfer with compute only when two windows fit.
     copies_input says whether the unit is given a copy of the rounds or
-    reads them where the store keeps them. copies_boundary_fold says
+    reads them where the store keeps them. A copy moves when the job
+    takes a unit, once its window owes no boundary, so it does not
+    overlap the wait for that boundary: CUDA-Q's dispatcher copies the
+    input when it picks a worker (host_side_dispatcher_design.md lines
+    36-42). copies_boundary_fold says
     whether the boundary mask is XORed into a duplicate of the landed
     input or into the unit's own memory, which needs that copy.
 

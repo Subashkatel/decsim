@@ -86,13 +86,15 @@ These are not from the papers. The pages use them everywhere.
   by the pool's `unit_memory` setting. A window's rounds are copied
   into it before the unit decodes them and freed when the decode ends.
 - **job**: one decode of one window, asked of a tier's pool.
-- **stage (a job)**: to put a job's rounds on a unit before the job may
-  compute, so the move overlaps the wait. A staged job stays on that
+- **stage (a job)**: to put a job's rounds on a unit whose compute is
+  still busy, so the move overlaps the decode running there. A job is
+  staged only once its window owes no boundary, and it stays on that
   unit (`decsim/decoders/decoder_pool.py`).
 - **park**: the wait between a job's input landing in a unit and its
-  compute starting. `dep_block` is the part spent waiting for a boundary
-  or an escalation message, and `compute_wait` the part spent waiting
-  for the unit's compute.
+  compute starting. `dep_block` is the part spent waiting for an
+  escalation message, and `compute_wait` the part spent waiting for the
+  unit's compute. A job that owes a boundary waits in the queue, not on
+  a unit, and `dep_block` holds that wait too.
 - **service**: one decode's fetch, algorithm and release, without
   anything it waited for.
 - **residence**: one round's or one window's stay in a store or a unit's

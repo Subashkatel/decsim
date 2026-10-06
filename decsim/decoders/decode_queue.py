@@ -15,6 +15,7 @@ run can be priced against, the floor of the tuning the paper leaves open
 import dataclasses
 from typing import TYPE_CHECKING, Optional
 
+import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
@@ -76,9 +77,11 @@ class WaitingJobs:
 
     def drain_in_scheduler_order(self) -> list:
         """Empty the queue into a list, next job first."""
+        if self.merges_strong:
+            return self._merged_strong_jobs()
         ordered = []
         while self.waiting:
-            job = self.next()
+            job = self.scheduler.pop(self.waiting)
             ordered.append(job)
         return ordered
 
@@ -86,20 +89,33 @@ class WaitingJobs:
         """Put drained jobs back at the queue's end, in the given order."""
         self.waiting.extend(ordered)
 
-    def next(self) -> decoding_records.DecodeJob:
-        """Remove and return the next job by the scheduler's rule."""
-        if self.merges_strong:
-            return self._merge_strong_batch(self.waiting)
-        return self.scheduler.pop(self.waiting)
+    def _merged_strong_jobs(self) -> list:
+        """The startable strong jobs as one batch, then each blocked job.
 
-    def _merge_strong_batch(self, queue: list) -> decoding_records.DecodeJob:
-        """Batch every queued strong job (timing-only) into one decode.
+        A job whose window owes a boundary stays out of the batch, so a
+        batch takes a unit only when every member may start, and the
+        blocked job waits in the queue on its own.
+        """
+        jobs = self._open_queued_strong_jobs(self.waiting)
+        startable = []
+        blocked = []
+        for job in jobs:
+            if decoder_unit_module.is_startable(job):
+                startable.append(job)
+            else:
+                blocked.append(job)
+        if not startable:
+            return blocked
+        batch = self._merge_strong_batch(startable)
+        return [batch, *blocked]
+
+    def _merge_strong_batch(self, jobs: list) -> decoding_records.DecodeJob:
+        """Batch these strong jobs (timing-only) into one decode.
 
         A batch that found no unit last time is opened back into its
-        member requests here, so the new batch serves every request
-        once.
+        member requests before this, so the new batch serves every
+        request once.
         """
-        jobs = self._open_queued_strong_jobs(queue)
         window_keys = []
         request_keys = []
         for job in jobs:

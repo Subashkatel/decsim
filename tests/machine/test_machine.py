@@ -472,7 +472,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     assert sender.windows is windows.window_manager
     assert requester.decode_queue is decoders.decoder_manager
     assert result.terminal_status == "complete"
-    assert result.fully_done_ticks == 279_888_000
+    assert result.fully_done_ticks == 279_932_000
     assert result.operation_results[0].logical_failure is False
     assert result == whole
 
@@ -2425,7 +2425,7 @@ PUBLISHED_MICROSECONDS_BY_BOUND = {
     3: [10, 11, 12, 14, 15, 16, 18, 19, 20, 22, 23, 24],
     4: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
 }
-TWELVE_ROUND_RUN_END_TICK = 54_000_000
+TWELVE_ROUND_RUN_END_TICK = 64_000_000
 
 
 def published_rounds(machine):
@@ -2587,7 +2587,9 @@ def test_a_packing_bound_of_six_clears_a_twelve_round_run():
 
     Round r occupies the stage from 5 + r us to 9 + r us, so at most
     five rounds are in flight at once and no round is ever held; the
-    run then ends at the last window's commit, 54 us.
+    run then ends at the last window's commit, 64 us. Each window after
+    the first takes a unit only once its boundary is in, so its input
+    hop, 5 us, follows the boundary.
     """
     settings = twelve_rounds_with_packing_bound(6)
     machine = machine_module.Machine.build(settings, 0)

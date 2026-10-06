@@ -178,8 +178,8 @@ class BoundaryCourier:
         The strong decoder starts once the boundary conditions are
         determined (Toshio et al. 2510.25222 lines 1248-1250), so the
         window owes the boundary until the message lands: deps_remaining
-        counts it, and WindowInputGate.may_start parks the job until the
-        delivery clears it.
+        counts it, and the job waits in the decode queue until the
+        delivery clears it (decode_dispatch.py).
         """
         record = self._record(source_key)
         if record.committed_request_key is None:
@@ -351,8 +351,8 @@ class BoundaryCourier:
         """A pinned face's message landed: the strong window may start.
 
         The fold was written when the job was built, so only the owed
-        count drops here, and the parked decode wakes as a weak window's
-        does.
+        count drops here, and the waiting decode is released as a weak
+        window's is.
         """
         destination.deps_remaining -= 1
         self.windows.accept_boundary(destination.key, True)

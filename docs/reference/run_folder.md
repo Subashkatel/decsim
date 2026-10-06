@@ -109,7 +109,7 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `task_id`, the swept paths, `algorithm`, `seed` | the task and the seed, which together name the shot |
 | `decoded_windows` | how many windows this shot decoded |
 | `logical_failure` | `True` when any scored owner's decoded observable did not match its truth, else `False`; a scored owner is an operation the source sampled a truth for, and a live stream's segments and the operations that only hold or resume its patch are scored through the stream's owner. A `memory_patches` shot fails when any patch does. An unscored shot is never a failure, as sinter never counts an error on a discarded shot |
-| `load` | service time per window divided by the interval between windows arriving; above 1 the decoder cannot keep up |
+| `load` | service time, boundary handoff and input hop per window, divided by the interval between windows arriving; above 1 the decoder cannot keep up |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the most jobs that waited in the ready queue at once; a depth counts only when time passes at it, so a job that joins and leaves in one tick never waited |
 | `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
@@ -120,7 +120,7 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `parallel_processes_needed` | Skoric's least count of parallel decoding processes for no backlog, ceil(2 tau_W / ((n_com + n_W) tau_rd)) from this shot's mean service (2209.08552 lines 429-438) |
 | `weak_syndrome_weight_mean`, `weak_syndrome_weight_max` | the set bits of each weak decode's input, its detection events when they are formed ahead of the decoder; only when `observation.record_switching_windows` is on |
 | `weak_service_mean_us` | each weak decode's compute, its first stage's start to its last stage's end; the same switch |
-| `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from its enqueue to its compute start, for a unit and for the unit's compute; the same switch |
+| `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from the tick it may start, its enqueue or its window's last boundary arriving after it, to its compute start, for a unit and for the unit's compute; the same switch |
 | `strong_held_in_units_max` | the most strong decodes held in the units' memory at once, landed and free to compute but waiting for a unit's compute, by the rule of the queue peaks. A unit takes the next decode into its memory while it computes, so this wait never shows in `strong_queue_max`; the same switch |
 | `backlog_peak_rounds` | the most rounds produced and not yet decoded at once; only when `observation.backlog_trace` is on |
 | `referee_windows_checked`, `referee_window_disagreements` | the referee's count, when the decoder's record is wrapped in `TesseractCheckedDecoder.Settings` |
@@ -147,9 +147,9 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
 | `admission_wait` | the window's data complete in the weak syndrome buffer, to its decode job entering the queue: the window side's decision (`windows.decision_cycles`), and any earlier request of the window that was withdrawn, as a restart window's is when a `double_window` strong window re-slices it; zero otherwise |
 | `store_read` | the committing decode's dispatch, to the end of its input's read in its tier's syndrome buffer, before the input hop: a store that prices reads, its port waits included; zero for a store that prices none |
-| `dep_block` | the input landing in the unit's memory, to the first tick the decode may compute: the dependency wait, for the predecessor's boundary and for the escalation message, the escalated rounds' read out of the weak syndrome buffer included; zero when nothing was owed |
+| `dep_block` | the wait for what the decode depends on: in the queue, from the job's entry to its predecessor's boundary arriving, since a window that owes a boundary takes no unit (`decsim/decoders/decode_dispatch.py`); and for an escalated window, the escalated rounds and the selection, to the first tick the decode may compute, less its input hop and its store read; zero when nothing was owed |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
-| `queue_wait` | queued, to a unit assigned |
+| `queue_wait` | queued, or the predecessor's boundary arriving when later, to a unit assigned: the wait for a unit only |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |
 | `fetch` | the unit reading the window out of its own memory |
 | `algorithm` | the decoding algorithm itself |
@@ -182,15 +182,20 @@ to one decode.
 
 - `admission_wait` runs from the window's data complete to its job
   entering the queue.
-- `queue_wait` ends where a unit took the window's first decode.
+- `queue_wait` ends where a unit took the window's first decode. It
+  starts at the job's entry, or at the window's last boundary arriving
+  when later: a window waits for a unit only once it may start.
 - `weak_attempt` runs from there to the verdict that sent the window to
   the strong tier. It is zero when the first decode is the one that
   committed.
 - `store_read` is the committing decode's read of its input in its
   tier's store, before that hop.
 - `input_link_per_window` is the committing decode's own hop in.
-- `dep_block` and `compute_wait` are the two halves of its park, the
-  wait between its input landing and its compute starting.
+- `dep_block` is every wait for what the decode depends on: the
+  predecessor's boundary while the job sat in the queue, and the
+  escalated rounds and the selection around the committing decode's hop.
+- `compute_wait` is the wait for the unit's compute after the input
+  landed.
 - `service` is its compute, and `output_link_per_window` its way home.
 - `confidence` is the signal the verdict needs, computed after that
   decode ended.
@@ -203,10 +208,11 @@ up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 
 The park is two points because it has two causes.
-A run whose windows wait on the seam reports the park in `dep_block` and
-zero in `compute_wait`; two decodes of one window sharing a unit, which
-is what a complementary gap's forced-class pair is, report it in the
-second. A strong decode whose rounds crossed with the escalation waits
+Two decodes of one window sharing a unit, which is what a complementary
+gap's forced-class pair is, report it in `compute_wait`. A window that
+waits on the seam reports no park: it takes a unit only once its
+boundary arrived, and that wait in the queue is in `dep_block`, not in
+`queue_wait`. A strong decode whose rounds crossed with the escalation waits
 for them before its input hop can start, and that wait is `dep_block`
 too: the point runs from the verdict to the first startable tick, less
 the input hop itself.

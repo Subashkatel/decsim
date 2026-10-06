@@ -67,24 +67,24 @@ class StrongRedecode:
         """The speculative strong decode, started with the weak job (Step 1).
 
         Step 1 starts both decoders on the same window (2510.25222 lines
-        598-601). A weak job that still owes a boundary parks until it
-        lands, so its speculative decode is planned when it leaves the
-        park (unparked_submission): a pinned face reads the neighbour's
-        final commit, which is what unparks the weak job. One whose
-        input has not landed is held and enqueued when its condition
-        fires, so there is no submission.
+        598-601). A weak job whose window still owes a boundary waits in
+        the decode queue until it lands, so its speculative decode is
+        planned at that release (released_submission): a pinned face
+        reads the neighbour's final commit, which is what releases the
+        weak job. One whose input has not landed is held and enqueued
+        when its condition fires, so there is no submission.
         """
         key = (weak_job.operation_id, weak_job.window_id)
         if weak_job.window.deps_remaining > 0:
-            self.selections.park_speculative_decode(key, weak_job)
+            self.selections.defer_speculative_decode(key, weak_job)
             return None
         return self._planned_speculative_decode(weak_job)
 
-    def unparked_submission(
+    def released_submission(
         self, window_key: tuple
     ) -> Optional[decoding_records.Submission]:
-        """The weak job left its park: plan its speculative strong decode."""
-        weak_job = self.selections.unpark_speculative_decode(window_key)
+        """The weak job's last boundary arrived: plan its speculative decode."""
+        weak_job = self.selections.take_deferred_speculative_decode(window_key)
         if weak_job is None:
             return None
         return self._planned_speculative_decode(weak_job)
@@ -351,23 +351,23 @@ class StrongRedecode:
 
 
 class _StrongSelections:
-    """The selection handshake: parked jobs, speculative decodes, arrivals."""
+    """The selection handshake: deferred and speculative decodes, arrivals."""
 
     def __init__(self) -> None:
         self.speculative_key_by_window: dict = {}
-        self.parked_weak_job_by_window: dict = {}
+        self.deferred_weak_job_by_window: dict = {}
         self.delivered_request_keys: set = set()
         self.landing_by_request_key: dict = {}
 
-    def park_speculative_decode(
+    def defer_speculative_decode(
         self, window_key: tuple, weak_job: decoding_records.DecodeJob
     ) -> None:
-        self.parked_weak_job_by_window[window_key] = weak_job
+        self.deferred_weak_job_by_window[window_key] = weak_job
 
-    def unpark_speculative_decode(
+    def take_deferred_speculative_decode(
         self, window_key: tuple
     ) -> Optional[decoding_records.DecodeJob]:
-        return self.parked_weak_job_by_window.pop(window_key, None)
+        return self.deferred_weak_job_by_window.pop(window_key, None)
 
     def remember_speculative_decode(
         self, window_key: tuple, request_key: window_records.DecoderRequestKey

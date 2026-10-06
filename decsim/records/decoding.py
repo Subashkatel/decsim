@@ -229,7 +229,7 @@ class DecoderInputHold:
     """A hold: a decode job's rounds until they land in unit memory.
 
     boundary_window_keys are the windows whose boundaries the job waits
-    for before its input takes a slot (decode_requests.py, may_stage);
+    for before it takes a unit and its input moves (decode_dispatch.py);
     the request key alone names the hold.
     """
 
@@ -460,7 +460,9 @@ class DecodeJob:
     # that unit's ports.DecoderMemory while it holds this job's input,
     # opaque to the record
     memory: Optional[object] = None
-    ready_time: int = 0  # tick the job was enqueued (queue-wait accounting)
+    # tick the job may start in the queue, its wait for a unit begun: its
+    # enqueue, or its window's last boundary arriving after it
+    ready_time: int = 0
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
     strong_label: Optional[str] = (
@@ -490,12 +492,7 @@ class DecodeJob:
     input_landing_ticks: Optional[int] = (
         None  # tick the staged input lands (set at DMA start)
     )
-    service_started: bool = (
-        False  # the decode itself began (past the boundary gate)
-    )
-    # landed in its slot with a boundary still owed: holds the slot,
-    # never the unit's compute, until release_parked
-    is_parked: bool = False
+    service_started: bool = False  # the decode itself began
     request_key: Optional[window_records.DecoderRequestKey] = None
     # the request whose transfer brought the rounds this job reads; the
     # jobs that share one landed input share this key and a unit holds

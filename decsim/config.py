@@ -13,15 +13,24 @@ import math
 from typing import Optional, TypeVar
 
 TICKS_PER_MICROSECOND = 1_000_000
+HALF_TICK = 0.5
 # A settings record with a clock field, which a part may leave None.
 ClockedSettings = TypeVar("ClockedSettings")
 
 
 def microseconds_to_ticks(microseconds: float) -> int:
-    """Round a duration in microseconds to whole ticks."""
+    """Round a duration in microseconds to whole ticks, a half tick up.
+
+    gem5 rounds a time to ticks the same way (src/python/m5/ticks.py
+    lines 80-82, fromSeconds). Python's round sends a half tick to the
+    even neighbor, so a 128 MHz clock would get 7812 ticks, not 7813.
+    The part tick is exact for a float, a Fraction or a Decimal.
+    """
     scaled = microseconds * TICKS_PER_MICROSECOND
-    rounded = round(scaled)
-    return int(rounded)
+    whole_ticks = math.floor(scaled)
+    part_tick = scaled - whole_ticks
+    rounds_up = part_tick >= HALF_TICK
+    return whole_ticks + int(rounds_up)
 
 
 def ticks_to_microseconds(ticks: int) -> float:

@@ -4,7 +4,10 @@
 figure per question: how many windows each cluster-gap threshold sends
 to Relay-BP-5, what logical error rate that share buys, what it costs
 in latency for kept and for escalated windows, and whether the strong
-decoder keeps up. A panel is one physical error rate and a curve one
+decoder keeps up. Union-find alone, the no-switching reference, comes
+from the switching baseline's weak_alone points beside this folder:
+the same machine and shots, run with no escalation, so its rate is the
+same at every threshold. A panel is one physical error rate and a curve one
 distance. A point with no failures is a hollow marker at its upper
 bound, as decsim.plots.bounds draws it, and a point failing more than
 half its shots has no per-round rate and is left out.
@@ -29,6 +32,10 @@ TIER_CURVES = [
     f"d={distance} {tier}" for distance in DISTANCES for tier in TIERS
 ]
 KEEP_UP = "strong decode time / Toshio bound"
+SWITCHING = "switching"
+SWITCHING_CURVES = [f"d={distance} switching" for distance in DISTANCES]
+BASELINE_FOLDER = "2026-10-01_switching_baseline"
+BASELINE_NAME = "weak_alone"
 
 
 def main(folder: pathlib.Path) -> None:
@@ -38,6 +45,10 @@ def main(folder: pathlib.Path) -> None:
     plots_folder.mkdir(exist_ok=True)
     escalated_figure(rows, plots_folder / "escalated.png")
     error_rate_figure(rows, plots_folder / "logical_error_rate.png")
+    baseline_rows = union_find_alone_rows(folder.parent / BASELINE_FOLDER)
+    versus_union_find_figure(
+        rows, baseline_rows, plots_folder / "versus_union_find.png"
+    )
     latency_figure(rows, plots_folder / "latency.png")
     keep_up_figure(rows, plots_folder / "strong_keeps_up.png")
 
@@ -124,6 +135,89 @@ def error_rate_figure(rows: list, path: pathlib.Path) -> None:
         axis.set_xlabel(SHARE)
         axis.set_ylabel("logical error rate per round")
     plots.save(figure, path)
+
+
+def union_find_alone_rows(folder: pathlib.Path) -> list:
+    """The switching baseline's union-find alone points, as numbers."""
+    with open(folder / "configurations.csv") as handle:
+        configurations = list(csv.DictReader(handle))
+    baseline_ids = [
+        configuration["configuration_id"]
+        for configuration in configurations
+        if configuration["name"] == BASELINE_NAME
+    ]
+    with open(folder / "status.csv") as handle:
+        statuses = list(csv.DictReader(handle))
+    rows = []
+    for status in statuses:
+        if status["configuration_id"] not in baseline_ids:
+            continue
+        row = {column: number(text) for column, text in status.items()}
+        row["d"] = int(status["qpu.distance"])
+        row[X] = float(status["workload.arguments.physical_error_probability"])
+        rows.append(row)
+    return rows
+
+
+def versus_union_find_figure(
+    rows: list, baseline_rows: list, path: pathlib.Path
+) -> None:
+    """Switching's logical error rate per threshold against union-find alone.
+
+    Switching is a curve per distance over the thresholds; union-find
+    alone is a dashed line in the same colour with its band shaded, or
+    a dotted line at its upper bound while it has no failures.
+    """
+    figure, axis_by_rate = plots.panels(X, ERROR_RATES, columns=2)
+    for error_rate, axis in axis_by_rate.items():
+        rate_rows = [row for row in rows if row[X] == error_rate]
+        failed_rows = [row for row in rate_rows if has_per_round_rate(row)]
+        error_free_rows = [
+            row for row in rate_rows if row["logical_failures"] == 0
+        ]
+        for row in rate_rows:
+            row[SWITCHING] = f"d={row['d']} switching"
+        plots.values(
+            axis,
+            failed_rows,
+            THRESHOLD,
+            RATE,
+            SWITCHING,
+            low=f"{RATE}_low",
+            high=f"{RATE}_high",
+            order=SWITCHING_CURVES,
+        )
+        plots.bounds(
+            axis,
+            error_free_rows,
+            THRESHOLD,
+            f"{RATE}_high",
+            SWITCHING,
+            order=SWITCHING_CURVES,
+        )
+        for row in baseline_rows:
+            if row[X] == error_rate and row["d"] in DISTANCES:
+                draw_union_find_alone(axis, row)
+        axis.set_yscale("log")
+        axis.set_ylabel("logical error rate per round")
+        axis.legend(fontsize=8)
+        threshold_axis(axis)
+    plots.save(figure, path)
+
+
+def draw_union_find_alone(axis, row: dict) -> None:
+    """One distance's union-find alone rate across every threshold."""
+    colour = f"C{DISTANCES.index(row['d'])}"
+    label = f"d={row['d']} union-find alone"
+    if not has_per_round_rate(row):
+        bound = row[f"{RATE}_high"]
+        label = f"{label}, no failures yet (rate is below)"
+        axis.axhline(bound, color=colour, linestyle=":", label=label)
+        return
+    axis.axhline(row[RATE], color=colour, linestyle="--", label=label)
+    low = row[f"{RATE}_low"]
+    high = row[f"{RATE}_high"]
+    axis.axhspan(low, high, color=colour, alpha=0.12, linewidth=0)
 
 
 def has_per_round_rate(row: dict) -> bool:

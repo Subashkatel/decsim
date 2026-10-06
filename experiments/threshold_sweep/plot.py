@@ -22,6 +22,7 @@ import pathlib
 import sys
 
 import matplotlib.pyplot as pyplot
+import matplotlib.ticker as ticker
 
 DISTANCES = [9, 11]
 ERROR_RATES = [0.001, 0.003]
@@ -180,7 +181,7 @@ def improvement_figure(
     """
     figure, axis = new_figure(
         "How many times better switching is",
-        "union-find alone rate / switching rate",
+        "switching is this many times better",
     )
     for label, colour, series_rows in series_of(rows, IMPROVEMENT_RATES):
         points = improvement_points(series_rows, baseline_rows)
@@ -196,8 +197,13 @@ def improvement_figure(
             color=colour,
             label=label,
         )
-    axis.axhline(1, color="black", linestyle="--", linewidth=1)
+    axis.axhline(
+        1, color="black", linestyle="--", linewidth=1,
+        label="1x: no better than union-find alone",
+    )
     axis.set_ylim(bottom=0)
+    axis.yaxis.set_major_locator(ticker.MultipleLocator(1))
+    axis.yaxis.set_major_formatter(ticker.FormatStrFormatter("%gx"))
     save(figure, axis, path)
 
 

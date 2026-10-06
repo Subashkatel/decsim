@@ -4,8 +4,10 @@
 writes plots/: the share of windows sent to the strong decoder, how
 many times better switching is than union-find alone, how long an
 escalated window takes (median and p99), and how many times too slow
-the strong decoder is. Every figure has one panel, the threshold
-across, and a line per distance and physical error rate.
+the strong decoder is, each with one panel, the threshold across and a
+line per distance and physical error rate; and for each threshold, the
+logical error rate of switching beside union-find alone, physical
+error rate across, all five on the same scale.
 
 Union-find alone, the no-switching reference, comes from the switching
 baseline's weak_alone points beside this folder: the same machine and
@@ -34,6 +36,9 @@ LEGEND_FONT_SIZE = 8
 THRESHOLD_LABEL = "threshold (dB)"
 # the rates whose switching points all have failures to compare
 IMPROVEMENT_RATES = [0.003]
+# sideways factors on the error rate axis, so the four series at one
+# error rate stand apart: d=9 switching, union-find, d=11 the same
+NUDGES = [0.91, 0.96, 1.04, 1.09]
 
 
 def main(folder: pathlib.Path) -> None:
@@ -51,6 +56,9 @@ def main(folder: pathlib.Path) -> None:
     latency_figure(rows, "median", plots_folder / "3_escalated_median.png")
     latency_figure(rows, "p99", plots_folder / "4_escalated_p99.png")
     keep_up_figure(rows, plots_folder / "5_strong_too_slow.png")
+    for threshold in THRESHOLDS_DB:
+        name = f"6_error_rate_at_{threshold:02g}_dB.png"
+        threshold_figure(rows, baseline_rows, threshold, plots_folder / name)
 
 
 def rows_of(status_path: pathlib.Path) -> list:
@@ -258,6 +266,92 @@ def keep_up_figure(rows: list, path: pathlib.Path) -> None:
     axis.axhline(1, color="black", linestyle="--", linewidth=1)
     axis.set_yscale("log")
     save(figure, axis, path)
+
+
+def threshold_figure(
+    rows: list, baseline_rows: list, threshold: float, path: pathlib.Path
+) -> None:
+    """Switching against union-find alone at one threshold.
+
+    A distance is one colour: switching solid circles, union-find
+    alone dashed squares, each nudged sideways so no point hides
+    another. A point with no failures has no rate; it is a hollow
+    marker at its upper bound, the rate lying somewhere below it.
+    """
+    figure, axis = pyplot.subplots(
+        figsize=FIGURE_SIZE_INCHES, layout="constrained"
+    )
+    threshold_rows = [row for row in rows if row["threshold"] == threshold]
+    for distance in DISTANCES:
+        colour = f"C{DISTANCES.index(distance)}"
+        switching = rows_at(threshold_rows, distance)
+        union_find = rows_at(baseline_rows, distance)
+        place = 2 * DISTANCES.index(distance)
+        draw_rates(
+            axis, switching, (colour, "o", "-", NUDGES[place]),
+            f"d={distance} switching",
+        )
+        draw_rates(
+            axis, union_find, (colour, "s", "--", NUDGES[place + 1]),
+            f"d={distance} union-find alone",
+        )
+    axis.plot(
+        [], [], "o", markerfacecolor="none", color="gray",
+        label="no failures yet (rate is below)",
+    )
+    axis.set_title(f"Logical error rate at {threshold:g} dB")
+    axis.set_xlabel("physical error rate")
+    axis.set_ylabel("logical error rate per round")
+    axis.set_xscale("log")
+    axis.set_yscale("log")
+    axis.set_xticks(ERROR_RATES, [f"{rate:g}" for rate in ERROR_RATES])
+    axis.minorticks_off()
+    axis.set_xlim(0.0007, 0.0045)
+    axis.set_ylim(1e-10, 1e-3)
+    axis.grid(alpha=GRID_ALPHA)
+    save(figure, axis, path)
+
+
+def rows_at(rows: list, distance: int) -> list:
+    """The rows at one distance in the sweep's error rates, by error rate."""
+    chosen = [
+        row
+        for row in rows
+        if row["d"] == distance and row["error_rate"] in ERROR_RATES
+    ]
+    return sorted(chosen, key=lambda row: row["error_rate"])
+
+
+def draw_rates(axis, rows: list, style: tuple, label: str) -> None:
+    """Rates with their bars on a line; failure-free points hollow.
+
+    style is (colour, marker, line style, sideways factor on x).
+    """
+    colour, marker, line, nudge = style
+    failed = [row for row in rows if has_rate(row)]
+    error_free = [row for row in rows if row["logical_failures"] == 0]
+    if failed:
+        rates = [row[RATE] for row in failed]
+        below = [row[RATE] - row[f"{RATE}_low"] for row in failed]
+        above = [row[f"{RATE}_high"] - row[RATE] for row in failed]
+        axis.errorbar(
+            [nudge * row["error_rate"] for row in failed],
+            rates,
+            yerr=[below, above],
+            fmt=marker,
+            linestyle=line,
+            capsize=3,
+            color=colour,
+            label=label,
+        )
+    for row in error_free:
+        axis.plot(
+            nudge * row["error_rate"],
+            row[f"{RATE}_high"],
+            marker,
+            markerfacecolor="none",
+            color=colour,
+        )
 
 
 if __name__ == "__main__":

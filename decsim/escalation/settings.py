@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from typing import Optional, Protocol
 
 import decsim.config as config
+import decsim.decoders.decoder_output as decoder_output
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -73,6 +74,16 @@ class SwitchingSettings:
     price the verdict's threshold and switch logic; clock None is the
     machine's clock. The complementary gap's two solves are two jobs of
     the weak pool, so its unit_count decides whether they overlap.
+
+    strong_answer_route names a row of decoder_output.STRONG_ANSWER_ROUTES,
+    the way a strong answer reaches the frame. direct, the default: the
+    strong host joins the weak crossing commit, which rides up with the
+    selection, and sends the answer on strong_decoder_to_frame (Toshio
+    2510.25222 Fig. 1). through_weak_chip: the answer goes down on
+    strong_decoder_to_weak_decoder, the weak chip joins it in one cycle
+    of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892
+    Table I, the Pauli frame update). A run with no switching sends a
+    strong answer direct.
     """
 
     confidence: ports.ConfidenceSettings
@@ -84,10 +95,17 @@ class SwitchingSettings:
     strong_window: StrongWindowSettings = (
         strong_window_shapes.RedoWindow.Settings()
     )
+    strong_answer_route: str = "direct"
 
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)
         config.check_cycles("switch_cycles", self.switch_cycles)
+        routes = decoder_output.STRONG_ANSWER_ROUTES
+        if self.strong_answer_route not in routes:
+            raise ValueError(
+                f"switching.strong_answer_route must be one of "
+                f"{tuple(routes)}, got {self.strong_answer_route!r}"
+            )
 
     def build_policy(
         self, threshold: ports.ThresholdSource

@@ -42,6 +42,9 @@ class LinkPath(str, Enum):
     CONTROLLER_TO_STRONG_BUFFER = (
         "controller_to_strong_buffer"  # the room-side write
     )
+    STRONG_DECODER_TO_WEAK_DECODER = (
+        "strong_decoder_to_weak_decoder"  # a strong answer to the chip
+    )
 
 
 @dataclass(frozen=True)

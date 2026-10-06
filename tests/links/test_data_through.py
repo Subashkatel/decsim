@@ -10,7 +10,7 @@ arithmetic over the extents the plan lays, so a change in the data path
 moves a number a reader can recompute rather than a guess.
 
 Three shapes of the escalation policy, at d=3 and d=5, 15 rounds, on the
-logical_reference card, where every one of the eleven paths is priced.
+logical_reference card, where every one of the twelve paths is priced.
 The switching shape runs with an unreachable gap threshold, so every
 window escalates and the strong tier's traffic is the whole plan rather
 than a sample. The feedback half of the loop needs a second workload: a
@@ -26,10 +26,12 @@ the first and last rounds of a stream.
 
 The switching shape's strong side is filled by the escalation alone
 (Toshio 2510.25222 lines 1247 to 1250): each escalated window sends its
-selection, the request's 64-bit name alone, and then the rounds its
-strong window reads that the strong syndrome buffer lacks behind the
-same name, so the fifteen rounds cross weak_decoder_to_strong_decoder
-once each and controller_to_strong_buffer carries nothing. A strong
+selection, the request's 64-bit name and the one bit of the weak
+crossing commit the strong host joins on the default direct route, and
+then the rounds its strong window reads that the strong syndrome buffer
+lacks behind the same name, so the fifteen rounds cross
+weak_decoder_to_strong_decoder once each and controller_to_strong_buffer
+carries nothing. A strong
 answer is its flip behind that name, 65 bits. The strong window is the
 commit region and one buffer ahead, its past face pinned on the
 neighbour's commit (Bombin 2303.04846 lines 775-788, 1456-1458), so it
@@ -69,6 +71,9 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 ROUNDS = 15
 NAME_BITS = window_records.REQUEST_KEY_WIRE_BITS
+# a selection on the direct route: the name, then the memory's one
+# logical observable of weak crossing commit
+SELECTION_BITS = NAME_BITS + 1
 PROBABILITY = 0.008
 SEED = 0
 CODE_TASK = "surface_code:rotated_memory_z"
@@ -148,9 +153,10 @@ EXPECTED = {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_weak_buffer": Traffic(15, 120),
         "weak_buffer_to_weak_decoder": Traffic(5, 220),
-        # nine names of 64 bits, five selections and four regions, and
-        # the regions' 120 bits of rounds
-        "weak_decoder_to_strong_decoder": Traffic(9, 696),
+        # nine names of 64 bits, five selections and four regions, the
+        # selections' five crossing-commit bits and the regions' 120 bits
+        # of rounds
+        "weak_decoder_to_strong_decoder": Traffic(9, 701),
         "strong_buffer_to_strong_decoder": Traffic(5, 220),
         "decoder_to_decoder": Traffic(8, 64),
         "strong_decoder_to_frame": Traffic(5, 325),
@@ -159,9 +165,10 @@ EXPECTED = {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_weak_buffer": Traffic(15, 360),
         "weak_buffer_to_weak_decoder": Traffic(3, 612),
-        # five names of 64 bits, three selections and two regions, and
-        # the regions' 360 bits of rounds
-        "weak_decoder_to_strong_decoder": Traffic(5, 680),
+        # five names of 64 bits, three selections and two regions, the
+        # selections' three crossing-commit bits and the regions' 360
+        # bits of rounds
+        "weak_decoder_to_strong_decoder": Traffic(5, 683),
         "strong_buffer_to_strong_decoder": Traffic(3, 612),
         "decoder_to_decoder": Traffic(4, 96),
         "strong_decoder_to_frame": Traffic(3, 195),
@@ -322,7 +329,7 @@ def commit_extents(machine) -> tuple:
 
 @pytest.mark.parametrize("shape,distance", CASES)
 def test_every_path_carries_the_traffic_the_plan_derives(shape, distance):
-    """The eleven-path table: what fired, how often, and for how many bits."""
+    """The twelve-path table: what fired, how often, and for how many bits."""
     machine, result = run_case(shape, distance)
     grouped = transfers_by_path(result)
     measured = {
@@ -454,17 +461,18 @@ def bounded_strong_hops_run(distance: int) -> dict:
     return transfers_by_path(result)
 
 
-def test_a_bounded_escalation_hop_serializes_the_selections_name():
-    """64 bits at 97.6 bits per us is 0.655738 us on the wire.
+def test_a_bounded_escalation_hop_serializes_the_selection():
+    """65 bits at 97.8 bits per us is 0.664622 us on the wire.
 
-    At d = 5 a selection and a region of fifteen rounds, each behind a
-    name, is 488 bits in the 5 us commit region: 97.6 bits per us.
+    At d = 5 a selection of a name and one crossing-commit bit, and a
+    region of fifteen rounds behind a name, is 489 bits in the 5 us
+    commit region: 97.8 bits per us.
     """
     distance = 5
     grouped = bounded_strong_hops_run(distance)
     first_selection = grouped["weak_decoder_to_strong_decoder"][0]
-    assert first_selection["payload_bits"] == NAME_BITS
-    assert first_selection["serialization_ticks"] == 655_738
+    assert first_selection["payload_bits"] == SELECTION_BITS
+    assert first_selection["serialization_ticks"] == 664_622
 
 
 def test_a_bounded_answer_hop_serializes_the_answers_name_and_flip():
@@ -484,15 +492,16 @@ def test_a_bounded_answer_hop_serializes_the_answers_name_and_flip():
 def escalation_transfers(distance: int) -> tuple:
     """(selections, regions) of the switching run's escalation hop.
 
-    A selection is the request's name alone, so its width tells it from
-    a region, which is the same name in front of at least one round.
+    A selection is the request's name and one crossing-commit bit, so
+    its width tells it from a region, which is the same name in front of
+    at least one round.
     """
     _machine, result = run_case("switching", distance)
     grouped = transfers_by_path(result)
     selections = []
     regions = []
     for transfer in grouped["weak_decoder_to_strong_decoder"]:
-        if transfer["payload_bits"] == NAME_BITS:
+        if transfer["payload_bits"] == SELECTION_BITS:
             selections.append(transfer)
         else:
             regions.append(transfer)

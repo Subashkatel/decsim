@@ -256,7 +256,7 @@ tick (us)  where                            what                                
 18.408     Window planner                   verdict
 18.408     Window planner                   W3 committed
 18.408     Strong tier                      W3 strong window held                                          10.000
-18.408     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  10.000    move      64
+18.408     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  10.000    move      65
 18.408     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  10.000    move      112
 18.408     Decoder unit default#0           stage algorithm                                                0.000
 18.408     Decoder unit default#0           stage release                                                  0.000
@@ -294,10 +294,14 @@ eight things happen that did not happen for window 0.
   to land.
 - **`weak_decoder_to_strong_decoder`, twice, 10 microseconds each.** The
   escalation crosses this hop as two transfers, and each takes the
-  strong tier's T_comm, ten tau_gen. The first carries only the
-  selection, which window to decode again, the request's 64-bit name.
-  The second is 112 bits: that name and 48 bits of rounds, read out of
-  the weak syndrome buffer. They are six rounds, `10..15`, the escalated
+  strong tier's T_comm, ten tau_gen. The first is the selection, 65
+  bits: which window to decode again, the request's 64-bit name, and
+  one bit of what the weak decode committed behind the window, which the
+  strong host joins to its own answer. That is the default
+  `strong_answer_route`, `direct`; under `through_weak_chip` the weak
+  chip keeps that bit and joins the answer itself, so the selection is
+  the name alone. The second is 112 bits: that name and 48 bits of
+  rounds, read out of the weak syndrome buffer. They are six rounds, `10..15`, the escalated
   window's commit region and the buffer region ahead of it. The rounds
   cross once, when a window escalates, and never before.
 - **`queued, dispatched to strong#0`.** A third decode job, on the other

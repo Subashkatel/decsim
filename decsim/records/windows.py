@@ -50,9 +50,10 @@ class DecoderRequestKey:
 
 
 # What a request's name is on a wire. Three kinds of message carry it,
-# once in every transfer: the selection, which is the name alone, a
-# region transfer, which is the name and its rounds, and the strong
-# answer, which is the name and its flips. The rule is gem5's: its
+# once in every transfer: the selection, which is the name and, on the
+# direct strong answer route, the weak crossing commit, a region
+# transfer, which is the name and its rounds, and the strong answer,
+# which is the name and its flips. The rule is gem5's: its
 # network sizes a message with no data at control_msg_size, 8 bytes, and
 # one with data at its data plus that same size (gem5
 # src/mem/ruby/network/Network.cc MessageSizeType_to_int and

@@ -7,6 +7,7 @@ pymatching,frame_to_controller,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 pymatching,qpu_to_controller,15.0,129.0,8.6,0.0,0.0,0.0,0.06
 pymatching,strong_buffer_to_strong_decoder,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 pymatching,strong_decoder_to_frame,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+pymatching,strong_decoder_to_weak_decoder,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 pymatching,weak_buffer_to_weak_decoder,4.0,192.0,48.0,0.0,0.0,0.0,0.016
 pymatching,weak_decoder_to_frame,4.0,4.0,1.0,0.0,0.0,0.0,0.016
 pymatching,weak_decoder_to_strong_decoder,0.0,0.0,0.0,0.0,0.0,0.0,0.0

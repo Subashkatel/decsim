@@ -44,6 +44,7 @@ THREAD_ORDER = (
     "decoder_to_decoder",
     "weak_decoder_to_frame",
     "strong_decoder_to_frame",
+    "strong_decoder_to_weak_decoder",
     "Frame",
     "frame_to_controller",
     "controller_to_qpu",

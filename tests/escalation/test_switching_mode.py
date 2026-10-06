@@ -89,6 +89,54 @@ def test_every_window_commits_once_across_both_output_links_property():
     )
 
 
+def through_weak_chip(settings):
+    """The settings with every strong answer joined on the weak chip."""
+    switching = dataclasses.replace(
+        settings.switching, strong_answer_route="through_weak_chip"
+    )
+    return dataclasses.replace(settings, switching=switching)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_through_the_weak_chip_every_answer_reaches_the_frame_on_its_hop(
+    seed,
+):
+    """A strong answer goes down to the chip, and the chip sends it home.
+
+    Every window, kept or escalated, reaches the frame on
+    weak_decoder_to_frame, and nothing rides strong_decoder_to_frame.
+    """
+    direct = switching_settings(20.0)
+    settings = through_weak_chip(direct)
+    machine, result = run_shot(settings, seed)
+    transfers = transfers_by_path(result)
+    windows = len(machine.observation.windows.windows)
+    escalations = transfers["strong_buffer_to_strong_decoder"]
+    assert escalations > 0
+    assert transfers.get("strong_decoder_to_frame", 0) == 0
+    assert transfers["strong_decoder_to_weak_decoder"] == escalations
+    assert transfers["weak_decoder_to_frame"] == windows
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_both_strong_answer_routes_predict_the_same_shot_for_shot(seed):
+    """The route moves where the join is priced, never what is joined."""
+    direct = switching_settings(20.0)
+    through = through_weak_chip(direct)
+    _machine, direct_result = run_shot(direct, seed)
+    _twin, through_result = run_shot(through, seed)
+    assert predictions(through_result) == predictions(direct_result)
+    assert failures(through_result) == failures(direct_result)
+
+
+def failures(result) -> list:
+    """Each operation's logical failure against the sampled truth."""
+    failed = []
+    for operation_result in result.operation_results:
+        failed.append(operation_result.logical_failure)
+    return failed
+
+
 def never_escalating_settings():
     """The gate's card at 0 dB, its weak tier clocked and its gap free.
 
@@ -277,6 +325,39 @@ def test_the_serial_escalation_timeline_is_exact():
     assert first_record.accepted_ticks == expected_accepted
     assert first_record.committed_ticks == expected_committed
     assert parked_start == expected_parked_start
+
+
+def test_through_the_weak_chip_the_frame_waits_a_hop_and_a_chip_cycle_more():
+    """The weak chip's join is one cycle, then the weak tier's own hop home.
+
+    Both strong answer hops are declared 4 us, so the answer lands on the
+    chip when it would land on the frame; the commit edge, one 0.5 us
+    cycle of the declared clock (Yang et al. 2605.04892 Table I prices
+    the frame update as one cycle), and weak_decoder_to_frame, 2 us, are
+    what the route adds.
+    """
+    direct = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
+    switching = declared_run.declared_switching(
+        strong_answer_route="through_weak_chip", clock=fabric.DECLARED_CLOCK
+    )
+    through = fabric.switching_machine(
+        rounds=9, escalated_windows={0, 1, 2}, switching=switching
+    )
+    direct.run()
+    through.run()
+    direct_snapshot = direct.control.pauli_frame.snapshot()
+    through_snapshot = through.control.pauli_frame.snapshot()
+    direct_record = direct_snapshot.records[0]
+    through_record = through_snapshot.records[0]
+    extra_ticks = through_record.accepted_ticks - direct_record.accepted_ticks
+    weak_leg_ticks = decsim_config.microseconds_to_ticks(
+        fabric.DECLARED_MICROSECONDS["weak_decoder_to_frame"]
+    )
+    commit_edge_ticks = fabric.DECLARED_CLOCK.period_ticks
+
+    assert through_record.window_key == direct_record.window_key
+    assert through_record.tier == "strong"
+    assert extra_ticks == weak_leg_ticks + commit_edge_ticks
 
 
 def test_the_speculative_decode_waits_for_the_context_it_reads():

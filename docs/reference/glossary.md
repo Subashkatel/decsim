@@ -102,9 +102,11 @@ These are not from the papers. The pages use them everywhere.
 - **escalation**: sending a window the weak tier was unsure of to the
   strong tier. The **verdict** is that decision, taken on a finished
   weak decode: keep its correction, or escalate. The **selection** is
-  the message that names the escalated window to the strong side; it
-  is the request's 64-bit name and nothing else. The region and the
-  strong answer carry the same name in front of their bits.
+  the message that names the escalated window to the strong side. On
+  the `direct` strong answer route it is the request's 64-bit name and
+  the weak crossing commit, one bit per logical observable, 64 + k
+  bits; on `through_weak_chip` it is the 64-bit name alone. The region
+  and the strong answer carry the same name in front of their bits.
 - **absorb**: a strong window absorbs a weak window when it decodes the
   same rounds again and replaces that window's answer, so the weak
   window is never decoded on its own.
@@ -218,6 +220,7 @@ Every hop is booked under one path name, the `LinkPath` values in
 | `weak_decoder_to_strong_decoder` | the escalation's selection, then the strong window's rounds |
 | `decoder_to_decoder` | one committed window's boundary to the next window |
 | `weak_decoder_to_frame`, `strong_decoder_to_frame` | a correction to the Pauli frame |
+| `strong_decoder_to_weak_decoder` | a strong answer to the weak chip, which joins it and sends it home on `weak_decoder_to_frame` (`switching.strong_answer_route` `through_weak_chip`) |
 | `frame_to_controller` | the conditional release |
 | `controller_to_qpu` | the instruction, and its pulse cost |
 

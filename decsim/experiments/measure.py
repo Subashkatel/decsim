@@ -144,8 +144,7 @@ WINDOW_STATUS_COLUMNS = tuple(
     if status is not decoding_records.BackendDecodeStatus.SUCCEEDED
 )
 
-# which store's output link carries a tier's window in; the way home is
-# the decoders' own FRAME_PATH_BY_TIER, and both are keyed by the tier
+# which store's output link carries a tier's window in, keyed by the tier
 # whose decode the frame committed rather than by the row's name
 INPUT_LINK_BY_TIER = {
     window_records.DecoderTier.WEAK: (
@@ -383,6 +382,28 @@ def link_delay_by_window(transfers: list) -> dict:
     return delay
 
 
+def answer_send_ticks(transfers: list) -> dict:
+    """The tick each window's answer first left for the frame, by window.
+
+    An answer rides every hop of its route (decoders/decoder_output.py
+    ANSWER_NAME_BITS_BY_PATH names them all), so its way home starts at
+    the earliest of those sends, whichever route it took.
+    """
+    send = {}
+    for row in transfers:
+        if row["path"] not in decoder_output.ANSWER_NAME_BITS_BY_PATH:
+            continue
+        attribution = row["attribution"]
+        operation_id = identity_records.stable_identity_from_json(
+            attribution["operation_id"]
+        )
+        key = (operation_id, attribution["window_id"])
+        start = _hop_start_ticks(row)
+        earlier = send.get(key, start)
+        send[key] = min(earlier, start)
+    return send
+
+
 def input_hop_by_request(transfers: list) -> dict:
     """(path, window id, run ordinal) -> (delay ticks, last delivery tick).
 
@@ -501,7 +522,7 @@ def window_points_us(
     input_hop: dict,
     qpu_send: dict,
     input_path: str,
-    output_path: str,
+    answer_send: dict,
 ) -> dict:
     """The per-window latency points, in us, for one decoded window.
 
@@ -533,7 +554,9 @@ def window_points_us(
     escalation_ticks = link_delay.get(
         ("weak_decoder_to_strong_decoder", operation_id, window_id), 0
     )
-    output_ticks = link_delay.get((output_path, operation_id, window_id), 0)
+    accepted = frame_record.accepted_ticks
+    output_sent = answer_send.get(window.key, accepted)
+    output_ticks = accepted - output_sent
     attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
     input_key = (input_path, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
@@ -544,7 +567,6 @@ def window_points_us(
     store_read = config_module.ticks_to_microseconds(decode.store_read_ticks)
     dependency_block_with_read = rounds_wait + park
     confidence_ticks = _confidence_ticks(window, decode)
-    output_sent = frame_record.accepted_ticks - output_ticks
     answered = max(window.t_done, decode.done_ticks)
     last_required_send = qpu_send[(operation_id, last_required_round)]
     first_required_send = qpu_send[(operation_id, window.start_round)]
@@ -627,6 +649,7 @@ def collect_samples(
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
+    answer_send = answer_send_ticks(transfers)
     input_hop = input_hop_by_request(transfers)
     qpu_send = qpu_send_ticks(transfers)
     frame_by_window = frame_records_by_window(observation)
@@ -651,9 +674,7 @@ def collect_samples(
         decode = _committed_decode(stages, frame_record)
         first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
         input_link = INPUT_LINK_BY_TIER[decode.tier]
-        output_link = decoder_output.FRAME_PATH_BY_TIER[decode.tier]
         input_path = input_link.value
-        output_path = output_link.value
         stage_us = _stage_microseconds(stages, frame_record)
         window_samples = window_points_us(
             window,
@@ -665,7 +686,7 @@ def collect_samples(
             input_hop,
             qpu_send,
             input_path,
-            output_path,
+            answer_send,
         )
         for name, value in window_samples.items():
             samples[name].append(value)

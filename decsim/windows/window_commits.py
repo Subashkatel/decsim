@@ -108,7 +108,9 @@ class WindowCommitter:
 
         What the weak decode committed of the faults behind the window
         joins the result before it leaves, so the frame and the
-        prediction receive the same bits.
+        prediction receive the same bits. The answer's route prices
+        where that join happens (decoders/decoder_output.py
+        STRONG_ANSWER_ROUTES).
         """
         result = _with_the_crossing_commit(window, result)
         finish = functools.partial(

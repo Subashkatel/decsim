@@ -57,11 +57,12 @@ ROUNDS_PER_SHOT = 100
 # a chosen cluster-gap threshold, not a calibrated one: the paper's
 # 20 dB is on the complementary gap
 THRESHOLD_DECIBELS = 20.0
-# the three strong-side legs that cross the cable to the host
+# the four strong-side legs that cross the cable to the host
 STRONG_CABLE_LEGS = (
     "controller_to_strong_buffer",
     "weak_decoder_to_strong_decoder",
     "strong_decoder_to_frame",
+    "strong_decoder_to_weak_decoder",
 )
 EXPERIMENT_ONE_LINKS_SOURCE = "experiments/switching_baseline/run.py"
 SWITCHING_COLLECTION = decsim.CollectionSettings(

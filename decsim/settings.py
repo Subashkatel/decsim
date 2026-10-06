@@ -189,12 +189,13 @@ _STRONG_BASELINE_PATH_CLOCKS = {
     "frame_to_controller": FRIDGE_CLOCK,
     "controller_to_qpu": FRIDGE_CLOCK,
 }
-# The strong side's four hops, all on the host.
+# The strong side's five hops, all on the host.
 _STRONG_SIDE_PATH_CLOCKS = {
     "controller_to_strong_buffer": ROOM_CLOCK,
     "weak_decoder_to_strong_decoder": ROOM_CLOCK,
     "strong_buffer_to_strong_decoder": ROOM_CLOCK,
     "strong_decoder_to_frame": ROOM_CLOCK,
+    "strong_decoder_to_weak_decoder": ROOM_CLOCK,
 }
 # A base's shot is ten rounds per unit of distance.
 _BASELINE_ROUNDS_PER_DISTANCE = 10
@@ -296,7 +297,7 @@ def strong_decoder_baseline(
 def one_cycle_strong_side(
     links: link_settings.FabricSettings,
 ) -> link_settings.FabricSettings:
-    """The card with the strong side's four hops one room cycle each.
+    """The card with the strong side's five hops one room cycle each.
 
     A run that switches on the weak base reaches the strong decoder over
     these hops, each an unbounded wire; every other path keeps its card.

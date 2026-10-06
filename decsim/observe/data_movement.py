@@ -73,6 +73,7 @@ MEMORY_CLASS_BY_LINK_PATH = {
     "weak_decoder_to_strong_decoder": MemoryClass.OFF_BOARD,
     "weak_decoder_to_frame": MemoryClass.ON_BOARD,
     "strong_decoder_to_frame": MemoryClass.OFF_BOARD,
+    "strong_decoder_to_weak_decoder": MemoryClass.OFF_BOARD,
     "decoder_to_decoder": MemoryClass.ON_CHIP,
     "frame_to_controller": MemoryClass.ON_CHIP,
 }

@@ -281,6 +281,20 @@ def test_row_totals_mean_is_statistics_fmean_of_the_rows():
     assert totals.mean("value") == statistics.fmean(values)
 
 
+def test_row_totals_mean_is_over_the_rows_that_hold_the_field():
+    """A measured row holds None and a csv row an empty cell."""
+    totals = fold.RowTotals(means=("value",))
+    totals.add({"value": 1.0})
+    totals.add({"value": None})
+    totals.add({"value": ""})
+    totals.add({"value": "3.0"})
+    unheld = fold.RowTotals(means=("value",))
+    unheld.add({})
+
+    assert totals.mean("value") == 2.0
+    assert unheld.mean("value") is None
+
+
 def test_row_totals_read_a_csv_files_text_and_a_measurements_numbers_alike():
     """One accumulator serves the fold and the single run."""
     text_rows = fold.RowTotals(

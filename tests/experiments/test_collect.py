@@ -107,6 +107,8 @@ WALL_CLOCK_COLUMNS = (
     "sim_wall_seconds_per_shot",
     "throughput_rounds_per_us",
     "throughput_windows_per_us",
+    "weak_reaction_growth_rate",
+    "strong_reaction_growth_rate",
 )
 
 # the sliding pymatching task's logical_failure, direct_failure and

@@ -680,9 +680,11 @@ log is the engine narrator: print, file (each shot's lines next to the results) 
 
 first_recorded_round and last_recorded_round are the measurement interval, both ends included, rounds counted from 1 within each operation's stream; None as the last runs it to the shot's end, so the defaults record everything. The latency samples keep only the windows whose first committed round (commit_lo) lies in it and the rounds in it. Commit regions tile a stream, so the interval picks each round's window once, where a window's first read round would pick a leading buffer's rounds twice. The machine is not told: every window runs and finishes, and only what is recorded is filtered, as OMNeT++'s warmup-period filters recorded values and ns-3's FlowMonitor counts a packet by its first send and lets it finish after the stop. A long shot starts with empty queues and ends by draining them, and the interval leaves both ends out. The user picks it, for instance from a pilot shot's samples in window order.
 
-The interval cuts the latency samples and what is made from them: the means and maxes, the windows' tiers, load and parallel_processes_needed. The logical failure and the predictions stay whole, since a logical error rate is a rate over whole shots, and so do the shot's counts and rates (decoded_windows, escalated_windows, throughput, the queue peaks, busy fractions, switching and backlog columns, the link totals): a report divides one count by another, escalated over decoded windows, and a cut on one side would bias the ratio.
+The interval cuts the latency samples and what is made from them: the means and maxes, the windows' tiers, the reaction growth rates and deadline misses, load and parallel_processes_needed. The logical failure and the predictions stay whole, since a logical error rate is a rate over whole shots, and so do the shot's counts and rates (decoded_windows, escalated_windows, throughput, the queue peaks, busy fractions, switching and backlog columns, the link totals): a report divides one count by another, escalated over decoded windows, and a cut on one side would bias the ratio.
 
-The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, the interval the latency columns.
+reaction_deadline_microseconds is a budget on each recorded window's reaction time (buffer0_ready_to_frame); None, the default, sets none. A shot then counts the windows over it and the shot-clock time the first of them arrived, which says when an overloaded tier, whose wait grows without bound, first breaks the budget over the run length chosen.
+
+The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, the interval the latency columns, the deadline the deadline columns.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -695,6 +697,7 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `data_movement` | `bool` | `False` |
 | `first_recorded_round` | `int` | `1` |
 | `last_recorded_round` | `Optional[int]` | `None` |
+| `reaction_deadline_microseconds` | `Optional[float]` | `None` |
 
 ## decsim/pauli_frame
 

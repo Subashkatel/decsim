@@ -38,6 +38,11 @@ PYTHON_REFUSALS = [
         "observation.last_recorded_round must be a whole number of rounds, "
         "at least 200",
     ),
+    (
+        {"reaction_deadline_microseconds": -1.0},
+        "observation.reaction_deadline_microseconds must be finite and not "
+        "negative",
+    ),
 ]
 
 

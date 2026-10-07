@@ -67,6 +67,15 @@ LOAD_MAXES = (
 )
 # each tier's offered load, which a folder an older tree wrote lacks
 OFFERED_LOADS = ("weak_offered_load", "strong_offered_load")
+# the reaction time's growth per tier and the round each shot first
+# missed the deadline, averaged over the shots that hold them, since a
+# tier whose windows completed at fewer than two ticks and a shot that
+# never missed hold none. A shot is one replication of a terminating
+# run, so the task's estimate is the mean of the shots' own values,
+# Law's IID replications (WSC 2004, p. 69), not one slope fitted
+# through every shot's windows
+GROWTH_COLUMNS = ("weak_reaction_growth_rate", "strong_reaction_growth_rate")
+OVERLOAD_MEANS = (*GROWTH_COLUMNS, "first_deadline_miss_us")
 # the latency point whose median and p99 sweep.csv also gives per tier:
 # a window's formed-to-commit time, kept (weak) apart from escalated
 # (strong), which the switching studies weigh against each other
@@ -112,6 +121,7 @@ SHOT_SUMS = (
     "executed_rounds",
     "strong_decoded_rounds",
     "strong_service_sum_us",
+    "deadline_missed_windows",
     *STATUS_SUMS,
 )
 SHOT_TRUE_COUNTS = (
@@ -240,6 +250,7 @@ def summarize_task(
         multiset = _multiset_over_tiers(counts, task_key, name)
         _add_latency_point_columns(row, totals, name, multiset)
     _add_tier_split_columns(row, counts, task_key)
+    _add_overload_columns(row, totals, counts, task_key)
     return row
 
 
@@ -818,6 +829,30 @@ def _add_load_columns(row: dict, totals) -> None:
     row["escalated_fraction"] = escalated / windows
 
 
+def _add_overload_columns(
+    row: dict, totals: fold.RowTotals, counts: dict, task_key: tuple
+) -> None:
+    """The growth of the reaction time and the misses of its deadline.
+
+    A column no shot held is left out. The missed fraction is over every
+    recorded window of the task, the windows of TIER_SPLIT_POINT's
+    samples, and is left out when the interval recorded none.
+    """
+    for name in OVERLOAD_MEANS:
+        mean = totals.mean(name)
+        if mean is not None:
+            row[name] = mean
+    if "deadline_missed_windows" not in totals.sums:
+        return
+    missed_windows = totals.sums["deadline_missed_windows"]
+    reactions = _multiset_over_tiers(counts, task_key, TIER_SPLIT_POINT)
+    recorded_windows = _total_count(reactions)
+    row["deadline_missed_windows"] = missed_windows
+    if recorded_windows == 0:
+        return
+    row["deadline_missed_fraction"] = missed_windows / recorded_windows
+
+
 def _strong_service_mean_us(totals: fold.RowTotals) -> Optional[float]:
     """The task's strong service over its strong decodes; None for none.
 
@@ -835,9 +870,11 @@ def _shot_totals(row: dict) -> fold.RowTotals:
     """What one task's shot rows add up to, role by role.
 
     A role's column is totalled only when the row holds it, the rule of
-    _points_held, so a folder an older tree wrote still folds.
+    _points_held, so a folder an older tree wrote still folds. The
+    OVERLOAD_MEANS are always totalled, since any shot may hold them.
     """
     means = _held_by(row, SHOT_MEANS)
+    means.extend(OVERLOAD_MEANS)
     maxes = _held_by(row, SHOT_MAXES)
     sums = _held_by(row, SHOT_SUMS)
     for name in _points_held(row):
@@ -1205,15 +1242,30 @@ def _scalar_fields(measurement) -> dict:
     """The measurement's own fields, the per-window collections left out.
 
     A field the shot did not measure holds None and is no column, the
-    rule _points_held keeps for a latency point.
+    rule _points_held keeps for a latency point, unless another shot of
+    its task may hold it (_columns_kept_empty).
     """
+    kept_empty = _columns_kept_empty(measurement)
     row = {}
     for name in measurement.__dataclass_fields__:
         value = getattr(measurement, name)
-        if name in NON_COLUMN_FIELDS or value is None:
+        if name in NON_COLUMN_FIELDS:
+            continue
+        if value is None and name not in kept_empty:
             continue
         row[name] = value
     return row
+
+
+def _columns_kept_empty(measurement) -> tuple:
+    """The columns a shot writes empty when it holds no value for them.
+
+    Another shot of its task may hold one, and every piece of a task
+    writes the same columns. A run with no deadline has no first miss.
+    """
+    if measurement.deadline_missed_windows is None:
+        return GROWTH_COLUMNS
+    return OVERLOAD_MEANS
 
 
 def _shot_link_row(task_key: tuple, measurement, path: str) -> dict:

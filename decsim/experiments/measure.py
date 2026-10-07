@@ -263,6 +263,17 @@ class ShotMeasurement:
     strong_wait_max_us: Optional[float]
     strong_held_in_units_max: Optional[int]
     backlog_peak_rounds: Optional[int]
+    # each tier's reaction time (buffer0_ready_to_frame) growth over its
+    # recorded windows, in us of wait per us of run (reaction_growth_rate);
+    # None for a tier whose windows completed at fewer than two ticks
+    weak_reaction_growth_rate: Optional[float]
+    strong_reaction_growth_rate: Optional[float]
+    # the recorded windows whose reaction time passed
+    # observation.reaction_deadline_microseconds, and the shot-clock tick,
+    # in us, the earliest of them had its data complete; None with no
+    # deadline, the tick None too when no window passed it
+    deadline_missed_windows: Optional[int]
+    first_deadline_miss_us: Optional[float]
     referee_windows_checked: int  # referee re-decodes (0 = referee off)
     # referee reached a different owned observable contribution
     referee_window_disagreements: int
@@ -686,6 +697,19 @@ def decoded_windows(observation: observation_module.Observation) -> list:
     return decoded
 
 
+def recorded_windows(
+    observation: observation_module.Observation,
+    observation_settings: observe_settings.ObservationSettings,
+) -> list:
+    """The decoded windows whose first committed round is recorded."""
+    recorded = []
+    for window, frame_record in decoded_windows(observation):
+        if not observation_settings.records_round(window.commit_lo):
+            continue
+        recorded.append((window, frame_record))
+    return recorded
+
+
 def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
@@ -721,9 +745,9 @@ def collect_samples(
         strong_keys, waits, observation_settings
     )
     stages = observation.stages
-    for window, frame_record in decoded_windows(observation):
-        if not observation_settings.records_round(window.commit_lo):
-            continue
+    for window, frame_record in recorded_windows(
+        observation, observation_settings
+    ):
         decode = _committed_decode(stages, frame_record)
         first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
         input_link = INPUT_LINK_BY_TIER[decode.tier]
@@ -745,6 +769,75 @@ def collect_samples(
             samples[name].append(value)
         window_tiers.append(decode.tier.value)
     return samples, tuple(window_tiers)
+
+
+def reaction_growth_rate(
+    recorded: list, tier: window_records.DecoderTier
+) -> Optional[float]:
+    """How fast a tier's reaction time grows along the shot, in us per us.
+
+    The least-squares slope of each window's buffer0_ready_to_frame
+    against the tick its data was complete, the window's arrival. Above
+    a load of 1 a queue has no steady state: Lindley's recursion
+    W_{n+1} = max(0, W_n + S_n - T_n) drifts by E[S] - E[T] > 0 a
+    window, so the wait grows linearly and its mean or p99 says only how
+    long the shot ran (Terhal, arXiv:1302.3428 Sec. II.G.3: the backlog
+    grows when r_gen / r_proc > 1). The slope estimates that drift per
+    unit of arrival time, which for one server is the offered load less
+    1 in the long run; a fit over a few windows of varying service is an
+    estimate of it, not equal to it. Against the commit tick the
+    slope would tend to 1 - 1 / load, under 1 however far the tier is
+    overloaded. None when the tier's recorded windows completed at fewer
+    than two distinct ticks, which leave no slope to fit.
+
+    The law holds for an unbounded FIFO queue fed without a pause by
+    stationary arrivals and service. A bounded store holds the backlog
+    upstream, in the controller, before a window's data is complete, so
+    the reaction time can stay flat while the tier is overloaded; there
+    backlog_peak_rounds (observation.backlog_trace) is the measure.
+    """
+    arrivals_us = []
+    reactions_us = []
+    for window, frame_record in recorded:
+        if frame_record.tier != tier.value:
+            continue
+        arrival_us = _arrival_microseconds(window)
+        reaction_us = _reaction_microseconds(window, frame_record)
+        arrivals_us.append(arrival_us)
+        reactions_us.append(reaction_us)
+    distinct_arrivals = set(arrivals_us)
+    if len(distinct_arrivals) < 2:
+        return None
+    fit = statistics.linear_regression(arrivals_us, reactions_us)
+    return fit.slope
+
+
+def deadline_misses(
+    recorded: list, deadline_microseconds: Optional[float]
+) -> tuple:
+    """The recorded windows over the deadline, and when the earliest arrived.
+
+    A finite-horizon reading of an overloaded tier, which has no steady
+    state: when its reaction time first passes a budget within the shot,
+    as Toshio et al. 2510.25222 judge a backlog trajectory by whether it
+    passes 10^6 rounds within N_gate steps (Sec. III, Fig. 11). The time
+    is on the shot clock, the tick the window's data was complete, the
+    growth fit's axis, since a round index restarts in each operation's
+    stream; None when no window missed, and both are None with no
+    deadline.
+    """
+    if deadline_microseconds is None:
+        return None, None
+    missed_arrivals_us = []
+    for window, frame_record in recorded:
+        reaction_us = _reaction_microseconds(window, frame_record)
+        if reaction_us > deadline_microseconds:
+            arrival_us = _arrival_microseconds(window)
+            missed_arrivals_us.append(arrival_us)
+    first_miss_us = None
+    if missed_arrivals_us:
+        first_miss_us = min(missed_arrivals_us)
+    return len(missed_arrivals_us), first_miss_us
 
 
 def chain_load(samples: dict, window_period_us: float) -> float:
@@ -871,6 +964,16 @@ def _measurement(
     predictions = _predictions(result)
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
+    recorded = recorded_windows(observation, settings.observation)
+    weak_growth = reaction_growth_rate(
+        recorded, window_records.DecoderTier.WEAK
+    )
+    strong_growth = reaction_growth_rate(
+        recorded, window_records.DecoderTier.STRONG
+    )
+    missed_windows, first_miss_us = deadline_misses(
+        recorded, settings.observation.reaction_deadline_microseconds
+    )
     throughput = _throughput_per_microsecond(observation, decoded_window_count)
     referee = _referee_counts(observation)
     commit_rounds = code.commit_rounds()
@@ -934,6 +1037,10 @@ def _measurement(
         strong_wait_max_us=tiers.strong_wait_max_us,
         strong_held_in_units_max=tiers.strong_held_in_units_max,
         backlog_peak_rounds=backlog_peak,
+        weak_reaction_growth_rate=weak_growth,
+        strong_reaction_growth_rate=strong_growth,
+        deadline_missed_windows=missed_windows,
+        first_deadline_miss_us=first_miss_us,
         referee_windows_checked=referee.windows_checked,
         referee_window_disagreements=referee.window_disagreements,
         link_totals=totals,
@@ -1513,6 +1620,21 @@ def _window_order(window_item: tuple) -> bytes:
 def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     span_ticks = end_ticks - start_ticks
     return config_module.ticks_to_microseconds(span_ticks)
+
+
+def _arrival_microseconds(window: window_records.Window) -> float:
+    """The shot-clock tick the window's data was complete, in us."""
+    return config_module.ticks_to_microseconds(window.t_data_complete)
+
+
+def _reaction_microseconds(
+    window: window_records.Window,
+    frame_record: decoding_records.PauliFrameCommitRecord,
+) -> float:
+    """buffer0_ready_to_frame: the window's data complete to its commit."""
+    return _span_microseconds(
+        frame_record.committed_ticks, window.t_data_complete
+    )
 
 
 def _last_emitted_round(qpu_send: dict, operation_id) -> int:

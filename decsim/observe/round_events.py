@@ -7,6 +7,8 @@ controller's output events are read only by the tests' run ledger
 has no other listener.
 """
 
+from typing import Any
+
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
 
@@ -20,6 +22,12 @@ class RoundEventRecorder:
         self.output_events: list = []
         # (tick, operation_id, round_index) per strong-store landing
         self.stored_rounds: list = []
+        # the tick of every round the QPU read out, an idle patch's
+        # included, before any departure delay the source states
+        self.readout_ticks: list = []
+        # the last round the QPU read out of each operation, its rounds
+        # generated so far, since it reads an operation's rounds in order
+        self.rounds_read_out_by_operation: dict = {}
 
     def record(self, event: round_records.RoundEvent) -> None:
         """One transition of one round."""
@@ -28,6 +36,28 @@ class RoundEventRecorder:
     def output(self, event: round_records.ControllerOutputEvent) -> None:
         """One transition on the controller's digital-to-QPU path."""
         self.output_events.append(event)
+
+    def round_read_out(self, readout: round_records.QPUReadout) -> None:
+        """The QPU read out one round, or one fragment of it."""
+        self.readout_ticks.append(self.engine.now)
+        by_operation = self.rounds_read_out_by_operation
+        latest = by_operation.get(readout.operation_id, 0)
+        by_operation[readout.operation_id] = max(latest, readout.round_index)
+
+    def idle_round_read_out(
+        self,
+        operation_id: Any,  # an opaque identity
+        patch: Any,  # an opaque identity
+        round_index: int,
+    ) -> None:
+        """An idle patch's round: generated work, though no operation's.
+
+        Its decodes, when the idle policy charges any, are load-only, so
+        it stretches the span the rounds were generated over and is no
+        operation's backlog.
+        """
+        del operation_id, patch, round_index
+        self.readout_ticks.append(self.engine.now)
 
     def round_stored(
         self, round_key: tuple, _packet: round_records.SyndromeRoundPacket

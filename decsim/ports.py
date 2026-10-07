@@ -2224,5 +2224,5 @@ class DecoderUnit(Protocol):
 class WindowBacklog(Protocol):
     """The window manager, as the decode backlog sampler reads it."""
 
-    def rounds_backlog(self) -> tuple:
-        """Rounds arrived and not decoded: (operation id, patch, rounds)."""
+    def final_round_counts(self) -> tuple:
+        """Rounds final from round 1: (operation id, patch, rounds)."""

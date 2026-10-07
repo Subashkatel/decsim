@@ -157,7 +157,7 @@ The numbers are in the folder's `sweep.csv`, one row per task. These
 are the columns this step reads:
 
 ```bash
-cut -d, -f5,35,77,101,134,135 results/d3/sweep.csv
+cut -d, -f5,35,79,103,136,137 results/d3/sweep.csv
 ```
 
 ```

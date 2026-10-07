@@ -215,9 +215,15 @@ class ShotMeasurement:
     weak_queue_max: int
     strong_queue_max: int
     # each tier's time-weighted fraction of busy units, Triage's
-    # utilization rate (2605.04459 lines 1024-1031)
+    # utilization rate (2605.04459 lines 1024-1031), over the whole run,
+    # its drain included
     weak_busy_fraction: float
     strong_busy_fraction: float
+    # each tier's offered load: its busy unit time over its units times
+    # the span the QPU generated the rounds over; past 1 the tier falls
+    # behind
+    weak_offered_load: float
+    strong_offered_load: float
     # the windows the strong tier committed, the rounds its decodes read
     # and their summed service, and r_com, the rounds a window commits.
     # The report divides the summed service by the summed windows per
@@ -244,8 +250,9 @@ class ShotMeasurement:
     # decodes held in the units' memory at once, landed and free to
     # compute but waiting on a unit's compute, which the strong ready
     # queue's peak does not see because a unit takes the next decode
-    # into its memory while it computes; and the most undecoded rounds
-    # the machine held at once. The first six need
+    # into its memory while it computes; and the most rounds the
+    # machine held at once without their final correction, an
+    # escalated window's waiting for its strong answer. The first six need
     # observation.record_switching_windows and the last
     # observation.backlog_trace; a shot that kept neither holds None,
     # and its row no column, since zeros would say nothing waited
@@ -872,7 +879,10 @@ def _measurement(
     algorithm = active_decoder_kind(settings)
     queued = observation.queue_depth.peak
     primary_tier = settings.window_tier.value
-    pools = _pool_measures(observation, primary_tier)
+    round_period_ticks = config_module.microseconds_to_ticks(
+        round_period_microseconds
+    )
+    pools = _pool_measures(observation, primary_tier, round_period_ticks)
     strong = _strong_decodes(observation)
     tiers = _tier_records(observation)
     backlog_peak = _backlog_peak_rounds(observation)
@@ -909,6 +919,8 @@ def _measurement(
         strong_queue_max=pools.strong_queue_max,
         weak_busy_fraction=pools.weak_busy_fraction,
         strong_busy_fraction=pools.strong_busy_fraction,
+        weak_offered_load=pools.weak_offered_load,
+        strong_offered_load=pools.strong_offered_load,
         escalated_windows=strong.windows,
         strong_decoded_rounds=strong.rounds,
         strong_service_sum_us=strong.service_sum_microseconds,
@@ -1121,6 +1133,8 @@ class _PoolMeasures:
     strong_queue_max: int
     weak_busy_fraction: float
     strong_busy_fraction: float
+    weak_offered_load: float
+    strong_offered_load: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1238,9 +1252,11 @@ def _referee_counts(
 
 
 def _pool_measures(
-    observation: observation_module.Observation, primary_tier: str
+    observation: observation_module.Observation,
+    primary_tier: str,
+    round_period_ticks: int,
 ) -> _PoolMeasures:
-    """Each pool's own queue peak and busy fraction, by the tier's name.
+    """Each pool's own queue peak, busy fraction and load, by tier name.
 
     The plan's windows queue in the default pool, so its numbers are the
     primary tier's; a run without a pool reads zero for it.
@@ -1248,25 +1264,75 @@ def _pool_measures(
     peaks = observation.queue_depth.peak_by_pool
     utilization = observation.decoder_utilization.result()
     busy = utilization["per_pool_busy_fraction"]
+    offered = _offered_load_by_pool(
+        observation, utilization, round_period_ticks
+    )
     default_queue_max = peaks.get(decode_queue.DEFAULT_POOL, 0)
     default_busy_fraction = busy.get(decode_queue.DEFAULT_POOL, 0.0)
+    default_offered_load = offered.get(decode_queue.DEFAULT_POOL, 0.0)
     if primary_tier == window_records.DecoderTier.STRONG.value:
         return _PoolMeasures(
             weak_queue_max=0,
             strong_queue_max=default_queue_max,
             weak_busy_fraction=0.0,
             strong_busy_fraction=default_busy_fraction,
+            weak_offered_load=0.0,
+            strong_offered_load=default_offered_load,
         )
     weak_queue_max = default_queue_max
     strong_queue_max = peaks.get(decode_queue.STRONG_POOL, 0)
     weak_busy_fraction = default_busy_fraction
     strong_busy_fraction = busy.get(decode_queue.STRONG_POOL, 0.0)
+    weak_offered_load = default_offered_load
+    strong_offered_load = offered.get(decode_queue.STRONG_POOL, 0.0)
     return _PoolMeasures(
         weak_queue_max=weak_queue_max,
         strong_queue_max=strong_queue_max,
         weak_busy_fraction=weak_busy_fraction,
         strong_busy_fraction=strong_busy_fraction,
+        weak_offered_load=weak_offered_load,
+        strong_offered_load=strong_offered_load,
     )
+
+
+def _offered_load_by_pool(
+    observation: observation_module.Observation,
+    utilization: dict,
+    round_period_ticks: int,
+) -> dict:
+    """Each pool's busy unit ticks over its units times the generation span.
+
+    The run drains every decode, so the busy ticks are the work the
+    rounds offered the pool: rho = lambda E[S] / c, the ratio chain_load
+    forms for the serial chain.
+    """
+    generation_ticks = _generation_span_ticks(observation, round_period_ticks)
+    busy_ticks = utilization["per_pool_busy_unit_ticks"]
+    units = utilization["per_pool_total_units"]
+    offered = {}
+    for pool, pool_busy_ticks in busy_ticks.items():
+        capacity_ticks = units[pool] * generation_ticks
+        offered[pool] = pool_busy_ticks / capacity_ticks
+    return offered
+
+
+def _generation_span_ticks(
+    observation: observation_module.Observation, round_period_ticks: int
+) -> int:
+    """The QPU's first readout to its last, plus the round that ends at it.
+
+    An idle patch's rounds count, since a policy may charge decodes for
+    them. Readout ticks, not departures, so a delay the source puts on a
+    readout's way out does not stretch it. Operations that run side by
+    side share the span, and a later operation stretches it to its end,
+    so it is the wall time the rounds arrived over, where rounds times
+    the round period would count side by side operations twice.
+    """
+    readout_ticks = observation.round_events.readout_ticks
+    first_readout_tick = min(readout_ticks)
+    last_readout_tick = max(readout_ticks)
+    readout_span_ticks = last_readout_tick - first_readout_tick
+    return readout_span_ticks + round_period_ticks
 
 
 def _strong_decodes(
@@ -1427,7 +1493,7 @@ def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
 def _backlog_peak_rounds(
     observation: observation_module.Observation,
 ) -> Optional[int]:
-    """The most undecoded rounds held at once, when the sampler ran."""
+    """The most rounds not yet final at once, when the sampler ran."""
     backlog = observation.decode_backlog
     if backlog is None:
         return None

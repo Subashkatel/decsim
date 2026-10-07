@@ -1884,6 +1884,185 @@ def test_enough_strong_units_leave_the_same_windows_and_no_wait():
     assert ample.backlog_peak_rounds < real.backlog_peak_rounds
 
 
+def slower_strong_than_the_shot() -> measure.ShotMeasurement:
+    """Every window escalates to a 100 us strong card on one unit.
+
+    The ten decodes are 1,000 us of work against 30 rounds read out a
+    microsecond apart, so the first strong answer lands after the last
+    round does.
+    """
+    strong_algorithm = charged(100.0)
+    shot = switching_run(
+        1000000.0,
+        observation=("backlog_trace",),
+        strong_algorithm=strong_algorithm,
+    )
+    return measure.measure_shot(shot)
+
+
+def test_a_window_waiting_for_its_strong_answer_keeps_its_rounds_waiting():
+    """A provisional weak commit is not a round's final correction.
+
+    No strong answer is in when the last round arrives, so no round is
+    final and the backlog holds every round the shot produced: Terhal's
+    backlog of syndrome data generated and not yet processed (quoted in
+    Skoric et al. 2209.08552 lines 46-55).
+    """
+    measurement = slower_strong_than_the_shot()
+
+    assert measurement.backlog_peak_rounds == SHOT_ROUNDS
+
+
+def test_an_overloaded_strong_tier_reads_its_offered_load_past_one():
+    """The busy time over the 30 us the rounds took, not over the drain.
+
+    The strong unit spends the run's drain busy, so its busy fraction
+    stays under 1; its offered load is the ten 100 us decodes, and the
+    few cycles each spends fetching and releasing, over 30 us.
+    """
+    measurement = slower_strong_than_the_shot()
+    work_over_generation = 1000.0 / 30.0
+
+    assert measurement.strong_busy_fraction < 1.0
+    assert measurement.strong_offered_load == pytest.approx(
+        work_over_generation, rel=0.001
+    )
+
+
+def test_a_readout_departure_delay_leaves_the_offered_load_where_it_was(
+    monkeypatch,
+):
+    """The span is the QPU's readouts, not the readouts' departures.
+
+    Every readout leaves 1,000 us after it is read out, so the same ten
+    decodes start later, and the 30 us of rounds they were offered over
+    is the same.
+    """
+    prompt = slower_strong_than_the_shot()
+    late_departure = staticmethod(departs_a_millisecond_late)
+    monkeypatch.setattr(
+        stim_device.StimDevice, "readout_departure_tick", late_departure
+    )
+    delayed = slower_strong_than_the_shot()
+
+    assert delayed.strong_offered_load == prompt.strong_offered_load
+
+
+def test_an_idle_patchs_rounds_stretch_the_span_the_load_is_offered_over():
+    """An idle patch's rounds are generated work, so they set the span too.
+
+    A 30-round memory operation runs beside a 300-round one that emits
+    no detector data, so the memory patch idles from round 31 to 300 and
+    the default idle policy charges each idle round a load-only decode
+    on the one 1 us weak unit: 105.372 us of busy time over the 300 us
+    the QPU generated rounds for.
+    """
+    settings = one_tier_machine(1.0)
+    (memory,) = settings.workload.operations
+    quiet = program_records.Operation(
+        2, "quiet", (99,), patches=(99,), emits_detector_data=False
+    )
+    rounds = round_policies.PerOperationRounds(((memory.id, 30), (2, 300)))
+    workload = dataclasses.replace(
+        settings.workload,
+        operations=(memory, quiet),
+        rounds_policy=rounds,
+        workload_record=None,
+    )
+    beside_a_quiet_patch = dataclasses.replace(settings, workload=workload)
+    task = task_at(beside_a_quiet_patch)
+    measurement = measured(task)
+    busy_over_generation = 105.372 / 300.0
+
+    assert measurement.weak_offered_load == pytest.approx(busy_over_generation)
+
+
+def departs_a_millisecond_late(readout, readout_tick: int) -> int:
+    """A source that sends every readout 1,000 us after it is read out."""
+    del readout
+    return readout_tick + 1_000_000_000
+
+
+class ReadoutsAndCommits:
+    """What the QPU read out and what the windows committed, in order."""
+
+    def __init__(self) -> None:
+        self.events = []
+
+    def round_read_out(self, readout) -> None:
+        """The QPU read out a round."""
+        self.events.append(("read", readout.round_index))
+
+    def window_committed(self, window, _contribution) -> None:
+        """A window committed its rounds."""
+        self.events.append(("commit", window.commit_lo, window.commit_hi))
+
+
+def backlog_peak_of(events: list) -> int:
+    """The most rounds read out past the unbroken committed prefix.
+
+    Recomputed from the event stream alone, the readouts and the commits
+    in the order they happened, on a run where every commit is final.
+    """
+    read_out = 0
+    committed = []
+    peak = 0
+    for event in events:
+        read_out, committed = _after_event(event, read_out, committed)
+        prefix = _committed_prefix(committed)
+        waiting = read_out - prefix
+        peak = max(peak, waiting)
+    return peak
+
+
+def _after_event(event: tuple, read_out: int, committed: list) -> tuple:
+    if event[0] == "read":
+        return max(read_out, event[1]), committed
+    commit_range = event[1:]
+    return read_out, [*committed, commit_range]
+
+
+def _committed_prefix(committed: list) -> int:
+    prefix = 0
+    for start_round, end_round in sorted(committed):
+        if start_round > prefix + 1:
+            break
+        prefix = max(prefix, end_round)
+    return prefix
+
+
+def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
+    """The backlog counts a round from its readout, not its publication.
+
+    Six rounds of store and a 5 us unit: from round 10 on, the controller
+    holds packed rounds until the store frees room, so the store has not
+    published them, and the backlog still holds every round read out
+    past the committed prefix.
+    """
+    heard = ReadoutsAndCommits()
+    build = machine_module.Machine.build
+
+    def build_and_listen(
+        settings, seed, built_models=None, online_threshold=None
+    ):
+        machine = build(settings, seed, built_models, online_threshold)
+        device = machine.qpu.device
+        device.trace.round_emitted.connect(heard.round_read_out)
+        window_manager = machine.windows.window_manager
+        sources = window_manager.window_sources()
+        sources.window_committed.connect(heard.window_committed)
+        return machine
+
+    monkeypatch.setattr(machine_module.Machine, "build", build_and_listen)
+    settings = bounded_store_settings()
+    observation = dataclasses.replace(settings.observation, backlog_trace=True)
+    traced = dataclasses.replace(settings, observation=observation)
+    task = task_at(traced)
+    measurement = measured(task)
+
+    assert measurement.backlog_peak_rounds == backlog_peak_of(heard.events)
+
+
 def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):
     """A column of zeros would say nothing waited; the shot writes none."""
     bare = switching_shot(1000000.0)

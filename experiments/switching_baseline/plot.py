@@ -15,6 +15,7 @@ out, as decsim.plots.error_rate draws them.
 """
 
 import csv
+import json
 import pathlib
 import sys
 
@@ -23,12 +24,21 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as pyplot
 import numpy
 
+import decsim.experiments.failure_statistics as failure_statistics
 import decsim.plots as plots
 
 DISTANCES = [5, 7, 9, 11, 13]
 ERROR_RATES = [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
 SWITCHING = "switching"
 UNION_FIND_ALONE = "union-find alone"
+TESSERACT = "Tesseract alone (whole shot)"
+# the decoder baseline beside this folder: sinter's Tesseract on the same
+# Stim circuit, the Z memory at one rate on all four noise channels and
+# 100 rounds, decoding each shot whole rather than in windows
+TESSERACT_FOLDER = "2026-09-27_decoder_baseline"
+TESSERACT_DECODER = "tesseract-short-beam"
+TESSERACT_ROUNDS = 100
+TESSERACT_TARGET_ERRORS = 100
 # configurations.csv's names, in the figures' words
 SHOWN_NAME = {
     "switching_baseline": SWITCHING,
@@ -131,7 +141,8 @@ def main(folder: pathlib.Path) -> None:
     decode_time_path = plots_folder / "decode_time.png"
     escalated_figure(switching_rows, escalated_path)
     latency_figure(rows, latency_path)
-    error_rate_figure(rows, rate_path)
+    tesseract = tesseract_rows(folder.parent / TESSERACT_FOLDER)
+    error_rate_figure(rows + tesseract, rate_path)
     strong_figure(switching_rows, strong_path)
     breakdown_path = plots_folder / "latency_breakdown.png"
     histograms = decode_time_histograms(folder)
@@ -174,6 +185,50 @@ def row_of(status: dict, name_by_id: dict) -> dict:
         if column not in row:
             row[column] = number(text)
     return row
+
+
+def tesseract_rows(folder: pathlib.Path) -> list:
+    """The decoder baseline's Tesseract points in Z, as error rate rows.
+
+    A point that reached the target error count stopped on it; one short
+    of it was stopped by the run's time budget, a cap. The per-round
+    rates go through the same map as the machine's rows.
+    """
+    with open(folder / "stats.csv") as handle:
+        reader = csv.reader(handle, skipinitialspace=True)
+        header = [column.strip() for column in next(reader)]
+        stats = [dict(zip(header, values)) for values in reader]
+    rows = []
+    for stat in stats:
+        metadata = json.loads(stat["json_metadata"])
+        is_tesseract = stat["decoder"] == TESSERACT_DECODER
+        if not is_tesseract or metadata["basis"] != "z":
+            continue
+        if metadata["d"] not in DISTANCES:
+            continue
+        failures = int(stat["errors"])
+        shots = int(stat["shots"]) - int(stat["discards"])
+        stop_kind = failure_statistics.StopKind.CAP
+        if failures >= TESSERACT_TARGET_ERRORS:
+            stop_kind = failure_statistics.StopKind.TARGET
+        estimate = failure_statistics.estimate(failures, shots, stop_kind)
+        row = {"decoder": TESSERACT, "d": metadata["d"], X: metadata["p"]}
+        row["logical_failures"] = failures
+        row["is_shot_rate_above_half"] = str(
+            estimate.rate is not None and estimate.rate > 0.5
+        )
+        row[RATE] = per_round(estimate.rate)
+        row[f"{RATE}_low"] = per_round(estimate.low)
+        row[f"{RATE}_high"] = per_round(estimate.high)
+        rows.append(row)
+    return rows
+
+
+def per_round(shot_rate):
+    """A shot rate over the baseline's rounds as a per-round rate."""
+    if shot_rate is None:
+        return None
+    return failure_statistics.per_round_rate(shot_rate, TESSERACT_ROUNDS)
 
 
 def number(text: str):
@@ -221,12 +276,12 @@ def latency_figure(rows: list, path: pathlib.Path) -> None:
 
 
 def error_rate_figure(rows: list, path: pathlib.Path) -> None:
-    """Switching against union-find alone, a panel per distance.
+    """Switching against union-find alone and Tesseract alone, by distance.
 
     A point failing more than half its shots has no per-round rate
     (decsim/experiments/report.py _is_above_half).
     """
-    decoders = [UNION_FIND_ALONE, SWITCHING]
+    decoders = [UNION_FIND_ALONE, SWITCHING, TESSERACT]
     failed_rows = [row for row in rows if has_per_round_rate(row)]
     error_free_rows = [row for row in rows if row["logical_failures"] == 0]
     figure, axis_by_distance = plots.panels("d", DISTANCES)

@@ -23,6 +23,7 @@ from decsim.detector_error_model import (
     detector_chronology,
     stim_fault_catalog,
     window_model_builders,
+    window_slicer,
 )
 from decsim.records import fault_model_contracts
 
@@ -190,18 +191,15 @@ def test_an_inverted_exclusion_range_is_refused():
 
 def test_a_single_window_keeps_excluded_faults_but_does_not_own_them():
     circuit = surface_code_circuit(4)
+    # One slicer serves both: a window cut alone leaves no ownership behind.
+    slicer = window_slicer.WindowSlicer(
+        circuit, round_count=4, fault_model_requirement=GRAPHLIKE_REQUIRED
+    )
     plain = window_model_builders.build_single_window_error_model(
-        circuit,
-        (1, 1, 2, 3),
-        round_count=4,
-        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        slicer, (1, 1, 2, 3)
     )
     excluded = window_model_builders.build_single_window_error_model(
-        circuit,
-        (1, 1, 2, 3),
-        round_count=4,
-        fault_model_requirement=GRAPHLIKE_REQUIRED,
-        fault_exclusion_ranges=((1, 1),),
+        slicer, (1, 1, 2, 3), fault_exclusion_ranges=((1, 1),)
     )
     plain_faults = plain.require_faults(GRAPHLIKE)
     excluded_faults = excluded.require_faults(GRAPHLIKE)
@@ -217,12 +215,11 @@ def test_a_single_window_keeps_excluded_faults_but_does_not_own_them():
 
 def test_exclusion_ranges_that_cover_the_window_leave_nothing_owned():
     circuit = surface_code_circuit(4)
+    slicer = window_slicer.WindowSlicer(
+        circuit, round_count=4, fault_model_requirement=GRAPHLIKE_REQUIRED
+    )
     excluded = window_model_builders.build_single_window_error_model(
-        circuit,
-        (1, 1, 2, 3),
-        round_count=4,
-        fault_model_requirement=GRAPHLIKE_REQUIRED,
-        fault_exclusion_ranges=((1, 1), (2, 3)),
+        slicer, (1, 1, 2, 3), fault_exclusion_ranges=((1, 1), (2, 3))
     )
     faults = excluded.require_faults(GRAPHLIKE)
     assert not faults.owned.any()
@@ -260,11 +257,11 @@ def test_a_front_buffer_round_is_decoded_but_not_owned():
     circuit = surface_code_circuit(6)
     # The runtime's geometry: the buffer starts buffer_rounds before the
     # commit region, here two rounds before commit rounds 3 and 4.
+    slicer = window_slicer.WindowSlicer(
+        circuit, round_count=6, fault_model_requirement=GRAPHLIKE_REQUIRED
+    )
     model = window_model_builders.build_single_window_error_model(
-        circuit,
-        (1, 3, 4, 5),
-        round_count=6,
-        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        slicer, (1, 3, 4, 5)
     )
     faults = model.require_faults(GRAPHLIKE)
     owned_count = faults.owned.sum()
@@ -330,11 +327,11 @@ def test_two_windows_with_front_buffers_partition_the_catalog_between_them():
 
 def test_a_single_window_built_alone_is_never_terminal():
     circuit = surface_code_circuit(4)
+    slicer = window_slicer.WindowSlicer(
+        circuit, round_count=4, fault_model_requirement=GRAPHLIKE_REQUIRED
+    )
     model = window_model_builders.build_single_window_error_model(
-        circuit,
-        (1, 3, 4, 4),
-        round_count=4,
-        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        slicer, (1, 3, 4, 4)
     )
     faults = model.require_faults(GRAPHLIKE)
     owned_count = faults.owned.sum()

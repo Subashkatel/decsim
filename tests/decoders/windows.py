@@ -4,6 +4,7 @@ import numpy
 import stim
 
 import decsim.detector_error_model.window_model_builders as builders
+import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 
@@ -22,12 +23,10 @@ def memory_circuit(distance: int, rounds: int, p: float) -> stim.Circuit:
 
 def whole_circuit_window(circuit: stim.Circuit, rounds: int, requirement):
     """One window over every round; it owns every fault."""
-    return builders.build_single_window_error_model(
-        circuit,
-        (1, rounds, rounds),
-        round_count=rounds,
-        fault_model_requirement=requirement,
+    slicer = window_slicer.WindowSlicer(
+        circuit, round_count=rounds, fault_model_requirement=requirement
     )
+    return builders.build_single_window_error_model(slicer, (1, rounds, rounds))
 
 
 def row_syndrome(model, shot):

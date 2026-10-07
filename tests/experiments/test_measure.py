@@ -1285,6 +1285,40 @@ def test_a_full_buffer_0_holds_rounds_and_the_wait_is_a_point():
     assert total_ticks == 133136000
 
 
+def test_the_measurement_interval_records_the_windows_that_start_in_it():
+    """Rounds 7 to 19 keep windows 2 to 6 and leave the machine alone.
+
+    The windows commit rounds 1-3, 4-6 and so on, so window 1 starts
+    before the interval at round 4, window 7 after it at round 22, and
+    windows 2 and 6 start on its two ends. The per-round points keep
+    rounds 7 to 19. Every window still runs: the run, its logical
+    outcome and its count of decoded windows are the whole shot's.
+    """
+    settings = bounded_store_settings()
+    interval = dataclasses.replace(
+        settings.observation, first_recorded_round=7, last_recorded_round=19
+    )
+    interval_settings = dataclasses.replace(settings, observation=interval)
+    whole_task = task_at(settings)
+    interval_task = task_at(interval_settings)
+    whole_shot = collect.run_shot(whole_task, 0)
+    interval_shot = collect.run_shot(interval_task, 0)
+
+    whole = measure.measure_shot(whole_shot)
+    cut = measure.measure_shot(interval_shot)
+
+    assert interval_shot.result == whole_shot.result
+    assert cut.predictions == whole.predictions
+    assert cut.logical_failure == whole.logical_failure
+    assert cut.decoded_windows == whole.decoded_windows
+    reaction = whole.samples["buffer0_ready_to_frame"]
+    assert cut.samples["buffer0_ready_to_frame"] == reaction[2:7]
+    stalls = whole.samples["cwb_stall_per_round"]
+    assert cut.samples["cwb_stall_per_round"] == stalls[6:19]
+    hops = whole.samples["cwb_per_round"]
+    assert cut.samples["cwb_per_round"] == hops[6:19]
+
+
 def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses():
     """The round waits before the wire is asked for.
 

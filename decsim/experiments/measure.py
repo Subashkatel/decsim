@@ -22,6 +22,7 @@ import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module
+import decsim.observe.settings as observe_settings
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
@@ -428,11 +429,19 @@ def input_hop_by_request(transfers: list) -> dict:
     return hops
 
 
-def controller_to_weak_buffer_delays_us(transfers: list) -> list:
-    """Every round's controller_to_weak_buffer delay, in microseconds."""
+def controller_to_weak_buffer_delays_us(
+    transfers: list, observation_settings: observe_settings.ObservationSettings
+) -> list:
+    """Every recorded round's controller_to_weak_buffer delay, in us.
+
+    A packed transfer is recorded by its first round.
+    """
     delays = []
     for row in transfers:
         if row["path"] != "controller_to_weak_buffer":
+            continue
+        first_rounds = row["attribution"]["rounds_by_operation"][0]
+        if not observation_settings.records_round(first_rounds["round_lo"]):
             continue
         delay = config_module.ticks_to_microseconds(row["total_delay_ticks"])
         delays.append(delay)
@@ -459,8 +468,12 @@ def round_stall_ticks(round_events: list) -> dict:
     return waits
 
 
-def round_stall_delays_us(round_keys: list, waits: dict) -> list:
-    """The wait for store room of every round that reached one store.
+def round_stall_delays_us(
+    round_keys: list,
+    waits: dict,
+    observation_settings: observe_settings.ObservationSettings,
+) -> list:
+    """The wait for store room of every recorded round that reached one store.
 
     One sample per round, in the order the rounds reached it, zero for a
     round that found room, so the point reads beside that store's own
@@ -468,6 +481,9 @@ def round_stall_delays_us(round_keys: list, waits: dict) -> list:
     """
     delays = []
     for key in round_keys:
+        _operation_id, round_index = key
+        if not observation_settings.records_round(round_index):
+            continue
         ticks = waits.get(key, 0)
         delay = config_module.ticks_to_microseconds(ticks)
         delays.append(delay)
@@ -649,14 +665,30 @@ def frame_records_by_window(
     return records
 
 
+def decoded_windows(observation: observation_module.Observation) -> list:
+    """Every window the frame committed, with its frame record, in key order."""
+    frame_by_window = frame_records_by_window(observation)
+    window_items = observation.windows.windows.items()
+    all_windows = sorted(window_items, key=_window_order)
+    decoded = []
+    for window_key, window in all_windows:
+        frame_record = frame_by_window.get(window_key)
+        if frame_record is None or window.t_done is None:
+            continue
+        decoded.append((window, frame_record))
+    return decoded
+
+
 def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
+    observation_settings: observe_settings.ObservationSettings,
 ) -> tuple:
-    """Every point's microsecond samples, and each window's committing tier.
+    """Every recorded point's microsecond samples, and each window's tier.
 
     Every point describes the decode the frame committed, named by the
-    frame record's tier and run ordinal. It stays whole past the size
+    frame record's tier and run ordinal. Only the windows and rounds in
+    the measurement interval are sampled. It stays whole past the size
     prompt: one walk over the windows in key order, read top to bottom.
     """
     transfers = result.link_traffic["transfers"]
@@ -664,24 +696,26 @@ def collect_samples(
     answer_send = answer_send_ticks(transfers)
     input_hop = input_hop_by_request(transfers)
     qpu_send = qpu_send_ticks(transfers)
-    frame_by_window = frame_records_by_window(observation)
     samples = {}
     for name in POINTS:
         samples[name] = []
     window_tiers = []
-    samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(transfers)
+    samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(
+        transfers, observation_settings
+    )
     round_events = observation.round_events
     waits = round_stall_ticks(round_events.events)
     weak_keys = weak_store_round_keys(round_events.events)
     strong_keys = strong_store_round_keys(round_events.stored_rounds)
-    samples["cwb_stall_per_round"] = round_stall_delays_us(weak_keys, waits)
-    samples["csb_stall_per_round"] = round_stall_delays_us(strong_keys, waits)
-    window_items = observation.windows.windows.items()
-    all_windows = sorted(window_items, key=_window_order)
+    samples["cwb_stall_per_round"] = round_stall_delays_us(
+        weak_keys, waits, observation_settings
+    )
+    samples["csb_stall_per_round"] = round_stall_delays_us(
+        strong_keys, waits, observation_settings
+    )
     stages = observation.stages
-    for window_key, window in all_windows:
-        frame_record = frame_by_window.get(window_key)
-        if frame_record is None or window.t_done is None:
+    for window, frame_record in decoded_windows(observation):
+        if not observation_settings.records_round(window.commit_lo):
             continue
         decode = _committed_decode(stages, frame_record)
         first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
@@ -823,12 +857,15 @@ def _measurement(
     owner_rounds = rounds_by_owner.values()
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
-    samples, window_tiers = collect_samples(observation, result)
+    samples, window_tiers = collect_samples(
+        observation, result, settings.observation
+    )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
-    throughput = _throughput_per_microsecond(observation, samples)
+    decoded = decoded_windows(observation)
+    decoded_window_count = len(decoded)
+    throughput = _throughput_per_microsecond(observation, decoded_window_count)
     referee = _referee_counts(observation)
-    decoded_windows = len(samples["service"])
     commit_rounds = code.commit_rounds()
     window_period_us = commit_rounds * round_period_microseconds
     load = chain_load(samples, window_period_us)
@@ -855,7 +892,7 @@ def _measurement(
         task_id=task_id,
         algorithm=algorithm,
         seed=seed,
-        decoded_windows=decoded_windows,
+        decoded_windows=decoded_window_count,
         logical_failure=is_scored_failure,
         executed_rounds=executed_rounds,
         scored_outputs=len(owners),
@@ -1156,7 +1193,7 @@ def _bit_text(bits: Optional[tuple]) -> Optional[str]:
 
 
 def _throughput_per_microsecond(
-    observation: observation_module.Observation, samples: dict
+    observation: observation_module.Observation, decoded_window_count: int
 ) -> _Throughput:
     """Windows and rounds over the span from first round to last commit.
 
@@ -1169,10 +1206,9 @@ def _throughput_per_microsecond(
         return _Throughput(
             windows_per_microsecond=0.0, rounds_per_microsecond=0.0
         )
-    decoded_windows = len(samples["service"])
     rounds_this_shot = _emitted_round_count(observation)
     span_us = _decoded_span_microseconds(observation)
-    windows_per_us = decoded_windows / span_us
+    windows_per_us = decoded_window_count / span_us
     rounds_per_us = rounds_this_shot / span_us
     return _Throughput(
         windows_per_microsecond=windows_per_us,

@@ -22,12 +22,38 @@ class ObservationSettings:
     trace_shots are the seeds whose shots a run traces. log_component_io
     adds each component's I/O lines.
 
+    first_recorded_round and last_recorded_round are the measurement
+    interval, both ends included, rounds counted from 1 within each
+    operation's stream; None as the last runs it to the shot's end, so
+    the defaults record everything. The latency samples keep only the
+    windows whose first committed round (commit_lo) lies in it and the
+    rounds in it. Commit regions tile a stream, so the interval picks
+    each round's window once, where a window's first read round would
+    pick a leading buffer's rounds twice. The machine is not told: every
+    window runs and finishes, and only what is recorded is filtered, as
+    OMNeT++'s warmup-period filters recorded values and ns-3's
+    FlowMonitor counts a packet by its first send and lets it finish
+    after the stop. A long shot starts with empty queues and ends by
+    draining them, and the interval leaves both ends out. The user picks
+    it, for instance from a pilot shot's samples in window order.
+
+    The interval cuts the latency samples and what is made from them:
+    the means and maxes, the windows' tiers, load and
+    parallel_processes_needed. The logical failure and the predictions
+    stay whole, since a logical error rate is a rate over whole shots,
+    and so do the shot's counts and rates (decoded_windows,
+    escalated_windows, throughput, the queue peaks, busy fractions,
+    switching and backlog columns, the link totals): a report divides
+    one count by another, escalated over decoded windows, and a cut on
+    one side would bias the ratio.
+
     The log and the trace are labels (compare=False) and no part of a
     task's id, as sinter keeps output options out of a task's strong id
     (sinter/_data/_task.py:167-204): the writers schedule nothing. The
-    others stay in the id because they add a shot's columns:
+    others stay in the id because they add or shape a shot's columns:
     record_switching_windows and backlog_trace the wait and backlog
-    columns, data_movement the shot_data_movement rows.
+    columns, data_movement the shot_data_movement rows, the interval the
+    latency columns.
     """
 
     log: str = dataclasses.field(compare=False, default="off")
@@ -37,6 +63,8 @@ class ObservationSettings:
     trace: str = dataclasses.field(compare=False, default="off")
     trace_shots: tuple = dataclasses.field(compare=False, default=(0,))
     data_movement: bool = False
+    first_recorded_round: int = 1
+    last_recorded_round: Optional[int] = None
 
     def __post_init__(self) -> None:
         """Every value checked, with the sentence the caller reads."""
@@ -52,6 +80,26 @@ class ObservationSettings:
         )
         config.check_boolean("observation.backlog_trace", self.backlog_trace)
         config.check_boolean("observation.data_movement", self.data_movement)
+        config.check_whole_count(
+            "observation.first_recorded_round",
+            self.first_recorded_round,
+            "rounds",
+        )
+        if self.last_recorded_round is not None:
+            config.check_whole_count(
+                "observation.last_recorded_round",
+                self.last_recorded_round,
+                "rounds",
+                minimum=self.first_recorded_round,
+            )
+
+    def records_round(self, round_index: int) -> bool:
+        """Whether the latency statistics take a sample of this round."""
+        if round_index < self.first_recorded_round:
+            return False
+        if self.last_recorded_round is None:
+            return True
+        return round_index <= self.last_recorded_round
 
     @property
     def prints_log(self) -> bool:

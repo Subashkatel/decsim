@@ -28,6 +28,16 @@ PYTHON_REFUSALS = [
     ),
     ({"backlog_trace": None}, "observation.backlog_trace must be true"),
     ({"data_movement": 0}, "observation.data_movement must be true or false"),
+    (
+        {"first_recorded_round": 0},
+        "observation.first_recorded_round must be a whole number of rounds, "
+        "at least 1",
+    ),
+    (
+        {"first_recorded_round": 200, "last_recorded_round": 100},
+        "observation.last_recorded_round must be a whole number of rounds, "
+        "at least 200",
+    ),
 ]
 
 

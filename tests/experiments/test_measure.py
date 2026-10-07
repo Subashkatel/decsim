@@ -1319,6 +1319,26 @@ def test_the_measurement_interval_records_the_windows_that_start_in_it():
     assert cut.samples["cwb_per_round"] == hops[6:19]
 
 
+def test_a_restarted_window_is_recorded_by_its_first_committed_round():
+    """The interval reads a window's commit_lo, not its first read round.
+
+    Restarted window 3 of this seed reads from round 7 and commits from
+    round 10, so an interval that ends at round 8 leaves it out, and
+    its 1.132 us admission wait with it; window 0 commits from round 1.
+    """
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    settings = switching_settings(
+        20.0, weak_microseconds=5.0, strong_window=double_window
+    )
+    interval = dataclasses.replace(settings.observation, last_recorded_round=8)
+    interval_settings = dataclasses.replace(settings, observation=interval)
+    task = task_at(interval_settings, SWITCHING_ERROR_PROBABILITY)
+
+    measurement = measured(task)
+
+    assert measurement.samples["admission_wait"] == [0.0]
+
+
 def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses():
     """The round waits before the wire is asked for.
 

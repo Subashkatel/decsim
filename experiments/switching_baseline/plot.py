@@ -137,12 +137,16 @@ def main(folder: pathlib.Path) -> None:
     escalated_path = plots_folder / "escalated.png"
     latency_path = plots_folder / "latency.png"
     rate_path = plots_folder / "logical_error_rate.png"
+    rate_with_tesseract_path = (
+        plots_folder / "logical_error_rate_with_tesseract.png"
+    )
     strong_path = plots_folder / "strong_decoder.png"
     decode_time_path = plots_folder / "decode_time.png"
     escalated_figure(switching_rows, escalated_path)
     latency_figure(rows, latency_path)
     tesseract = tesseract_rows(folder.parent / TESSERACT_FOLDER)
-    error_rate_figure(rows + tesseract, rate_path)
+    error_rate_figure(rows, rate_path)
+    error_rate_figure(rows + tesseract, rate_with_tesseract_path)
     strong_figure(switching_rows, strong_path)
     breakdown_path = plots_folder / "latency_breakdown.png"
     histograms = decode_time_histograms(folder)
@@ -276,7 +280,7 @@ def latency_figure(rows: list, path: pathlib.Path) -> None:
 
 
 def error_rate_figure(rows: list, path: pathlib.Path) -> None:
-    """Switching against union-find alone and Tesseract alone, by distance.
+    """Switching against union-find alone, and Tesseract alone if in rows.
 
     A point failing more than half its shots has no per-round rate
     (decsim/experiments/report.py _is_above_half).

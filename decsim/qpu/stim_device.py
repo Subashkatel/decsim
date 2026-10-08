@@ -375,15 +375,13 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """
         if operation.circuit is None:
             return None
-        key = program_records.decode_identity(operation)
-        detector_rounds = self._bind_source(key, operation.circuit, round_count)
+        slicer = self._strong_slicer(
+            operation, round_count, fault_model_requirement
+        )
         span = _window_span(window)
         return window_models.build_single_window_error_model(
-            operation.circuit,
+            slicer,
             span,
-            round_count=round_count,
-            detector_rounds=detector_rounds,
-            fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=fault_exclusion_ranges,
             prior_faults=prior_faults,
         )
@@ -397,6 +395,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             sample_key_by_operation_id={},
             stream_model_by_id={},
             source_binding_by_key={},
+            strong_slicer_by_key={},
         )
 
     def _sampler_for(
@@ -483,6 +482,32 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         if readout_arrives_separately and has_folded_readout:
             return packet[: table.readout_slot_start]
         return packet
+
+    def _strong_slicer(
+        self,
+        operation: program_records.Operation,
+        round_count: int,
+        requirement: fault_models.DecoderFaultModelRequirement,
+    ) -> window_slicer.WindowSlicer:
+        """The operation's slicer, indexed once for all its strong windows.
+
+        Indexing the circuit's faults is the costly step and is the same
+        for every window, so a shot builds it once instead of once per
+        escalation.
+        """
+        key = program_records.decode_identity(operation)
+        detector_rounds = self._bind_source(key, operation.circuit, round_count)
+        slicer_key = (key, requirement)
+        slicer = self._shots.strong_slicer_by_key.get(slicer_key)
+        if slicer is None:
+            slicer = window_slicer.WindowSlicer(
+                operation.circuit,
+                round_count=round_count,
+                detector_rounds=detector_rounds,
+                fault_model_requirement=requirement,
+            )
+            self._shots.strong_slicer_by_key[slicer_key] = slicer
+        return slicer
 
     def _bind_source(
         self, key, circuit: stim.Circuit, source_round_count: int
@@ -882,6 +907,7 @@ class _ShotTable:
     sample_key_by_operation_id: dict = dataclasses.field(default_factory=dict)
     stream_model_by_id: dict = dataclasses.field(default_factory=dict)
     source_binding_by_key: dict = dataclasses.field(default_factory=dict)
+    strong_slicer_by_key: dict = dataclasses.field(default_factory=dict)
 
 
 def _rounds_by_key(declared: Optional[dict]) -> dict:

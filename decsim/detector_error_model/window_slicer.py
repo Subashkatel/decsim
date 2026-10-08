@@ -45,10 +45,7 @@ class WindowSlicer:
         self.fault_index = _index_faults(
             self.catalogs.by_representation, self.chronology.round_by_detector
         )
-        self.committed_elsewhere = {
-            representation: set()
-            for representation in self.catalogs.by_representation
-        }
+        self.committed_elsewhere = _no_commits(self.catalogs)
         # (type by detector, type by observable), read only when the
         # decoder splits a region by type
         self.bases = None
@@ -91,12 +88,74 @@ class WindowSlicer:
             last_buffer_round,
             is_last,
         )
+        return self._sliced(
+            context,
+            fault_exclusion_ranges,
+            explicitly_owned_faults,
+            explicitly_prior_faults,
+            self.committed_elsewhere,
+        )
+
+    def slice_window_alone(
+        self,
+        first_buffer_round: int,
+        first_commit_round: int,
+        last_commit_round: int,
+        last_buffer_round: int,
+        *,
+        fault_exclusion_ranges: tuple[tuple[int, int], ...],
+        explicitly_prior_faults: Optional[
+            dict[fault_model_contracts.FaultRepresentation, Container[int]]
+        ],
+    ) -> fault_model_contracts.WindowErrorModel:
+        """One window outside the plan, never terminal.
+
+        Its ownership starts empty and is not kept, so one slicer serves
+        every window cut on its own from the circuit, and the circuit is
+        indexed once for all of them.
+        """
+        context = self._placement_context(
+            first_buffer_round,
+            first_commit_round,
+            last_commit_round,
+            last_buffer_round,
+            is_last=False,
+        )
+        no_commits = _no_commits(self.catalogs)
+        return self._sliced(
+            context,
+            fault_exclusion_ranges,
+            None,
+            explicitly_prior_faults,
+            no_commits,
+        )
+
+    def _sliced(
+        self,
+        context: window_placement.WindowPlacementContext,
+        fault_exclusion_ranges: tuple[tuple[int, int], ...],
+        explicitly_owned_faults: Optional[
+            dict[fault_model_contracts.FaultRepresentation, set[int]]
+        ],
+        explicitly_prior_faults: Optional[
+            dict[fault_model_contracts.FaultRepresentation, Container[int]]
+        ],
+        committed_elsewhere: dict[
+            fault_model_contracts.FaultRepresentation, set[int]
+        ],
+    ) -> fault_model_contracts.WindowErrorModel:
         placed = {}
         for representation, catalog in self.catalogs.by_representation.items():
             owned = _for_representation(explicitly_owned_faults, representation)
             prior = _for_representation(explicitly_prior_faults, representation)
+            committed = committed_elsewhere[representation]
             placed[representation] = self._place(
-                catalog, context, fault_exclusion_ranges, owned, prior
+                catalog,
+                context,
+                fault_exclusion_ranges,
+                owned,
+                prior,
+                committed,
             )
         return self._window_model(context, placed)
 
@@ -133,6 +192,7 @@ class WindowSlicer:
         fault_exclusion_ranges: tuple[tuple[int, int], ...],
         explicitly_owned_faults: Optional[set[int]],
         explicitly_prior_faults: Optional[Container[int]],
+        committed_elsewhere: set[int],
     ) -> fault_model_contracts.PlacedFaultModel:
         representation = catalog.representation
         candidate_faults = self._candidate_faults(representation, context.rows)
@@ -141,7 +201,7 @@ class WindowSlicer:
             context=context,
             fault_rounds=self.fault_index.fault_rounds[representation],
             candidate_faults=candidate_faults,
-            committed_elsewhere=self.committed_elsewhere[representation],
+            committed_elsewhere=committed_elsewhere,
             explicitly_owned_faults=explicitly_owned_faults,
             explicitly_prior_faults=explicitly_prior_faults,
             fault_exclusion_ranges=fault_exclusion_ranges,
@@ -330,6 +390,14 @@ def _faults_by_round(
             faults = by_round.setdefault(round_index, [])
             faults.append(fault_index)
     return by_round
+
+
+def _no_commits(
+    catalogs: fault_model_contracts.FaultCatalogs,
+) -> dict[fault_model_contracts.FaultRepresentation, set[int]]:
+    return {
+        representation: set() for representation in catalogs.by_representation
+    }
 
 
 def _for_representation(

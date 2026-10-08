@@ -16,6 +16,7 @@ import stim
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.detector_error_model.stim_fault_catalog as stim_fault_catalog
 import decsim.detector_error_model.window_model_builders as builders
+import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
@@ -205,12 +206,10 @@ def test_a_windowed_part_keeps_what_its_window_commits_and_hands_on(
 ):
     """Rows, owned mask and the flips handed on, each cut to one type."""
     circuit = _circuit("z", 3, 9)
-    model = builders.build_single_window_error_model(
-        circuit,
-        window_entry,
-        round_count=9,
-        fault_model_requirement=REQUIREMENT,
+    slicer = window_slicer.WindowSlicer(
+        circuit, round_count=9, fault_model_requirement=REQUIREMENT
     )
+    model = builders.build_single_window_error_model(slicer, window_entry)
     whole = model.physical_faults
     parts = basis_split.split_by_basis(model)
     part = parts[basis]

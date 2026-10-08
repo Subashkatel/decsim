@@ -72,12 +72,9 @@ def build_window_error_models(
 
 
 def build_single_window_error_model(
-    circuit: stim.Circuit,
+    slicer: window_slicer.WindowSlicer,
     window_entry: tuple[int, ...],
     *,
-    round_count: int,
-    detector_rounds: Optional[dict[int, int]] = None,
-    fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
     fault_exclusion_ranges: Sequence[Sequence[int]] = (),
     prior_faults: _PriorFaults = None,
 ) -> fault_model_contracts.WindowErrorModel:
@@ -93,15 +90,8 @@ def build_single_window_error_model(
         fault_exclusion_ranges
     )
     bounds = window_placement.parse_window_entry(window_entry)
-    slicer = window_slicer.WindowSlicer(
-        circuit,
-        round_count=round_count,
-        detector_rounds=detector_rounds,
-        fault_model_requirement=fault_model_requirement,
-    )
-    return slicer.slice_window(
+    return slicer.slice_window_alone(
         *bounds,
-        is_last=False,
         fault_exclusion_ranges=exclusion_ranges,
         explicitly_prior_faults=prior_faults,
     )

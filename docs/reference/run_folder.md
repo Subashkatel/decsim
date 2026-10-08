@@ -168,6 +168,18 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `qpu_last_round_to_frame` | the last round the window needs leaving the QPU, to the frame |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
 
+`observation.first_recorded_round` and `observation.last_recorded_round`
+set the measurement interval, both ends included, rounds counted from 1
+within each operation's stream; the defaults, 1 and null, record every
+window. A window is sampled when its first committed round lies in the
+interval, and a per-round point's round when it does. Every window
+still runs and finishes, so a long shot can leave out its start-up,
+when the queues are empty, and its drain at the end. The interval
+cuts these points, their `_mean_us` and `_max_us` columns, the tier
+split, `load` and `parallel_processes_needed`; `logical_failure`,
+`predictions` and every count and rate in `shots.csv`, `decoded_windows`
+and `escalated_windows` among them, stay over the whole shot.
+
 The two `buffer0` totals start the clock where the decoder could first
 have started. The two `qpu` totals start it where the physics did, so
 they also carry the link out of the fridge, the controller's own work

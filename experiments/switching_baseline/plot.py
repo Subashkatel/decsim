@@ -3,8 +3,10 @@
 `python plot.py <results folder>` writes the folder's plots/, one
 figure per question: the share of windows escalated, the formed-to-
 commit latency, the logical error rate of switching against union-find
-alone, whether the strong decoder keeps up, each decoder's decode time
-per window by distance, and where a window's time goes. The folder
+alone (also with Tesseract, and with the strong decoders alone of
+the strong-only baseline, read from its folder beside this one),
+whether the strong decoder keeps up, each decoder's decode time per
+window by distance, and where a window's time goes. The folder
 holds status.csv, as `decsim status` writes it, configurations.csv,
 each configuration's id and name, and two tables of each
 configuration's window_samples.csv: decode_time.csv, the "algorithm"
@@ -32,6 +34,14 @@ ERROR_RATES = [0.0005, 0.001, 0.002, 0.003, 0.004, 0.005]
 SWITCHING = "switching"
 UNION_FIND_ALONE = "union-find alone"
 TESSERACT = "Tesseract alone (whole shot)"
+RELAY_BP_ALONE = "Relay-BP-5 alone"
+TESSERACT_ALONE = "Tesseract alone"
+# every decoder in the error rate figures, in one order so each keeps
+# its color in every figure
+DECODERS = [UNION_FIND_ALONE, SWITCHING, TESSERACT, RELAY_BP_ALONE, TESSERACT_ALONE]
+# the strong decoders alone beside this folder: the same machine, sliding
+# windows and shots, every window on the strong decoder (Experiment 3)
+STRONG_ALONE_FOLDER = "2026-10-07_strong_only_baseline"
 # the decoder baseline beside this folder: sinter's Tesseract on the same
 # Stim circuit, the Z memory at one rate on all four noise channels and
 # 100 rounds, decoding each shot whole rather than in windows
@@ -43,6 +53,8 @@ TESSERACT_TARGET_ERRORS = 100
 SHOWN_NAME = {
     "switching_baseline": SWITCHING,
     "weak_alone": UNION_FIND_ALONE,
+    "relay_bp5_alone": RELAY_BP_ALONE,
+    "tesseract_alone": TESSERACT_ALONE,
 }
 X = "physical error rate"
 RATE = "logical_error_rate_per_round"
@@ -147,6 +159,9 @@ def main(folder: pathlib.Path) -> None:
     tesseract = tesseract_rows(folder.parent / TESSERACT_FOLDER)
     error_rate_figure(rows, rate_path)
     error_rate_figure(rows + tesseract, rate_with_tesseract_path)
+    strong_alone_path = plots_folder / "logical_error_rate_with_strong_alone.png"
+    strong_alone = rows_of(folder.parent / STRONG_ALONE_FOLDER)
+    error_rate_figure(rows + strong_alone, strong_alone_path)
     strong_figure(switching_rows, strong_path)
     breakdown_path = plots_folder / "latency_breakdown.png"
     histograms = decode_time_histograms(folder)
@@ -280,12 +295,12 @@ def latency_figure(rows: list, path: pathlib.Path) -> None:
 
 
 def error_rate_figure(rows: list, path: pathlib.Path) -> None:
-    """Switching against union-find alone, and Tesseract alone if in rows.
+    """Switching against union-find alone, and any decoder alone in rows.
 
     A point failing more than half its shots has no per-round rate
     (decsim/experiments/report.py _is_above_half).
     """
-    decoders = [UNION_FIND_ALONE, SWITCHING, TESSERACT]
+    decoders = DECODERS
     failed_rows = [row for row in rows if has_per_round_rate(row)]
     error_free_rows = [row for row in rows if row["logical_failures"] == 0]
     figure, axis_by_distance = plots.panels("d", DISTANCES)

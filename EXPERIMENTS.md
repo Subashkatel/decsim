@@ -148,7 +148,9 @@ as is (`decsim/decoders/backend_outcome.py`).
 
 ## 2026-10-07: Experiment 3, strong decoder alone
 
-**Status.** Stopped by the owner on 2026-10-08 during batch 5, with 19 of 40 points at their stop rule; the others keep their partial shots. Final fold running.
+**Status.** Stopped by the owner on 2026-10-08 during batch 5. The
+final fold (job 15247572, done 2026-10-08 20:12) has 21 of 40 points at
+their stop rule; the 19 others keep their partial shots.
 
 **Question.** What logical error rate does a strong decoder reach alone
 on the same machine, windows and shots as Experiment 1, so switching
@@ -192,13 +194,17 @@ The Tesseract package must be importable (`PYTHONPATH` to a folder
 holding `tesseract_decoder` and `_tesseract_py_util`).
 
 **Data.** `tmp/runs/2026-10-07_strong_only_code/results/2026-10-07_strong_only_baseline/run`.
-Not folded or on GitHub yet.
+On GitHub: `results/2026-10-07_strong_only_baseline/` (`status.csv`
+final fold, `configurations.csv`, `commit.txt`). Experiment 1's
+`plot.py` draws these points in
+`results/2026-10-01_switching_baseline/plots/logical_error_rate_with_strong_alone.png`.
 
 ## 2026-10-03: Experiment 2, threshold sweep
 
-**Status.** Stopped by the owner on 2026-10-08 during batch 11, with 10
-of 20 points at their stop rule (every point at physical error rate
-0.003); the points at 0.001 keep their partial shots. Final fold running.
+**Status.** Stopped by the owner on 2026-10-08 during batch 11. The
+final fold (job 15247571, done 2026-10-08 21:10) has 10 of 20 points at
+their stop rule (every point at physical error rate 0.003); the points
+at 0.001 keep their partial shots.
 
 **Question.** How does the switching threshold change the share of
 windows sent to the strong decoder, the logical error rate, the latency
@@ -228,7 +234,7 @@ python experiments/threshold_sweep/plot.py results/2026-10-03_threshold_sweep
 
 **Data.** `tmp/runs/2026-10-03_threshold_sweep_code/results/2026-10-03_threshold_sweep/run`
 (29 GB). On GitHub: `results/2026-10-03_threshold_sweep/` (`status.csv`
-folded 2026-10-07 15:54, `configurations.csv`, `commit.txt`, `plots/`).
+final fold of 2026-10-08, `configurations.csv`, `commit.txt`, `plots/`).
 
 ## 2026-10-01: Experiment 1, switching baseline
 

@@ -910,13 +910,16 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     fewer rounds.
 
     From window 1 on, dep_block also holds the wait in the queue for the
-    window before it: that window's whole path, 12.240 us on window 0
-    and 12.248 us after, and its strong boundary's 0.012 us hop down
-    strong_decoder_to_weak_decoder, less the 3 us between the two
-    windows' data. It is 9.252 us on window 1 and grows by 9.260 us a
-    window; the last window's data completes with the window before
-    it's, so it waits 3 us more. The unit is idle when the boundary
-    lands, so queue_wait is zero.
+    window before it: that window's path to the end of its strong
+    decode, 12.224 us on window 0 and 12.232 us after (its whole path
+    less the 0.012 us hop home and the 0.004 us frame commit, since the
+    boundary leaves when the decode ends), and its strong boundary's
+    0.012 us hop down strong_decoder_to_weak_decoder, less the 3 us
+    between the two windows' data. It is 9.236 us on window 1, 9.264 us
+    with the input hop, and grows by 9.244 us a window; the last
+    window's data completes with the window before it's, so it waits
+    3 us more. The unit is idle when the boundary lands, so queue_wait
+    is zero.
     """
     measurement = switching_shot(1000000.0)
 
@@ -927,15 +930,15 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     assert samples["queue_wait"] == [0.0] * 10
     assert samples["dep_block"] == [
         0.020,
-        9.280,
-        18.540,
-        27.800,
-        37.060,
-        46.320,
-        55.580,
-        64.840,
-        74.100,
-        86.344,
+        9.264,
+        18.508,
+        27.752,
+        36.996,
+        46.240,
+        55.484,
+        64.728,
+        73.972,
+        86.200,
     ]
     assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10

@@ -397,6 +397,21 @@ def distinct_round_count(payloads: list) -> int:
     return len(round_identities)
 
 
+def last_round_by_operation(payloads: list) -> tuple:
+    """(operation id, its last round) for every operation the payloads hold.
+
+    A decode reads past its own operation when its buffer runs into the
+    next one, so a reader that asks when its last round was measured
+    needs every operation's.
+    """
+    last_rounds = {}
+    for payload in payloads:
+        latest = last_rounds.get(payload.operation_id, 0)
+        last_rounds[payload.operation_id] = max(latest, payload.round_index)
+    pairs = last_rounds.items()
+    return tuple(pairs)
+
+
 @dataclass
 class DecodeJob:
     """One unit of decoder work.
@@ -604,6 +619,10 @@ class DecoderStageRecord:
     # the ticks the decode's input read took in its store
     # (DecodeJob.store_read_ticks)
     store_read_ticks: int = 0
+    # (operation id, its last round) for every operation the decode's
+    # input held when the stage closed (last_round_by_operation); a
+    # strong region reads past the window it answers for
+    last_rounds_read: tuple = ()
 
 
 class DecoderEvidence(Enum):

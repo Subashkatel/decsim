@@ -99,7 +99,7 @@ class Windows:
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
-        courier = window_boundaries.BoundaryCourier()
+        courier = window_boundaries.BoundaryCourier(window_tier)
         committer = window_commits.WindowCommitter(engine)
         verdict = _verdict(switching_settings, machine_clock, engine)
         clocked_windows = config.with_machine_clock(

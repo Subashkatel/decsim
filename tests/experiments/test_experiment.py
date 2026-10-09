@@ -36,7 +36,7 @@ PACKAGE_DIR = EXPERIMENT_FILE.parent.parent
 OTHER_POINT_NAMES = frozenset(
     {
         "POINTS",
-        "ROUND_POINTS",
+        "UNTIERED_POINTS",
         "TIER_SPLIT_POINT",
         "window_points_us",
         "_points_held",

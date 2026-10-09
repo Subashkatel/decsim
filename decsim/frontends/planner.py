@@ -61,7 +61,8 @@ def plan_execution(
             rounds_policy,
             geometry,
             round_ticks,
-            base_nodes[patch_count],
+            patch_count,
+            base_nodes,
         )
         resolved.append(planning)
         _note_patches(operation, patches_by_key)
@@ -207,7 +208,14 @@ def _resolve_geometry(code):
 
 
 def _resolve_operation(
-    operation, code, layout, rounds_policy, geometry, round_ticks, base_nodes
+    operation,
+    code,
+    layout,
+    rounds_policy,
+    geometry,
+    round_ticks,
+    patch_count,
+    base_nodes,
 ) -> program_records.ResolvedOperationPlanning:
     operation_code = layout.code_for_operation(operation)
     if operation_code is not code:
@@ -217,14 +225,16 @@ def _resolve_operation(
         )
     round_count = rounds_policy.rounds_for(operation, code)
     spatial_node_count = layout.spatial_nodes_for(
-        operation, base_spatial_node_count=base_nodes
+        operation, base_spatial_node_count=base_nodes[patch_count]
     )
+    syndrome_bits_per_round = code.syndrome_bits_per_round(patch_count)
     return program_records.ResolvedOperationPlanning(
         operation_id=operation.id,
         code_geometry=geometry,
         round_count=round_count,
         round_ticks=round_ticks,
         spatial_node_count=spatial_node_count,
+        syndrome_bits_per_round=syndrome_bits_per_round,
     )
 
 

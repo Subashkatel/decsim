@@ -359,6 +359,14 @@ class WindowPlanner:
         """The decoding-graph nodes per round of an operation."""
         return self.resolved_operation_by_id[operation_id].spatial_node_count
 
+    def syndrome_bits_per_round_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
+        """The checks one round of an operation reads, by its code card."""
+        resolved = self.resolved_operation_by_id[operation_id]
+        return resolved.syndrome_bits_per_round
+
     # ---- a dynamic stream: registered, grown, clipped
 
     def register_stream(

@@ -39,9 +39,15 @@ reads what the weak window read. At d=3 that is 1-6, 4-9, 7-12, 10-15
 and 13-15, so four regions carry rounds 1-6, 7-9, 10-12 and 13-15 (44,
 24, 24 and 28 bits of rounds) and the fifth window finds its rounds
 there already; at d=5 it is 1-10, 6-15 and 11-15, so two regions carry
-1-10 and 11-15 (228 and 132 bits of rounds). Each pinned face crosses
-decoder_to_decoder beside the weak hand-offs, one bulk layer each, so
-that hop carries twice the hand-offs.
+1-10 and 11-15 (228 and 132 bits of rounds). A boundary rides the hop
+between the side that committed it and the side that reads it, one bulk
+layer each. Every window escalates and the boundaries are held, so no
+weak boundary ships: each strong answer's boundary goes down
+strong_decoder_to_weak_decoder to the window after it, behind the
+request's name, and each pinned face is that strong commit, read out of
+the host's own memory on strong_buffer_to_strong_decoder. In the strong
+shape every hand-off is that same read, and decoder_to_decoder, the hop
+between two weak units, carries nothing.
 """
 
 import collections
@@ -137,16 +143,15 @@ EXPECTED = {
     ("strong", 3): {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_strong_buffer": Traffic(15, 120),
-        "strong_buffer_to_strong_decoder": Traffic(4, 192),
-        "decoder_to_decoder": Traffic(3, 24),
+        # four windows' inputs and three hand-offs of one bulk layer
+        "strong_buffer_to_strong_decoder": Traffic(7, 216),
         # four answers of one flip behind a 64-bit name
         "strong_decoder_to_frame": Traffic(4, 260),
     },
     ("strong", 5): {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_strong_buffer": Traffic(15, 360),
-        "strong_buffer_to_strong_decoder": Traffic(2, 480),
-        "decoder_to_decoder": Traffic(1, 24),
+        "strong_buffer_to_strong_decoder": Traffic(3, 504),
         "strong_decoder_to_frame": Traffic(2, 130),
     },
     ("switching", 3): {
@@ -157,9 +162,11 @@ EXPECTED = {
         # selections' five crossing-commit bits and the regions' 120 bits
         # of rounds
         "weak_decoder_to_strong_decoder": Traffic(9, 701),
-        "strong_buffer_to_strong_decoder": Traffic(5, 220),
-        "decoder_to_decoder": Traffic(8, 64),
+        # five strong inputs and four pinned faces of one bulk layer
+        "strong_buffer_to_strong_decoder": Traffic(9, 252),
         "strong_decoder_to_frame": Traffic(5, 325),
+        # four held boundaries of one bulk layer behind a 64-bit name
+        "strong_decoder_to_weak_decoder": Traffic(4, 288),
     },
     ("switching", 5): {
         "qpu_to_controller": Traffic(15, 385),
@@ -169,9 +176,9 @@ EXPECTED = {
         # selections' three crossing-commit bits and the regions' 360
         # bits of rounds
         "weak_decoder_to_strong_decoder": Traffic(5, 683),
-        "strong_buffer_to_strong_decoder": Traffic(3, 612),
-        "decoder_to_decoder": Traffic(4, 96),
+        "strong_buffer_to_strong_decoder": Traffic(5, 660),
         "strong_decoder_to_frame": Traffic(3, 195),
+        "strong_decoder_to_weak_decoder": Traffic(2, 176),
     },
 }
 # The commit extents the sliding scheme lays for the two distances, read
@@ -353,13 +360,32 @@ def _checked_decoder_inputs(grouped: dict, distance: int) -> int:
     """Hold every decoder input to its window's detector count."""
     checked = 0
     for path in DECODER_INPUT_PATHS:
-        for transfer in grouped.get(path, ()):
+        on_path = grouped.get(path, ())
+        inputs = _inputs_of(on_path)
+        for transfer in inputs:
             attribution = transfer["attribution"]
             round_lo, round_hi = own_range(attribution)
             expected = window_detectors(round_lo, round_hi, ROUNDS, distance)
             assert transfer["payload_bits"] == expected, attribution
             checked += 1
     return checked
+
+
+def _inputs_of(transfers) -> list:
+    """The transfers that carry a decode's input, boundaries left out."""
+    inputs = []
+    for transfer in transfers:
+        if not is_boundary(transfer):
+            inputs.append(transfer)
+    return inputs
+
+
+def is_boundary(transfer: dict) -> bool:
+    """Whether the transfer carries a boundary, which names its source."""
+    relation = transfer["attribution"]["relation"]
+    if not relation:
+        return False
+    return "source_window_key" in relation
 
 
 def _checked_store_hops(grouped: dict, distance: int) -> int:
@@ -425,14 +451,28 @@ def test_the_boundary_hop_pays_one_bulk_layer_per_hand_off(distance):
     """A hand-off updates the destination's oldest layer and nothing else.
 
     Tan et al. 2209.09219 lines 936-946; the layer is d*d-1 detectors, 8
-    at d=3 and 24 at d=5, whatever the window's own extent is.
+    at d=3 and 24 at d=5, whatever the window's own extent is. A hand-off
+    down from the host names its request ahead of that layer; a pinned
+    face read on the host names nothing.
     """
     _machine, result = run_case("switching", distance)
-    grouped = transfers_by_path(result)
     bulk_layer = distance * distance - 1
-    hand_offs = grouped["decoder_to_decoder"]
-    sizes = [transfer["payload_bits"] for transfer in hand_offs]
-    assert set(sizes) == {bulk_layer}
+    sizes = _boundary_sizes_by_path(result)
+    assert sizes == {
+        "strong_buffer_to_strong_decoder": {bulk_layer},
+        "strong_decoder_to_weak_decoder": {bulk_layer + NAME_BITS},
+    }
+
+
+def _boundary_sizes_by_path(result) -> dict:
+    """The payload sizes of the run's boundaries, by the path each rode."""
+    sizes = {}
+    for transfer in result.link_traffic["transfers"]:
+        if not is_boundary(transfer):
+            continue
+        on_path = sizes.setdefault(transfer["path"], set())
+        on_path.add(transfer["payload_bits"])
+    return sizes
 
 
 def bounded_strong_hops_run(distance: int) -> dict:

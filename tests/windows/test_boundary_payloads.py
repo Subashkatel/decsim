@@ -1,4 +1,4 @@
-"""What a window's hand-off costs on decoder_to_decoder.
+"""What a window's hand-off costs on the wire.
 
 The referents are the implementations that write the update: quits
 updates one check layer (`syn_update` sized by `hz.shape[0]`,
@@ -190,35 +190,40 @@ def test_the_width_is_the_rows_arithmetic_on_the_seam_not_the_round_count():
 def test_a_destination_with_no_window_model_is_priced_by_its_card():
     """No layer to count is not a hand-off that costs nothing.
 
-    A window whose detector positions are unknown has no seam to size,
-    so the interaction answers None and the wire prices the transfer by
-    its link card. Answering zero would make the hand-off free.
+    A window whose detector positions are unknown is sized on one round
+    of the code card's checks, 24 at d=5, and no error was drawn to flip
+    any of them: the dense row pays the layer, the sparse row nothing.
+    With no card count either, the interaction answers None.
     """
     known = _window_reading(6)
-    unknown = dataclasses.replace(known, detector_positions=None)
+    card_only = dataclasses.replace(
+        known, detector_positions=None, layer_detector_count=24
+    )
     residual = window_records.DependencyResidual(detector_ids=(10, 11))
-    dense = boundary_payloads.DenseSeamMask()
-    interaction = window_interactions.DefaultWindowInteraction(0, dense)
+    dense_row = boundary_payloads.DenseSeamMask()
+    sparse_row = boundary_payloads.SparseSeamList()
+    dense = window_interactions.DefaultWindowInteraction(0, dense_row)
+    sparse = window_interactions.DefaultWindowInteraction(0, sparse_row)
     source = _source_committing(1, 3)
-    bits = interaction.boundary_payload_bits(residual, unknown, source)
-    assert bits is None
+    dense_bits = dense.boundary_payload_bits(residual, card_only, source)
+    sparse_bits = sparse.boundary_payload_bits(residual, card_only, source)
+    unknown = dataclasses.replace(card_only, layer_detector_count=None)
+    unknown_bits = dense.boundary_payload_bits(residual, unknown, source)
+    assert dense_bits == 24
+    assert sparse_bits == 0
+    assert unknown_bits is None
 
 
 def _pinned_faces(result) -> list:
-    """(strong window index, payload bits) of every pinned face on the wire.
+    """(strong window index, seam bits) of every pinned face on the wire.
 
     A weak delivery is attributed to the window that produced it; a
-    pinned face is attributed to the strong window that reads it.
+    pinned face is attributed to the strong window that reads it. The
+    seam leaves out the request's name a hop across the wall adds.
     """
     faces = []
-    for transfer in result.link_traffic["transfers"]:
-        if transfer["path"] != "decoder_to_decoder":
-            continue
-        attribution = transfer["attribution"]
-        source = attribution["relation"]["request_key"]["window_id"]
-        if attribution["window_id"] == source:
-            continue
-        faces.append((attribution["window_id"], transfer["payload_bits"]))
+    for window_id, _source, seam in _pins_with_sources(result):
+        faces.append((window_id, seam))
     return faces
 
 
@@ -342,19 +347,28 @@ def _pins_by_direction(result) -> tuple:
     """
     near = []
     far = []
+    for window_id, source, seam in _pins_with_sources(result):
+        if source < window_id:
+            near.append(seam)
+        else:
+            far.append(seam)
+    return (near, far)
+
+
+def _pins_with_sources(result) -> list:
+    """(strong window, source window, seam bits) of every pinned face."""
+    pins = []
     for transfer in result.link_traffic["transfers"]:
-        if transfer["path"] != "decoder_to_decoder":
+        if not shape_tests.is_boundary(transfer):
             continue
         attribution = transfer["attribution"]
         source = attribution["relation"]["request_key"]["window_id"]
         window_id = attribution["window_id"]
         if window_id == source:
             continue
-        if source < window_id:
-            near.append(transfer["payload_bits"])
-        else:
-            far.append(transfer["payload_bits"])
-    return (near, far)
+        seam = shape_tests.seam_bits(transfer)
+        pins.append((window_id, source, seam))
+    return pins
 
 
 def test_a_backward_weak_hand_off_is_charged_the_layer_it_lands_on():

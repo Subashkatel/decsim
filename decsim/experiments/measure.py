@@ -23,6 +23,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module
 import decsim.observe.settings as observe_settings
+import decsim.observe.stage_records as stage_records
 import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -131,13 +132,23 @@ POINTS = (
     # controller processing, packing and CWB.
     "buffer0_ready_to_frame",  # window complete in the buffer -> frame
     "buffer0_first_round_to_frame",  # first round in the buffer -> frame
-    "qpu_last_round_to_frame",  # last required round off QPU -> frame
+    # the last round the committing decode read off QPU -> frame
+    "qpu_last_round_to_frame",
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
+    # per shot: the last round any committing decode read leaving the QPU
+    # -> the last correction committed at the frame, whichever window
+    # holds it (end_of_stream_reaction_us)
+    "end_of_stream_reaction",
 )
 
-# the points sampled once a round, not once a window, so no committing
-# tier names their samples
-ROUND_POINTS = ("cwb_per_round", "cwb_stall_per_round", "csb_stall_per_round")
+# the points sampled once a round or once a shot, not once a window, so
+# no committing tier names their samples
+UNTIERED_POINTS = (
+    "cwb_per_round",
+    "cwb_stall_per_round",
+    "csb_stall_per_round",
+    "end_of_stream_reaction",
+)
 
 # One count column per status a committed window's decode may carry
 # besides success (records/decoding.py BackendDecodeStatus), so a status
@@ -160,6 +171,9 @@ INPUT_LINK_BY_TIER = {
         transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
     ),
 }
+
+# the hop a boundary's delay is kept under, whichever path it rode
+BOUNDARY_HOP = "boundary"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -283,9 +297,10 @@ class ShotMeasurement:
     # decodes held in the units' memory at once, landed and free to
     # compute but waiting on a unit's compute, which the strong ready
     # queue's peak does not see because a unit takes the next decode
-    # into its memory while it computes; and the most rounds the
-    # machine held at once without their final correction, an
-    # escalated window's waiting for its strong answer. The first six need
+    # into its memory while it computes; and the most rounds of windows
+    # read out whole the machine held at once without their final
+    # correction, an escalated window's waiting for its strong answer,
+    # past the lag the window shape sets alone. The first six need
     # observation.record_switching_windows and the last
     # observation.backlog_trace; a shot that kept neither holds None,
     # and its row no column, since zeros would say nothing waited
@@ -411,24 +426,27 @@ def link_totals(traffic: dict) -> dict:
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """Ticks from the first request to the last delivery by (path, window key).
+    """Ticks from the first request to the last delivery by (hop, window key).
 
     A hop's transfers for one window can overlap (the selection and its
     rounds), so the span is what the window waited and a sum would count
     the overlap twice. A window is keyed by (operation_id, window_index),
     since several streams each have a window 3, as gem5's reorder buffer
     finds an instruction by thread and sequence number
-    (src/cpu/o3/rob.hh:131-134).
+    (src/cpu/o3/rob.hh:131-134). The hop is the path, or BOUNDARY_HOP for
+    a boundary, which rides the path its two sides pick
+    (windows/window_boundaries.py) and so shares the cable with the
+    escalation it does not belong to. A boundary is kept under the window
+    that waits for it, its destination: a strong window that reads a
+    pinned face and later ships its own boundary would otherwise span its
+    decode.
     """
     first_request = {}
     last_delivery = {}
     for row in transfers:
-        attribution = row["attribution"]
-        recorded_operation = attribution["operation_id"]
-        operation_id = identity_records.stable_identity_from_json(
-            recorded_operation
-        )
-        key = (row["path"], operation_id, attribution["window_id"])
+        hop = _hop_of(row)
+        operation_id, window_id = _waiting_window(row)
+        key = (hop, operation_id, window_id)
         request = _hop_start_ticks(row)
         earliest_request = first_request.get(key, request)
         first_request[key] = min(earliest_request, request)
@@ -622,12 +640,8 @@ def window_points_us(
     (ciw/data_record.py lines 3-21).
     """
     operation_id, window_id = window.key
-    last_emitted_round = _last_emitted_round(qpu_send, operation_id)
-    last_required_round = min(window.buffer_hi, last_emitted_round)
     committed = frame_record.committed_ticks
-    handoff_ticks = link_delay.get(
-        ("decoder_to_decoder", operation_id, window_id), 0
-    )
+    handoff_ticks = link_delay.get((BOUNDARY_HOP, operation_id, window_id), 0)
     escalation_ticks = link_delay.get(
         ("weak_decoder_to_strong_decoder", operation_id, window_id), 0
     )
@@ -650,7 +664,7 @@ def window_points_us(
     dependency_block = config_module.ticks_to_microseconds(dependency_ticks)
     confidence_ticks = _confidence_ticks(window, decode)
     answered = max(window.t_done, decode.done_ticks)
-    last_required_send = qpu_send[(operation_id, last_required_round)]
+    last_required_send = last_required_send_ticks(decode, qpu_send)
     first_required_send = qpu_send[(operation_id, window.start_round)]
     return {
         "buffer_fill": _span_microseconds(
@@ -755,7 +769,9 @@ def collect_samples(
 
     Every point describes the decode the frame committed, named by the
     frame record's tier and run ordinal. Only the windows and rounds in
-    the measurement interval are sampled. It stays whole past the size
+    the measurement interval are sampled, but for the end-of-stream
+    reaction, which is the drain the interval leaves out. It stays whole
+    past the size
     prompt: one walk over the windows in key order, read top to bottom.
     """
     transfers = result.link_traffic["transfers"]
@@ -804,7 +820,60 @@ def collect_samples(
         for name, value in window_samples.items():
             samples[name].append(value)
         window_tiers.append(decode.tier.value)
+    decoded = decoded_windows(observation)
+    samples["end_of_stream_reaction"] = end_of_stream_reaction_us(
+        decoded, stages, qpu_send
+    )
     return samples, tuple(window_tiers)
+
+
+def last_required_send_ticks(decode: "_CommittedDecode", qpu_send: dict) -> int:
+    """The tick the last round the committing decode read left the QPU.
+
+    The rounds are the decode's own input, not its window's plan: a
+    strong region that absorbed later windows reads past the window it
+    answers for, and a buffer that runs into the next operation reads
+    that operation's rounds.
+    """
+    sends = []
+    for operation_id, round_index in decode.last_rounds_read:
+        sends.append(qpu_send[(operation_id, round_index)])
+    return max(sends)
+
+
+def end_of_stream_reaction_us(
+    decoded: list, stages: stage_records.StageLedger, qpu_send: dict
+) -> list:
+    """The shot's end-of-stream reaction in us: one sample, none for no window.
+
+    It runs from the last round a committing decode read leaving the QPU
+    to the last correction committed at the frame, whichever window that
+    is, since a strong answer for an earlier window can land after the
+    final window's. It is the response time from the final syndrome to
+    the correction of Toshio et al. 2510.25222 (lines 357-363) and
+    Riverlane's full decoding response time (2410.05202 lines 74-79) up
+    to the frame: the conditional operation's own legs,
+    frame_to_controller, the decision-to-pulse cycles and
+    controller_to_qpu, run only for an operation another waits on, and
+    are not in it. Google's decoder latency (2408.13687 lines 496-499)
+    stops at the correction too, but starts at the decoder's receipt.
+    Every window of the shot counts, the measurement interval
+    notwithstanding, since the end of the stream is the drain it leaves
+    out.
+    """
+    if not decoded:
+        return []
+    final_sends = []
+    commits = []
+    for _window, frame_record in decoded:
+        decode = _committed_decode(stages, frame_record)
+        decode_send = last_required_send_ticks(decode, qpu_send)
+        final_sends.append(decode_send)
+        commits.append(frame_record.committed_ticks)
+    final_send = max(final_sends)
+    last_commit = max(commits)
+    reaction = _span_microseconds(last_commit, final_send)
+    return [reaction]
 
 
 def reaction_growth_rate(
@@ -958,11 +1027,11 @@ def parallel_processes_needed(
 def _request_run_sequence(row: dict):
     """The run ordinal of the request a transfer serves, None when it has none.
 
-    A boundary hand-off names its source request instead, and a round's
-    transfer names no request at all.
+    A boundary hand-off is no decode's input, though it names the
+    request that committed it, and a round's transfer names no request.
     """
     relation = row["attribution"].get("relation")
-    if not relation:
+    if not relation or _is_boundary(row):
         return None
     request_key = relation.get("request_key")
     if request_key is None:
@@ -1378,6 +1447,8 @@ class _CommittedDecode:
     round_count: int  # the rounds it read, its job's own count
     backend_queue_wait_ticks: int  # its waits inside a strong backend
     store_read_ticks: int  # its input's read in its tier's store
+    # (operation id, last round) of every operation its input held
+    last_rounds_read: tuple
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1772,7 +1843,7 @@ def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
 def _backlog_peak_rounds(
     observation: observation_module.Observation,
 ) -> Optional[int]:
-    """The most rounds not yet final at once, when the sampler ran."""
+    """The most rounds read out whole and not final, when the sampler ran."""
     backlog = observation.decode_backlog
     if backlog is None:
         return None
@@ -1809,12 +1880,36 @@ def _reaction_microseconds(
     )
 
 
-def _last_emitted_round(qpu_send: dict, operation_id) -> int:
-    last_round = 0
-    for sent_operation_id, round_index in qpu_send:
-        if sent_operation_id == operation_id:
-            last_round = max(last_round, round_index)
-    return last_round
+def _hop_of(row: dict) -> str:
+    """The hop a transfer's delay is kept under: BOUNDARY_HOP, or its path."""
+    if _is_boundary(row):
+        return BOUNDARY_HOP
+    return row["path"]
+
+
+def _waiting_window(row: dict) -> tuple:
+    """(operation_id, window index) of the window the transfer holds up.
+
+    A boundary holds up its destination; every other transfer the window
+    its attribution names.
+    """
+    attribution = row["attribution"]
+    if _is_boundary(row):
+        destination = attribution["relation"]["destination_window_key"]
+        return identity_records.stable_identity_from_json(destination)
+    recorded_operation = attribution["operation_id"]
+    operation_id = identity_records.stable_identity_from_json(
+        recorded_operation
+    )
+    return operation_id, attribution["window_id"]
+
+
+def _is_boundary(row: dict) -> bool:
+    """Whether the transfer carries a boundary, which names its source."""
+    relation = row["attribution"].get("relation")
+    if not relation:
+        return False
+    return "source_window_key" in relation
 
 
 def _hop_start_ticks(row: dict) -> int:
@@ -1855,9 +1950,29 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     rounds = _rounds_read(records)
     waited = _backend_queue_wait_ticks(records)
     read = _store_read_ticks(records)
+    last_rounds = _last_rounds_read(records)
     return _CommittedDecode(
-        tier, first, last, ready, run_sequence, rounds, waited, read
+        tier,
+        first,
+        last,
+        ready,
+        run_sequence,
+        rounds,
+        waited,
+        read,
+        last_rounds,
     )
+
+
+def _last_rounds_read(records: list) -> tuple:
+    """The decode's last round of each operation, as its stages carry it."""
+    last_rounds = {}
+    for record in records:
+        for operation_id, round_index in record.last_rounds_read:
+            latest = last_rounds.get(operation_id, 0)
+            last_rounds[operation_id] = max(latest, round_index)
+    pairs = last_rounds.items()
+    return tuple(pairs)
 
 
 def _backend_queue_wait_ticks(records: list) -> int:

@@ -1025,7 +1025,7 @@ def _counts_of_samples(measurements: list) -> dict:
 
 def _tiers_of_samples(measurement: measure.ShotMeasurement, name: str) -> tuple:
     """The tier each sample of a latency point sits under."""
-    if name in measure.ROUND_POINTS:
+    if name in measure.UNTIERED_POINTS:
         values = measurement.samples[name]
         return ("",) * len(values)
     return measurement.window_tiers

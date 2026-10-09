@@ -180,6 +180,29 @@ class OperationResults:
         committed = self._committed_windows_of(operation_id)
         return _unbroken_prefix_round_count(committed)
 
+    def read_out_prefix_round_count(
+        self,
+        operation_id: Any,  # an opaque identity
+        rounds_read_out_by_operation: dict,
+    ) -> int:
+        """Rounds of the windows read out whole, unbroken from round 1.
+
+        It is the final prefix an instant decoder on instant links would
+        hold: a window is decoded only once its last round is measured
+        (Skoric et al. 2209.08552 lines 416-418), so the rounds read out
+        past it, a trailing buffer and the next window's rounds so far,
+        wait on the window shape and on no decoder.
+        """
+        whole = []
+        for key, window in self.planner.windows_by_key.items():
+            if key[0] != operation_id:
+                continue
+            if self.tracker.is_read_out_whole(
+                window, rounds_read_out_by_operation
+            ):
+                whole.append(window)
+        return _unbroken_prefix_round_count(whole)
+
     def final_prefix_round_count(
         self,
         operation_id: Any,  # an opaque identity

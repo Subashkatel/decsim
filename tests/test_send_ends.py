@@ -22,19 +22,32 @@ ENDS_OF_PATH = {
     "QPU_TO_CONTROLLER": ("qpu", "controller"),
     "CONTROLLER_TO_WEAK_BUFFER": ("controller", "syndrome_buffer"),
     "WEAK_BUFFER_TO_WEAK_DECODER": ("syndrome_buffer", "decoders"),
-    "WEAK_DECODER_TO_STRONG_DECODER": ("decoders",),
-    "STRONG_BUFFER_TO_STRONG_DECODER": ("syndrome_buffer", "decoders"),
-    "WEAK_DECODER_TO_FRAME": ("decoders", "pauli_frame"),
     # a boundary is a window-side record and both its ends hold one
-    # (decisions.md D12)
+    # (decisions.md D12), so the window side is an end of every hop a
+    # boundary rides (windows/window_boundaries.py _BOUNDARY_ROUTES)
+    "WEAK_DECODER_TO_STRONG_DECODER": ("decoders", "windows"),
+    "STRONG_BUFFER_TO_STRONG_DECODER": (
+        "syndrome_buffer",
+        "decoders",
+        "windows",
+    ),
+    "WEAK_DECODER_TO_FRAME": ("decoders", "pauli_frame"),
     "DECODER_TO_DECODER": ("windows",),
     "STRONG_DECODER_TO_FRAME": ("decoders", "pauli_frame"),
     "FRAME_TO_CONTROLLER": ("pauli_frame", "controller"),
     "CONTROLLER_TO_QPU": ("controller", "qpu"),
     "CONTROLLER_TO_STRONG_BUFFER": ("controller", "syndrome_buffer"),
     # the strong answer to the weak chip's commit step, both decoder ends
-    "STRONG_DECODER_TO_WEAK_DECODER": ("decoders",),
+    "STRONG_DECODER_TO_WEAK_DECODER": ("decoders", "windows"),
 }
+
+# A boundary's send names no path: the courier picks one from the two
+# sides (windows/window_boundaries.py _BOUNDARY_ROUTES), so a call of
+# send_boundary is read as the boundary's own hop, whose ends are the
+# window side's at both decoders.
+BOUNDARY_ROUTE = "BOUNDARY_ROUTE"
+BOUNDARY_SEND = "send_boundary"
+ENDS_OF_SEND = {**ENDS_OF_PATH, BOUNDARY_ROUTE: ("windows",)}
 
 # the components on the reaction path; the root wires the paths onto the
 # ports (build, machine), the fabric carries them (links) and the
@@ -156,7 +169,7 @@ DELIVERY_CALLBACKS = {
     ("pauli_frame/decision_dispatch.py", "FRAME_TO_CONTROLLER"): (
         "_at_the_controller",
     ),
-    ("windows/window_boundaries.py", "DECODER_TO_DECODER"): (
+    ("windows/window_boundaries.py", BOUNDARY_ROUTE): (
         "_pin_delivered",
         "_receive_boundary",
     ),
@@ -296,12 +309,22 @@ def _registered_callback(node):
 
 
 def _path_argument(node: ast.Call):
-    """The LinkPath member this call names, or None."""
+    """The LinkPath member this call names, BOUNDARY_ROUTE, or None."""
+    if _is_boundary_send(node):
+        return BOUNDARY_ROUTE
     for argument in node.args:
         member = _link_path_member(argument)
         if member is not None:
             return member
     return None
+
+
+def _is_boundary_send(node: ast.Call) -> bool:
+    """Whether the call is the courier's send of a boundary."""
+    called = node.func
+    if not isinstance(called, ast.Attribute):
+        return False
+    return called.attr == BOUNDARY_SEND
 
 
 def _link_path_member(argument):
@@ -499,7 +522,7 @@ def _as_tuples(found: dict) -> dict:
 
 def _add_wrong_receivers(site, wrong: dict) -> None:
     """Add every method the callback reaches outside the hop's two ends."""
-    ends = set(ENDS_OF_PATH[site.path_name])
+    ends = set(ENDS_OF_SEND[site.path_name])
     defined = _packages_defining()
     for method, lineno in _reached_methods(site):
         packages = defined.get(method, set())
@@ -519,7 +542,7 @@ def _add_wrong_end(site, reached: tuple, packages, ends, wrong: dict) -> None:
 
 def _add_second_calls(site, too_many: dict) -> None:
     """Record a callback that calls the other end more than once."""
-    ends = set(ENDS_OF_PATH[site.path_name])
+    ends = set(ENDS_OF_SEND[site.path_name])
     other_end = ends - {site.package}
     defined = _packages_defining()
     at_the_other_end = []

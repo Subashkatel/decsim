@@ -1,9 +1,11 @@
 """The boundary courier: residual defects travel to dependent windows.
 
 A boundary is the residual defects at a window's commit edge. The record
-that leaves is the courier's, so it both sends it over
-decoder_to_decoder and handles its landing (OMNeT++ refuses a module
-that sends a message it does not own, src/sim/csimplemodule.cc:333-334).
+that leaves is the courier's, so it both sends it and handles its
+landing (OMNeT++ refuses a module that sends a message it does not own,
+src/sim/csimplemodule.cc:333-334). It rides the hop between the side
+whose decode committed it and the side whose decode reads it
+(_BOUNDARY_ROUTES).
 Every send bumps the source's version and each delivery's version, and a
 receiver accepts only the latest, so a late delivery is harmless. A held
 boundary waits for a final result. A strong window whose face is pinned
@@ -34,7 +36,11 @@ class HeldBoundary:
 
 
 class BoundaryCourier:
-    """Delivers committed boundaries, versioned, held until final."""
+    """Delivers committed boundaries, versioned, held until final.
+
+    window_tier is the tier that decodes the planner's windows, so every
+    hand-on lands on its side; a pinned face lands on the strong side.
+    """
 
     planner = ports.Port(window_planner.WindowPlanner)
     # the boundary is this component's record, so it sends it itself
@@ -47,7 +53,8 @@ class BoundaryCourier:
     # whether it was the last boundary a shipped window owed
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self) -> None:
+    def __init__(self, window_tier: window_records.DecoderTier) -> None:
+        self.window_tier = window_tier
         self.record_by_window: dict = {}
 
     # ---- what the committer asks
@@ -189,8 +196,13 @@ class BoundaryCourier:
             )
         boundary = self._pinned_boundary(source_key, destination, record)
         positions = _row_positions(model)
+        layer_bits = self.planner.syndrome_bits_per_round_of(
+            destination.operation_id
+        )
         destination_info = window_records.WindowInfo.from_window(
-            destination, detector_positions=positions
+            destination,
+            detector_positions=positions,
+            layer_detector_count=layer_bits,
         )
         self._fold_pin(
             source_key, destination, destination_info, record, boundary
@@ -256,21 +268,24 @@ class BoundaryCourier:
         request_key: window_records.DecoderRequestKey,
         boundary: Optional[window_records.DependencyResidual],
     ) -> None:
-        """One pinned face's message, priced on the strong window's seam."""
+        """One pinned face's message, priced on the strong window's seam.
+
+        It leaves the side of the decode the source last committed.
+        """
         record = self._record(source_key)
         attribution = self._pin_attribution(
             record, source_key, destination, operation, request_key
         )
         source_info = self._source_info(source_key)
-        payload_bits = self.interaction.boundary_payload_bits(
+        seam_bits = self.interaction.boundary_payload_bits(
             boundary, destination_info, source_info
         )
+        source_tier = record.committed_request_key.tier
+        route = _boundary_route(source_tier, window_records.DecoderTier.STRONG)
+        payload_bits = _wire_bits(seam_bits, route)
         delivered = functools.partial(self._pin_delivered, destination)
         self.transfers.send_boundary(
-            transfer_records.LinkPath.DECODER_TO_DECODER,
-            attribution,
-            payload_bits,
-            delivered,
+            route.path, attribution, payload_bits, delivered
         )
 
     def _settled_delivery(
@@ -395,7 +410,7 @@ class BoundaryCourier:
         version: int,
         delivery_version: int,
     ) -> None:
-        """One delivery over decoder_to_decoder, received at its landing."""
+        """One delivery on its two sides' hop, received at its landing."""
         window_attribution = self._window_attribution(
             window, operation, source_request_key
         )
@@ -416,16 +431,15 @@ class BoundaryCourier:
             version,
             delivery_version,
         )
-        payload_bits = self._boundary_bits(boundary, window.key, dependent_key)
+        seam_bits = self._boundary_bits(boundary, window.key, dependent_key)
+        route = _boundary_route(source_request_key.tier, self.window_tier)
+        payload_bits = _wire_bits(seam_bits, route)
         self.transfers.send_boundary(
-            transfer_records.LinkPath.DECODER_TO_DECODER,
-            attribution,
-            payload_bits,
-            receive,
+            route.path, attribution, payload_bits, receive
         )
 
     def _boundary_bits(self, boundary, source_key: tuple, dependent_key: tuple):
-        """The bits this hand-off takes on the wire, or None for the card.
+        """The bits this hand-off takes on the wire, None when unknown.
 
         The interaction prices it, since it decides what a boundary is
         and which layer of the destination it lands on.
@@ -445,8 +459,13 @@ class BoundaryCourier:
         detector_positions = None
         if model is not None:
             detector_positions = model.defect_positions
+        layer_bits = self.planner.syndrome_bits_per_round_of(
+            destination.operation_id
+        )
         return window_records.WindowInfo.from_window(
-            destination, detector_positions=detector_positions
+            destination,
+            detector_positions=detector_positions,
+            layer_detector_count=layer_bits,
         )
 
     def _source_info(self, source_key: tuple) -> window_records.WindowInfo:
@@ -532,8 +551,8 @@ def _row_positions(model) -> Optional[dict]:
     The input of task j is restricted to its own checks (Bombin et al.
     2303.04846 lines 782-788), so the residual is intersected with the
     rows the strong window decodes on, not the neighbour's detectors its
-    faults also flip. None for a run with no error model; the wire then
-    prices the message by its card.
+    faults also flip. None for a run with no error model, whose seam is
+    one round of the code card's checks.
     """
     if model is None:
         return None
@@ -555,3 +574,64 @@ class _BoundaryRecord:
         self.delivery_version_by_dependent: dict = {}
         self.released_dependents: set = set()
         self.held: Optional[HeldBoundary] = None
+
+
+def _boundary_route(
+    source_tier: window_records.DecoderTier,
+    destination_tier: window_records.DecoderTier,
+) -> "_BoundaryRoute":
+    return _BOUNDARY_ROUTES[source_tier, destination_tier]
+
+
+def _wire_bits(
+    seam_bits: Optional[int], route: "_BoundaryRoute"
+) -> Optional[int]:
+    """The seam behind the route's name, None when the seam is unknown."""
+    if seam_bits is None:
+        return None
+    return seam_bits + route.name_bits
+
+
+@dataclasses.dataclass(frozen=True)
+class _BoundaryRoute:
+    """The hop a boundary takes, and the bits of the name it carries."""
+
+    path: transfer_records.LinkPath
+    name_bits: int
+
+
+# Two weak units meet on the chip, a link per graph edge (Helios
+# 2301.08419 lines 764-769). A boundary between the chip and the host
+# crosses the cable on the hop the escalation or the strong answer takes
+# (decoders/decoder_output.py): no paper prices this message (Toshio
+# 2510.25222 lines 1965-1966 count the syndrome data and the decoding
+# output alone), so the cable leg is decsim's choice. It names the
+# request that committed it, as every message across the wall does while
+# other requests are open (records/windows.py REQUEST_KEY_WIRE_BITS).
+# Two strong decodes meet in the host's own memory, the read the strong
+# window's input takes, which crosses no wire that needs a name.
+_BOUNDARY_ROUTES = {
+    (window_records.DecoderTier.WEAK, window_records.DecoderTier.WEAK): (
+        _BoundaryRoute(
+            path=transfer_records.LinkPath.DECODER_TO_DECODER, name_bits=0
+        )
+    ),
+    (window_records.DecoderTier.WEAK, window_records.DecoderTier.STRONG): (
+        _BoundaryRoute(
+            path=transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
+            name_bits=window_records.REQUEST_KEY_WIRE_BITS,
+        )
+    ),
+    (window_records.DecoderTier.STRONG, window_records.DecoderTier.WEAK): (
+        _BoundaryRoute(
+            path=transfer_records.LinkPath.STRONG_DECODER_TO_WEAK_DECODER,
+            name_bits=window_records.REQUEST_KEY_WIRE_BITS,
+        )
+    ),
+    (window_records.DecoderTier.STRONG, window_records.DecoderTier.STRONG): (
+        _BoundaryRoute(
+            path=transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
+            name_bits=0,
+        )
+    ),
+}

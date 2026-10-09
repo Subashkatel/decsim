@@ -83,12 +83,15 @@ class DecoderUtilization:
 
 
 class DecodeBacklog:
-    """The peak count of syndrome rounds not yet finally corrected.
+    """The peak count of rounds read out whole and not finally corrected.
 
     Sampled after every action, since the rounds waiting are spread over
     the window manager and the queues and no one source reports them. A
-    round counts from its readout, so one the controller holds for room
-    in a full store is in the backlog too.
+    window counts once its rounds are read out, so one whose rounds the
+    controller holds for room in a full store is in the backlog too. The
+    peak is over the counts ticks end at, the rule of the queue peaks
+    (observe/queue_depth.py): a round made whole and corrected at one
+    tick never waited.
     """
 
     def __init__(
@@ -100,17 +103,26 @@ class DecodeBacklog:
         self.window_manager = window_manager
         self.decoder_managers = decoder_managers
         self.round_events = round_events
-        self.peak = 0
+        self.ended_peak = 0
+        self.tick = 0
+        self.rounds = 0
 
     def observe(self, tick: int) -> None:
-        """Sample the backlog after an action and keep its peak."""
-        del tick
+        """Sample the backlog after an action; a later tick ends this one."""
         view = run_views.backlog_view(
             self.window_manager,
             self.decoder_managers,
             self.round_events.rounds_read_out_by_operation,
         )
-        self.peak = max(self.peak, view.total_rounds)
+        if tick != self.tick:
+            self.ended_peak = max(self.ended_peak, self.rounds)
+            self.tick = tick
+        self.rounds = view.total_rounds
+
+    @property
+    def peak(self) -> int:
+        """The most rounds a tick ended at, the last tick's count included."""
+        return max(self.ended_peak, self.rounds)
 
 
 class _StepIntegral:

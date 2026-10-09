@@ -16,8 +16,10 @@ keys: bp_method 3, composition 1, gamma0 0.1, 80 pre-iterations, 300
 relay sets of 60 iterations, stop at the first converged solution, fp32,
 and decsim's own gamma table. Each time is one decode() call from Python
 on the host clock: the binding, the syndrome's copy to the device, the
-kernels and the answer's copy back, with no dispatcher and no link. The
-GPUs are an NVIDIA A100-SXM4-80GB (x86 host) and a GH200 144G HBM3e
+kernels and the answer's copy back, with no dispatcher and no link.
+tools/relay_gpu_timing makes such regions (make_regions.py), times them
+(time_decodes.py, time_a100.sbatch) and fits the lines (fit_lines.py).
+The GPUs are an NVIDIA A100-SXM4-80GB (x86 host) and a GH200 144G HBM3e
 (Grace host, NVLink-C2C), driver 610.57.04, CUDA user-mode driver 13.3,
 toolkit 12.9; the slice profiles were cut on A100 80GB PCIe boards.
 

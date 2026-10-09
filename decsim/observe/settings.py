@@ -39,7 +39,8 @@ class ObservationSettings:
 
     The interval cuts the latency samples and what is made from them:
     the means and maxes, the windows' tiers, the reaction growth rates
-    and deadline misses, load and parallel_processes_needed. The logical
+    and deadline misses, load and parallel_processes_needed, but for the
+    end-of-stream reaction, which is the drain itself. The logical
     failure and the predictions stay whole, since a logical error rate
     is a rate over whole shots, and so do the shot's counts and rates
     (decoded_windows, escalated_windows, throughput, the queue peaks,

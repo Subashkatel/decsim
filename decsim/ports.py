@@ -812,7 +812,8 @@ class BoundaryCourier(Protocol):
     A pinned face reads the correction its neighbour committed, Bombin
     et al. 2303.04846's input adaptation (lines 775-788): the later
     decoding task's input is the syndrome plus the corrections already
-    committed. The message is one seam layer on decoder_to_decoder.
+    committed. The message is one seam layer, sent from the side that
+    committed the correction to the strong host.
     """
 
     def pin_strong_face(
@@ -1970,7 +1971,7 @@ class RegionProposer(Protocol):
 
 @runtime_checkable
 class BoundaryPayload(Protocol):
-    """How a boundary message is written on decoder_to_decoder.
+    """How a boundary message is written on the wire.
 
     The seam is the destination's oldest round layer, turned into the
     bits the wire carries.
@@ -2228,5 +2229,5 @@ class DecoderUnit(Protocol):
 class WindowBacklog(Protocol):
     """The window manager, as the decode backlog sampler reads it."""
 
-    def final_round_counts(self) -> tuple:
-        """Rounds final from round 1: (operation id, patch, rounds)."""
+    def backlog_round_counts(self, rounds_read_out_by_operation: dict) -> tuple:
+        """Rounds read out whole, not final: (operation id, patch, rounds)."""

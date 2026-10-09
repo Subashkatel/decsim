@@ -2,10 +2,11 @@
 
 With uniform priors every edge has the same length, so decsim's weighted
 growth (Delfosse and Nickerson 1709.06218, Huang, Newman and Brown
-2004.04693) is the paper's
-uniform growth; ldpc's peeling decoder (ldpc.union_find_decoder) is the
-referent. Every syndrome an error produces is satisfiable: both
-decoders reproduce it, and on a single fault both name that fault.
+2004.04693) is the paper's uniform growth; ldpc's union-find decoder
+(ldpc.union_find_decoder) in its matrix-solve mode is the referent, as
+its peeling mode can fail to return on circuit-level graphs. Every
+syndrome an error produces is satisfiable: both decoders reproduce it,
+and on a single fault both name that fault.
 ldpc's decoder does not return on an unsatisfiable syndrome, so the
 unsatisfiable side is decsim's own: best effort, as PECOS (grow until
 no progress, then peel) and ldpc (return the decoding) do, with the
@@ -103,7 +104,9 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
 
 def _referee():
     check = scipy.sparse.csr_matrix(CHECK)
-    return union_find_decoder.UnionFindDecoder(check, uf_method="peeling")
+    # ldpc takes uf_method as text but keeps it in a C bool: any
+    # non-empty text selects matrix solve, an empty one peeling
+    return union_find_decoder.UnionFindDecoder(check, uf_method="inversion")
 
 
 def _reproduces(correction, syndrome) -> bool:

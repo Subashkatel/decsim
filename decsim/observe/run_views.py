@@ -14,7 +14,7 @@ import decsim.records.identity as identity_records
 class BacklogView:
     """Decode backlog at one instant, per lane, per op, per patch, total.
 
-    The rounds are syndrome rounds the QPU read out whose final
+    The rounds are those of windows the QPU read out whole whose final
     correction is not in place yet.
     """
 
@@ -44,14 +44,13 @@ def backlog_view(
         queue_length = len(queue)
         per_lane.append((lane, queue_length))
         ready_jobs += queue_length
-    final_rounds = window_manager.final_round_counts()
+    backlog_rounds = window_manager.backlog_round_counts(
+        rounds_read_out_by_operation
+    )
     per_op = []
     per_patch: dict = {}
     total_rounds = 0
-    for operation_id, patch, final in final_rounds:
-        read_out = rounds_read_out_by_operation.get(operation_id, 0)
-        not_final = read_out - final
-        waiting = max(0, not_final)
+    for operation_id, patch, waiting in backlog_rounds:
         per_op.append((operation_id, waiting))
         per_patch[patch] = per_patch.get(patch, 0) + waiting
         total_rounds += waiting

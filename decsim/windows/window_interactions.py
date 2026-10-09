@@ -213,8 +213,8 @@ class DefaultWindowInteraction:
         The message updates the one layer of the destination the two
         windows share (Tan 2209.09219 lines 936-946), so the seam is
         that layer's detectors and the flips landing on it. A
-        destination with no window model has no layer to count, and the
-        wire prices the transfer by its card.
+        destination with no window model is priced on one round of the
+        code card's checks, none flipped, as no error was drawn.
         """
         seam = _seam_of(payload, destination, source)
         if seam is None:
@@ -271,7 +271,7 @@ def _seam_of(payload, destination, source):
     """The layer the source's mask lands on, and the flips landing on it."""
     positions = destination.detector_positions
     if positions is None:
-        return None
+        return _card_seam(destination)
     seam_round = _seam_round(source, destination)
     detector_count = 0
     for round_index, _position in positions.values():
@@ -279,6 +279,13 @@ def _seam_of(payload, destination, source):
             detector_count += 1
     flip_count = _seam_flip_count(payload, positions, seam_round)
     return window_records.BoundarySeam(detector_count, flip_count)
+
+
+def _card_seam(destination):
+    """One round of the card's checks, None when the card is not known."""
+    if destination.layer_detector_count is None:
+        return None
+    return window_records.BoundarySeam(destination.layer_detector_count, 0)
 
 
 def _seam_round(source, destination) -> int:

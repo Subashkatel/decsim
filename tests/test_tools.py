@@ -453,7 +453,7 @@ def test_the_tutorial_check_runs_the_python_blocks_as_one_session(
     "shown_line, moved_line",
     [
         (r"^(3,15,50,)[0-9.]+", r"\g<1>99.9"),
-        (r"^88\.424 ", "88.425 "),
+        (r"^98\.420 ", "98.421 "),
     ],
     ids=["sweep column", "trace tick"],
 )

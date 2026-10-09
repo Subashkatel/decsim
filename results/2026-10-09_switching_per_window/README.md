@@ -18,9 +18,9 @@ setting has the same shot count in all four configurations.
 
 - The run: decsim at commit 1785bafa (see commit.txt), from
   `experiments/switching_per_window/run.py`. The raw run files
-  (shots.csv and window_outcomes.csv, 3.5 GB) stay on the cluster and are
-  not in the repository.
-- This folder: `experiments/switching_per_window/` at commit c9257a56.
+  (shots.csv, window_outcomes.csv, window_samples.csv and sweep.csv)
+  stay on the cluster and are not in the repository.
+- This folder: `experiments/switching_per_window/` at commit b8e029f1.
 
 ```
 python experiments/switching_per_window/tables.py <run folder> <this folder>
@@ -45,8 +45,10 @@ of comparison.csv.
 | shot_summary.csv | per configuration and setting: shots, failed shots, failure rate with 95% Wilson interval, windows decoded, shots with a wrong window |
 | window_summary.csv | per configuration and setting: windows by final answer class |
 | switching_summary.csv | switching only: escalated and kept windows by union-find's class, and Relay-BP-5's outcomes on the escalated windows |
-| union_find_by_gap.csv | switching only: union-find's windows by cluster gap (1 dB bins) and class |
+| union_find_by_gap.csv | switching only: union-find's windows by cluster gap (1 dB bins), right or wrong against the label of the window's own rounds |
 | kept_by_detection_events.csv | switching only: kept windows by detection events and class |
+| reaction_time.csv | per configuration and setting: windows by reaction time, 8 bins per decade of µs |
+| decode_time.csv | per configuration and setting: the decoder's own time on a window (median, 99th percentile) and the window period |
 | comparison.csv | the meeting table: one row per setting, all four configurations side by side |
 | plots/ | the figures below |
 
@@ -83,7 +85,7 @@ of comparison.csv.
   form Toshio et al. 2510.25222 report.
 
 No paper we checked scores each window right or wrong inside a
-sliding-window run, so figures 03 to 13 use the definitions above.
+sliding-window run, so figures 03 to 14 use the definitions above.
 
 ## comparison.csv columns
 
@@ -161,28 +163,32 @@ in its total.
 
 ### 07 Of union-find's windows, what share are wrong, by decision?
 
-- How to read: bars in % of all windows union-find decided. Red: kept,
-  wrong alone (false negative). Orange: kept, wrong in a seam pair.
-  Grey: kept, wrong beside a skipped window. Purple: escalated, wrong
+- How to read: bars in % of all windows union-find decided. Black: kept,
+  wrong alone (false negative). Olive: kept, wrong in a seam pair.
+  Brown: kept, wrong beside a skipped window. Dark blue: escalated, wrong
   (correct escalation).
 - What we see: false negatives are very rare: 1 to 131 windows per
   setting (131 at d = 11, 0.002, out of 2.7 million windows decided).
   Kept wrong windows are nearly all seam pairs. Correct escalations grow
   with the physical error rate.
 
-### 08 Does the gap separate union-find's wrong windows from right ones?
+### 08 At each cluster gap, what share of union-find's windows are wrong?
 
 One file per physical error rate.
 
-- How to read: two lines, the gap of right windows and of wrong windows,
-  each in % of its own windows, 2 dB bins. Dashed line: the 20 dB
-  threshold. The last bin holds 60 dB and above.
-- What we see: the two lines almost match, so the cluster gap does not
-  separate wrong windows from right ones here. Many windows share one gap
-  value, and that value moves with the physical error rate: 43 dB at
-  0.002 (46% to 66% of windows), 39 dB at 0.003, 34 dB at 0.004. So it
-  comes from the error weights, not from a fixed cap. We have not checked
-  more than this.
+- How to read: all windows union-find decided in switching, kept and
+  escalated. Wrong means union-find's answer differs from the label of
+  the window's own rounds, with no seam pairing, so the count does not
+  depend on the escalation decision. One line per distance, 4 dB bins,
+  a point only where the bin holds at least 20 windows. Dashed line: the
+  20 dB threshold. The last point holds 60 dB and above.
+- What we see: if the gap told wrong windows from right ones, the lines
+  would fall steeply as the gap grows. They are flat. In bins of at least
+  1,000 windows, 0.3% to 1.6% are wrong at 0.002 and 1.0% to 7.3% at
+  0.005, at low and high gaps alike. Many windows share one gap value,
+  and that value moves with the physical error rate: 43 dB at 0.002 (46%
+  to 66% of windows), 39 dB at 0.003, 34 dB at 0.004. It is the same at
+  every distance. We have not found why.
 
 ### 09 Do the kept windows union-find gets wrong have more detection events?
 
@@ -230,7 +236,50 @@ One file per physical error rate.
   wrong window and 98 failed (0.3%). The share grows with the physical
   error rate. Switching is highest at 0.005 (d = 11: 31%).
 
+### 14 Of union-find's windows, which were kept or escalated, right or wrong?
+
+- How to read: one bar per setting, all windows union-find decided in
+  switching, 100% wide. Grey: kept, union-find right. Black: kept,
+  union-find wrong (false negative). Pale orange: escalated, union-find
+  right (false positive). Dark orange: escalated, union-find wrong
+  (correct escalation). Beside each bar: the escalated share, and of
+  those, the false positive share.
+- What we see: 12.3% (d = 5, 0.002) to 66.0% (d = 11, 0.005) of windows
+  are escalated, and 93.4% to 99.2% of the escalated windows were false
+  positives. Here wrong is any wrong window, seam pairs included, as in
+  figures 05 to 07.
+
+### 15 How long does each configuration take to react to a window?
+
+One file per physical error rate.
+
+- How to read: reaction time, from the window's data complete in the
+  syndrome buffer to its correction in the Pauli frame, from decsim's
+  timing model of each decoder. One line per configuration, each in % of
+  its windows, 8 bins per decade, both axes log.
+- What we see: union-find alone has a median of 1.4 to 3.4 µs. Switching
+  has two groups: kept windows near union-find, and escalated windows
+  with Relay-BP-5 at milliseconds to seconds. Relay-BP-5 alone has a
+  median of 5.4 ms (d = 5, 0.002) to 415 ms (d = 11, 0.005), and
+  Tesseract alone 31 ms to 4.9 s. A decoder that falls behind waits
+  longer the longer the shot runs, so these times hold for 100-round
+  shots.
+
+### 16 How long does each decoder take on a window, against the time the QPU takes to measure one?
+
+- How to read: the decoder's own time on one window (the algorithm
+  stage, no waiting), median with a bar up to the 99th percentile,
+  against distance on log axes. One panel per physical error rate.
+  Dashed line: the window period, the time the QPU takes to measure one
+  window's new rounds (d rounds of 1 µs). A decoder above the line falls
+  further behind with every window.
+- What we see: union-find is below the line everywhere; its 99th
+  percentile is at most 0.47 of the window period. Relay-BP-5's median
+  is 73 (d = 5, 0.002) to 3,115 (d = 11, 0.005) window periods, and
+  Tesseract's is 520 to 52,734.
+
 ## Open
 
-- The common gap value in figure 08: not studied beyond its position.
+- The common gap value in figure 08: the same at every distance; not
+  explained.
 - Why switching's share in figure 13 is highest at 0.005: not studied.

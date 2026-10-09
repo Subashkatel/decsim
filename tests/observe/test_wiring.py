@@ -40,6 +40,7 @@ EVERY_KNOB = {
     "record_switching_windows": True,
     "backlog_trace": True,
     "data_movement": True,
+    "record_window_outcomes": True,
     "trace": "chrome",
 }
 
@@ -218,10 +219,12 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     assert asked.observation.decode_records is not None
     assert asked.observation.decode_backlog is not None
     assert asked.observation.decoder_utilization is not None
+    assert asked.observation.window_outcomes is not None
     assert silent.observation.trace_writer is None
     assert silent.observation.data_movement is None
     assert silent.observation.decode_records is None
     assert silent.observation.decode_backlog is None
+    assert silent.observation.window_outcomes is None
     assert silent.observation.decoder_utilization is not None
 
 
@@ -395,6 +398,7 @@ def _bare_observation(
         round_events=rounds,
         referee_audit=audit,
         sampled_shots=shots,
+        window_outcomes=None,
         confidence=None,
     )
 

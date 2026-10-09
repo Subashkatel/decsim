@@ -341,6 +341,24 @@ def write_run_file(directory: pathlib.Path, **arguments) -> pathlib.Path:
     return path
 
 
+def write_packed_run_file(
+    directory: pathlib.Path, seconds_per_shot: float, **arguments
+) -> pathlib.Path:
+    """write_run_file's file, and the seconds file --slurm sizes jobs by.
+
+    Every task is estimated at seconds_per_shot core seconds a shot.
+    """
+    path = write_run_file(directory, **arguments)
+    study = sweep(**arguments)
+    lines = ["task,core_seconds_per_shot"]
+    for task in study.tasks:
+        lines.append(f"{task.name},{seconds_per_shot}")
+    seconds_path = pathlib.Path(directory) / "seconds_per_shot.csv"
+    seconds_text = "\n".join(lines) + "\n"
+    seconds_path.write_text(seconds_text)
+    return path
+
+
 def first_task(**arguments) -> collect.Task:
     """sweep(**arguments)'s first task."""
     study = sweep(**arguments)

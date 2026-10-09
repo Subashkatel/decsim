@@ -127,6 +127,31 @@ def test_streaming_formation_equals_stims_converter_on_sampled_shots():
     assert decsim_events.any()
 
 
+def test_a_row_formed_backwards_gives_stims_converter_the_drawn_events():
+    """Events and flips drawn from the error model come back from the row."""
+    circuit = surface_code_circuit(4)
+    table = detector_formation.build_formation_table(circuit, 4)
+    model = circuit.detector_error_model()
+    sampler = model.compile_sampler(seed=7)
+    drawn_events, drawn_flips, _ = sampler.sample(16)
+    rows = [
+        detector_formation.measurements_forming(table, events, flips)
+        for events, flips in zip(drawn_events, drawn_flips, strict=True)
+    ]
+    measurements = numpy.array(rows, dtype=bool)
+    stim_events, stim_observables = formed_by_stim(circuit, measurements)
+    assert numpy.array_equal(stim_events, drawn_events)
+    assert numpy.array_equal(stim_observables, drawn_flips)
+    assert drawn_events.any()
+
+
+def test_events_no_row_forms_are_refused():
+    circuit = stim.Circuit("R 0\nM 0\nDETECTOR rec[-1]\nDETECTOR rec[-1]")
+    table = detector_formation.build_formation_table(circuit, 1)
+    with pytest.raises(RuntimeError, match="formed by no measurement row"):
+        detector_formation.measurements_forming(table, (1, 0), ())
+
+
 def test_sparse_observable_ids_equal_stims_converter_on_sampled_shots():
     """A circuit naming observables 0 and 3 declares four; 1 and 2 are 0.
 

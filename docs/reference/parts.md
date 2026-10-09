@@ -684,7 +684,9 @@ The interval cuts the latency samples and what is made from them: the means and 
 
 reaction_deadline_microseconds is a budget on each recorded window's reaction time (buffer0_ready_to_frame); None, the default, sets none. A shot then counts the windows over it and the shot-clock time the first of them arrived, which says when an overloaded tier, whose wait grows without bound, first breaks the budget over the run length chosen.
 
-The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, the interval the latency columns, the deadline the deadline columns.
+record_window_outcomes keeps each window's committed answer, and its true label when the source keeps its errors (ErrorModelStimDevice), for window_outcomes.csv (observe/window_outcomes.py).
+
+The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, record_window_outcomes the window_outcomes rows, the interval the latency columns, the deadline the deadline columns.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -695,6 +697,7 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `trace` | `str` | `'off'` |
 | `trace_shots` | `tuple` | `(0,)` |
 | `data_movement` | `bool` | `False` |
+| `record_window_outcomes` | `bool` | `False` |
 | `first_recorded_round` | `int` | `1` |
 | `last_recorded_round` | `Optional[int]` | `None` |
 | `reaction_deadline_microseconds` | `Optional[float]` | `None` |
@@ -817,6 +820,10 @@ burst_onset_round is the first one-based round with extra noise. It climbs to bu
 | `burst_center` | `Optional[tuple]` | `None` |
 | `burst_error_probability` | `float` | `0.0` |
 | `burst_channels` | `tuple` | `BURST_CHANNELS` |
+
+### `ErrorModelStimDevice.Settings`
+
+`decsim/qpu/stim_device.py`. The error model row has no keys: the circuit states its model.
 
 ### `StreamingStimDevice.Settings`
 

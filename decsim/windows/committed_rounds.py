@@ -85,10 +85,30 @@ class LogicalLedger:
     ) -> Optional[tuple]:
         """The XOR of the contributions covering [commit_lo, commit_hi].
 
+        None when any covering contribution is timing-only.
+        """
+        contributions = self.contributions_for_interval(
+            stream_id, commit_lo, commit_hi, boundary_policy=boundary_policy
+        )
+        for contribution in contributions:
+            if contribution.logical_observables is None:
+                return None
+        return _xor_of(contributions)
+
+    def contributions_for_interval(
+        self,
+        stream_id: Any,  # an opaque identity
+        commit_lo: int,
+        commit_hi: int,
+        *,
+        boundary_policy: str,
+    ) -> list:
+        """The contributions covering [commit_lo, commit_hi], in extent order.
+
         The interval must be tiled without gap or overlap. Under strict,
         no contribution may cross the interval's edge; under
         stream_segment, only a functional (observable-bearing) one may
-        not. None when any covering contribution is timing-only.
+        not.
         """
         contributions = self._covering(stream_id, commit_lo, commit_hi)
         _check_tiling(contributions, stream_id, commit_lo, commit_hi)
@@ -96,10 +116,7 @@ class LogicalLedger:
             _check_inside_interval(
                 contribution, commit_lo, commit_hi, boundary_policy
             )
-        for contribution in contributions:
-            if contribution.logical_observables is None:
-                return None
-        return _xor_of(contributions)
+        return contributions
 
     def replace_prediction(
         self, owner_key: tuple, logical_observables: tuple

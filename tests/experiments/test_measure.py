@@ -32,6 +32,7 @@ import ast
 import collections
 import dataclasses
 import functools
+import json
 import math
 import pathlib
 import statistics
@@ -3000,3 +3001,42 @@ def _gap_of(result):
     if result is None or result.soft_output is None:
         return None
     return result.soft_output.gap
+
+
+def _parity_of_cells(cells: list) -> int:
+    """The XOR of one-observable bit cells, each json text like "1"."""
+    bits = [json.loads(cell) for cell in cells]
+    return bits.count("1") % 2
+
+
+def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
+    """The labels add up to the truth (2509.03815 Eq. (2), lines 576-580).
+
+    Every window escalates into a double window, so the rows hold strong
+    windows labelled over the rounds they absorbed, each beside the weak
+    answer and label of its own commit rounds. The outcomes knob alone
+    carries each window's detection events, and the rows stay out of
+    shots.csv, in their own file.
+    """
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    settings = switching_settings(
+        1000000.0,
+        observation=("record_window_outcomes",),
+        strong_window=double_window,
+    )
+    source = stim_device.ErrorModelStimDevice.Settings()
+    qpu = dataclasses.replace(settings.qpu, source=source)
+    drawn = dataclasses.replace(settings, qpu=qpu)
+    task = task_at(drawn, SWITCHING_ERROR_PROBABILITY)
+    measurement = measured(task, seed=3)
+    rows = measurement.window_outcomes
+    answer_parity = _parity_of_cells([row.answer for row in rows])
+    label_parity = _parity_of_cells([row.label for row in rows])
+    weak_labels = [json.loads(row.weak_label) for row in rows]
+    kinds = {row.ownership_kind for row in rows}
+    (shot_row,) = report.shot_rows([measurement])
+    assert measurement.logical_failure == (answer_parity != label_parity)
+    assert kinds == {"strong_window"}
+    assert "1" in weak_labels
+    assert all(row.detection_events is not None for row in rows)
+    assert "window_outcomes" not in shot_row

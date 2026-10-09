@@ -21,6 +21,7 @@ import stim
 import decsim.config as config
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.error_model_sampler as error_model_sampler
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.ports as ports
@@ -56,7 +57,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     circuit does not follow Stim's generator layout. A non-empty
     terminal_detector_ids entry says the final data readout arrives as its
     own fragment (finalize_stream_round). shot_sampled carries the
-    whole-circuit detection events a reference decode reads.
+    whole-circuit detection events a reference decode reads; this source
+    keeps no fired errors, so errors_sampled is silent.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -75,6 +77,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
     operation_circuit_scope = "per_operation"
     emits_bit_values = True
+    errors_sampled = trace_source.SILENT
 
     def __init__(
         self,
@@ -401,10 +404,14 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def _sampler_for(
         self, key, circuit: stim.Circuit
     ) -> stim.CompiledMeasurementSampler:
-        if self._seed is None:
-            return circuit.compile_sampler()
-        sample_seed = seeding.substream_seed(self._seed, (key,))
+        sample_seed = self._sample_seed(key)
         return circuit.compile_sampler(seed=sample_seed)
+
+    def _sample_seed(self, key) -> Optional[int]:
+        """The stream's substream of the root seed; None draws unseeded."""
+        if self._seed is None:
+            return None
+        return seeding.substream_seed(self._seed, (key,))
 
     def _readouts(self, key, operation, round_index, bits):
         patches = program_records.patches_of(operation)
@@ -428,9 +435,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             detector_rounds=detector_rounds,
         )
         sampled_circuit = self._sampled_circuit(operation.circuit, table)
-        sampler = self._sampler_for(key, sampled_circuit)
-        self._mark_stochastic_use()
-        measurement_row = self._measurement_row(sampler)
+        measurement_row = self._draw_measurement_row(
+            key, operation, sampled_circuit, table
+        )
         packets = detector_formation.split_measurements_into_packets(
             table, measurement_row
         )
@@ -451,6 +458,20 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """The circuit the shot is drawn from: the operation's own."""
         del table
         return circuit
+
+    def _draw_measurement_row(
+        self,
+        key,
+        operation: program_records.Operation,
+        circuit: stim.Circuit,
+        table: formation_records.FormationTable,
+    ) -> tuple[int, ...]:
+        """One shot's raw measurement bits, drawn from the circuit."""
+        del operation
+        del table
+        sampler = self._sampler_for(key, circuit)
+        self._mark_stochastic_use()
+        return self._measurement_row(sampler)
 
     def _measurement_row(
         self, sampler: stim.CompiledMeasurementSampler
@@ -669,6 +690,70 @@ class BurstStimDevice(StimDevice):
         if self.burst.burst_error_probability == 0:
             return circuit
         return burst_circuit(circuit, table, self.burst)
+
+
+class ErrorModelStimDevice(StimDevice):
+    """Draws each shot from the detector error model, keeping its errors.
+
+    The errors that fired are the truth a window's label is read from
+    (Zhang et al. 2509.03815 lines 497-508), which a measurement sample
+    cannot say. The raw row the QPU emits is the one whose formation
+    gives exactly the drawn events and flips
+    (detector_formation.measurements_forming), so every part downstream
+    runs as on a measurement sample. errors_sampled(operation, errors)
+    fires once per shot with the FiredError records.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The error model row has no keys: the circuit states its model."""
+
+        # the word the reports name this row by
+        name = "error_model_stim"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "ErrorModelStimDevice":
+            """A fresh source over the workload's circuits, as keywords."""
+            del code
+            return ErrorModelStimDevice(**circuit_arguments)
+
+    def __init__(
+        self,
+        seed: Optional[numbers.Integral] = None,
+        detector_rounds: Optional[dict] = None,
+        terminal_detector_ids: Optional[dict] = None,
+        measurement_rounds: Optional[dict] = None,
+    ) -> None:
+        StimDevice.__init__(
+            self,
+            seed=seed,
+            detector_rounds=detector_rounds,
+            terminal_detector_ids=terminal_detector_ids,
+            measurement_rounds=measurement_rounds,
+        )
+        self.errors_sampled = trace_source.TraceSource()
+
+    def _draw_measurement_row(
+        self,
+        key,
+        operation: program_records.Operation,
+        circuit: stim.Circuit,
+        table: formation_records.FormationTable,
+    ) -> tuple[int, ...]:
+        """The drawn shot's raw row; its fired errors are fired too."""
+        sampler = error_model_sampler.sampler_of(circuit)
+        sample_seed = self._sample_seed(key)
+        self._mark_stochastic_use()
+        detection_events, observable_flips, error_indices = sampler.draw(
+            sample_seed
+        )
+        detector_rounds = table.detector_rounds()
+        fired_errors = sampler.fired_errors(error_indices, detector_rounds)
+        self.errors_sampled.fire(operation, fired_errors)
+        return detector_formation.measurements_forming(
+            table, detection_events, observable_flips
+        )
 
 
 def validated_seed(seed: Optional[numbers.Integral]) -> Optional[int]:

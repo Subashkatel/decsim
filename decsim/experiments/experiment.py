@@ -70,10 +70,10 @@ class Experiment:
         names = [task.name for task in self.tasks]
         _refuse_an_unknown_task(self.name, name, names)
 
-    def only(self, name: str) -> "Experiment":
-        """The experiment cut to its one task of this name."""
-        task = self.task_named(name)
-        return Experiment(self.name, [task], self.collection)
+    def only(self, *names: str) -> "Experiment":
+        """The experiment cut to its tasks of these names, in this order."""
+        tasks = [self.task_named(name) for name in names]
+        return Experiment(self.name, tasks, self.collection)
 
     def with_max_shots(self, shot_count: int) -> "Experiment":
         """Every task stopped at its first shot_count shots.

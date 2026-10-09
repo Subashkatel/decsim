@@ -38,6 +38,7 @@ import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
+import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
 
 
@@ -77,6 +78,11 @@ def observe(
     stages = _connect_stage_records(decoders)
     referee_audit = _connect_referee_audit(decoders)
     sampled_shots = _connect_sampled_shots(qpu.syndrome_source)
+    window_outcomes = _window_outcomes(observation)
+    if window_outcomes is not None:
+        _connect_window_outcomes(
+            window_outcomes, qpu.syndrome_source, window_manager
+        )
     decode_records = _decode_records(observation)
     _connect_decode_records(decoder_managers, decode_records)
     confidence = _connect_confidence(switching, decoder_managers)
@@ -111,6 +117,7 @@ def observe(
         stages=stages,
         referee_audit=referee_audit,
         sampled_shots=sampled_shots,
+        window_outcomes=window_outcomes,
         decode_backlog=decode_backlog,
         decoder_utilization=decoder_utilization,
         round_events=round_events,
@@ -406,8 +413,16 @@ def _connect_window_trace(
 def _decode_records(
     observation: observe_settings.ObservationSettings,
 ) -> Optional[decode_records_module.DecodeRecordLedger]:
-    """The switching study's record ledger, only when the section asks."""
-    if not observation.record_switching_windows:
+    """The decode record ledger, when the records that read it ask.
+
+    The switching records and the window outcomes both read each
+    decode's syndrome weight off it.
+    """
+    is_asked = (
+        observation.record_switching_windows
+        or observation.record_window_outcomes
+    )
+    if not is_asked:
         return None
     return decode_records_module.DecodeRecordLedger()
 
@@ -510,6 +525,28 @@ def _connect_sampled_shots(
     shots = sampled_shots_module.SampledShots()
     syndrome_source.shot_sampled.connect(shots.shot_sampled)
     return shots
+
+
+def _window_outcomes(
+    observation: observe_settings.ObservationSettings,
+) -> Optional[window_outcomes_module.WindowOutcomes]:
+    """The windows' answers and labels, only when the section asks."""
+    if not observation.record_window_outcomes:
+        return None
+    return window_outcomes_module.WindowOutcomes()
+
+
+def _connect_window_outcomes(
+    window_outcomes: window_outcomes_module.WindowOutcomes,
+    syndrome_source,
+    window_manager,
+) -> None:
+    """The source's fired errors and every delivered result's windows."""
+    syndrome_source.errors_sampled.connect(window_outcomes.errors_sampled)
+    results = window_manager.results
+    results.trace.contributions_delivered.connect(
+        window_outcomes.contributions_delivered
+    )
 
 
 def _frame_corrections(

@@ -13,7 +13,7 @@ import json
 import math
 import pathlib
 import statistics
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import decsim.config as config_module
 import decsim.decoders.decode_queue as decode_queue
@@ -24,6 +24,7 @@ import decsim.experiments.run_folder as run_folder
 import decsim.observe.observation as observation_module
 import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records
+import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
@@ -176,6 +177,38 @@ BOUNDARY_HOP = "boundary"
 
 
 @dataclasses.dataclass(frozen=True)
+class WindowOutcomeRow:
+    """One window of one shot: its answer, its label, how it was decided.
+
+    A row is a contribution of the logical ledger (observe/
+    window_outcomes.py): an ordinary window, or a strong window over the
+    windows it absorbed. tier and decode_status are its final decode's;
+    detection_events are the set bits that decode read. gap_nats,
+    is_escalated and weak_answer are the verdict's on a switching run,
+    and weak_label is the label of the escalated window's own commit
+    rounds, the extent its weak answer predicted. Answers and labels are
+    json text of Stim's 01 format, as predictions is, and is_right says
+    whether the answer equals the label.
+    """
+
+    operation_id: Any  # an opaque identity
+    window_index: int
+    ownership_kind: str
+    commit_lo: int
+    commit_hi: int
+    tier: Optional[str]
+    decode_status: Optional[str]
+    detection_events: Optional[int]
+    answer: Optional[str]
+    label: Optional[str]
+    is_right: Optional[bool]
+    gap_nats: Optional[float]
+    is_escalated: Optional[bool]
+    weak_answer: Optional[str]
+    weak_label: Optional[str]
+
+
+@dataclasses.dataclass(frozen=True)
 class ShotConfidence:
     """A shot's windows' confidence gaps, when a signal decided escalation.
 
@@ -323,6 +356,9 @@ class ShotMeasurement:
     # every operation's predicted observables, so two decoders' shots of
     # one seed compare answer by answer and not only failure by failure
     predictions: str
+    # each window's answer and label, None unless
+    # observation.record_window_outcomes; window_outcomes.csv holds it
+    window_outcomes: Optional[tuple]
 
 
 def measure_shot(
@@ -1070,6 +1106,7 @@ def _measurement(
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
     confidence = _shot_confidence(settings, observation, seed, record_options)
+    window_outcomes = _shot_window_outcomes(observation, owners)
     return ShotMeasurement(
         task_id=task_id,
         algorithm=algorithm,
@@ -1122,6 +1159,7 @@ def _measurement(
         sample_digest=sample_digest,
         confidence=confidence,
         predictions=predictions,
+        window_outcomes=window_outcomes,
     )
 
 
@@ -1140,6 +1178,132 @@ def _shot_confidence(
     signal = settings.switching.confidence.name
     sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
+
+
+def _shot_window_outcomes(
+    observation: observation_module.Observation, owners: tuple
+) -> Optional[tuple]:
+    """Every delivered window's row, None when the run kept none.
+
+    Where labels exist they add up to each owner's sampled truth
+    (2509.03815 Eq. (2)): the errors the source drew, owned window by
+    window, against the row it formed.
+    """
+    outcomes = observation.window_outcomes
+    if outcomes is None:
+        return None
+    weights = _syndrome_weight_by_request(observation)
+    rows = []
+    for owner in owners:
+        delivered = outcomes.outcomes_by_operation.get(owner.operation_id, ())
+        _check_labels_add_up(delivered, owner.observable_truth)
+        for outcome in delivered:
+            row = _window_outcome_row(observation, weights, outcome)
+            rows.append(row)
+    return tuple(rows)
+
+
+def _syndrome_weight_by_request(
+    observation: observation_module.Observation,
+) -> dict:
+    """Each ended request's set input bits, by its request key."""
+    records = observation.decode_records
+    if records is None:
+        return {}
+    return {
+        record.request_key: record.syndrome_weight
+        for record in records.requests
+    }
+
+
+def _check_labels_add_up(delivered: tuple, observable_truth: tuple) -> None:
+    labels = [outcome.label for outcome in delivered]
+    if not labels or None in labels:
+        return
+    total = [0] * len(observable_truth)
+    for label in labels:
+        for observable_index, bit in enumerate(label):
+            total[observable_index] ^= bit
+    assert tuple(total) == tuple(observable_truth), (
+        "the window labels do not add up to the sampled truth"
+    )
+
+
+def _window_outcome_row(
+    observation: observation_module.Observation,
+    weights: dict,
+    outcome: window_outcomes_module.WindowOutcome,
+) -> WindowOutcomeRow:
+    """One outcome joined with its window's decode and its verdict."""
+    operation_id, window_index = outcome.owner_key
+    window = observation.windows.windows[outcome.owner_key]
+    request_key = window.published_request_key
+    tier = None
+    if request_key is not None:
+        tier = request_key.tier.value
+    verdict = _verdict_of(observation, window)
+    detection_events = weights.get(request_key)
+    is_right = None
+    if outcome.label is not None:
+        is_right = outcome.answer == outcome.label
+    answer = _bit_cell(outcome.answer)
+    label = _bit_cell(outcome.label)
+    weak_answer = _bit_cell(verdict.weak_answer)
+    weak_label = _bit_cell(verdict.weak_label)
+    return WindowOutcomeRow(
+        operation_id=operation_id,
+        window_index=window_index,
+        ownership_kind=outcome.ownership_kind,
+        commit_lo=outcome.commit_lo,
+        commit_hi=outcome.commit_hi,
+        tier=tier,
+        decode_status=window.decode_status,
+        detection_events=detection_events,
+        answer=answer,
+        label=label,
+        is_right=is_right,
+        gap_nats=verdict.gap_nats,
+        is_escalated=verdict.is_escalated,
+        weak_answer=weak_answer,
+        weak_label=weak_label,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _Verdict:
+    """What the verdict read and decided for one window; None off switching."""
+
+    gap_nats: Optional[float] = None
+    is_escalated: Optional[bool] = None
+    weak_answer: Optional[tuple] = None
+    weak_label: Optional[tuple] = None
+
+
+def _verdict_of(
+    observation: observation_module.Observation,
+    window: window_records.Window,
+) -> _Verdict:
+    """The confidence ledger's reading of the window, labelled on its rounds."""
+    ledger = observation.confidence
+    if ledger is None:
+        return _Verdict()
+    weak_result = ledger.verdict_results.get(window.key)
+    if weak_result is None:
+        return _Verdict()
+    gap_nats = None
+    if weak_result.soft_output is not None:
+        gap_nats = weak_result.soft_output.gap
+    is_escalated = window.key in ledger.escalated_keys
+    weak_answer = weak_result.logical_observables
+    weak_label = None
+    if is_escalated and weak_answer is not None:
+        weak_label = observation.window_outcomes.label_of(
+            window.operation_id,
+            window.commit_lo,
+            window.commit_hi,
+            len(weak_answer),
+        )
+    return _Verdict(gap_nats, is_escalated, weak_answer, weak_label)
 
 
 def _window_statuses(observation: observation_module.Observation) -> dict:
@@ -1382,6 +1546,14 @@ def _bit_text(bits: Optional[tuple]) -> Optional[str]:
         return None
     characters = [str(int(bit)) for bit in bits]
     return "".join(characters)
+
+
+def _bit_cell(bits: Optional[tuple]) -> Optional[str]:
+    """Bits as a json string cell, so a reader that types numbers keeps 01."""
+    if bits is None:
+        return None
+    text = _bit_text(bits)
+    return json.dumps(text)
 
 
 def _throughput_per_microsecond(

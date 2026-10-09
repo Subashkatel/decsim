@@ -55,12 +55,18 @@ class ObservationSettings:
     whose wait grows without bound, first breaks the budget over the
     run length chosen.
 
+    record_window_outcomes keeps each window's committed answer, and
+    its true label when the source keeps its errors
+    (ErrorModelStimDevice), for window_outcomes.csv
+    (observe/window_outcomes.py).
+
     The log and the trace are labels (compare=False) and no part of a
     task's id, as sinter keeps output options out of a task's strong id
     (sinter/_data/_task.py:167-204): the writers schedule nothing. The
     others stay in the id because they add or shape a shot's columns:
     record_switching_windows and backlog_trace the wait and backlog
-    columns, data_movement the shot_data_movement rows, the interval the
+    columns, data_movement the shot_data_movement rows,
+    record_window_outcomes the window_outcomes rows, the interval the
     latency columns, the deadline the deadline columns.
     """
 
@@ -71,6 +77,7 @@ class ObservationSettings:
     trace: str = dataclasses.field(compare=False, default="off")
     trace_shots: tuple = dataclasses.field(compare=False, default=(0,))
     data_movement: bool = False
+    record_window_outcomes: bool = False
     first_recorded_round: int = 1
     last_recorded_round: Optional[int] = None
     reaction_deadline_microseconds: Optional[float] = None
@@ -89,6 +96,9 @@ class ObservationSettings:
         )
         config.check_boolean("observation.backlog_trace", self.backlog_trace)
         config.check_boolean("observation.data_movement", self.data_movement)
+        config.check_boolean(
+            "observation.record_window_outcomes", self.record_window_outcomes
+        )
         config.check_whole_count(
             "observation.first_recorded_round",
             self.first_recorded_round,

@@ -58,6 +58,7 @@ SOURCE_ROWS = {
     "syndrome_bits": syndrome_devices.SyndromeBitDevice,
     "recorded_stim": stim_device.RecordedStimDevice,
     "streaming_stim": streaming_stim_device.StreamingStimDevice,
+    "error_model_stim": stim_device.ErrorModelStimDevice,
 }
 # the decoders decsim ships whose record has defaults of its own;
 # union_find names its timing, so its record has none

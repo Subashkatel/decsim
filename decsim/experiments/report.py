@@ -47,6 +47,7 @@ NON_COLUMN_FIELDS = (
     "data_movement",
     "window_statuses",
     "confidence",
+    "window_outcomes",
 )
 # the counters a hold books for the whole shot: a reference is a token
 # on a store's slot and belongs to no path, so these repeat on every row
@@ -136,6 +137,7 @@ FOLDED_FILES = (
     "shot_data_movement.csv",
     "latency_samples.csv",
     "window_confidence.csv",
+    "window_outcomes.csv",
 )
 # the confidence histogram's bin, a tenth of a decibel: Gidney et al.
 # bin gaps to the nearest whole decibel (2312.04522 main.tex:459, 505),
@@ -164,6 +166,7 @@ class RunRecord:
     latency_samples: list
     window_confidence: list
     confidence_histogram: list
+    window_outcomes: list
 
 
 def percentile_of_counts(multiset: dict, fraction: float) -> float:
@@ -402,6 +405,26 @@ def window_confidence_rows(measurements: list) -> list:
     return rows
 
 
+def window_outcome_rows(measurements: list) -> list:
+    """One row per delivered window of each shot: answer beside label.
+
+    A run with observation.record_window_outcomes off writes no row.
+    """
+    rows = []
+    for measurement in measurements:
+        outcomes = measurement.window_outcomes
+        if outcomes is None:
+            continue
+        task_key = measured_task_key(measurement)
+        for outcome in outcomes:
+            row = task_columns(task_key)
+            row["seed"] = measurement.seed
+            fields = dataclasses.asdict(outcome)
+            row.update(fields)
+            rows.append(row)
+    return rows
+
+
 def confidence_histogram_rows(measurements: list) -> list:
     """Every scored shot's window gaps and smallest gap, per 0.1 dB bin.
 
@@ -454,13 +477,21 @@ def record_of(measurements: list) -> RunRecord:
     latency = latency_sample_rows(measurements)
     confidence = window_confidence_rows(measurements)
     histogram = confidence_histogram_rows(measurements)
+    outcomes = window_outcome_rows(measurements)
     return RunRecord(
-        shots, links, movement, samples, latency, confidence, histogram
+        shots,
+        links,
+        movement,
+        samples,
+        latency,
+        confidence,
+        histogram,
+        outcomes,
     )
 
 
 def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
-    """The record's seven files; one with no rows is not written."""
+    """The record's eight files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
     _write_rows(record.shots, shots_path, swept)
     links_path = report_dir / "shot_links.csv"
@@ -475,6 +506,8 @@ def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
     _write_rows(record.window_confidence, confidence_path, swept)
     histogram_path = report_dir / "confidence_histogram.csv"
     _write_rows(record.confidence_histogram, histogram_path, swept)
+    outcomes_path = report_dir / "window_outcomes.csv"
+    _write_rows(record.window_outcomes, outcomes_path, swept)
 
 
 def read_rows(path: Path) -> list:
@@ -566,6 +599,7 @@ def _fold_the_folders(
     _fold_shot_movement(folders, order, out_dir, swept)
     _fold_latency_samples(folders, order, out_dir, swept)
     _fold_window_confidence(folders, order, out_dir, swept)
+    _fold_window_outcomes(folders, order, out_dir, swept)
     histogram = _folded_confidence_histogram(folders)
     histogram_rows = _confidence_histogram_rows_of(histogram, list(shot_totals))
     histogram_path = out_dir / "confidence_histogram.csv"
@@ -619,6 +653,14 @@ def _fold_window_confidence(
 ) -> None:
     """Every folder's window_confidence.csv into one; no summary reads it."""
     name = "window_confidence.csv"
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
+
+
+def _fold_window_outcomes(
+    folders: list, order, out_dir: Path, swept: dict
+) -> None:
+    """Every folder's window_outcomes.csv into one; no summary reads it."""
+    name = "window_outcomes.csv"
     _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
 
 

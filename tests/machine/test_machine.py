@@ -11,6 +11,10 @@ Strong-primary stream checks compare readout with Stim and terminal
 prediction with PyMatching on the same circuit. They pin the direct strong
 route, bounded storage lifetime and configured service/link timings.
 
+Experiment 1's union-find windows are checked window by window against
+a sliding-window decode written outside decsim's window code
+(tests/machine/independent_window_decoding.py).
+
 The laws at the end of the file are the ones only the whole machine
 holds: they run a declared card (tests/declared_run.py, whose every
 latency is a number the test states) and read what the composition of
@@ -20,6 +24,7 @@ the controller, the stores, the windows and the frame produced.
 import dataclasses
 import functools
 import importlib.util
+import pathlib
 from typing import Any
 
 import ldpc
@@ -96,6 +101,7 @@ import tests.declared_run as declared_run
 import tests.decoders.test_union_find_cycle_count as cycle_count_tests
 import tests.escalation.test_strong_window_shapes as shape_tests
 import tests.machine.decoder_arrangements as decoder_arrangements
+import tests.machine.independent_window_decoding as independent_window_decoding
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -3022,6 +3028,113 @@ def test_a_matching_arrangement_predicts_what_qldpcs_sliding_windows_predict(
 
     assert len(predictions) == ARRANGEMENT_SHOT_COUNT
     assert predictions == reference_predictions
+
+
+THIS_FILE = pathlib.Path(__file__)
+EXPERIMENT_ONE_RUN_FILE = (
+    THIS_FILE.parents[2] / "experiments" / "switching_baseline" / "run.py"
+)
+UNION_FIND_DISTANCE = 5
+# Experiment 1's highest rate, where most windows hold defects to match
+UNION_FIND_ERROR_RATE = 0.005
+UNION_FIND_ROUNDS = 20  # four windows of d rounds
+UNION_FIND_SHOT_COUNT = 100
+
+
+@functools.cache
+def experiment_one_run_file():
+    """experiments/switching_baseline/run.py, for its machine functions."""
+    specification = importlib.util.spec_from_file_location(
+        "experiment_one_run_file", EXPERIMENT_ONE_RUN_FILE
+    )
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def experiment_one_weak_alone() -> machine_settings.MachineSettings:
+    """Experiment 1's weak-alone machine on shots of four windows."""
+    run_file = experiment_one_run_file()
+    machine = run_file.weak_alone(UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE)
+    workload = machine_settings.memory_workload(
+        UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE, UNION_FIND_ROUNDS
+    )
+    return dataclasses.replace(machine, workload=workload)
+
+
+def note_weak_commit(commits, job, result, outcome, ended_ticks) -> None:
+    """One window's commit, in the referee's terms."""
+    del outcome, ended_ticks
+    residual = result.boundary_data
+    commit = independent_window_decoding.Commit(
+        job.window_id,
+        independent_window_decoding.WEAK,
+        residual.detector_ids,
+        result.logical_observables,
+    )
+    commits.append(commit)
+
+
+def weak_alone_shots(settings, seeds) -> tuple:
+    """Each seed's detection events, window commits and prediction."""
+    models = built_window_models.BuiltWindowModels()
+    events = []
+    commits = []
+    predictions = []
+    for seed in seeds:
+        machine = machine_module.Machine.build(settings, seed, models)
+        shot_commits = []
+        listener = functools.partial(note_weak_commit, shot_commits)
+        outcomes = machine.decoders.decoder_manager.outcomes
+        outcomes.trace.request_ended.connect(listener)
+        result = machine.run()
+        sampled = machine.observation.sampled_shots.shots_by_operation[1]
+        events.append(sampled.detection_events)
+        commits.append(shot_commits)
+        operation_result = result.operation_results[0]
+        predictions.append(operation_result.logical_observables)
+    return events, commits, predictions
+
+
+def test_union_find_windows_commit_what_an_independent_sliding_decode_does():
+    """Experiment 1's weak-alone windows beside an outside window driver.
+
+    The machine is Experiment 1's weak-alone card: union-find at its
+    weight_step of 0.5 on sliding windows of commit d and buffer d with
+    the lookahead tail, here at d = 5 and p = 0.005 on shots of four
+    windows. The referee (tests/machine/independent_window_decoding.py)
+    builds the circuit's windows from Stim's model by the rules of
+    Skoric 2209.08552, qLDPC's SequentialWindowDecoder and cudaqx's
+    sliding window, and decodes each with the same union-find row. Every
+    window of 100 shots commits the same detectors and observables, and
+    every shot predicts the same bits.
+    """
+    settings = experiment_one_weak_alone()
+    seeds = range(UNION_FIND_SHOT_COUNT)
+    events, commits, predictions = weak_alone_shots(settings, seeds)
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        rounds=UNION_FIND_ROUNDS,
+        distance=UNION_FIND_DISTANCE,
+        after_clifford_depolarization=UNION_FIND_ERROR_RATE,
+        before_round_data_depolarization=UNION_FIND_ERROR_RATE,
+        before_measure_flip_probability=UNION_FIND_ERROR_RATE,
+        after_reset_flip_probability=UNION_FIND_ERROR_RATE,
+    )
+    weak_decoder = settings.weak_decoder.algorithm.build()
+    referee = independent_window_decoding.SlidingWindowReferee(
+        circuit, UNION_FIND_ROUNDS, UNION_FIND_DISTANCE, weak_decoder
+    )
+
+    referee_commits = [referee.weak_commits(shot) for shot in events]
+
+    referee_predictions = [
+        independent_window_decoding.prediction(shot_commits)
+        for shot_commits in referee_commits
+    ]
+    assert len(commits) == UNION_FIND_SHOT_COUNT
+    assert referee_commits == commits
+    assert referee_predictions == predictions
 
 
 def test_a_sampled_stream_segment_has_no_independent_accuracy_result() -> None:

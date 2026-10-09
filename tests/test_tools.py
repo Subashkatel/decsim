@@ -13,7 +13,6 @@ import importlib.util
 import os
 import pathlib
 import re
-import shlex
 import subprocess
 import sys
 
@@ -574,7 +573,7 @@ def _decsim(tmp_path, arguments: list, environment):
     )
 
 
-# The weak base at two distances, four shots each.
+# The weak base at two distances, four shots each, a second a shot.
 TWO_TASK_RUN_FILE = """
 import decsim
 import decsim.settings as machine_settings
@@ -584,7 +583,7 @@ for distance in (3, 5):
     machine = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
     task = decsim.Task(f"d{distance}", machine, {"qpu.distance": distance})
     tasks.append(task)
-collection = decsim.CollectionSettings(max_shots=4)
+collection = decsim.CollectionSettings(max_shots=4, core_seconds_per_shot=1.0)
 experiment = decsim.Experiment("two_tasks", tasks, collection)
 """
 
@@ -606,63 +605,6 @@ def _slurm_arguments(config_path, results_dir, *extra) -> list:
         str(results_dir),
         *extra,
     ]
-
-
-def test_a_slurm_dry_run_writes_one_array_and_one_fold(tmp_path):
-    """Job i of the array runs task i of the run file, then a fold.
-
-    A dry run records the tasks and writes both files, and submits
-    nothing. The folder's path holds a space, and each line still reads
-    back as the arguments it was written from, the array index left for
-    the shell to expand.
-    """
-    config_path = _two_task_run_file(tmp_path)
-    results_dir = tmp_path / "run folder"
-    environment = _slurm_environment(tmp_path, "clean")
-    arguments = _slurm_arguments(config_path, results_dir, "--dry-run")
-
-    completed = _decsim(tmp_path, arguments, environment)
-
-    run_script = results_dir / "run.sbatch"
-    run_text = run_script.read_text()
-    run_lines = run_text.splitlines()
-    fold_script = results_dir / "fold.sbatch"
-    fold_text = fold_script.read_text()
-    fold_lines = fold_text.splitlines()
-    decsim_run = [sys.executable, "-m", "decsim", "run"]
-    run_path = config_path.resolve()
-    assert completed.returncode == 0, completed.stderr
-    assert run_lines[1] == (
-        "#SBATCH --array=0-1 --cpus-per-task=4 --mem=16384M --time=24:00:00"
-    )
-    assert shlex.split(run_lines[2]) == [
-        "#SBATCH",
-        f"--output={results_dir}/logs/%a.log",
-    ]
-    assert shlex.split(run_lines[3]) == [
-        *decsim_run,
-        str(run_path),
-        "--out",
-        str(results_dir),
-        "--job",
-        "$SLURM_ARRAY_TASK_ID",
-        "--processes",
-        "4",
-    ]
-    assert shlex.split(fold_lines[2]) == [
-        "#SBATCH",
-        f"--output={results_dir}/logs/fold.log",
-    ]
-    assert shlex.split(fold_lines[3]) == [
-        *decsim_run,
-        "--fold",
-        "--out",
-        str(results_dir),
-    ]
-    task_records = results_dir.glob("tasks/*/machine.json")
-    task_record_paths = list(task_records)
-    assert len(task_record_paths) == 2
-    assert not (tmp_path / "submissions.txt").exists()
 
 
 def test_a_launch_submits_the_array_then_the_fold_behind_it(tmp_path):

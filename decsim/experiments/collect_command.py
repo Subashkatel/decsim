@@ -6,8 +6,9 @@ contiguous prefix of its seeds, and no piece past the stop starts. Then
 the pieces are folded, one row per task. A saved piece is counted, not
 rerun, so a killed collect resumes; the same experiment reproduces the
 same rows (only the wall-clock column varies), with a pool too, as long
-as each task stops at the same piece. On Slurm each job collects one
-task and one fold job folds them all.
+as each task stops at the same piece. On Slurm each job runs the
+fixed pieces the launcher packed into it and one fold job folds them
+all.
 """
 
 import copy
@@ -211,7 +212,8 @@ def collect_experiment(
         study, chosen, run_dir, run_file
     )
     print(f"run dir: {run_dir}\n", file=sys.stderr)
-    measure_shot = _shot_measure(collections, run_dir)
+    tasks = [collection.task for collection in collections]
+    measure_shot = _shot_measure(tasks, run_dir)
     _collect_until_stopped(collections, run_dir, measure_shot, processes)
     folded_ids = run_folder.recorded_task_ids(run_dir, every_id)
     folders = pieces.folders_of(run_dir, folded_ids)
@@ -239,28 +241,38 @@ def start_the_folder(
     return every_id, collections, started_utc
 
 
-def run_job(
+def run_pieces(
     run_file: pathlib.Path,
     run_dir: pathlib.Path,
-    index: int,
+    job_pieces: list,
     *,
     processes: int = 1,
 ) -> None:
-    """One Slurm job: the experiment's index-th task to its stop.
+    """One Slurm job's pieces, each [task name, first seed, count], run.
 
-    The launcher wrote run.json and the run file's copy, so a job checks
-    the folder ran this tree and this run file, records its task again
-    and collects from its saved pieces. It folds nothing.
+    The launcher recorded every task and wrote run.json and the run
+    file's copy, so a job checks the folder ran this tree, this run file
+    and these tasks, and writes no record: many jobs share a task. The
+    pieces go to the pool in the order given, which the launcher made
+    longest first, and a piece saved since the launch is skipped. It
+    folds nothing.
     """
     _check_processes(processes)
     run_folder.copy_the_run_file(run_file, run_dir)
     study = experiment.load(run_file)
     _refuse_another_tree(run_dir)
-    task = study.tasks[index]
-    chosen = study.only(task.name)
-    collections = recorded_tasks(run_dir, chosen)
-    measure_shot = _shot_measure(collections, run_dir)
-    _collect_until_stopped(collections, run_dir, measure_shot, processes)
+    names = [name for name, _first_seed, _count in job_pieces]
+    unique_names = dict.fromkeys(names)
+    chosen = study.only(*unique_names)
+    for task in chosen.tasks:
+        task_id = task.strong_id()
+        _refuse_a_name_recorded_for_another_task(run_dir, task.name, task_id)
+    units = _unsaved_units(chosen, run_dir, job_pieces)
+    measure_shot = _shot_measure(chosen.tasks, run_dir)
+    save = functools.partial(_save_the_piece, run_dir)
+    collect.run_units(
+        units, measure_shot, on_unit_done=save, processes=processes
+    )
 
 
 def fold_the_run(run_dir: pathlib.Path) -> list:
@@ -439,12 +451,11 @@ def _recorded_calibrator(
     return pieces.read_state(folder)
 
 
-def _shot_measure(collections: list, run_dir: pathlib.Path):
-    """The measure every shot of these tasks' collections runs through.
+def _shot_measure(tasks: list, run_dir: pathlib.Path):
+    """The measure every shot of these tasks runs through.
 
     It is a partial of a module-level function, so a pool can pickle it.
     """
-    tasks = [collection.task for collection in collections]
     only_traced_shot = _traces_one_shot(tasks)
     return functools.partial(
         measure.measure_shot,
@@ -628,6 +639,22 @@ def _record_path(run_dir: pathlib.Path, name: str) -> pathlib.Path:
     """Where the folder keeps the named task's machine.json."""
     task_dir = run_dir / run_folder.TASKS_FOLDER / name
     return task_dir / run_folder.RECORD_FILE
+
+
+def _unsaved_units(
+    chosen: experiment.Experiment, run_dir: pathlib.Path, job_pieces: list
+) -> list:
+    """The job's pieces whose folders do not exist yet, as work units."""
+    units = []
+    for name, first_seed, count in job_pieces:
+        task = chosen.task_named(name)
+        task_id = task.strong_id()
+        folder = pieces.piece_dir(run_dir, task_id, first_seed, count)
+        if folder.is_dir():
+            continue
+        unit = collect.Unit(task, first_seed, count)
+        units.append(unit)
+    return units
 
 
 def _record_a_new_task(

@@ -25,7 +25,9 @@ NAME = "my_first_sweep"
 DISTANCES = (3, 5, 7)
 PHYSICAL_ERROR_PROBABILITY = 0.003
 ROUND_PERIOD_MICROSECONDS = 1.0
-COLLECTION = decsim.CollectionSettings(max_shots=400)
+# a shot's core seconds, distance 7's mean over 20 shots on della-vis1,
+# an upper bound for 3 and 5; only `decsim run --slurm` reads it
+COLLECTION = decsim.CollectionSettings(max_shots=400, core_seconds_per_shot=0.5)
 
 tasks = []
 for distance in DISTANCES:

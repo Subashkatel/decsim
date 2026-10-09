@@ -20,7 +20,7 @@ setting has the same shot count in all four configurations.
   `experiments/switching_per_window/run.py`. The raw run files
   (shots.csv, window_outcomes.csv, window_samples.csv and sweep.csv)
   stay on the cluster and are not in the repository.
-- This folder: `experiments/switching_per_window/` at commit b8e029f1.
+- This folder: `experiments/switching_per_window/` at commit ae69f0bc.
 
 ```
 python experiments/switching_per_window/tables.py <run folder> <this folder>
@@ -85,7 +85,7 @@ of comparison.csv.
   form Toshio et al. 2510.25222 report.
 
 No paper we checked scores each window right or wrong inside a
-sliding-window run, so figures 03 to 14 use the definitions above.
+sliding-window run, so figures 03 to 14 and 17 use the definitions above.
 
 ## comparison.csv columns
 
@@ -277,6 +277,20 @@ One file per physical error rate.
   percentile is at most 0.47 of the window period. Relay-BP-5's median
   is 73 (d = 5, 0.002) to 3,115 (d = 11, 0.005) window periods, and
   Tesseract's is 520 to 52,734.
+
+### 17 Where Relay-BP-5 and union-find alone differ, who was right?
+
+- How to read: the figure 07 view for Relay-BP-5. Bars in % of the
+  escalated windows, one panel per distance. Green: fixed (Relay-BP-5
+  right, union-find alone wrong). Pink: broke (the reverse). Grey: both
+  wrong. Yellow: Relay-BP-5 did not converge; these windows are also in
+  the other bars. Both right is the rest and is not drawn (91% to 100%).
+- What we see: fixed is above broke in every setting. Both grow with
+  the physical error rate and fall with distance: d = 5, 0.005 has 4.41%
+  fixed and 2.59% broke; d = 11, 0.002 has 88 fixed and 13 broke out of
+  653,922 escalated windows. Not converged is zero at d = 5 and 7 and
+  largest at d = 11, 0.005 (2.26%, 105 windows), where it is above fixed
+  (1.53%) and broke (1.29%).
 
 ## Open
 

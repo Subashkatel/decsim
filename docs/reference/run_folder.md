@@ -25,7 +25,7 @@ with another `code_state.patch`, is refused:
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `task_id`, `first_seed` and `count` (its other counts are its own `shots.csv` columns summed: `is_scored`, `logical_failure`, `sim_wall_seconds`, `executed_rounds` and the `*_windows` status columns), its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a task whose pieces differ in it, a piece without it included), the `state_sha256` of an online task's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended), and the `commit`, `dirty`, `patch_sha256` (the sha256 of the tree's `code_state.patch`, null when it has none), `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a run and a fold refuse a folder holding a piece whose tree is not the one its `run.json` names: another commit, the same commit clean against dirty, or another patch, since its rows would pool two simulators under one `run.json`) |
 | `run.sbatch`, `fold.sbatch`, `logs/` | `decsim/experiments/plan_command.py`, `launch` | what `decsim run --slurm` writes: the job array whose job `i` runs task `i` of the run file where it stands, so a file beside it is found, the job that folds after it, and their Slurm logs, `logs/<i>.log` and `logs/fold.log` |
 | `tasks/<name>/machine.json`, `tasks/<name>/inputs/` | `decsim/experiments/run_folder.py`, `write_task_record` | each task's record and workload, below, written before any shot and only once every task of the experiment has built and been accepted, so a refused one changes no record. A name the folder holds for a task of another id is refused, and so is a task whose shot runs no round, which sizes no piece. The record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the task's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which `decsim run --fold` folds it by, whatever its run file says later |
@@ -49,6 +49,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per task, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
 | `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `confidence_shot_count` shots of a task (its `record_options`, a `decsim.experiments.collect.RecordOptions`, 100 by default), written only when a confidence signal decides the escalation |
+| `window_outcomes.csv` | `decsim/experiments/report.py`, `window_outcome_rows` | one row per delivered window of every shot: its committed answer beside its true label, written only when `observation.record_window_outcomes` is on |
 | `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per task, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on. A task's mean per shot on a path or a memory class is a counter's sum over those rows divided by the task's distinct seeds; `references` and `referenced_rounds` repeat on every row of a shot, so they count once per seed |
@@ -313,8 +314,10 @@ One row per window whose confidence the escalation verdict read, for
 the shots of seed 0 up to the task's `confidence_shot_count`, 100 by
 default; `decsim.Task(..., record_options=decsim.experiments.collect.RecordOptions(
 confidence_shot_count=None))` writes every scored shot's (`all`). A run whose escalation reads no confidence writes no file.
-A window has no truth of its own, so a row carries its shot's failure
-and whether the strong decode changed the window's answer. An unscored
+A window has no truth of its own here, so a row carries its shot's
+failure and whether the strong decode changed the window's answer;
+`window_outcomes.csv` gives each window its label when the source keeps
+its errors. An unscored
 shot writes no row: it is sinter's discard, neither a failure nor a
 success, and sweep.csv's `unscored_shots` counts it.
 
@@ -327,6 +330,32 @@ success, and sweep.csv's `unscored_shots` counts it.
 | `escalated` | whether the verdict sent the window to the strong tier |
 | `strong_revised` | for an escalated window, whether the strong decode predicted other observables than the weak one; empty for a kept window |
 | `shot_failed` | whether the shot ended in a logical failure |
+
+### `window_outcomes.csv`
+
+One row per window that delivered an operation's result, for every
+shot, when `observation.record_window_outcomes` is on: an ordinary
+window, or a strong window over the windows it absorbed, as the
+logical ledger tiles the rounds. A window's label is the parity of the
+true errors it owns, an error owned by the window whose commit rounds
+hold its earliest detector's round (Zhang et al. 2509.03815 Eq. (1));
+only `ErrorModelStimDevice` keeps the errors, so with another source
+the label columns are empty. The labels of a shot add up to its truth
+(Eq. (2)), which the measurement asserts, and a window can be wrong
+while its shot is right (2509.03815 lines 1130-1138). Bits are json
+text of Stim's 01 format, as in `predictions`.
+
+| Column | What it is |
+| --- | --- |
+| `task_id`, the swept paths, `algorithm`, `seed` | the shot |
+| `operation_id`, `window_index` | the window that owns the rows: its operation and its index |
+| `ownership_kind` | `ordinary_window`, or `strong_window` for a double window's extent |
+| `commit_lo`, `commit_hi` | the rounds it owns |
+| `tier`, `decode_status` | the tier and the status of its final decode; an empty status is a decode that succeeded |
+| `detection_events` | the set bits that decode read |
+| `answer`, `label`, `is_right` | its committed prediction, its true label, and whether they are equal |
+| `gap_nats`, `is_escalated` | on a switching run, the gap the verdict read and whether it escalated |
+| `weak_answer`, `weak_label` | on a switching run, the weak decode's prediction of the window's own commit rounds; for an escalated window, also the label of those rounds |
 
 ### `confidence_histogram.csv`
 

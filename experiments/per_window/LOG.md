@@ -60,6 +60,8 @@ All decisions by the owner.
 | 2026-10-08 | All parameters in one experiment file, `experiments/per_window/run.py`, as main does since the yaml path was deleted (`526f7f64`): named constants at the top, each with its source. The analysis scripts hold no numbers. | One place to read and change every parameter. A task's id hashes its machine and metadata, not its stop rule (`decsim/experiments/collect.py`), so new distances or rates can be added later with the same commit. |
 | 2026-10-08 | Stop rule, option A: at each setting, one fixed number of shots N, the same for all four configurations; N gives union-find alone about 100 failures (N = 100 / its rate in Experiment 1). A rate is shown only with at least 20 failures, with 95% Wilson intervals. Keep d=11 at 0.002. | Papers that compare decoders use one fixed shot count for all of them (see Stop rule research). 100 failures gives about +-20% at 95%. Estimated cost about 9,100 core-hours, 6,750 of them at d=11, 0.002. |
 | 2026-10-08 | Keep Experiment 1's machine and every latency as they are, on today's main (newer code than Experiments 1 and 3). | The results compare with Experiment 1. The run is about correctness, so the timing estimates stay. |
+| 2026-10-09 | The true label of a window comes from the errors that fired: a new shot source draws each shot from Stim's error model with `sample(return_errors=True)` and emits the raw row that forms exactly those events. | 2509.03815 labels windows by the flipped edges (lines 497-508); Gong et al. sample their windows from Stim's error model (`SlidingWindowDecoder/osd.py:124-125`). A measurement sample cannot say which errors fired. The shots are new, so they are not Experiment 1's shots. |
+| 2026-10-09 | Tesseract alone uses the package's exact short-beam profile: beam 15, climbing, no revisits, queue 200,000, 16 orders by index, merge errors, order seed 2384753. | `tesseract-decoder` 6a260b0, `src/tesseract_sinter_compat.pybind.h:468-474`, the profile the Tesseract paper runs. |
 
 ## Plan
 
@@ -70,7 +72,7 @@ Each step is decided before the next. Status on 2026-10-08:
 | 1. Questions | what the run must answer | discussing |
 | 1b. Literature check | which papers ground each piece | done, see below |
 | 2. Definitions | what right and wrong mean for a window | not started |
-| 3. Records | what decsim saves per shot, per window, per strong window | not started |
+| 3. Records | what decsim saves per shot, per window, per strong window | built, see Records |
 | 4. Configurations and settings | decoders, distances, error rates, stop rule, every latency | decided |
 | 5. Checks before the run | how we prove the records are right | not started |
 | 6. Cost | time per shot (from Experiments 1 and 3), core-hours, job plan | not started; no pilot |
@@ -113,6 +115,29 @@ quote checked word for word.
 Known limit: neighbouring windows overlap, so they are not independent
 (Dinca et al. 2512.15689, 1076-1088); Toshio's per-window rates assume
 they are. We report both.
+
+## Records (2026-10-09)
+
+What decsim keeps per window, and how (branch `per-window-experiment`):
+
+- `ErrorModelStimDevice` (`decsim/qpu/stim_device.py`): draws each shot
+  from the circuit's error model and keeps the errors that fired; the
+  raw measurement row it emits is solved back from the drawn events
+  (`detector_formation.measurements_forming`), so the rest of the
+  machine runs unchanged.
+- A fired error belongs to the window whose commit rounds hold the
+  round of its earliest detector, the rule decsim's windows already use
+  to own faults (`window_placement.py`).
+- `observation.record_window_outcomes` writes `window_outcomes.csv`:
+  one row per window that delivered the shot's answer (the logical
+  ledger's tiling, so a double window is one row). Columns: the window,
+  its rounds, tier, decode status (converged or not), detection events,
+  answer, true label, right or wrong, and on switching runs the gap,
+  escalated, and the weak answer and label of its own rounds.
+- Checks: Stim's own converter turns the emitted rows back into the
+  drawn events (test); the labels of every shot add up to its truth
+  (asserted in every shot, 2509.03815 Eq. 2); a shot fails exactly when
+  its answers and labels differ in total (test, and the smoke run).
 
 ## Machine and latencies (2026-10-08)
 

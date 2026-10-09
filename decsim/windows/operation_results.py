@@ -26,10 +26,12 @@ import decsim.windows.window_planner as window_planner
 class OperationResults:
     """Delivers each result once it is final.
 
-    A result is an operation's or a stream segment's. Trace source:
+    A result is an operation's or a stream segment's. Trace sources:
     operation_result_delivered(operation_id, logical_observables) at
     every delivery, and with None when a delivery is withdrawn; the
-    result ledger listens.
+    result ledger listens. contributions_delivered(operation_id,
+    contributions) at an operation's delivery, the contributions whose
+    XOR it is, in extent order; read only when someone listens.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -222,7 +224,20 @@ class OperationResults:
             operation.id, commit_lo, commit_hi, boundary_policy="strict"
         )
         self._record_result(operation.id, logical_observables)
+        self._report_contributions(operation.id, commit_lo, commit_hi)
         self.conditional_release.release_waiters(operation)
+
+    def _report_contributions(
+        self, operation_id, commit_lo: int, commit_hi: int
+    ) -> None:
+        if not self.trace.contributions_delivered.has_listeners:
+            return
+        contributions = self.ledger.contributions_for_interval(
+            operation_id, commit_lo, commit_hi, boundary_policy="strict"
+        )
+        self.trace.contributions_delivered.fire(
+            operation_id, tuple(contributions)
+        )
 
     def _is_final(self, operation_id) -> bool:
         """Every window committed and final, no store holding, sealed."""
@@ -408,5 +423,8 @@ class _TraceSources:
     """Every event the operation results reports, as one member."""
 
     operation_result_delivered: trace_source.TraceSource = (
+        trace_source.new_source()
+    )
+    contributions_delivered: trace_source.TraceSource = (
         trace_source.new_source()
     )

@@ -1386,6 +1386,9 @@ class SyndromeSource(Protocol):
     shot_sampled(operation, detection_events) fires once when a physical
     source's complete shot is available (a live source's at final
     readout); a source that draws nothing carries the silent source.
+    errors_sampled(operation, fired_errors) fires once per shot from a
+    source that keeps the errors it drew, the truth a window's label is
+    read from; every other source carries the silent source.
     emits_bit_values says whether payloads carry measured values or
     their sizes alone.
     """
@@ -1395,6 +1398,7 @@ class SyndromeSource(Protocol):
     operation_circuit_scope: str
     emits_bit_values: bool
     shot_sampled: Union[trace_source.TraceSource, trace_source.SilentSource]
+    errors_sampled: Union[trace_source.TraceSource, trace_source.SilentSource]
 
     def declare_stream(
         self,

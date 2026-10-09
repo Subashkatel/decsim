@@ -89,6 +89,16 @@ def round_payload(device, operation, round_index):
     return payloads[0]
 
 
+class _HeardErrors:
+    """The fired errors each operation's shot reported."""
+
+    def __init__(self) -> None:
+        self.errors_by_operation = {}
+
+    def errors_sampled(self, operation, fired_errors) -> None:
+        self.errors_by_operation[operation.id] = fired_errors
+
+
 def recorded_device(row, **settings):
     measurements = numpy.array([row], dtype=bool)
     return stim_device.RecordedStimDevice(measurements, 0, **settings)
@@ -191,6 +201,32 @@ def test_a_seeded_shot_is_stims_shot_under_the_hashed_substream_seed():
     assert first.bits == (0, 0, 0, 0, 0, 0, 0, 0)
     assert second.bits == (0, 0, 0, 0, 0, 0, 0, 0)
     assert third.bits == (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1)
+
+
+def test_an_error_model_shot_is_stims_error_model_sample_formed_back():
+    """The emitted rows form the events and flips the model drew.
+
+    The draw is Stim's CompiledDemSampler under the same substream seed
+    the measurement sampler takes (7382560267478030810, pinned above),
+    and the fired errors heard add up to the shot's truth.
+    """
+    circuit = memory_circuit(3, 3, noise=0.03)
+    model = circuit.detector_error_model()
+    sampler = model.compile_sampler(seed=7382560267478030810)
+    events, flips, _ = sampler.sample(1)
+    device = stim_device.ErrorModelStimDevice(seed=7)
+    heard = _HeardErrors()
+    device.errors_sampled.connect(heard.errors_sampled)
+    operation = memory_operation(circuit, 1)
+    device.begin_operation(operation, 3, 3, round_period_ticks=1_100_000)
+    fired_flips = [0]
+    for error in heard.errors_by_operation[1]:
+        fired_flips[0] ^= error.logical_observables[0]
+    drawn_events = events[0].tolist()
+    assert device.sampled_detection_events(1) == tuple(drawn_events)
+    assert device.logical_observable_truth(1) == (int(flips[0][0]),)
+    assert tuple(fired_flips) == device.logical_observable_truth(1)
+    assert any(events[0])
 
 
 def test_a_seed_outside_stims_64_bit_range_is_refused():

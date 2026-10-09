@@ -53,6 +53,7 @@ class StreamingStimDevice(seeding._AtomicRunSeedConsumer):
 
     operation_circuit_scope = "none"
     emits_bit_values = True
+    errors_sampled = trace_source.SILENT
 
     def __init__(
         self,

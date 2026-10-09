@@ -281,6 +281,33 @@ def form_shot(
     return tuple(detector_bits), tuple(observable_bits)
 
 
+def measurements_forming(
+    table: formation_records.FormationTable,
+    detection_events: Sequence[int],
+    observable_flips: Sequence[int],
+) -> tuple[int, ...]:
+    """A raw measurement row that form_shot turns into these bits.
+
+    form_shot read backwards: each recipe is one equation over GF(2),
+    its reference parity XOR its records equal to its bit. Elimination
+    pivots each equation on its latest record, then back substitution
+    sets the pivots from the earliest up; a bit no pivot names stays 0,
+    one of the rows Stim's sampler could have drawn for the same events,
+    since every detector and observable reads only through its recipe.
+    """
+    offsets = _packet_offsets(table)
+    pivots: dict = {}
+    equations = _formation_equations(
+        table, offsets, detection_events, observable_flips
+    )
+    for record_mask, parity in equations:
+        _eliminate_into(pivots, record_mask, parity)
+    packet_widths = table.packet_width_by_round.values()
+    row_width = sum(packet_widths)
+    row = _back_substituted(pivots, row_width)
+    return tuple(row)
+
+
 @dataclasses.dataclass(frozen=True)
 class _CircuitTables:
     """What every recipe is read against."""
@@ -648,3 +675,92 @@ def _rounds_back(before_start: int, round_width: int) -> int:
             "repeated round a measurement"
         )
     return -(-before_start // round_width)
+
+
+def _packet_offsets(table: formation_records.FormationTable) -> dict:
+    """Each round's first index in the row, as the packets cut it."""
+    offsets = {}
+    cursor = 0
+    after_last_round = table.round_count + 1
+    for round_index in range(1, after_last_round):
+        offsets[round_index] = cursor
+        cursor += table.packet_width_by_round[round_index]
+    return offsets
+
+
+def _formation_equations(
+    table: formation_records.FormationTable,
+    offsets: dict,
+    detection_events: Sequence[int],
+    observable_flips: Sequence[int],
+) -> list:
+    """(record mask, parity) for every detector, then every observable.
+
+    A mask is an int with one bit per row index the recipe reads.
+    """
+    equations = []
+    for recipe in table.detectors:
+        event = detection_events[recipe.detector_index]
+        equation = _recipe_equation(recipe, offsets, event)
+        equations.append(equation)
+    for recipe in table.observables:
+        flip = observable_flips[recipe.observable_index]
+        equation = _recipe_equation(recipe, offsets, flip)
+        equations.append(equation)
+    return equations
+
+
+def _recipe_equation(recipe, offsets: dict, bit: int) -> tuple:
+    """One recipe's records as a mask, against its bit and reference."""
+    record_mask = 0
+    for round_index, slot in recipe.records:
+        row_index = offsets[round_index] + slot
+        record_mask ^= 1 << row_index
+    parity = int(bit) ^ recipe.reference_parity
+    return record_mask, parity
+
+
+def _eliminate_into(pivots: dict, record_mask: int, parity: int) -> None:
+    """Reduce one equation by the pivots; keep it under its latest record.
+
+    An equation that reduces to nothing must have parity 0: events that
+    no row forms are not a shot of this circuit.
+    """
+    while record_mask:
+        latest_record = record_mask.bit_length() - 1
+        if latest_record not in pivots:
+            pivots[latest_record] = (record_mask, parity)
+            return
+        pivot_mask, pivot_parity = pivots[latest_record]
+        record_mask ^= pivot_mask
+        parity ^= pivot_parity
+    if parity:
+        raise RuntimeError(
+            "the detection events and observable flips are formed by no "
+            "measurement row of this circuit"
+        )
+
+
+def _back_substituted(pivots: dict, row_width: int) -> list[int]:
+    """The row the reduced equations fix, earliest pivot first.
+
+    A pivot's other records are all earlier, so each is set by then.
+    """
+    row = [0] * row_width
+    for latest_record in sorted(pivots):
+        record_mask, parity = pivots[latest_record]
+        earlier_records = record_mask ^ (1 << latest_record)
+        earlier_parity = _parity_of_records(row, earlier_records)
+        row[latest_record] = parity ^ earlier_parity
+    return row
+
+
+def _parity_of_records(row: list[int], record_mask: int) -> int:
+    """The XOR of the row's bits the mask names."""
+    parity = 0
+    while record_mask:
+        lowest_record = record_mask & -record_mask
+        row_index = lowest_record.bit_length() - 1
+        parity ^= row[row_index]
+        record_mask ^= lowest_record
+    return parity

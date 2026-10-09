@@ -24,6 +24,7 @@ import decsim.observe.sampled_shots as sampled_shots_module
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
+import decsim.observe.window_outcomes as window_outcomes_module
 
 
 @dataclasses.dataclass(frozen=True)
@@ -48,4 +49,5 @@ class Observation:
     round_events: round_events_module.RoundEventRecorder
     referee_audit: referee_audit_module.RefereeAudit
     sampled_shots: sampled_shots_module.SampledShots
+    window_outcomes: Optional[window_outcomes_module.WindowOutcomes]
     confidence: Optional[decode_records_module.ConfidenceLedger]

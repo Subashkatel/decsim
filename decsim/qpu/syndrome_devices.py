@@ -52,6 +52,7 @@ class CircuitlessSource:
     operation_circuit_scope = "none"
     # nothing is sampled per shot, so the port's shot source never fires
     shot_sampled = trace_source.SILENT
+    errors_sampled = trace_source.SILENT
 
     def __init__(self, code: ports.CodeModel) -> None:
         self.code = code

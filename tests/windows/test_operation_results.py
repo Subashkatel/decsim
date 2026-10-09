@@ -137,6 +137,19 @@ def test_the_result_is_the_xor_over_every_window_delivered_once():
     assert fixture.release.released == [1]
 
 
+def test_a_delivery_reports_the_contributions_its_result_is_the_xor_of():
+    fixture = _Fixture()
+    heard = {}
+    fixture.results.trace.contributions_delivered.connect(heard.__setitem__)
+    fixture.commit((1, 0), (1, 0))
+    fixture.commit((1, 1), (1, 1))
+    assert list(heard) == [1]
+    contributions = heard[1]
+    owners = [contribution.owner_key for contribution in contributions]
+    assert owners == [(1, 0), (1, 1)]
+    assert fixture.delivered.result_by_operation == {1: (0, 1)}
+
+
 def test_a_window_awaiting_strong_holds_the_operation_result():
     fixture = _Fixture()
     fixture.commit((1, 0), (1, 0))

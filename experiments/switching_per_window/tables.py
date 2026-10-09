@@ -1,30 +1,34 @@
-"""The switching-per-window run's tables, one per figure, from its folder.
+"""The switching-per-window run's tables, from its folder.
 
 `python tables.py <run folder> <results folder>` reads the folded
 shots.csv and window_outcomes.csv and each task's record, and writes
-five tidy tables, every count kept so any figure can be redrawn:
+tidy tables of counts, so every figure and the final comparison table
+can be drawn from them:
 
-- shot_failures.csv: each configuration's failed shots per setting, the
-  rate and its 95% Wilson interval, and whether it has the 20 failures
-  a shown rate needs (LOG.md, stop rule).
-- union_find_by_gap.csv: switching's union-find windows by their gap in
-  1 dB bins, and how many union-find got wrong: P_weak(error | gap),
-  Toshio et al. 2510.25222 Eq. 2 and Fig. 5.
-- switching_decisions.csv: each union-find window of switching as a
-  correct escalation (escalated, union-find wrong), a false positive
-  (escalated, right), a false negative (kept, wrong) or a correct keep.
-- strong_on_escalated.csv: each escalated window's Relay-BP-5 answer on
-  the rounds its double window commits, beside union-find alone's
-  answer on the same rounds and shot, and whether Relay-BP-5 converged.
-- wrong_windows.csv: shots by configuration, setting, failed or not,
-  and their number of wrong windows.
+- shot_summary.csv: per configuration and setting, the shots, the
+  failed shots with the rate's 95% Wilson interval, the windows
+  decoded, and the shots with at least one wrong window.
+- window_summary.csv: per configuration and setting, the windows by
+  their final answer: right, wrong alone, or wrong in a seam pair.
+- switching_summary.csv: per setting, switching's union-find windows
+  by decision (escalated or kept) and by union-find's answer on the
+  window's own rounds (right, wrong alone, wrong in a seam pair, or
+  wrong beside a window union-find never answered), and
+  the escalated windows by Relay-BP-5's outcome against union-find
+  alone on the same rounds.
+- union_find_by_gap.csv: switching's union-find windows by their gap
+  in 1 dB bins and by union-find's answer.
+- kept_by_detection_events.csv: switching's kept windows by their
+  detection-event count and by union-find's answer.
 
 A window is right when its answer equals its label, the parity of the
-true errors it owns (2509.03815 Eq. 1). A kept window's union-find
-answer is its row's answer; an escalated window's is its weak_answer,
-labelled on its own rounds. Union-find alone's windows tile the same
-rounds as switching's (the same sliding windows and seeds), so its
-answer on a double window's rounds is the XOR of the windows inside.
+true errors it owns (2509.03815 Eq. 1). Two wrong windows that share a
+seam flip the shot twice and cancel: one error near the seam, owned by
+one window and corrected by the other, gives such a pair. Pairs are
+taken left to right in time and do not overlap; a wrong window in no
+pair is wrong alone. An escalated window's union-find answer covers
+only its own rounds, the first of its double window, so it pairs only
+with the window before it.
 """
 
 import collections
@@ -43,19 +47,16 @@ SHOWN_FAILURES = 20
 # the normal quantile of a two-sided 95% interval
 NORMAL_QUANTILE_95 = 1.959963984540054
 GAP_BIN_DECIBELS = 1.0
-# switching's four outcomes, keyed (escalated, union-find right)
-DECISION_OF = {
-    (True, False): "correct_escalation",
-    (True, True): "false_positive",
-    (False, False): "false_negative",
-    (False, True): "correct_keep",
-}
-DECISIONS = (
-    "correct_escalation",
-    "false_positive",
-    "false_negative",
-    "correct_keep",
+# union-find never answers the window a double window takes in, so a
+# wrong window beside it in no pair is wrong_partner_unseen, not
+# wrong_alone: an escalated window, or the window after a double window
+ANSWER_CLASSES = (
+    "right",
+    "wrong_alone",
+    "wrong_paired",
+    "wrong_partner_unseen",
 )
+DECISIONS = ("escalated", "kept")
 # Relay-BP-5 against union-find alone on an escalated window's rounds,
 # keyed (Relay-BP-5 right, union-find right); a window Relay-BP-5 did
 # not converge on is counted apart as not_converged
@@ -81,19 +82,18 @@ def main(run_dir: pathlib.Path, results_dir: pathlib.Path) -> None:
     tasks = task_settings(run_dir)
     shots_path = run_dir / "shots.csv"
     outcomes_path = run_dir / "window_outcomes.csv"
-    failures = shot_failures(shots_path, tasks)
+    shots = shot_counts(shots_path, tasks)
     windows = window_tables(outcomes_path, tasks)
-    escalated_rounds = windows.escalated_rounds
     union_find_answers = union_find_answers_on(
-        outcomes_path, tasks, escalated_rounds
+        outcomes_path, tasks, windows.escalated_rounds
     )
     strong = strong_on_escalated(windows.escalated, union_find_answers)
     tables = {
-        "shot_failures.csv": failures,
+        "shot_summary.csv": windows.shot_rows(shots),
+        "window_summary.csv": windows.window_rows(),
+        "switching_summary.csv": windows.switching_rows(strong),
         "union_find_by_gap.csv": windows.gap_rows(),
-        "switching_decisions.csv": windows.decision_rows(),
-        "strong_on_escalated.csv": strong,
-        "wrong_windows.csv": windows.wrong_window_rows(),
+        "kept_by_detection_events.csv": windows.event_rows(),
     }
     results_dir.mkdir(parents=True, exist_ok=True)
     for file_name, rows in tables.items():
@@ -116,19 +116,15 @@ def task_settings(run_dir: pathlib.Path) -> dict:
     return tasks
 
 
-def shot_failures(shots_path: pathlib.Path, tasks: dict) -> list:
-    """Each task's shots and failed shots, with the rate's interval."""
-    shots = collections.Counter()
-    failed = collections.Counter()
+def shot_counts(shots_path: pathlib.Path, tasks: dict) -> dict:
+    """Each setting's shots, failed shots and windows decoded."""
+    counts = collections.defaultdict(collections.Counter)
     for row in _rows(shots_path):
-        setting = tasks[row["task_id"]]
-        shots[setting] += 1
-        failed[setting] += row["logical_failure"] == "True"
-    rows = []
-    for setting in sorted(shots):
-        row = _failure_row(setting, shots[setting], failed[setting])
-        rows.append(row)
-    return rows
+        setting_counts = counts[tasks[row["task_id"]]]
+        setting_counts["shots"] += 1
+        setting_counts["failed_shots"] += row["logical_failure"] == "True"
+        setting_counts["decoded_windows"] += int(row["decoded_windows"])
+    return counts
 
 
 class WindowTables:
@@ -141,46 +137,75 @@ class WindowTables:
     """
 
     def __init__(self) -> None:
-        self.gap_windows = collections.Counter()
-        self.gap_wrong = collections.Counter()
-        self.decision_counts = collections.Counter()
-        self.shot_wrong_counts = collections.Counter()
+        self.answers = collections.Counter()
+        self.shots_with_wrong = collections.Counter()
+        self.failed_by_parity = collections.Counter()
+        self.decisions = collections.Counter()
+        self.gaps = collections.Counter()
+        self.events = collections.Counter()
         self.escalated = []
         self.escalated_rounds = collections.defaultdict(set)
 
-    def gap_rows(self) -> list:
-        """union_find_by_gap.csv: windows and wrong ones per gap bin."""
+    def shot_rows(self, shots: dict) -> list:
+        """shot_summary.csv, checking each failure against the windows."""
         rows = []
-        for key in sorted(self.gap_windows):
-            distance, rate, gap_bin = key
-            row = {
-                "distance": distance,
-                "physical_error_rate": rate,
-                "gap_low_db": gap_bin * GAP_BIN_DECIBELS,
-                "gap_high_db": (gap_bin + 1) * GAP_BIN_DECIBELS,
-                "windows": self.gap_windows[key],
-                "union_find_wrong": self.gap_wrong[key],
-            }
+        for setting in sorted(shots):
+            counts = shots[setting]
+            failed = counts["failed_shots"]
+            assert failed == self.failed_by_parity[setting], (
+                f"window answers do not give the failed shots of {setting}"
+            )
+            row = _failure_row(setting, counts["shots"], failed)
+            row["decoded_windows"] = counts["decoded_windows"]
+            row["shots_with_a_wrong_window"] = self.shots_with_wrong[setting]
             rows.append(row)
         return rows
 
-    def decision_rows(self) -> list:
-        """switching_decisions.csv: the four outcomes per setting."""
-        return _setting_rows(self.decision_counts, DECISIONS)
-
-    def wrong_window_rows(self) -> list:
-        """wrong_windows.csv: shots by failed and wrong-window count."""
+    def window_rows(self) -> list:
+        """window_summary.csv: final answers by class per setting."""
+        settings = {key[:3] for key in self.answers}
         rows = []
-        for key in sorted(self.shot_wrong_counts):
-            configuration, distance, rate, failed, wrong = key
-            row = {
-                "configuration": configuration,
-                "distance": distance,
-                "physical_error_rate": rate,
-                "shot_failed": failed,
-                "wrong_windows": wrong,
-                "shots": self.shot_wrong_counts[key],
-            }
+        for setting in sorted(settings):
+            row = _setting_row(setting)
+            for answer_class in ANSWER_CLASSES:
+                row[answer_class] = self.answers[(*setting, answer_class)]
+            rows.append(row)
+        return rows
+
+    def switching_rows(self, strong: collections.Counter) -> list:
+        """switching_summary.csv: decisions, answers and strong outcomes."""
+        settings = {key[:2] for key in self.decisions}
+        rows = []
+        for setting in sorted(settings):
+            row = _setting_row(setting)
+            row.update(_decision_columns(self.decisions, setting))
+            for outcome in STRONG_OUTCOMES:
+                row[outcome] = strong[(*setting, outcome)]
+            rows.append(row)
+        return rows
+
+    def gap_rows(self) -> list:
+        """union_find_by_gap.csv: windows by gap bin and answer class."""
+        rows = []
+        for key in sorted(self.gaps):
+            distance, rate, gap_bin, answer_class = key
+            row = _setting_row((distance, rate))
+            row["gap_low_db"] = gap_bin * GAP_BIN_DECIBELS
+            row["gap_high_db"] = (gap_bin + 1) * GAP_BIN_DECIBELS
+            row["union_find_answer"] = answer_class
+            row["windows"] = self.gaps[key]
+            rows.append(row)
+        return rows
+
+    def event_rows(self) -> list:
+        """kept_by_detection_events.csv: kept windows by event count."""
+        rows = []
+        for key in sorted(self.events):
+            distance, rate, events, answer_class = key
+            row = _setting_row((distance, rate))
+            row["detection_events"] = events
+            row["union_find_answer"] = answer_class
+            row["windows"] = self.events[key]
             rows.append(row)
         return rows
 
@@ -188,8 +213,8 @@ class WindowTables:
 def window_tables(outcomes_path: pathlib.Path, tasks: dict) -> WindowTables:
     """Every count but the union-find join, in one pass.
 
-    A shot's rows are consecutive in the folded file, so its wrong
-    windows and its parities are counted as its rows pass.
+    A shot's rows are consecutive in the folded file, so each shot is
+    counted when its last row has passed.
     """
     tables = WindowTables()
     shot = _ShotTally()
@@ -200,8 +225,6 @@ def window_tables(outcomes_path: pathlib.Path, tasks: dict) -> WindowTables:
             shot.close_into(tables)
             shot = _ShotTally(shot_key)
         shot.add(row)
-        if setting[0] == SWITCHING:
-            _count_switching_window(tables, setting, row)
     shot.close_into(tables)
     return tables
 
@@ -227,8 +250,10 @@ def union_find_answers_on(
     return spans
 
 
-def strong_on_escalated(escalated: list, union_find_answers: dict) -> list:
-    """strong_on_escalated.csv: escalated windows by both decoders' outcome."""
+def strong_on_escalated(
+    escalated: list, union_find_answers: dict
+) -> collections.Counter:
+    """Escalated windows by Relay-BP-5's outcome, per setting."""
     counts = collections.Counter()
     for window in escalated:
         distance, rate, seed, commit_lo, commit_hi, strong_right, converged = (
@@ -239,7 +264,27 @@ def strong_on_escalated(escalated: list, union_find_answers: dict) -> list:
         union_find_right = _span_right(span, span_key)
         outcome = _strong_outcome(strong_right, union_find_right, converged)
         counts[(distance, rate, outcome)] += 1
-    return _setting_rows(counts, STRONG_OUTCOMES)
+    return counts
+
+
+def paired_positions(spans: list) -> set:
+    """The positions of wrong windows that pair with a wrong neighbour.
+
+    spans holds (commit_lo, commit_hi, is_wrong) in time order; a
+    commit_hi of None never pairs with the window after it.
+    """
+    paired = set()
+    open_position = None
+    for position, (commit_lo, _commit_hi, is_wrong) in enumerate(spans):
+        if not is_wrong:
+            open_position = None
+            continue
+        if _is_after(spans, open_position, commit_lo):
+            paired.update((open_position, position))
+            open_position = None
+            continue
+        open_position = position
+    return paired
 
 
 def wilson_interval(failures: int, shots: int) -> tuple:
@@ -272,58 +317,129 @@ def write_rows(path: pathlib.Path, rows: list) -> None:
 
 
 class _ShotTally:
-    """One shot's wrong windows and the parity of its answers and labels."""
+    """One shot's window rows, counted when the shot ends."""
 
     def __init__(self, key: tuple = None) -> None:
         self.key = key
-        self.wrong = 0
-        self.answer_parity = 0
-        self.label_parity = 0
+        self.rows = []
 
     def add(self, row: dict) -> None:
-        self.wrong += row["is_right"] == "False"
-        self.answer_parity ^= _bit_of(row["answer"])
-        self.label_parity ^= _bit_of(row["label"])
+        self.rows.append(row)
 
     def close_into(self, tables: WindowTables) -> None:
-        """The shot counted, failed when its parities differ (Eq. 2)."""
+        """The shot's final answers, and switching's decisions, counted."""
         if self.key is None:
             return
-        setting, _seed = self.key
-        failed = self.answer_parity != self.label_parity
-        tables.shot_wrong_counts[(*setting, failed, self.wrong)] += 1
+        setting, seed = self.key
+        self.rows.sort(key=_commit_lo_of)
+        _count_answers(tables, setting, self.rows)
+        if setting[0] == SWITCHING:
+            _count_switching(tables, setting, seed, self.rows)
 
 
-def _count_switching_window(
-    tables: WindowTables, setting: tuple, row: dict
-) -> None:
-    """A switching window's gap bin, decision and, escalated, its span.
+def _count_answers(tables: WindowTables, setting: tuple, rows: list) -> None:
+    """Final answers by class, and the shot failed when its parities differ.
 
-    A window with no gap was absorbed into a double window before
-    union-find answered it, so switching made no decision on it.
+    The shot fails exactly when its answers' parity differs from its
+    labels' parity (2509.03815 Eq. 2).
     """
-    if row["gap_nats"] == "":
-        return
+    spans = []
+    answer_parity = 0
+    label_parity = 0
+    for row in rows:
+        is_wrong = row["is_right"] == "False"
+        spans.append((int(row["commit_lo"]), int(row["commit_hi"]), is_wrong))
+        answer_parity ^= _bit_of(row["answer"])
+        label_parity ^= _bit_of(row["label"])
+    classes = _answer_classes(spans)
+    for answer_class in classes:
+        tables.answers[(*setting, answer_class)] += 1
+    tables.shots_with_wrong[setting] += any(span[2] for span in spans)
+    tables.failed_by_parity[setting] += answer_parity != label_parity
+
+
+def _count_switching(
+    tables: WindowTables, setting: tuple, seed: str, rows: list
+) -> None:
+    """Each union-find window's decision, answer class, gap and events.
+
+    A row with no gap holds no union-find decision and is skipped.
+    """
+    decided = [row for row in rows if row["gap_nats"] != ""]
+    spans = [_union_find_span(row) for row in decided]
+    classes = _answer_classes(spans)
     _configuration, distance, rate = setting
-    is_escalated = row["is_escalated"] == "True"
-    union_find_right = _union_find_right(row, is_escalated)
-    gap_nats = float(row["gap_nats"])
-    gap_decibels = threshold_sources.nats_to_decibels(gap_nats)
-    gap_bins = gap_decibels / GAP_BIN_DECIBELS
-    gap_bin = math.floor(gap_bins)
-    tables.gap_windows[(distance, rate, gap_bin)] += 1
-    tables.gap_wrong[(distance, rate, gap_bin)] += not union_find_right
-    decision = DECISION_OF[(is_escalated, union_find_right)]
-    tables.decision_counts[(distance, rate, decision)] += 1
-    if is_escalated:
-        _keep_escalated(tables, distance, rate, row)
+    for row, answer_class in zip(decided, classes, strict=True):
+        is_escalated = row["is_escalated"] == "True"
+        decision = DECISIONS[0] if is_escalated else DECISIONS[1]
+        tables.decisions[(distance, rate, decision, answer_class)] += 1
+        gap_bin = _gap_bin_of(row)
+        tables.gaps[(distance, rate, gap_bin, answer_class)] += 1
+        if is_escalated:
+            _keep_escalated(tables, distance, rate, seed, row)
+            continue
+        events = int(row["detection_events"])
+        tables.events[(distance, rate, events, answer_class)] += 1
+
+
+def _union_find_span(row: dict) -> tuple:
+    """Union-find's answer on a window's own rounds, as a span to pair.
+
+    An escalated window's own rounds end inside its double window, so
+    the window after the double window is not its neighbour.
+    """
+    commit_lo = int(row["commit_lo"])
+    if row["is_escalated"] == "True":
+        is_wrong = row["weak_answer"] != row["weak_label"]
+        return commit_lo, None, is_wrong
+    is_wrong = row["is_right"] == "False"
+    return commit_lo, int(row["commit_hi"]), is_wrong
+
+
+def _answer_classes(spans: list) -> list:
+    """Each span's class in ANSWER_CLASSES.
+
+    A wrong window's partner is unseen when it sits on a side union-find
+    never answered: after an escalated window's own rounds, or before
+    the window after a double window.
+    """
+    paired = paired_positions(spans)
+    classes = []
+    previous_hi = 0
+    for position, (_commit_lo, commit_hi, is_wrong) in enumerate(spans):
+        is_beside_unseen = commit_hi is None or previous_hi is None
+        answer_class = _answer_class(
+            is_wrong, position in paired, is_beside_unseen
+        )
+        classes.append(answer_class)
+        previous_hi = commit_hi
+    return classes
+
+
+def _answer_class(
+    is_wrong: bool, is_paired: bool, is_beside_unseen: bool
+) -> str:
+    if not is_wrong:
+        return "right"
+    if is_paired:
+        return "wrong_paired"
+    if is_beside_unseen:
+        return "wrong_partner_unseen"
+    return "wrong_alone"
+
+
+def _is_after(spans: list, open_position, commit_lo: int) -> bool:
+    """Whether the open wrong window ends just before commit_lo."""
+    if open_position is None:
+        return False
+    open_hi = spans[open_position][1]
+    return open_hi is not None and open_hi + 1 == commit_lo
 
 
 def _keep_escalated(
-    tables: WindowTables, distance: int, rate: float, row: dict
+    tables: WindowTables, distance: int, rate: float, seed: str, row: dict
 ) -> None:
     """An escalated window's span and Relay-BP-5 outcome, for the join."""
-    seed = row["seed"]
     commit_lo = int(row["commit_lo"])
     commit_hi = int(row["commit_hi"])
     strong_right = row["is_right"] == "True"
@@ -342,11 +458,21 @@ def _keep_escalated(
     shot_spans.add((commit_lo, commit_hi))
 
 
-def _union_find_right(row: dict, is_escalated: bool) -> bool:
-    """Union-find's answer on the window's own rounds against its label."""
-    if is_escalated:
-        return row["weak_answer"] == row["weak_label"]
-    return row["is_right"] == "True"
+def _decision_columns(decisions: collections.Counter, setting: tuple) -> dict:
+    """decision_answer columns, e.g. escalated_wrong_alone, per setting."""
+    columns = {}
+    for decision in DECISIONS:
+        for answer_class in ANSWER_CLASSES:
+            column = f"{decision}_{answer_class}"
+            columns[column] = decisions[(*setting, decision, answer_class)]
+    return columns
+
+
+def _gap_bin_of(row: dict) -> int:
+    gap_nats = float(row["gap_nats"])
+    gap_decibels = threshold_sources.nats_to_decibels(gap_nats)
+    gap_bins = gap_decibels / GAP_BIN_DECIBELS
+    return math.floor(gap_bins)
 
 
 def _add_inside(
@@ -384,32 +510,28 @@ def _strong_outcome(
     return STRONG_OUTCOME_OF[(strong_right, union_find_right)]
 
 
-def _setting_rows(counts: collections.Counter, outcomes: tuple) -> list:
-    """One row per setting, a column per outcome, from (d, rate, outcome)."""
-    settings = {key[:2] for key in counts}
-    rows = []
-    for distance, rate in sorted(settings):
-        row = {"distance": distance, "physical_error_rate": rate}
-        for outcome in outcomes:
-            row[outcome] = counts[(distance, rate, outcome)]
-        rows.append(row)
-    return rows
-
-
 def _failure_row(setting: tuple, shots: int, failed: int) -> dict:
-    configuration, distance, rate = setting
     low, high = wilson_interval(failed, shots)
-    return {
-        "configuration": configuration,
-        "distance": distance,
-        "physical_error_rate": rate,
-        "shots": shots,
-        "failed_shots": failed,
-        "failure_rate": failed / shots,
-        "failure_rate_low": low,
-        "failure_rate_high": high,
-        "is_shown": failed >= SHOWN_FAILURES,
-    }
+    row = _setting_row(setting)
+    row["shots"] = shots
+    row["failed_shots"] = failed
+    row["failure_rate"] = failed / shots
+    row["failure_rate_low"] = low
+    row["failure_rate_high"] = high
+    row["is_shown"] = failed >= SHOWN_FAILURES
+    return row
+
+
+def _setting_row(setting: tuple) -> dict:
+    """The first columns of a row: configuration if any, d and rate."""
+    names = ("distance", "physical_error_rate")
+    if len(setting) == 3:
+        names = ("configuration", *names)
+    return dict(zip(names, setting, strict=True))
+
+
+def _commit_lo_of(row: dict) -> int:
+    return int(row["commit_lo"])
 
 
 def _parts_of(task_name: str) -> tuple:

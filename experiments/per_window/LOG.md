@@ -61,11 +61,13 @@ All decisions by the owner.
 | 2026-10-08 | Stop rule, option A: at each setting, one fixed number of shots N, the same for all four configurations; N gives union-find alone about 100 failures (N = 100 / its rate in Experiment 1). A rate is shown only with at least 20 failures, with 95% Wilson intervals. Keep d=11 at 0.002. | Papers that compare decoders use one fixed shot count for all of them (see Stop rule research). 100 failures gives about +-20% at 95%. Estimated cost about 9,100 core-hours, 6,750 of them at d=11, 0.002. |
 | 2026-10-08 | Keep Experiment 1's machine and every latency as they are, on today's main (newer code than Experiments 1 and 3). | The results compare with Experiment 1. The run is about correctness, so the timing estimates stay. |
 | 2026-10-09 | The true label of a window comes from the errors that fired: a new shot source draws each shot from Stim's error model with `sample(return_errors=True)` and emits the raw row that forms exactly those events. | 2509.03815 labels windows by the flipped edges (lines 497-508); Gong et al. sample their windows from Stim's error model (`SlidingWindowDecoder/osd.py:124-125`). A measurement sample cannot say which errors fired. The shots are new, so they are not Experiment 1's shots. |
+| 2026-10-09 | `decsim run --slurm` packs fixed-shot pieces into one job array: pieces of at most a twentieth of a core's budget, dealt longest first to the least loaded core, every job asking the busiest core's work over 0.8 (at least 61 minutes). 3 cores a job. | Princeton Research Computing asked for 80% use of requested walltime (our jobs used 28%) and walltimes of at least 1:01:00. Graham 1969 bounds each core within one piece of the mean. Della's short QOS: 400 jobs and 1000 cores per user. |
+| 2026-10-09 | Run with the host venv `tmp/deltakit-integration/upstream/.venv` and Tesseract from `tmp/runs/2026-10-07_strong_only_pydeps`, as Experiments 1 to 3 did. | The sbatch line holds the launching interpreter; `decsim/.venv/bin/python` is an Apptainer wrapper whose interpreter path does not exist on compute nodes. |
 | 2026-10-09 | Tesseract alone uses the package's exact short-beam profile: beam 15, climbing, no revisits, queue 200,000, 16 orders by index, merge errors, order seed 2384753. | `tesseract-decoder` 6a260b0, `src/tesseract_sinter_compat.pybind.h:468-474`, the profile the Tesseract paper runs. |
 
 ## Plan
 
-Each step is decided before the next. Status on 2026-10-08:
+Each step is decided before the next. Status on 2026-10-09:
 
 | Step | What we decide | Status |
 | --- | --- | --- |
@@ -74,9 +76,9 @@ Each step is decided before the next. Status on 2026-10-08:
 | 2. Definitions | what right and wrong mean for a window | not started |
 | 3. Records | what decsim saves per shot, per window, per strong window | built, see Records |
 | 4. Configurations and settings | decoders, distances, error rates, stop rule, every latency | decided |
-| 5. Checks before the run | how we prove the records are right | not started |
-| 6. Cost | time per shot (from Experiments 1 and 3), core-hours, job plan | not started; no pilot |
-| 7. Run system | how the run is started, folded, logged, pushed | not started |
+| 5. Checks before the run | how we prove the records are right | done, see Records; outside review running |
+| 6. Cost | time per shot (from Experiments 1 and 3), core-hours, job plan | done, see Cost; no pilot |
+| 7. Run system | how the run is started, folded, logged, pushed | built, see Cost; waits for the owner's go |
 | 8. Analysis | the plots, named before the run | not started |
 
 ### Step 1. Questions (draft)
@@ -138,6 +140,26 @@ What decsim keeps per window, and how (branch `per-window-experiment`):
   drawn events (test); the labels of every shot add up to its truth
   (asserted in every shot, 2509.03815 Eq. 2); a shot fails exactly when
   its answers and labels differ in total (test, and the smoke run).
+
+## Cost (2026-10-09)
+
+`experiments/per_window/run.py` holds N per setting (100 / union-find
+alone's Experiment 1 rate) and each task's core seconds a shot
+(Experiment 1 or 3, same configuration and setting). Core-hours by
+setting, all four configurations:
+
+| d \ physical error rate | 0.002 | 0.003 | 0.004 | 0.005 |
+| --- | --- | --- | --- | --- |
+| 5 | 13 (N 4,041) | 7 (1,504) | 4 (705) | 3 (420) |
+| 7 | 106 (17,836) | 30 (3,774) | 14 (1,274) | 8 (616) |
+| 9 | 890 (88,496) | 138 (10,321) | 47 (2,516) | 27 (996) |
+| 11 | 6,699 (392,157) | 740 (34,800) | 170 (5,240) | 114 (1,527) |
+
+Total about 9,000 core-hours. Dry run (`--slurm --dry-run`): 15,185
+pieces; with `--hours 24`, 165 jobs of 3 cores at 22:47:00 (495 cores);
+with `--hours 12`, 330 jobs at 11:24:00 (990 cores). Every job is
+planned at 80% use. The largest Experiment 1 piece used 4.6 GB, so three
+processes fit in 16 GB.
 
 ## Machine and latencies (2026-10-08)
 

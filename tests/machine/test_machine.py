@@ -11,8 +11,9 @@ Strong-primary stream checks compare readout with Stim and terminal
 prediction with PyMatching on the same circuit. They pin the direct strong
 route, bounded storage lifetime and configured service/link timings.
 
-Experiment 1's union-find windows are checked window by window against
-a sliding-window decode written outside decsim's window code
+Experiment 1's union-find windows, and its switching machine's double
+windows on a PyMatching strong tier, are checked window by window
+against a decode written outside decsim's window code
 (tests/machine/independent_window_decoding.py).
 
 The laws at the end of the file are the ones only the whole machine
@@ -3126,7 +3127,7 @@ def test_union_find_windows_commit_what_an_independent_sliding_decode_does():
         circuit, UNION_FIND_ROUNDS, UNION_FIND_DISTANCE, weak_decoder
     )
 
-    referee_commits = [referee.weak_commits(shot) for shot in events]
+    referee_commits = [referee.commits(shot) for shot in events]
 
     referee_predictions = [
         independent_window_decoding.prediction(shot_commits)
@@ -3135,6 +3136,229 @@ def test_union_find_windows_commit_what_an_independent_sliding_decode_does():
     assert len(commits) == UNION_FIND_SHOT_COUNT
     assert referee_commits == commits
     assert referee_predictions == predictions
+
+
+SWITCHING_DISTANCE = 3
+SWITCHING_ROUNDS = 18  # six windows, room for two double windows of 9
+SWITCHING_SHOT_COUNT = 100
+
+
+def experiment_one_switching_on_matching() -> machine_settings.MachineSettings:
+    """Experiment 1's switching machine, PyMatching as its strong tier."""
+    run_file = experiment_one_run_file()
+    machine = run_file.switching(SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE)
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    strong_decoder = dataclasses.replace(
+        machine.strong_decoder, algorithm=matching
+    )
+    workload = machine_settings.memory_workload(
+        SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE, SWITCHING_ROUNDS
+    )
+    return dataclasses.replace(
+        machine, strong_decoder=strong_decoder, workload=workload
+    )
+
+
+DELIVERED_TIERS = {
+    KEPT_WEAK_REQUEST: independent_window_decoding.WEAK,
+    decoding_records.RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY: (
+        independent_window_decoding.STRONG
+    ),
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class SwitchingShot:
+    """What one switching shot escalated and committed.
+
+    residuals holds (window, tier, detectors) for every delivered decode:
+    the detectors its commit flips, the hand-off to its neighbours.
+    frame_writes holds (window, tier, observables) for every frame write.
+    """
+
+    escalated_windows: frozenset
+    residuals: list
+    frame_writes: list
+    prediction: tuple
+
+
+def note_delivered_residual(residuals, job, result, outcome, ended_ticks):
+    """A delivered decode's committed detectors, by window and tier."""
+    del ended_ticks
+    tier = DELIVERED_TIERS.get(outcome)
+    if tier is None:
+        return
+    residual = result.boundary_data
+    residuals.append((job.window_id, tier, residual.detector_ids))
+
+
+def frame_writes(records) -> list:
+    """The frame's writes as (window, tier, observables), in window order."""
+    writes = []
+    for record in records:
+        window_index = record.window_key[1]
+        write = (window_index, record.tier, record.logical_observables)
+        writes.append(write)
+    return sorted(writes)
+
+
+def switching_shot(settings, seed: int, models) -> tuple:
+    """The seed's detection events and its SwitchingShot."""
+    machine = machine_module.Machine.build(settings, seed, models)
+    residuals = []
+    listener = functools.partial(note_delivered_residual, residuals)
+    decoders = machine.decoders
+    weak_outcomes = decoders.decoder_manager.outcomes
+    weak_outcomes.trace.request_ended.connect(listener)
+    strong_outcomes = decoders.strong_decoder_manager.outcomes
+    strong_outcomes.trace.request_ended.connect(listener)
+    result = machine.run()
+    observation = machine.observation
+    sampled = observation.sampled_shots.shots_by_operation[1]
+    escalated_keys = observation.confidence.escalated_keys
+    escalated = frozenset(window_key[1] for window_key in escalated_keys)
+    writes = frame_writes(observation.frame_corrections.committed)
+    operation_result = result.operation_results[0]
+    shot = SwitchingShot(
+        escalated,
+        sorted(residuals),
+        writes,
+        operation_result.logical_observables,
+    )
+    return sampled.detection_events, shot
+
+
+def referee_switching_shot(referee, detection_events, escalated_windows):
+    """The referee's SwitchingShot for the same events and escalations."""
+    commits = referee.commits(detection_events, escalated_windows)
+    residuals = []
+    writes = []
+    for commit in commits:
+        residuals.append((commit.window_index, commit.tier, commit.detectors))
+        writes.append((commit.window_index, commit.tier, commit.observables))
+    prediction = independent_window_decoding.prediction(commits)
+    return SwitchingShot(
+        escalated_windows, sorted(residuals), sorted(writes), prediction
+    )
+
+
+def machine_and_referee_shots(settings, referee) -> tuple:
+    """Every seed's SwitchingShot from the machine, then from the referee."""
+    models = built_window_models.BuiltWindowModels()
+    machine_shots = []
+    referee_shots = []
+    for seed in range(SWITCHING_SHOT_COUNT):
+        events, shot = switching_shot(settings, seed, models)
+        machine_shots.append(shot)
+        refereed = referee_switching_shot(
+            referee, events, shot.escalated_windows
+        )
+        referee_shots.append(refereed)
+    return machine_shots, referee_shots
+
+
+def test_switching_commits_what_an_independent_double_window_decode_does():
+    """Experiment 1's switching machine beside an outside double window.
+
+    Experiment 1's switching card at d = 3 and p = 0.005, its strong tier
+    PyMatching, which is exact and deterministic, on shots of six
+    windows. A double window is not a whole-circuit decode: its faces
+    are pinned on the weak tier's commits beside it, so the right
+    reference is the protocol itself, decoded independently. The
+    referee (tests/machine/independent_window_decoding.py) takes which
+    windows the cluster gap escalated from the run, since the gap is
+    the confidence part's own law, and lays out every weak window,
+    double window and restart, and every pinned input, from Stim's
+    model alone. Over 100 shots, some kept whole and most escalating,
+    every delivered decode commits the same detectors, every frame write
+    carries the same observables, and every prediction is the same.
+    """
+    settings = experiment_one_switching_on_matching()
+    circuit = switching_circuit()
+    weak_decoder = settings.weak_decoder.algorithm.build()
+    referee = independent_window_decoding.SlidingWindowReferee(
+        circuit, SWITCHING_ROUNDS, SWITCHING_DISTANCE, weak_decoder
+    )
+
+    machine_shots, referee_shots = machine_and_referee_shots(settings, referee)
+
+    escalating = [shot for shot in machine_shots if shot.escalated_windows]
+    assert 0 < len(escalating) < SWITCHING_SHOT_COUNT
+    assert referee_shots == machine_shots
+
+
+def switching_circuit() -> stim.Circuit:
+    """The switching shots' circuit, generated by Stim beside the machine."""
+    return stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        rounds=SWITCHING_ROUNDS,
+        distance=SWITCHING_DISTANCE,
+        after_clifford_depolarization=UNION_FIND_ERROR_RATE,
+        before_round_data_depolarization=UNION_FIND_ERROR_RATE,
+        before_measure_flip_probability=UNION_FIND_ERROR_RATE,
+        after_reset_flip_probability=UNION_FIND_ERROR_RATE,
+    )
+
+
+def with_layer_in_observable(circuit, layer: int) -> stim.Circuit:
+    """The circuit with every detector of Stim's layer also in observable 0.
+
+    A detector's parity is fixed without noise, so observable 0 stays a
+    valid observable, and a fault flipping one of the layer's detectors
+    now flips it too.
+    """
+    flattened = circuit.flattened()
+    widened = stim.Circuit()
+    for instruction in flattened:
+        widened.append(instruction)
+        if instruction.name != "DETECTOR":
+            continue
+        coordinates = instruction.gate_args_copy()
+        if coordinates[-1] != layer:
+            continue
+        targets = instruction.targets_copy()
+        widened.append("OBSERVABLE_INCLUDE", targets, 0)
+    return widened
+
+
+def running(settings, circuit) -> machine_settings.MachineSettings:
+    """The settings with their one memory operation running circuit."""
+    record = settings.workload.workload_record
+    operation = dataclasses.replace(record.operations[0], circuit=circuit)
+    record = dataclasses.replace(record, operations=(operation,))
+    workload = workload_settings.WorkloadSettings.running(record)
+    return dataclasses.replace(settings, workload=workload)
+
+
+def test_a_double_window_books_the_observable_its_crossing_commit_flips():
+    """A fault across a double window's near seam flips its frame write.
+
+    No fault of the d = 3 memory circuit both crosses rounds and flips
+    the observable, so the test above cannot see the weak decode's
+    crossing commit join the strong result. Here every detector of
+    Stim's layer 8, round 9, also enters observable 0, so a fault across
+    rounds 9 and 10, the seam before window 3, flips it. Seed 26
+    escalates window 3, whose weak decode commits such a fault; the
+    machine books its flip with the strong result, as the referee does.
+    """
+    generated = switching_circuit()
+    circuit = with_layer_in_observable(generated, 8)
+    matching_settings = experiment_one_switching_on_matching()
+    settings = running(matching_settings, circuit)
+    weak_decoder = settings.weak_decoder.algorithm.build()
+    referee = independent_window_decoding.SlidingWindowReferee(
+        circuit, SWITCHING_ROUNDS, SWITCHING_DISTANCE, weak_decoder
+    )
+    models = built_window_models.BuiltWindowModels()
+
+    events, machine_shot = switching_shot(settings, 26, models)
+
+    escalated = machine_shot.escalated_windows
+    commits = referee.commits(events, escalated)
+    crossing = [commit.crossing_observables for commit in commits]
+    assert (1,) in crossing
+    referee_shot = referee_switching_shot(referee, events, escalated)
+    assert referee_shot == machine_shot
 
 
 def test_a_sampled_stream_segment_has_no_independent_accuracy_result() -> None:

@@ -2,22 +2,34 @@
 
 The referee for the machine's windows. It reads Stim's detector error
 model itself and lays out, fills and commits each window by the rules
-below, never through decsim's window planner, slicer or ownership code;
-only the decode of one window is a decsim decoder row, called on the
-matrices built here.
+below, never through decsim's window planner, slicer, ownership code or
+strong regions; only the decode of one weak window is a decsim decoder
+row, called on the matrices built here.
 
-Skoric et al. 2209.08552 lines 188-197: a window decodes its commit and
-buffer rounds and keeps the corrections of its commit region; lines
-260-261: it also commits the edges leaving the commit region. qLDPC's
-SequentialWindowDecoder (qldpc/decoders/sinter.py lines 470-510, qldpc
-0.3.3 as installed) gives the columns: every fault flipping a detector
-of the window that no earlier window committed, of which the window
-commits those flipping a detector of its commit rounds. Its decode loop
-(lines 635-652) reads the bare syndrome plus the effect of every
-correction committed so far. cudaqx's sliding window
+Skoric et al. 2209.08552 Sec. I B (lines 195-206): a window decodes its
+commit and buffer rounds and keeps the corrections of its commit
+region; Fig. 2 (line 271): it also commits the edges leaving the commit
+region. qLDPC's SequentialWindowDecoder (qldpc/decoders/sinter.py lines
+470-510, qldpc 0.3.3 as installed) gives the columns: every fault
+flipping a detector of the window that no earlier window committed, of
+which the window commits those flipping a detector of its commit
+rounds. Its decode loop (lines 635-652) reads the bare syndrome plus the
+effect of every correction committed so far. cudaqx's sliding window
 (libs/qec/lib/decoders/sliding_window.cpp lines 311-322) commits the
 same columns, everything before the next window's first column. Every
 window strides its commit rounds, and the last commits what is left.
+
+An escalated window opens Toshio et al.'s double window (2510.25222
+Sec. III C and Fig. 12, lines 1242-1251 and 1260-1263): the strong
+decoder takes r_com + 2 r_buf rounds from the escalated commit and
+decodes them once the weak decoder has determined the boundary
+conditions at both ends, and the weak chain restarts past them, here
+reading back one buffer region. The strong input is the bare syndrome
+plus the corrections committed by the decodes before it (Bombin et
+al. 2303.04846, lines 822-835 of tmp/papers/2303.04846.txt), and its
+decoder is PyMatching on the region's faults. The restart window is
+decoded first, so it commits the faults crossing into the region
+(Skoric Fig. 2).
 
 A union-find decode breaks ties by edge order, so the matrices keep
 Stim's order: rows by detector index, columns by a fault's first
@@ -26,13 +38,16 @@ appearance in the model, the order of qLDPC's column masks.
 
 import dataclasses
 import math
+from typing import Optional
 
 import numpy
+import pymatching
 import scipy.sparse
 
 import decsim.records.fault_model_contracts as fault_models
 
 WEAK = "weak"
+STRONG = "strong"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -47,12 +62,17 @@ class Fault:
 
 @dataclasses.dataclass(frozen=True)
 class Commit:
-    """What one window commits: the detectors and observables it flips."""
+    """What one window commits: the detectors and observables it flips.
+
+    A double window's observables include those its weak decode's
+    crossing commit flips, also kept apart in crossing_observables.
+    """
 
     window_index: int
     tier: str
     detectors: tuple
     observables: tuple
+    crossing_observables: tuple = ()
 
 
 class SlidingWindowReferee:
@@ -73,31 +93,116 @@ class SlidingWindowReferee:
         self.weak_decoder = weak_decoder
         self.observable_count = circuit.num_observables
 
-    def weak_commits(self, detection_events) -> list:
-        """Each window's commit, in window order."""
+    def commits(self, detection_events, escalated_windows=frozenset()) -> list:
+        """Each commit of one shot, given the windows whose verdict escalated.
+
+        A kept window commits its weak decode. An escalated window
+        commits only what its weak decode owns behind its first round,
+        the restart's crossing faults, which pin the region before it
+        and its own; those flips are booked with its strong commit, as
+        decsim's frame books them.
+        """
         syndrome = numpy.array(detection_events, dtype=numpy.uint8)
-        committed = set()
-        commits = []
+        shot = _Shot(syndrome, set(), [])
         strides = self.round_count / self.window_rounds
         window_count = math.ceil(strides)
-        for window_index in range(window_count):
-            commit = self._weak_commit(window_index, syndrome, committed)
-            commits.append(commit)
-        return commits
+        window_index = 0
+        first_round = None
+        while window_index < window_count:
+            window = self._window(window_index, first_round)
+            if window_index in escalated_windows:
+                window_index, first_round = self._escalate(window, shot)
+                continue
+            self._keep(window, shot)
+            window_index += 1
+            first_round = None
+        self._decode_waiting_region(shot)
+        return shot.commits
 
-    def _weak_commit(self, window_index: int, syndrome, committed: set):
-        """Decode one window and commit its commit region's faults."""
+    def _window(self, window_index: int, first_round: Optional[int]):
+        """The window's rounds; a restart reads back from first_round."""
         commit_lo = window_index * self.window_rounds + 1
         stride_end = commit_lo + self.window_rounds - 1
         commit_hi = min(stride_end, self.round_count)
         last_round = commit_hi + self.window_rounds
-        rows = self._rows(commit_lo, last_round)
-        columns = self._columns(rows, committed)
-        owned = self._owned(columns, commit_lo, commit_hi)
-        selected = self._weak_selection(rows, columns, owned, syndrome)
-        return self._commit(
-            window_index, WEAK, columns, owned, selected, syndrome, committed
+        if first_round is None:
+            first_round = commit_lo
+        return _Window(
+            window_index, first_round, commit_lo, commit_hi, last_round
         )
+
+    def _keep(self, window: "_Window", shot: "_Shot") -> None:
+        """Commit the weak decode; a region waiting on it is decoded next."""
+        columns, owned, selected = self._weak_decode(window, shot)
+        commit = self._commit(
+            window.index, WEAK, columns, owned, selected, shot
+        )
+        shot.commits.append(commit)
+        self._decode_waiting_region(shot)
+
+    def _escalate(self, window: "_Window", shot: "_Shot") -> tuple:
+        """Open the window's region; the restart's index and first round."""
+        columns, owned, selected = self._weak_decode(window, shot)
+        crossing = self._crossing(columns, owned, window.commit_lo)
+        crossing_commit = self._commit(
+            window.index, STRONG, columns, crossing, selected, shot
+        )
+        self._decode_waiting_region(shot)
+        region_end = window.commit_lo + 3 * self.window_rounds - 1
+        last_round = min(region_end, self.round_count)
+        shot.waiting_region = _Region(
+            window.index,
+            window.commit_lo,
+            last_round,
+            crossing_commit.observables,
+        )
+        restart_strides = last_round / self.window_rounds
+        restart_index = math.ceil(restart_strides)
+        restart_first_round = last_round - self.window_rounds + 1
+        return restart_index, restart_first_round
+
+    def _decode_waiting_region(self, shot: "_Shot") -> None:
+        """Decode the region whose far face has just been committed."""
+        region = shot.waiting_region
+        if region is None:
+            return
+        shot.waiting_region = None
+        rows = self._rows(region.first_round, region.last_round)
+        columns = self._columns(rows, shot.committed)
+        owned = self._owned(columns, region.first_round, region.last_round)
+        placed = self._placed_faults(rows, columns, owned)
+        region_syndrome = shot.syndrome[rows]
+        selected = _matching_selection(placed, region_syndrome)
+        commit = self._commit(
+            region.window_index, STRONG, columns, owned, selected, shot
+        )
+        observables = _flips_together(
+            commit.observables, region.crossing_observables
+        )
+        booked = dataclasses.replace(
+            commit,
+            observables=observables,
+            crossing_observables=region.crossing_observables,
+        )
+        shot.commits.append(booked)
+
+    def _weak_decode(self, window: "_Window", shot: "_Shot") -> tuple:
+        """The window's columns, which it owns, and the weak correction."""
+        rows = self._rows(window.first_round, window.last_round)
+        columns = self._columns(rows, shot.committed)
+        owned = self._owned(columns, window.commit_lo, window.commit_hi)
+        selected = self._weak_selection(rows, columns, owned, shot.syndrome)
+        return columns, owned, selected
+
+    def _crossing(self, columns: list, owned: list, commit_lo: int) -> list:
+        """Whether each column is owned and flips a round before commit_lo."""
+        crossing = []
+        for column, fault_index in enumerate(columns):
+            rounds = self.faults[fault_index].rounds
+            earliest = min(rounds)
+            is_crossing = owned[column] and earliest < commit_lo
+            crossing.append(is_crossing)
+        return crossing
 
     def _rows(self, first_round: int, last_round: int) -> list:
         """The detectors of the rounds a window reads, in index order."""
@@ -187,7 +292,7 @@ class SlidingWindowReferee:
         return _ones_at(entry_rows, entry_columns, shape)
 
     def _commit(
-        self, window_index, tier, columns, owned, selected, syndrome, committed
+        self, window_index, tier, columns, owned, selected, shot
     ) -> Commit:
         """Take the owned columns out of later windows; apply the selected.
 
@@ -200,17 +305,48 @@ class SlidingWindowReferee:
         for column, fault_index in enumerate(columns):
             if not owned[column]:
                 continue
-            committed.add(fault_index)
+            shot.committed.add(fault_index)
             if not selected[column]:
                 continue
             fault = self.faults[fault_index]
             flipped_rows = list(fault.detectors)
-            syndrome[flipped_rows] ^= 1
+            shot.syndrome[flipped_rows] ^= 1
             detectors.symmetric_difference_update(fault.detectors)
             for observable in fault.observables:
                 observables[observable] ^= 1
         flipped = tuple(sorted(detectors))
         return Commit(window_index, tier, flipped, tuple(observables))
+
+
+@dataclasses.dataclass(frozen=True)
+class _Window:
+    """One weak window: the rounds it reads and the rounds it commits."""
+
+    index: int
+    first_round: int
+    commit_lo: int
+    commit_hi: int
+    last_round: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _Region:
+    """A strong region waiting for its far face to be committed."""
+
+    window_index: int
+    first_round: int
+    last_round: int
+    crossing_observables: tuple
+
+
+@dataclasses.dataclass
+class _Shot:
+    """One shot's running syndrome, committed faults and commits."""
+
+    syndrome: numpy.ndarray
+    committed: set
+    commits: list
+    waiting_region: Optional[_Region] = None
 
 
 def prediction(commits: list) -> tuple:
@@ -305,6 +441,36 @@ def _local_rows(fault: Fault, row_by_detector: dict) -> list:
 
 def _merged(earlier: float, probability: float) -> float:
     return earlier * (1 - probability) + probability * (1 - earlier)
+
+
+def _matching_selection(placed, region_syndrome) -> list:
+    """PyMatching's minimum-weight correction over the region's columns.
+
+    Log-odds weights with parallel faults merged as independent errors,
+    the convention of PyMatching's loader for a Stim model.
+    """
+    priors = placed.priors
+    negated = -priors
+    log_survival = numpy.log1p(negated)
+    log_prior = numpy.log(priors)
+    weights = log_survival - log_prior
+    check = placed.check.copy()
+    matching = pymatching.Matching.from_check_matrix(
+        check,
+        weights=weights,
+        error_probabilities=priors,
+        merge_strategy="independent",
+    )
+    selected = matching.decode(region_syndrome)
+    return list(selected)
+
+
+def _flips_together(first: tuple, second: tuple) -> tuple:
+    flips = []
+    for first_flip, second_flip in zip(first, second, strict=True):
+        flip = first_flip ^ second_flip
+        flips.append(flip)
+    return tuple(flips)
 
 
 def _ones_at(entry_rows: list, entry_columns: list, shape: tuple):

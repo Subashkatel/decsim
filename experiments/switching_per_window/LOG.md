@@ -217,3 +217,42 @@ and the exact commands to repeat it.
 ## Results
 
 None yet.
+
+## Run (2026-10-09)
+
+Submitted on the owner's "submit", from a copy pinned at commit
+`1785bafa` (`tmp/runs/2026-10-09_switching_per_window_code`, clean
+tree). Job array 15259257 (330 jobs), fold job 15259258.
+
+```
+cd tmp/runs/2026-10-09_switching_per_window_code
+PYTHONPATH=$PWD:/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/tmp/runs/2026-10-07_strong_only_pydeps \
+  /scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/tmp/deltakit-integration/upstream/.venv/bin/python \
+  -m decsim run experiments/switching_per_window/run.py --slurm --hours 12 \
+  --out $PWD/results/2026-10-09_switching_per_window/run
+```
+
+The launcher wrote these two files into the run folder (`jobs.json`
+beside them lists each job's 22,281 pieces; the same command rebuilds
+it). `run.sbatch`:
+
+```
+#!/bin/bash
+#SBATCH --array=0-329 --cpus-per-task=3 --mem=16384M --time=11:24:00
+#SBATCH --output=<run folder>/logs/%A_%a.log
+<python> -m decsim run <copy>/experiments/switching_per_window/run.py --out <run folder> --job $SLURM_ARRAY_TASK_ID --processes 3
+```
+
+`fold.sbatch`, submitted with `--dependency=afterany:15259257`:
+
+```
+#!/bin/bash
+#SBATCH --cpus-per-task=1 --mem=16G --time=12:00:00
+#SBATCH --output=<run folder>/logs/fold.log
+<python> -m decsim run --fold --out <run folder>
+```
+
+The run folder (pieces, logs, folded csv files) stays on Della scratch
+at `tmp/runs/2026-10-09_switching_per_window_code/results/2026-10-09_switching_per_window/run`.
+To resume after the array ends, run the same command: it packs only the
+pieces not yet saved. Do not run it while jobs of the array are queued.

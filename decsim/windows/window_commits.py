@@ -110,9 +110,13 @@ class WindowCommitter:
         joins the result before it leaves, so the frame and the
         prediction receive the same bits. The answer's route prices
         where that join happens (decoders/decoder_output.py
-        STRONG_ANSWER_ROUTES).
+        STRONG_ANSWER_ROUTES). A boundary held for the window leaves
+        now, from the decoder that computed it, as a final weak result's
+        does (commit_or_publish), and not after the answer reaches the
+        frame.
         """
         result = _with_the_crossing_commit(window, result)
+        self.courier.ship_held(window, result, request_key)
         finish = functools.partial(
             self.finish_strong, window, operation, result, request_key
         )
@@ -170,10 +174,10 @@ class WindowCommitter:
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
-        """The strong result is the window's final one.
+        """The strong result, landed, is the window's final one.
 
         Its prediction, status and no-correction reason replace the
-        provisional ones, and a boundary held for it ships.
+        provisional ones.
         """
         _record_the_decode(window, result)
         if result.logical_observables is not None:
@@ -182,7 +186,6 @@ class WindowCommitter:
             )
         # nothing of the operation waits on the window any more
         window.published_request_key = request_key
-        self.courier.ship_held(window, result, request_key)
         self.results.release_committed_segments(operation.id)
         self.results.deliver_if_final(operation)
 

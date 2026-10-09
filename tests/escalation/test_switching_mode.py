@@ -305,12 +305,13 @@ def test_the_serial_escalation_timeline_is_exact():
     rounds over weak_decoder_to_strong_decoder, 3 us; they land in the
     strong syndrome buffer at 33 us, the job is built and its input
     crosses strong_buffer_to_strong_decoder, 6 us, so the strong decode
-    starts at 39 us. The Held boundary keeps the next window's job in
-    the queue until the strong correction has committed at 74 us and
-    its boundary crossed from the host down
-    strong_decoder_to_weak_decoder, 4 us; only then does the job take a
-    unit and its input cross weak_buffer_to_weak_decoder, 5 us, so it
-    starts at 83 us.
+    starts at 39 us. The strong decode ends at 69 us, and its answer
+    lands on the frame 4 us later, at 73 us. The Held boundary keeps the
+    next window's job in the queue until the boundary, which leaves the
+    host when the strong decode ends, has crossed
+    strong_decoder_to_weak_decoder, 4 us, to 73 us; only then does the
+    job take a unit and its input cross weak_buffer_to_weak_decoder,
+    5 us, so it starts at 78 us.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
     machine.run()
@@ -326,7 +327,7 @@ def test_the_serial_escalation_timeline_is_exact():
     expected_strong_start = decsim_config.microseconds_to_ticks(39.0)
     expected_accepted = decsim_config.microseconds_to_ticks(73.0)
     expected_committed = decsim_config.microseconds_to_ticks(74.0)
-    expected_released_start = decsim_config.microseconds_to_ticks(83.0)
+    expected_released_start = decsim_config.microseconds_to_ticks(78.0)
 
     assert weak_done == expected_weak_done
     assert strong_start == expected_strong_start
@@ -643,9 +644,9 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
     holder once window 0's strong input lands in the unit, 39.0 us here:
     the weak commit at 30.0, the escalation hop of 3.0 and the strong
     buffer's hop of 6.0. Rounds 4 to 6 stay for window 1 until its own
-    commit releases them at 96.0 us: window 1 takes a unit only after
-    the strong commit at 74.0 and the boundary's hop down from the host
-    of 4.0, so its own input hop of 5.0 follows them.
+    commit releases them at 91.0 us: window 1 takes a unit only after
+    the strong decode ends at 69.0 and the boundary's hop down from the
+    host of 4.0, so its own input hop of 5.0 follows them.
     """
     machine = fabric.switching_machine(rounds=6, escalated_windows={0})
     probe = declared_run.OccupancyProbe(machine.windows.window_manager)
@@ -659,7 +660,7 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
         (decsim_config.microseconds_to_ticks(0.0), 0),
         (decsim_config.microseconds_to_ticks(33.0), 6),
         (decsim_config.microseconds_to_ticks(39.0), 3),
-        (decsim_config.microseconds_to_ticks(96.0), 0),
+        (decsim_config.microseconds_to_ticks(91.0), 0),
     ]
 
     assert strong_record.window_key == (1, 0)

@@ -91,6 +91,7 @@ WALL_CLOCK_POINTS = (
     "buffer0_first_round_to_frame",
     "qpu_last_round_to_frame",
     "qpu_first_round_to_frame",
+    "end_of_stream_reaction",
 )
 WALL_CLOCK_COLUMNS = (
     "load",

@@ -168,8 +168,9 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `frame_commit` | the frame accepting a correction, to it being committed |
 | `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |
 | `buffer0_first_round_to_frame` | the window's first round in that syndrome buffer, to the frame |
-| `qpu_last_round_to_frame` | the last round the window needs leaving the QPU, to the frame |
+| `qpu_last_round_to_frame` | the last round the committing decode read leaving the QPU, to the frame: a strong region that absorbed later windows reads past its window, and a buffer that runs into the next operation reads that operation's rounds |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
+| `end_of_stream_reaction` | one sample a shot: the last round any committing decode read leaving the QPU, to the last correction committed at the frame, whichever window holds it. It is the response time from the final syndrome to the correction (Toshio et al. 2510.25222 lines 357-363) and Riverlane's full decoding response time (2410.05202 lines 74-79) up to the frame; a conditional operation's own legs, `frame_to_controller`, the decision-to-pulse cycles and `controller_to_qpu`, run only for an operation another waits on and are not in it. The pooled window points hide it: the final window is one sample among many |
 
 `observation.first_recorded_round` and `observation.last_recorded_round`
 set the measurement interval, both ends included, rounds counted from 1
@@ -180,7 +181,8 @@ still runs and finishes, so a long shot can leave out its start-up,
 when the queues are empty, and its drain at the end. The interval
 cuts these points, their `_mean_us` and `_max_us` columns, the tier
 split, the growth rates and deadline columns, `load` and
-`parallel_processes_needed`; `logical_failure`,
+`parallel_processes_needed`; `end_of_stream_reaction`, which is the
+drain itself, `logical_failure`,
 `predictions` and every count and rate in `shots.csv`, `decoded_windows`
 and `escalated_windows` among them, stay over the whole shot.
 
@@ -284,9 +286,9 @@ value.
 | --- | --- |
 | `task_id`, the swept paths, `algorithm` | the task |
 | `name` | which latency point, from the list above |
-| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows |
+| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows, and for `end_of_stream_reaction`, whose samples are shots |
 | `value_us` | one microsecond value that occurred |
-| `count` | how many windows carried it |
+| `count` | how many windows, rounds or shots carried it |
 
 This is the multiset of a point's window samples, one per tier. A median
 and a p99 need nothing more, and one piece records nothing more for
@@ -393,7 +395,8 @@ Then four columns per latency point, in the order of `POINTS`:
 `<point>_mean_us`, `<point>_median_us`, `<point>_p99_us` and
 `<point>_max_us`. The mean and the max fold over the shot rows; the
 median and the p99 come from the sample counts, through
-`percentile_of_counts`.
+`percentile_of_counts`, and for `end_of_stream_reaction`, one sample a
+shot, they are over the task's shots.
 
 Then `buffer0_ready_to_frame_<tier>_median_us` and
 `buffer0_ready_to_frame_<tier>_p99_us` for each tier that committed a

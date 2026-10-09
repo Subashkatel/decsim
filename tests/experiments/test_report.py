@@ -147,6 +147,15 @@ WALL_CLOCK = {
 }
 
 
+def _counts_by_tier(rows: list, name: str) -> collections.Counter:
+    """One latency point's sample count under each tier."""
+    counted = collections.Counter()
+    for row in rows:
+        if row["name"] == name:
+            counted[row["tier"]] += row["count"]
+    return counted
+
+
 def wall_clock_axes(distances: tuple) -> dict:
     return {
         run_files.DISTANCE_PATH: distances,
@@ -161,6 +170,15 @@ def test_every_decoded_window_contributes_one_latency_sample():
     samples = measurement.samples["algorithm"]
     assert len(samples) == measurement.decoded_windows
     assert all(sample > 0 for sample in samples)
+
+
+def test_the_end_of_stream_reaction_is_counted_once_a_shot_under_no_tier():
+    """Its median and p99 in sweep.csv are over the task's shots."""
+    measurements = measured_shots(2)
+    rows = report.window_sample_rows(measurements)
+    counted = _counts_by_tier(rows, "end_of_stream_reaction")
+
+    assert counted == {"": 2}
 
 
 def test_a_latency_sample_names_the_tier_that_decoded_its_window():

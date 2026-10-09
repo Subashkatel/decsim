@@ -272,6 +272,9 @@ class StagedDecoder(decoder_module.DecoderBase):
         running.open_stage = None
         job = running.job
         sequences = _run_sequences(job)
+        last_rounds_read = decoding_records.last_round_by_operation(
+            job.payloads
+        )
         record = decoding_records.DecoderStageRecord(
             job.operation_id,
             job.window_id,
@@ -288,6 +291,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             round_count=job.round_count,
             backend_queue_wait_ticks=job.backend_queue_wait_ticks,
             store_read_ticks=job.store_read_ticks,
+            last_rounds_read=last_rounds_read,
         )
         self.stage_recorded.fire(record)
 

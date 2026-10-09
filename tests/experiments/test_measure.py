@@ -2102,6 +2102,61 @@ def slower_strong_than_the_shot() -> measure.ShotMeasurement:
     return measure.measure_shot(shot)
 
 
+def last_commit_ticks(observation) -> int:
+    """The tick the frame committed its last correction of the shot."""
+    commits = []
+    for record in observation.frame_corrections.committed:
+        commits.append(record.committed_ticks)
+    return max(commits)
+
+
+def test_the_end_of_stream_reaction_ends_at_the_last_commit():
+    """The stream's answer is in place at its last correction.
+
+    Ten 100 us strong decodes on one unit end long after round 30 is read
+    out, so the reaction from that readout to the frame's last commit is
+    the end of the stream's own, one sample a shot (Toshio et al.
+    2510.25222 lines 357-363), and past the pooled window mean.
+    """
+    strong_algorithm = charged(100.0)
+    shot = switching_run(1000000.0, strong_algorithm=strong_algorithm)
+    measurement = measure.measure_shot(shot)
+    observation = shot.machine.observation
+    last_commit = last_commit_ticks(observation)
+    last_readout = max(observation.round_events.readout_ticks)
+    span_ticks = last_commit - last_readout
+    expected = config_module.ticks_to_microseconds(span_ticks)
+    pooled = measurement.means["qpu_last_round_to_frame"]
+
+    assert measurement.samples["end_of_stream_reaction"] == [expected]
+    assert expected > pooled
+
+
+def test_a_terminal_double_window_reads_its_region_to_the_last_round():
+    """The strong region's rounds, not its escalated window's, set the clock.
+
+    Windows commit 2 rounds and buffer 3 over 30, and every one
+    escalates into a double window, so the last region starts at window
+    12, which reads through round 29, and absorbs 13 and 14: it reads
+    through round 30. Both QPU anchors read the region's last round, so
+    the latest window's qpu_last_round_to_frame is the end-of-stream
+    reaction, from round 30's readout to the last commit.
+    """
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    shot = switching_run(
+        1000000.0, strong_window=double_window, commit_rounds=2
+    )
+    measurement = measure.measure_shot(shot)
+    observation = shot.machine.observation
+    last_commit = last_commit_ticks(observation)
+    last_readout = max(observation.round_events.readout_ticks)
+    span_ticks = last_commit - last_readout
+    expected = config_module.ticks_to_microseconds(span_ticks)
+
+    assert measurement.samples["end_of_stream_reaction"] == [expected]
+    assert measurement.maxes["qpu_last_round_to_frame"] == expected
+
+
 def test_a_window_waiting_for_its_strong_answer_keeps_its_rounds_waiting():
     """A provisional weak commit is not a round's final correction.
 

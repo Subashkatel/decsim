@@ -665,8 +665,10 @@ def bar_axis(axis: pyplot.Axes) -> None:
 
 
 def finish_distribution(axis: pyplot.Axes) -> None:
-    """A share axis from zero, with the grid and legend."""
-    axis.set_ylim(bottom=0)
+    """A share axis from zero, with headroom above the lines for the legend."""
+    _bottom, top = axis.get_ylim()
+    headroom_top = top * BAR_HEADROOM
+    axis.set_ylim(0, headroom_top)
     finish_axis(axis)
 
 

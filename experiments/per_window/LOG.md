@@ -62,6 +62,7 @@ Each step is decided before the next. Status on 2026-10-08:
 | Step | What we decide | Status |
 | --- | --- | --- |
 | 1. Questions | what the run must answer | discussing |
+| 1b. Literature check | which papers ground each piece | done, see below |
 | 2. Definitions | what right and wrong mean for a window | not started |
 | 3. Records | what decsim saves per shot, per window, per strong window | not started |
 | 4. Configurations and settings | decoders, distances, error rates, stop rule | partly decided |
@@ -81,6 +82,31 @@ Each step is decided before the next. Status on 2026-10-08:
 | Q5 | Is Relay-BP right on the windows it gets? Did it fix union-find's error or break a right answer? Did it converge? | per strong window |
 | Q6 | Which wrong windows make the shot fail? | window to shot |
 | Q7 | Latency of kept and escalated windows, and strong decoder load (second priority). | per window |
+
+## Literature grounding (2026-10-08)
+
+Every piece we plan to measure follows a published method. No paper
+combines them: per-window truth inside sliding windows, under
+circuit-level noise, with weak-to-strong escalation. That combination is
+our own, built only from these grounded pieces. Line numbers refer to
+the text copies in the sandbox (tmp/papers/txt/<arXiv id>.txt), each
+quote checked word for word.
+
+| What we measure | Method we follow | Source (lines) |
+| --- | --- | --- |
+| True answer of a window (form A) | parity of the true errors in the window's own region on the logical operator; the windows' labels add up to the shot's | Zhang et al. 2509.03815, Eq. 1 (499-508, 576-580) |
+| Per-window error rate | Pr[window answer differs from its label] | 2509.03815 (1073-1077) |
+| The seam trap | a window can be wrong on its own label while the shot is right | 2509.03815 (1130-1138); Tan et al. 2209.09219 (921-929) |
+| Prefix right (form B) | after each commit, the residual (true errors plus all corrections so far) is judged by an ideal decoder | Huang and Puri 2311.03307 (214-225); Sriram et al. 2608.10081 (350-354) |
+| Window error that makes the shot fail | window decoding fails where global decoding does not | Mishima, Toshio et al. 2605.14637 (474-479, 904-908) |
+| Weak error rate per gap | gap labelled by whether the decoder is right | Toshio 2510.25222 (803-808, 820-828); Gidney et al. 2312.04522 (894-900) |
+| Kept but wrong (false negative) | accepted by the decoder but corrected into a logical error | Smith et al. 2405.03766 (1187-1193); Meister et al. 2405.07433 (1312-1315); Toshio P_th (880-897) |
+| How well the gap ranks failures | AUC against true failures | Dentelski 2606.08758 (534-540) |
+| The words false positive and false negative | as there, but judged against the truth, not a reference decoder | Viszlai et al. 2412.05115 (574-583) |
+
+Known limit: neighbouring windows overlap, so they are not independent
+(Dinca et al. 2512.15689, 1076-1088); Toshio's per-window rates assume
+they are. We report both.
 
 ## Runs
 

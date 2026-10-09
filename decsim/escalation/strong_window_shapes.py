@@ -549,9 +549,9 @@ def strong_job_payloads(
     A face read raw folds no boundary: a mask there would count the
     rounds behind it twice (Bombin et al. 2303.04846 lines 775-788). For
     a pinned face the courier ships the neighbour's committed boundary
-    over decoder_to_decoder, and the job's gate XORs it into the landed
-    input when the decode starts, the path the weak side's boundaries
-    take.
+    from the side that committed it to the strong host, and the job's
+    gate XORs it into the landed input when the decode starts, as a weak
+    window's gate folds its boundary.
     """
     for source_key in folded_boundaries:
         shape.courier.pin_strong_face(

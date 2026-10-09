@@ -399,6 +399,7 @@ def _resolved_operation(operation_id: int):
         round_count=6,
         round_ticks=1000,
         spatial_node_count=9,
+        syndrome_bits_per_round=8,
     )
 
 

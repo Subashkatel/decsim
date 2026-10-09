@@ -894,25 +894,27 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     card) is its own point, outside the sum. What it costs the decode
     is dep_block: the strong job is built when the rounds land, 0.020
     us after the verdict, and from window 1 on it pins its past face on
-    the window before, whose committed boundary crosses
-    decoder_to_decoder in 0.004 us; the job takes a unit only then, so
-    its input hop follows both, 0.024 us. The last window's rounds were
-    carried up with the window before it, so its input hop starts 0.004
-    us after the verdict and waits 0.008 us after landing for the
-    selection's 0.020 us. The weak attempt starts where a unit took the
-    window's first decode, which is after the window before it
-    committed, so on every window it is the input hop and the two
-    forced-class solves of its complementary gap one after the other,
-    0.004 + 2 x 1.064 = 2.132 us; the last window's solves read fewer
-    rounds.
+    the window before, whose committed boundary is a strong decode's, so
+    the host reads it out of its own memory on
+    strong_buffer_to_strong_decoder in 0.008 us; the job takes a unit
+    only then, so its input hop follows both, 0.028 us. The last
+    window's rounds were carried up with the window before it, so its
+    input hop starts 0.008 us after the verdict and waits 0.004 us after
+    landing for the selection's 0.020 us. The weak attempt starts where
+    a unit took the window's first decode, which is after the window
+    before it committed, so on every window it is the input hop and the
+    two forced-class solves of its complementary gap one after the
+    other, 0.004 + 2 x 1.064 = 2.132 us; the last window's solves read
+    fewer rounds.
 
     From window 1 on, dep_block also holds the wait in the queue for the
     window before it: that window's whole path, 12.240 us on window 0
-    and 12.244 us after, and its boundary's 0.004 us hop, less the 3 us
-    between the two windows' data. It is 9.244 us on window 1 and grows
-    by 9.248 us a window; the last window's data completes with the
-    window before it's, so it waits 3 us more. The unit is idle when the
-    boundary lands, so queue_wait is zero.
+    and 12.248 us after, and its strong boundary's 0.012 us hop down
+    strong_decoder_to_weak_decoder, less the 3 us between the two
+    windows' data. It is 9.252 us on window 1 and grows by 9.260 us a
+    window; the last window's data completes with the window before
+    it's, so it waits 3 us more. The unit is idle when the boundary
+    lands, so queue_wait is zero.
     """
     measurement = switching_shot(1000000.0)
 
@@ -923,15 +925,15 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     assert samples["queue_wait"] == [0.0] * 10
     assert samples["dep_block"] == [
         0.020,
-        9.268,
-        18.516,
-        27.764,
-        37.012,
-        46.260,
-        55.508,
-        64.756,
-        74.004,
-        86.240,
+        9.280,
+        18.540,
+        27.800,
+        37.060,
+        46.320,
+        55.580,
+        64.840,
+        74.100,
+        86.344,
     ]
     assert samples["compute_wait"] == [0.0] * 10
     assert samples["algorithm"] == [10.0] * 10

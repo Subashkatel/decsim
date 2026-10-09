@@ -33,6 +33,8 @@ class ResolvedOperationPlanning:
     round_count: int
     round_ticks: int
     spatial_node_count: int
+    # the code card's checks over the operation's patches, one round
+    syndrome_bits_per_round: int
 
 
 @dataclass(frozen=True)

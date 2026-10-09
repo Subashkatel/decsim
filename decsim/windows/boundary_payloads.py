@@ -1,4 +1,4 @@
-"""How a boundary message is represented on decoder_to_decoder.
+"""How a boundary message is represented on the wire.
 
 A window's hand-off updates the detectors of its neighbour's oldest
 round layer, and nothing else: Tan et al. 2209.09219 lines 936-946,

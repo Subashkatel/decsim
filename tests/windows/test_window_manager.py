@@ -118,7 +118,7 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     )
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
-    courier = window_boundaries.BoundaryCourier()
+    courier = window_boundaries.BoundaryCourier(window_records.DecoderTier.WEAK)
     courier.planner = manager.planner
     courier.interaction = manager.window_interaction
     manager.courier = courier

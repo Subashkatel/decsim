@@ -17,6 +17,7 @@ import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
 import decsim.records.program as program_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.round_retention as round_retention
@@ -68,6 +69,8 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         windows_by_key=windows,
         models=no_models,
         round_count_of=lambda _operation_id: 20,
+        # d*d-1 checks of one d=3 patch
+        syndrome_bits_per_round_of=lambda _operation_id: 8,
     )
     profile = link_profiles.logical_reference_profile()
     links = fabric.LinkFabric(profile, engine)
@@ -77,7 +80,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     )
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
-    courier = window_boundaries.BoundaryCourier()
+    courier = window_boundaries.BoundaryCourier(window_records.DecoderTier.WEAK)
     courier.planner = planner
     courier.transfers = transfers
     courier.retention = _retention_of(20)
@@ -143,17 +146,29 @@ class _RecordingTransfers:
         self, path, attribution, payload_bits, on_delivered
     ) -> None:
         """Record the hand-off, then send it over the real fabric."""
-        self.boundary_sends.append((attribution, payload_bits))
+        self.boundary_sends.append((path, attribution, payload_bits))
         self.transfers.send_boundary(
             path, attribution, payload_bits, on_delivered
         )
 
 
-class _NoWindows:
-    """The facade a courier test does not look at."""
+class _LandingTicks:
+    """The facade, noting the tick each boundary lands."""
 
-    def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
-        """One boundary landed."""
+    def __init__(self, engine: engine_module.Engine) -> None:
+        self.engine = engine
+        self.ticks = []
+
+    def accept_boundary(self, _window_key: tuple, _is_unblocked: bool) -> None:
+        """One boundary landed now."""
+        self.ticks.append(self.engine.now)
+
+
+def _reference_latency_ticks(path_name: str) -> int:
+    """The reference card's latency on one hop."""
+    profile = link_profiles.logical_reference_profile()
+    path = getattr(profile, path_name)
+    return path.channel.propagation_latency_ticks
 
 
 def _pinned_courier():
@@ -194,6 +209,8 @@ def _pinned_courier():
         windows_by_key=windows,
         models=no_models,
         round_count_of=lambda _operation_id: 6,
+        # d*d-1 checks of one d=3 patch
+        syndrome_bits_per_round_of=lambda _operation_id: 8,
     )
     profile = link_profiles.logical_reference_profile()
     links = fabric.LinkFabric(profile, engine)
@@ -204,13 +221,13 @@ def _pinned_courier():
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
     recording = _RecordingTransfers(transfers)
-    courier = window_boundaries.BoundaryCourier()
+    courier = window_boundaries.BoundaryCourier(window_records.DecoderTier.WEAK)
     courier.planner = planner
     courier.transfers = recording
     courier.retention = _retention_of(6)
     courier.interaction = interaction
     courier.boundary_policy = _EAGER
-    courier.windows = _NoWindows()
+    courier.windows = _LandingTicks(engine)
     return engine, operation, source, courier, recording
 
 
@@ -253,7 +270,8 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     The residual detectors that lie in the strong window's model land on
     the one layer where the two windows meet, its oldest read round
     (Tan 2209.09219 lines 943-946), and the message is priced against
-    that layer of the strong window: eight detectors, one bit each.
+    that layer of the strong window: eight detectors, one bit each,
+    behind the request's name the cable to the host carries.
     """
     engine, operation, source, courier, recording = _pinned_courier()
     request_key = window_records.DecoderRequestKey(
@@ -275,8 +293,8 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     engine.run()
     assert dict(strong_window.boundary_in) == {4: [1, 0, 1]}
     pinned_send = recording.boundary_sends[-1]
-    attribution, payload_bits = pinned_send
-    assert payload_bits == 8
+    _path, attribution, payload_bits = pinned_send
+    assert payload_bits == 8 + window_records.REQUEST_KEY_WIRE_BITS
     assert attribution.relation.source_window_key == (1, 0)
     assert attribution.relation.destination_window_key == (1, 1)
     assert attribution.relation.source_request_key == request_key
@@ -292,6 +310,92 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
         (2, 2),
         (2, 3),
     )
+
+
+def test_a_weak_commit_reaches_a_strong_window_over_the_cable():
+    """The chip commits the boundary and the host decodes the strong window.
+
+    The weak hand-on stays on the chip, but the pinned face crosses to
+    the host on the escalation's hop, so the strong decode, which starts
+    once its boundary is determined (Toshio et al. 2510.25222 lines
+    1248-1250), waits at least that hop's latency, not one chip cycle.
+    """
+    engine, operation, source, courier, recording = _pinned_courier()
+    weak_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.WEAK, 0
+    )
+    residual = window_records.DependencyResidual(detector_ids=(24,))
+    courier.send(source, operation, residual, source_request_key=weak_key)
+    engine.run()
+    pinned_ticks = engine.now
+    strong_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 3
+    )
+    strong_window = _strong_window_of_the_pin()
+    model = _strong_model()
+    courier.pin_strong_face((1, 0), strong_window, model, operation, strong_key)
+    engine.run()
+    hand_on_path, _attribution, _bits = recording.boundary_sends[0]
+    pin_path, _attribution, _bits = recording.boundary_sends[1]
+    pin_ticks = courier.windows.ticks[1] - pinned_ticks
+    cable_ticks = _reference_latency_ticks("weak_decoder_to_strong_decoder")
+    assert pin_ticks >= cable_ticks
+    assert hand_on_path is transfer_records.LinkPath.DECODER_TO_DECODER
+    assert pin_path is transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
+
+
+def test_a_strong_commit_reaches_the_weak_window_after_it_over_the_cable():
+    """A strong decode's boundary leaves the host for the chip.
+
+    A held boundary ships once the strong answer is final, and the
+    window after it decodes on the chip, so the message takes the strong
+    answer's hop down and lands no sooner than its latency. The window
+    after it has no model, so its seam is one round of the code card's
+    checks, eight at d=3, behind the request's name.
+    """
+    engine, operation, source, courier, recording = _pinned_courier()
+    strong_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 2
+    )
+    residual = window_records.DependencyResidual(detector_ids=(24,))
+    courier.send(source, operation, residual, source_request_key=strong_key)
+    engine.run()
+    path, _attribution, payload_bits = recording.boundary_sends[0]
+    cable_ticks = _reference_latency_ticks("strong_decoder_to_weak_decoder")
+    assert courier.windows.ticks[0] >= cable_ticks
+    assert path is transfer_records.LinkPath.STRONG_DECODER_TO_WEAK_DECODER
+    assert payload_bits == 8 + window_records.REQUEST_KEY_WIRE_BITS
+
+
+def test_a_strong_commit_reaches_a_strong_window_in_the_hosts_memory():
+    """Both decodes run on the host, so the face crosses no cable.
+
+    The strong window reads it out of the host's own memory, as it reads
+    its rounds, and that read carries no request's name: the seam alone,
+    eight detectors of one bit.
+    """
+    engine, operation, source, courier, recording = _pinned_courier()
+    # the weak window after it has a model, so the cable prices the
+    # message by its seam
+    courier.planner.models.model_by_window[(1, 1)] = _strong_model()
+    strong_key = window_records.DecoderRequestKey(
+        1, 0, window_records.DecoderTier.STRONG, 2
+    )
+    residual = window_records.DependencyResidual(detector_ids=(24,))
+    courier.send(source, operation, residual, source_request_key=strong_key)
+    engine.run()
+    next_strong_key = window_records.DecoderRequestKey(
+        1, 1, window_records.DecoderTier.STRONG, 3
+    )
+    strong_window = _strong_window_of_the_pin()
+    model = _strong_model()
+    courier.pin_strong_face(
+        (1, 0), strong_window, model, operation, next_strong_key
+    )
+    engine.run()
+    path, _attribution, payload_bits = recording.boundary_sends[1]
+    assert path is transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
+    assert payload_bits == 8
 
 
 def test_a_face_pinned_on_its_own_window_folds_only_the_crossing_commit():

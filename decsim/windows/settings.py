@@ -48,7 +48,7 @@ class WindowSettings:
     tail or a boundary row its strong window cannot serve.
     boundary_payload is a payload row's Settings record
     (windows/boundary_payloads.py), how the hand-off between windows is
-    written on decoder_to_decoder. clock and decision_cycles price
+    written on the hop between their decoders. clock and decision_cycles price
     issuing one decode request; clock None is the machine's clock.
     """
 

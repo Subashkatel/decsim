@@ -10,6 +10,8 @@ limit, sealed length and closed boundaries) lives here; its geometry is
 the planner's.
 """
 
+import functools
+from collections.abc import Callable
 from typing import Any, Optional
 
 import decsim.ports as ports
@@ -252,36 +254,40 @@ class RoundTracker:
         self, window: window_records.Window
     ) -> window_records.WindowReadiness:
         """What the scheme sees when deciding whether a window has its data."""
-        successor_ids = sorted(
-            self.planner.successors_by_operation[window.operation_id],
-            key=identity_records.stable_identity_bytes,
-        )
-        successors = []
-        for successor_id in successor_ids:
-            arrived = self.rounds_arrived(successor_id)
-            round_count = self.round_count_for_window(successor_id)
-            successor = window_records.SuccessorReadiness(
-                successor_id, arrived, round_count
-            )
-            successors.append(successor)
-        local_round_count = self.effective_round_count_for_window(
-            window.operation_id, window
-        )
-        closed_boundary = self.closed_boundary_round_for_window(window)
-        is_tail_closed = closed_boundary is not None
-        local_rounds_arrived = self.rounds_arrived(window.operation_id)
-        memory_rounds_arrived = self.memory_rounds(window.operation_id)
-        return window_records.WindowReadiness(
-            local_rounds_arrived=local_rounds_arrived,
-            local_round_count=local_round_count,
-            successors=tuple(successors),
-            memory_rounds_arrived=memory_rounds_arrived,
-            tail_closed=is_tail_closed,
-        )
+        return self._readiness(window, self.rounds_arrived)
 
     def is_data_complete(self, window: window_records.Window) -> bool:
         """Whether the window has every round it reads, by the scheme's rule."""
         readiness = self.readiness(window)
+        return self.scheme.data_complete(window, readiness=readiness)
+
+    def is_read_out_whole(
+        self,
+        window: window_records.Window,
+        rounds_read_out_by_operation: dict,
+    ) -> bool:
+        """Whether the window would have its data were its read-out rounds in.
+
+        The scheme's own rule, on every operation's rounds read out at the
+        QPU in place of those arrived in the store, its successors' too, so
+        the readout path's transit and a round the controller holds for
+        store room are not part of it. A strong region decodes an absorbed
+        window's commit rounds, so its own buffer is no part of it.
+        """
+        read_out = rounds_read_out_by_operation.get(window.operation_id, 0)
+        # a window reads its own commit rounds, and one whose data landed
+        # was read out, so these answer most windows without a readiness,
+        # which the backlog sampler would build after every action
+        if window.commit_hi > read_out:
+            return False
+        if window.t_data_complete is not None:
+            return True
+        if window.is_absorbed:
+            return True
+        rounds_of = functools.partial(
+            _rounds_read_out, rounds_read_out_by_operation
+        )
+        readiness = self._readiness(window, rounds_of)
         return self.scheme.data_complete(window, readiness=readiness)
 
     def is_buffer_filled_by_memory(self, window: window_records.Window) -> bool:
@@ -293,6 +299,44 @@ class RoundTracker:
         """Whether the window's first read round has arrived."""
         arrived = self.rounds_arrived(window.operation_id)
         return arrived >= window.start_round
+
+    def _readiness(
+        self,
+        window: window_records.Window,
+        rounds_of: Callable[[Any], int],
+    ) -> window_records.WindowReadiness:
+        """The readiness with each operation's rounds counted by rounds_of.
+
+        Memory rounds keep their store count: the QPU reads them out under
+        an idle identity of their own and they carry no syndrome, so a
+        buffer they fill is whole once they land.
+        """
+        successor_ids = sorted(
+            self.planner.successors_by_operation[window.operation_id],
+            key=identity_records.stable_identity_bytes,
+        )
+        successors = []
+        for successor_id in successor_ids:
+            arrived = rounds_of(successor_id)
+            round_count = self.round_count_for_window(successor_id)
+            successor = window_records.SuccessorReadiness(
+                successor_id, arrived, round_count
+            )
+            successors.append(successor)
+        local_round_count = self.effective_round_count_for_window(
+            window.operation_id, window
+        )
+        closed_boundary = self.closed_boundary_round_for_window(window)
+        is_tail_closed = closed_boundary is not None
+        local_rounds_arrived = rounds_of(window.operation_id)
+        memory_rounds_arrived = self.memory_rounds(window.operation_id)
+        return window_records.WindowReadiness(
+            local_rounds_arrived=local_rounds_arrived,
+            local_round_count=local_round_count,
+            successors=tuple(successors),
+            memory_rounds_arrived=memory_rounds_arrived,
+            tail_closed=is_tail_closed,
+        )
 
 
 class _Arrivals:
@@ -343,3 +387,10 @@ class _StreamLength:
         if not covered:
             return None
         return min(covered)
+
+
+def _rounds_read_out(
+    rounds_read_out_by_operation: dict,
+    operation_id: Any,  # an opaque identity
+) -> int:
+    return rounds_read_out_by_operation.get(operation_id, 0)

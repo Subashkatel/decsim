@@ -118,6 +118,25 @@ def test_an_overflow_past_the_end_is_satisfied_by_a_successors_rounds():
     assert tracker.is_data_complete(window)
 
 
+def test_a_window_is_read_out_whole_on_its_successors_readouts_too():
+    """The QPU's counts stand in for every operation's arrivals.
+
+    Operation 1's four rounds and operation 2's first are read out and
+    none has landed, so the window that reads into operation 2 would have
+    its data were they in, while the store still lacks them all.
+    """
+    tracker = _tracker({1: 4, 2: 9}, {1: [2], 2: []})
+    operation_1 = _operation(1)
+    tracker.register_operation(operation_1)
+    operation_2 = _operation(2)
+    tracker.register_operation(operation_2)
+    window = _window(1, 1, 3, 5)
+    read_out = {1: 4, 2: 1}
+
+    assert tracker.is_read_out_whole(window, read_out)
+    assert not tracker.is_data_complete(window)
+
+
 def test_an_overflow_past_the_end_is_satisfied_by_memory_rounds():
     tracker = _tracker({1: 4, 2: 9}, {1: [2], 2: []})
     operation_1 = _operation(1)

@@ -19,11 +19,13 @@ class _DecoderManager:
 class _WindowManager:
     """The one call the backlog view makes on the window side."""
 
-    def __init__(self, final_rounds) -> None:
-        self.final_rounds = final_rounds
+    def __init__(self, backlog_rounds) -> None:
+        self.backlog_rounds = backlog_rounds
+        self.rounds_read_out = None
 
-    def final_round_counts(self):
-        return self.final_rounds
+    def backlog_round_counts(self, rounds_read_out_by_operation):
+        self.rounds_read_out = rounds_read_out_by_operation
+        return self.backlog_rounds
 
 
 def test_the_default_pool_is_the_unnamed_lane_and_the_hosts_keeps_its_name():
@@ -39,13 +41,14 @@ def test_the_default_pool_is_the_unnamed_lane_and_the_hosts_keeps_its_name():
 
 
 def test_the_rounds_are_summed_per_operation_per_patch_and_over_the_run():
-    """An operation's backlog is its rounds read out past its final ones."""
+    """The window side counts each operation's rounds from its readouts."""
     decoders = (_DecoderManager("default", []),)
-    windows = _WindowManager(((1, "p0", 2), (2, "p0", 0), (3, "p1", 6)))
+    windows = _WindowManager(((1, "p0", 4), (2, "p0", 3), (3, "p1", 2)))
     rounds_read_out = {1: 6, 2: 3, 3: 8}
 
     view = run_views.backlog_view(windows, decoders, rounds_read_out)
 
+    assert windows.rounds_read_out == rounds_read_out
     assert view.per_op_rounds == ((1, 4), (2, 3), (3, 2))
     assert view.per_patch_rounds == (("p0", 7), ("p1", 2))
     assert view.total_rounds == 9

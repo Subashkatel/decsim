@@ -261,9 +261,10 @@ class ShotMeasurement:
     # decodes held in the units' memory at once, landed and free to
     # compute but waiting on a unit's compute, which the strong ready
     # queue's peak does not see because a unit takes the next decode
-    # into its memory while it computes; and the most rounds the
-    # machine held at once without their final correction, an
-    # escalated window's waiting for its strong answer. The first six need
+    # into its memory while it computes; and the most rounds of windows
+    # read out whole the machine held at once without their final
+    # correction, an escalated window's waiting for its strong answer,
+    # past the lag the window shape sets alone. The first six need
     # observation.record_switching_windows and the last
     # observation.backlog_trace; a shot that kept neither holds None,
     # and its row no column, since zeros would say nothing waited
@@ -1666,7 +1667,7 @@ def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
 def _backlog_peak_rounds(
     observation: observation_module.Observation,
 ) -> Optional[int]:
-    """The most rounds not yet final at once, when the sampler ran."""
+    """The most rounds read out whole and not final, when the sampler ran."""
     backlog = observation.decode_backlog
     if backlog is None:
         return None

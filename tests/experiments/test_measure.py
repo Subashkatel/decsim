@@ -2245,6 +2245,7 @@ class ReadoutsAndCommits:
 
     def __init__(self) -> None:
         self.events = []
+        self.windows = {}
 
     def round_read_out(self, readout) -> None:
         """The QPU read out a round."""
@@ -2255,21 +2256,34 @@ class ReadoutsAndCommits:
         self.events.append(("commit", window.commit_lo, window.commit_hi))
 
 
-def backlog_peak_of(events: list) -> int:
-    """The most rounds read out past the unbroken committed prefix.
+def backlog_peak_of(events: list, windows) -> int:
+    """The most rounds of windows read out whole past the committed prefix.
 
-    Recomputed from the event stream alone, the readouts and the commits
-    in the order they happened, on a run where every commit is final.
+    Recomputed from the event stream, the readouts and the commits in the
+    order they happened, and the plan's windows, on a run of one
+    SHOT_ROUNDS operation where every commit is final: a window is read
+    out whole once its last round, or the operation's, is read out.
     """
     read_out = 0
     committed = []
     peak = 0
     for event in events:
         read_out, committed = _after_event(event, read_out, committed)
-        prefix = _committed_prefix(committed)
-        waiting = read_out - prefix
+        whole = _read_out_whole(windows, read_out)
+        whole_prefix = _committed_prefix(whole)
+        final_prefix = _committed_prefix(committed)
+        waiting = whole_prefix - final_prefix
         peak = max(peak, waiting)
     return peak
+
+
+def _read_out_whole(windows, read_out: int) -> list:
+    whole = []
+    for window in windows:
+        last_round = min(window.buffer_hi, SHOT_ROUNDS)
+        if last_round <= read_out:
+            whole.append((window.commit_lo, window.commit_hi))
+    return whole
 
 
 def _after_event(event: tuple, read_out: int, committed: list) -> tuple:
@@ -2308,6 +2322,7 @@ def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
         window_manager = machine.windows.window_manager
         sources = window_manager.window_sources()
         sources.window_committed.connect(heard.window_committed)
+        heard.windows = window_manager.planned_windows()
         return machine
 
     monkeypatch.setattr(machine_module.Machine, "build", build_and_listen)
@@ -2317,7 +2332,67 @@ def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
     task = task_at(traced)
     measurement = measured(task)
 
-    assert measurement.backlog_peak_rounds == backlog_peak_of(heard.events)
+    windows = heard.windows.values()
+    expected = backlog_peak_of(heard.events, windows)
+
+    assert measurement.backlog_peak_rounds == expected
+    assert expected > 3
+
+
+def test_a_unit_that_keeps_up_holds_one_windows_commit_rounds():
+    """The window shape's own lag is not in the backlog.
+
+    Each window commits 3 rounds and buffers 3, so up to 5 rounds are
+    read out past the last window read out whole, which an instant
+    decoder holds too. The 1 us unit decodes each window well inside the
+    3 us its commit rounds take, so only the window it decodes waits:
+    3 rounds, and at the end the last window's 6, rounds 25 to 30.
+    """
+    settings = one_tier_machine(1.0)
+    observation = dataclasses.replace(settings.observation, backlog_trace=True)
+    traced = dataclasses.replace(settings, observation=observation)
+    task = task_at(traced)
+    measurement = measured(task)
+
+    assert measurement.backlog_peak_rounds == 6
+
+
+def instant_machine() -> machine_settings.MachineSettings:
+    """The one-tier machine with every cost zero: hops, unit and frame."""
+    base = one_tier_machine(0.0)
+    hop_cycles = {}
+    for path in transfer_records.LinkPath:
+        hop_cycles[path.value] = 0
+    links = fridge_hops(hop_cycles)
+    algorithm = charged(0.0)
+    pool = run_files.decoder_pool(algorithm, FRIDGE_CLOCK)
+    engine = dataclasses.replace(
+        pool.engine, fetch_cycles_per_round=0, release_cycles_per_job=0
+    )
+    instant_pool = dataclasses.replace(pool, engine=engine)
+    frame = dataclasses.replace(base.pauli_frame, write_cycles=0)
+    observation = dataclasses.replace(base.observation, backlog_trace=True)
+    return dataclasses.replace(
+        base,
+        links=links,
+        weak_decoder=instant_pool,
+        pauli_frame=frame,
+        observation=observation,
+    )
+
+
+def test_an_instant_decoder_on_instant_links_holds_no_backlog():
+    """Every window is final at the tick its last round is read out.
+
+    The rounds read out past it are the window shape's, and a round made
+    whole and corrected within one tick never waited.
+    """
+    settings = instant_machine()
+    task = task_at(settings)
+    measurement = measured(task)
+
+    assert measurement.maxes["buffer0_ready_to_frame"] == 0.0
+    assert measurement.backlog_peak_rounds == 0
 
 
 def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):

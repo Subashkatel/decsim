@@ -59,6 +59,7 @@ All decisions by the owner.
 | 2026-10-08 | No pilot. | The time per shot at d=5 to 11 is already measured in Experiments 1 and 3. |
 | 2026-10-08 | All parameters in one experiment file, `experiments/per_window/run.py`, as main does since the yaml path was deleted (`526f7f64`): named constants at the top, each with its source. The analysis scripts hold no numbers. | One place to read and change every parameter. A task's id hashes its machine and metadata, not its stop rule (`decsim/experiments/collect.py`), so new distances or rates can be added later with the same commit. |
 | 2026-10-08 | Stop rule, option A: at each setting, one fixed number of shots N, the same for all four configurations; N gives union-find alone about 100 failures (N = 100 / its rate in Experiment 1). A rate is shown only with at least 20 failures, with 95% Wilson intervals. Keep d=11 at 0.002. | Papers that compare decoders use one fixed shot count for all of them (see Stop rule research). 100 failures gives about +-20% at 95%. Estimated cost about 9,100 core-hours, 6,750 of them at d=11, 0.002. |
+| 2026-10-08 | Keep Experiment 1's machine and every latency as they are, on today's main (newer code than Experiments 1 and 3). | The results compare with Experiment 1. The run is about correctness, so the timing estimates stay. |
 
 ## Plan
 
@@ -70,7 +71,7 @@ Each step is decided before the next. Status on 2026-10-08:
 | 1b. Literature check | which papers ground each piece | done, see below |
 | 2. Definitions | what right and wrong mean for a window | not started |
 | 3. Records | what decsim saves per shot, per window, per strong window | not started |
-| 4. Configurations and settings | decoders, distances, error rates, stop rule, every latency | decided except the latencies |
+| 4. Configurations and settings | decoders, distances, error rates, stop rule, every latency | decided |
 | 5. Checks before the run | how we prove the records are right | not started |
 | 6. Cost | time per shot (from Experiments 1 and 3), core-hours, job plan | not started; no pilot |
 | 7. Run system | how the run is started, folded, logged, pushed | not started |
@@ -112,6 +113,38 @@ quote checked word for word.
 Known limit: neighbouring windows overlap, so they are not independent
 (Dinca et al. 2512.15689, 1076-1088); Toshio's per-window rates assume
 they are. We report both.
+
+## Machine and latencies (2026-10-08)
+
+Every value is Experiment 1's, written with its source in
+`experiments/switching_baseline/run.py` on main. Values marked
+estimate or chosen have no paper behind them.
+
+| Part | Value | Source |
+| --- | --- | --- |
+| Chip clock | 250 MHz | 2605.04892 line 1063 |
+| Round period | 1 us | chosen in Experiment 1, no source |
+| Rounds per shot | 100 | Experiment 1 |
+| Packing a round | 8 cycles (32 ns) | 2603.16203 lines 894-895 |
+| Forming detection events | 5 cycles, then 1 a round | 2605.04892 lines 1273-1275 |
+| Uplink to the weak buffer | 40 cycles, 4 lanes of 38.79 bits | 2603.16203 lines 895-897, 971-975 |
+| Weak buffer to union-find | 1 cycle | estimate (2603.16203 lines 668-670) |
+| Window decision | 5 cycles (20 ns) | 2603.16203 lines 897-899 |
+| Union-find | Helios cycle law at 100 MHz, delay 3 cycles | Helios RTL 2dda998; 2406.08491 line 1230 |
+| Union-find weight step | 0.5 | estimate |
+| Correction to the frame | 41 cycles (164 ns); frame write 1 cycle | 2603.16203 lines 903-904; 2605.04892 Table I |
+| Cluster gap walk | 1.0 us | chosen, estimate (2602.03336 lines 17-19) |
+| Threshold | 20 dB on the cluster gap; compare and switch 1 cycle each | chosen; cycles estimate |
+| Strong window | double window, re-reads 1 buffer region | 2510.25222 Sec. III C, Fig. 12 |
+| Each cable leg to the strong host (4 legs) | 1.151 us | 2609.09270 Table III, lines 1611, 1627 |
+| Relay-BP-5 keys | gamma0 0.35, interval [-0.254, 0.985], 600 legs of 60 after 80, stop at 5 solutions | 2506.01779 lines 307, 332, 343 |
+| Relay-BP-5 time | measured A100-SXM4-80GB line in iterations, nearest region in detectors | `decsim/decoders/measured_table/measurements.py`, Slurm job 14676845 |
+| Tesseract | its own wall clock; only its answers and error rate are results | as Experiment 3 |
+| Decision to pulse | 8 cycles | QubiC, estimate |
+
+The A100 table was measured on regions of 3d rounds at physical error
+rate 0.001. A window of another size is priced by the nearest measured
+region, at its own iteration count.
 
 ## Stop rule research (2026-10-08)
 

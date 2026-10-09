@@ -11,16 +11,15 @@ configuration.
 - Tesseract alone
 
 Surface-code memory, 100 rounds per shot, d = 5, 7, 9, 11, physical
-error rate 0.002, 0.003, 0.004, 0.005. Slurm array 15259257, all 330
-jobs completed; fold job 15276821. 2,264,892 shots in all: each setting
-has the same shot count in all four configurations.
+error rate 0.002, 0.003, 0.004, 0.005. 2,264,892 shots in all: each
+setting has the same shot count in all four configurations.
 
 ## Where the numbers come from
 
-- The run: decsim at commit 1785bafa (see commit.txt), run folder
-  `tmp/runs/2026-10-09_switching_per_window_code/results/2026-10-09_switching_per_window/run`
-  in the sandbox. It is not in the repository (window_outcomes.csv is
-  3.5 GB).
+- The run: decsim at commit 1785bafa (see commit.txt), from
+  `experiments/switching_per_window/run.py`. The raw run files
+  (shots.csv and window_outcomes.csv, 3.5 GB) stay on the cluster and are
+  not in the repository.
 - This folder: `experiments/switching_per_window/` at commit c9257a56.
 
 ```
@@ -29,15 +28,13 @@ python experiments/switching_per_window/plot.py <this folder>
 python experiments/switching_per_window/comparison.py <this folder>
 ```
 
-The scripts only read the run folder. The run folder's file sizes and
-times were the same before and after the scripts ran. Every number here
+The scripts only read the run folder. Every number here
 is a count from the run's csv files, or a rate made from those counts.
 tables.py stops with an error if a shot's failed flag differs from the
 parity of its window answers against its window labels, or if the
 windows of a shot do not cover its rounds.
 
-An independent recount (Codex, its own code on the raw csv files)
-matched every table count at d = 5, 0.005; d = 7, 0.003; and d = 11,
+An independent recount from the raw csv files matched every table count at d = 5, 0.005; d = 7, 0.003; and d = 11,
 0.005, all shot totals and seed sets in all 16 settings, and every cell
 of comparison.csv.
 

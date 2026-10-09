@@ -54,6 +54,11 @@ All decisions by the owner.
 | 2026-10-08 | Switching keeps Relay-BP's answer, even when it did not converge. No fallback to union-find. | We want to see today's behavior. The tables show what each decoder gave. |
 | 2026-10-08 | Save Tesseract's answer on every window as a check. The machine never uses it. | A third opinion on each window. |
 | 2026-10-08 | Work on a new branch from main, with this log. | Anyone can repeat the run. |
+| 2026-10-08 | Four configurations on the same shots: union-find alone, Relay-BP-5 alone, switching, Tesseract alone. This replaces "Tesseract as a check on every window". | Each configuration saves its own answer per window. Tesseract alone shows what a more accurate decoder gives on the same windows and shots; it is not part of the switching design. |
+| 2026-10-08 | d = 5, 7, 9, 11 and physical error rates 0.002, 0.003, 0.004, 0.005. d=13 later. | Relay-BP-5 starts to not converge at d=9. The configuration id leaves out the sweep and the stop rule (`decsim/experiments/run_folder.py`), so new points can be added later with the same commit. |
+| 2026-10-08 | No pilot. | The time per shot at d=5 to 11 is already measured in Experiments 1 and 3. |
+| 2026-10-08 | All parameters in yaml files in `experiments/per_window/`, one per configuration, each extending `configs/experiments/switching_baseline/switching_baseline.yaml`. Scripts hold no numbers. | One place to read and change every parameter. |
+| 2026-10-08 | The stop rule comes from the papers. | Research in progress. |
 
 ## Plan
 
@@ -65,9 +70,9 @@ Each step is decided before the next. Status on 2026-10-08:
 | 1b. Literature check | which papers ground each piece | done, see below |
 | 2. Definitions | what right and wrong mean for a window | not started |
 | 3. Records | what decsim saves per shot, per window, per strong window | not started |
-| 4. Configurations and settings | decoders, distances, error rates, stop rule | partly decided |
+| 4. Configurations and settings | decoders, distances, error rates, stop rule | decided except the stop rule |
 | 5. Checks before the run | how we prove the records are right | not started |
-| 6. Pilot and cost | time per shot, core-hours, job plan | not started |
+| 6. Cost | time per shot (from Experiments 1 and 3), core-hours, job plan | not started; no pilot |
 | 7. Run system | how the run is started, folded, logged, pushed | not started |
 | 8. Analysis | the plots, named before the run | not started |
 

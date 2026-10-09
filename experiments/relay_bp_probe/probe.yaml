@@ -1,0 +1,17 @@
+# The Relay-BP probe: Experiment 1's switching machine at the one setting
+# where switching is worst (d=13, physical error rate 0.005), 20 shots,
+# to see why its Relay-BP-5 windows do not converge. Only the sweep and
+# the stop rule change, so the configuration id is Experiment 1's.
+extends: ../../configs/experiments/switching_baseline/switching_baseline.yaml
+
+sweep:
+  - axes:
+      workload.arguments.physical_error_probability: [0.005]
+      qpu.distance: [13]
+      qpu.round_period_microseconds: [1.0]
+
+collection:
+  max_failures: 100
+  max_shots: 20
+  min_shots: 0
+  piece_rounds: 200

@@ -1,0 +1,6 @@
+window,osd_answer_explains_syndrome,osd_answer_weight,seed_2_600_legs_converged,seed_2_600_legs_iterations,seed_3_600_legs_converged,seed_3_600_legs_iterations,seed_2_3000_legs_converged,seed_2_3000_legs_iterations
+window_1308348_00001.pkl,True,248,False,36080,False,36080,True,180080
+window_1308350_00001.pkl,True,282,False,36080,True,36061,True,180018
+window_1308352_00004.pkl,True,291,False,36080,False,36080,True,180027
+window_1308355_00003.pkl,True,278,True,36056,True,36063,True,180052
+window_1308356_00001.pkl,True,316,True,36078,False,36080,True,180078

@@ -54,15 +54,15 @@
     "event_count": 204
   },
   "experiment_one_switching": {
-    "result_sha256": "e3e480479f66e340f9dbc01323a7a5b04dce20ddae1492402ba322bdfa6153a6",
+    "result_sha256": "c29aea8b3350466d4e3499eb4f963a2a5fd0931cd98e43a1208da66a3d48320f",
     "seeds_sha256": "acdfa3e34606ce94fd3a5f059b2429aba6ddab15f677fc64126a2ffe7c7d1b17",
-    "final_tick": 1910608000,
-    "event_count": 1003
+    "final_tick": 1914568000,
+    "event_count": 1015
   },
   "experiment_one_weak_alone": {
-    "result_sha256": "85f3256373cc25040fc057c8f89cf7352d5410cb3e4e484e64b19303aa3c7898",
+    "result_sha256": "47ee78abb9907e151b3b6f1d659b3af95ca451a7b6796f94142f817209824c70",
     "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
-    "final_tick": 102340000,
+    "final_tick": 108960000,
     "event_count": 972
   },
   "extra_cluster_gap_switching": {

@@ -84,7 +84,7 @@ def _run(argv: list) -> None:
 
 
 def _launch_on_slurm(parsed) -> None:
-    """Every task recorded, then one Slurm job each and one fold job."""
+    """Every task recorded, its pieces packed into Slurm jobs, then a fold."""
     import decsim.experiments.plan_command as plan_command
 
     job = plan_command.JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
@@ -94,14 +94,13 @@ def _launch_on_slurm(parsed) -> None:
 
 
 def _run_a_job(parsed) -> None:
-    """One Slurm job: one task to its stop, on a tree git names."""
-    import decsim.experiments.collect_command as collect_command
+    """One Slurm job: the pieces packed into it, on a tree git names."""
     import decsim.experiments.plan_command as plan_command
 
     plan_command.refuse_an_unnamed_tree()
     run_path = pathlib.Path(parsed.run_file)
     run_dir = pathlib.Path(parsed.out)
-    collect_command.run_job(
+    plan_command.run_job(
         run_path, run_dir, parsed.job, processes=parsed.processes
     )
 
@@ -158,7 +157,8 @@ def _list_the_tasks(run_file: str) -> None:
 def _run_parser():
     """The run command's arguments, all here, where the command page reads them.
 
-    The Slurm defaults are four cores, a day of walltime and 16384 MB a
+    The Slurm defaults are three cores a job (decsim/experiments/
+    plan_command.py says why), a walltime limit of a day and 16384 MB a
     job. --job is a Slurm job's entry, which run.sbatch writes.
     """
     import argparse
@@ -212,13 +212,13 @@ def _run_parser():
     parser.add_argument(
         "--slurm",
         action="store_true",
-        help="run each task as one job of a Slurm job array, then fold",
+        help="pack the tasks' pieces into Slurm job arrays, then fold",
     )
     parser.add_argument(
-        "--cores", type=int, default=4, help="pieces a job runs at once"
+        "--cores", type=int, default=3, help="pieces a job runs at once"
     )
     parser.add_argument(
-        "--hours", type=int, default=24, help="a job's walltime"
+        "--hours", type=int, default=24, help="a job's longest walltime"
     )
     parser.add_argument(
         "--memory-mb", type=int, default=16384, help="a job's memory"
@@ -285,11 +285,11 @@ def _check_the_local_arguments(parser, parsed) -> None:
 
 
 def _check_the_slurm_arguments(parser, parsed) -> None:
-    """A Slurm run runs every task to its stop, one job each."""
+    """A Slurm run runs every task to its max_shots."""
     chosen = (parsed.only, parsed.shots, parsed.seed)
     if any(option is not None for option in chosen):
         parser.error(
-            "--slurm runs every task to its stop; --only, --shots and "
+            "--slurm runs every task to its max_shots; --only, --shots and "
             "--seed run locally"
         )
 

@@ -72,6 +72,12 @@ FOUR_TASKS = {
     "axes": run_files.FOUR_TASK_AXES,
     "collection": {"max_shots": 2},
 }
+# the four tasks, each shot estimated at 280 core seconds: a piece of a
+# two-hour job holds one shot, and the twenty overfill one single-core job
+FOUR_TASKS_PACKED = {
+    "axes": run_files.FOUR_TASK_AXES,
+    "collection": {"max_shots": 5, "core_seconds_per_shot": 280.0},
+}
 # the four tasks in pieces of one shot each
 FOUR_TASKS_CUT = {
     "axes": run_files.FOUR_TASK_AXES,
@@ -2092,12 +2098,16 @@ def _named_library(path: pathlib.Path, digest) -> dict:
 
 
 @pytest.mark.parametrize(
-    "flag, value", [("--cores", "0"), ("--hours", "0"), ("--memory-mb", "-1")]
+    "flag, value, minimum",
+    [("--cores", "0", 1), ("--hours", "1", 2), ("--memory-mb", "-1", 1)],
 )
 def test_a_slurm_job_asking_for_no_core_hour_or_memory_is_refused(
-    tmp_path, capsys, flag, value
+    tmp_path, capsys, flag, value, minimum
 ):
-    """A job has a core, an hour and some memory, or nothing is written."""
+    """A job has a core, two hours and some memory, or nothing is written.
+
+    A walltime is at least 61 minutes, so a limit of one hour holds none.
+    """
     run_file = run_files.write_run_file(tmp_path)
     out_dir = tmp_path / "out"
     arguments = [str(run_file), "--out", str(out_dir), "--slurm", "--dry-run"]
@@ -2106,35 +2116,32 @@ def test_a_slurm_job_asking_for_no_core_hour_or_memory_is_refused(
         command.main(["run", *arguments, flag, value])
 
     printed = capsys.readouterr()
-    assert f"{flag} must be at least 1, got {value}" in printed.err
+    assert f"{flag} must be at least {minimum}, got {value}" in printed.err
     assert not out_dir.exists()
 
 
 def test_array_jobs_then_the_fold_write_the_local_runs_rows(tmp_path):
     """The referent is one local run of the same four tasks.
 
-    The launcher records the tasks; each job of the array then runs the
-    line run.sbatch holds, in whatever order the array runs them, and the
-    fold job's fold writes every file the local run wrote, row for row
-    but the wall clock. The run file reads a file beside it, as a
-    threshold table is read, and every job finds it.
+    The launcher records the tasks and packs their one-shot pieces into
+    two jobs; each job then runs the line run.sbatch holds, in
+    whatever order the array runs them, and the fold job's fold writes
+    every file the local run wrote, row for row but the wall clock. The
+    run file reads a file beside it, as a threshold table is read, and
+    every job finds it.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_PACKED)
     _read_a_file_beside(config_path)
     local_dir = tmp_path / "local"
     split_dir = tmp_path / "split"
     command.main(["run", str(config_path), "--out", str(local_dir)])
-    job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
+    job = plan_command.JobShape(cores=1, hours=2, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
 
-    job_3 = _job_arguments(split_dir, "3")
-    command.main(job_3)
     job_1 = _job_arguments(split_dir, "1")
     command.main(job_1)
     job_0 = _job_arguments(split_dir, "0")
     command.main(job_0)
-    job_2 = _job_arguments(split_dir, "2")
-    command.main(job_2)
     command.main(["run", "--fold", "--out", str(split_dir)])
 
     assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)
@@ -2144,9 +2151,9 @@ def test_an_array_job_refuses_a_run_file_edited_since_the_launch(
     tmp_path, capsys
 ):
     """Job i of an edited run file may name another task, so it stops."""
-    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_PACKED)
     split_dir = tmp_path / "split"
-    job = plan_command.JobShape(cores=1, hours=1, memory_mb=1024)
+    job = plan_command.JobShape(cores=1, hours=2, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)
     with config_path.open("a") as run_file:
         run_file.write("# edited after the launch\n")

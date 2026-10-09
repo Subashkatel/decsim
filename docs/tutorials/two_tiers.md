@@ -123,8 +123,8 @@ cut -d, -f3,8,9,35,79,103,136,137 results/two_tiers/sweep.csv
 
 ```
 qpu.distance,logical_failures,scored_shots,load,queue_wait_mean_us,service_mean_us,buffer0_ready_to_frame_median_us,buffer0_ready_to_frame_p99_us
-3,15,50,20.337608,0.0,31.8336,218.924,567.788
-5,16,50,24.0966912,0.0,64.718,441.088,986.208
+3,15,50,13.127506666666665,0.0,31.8336,218.924,567.788
+5,16,50,14.7866224,0.0,64.718,441.088,986.208
 ```
 
 Every value is the same on any host: the decoders are priced by cards,
@@ -141,7 +141,7 @@ switching is for.
 `load` is the service time per window divided by the time between
 windows arriving. Above 1 the decoders cannot keep up, the undecoded
 backlog grows, and the tail of the reaction time grows with it. This
-configuration is far over its head, at a load near 20, which is why
+configuration is far over its head, at a load of 13 to 15, which is why
 `buffer0_ready_to_frame_p99_us` is between two and three times the
 median beside it. The mean queue wait is zero all the same: each window
 waits for the boundary of the window before it, and a unit is free by

@@ -400,18 +400,17 @@ def link_delay_by_window(transfers: list) -> dict:
     (src/cpu/o3/rob.hh:131-134). The hop is the path, or BOUNDARY_HOP for
     a boundary, which rides the path its two sides pick
     (windows/window_boundaries.py) and so shares the cable with the
-    escalation it does not belong to.
+    escalation it does not belong to. A boundary is kept under the window
+    that waits for it, its destination: a strong window that reads a
+    pinned face and later ships its own boundary would otherwise span its
+    decode.
     """
     first_request = {}
     last_delivery = {}
     for row in transfers:
-        attribution = row["attribution"]
-        recorded_operation = attribution["operation_id"]
-        operation_id = identity_records.stable_identity_from_json(
-            recorded_operation
-        )
         hop = _hop_of(row)
-        key = (hop, operation_id, attribution["window_id"])
+        operation_id, window_id = _waiting_window(row)
+        key = (hop, operation_id, window_id)
         request = _hop_start_ticks(row)
         earliest_request = first_request.get(key, request)
         first_request[key] = min(earliest_request, request)
@@ -1714,6 +1713,23 @@ def _hop_of(row: dict) -> str:
     if _is_boundary(row):
         return BOUNDARY_HOP
     return row["path"]
+
+
+def _waiting_window(row: dict) -> tuple:
+    """(operation_id, window index) of the window the transfer holds up.
+
+    A boundary holds up its destination; every other transfer the window
+    its attribution names.
+    """
+    attribution = row["attribution"]
+    if _is_boundary(row):
+        destination = attribution["relation"]["destination_window_key"]
+        return identity_records.stable_identity_from_json(destination)
+    recorded_operation = attribution["operation_id"]
+    operation_id = identity_records.stable_identity_from_json(
+        recorded_operation
+    )
+    return operation_id, attribution["window_id"]
 
 
 def _is_boundary(row: dict) -> bool:

@@ -76,6 +76,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
+import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -1701,21 +1702,67 @@ def seam_streams_settings(
 def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
     """Two streams each have a window 3, and each paid one 0.5 us seam.
 
-    dd_per_window is the decoder-to-decoder hop a window's own boundary
-    rode. It is keyed by the window, which is its operation and its
+    dd_per_window is the decoder-to-decoder hop of the boundary into a
+    window. It is keyed by the window, which is its operation and its
     index, not by the index alone, which two streams share, so each of
-    the eighteen windows reads the one card it crossed, and the last
-    window of a stream reads nothing because no window follows it.
+    the eighteen windows reads the one card it waited on, and the first
+    window of a stream reads nothing because no window precedes it.
     """
     one_stream_run = seam_streams_shot(1)
     two_stream_run = seam_streams_shot(2)
     one_stream = measure.measure_shot(one_stream_run)
     two_streams = measure.measure_shot(two_stream_run)
 
-    one_stream_seams = [0.5] * 8 + [0.0]
+    one_stream_seams = [0.0] + [0.5] * 8
     assert one_stream.samples["dd_per_window"] == one_stream_seams
     assert two_streams.samples["dd_per_window"] == one_stream_seams * 2
     assert two_streams.load == one_stream.load
+
+
+def _boundary_row(source_index, destination_index, attributed_index, times):
+    """One boundary transfer of operation 1, as a run's transfers hold it.
+
+    attributed_index is the window its attribution names: a pinned face
+    is the strong window's own transfer, a hand-off the sender's. times
+    is (request, delivery) in ticks.
+    """
+    request, delivery = times
+    operation = identity_records.stable_identity_json(1)
+    source = identity_records.stable_identity_json((1, source_index))
+    destination = identity_records.stable_identity_json((1, destination_index))
+    relation = {
+        "source_window_key": source,
+        "destination_window_key": destination,
+    }
+    attribution = {
+        "operation_id": operation,
+        "window_id": attributed_index,
+        "relation": relation,
+    }
+    return {
+        "path": "strong_decoder_to_weak_decoder",
+        "attribution": attribution,
+        "delivery_ticks": delivery,
+        "total_delay_ticks": delivery - request,
+    }
+
+
+def test_a_window_that_reads_a_boundary_and_ships_one_waits_on_the_first():
+    """Each boundary is the wait of the window it lands on.
+
+    Strong window 2 reads its face pinned on window 1 (ticks 100 to 110),
+    decodes, then ships its own boundary to window 3 (ticks 900 to 912).
+    Both name window 2. Window 2 waited 10 ticks and window 3 waited 12;
+    neither spans window 2's decode, which load already counts as
+    service.
+    """
+    pinned_face = _boundary_row(1, 2, 2, (100, 110))
+    shipped = _boundary_row(2, 3, 2, (900, 912))
+    delay = measure.link_delay_by_window([pinned_face, shipped])
+    assert delay == {
+        (measure.BOUNDARY_HOP, 1, 2): 10,
+        (measure.BOUNDARY_HOP, 1, 3): 12,
+    }
 
 
 def test_a_late_streams_windows_count_from_their_own_rounds_sends():

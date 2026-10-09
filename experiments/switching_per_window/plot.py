@@ -24,14 +24,18 @@ Windows and shots
  13 Of the shots with a wrong window, what share fail?
 
 A share is a count over a total, drawn with its 95% Wilson interval
-when the total holds at least SHOWN_TOTAL windows or shots. Figure 01
-draws a rate only with SHOWN_FAILURES failures (LOG.md, stop rule).
+when the total holds at least SHOWN_TOTAL windows or shots (TOTAL_RULE).
+Figure 01 draws a rate only with SHOWN_FAILURES failures (FAILURE_RULE,
+LOG.md, stop rule). Windows of one shot are not independent, so a
+window share's interval is narrower than a shot-resampled one would be.
 """
 
 import collections
 import csv
 import pathlib
 import sys
+from collections.abc import Callable
+from typing import Optional
 
 import matplotlib.pyplot as pyplot
 import matplotlib.ticker as ticker
@@ -47,6 +51,9 @@ THRESHOLD_DECIBELS = 20.0
 ROUNDS_PER_SHOT = 100
 SHOWN_FAILURES = tables.SHOWN_FAILURES
 SHOWN_TOTAL = 20
+# which number a point's display rule holds to, and its minimum
+FAILURE_RULE = ("count", SHOWN_FAILURES)
+TOTAL_RULE = ("total", SHOWN_TOTAL)
 TABLE_NAMES = (
     "shot_summary",
     "window_summary",
@@ -197,7 +204,7 @@ def failure_figure(rows: list, plots_dir: pathlib.Path) -> None:
         for configuration, (name, color) in CONFIGURATIONS.items():
             columns = ("failed_shots", "shots")
             points = column_points(rows, configuration, distance, columns)
-            draw_shares(axis, points, (name, color), SHOWN_FAILURES, per_round)
+            draw_shares(axis, points, (name, color), FAILURE_RULE, per_round)
         axis.set_ylabel("logical error rate per round")
         axis.set_yscale("log")
         axis.yaxis.set_major_formatter(plain_numbers)
@@ -265,7 +272,7 @@ def share_figure(
     for distance in DISTANCES:
         points = distance_points(rows, distance, columns)
         line = (f"d = {distance}", DISTANCE_COLORS[distance])
-        draw_shares(axis, points, line, SHOWN_TOTAL)
+        draw_shares(axis, points, line, TOTAL_RULE)
     axis.set_ylabel(y_label)
     rate_axis(axis)
     save(figure, plots_dir, file_name)
@@ -323,12 +330,21 @@ def event_figures(rows: list, plots_dir: pathlib.Path) -> None:
         figure, axis_by_distance = distance_panels(title)
         for distance, axis in axis_by_distance.items():
             counts = class_counts(rows, distance, rate, events_of)
-            edges = event_edges(counts)
-            counts = rebinned(counts, edges)
-            draw_distributions(axis, counts, EVENT_GROUPS, edges)
-            axis.set_xlabel("detection events in the kept window")
-            finish_distribution(axis)
+            draw_event_panel(axis, counts)
         save(figure, plots_dir, f"09_detection_events_p{rate}.png")
+
+
+def draw_event_panel(axis: pyplot.Axes, counts: dict) -> None:
+    """One setting's detection-event histograms.
+
+    A setting with no kept windows keeps its axis labels only.
+    """
+    axis.set_xlabel("detection events in the kept window")
+    if counts:
+        edges = event_edges(counts)
+        binned = rebinned(counts, edges)
+        draw_distributions(axis, binned, EVENT_GROUPS, edges)
+    finish_distribution(axis)
 
 
 def wrong_shots_figure(rows: list, plots_dir: pathlib.Path) -> None:
@@ -339,7 +355,7 @@ def wrong_shots_figure(rows: list, plots_dir: pathlib.Path) -> None:
     for distance, axis in axis_by_distance.items():
         for configuration, line in CONFIGURATIONS.items():
             points = column_points(rows, configuration, distance, columns)
-            draw_shares(axis, points, line, SHOWN_TOTAL)
+            draw_shares(axis, points, line, TOTAL_RULE)
         axis.set_ylabel("of these shots, failed (%)")
         rate_axis(axis)
     save(figure, plots_dir, "13_failed_among_wrong_shots.png")
@@ -362,32 +378,32 @@ def draw_shares(
     axis: pyplot.Axes,
     points: dict,
     line: tuple,
-    shown: int,
-    transform=None,
+    rule: tuple,
+    transform: Optional[Callable] = None,
 ) -> None:
-    """Count over total in % at each x, with Wilson bars.
+    """Count over total in % at each physical error rate, Wilson bars.
 
-    line is the (label, color) pair. A point below the rule is a gap in
-    its line.
+    line is the (label, color) pair, rule FAILURE_RULE or TOTAL_RULE. A
+    point below the rule is a gap in its line.
     """
     label, color = line
-    xs = sorted(points)
-    ys = []
+    rates = sorted(points)
+    shares = []
     below = []
     above = []
-    for x in xs:
-        share, low, high = shown_share(points[x], shown, transform)
+    for rate in rates:
+        share, low, high = shown_share(points[rate], rule, transform)
         bar_below = share - low
         bar_above = high - share
-        ys.append(share)
+        shares.append(share)
         below.append(bar_below)
         above.append(bar_above)
-    is_hidden = numpy.isnan(ys)
+    is_hidden = numpy.isnan(shares)
     if is_hidden.all():
         return
     axis.errorbar(
-        xs,
-        ys,
+        rates,
+        shares,
         yerr=[below, above],
         fmt="o-",
         color=color,
@@ -396,16 +412,16 @@ def draw_shares(
     )
 
 
-def shown_share(point: tuple, shown: int, transform=None) -> tuple:
-    """A point's share and Wilson bounds in %, not a number when hidden.
-
-    Failures are held to the count rule, other shares to the total.
-    """
+def shown_share(
+    point: tuple, rule: tuple, transform: Optional[Callable] = None
+) -> tuple:
+    """A point's share and Wilson bounds in %, not a number when hidden."""
     count, total = point
+    held_number, minimum = rule
     held = total
-    if shown == SHOWN_FAILURES:
+    if held_number == "count":
         held = count
-    if held < shown or total == 0:
+    if held < minimum or total == 0:
         return numpy.nan, numpy.nan, numpy.nan
     share = 100 * count / total
     low, high = tables.wilson_interval(count, total)
@@ -423,21 +439,52 @@ def per_round(shot_share: float) -> float:
 
 
 def draw_bars(axis: pyplot.Axes, values: dict, names: dict) -> None:
-    """Grouped bars: a group per rate, a bar per key of values."""
+    """Grouped bars: a group per rate, a bar per key of values.
+
+    values maps a key to its heights per rate, or to its (count, total)
+    points per rate, drawn as shares in % with Wilson bars.
+    """
     positions = numpy.arange(len(PHYSICAL_ERROR_RATES))
     bar_width = BAR_GROUP_WIDTH / len(values)
     first_offset = (len(values) - 1) / 2
     entries = values.items()
-    for index, (key, heights) in enumerate(entries):
+    for index, (key, bar_values) in enumerate(entries):
         name, color = names[key]
         offset = (index - first_offset) * bar_width
         bar_positions = positions + offset
-        axis.bar(bar_positions, heights, bar_width, color=color, label=name)
+        heights, error_bars = bar_heights(bar_values)
+        axis.bar(
+            bar_positions,
+            heights,
+            bar_width,
+            yerr=error_bars,
+            capsize=2,
+            color=color,
+            label=name,
+        )
     axis.set_xticks(positions, labels=PHYSICAL_ERROR_RATES)
 
 
+def bar_heights(bar_values: list) -> tuple:
+    """Heights and Wilson bars of shares, or plain heights and no bars."""
+    is_shares = any(isinstance(value, tuple) for value in bar_values)
+    if not is_shares:
+        return bar_values, None
+    heights = []
+    below = []
+    above = []
+    for point in bar_values:
+        share, low, high = shown_share(point, TOTAL_RULE)
+        bar_below = share - low
+        bar_above = high - share
+        heights.append(share)
+        below.append(bar_below)
+        above.append(bar_above)
+    return heights, [below, above]
+
+
 def draw_distributions(
-    axis: pyplot.Axes, counts: dict, groups: dict, edges
+    axis: pyplot.Axes, counts: dict, groups: dict, edges: numpy.ndarray
 ) -> None:
     """Each group's share of its windows per bin, as a histogram line.
 
@@ -457,7 +504,9 @@ def draw_distributions(
     axis.set_ylabel("share of the line's windows per bin (%)")
 
 
-def group_windows(counts: dict, classes: tuple, edges) -> numpy.ndarray:
+def group_windows(
+    counts: dict, classes: tuple, edges: numpy.ndarray
+) -> numpy.ndarray:
     """The windows of the classes in each bin, zero where none."""
     windows = numpy.zeros(len(edges), dtype=int)
     for answer_class in classes:
@@ -474,11 +523,12 @@ def event_edges(counts: dict) -> numpy.ndarray:
         largest = max(largest, *class_bins)
     rounded_up_width = -(-largest // EVENT_BINS)
     bin_width = max(1, rounded_up_width)
-    top = largest + bin_width
+    # one bin past the largest, so even an all-zero count has two edges
+    top = largest + 2 * bin_width
     return numpy.arange(0, top, bin_width)
 
 
-def rebinned(counts: dict, edges) -> dict:
+def rebinned(counts: dict, edges: numpy.ndarray) -> dict:
     """Counts by single value moved into the bins whose low edges these are."""
     bin_width = edges[1] - edges[0]
     moved = collections.defaultdict(collections.Counter)
@@ -489,7 +539,9 @@ def rebinned(counts: dict, edges) -> dict:
     return moved
 
 
-def class_counts(rows: list, distance: int, rate: float, bin_of) -> dict:
+def class_counts(
+    rows: list, distance: int, rate: float, bin_of: Callable
+) -> dict:
     """Windows of one setting by answer class and by bin."""
     counts = collections.defaultdict(collections.Counter)
     for row in rows:
@@ -515,33 +567,33 @@ def events_of(row: dict) -> int:
 
 
 def switching_shares(rows: list, distance: int, columns: tuple) -> list:
-    """The columns' share of union-find's windows in switching, per rate."""
-    shares = []
+    """The columns' (count, union-find's windows) points, per rate."""
+    points = []
     for rate in PHYSICAL_ERROR_RATES:
         row = _setting_row_of(rows, distance, rate)
-        share = numpy.nan
+        point = (0, 0)
         if row is not None:
-            share = 100 * column_sum(row, columns) / column_sum(row, DECIDED)
-        shares.append(share)
-    return shares
+            point = (column_sum(row, columns), column_sum(row, DECIDED))
+        points.append(point)
+    return points
 
 
 def answer_shares(
     rows: list, configuration: str, distance: int, answer_class: str
 ) -> list:
-    """One answer class's share of a configuration's windows, per rate."""
+    """One answer class's (count, windows) points, per rate."""
     configuration_rows = [
         row for row in rows if row["configuration"] == configuration
     ]
-    shares = []
+    points = []
     for rate in PHYSICAL_ERROR_RATES:
         row = _setting_row_of(configuration_rows, distance, rate)
-        share = numpy.nan
+        point = (0, 0)
         if row is not None:
             windows = column_sum(row, tables.ANSWER_CLASSES)
-            share = 100 * int(row[answer_class]) / windows
-        shares.append(share)
-    return shares
+            point = (int(row[answer_class]), windows)
+        points.append(point)
+    return points
 
 
 def column_points(

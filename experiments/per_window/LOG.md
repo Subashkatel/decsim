@@ -57,8 +57,8 @@ All decisions by the owner.
 | 2026-10-08 | Four configurations on the same shots: union-find alone, Relay-BP-5 alone, switching, Tesseract alone. This replaces "Tesseract as a check on every window". | Each configuration saves its own answer per window. Tesseract alone shows what a more accurate decoder gives on the same windows and shots; it is not part of the switching design. |
 | 2026-10-08 | d = 5, 7, 9, 11 and physical error rates 0.002, 0.003, 0.004, 0.005. d=13 later. | Relay-BP-5 starts to not converge at d=9. The configuration id leaves out the sweep and the stop rule (`decsim/experiments/run_folder.py`), so new points can be added later with the same commit. |
 | 2026-10-08 | No pilot. | The time per shot at d=5 to 11 is already measured in Experiments 1 and 3. |
-| 2026-10-08 | All parameters in yaml files in `experiments/per_window/`, one per configuration, each extending `configs/experiments/switching_baseline/switching_baseline.yaml`. Scripts hold no numbers. | One place to read and change every parameter. |
-| 2026-10-08 | The stop rule comes from the papers. | Research in progress. |
+| 2026-10-08 | All parameters in one experiment file, `experiments/per_window/run.py`, as main does since the yaml path was deleted (`526f7f64`): named constants at the top, each with its source. The analysis scripts hold no numbers. | One place to read and change every parameter. A task's id hashes its machine and metadata, not its stop rule (`decsim/experiments/collect.py`), so new distances or rates can be added later with the same commit. |
+| 2026-10-08 | Stop rule, option A: at each setting, one fixed number of shots N, the same for all four configurations; N gives union-find alone about 100 failures (N = 100 / its rate in Experiment 1). A rate is shown only with at least 20 failures, with 95% Wilson intervals. Keep d=11 at 0.002. | Papers that compare decoders use one fixed shot count for all of them (see Stop rule research). 100 failures gives about +-20% at 95%. Estimated cost about 9,100 core-hours, 6,750 of them at d=11, 0.002. |
 
 ## Plan
 
@@ -70,7 +70,7 @@ Each step is decided before the next. Status on 2026-10-08:
 | 1b. Literature check | which papers ground each piece | done, see below |
 | 2. Definitions | what right and wrong mean for a window | not started |
 | 3. Records | what decsim saves per shot, per window, per strong window | not started |
-| 4. Configurations and settings | decoders, distances, error rates, stop rule | decided except the stop rule |
+| 4. Configurations and settings | decoders, distances, error rates, stop rule, every latency | decided except the latencies |
 | 5. Checks before the run | how we prove the records are right | not started |
 | 6. Cost | time per shot (from Experiments 1 and 3), core-hours, job plan | not started; no pilot |
 | 7. Run system | how the run is started, folded, logged, pushed | not started |
@@ -112,6 +112,20 @@ quote checked word for word.
 Known limit: neighbouring windows overlap, so they are not independent
 (Dinca et al. 2512.15689, 1076-1088); Toshio's per-window rates assume
 they are. We report both.
+
+## Stop rule research (2026-10-08)
+
+| Source | Rule | Lines |
+| --- | --- | --- |
+| Toshio 2510.25222 | one fixed shot count for every decoder: 10^6 (threshold plot), 10^7 to 10^8 (gap plots) | 741, 793, 1690, 1733 |
+| Dentelski 2606.08758 | the same 10^8 shots per configuration; 95% intervals; a point needs 20 failures | 381-383, 1165-1167 |
+| Gidney 2312.04522; Dinca 2512.15689 | fixed 10^9 or 10^8 shots; Wilson intervals | 864, 896; 348-351, 494 |
+| Liang 2406.08491 (Helios) | fixed 10^6 to 10^8 trials | 1312, 1322 |
+| sinter (Stim) | stop a task after max_errors failures; its README uses 1,000 | `_collection.py:79`, README 85 |
+| Tesseract and Chromobius READMEs | max_errors 100 | README 363; README 89 |
+| Fowler 1110.5133; Bravyi 2208.04660 | until 10,000 failures; until 10 | 416; 443 |
+
+No paper uses exactly 100 failures; 100 is the value of Experiment 1.
 
 ## Runs
 

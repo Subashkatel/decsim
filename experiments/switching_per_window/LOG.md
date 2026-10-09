@@ -1,10 +1,10 @@
-# Per-window experiment: log
+# Switching per window: log
 
 This file records everything about this experiment: why we run it,
 what we decided and why, what we ran, with which code and parameters,
 where the data is, and how to run it again. Newest entries go at the
 bottom of each section. The plan is discussed step by step on the page
-"Per-Window Experiment Plan" and copied here once decided.
+"Switching Per Window: Plan" and copied here once decided.
 
 ## Why this experiment
 
@@ -57,7 +57,7 @@ All decisions by the owner.
 | 2026-10-08 | Four configurations on the same shots: union-find alone, Relay-BP-5 alone, switching, Tesseract alone. This replaces "Tesseract as a check on every window". | Each configuration saves its own answer per window. Tesseract alone shows what a more accurate decoder gives on the same windows and shots; it is not part of the switching design. |
 | 2026-10-08 | d = 5, 7, 9, 11 and physical error rates 0.002, 0.003, 0.004, 0.005. d=13 later. | Relay-BP-5 starts to not converge at d=9. The configuration id leaves out the sweep and the stop rule (`decsim/experiments/run_folder.py`), so new points can be added later with the same commit. |
 | 2026-10-08 | No pilot. | The time per shot at d=5 to 11 is already measured in Experiments 1 and 3. |
-| 2026-10-08 | All parameters in one experiment file, `experiments/per_window/run.py`, as main does since the yaml path was deleted (`526f7f64`): named constants at the top, each with its source. The analysis scripts hold no numbers. | One place to read and change every parameter. A task's id hashes its machine and metadata, not its stop rule (`decsim/experiments/collect.py`), so new distances or rates can be added later with the same commit. |
+| 2026-10-08 | All parameters in one experiment file, `experiments/switching_per_window/run.py`, as main does since the yaml path was deleted (`526f7f64`): named constants at the top, each with its source. The analysis scripts hold no numbers. | One place to read and change every parameter. A task's id hashes its machine and metadata, not its stop rule (`decsim/experiments/collect.py`), so new distances or rates can be added later with the same commit. |
 | 2026-10-08 | Stop rule, option A: at each setting, one fixed number of shots N, the same for all four configurations; N gives union-find alone about 100 failures (N = 100 / its rate in Experiment 1). A rate is shown only with at least 20 failures, with 95% Wilson intervals. Keep d=11 at 0.002. | Papers that compare decoders use one fixed shot count for all of them (see Stop rule research). 100 failures gives about +-20% at 95%. Estimated cost about 9,100 core-hours, 6,750 of them at d=11, 0.002. |
 | 2026-10-08 | Keep Experiment 1's machine and every latency as they are, on today's main (newer code than Experiments 1 and 3). | The results compare with Experiment 1. The run is about correctness, so the timing estimates stay. |
 | 2026-10-09 | The true label of a window comes from the errors that fired: a new shot source draws each shot from Stim's error model with `sample(return_errors=True)` and emits the raw row that forms exactly those events. | 2509.03815 labels windows by the flipped edges (lines 497-508); Gong et al. sample their windows from Stim's error model (`SlidingWindowDecoder/osd.py:124-125`). A measurement sample cannot say which errors fired. The shots are new, so they are not Experiment 1's shots. |
@@ -120,7 +120,7 @@ they are. We report both.
 
 ## Records (2026-10-09)
 
-What decsim keeps per window, and how (branch `per-window-experiment`):
+What decsim keeps per window, and how (branch `switching-per-window`):
 
 - `ErrorModelStimDevice` (`decsim/qpu/stim_device.py`): draws each shot
   from the circuit's error model and keeps the errors that fired; the
@@ -143,7 +143,7 @@ What decsim keeps per window, and how (branch `per-window-experiment`):
 
 ## Cost (2026-10-09)
 
-`experiments/per_window/run.py` holds N per setting (100 / union-find
+`experiments/switching_per_window/run.py` holds N per setting (100 / union-find
 alone's Experiment 1 rate) and each task's core seconds a shot
 (Experiment 1 or 3, same configuration and setting). Core-hours by
 setting, all four configurations:

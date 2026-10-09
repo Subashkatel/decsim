@@ -1,4 +1,4 @@
-"""The per-window experiment: each window's answer beside its true label.
+"""Switching per window: each window's answer beside its true label.
 
 Four configurations on the same shots: union-find alone, Relay-BP-5
 alone, switching between them, and Tesseract alone as a reference
@@ -27,7 +27,7 @@ Usage
 -----
 
 ```
-decsim run experiments/per_window/run.py --slurm --dry-run
+decsim run experiments/switching_per_window/run.py --slurm --dry-run
 ```
 """
 
@@ -42,7 +42,7 @@ import decsim.decoders.tesseract.decoder as tesseract
 import decsim.qpu.stim_device as stim_device
 import decsim.settings as machine_settings
 
-NAME = "per_window"
+NAME = "switching_per_window"
 DISTANCES = (5, 7, 9, 11)
 PHYSICAL_ERROR_PROBABILITIES = (0.002, 0.003, 0.004, 0.005)
 # the failures union-find alone is expected to make in each setting
@@ -189,7 +189,7 @@ def configurations(
         "relay_bp5_alone": strong_alone(union_find_alone, relay_bp5),
         "tesseract_alone": strong_alone(union_find_alone, tesseract_pool),
     }
-    return {name: per_window(machine) for name, machine in machines.items()}
+    return {name: with_labels(machine) for name, machine in machines.items()}
 
 
 def strong_alone(
@@ -202,7 +202,7 @@ def strong_alone(
     )
 
 
-def per_window(
+def with_labels(
     machine: machine_settings.MachineSettings,
 ) -> machine_settings.MachineSettings:
     """The machine drawing shots with their errors, writing window labels."""
@@ -222,7 +222,7 @@ def shot_count(distance: int, physical_error_probability: float) -> int:
     return math.ceil(expected_shots)
 
 
-def per_window_tasks() -> list:
+def switching_per_window_tasks() -> list:
     """Every configuration at every setting, the distance fastest."""
     grid = decsim.grid(
         physical_error_probability=PHYSICAL_ERROR_PROBABILITIES,
@@ -251,5 +251,5 @@ def per_window_tasks() -> list:
     return tasks
 
 
-tasks = per_window_tasks()
+tasks = switching_per_window_tasks()
 experiment = decsim.Experiment(NAME, tasks)

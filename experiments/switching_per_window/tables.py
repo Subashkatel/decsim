@@ -1,7 +1,8 @@
 """The switching-per-window run's tables, from its folder.
 
 `python tables.py <run folder> <results folder>` reads the folded
-shots.csv and window_outcomes.csv and each task's record, and writes
+shots.csv, window_outcomes.csv, window_samples.csv and sweep.csv and
+each task's record, and writes
 tidy tables of counts, so every figure and the final comparison table
 can be drawn from them:
 
@@ -18,9 +19,19 @@ can be drawn from them:
   once with every wrong label counted wrong (label_fixed, ...), and
   how many of them Relay-BP-5 did not converge on (not_converged).
 - union_find_by_gap.csv: switching's union-find windows by their gap
-  in 1 dB bins and by the class of union-find's answer.
+  in 1 dB bins and by whether union-find's answer equals the label of
+  the window's own rounds (right or wrong, no seam pairing, so the
+  count does not depend on the escalation decision).
 - kept_by_detection_events.csv: switching's kept windows by their
   detection-event count and by the class of union-find's answer.
+- reaction_time.csv: per configuration and setting, the windows by
+  reaction time (buffer0_ready_to_frame: the window's data complete to
+  its correction in the frame), in REACTION_BINS_PER_DECADE bins per
+  decade of microseconds.
+- decode_time.csv: per configuration and setting, the decoder's own
+  time on a window (algorithm), median and 99th percentile, and the
+  window period, the time the QPU takes to measure one window's new
+  rounds.
 
 A window is right when its answer equals its label, the parity of the
 true errors it owns (2509.03815 Eq. 1). Two wrong windows that share a
@@ -48,6 +59,12 @@ SHOWN_FAILURES = 20
 # the normal quantile of a two-sided 95% interval
 NORMAL_QUANTILE_95 = 1.959963984540054
 GAP_BIN_DECIBELS = 1.0
+# union-find's answer against the label of its window's own rounds
+OWN_LABEL_ANSWERS = {False: "right", True: "wrong"}
+REACTION_TIME_STAGE = "buffer0_ready_to_frame"
+REACTION_BINS_PER_DECADE = 8
+# the lowest reaction bin's low edge, 10^-0.5 us
+REACTION_LOWEST_DECADE = -0.5
 # An escalated window commits its own rounds and the next two windows',
 # which union-find never answers. A wrong union-find window beside
 # those rounds in no pair is wrong_partner_unseen, as its seam partner
@@ -82,6 +99,8 @@ def main(run_dir: pathlib.Path, results_dir: pathlib.Path) -> None:
     tasks = task_settings(run_dir)
     shots_path = run_dir / "shots.csv"
     outcomes_path = run_dir / "window_outcomes.csv"
+    samples_path = run_dir / "window_samples.csv"
+    sweep_path = run_dir / "sweep.csv"
     shots = shot_counts(shots_path, tasks)
     windows = window_tables(outcomes_path, tasks)
     union_find_classes = union_find_on_partitions(outcomes_path, tasks, windows)
@@ -92,6 +111,8 @@ def main(run_dir: pathlib.Path, results_dir: pathlib.Path) -> None:
         "switching_summary.csv": windows.switching_rows(strong),
         "union_find_by_gap.csv": windows.gap_rows(),
         "kept_by_detection_events.csv": windows.event_rows(),
+        "reaction_time.csv": reaction_rows(samples_path, tasks),
+        "decode_time.csv": decode_rows(sweep_path, tasks, shots),
     }
     results_dir.mkdir(parents=True, exist_ok=True)
     for file_name, rows in tables.items():
@@ -115,14 +136,62 @@ def task_settings(run_dir: pathlib.Path) -> dict:
 
 
 def shot_counts(shots_path: pathlib.Path, tasks: dict) -> dict:
-    """Each setting's shots, failed shots and windows decoded."""
+    """Each setting's shots, failed shots and windows decoded.
+
+    window_period_us is each setting's window period, the same on every
+    shot of a task.
+    """
     counts = collections.defaultdict(collections.Counter)
     for row in _rows(shots_path):
         setting_counts = counts[tasks[row["task_id"]]]
         setting_counts["shots"] += 1
         setting_counts["failed_shots"] += row["logical_failure"] == "True"
         setting_counts["decoded_windows"] += int(row["decoded_windows"])
+        setting_counts["window_period_us"] = float(row["window_period_us"])
     return counts
+
+
+def reaction_rows(samples_path: pathlib.Path, tasks: dict) -> list:
+    """reaction_time.csv: windows by reaction-time bin, per setting.
+
+    window_samples.csv holds each stage's values with their counts; the
+    reaction time of a switching window is either tier's, so both tiers
+    count.
+    """
+    windows = collections.Counter()
+    for row in _rows(samples_path):
+        if row["name"] != REACTION_TIME_STAGE:
+            continue
+        setting = tasks[row["task_id"]]
+        reaction_us = float(row["value_us"])
+        reaction_bin = _reaction_bin_of(reaction_us)
+        windows[(*setting, reaction_bin)] += int(row["count"])
+    rows = []
+    for key in sorted(windows):
+        *setting, reaction_bin = key
+        row = _setting_row(tuple(setting))
+        row["low_us"] = reaction_edge(reaction_bin)
+        row["high_us"] = reaction_edge(reaction_bin + 1)
+        row["windows"] = windows[key]
+        rows.append(row)
+    return rows
+
+
+def decode_rows(sweep_path: pathlib.Path, tasks: dict, shots: dict) -> list:
+    """decode_time.csv: the decoder's own time on a window, per setting."""
+    sweep_rows = {}
+    for sweep_row in _rows(sweep_path):
+        setting = tasks[sweep_row["task_id"]]
+        sweep_rows[setting] = sweep_row
+    rows = []
+    for setting in sorted(sweep_rows):
+        sweep_row = sweep_rows[setting]
+        row = _setting_row(setting)
+        row["median_us"] = float(sweep_row["algorithm_median_us"])
+        row["p99_us"] = float(sweep_row["algorithm_p99_us"])
+        row["window_period_us"] = shots[setting]["window_period_us"]
+        rows.append(row)
+    return rows
 
 
 class WindowTables:
@@ -186,7 +255,7 @@ class WindowTables:
         return rows
 
     def gap_rows(self) -> list:
-        """union_find_by_gap.csv: windows by gap bin and answer class."""
+        """union_find_by_gap.csv: windows by gap bin and own-label answer."""
         rows = []
         for key in sorted(self.gaps):
             distance, rate, gap_bin, answer_class = key
@@ -396,11 +465,14 @@ def _count_switching(tables: WindowTables, shot: tuple) -> None:
     spans = [_union_find_span(row) for row, _final_class in decided]
     classes = _answer_classes(spans)
     _configuration, distance, rate = setting
-    for (row, final_class), answer_class in zip(decided, classes, strict=True):
+    windows = zip(decided, spans, classes, strict=True)
+    for (row, final_class), span, answer_class in windows:
         decision = DECISIONS[row["is_escalated"] != "True"]
         tables.decisions[(distance, rate, decision, answer_class)] += 1
         gap_bin = _gap_bin_of(row)
-        tables.gaps[(distance, rate, gap_bin, answer_class)] += 1
+        _commit_lo, _commit_hi, is_wrong = span
+        own_answer = OWN_LABEL_ANSWERS[is_wrong]
+        tables.gaps[(distance, rate, gap_bin, own_answer)] += 1
         if decision == DECISIONS[0]:
             window = (distance, rate, seed, row, final_class)
             _keep_escalated(tables, window)
@@ -567,6 +639,17 @@ def _gap_bin_of(row: dict) -> int:
     gap_decibels = threshold_sources.nats_to_decibels(gap_nats)
     gap_bins = gap_decibels / GAP_BIN_DECIBELS
     return math.floor(gap_bins)
+
+
+def _reaction_bin_of(reaction_us: float) -> int:
+    decades = math.log10(reaction_us) - REACTION_LOWEST_DECADE
+    return math.floor(decades * REACTION_BINS_PER_DECADE)
+
+
+def reaction_edge(reaction_bin: int) -> float:
+    """A reaction-time bin's low edge, in microseconds."""
+    decades = reaction_bin / REACTION_BINS_PER_DECADE
+    return 10 ** (decades + REACTION_LOWEST_DECADE)
 
 
 def _failure_row(setting: tuple, shots: int, failed: int) -> dict:

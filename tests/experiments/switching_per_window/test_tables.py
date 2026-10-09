@@ -93,6 +93,19 @@ def test_a_share_holds_its_total_and_a_failure_rate_its_count():
     assert math.isnan(hidden)
 
 
+def test_a_reaction_time_lies_in_its_bin_and_the_plot_reads_the_bin_back():
+    plot = script_module("plot")
+
+    for reaction_us in (0.438144, 1.0, 2.5, 1000.0, 5513626.472):
+        reaction_bin = tables._reaction_bin_of(reaction_us)
+        low_us = tables.reaction_edge(reaction_bin)
+        high_us = tables.reaction_edge(reaction_bin + 1)
+        row = {"low_us": str(low_us)}
+
+        assert low_us <= reaction_us < high_us
+        assert plot.reaction_bin_of(row) == reaction_bin
+
+
 def window_row(
     commit_lo: int, commit_hi: int, answer: int, label: int = 0
 ) -> dict:

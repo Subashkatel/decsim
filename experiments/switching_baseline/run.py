@@ -210,10 +210,21 @@ def weak_decoder() -> decoder_settings.DecoderPoolSettings:
     764-767), and the graph sits in registers, so there is no setup
     (lines 912-913). The clock is the design's 100 MHz synthesis target
     (2406.08491 line 1230). The step that turns a log-odds weight into
-    growth ticks is an estimate, as the design's weights are integers
-    from 2 to wmax (2406.08491 lines 1616-1620). The engine reads a
-    header byte, then a round a cycle (control_node_single_FPGA.v:137
-    and 170-182), and the correction leaves in one 25 ns message
+    growth ticks is 0.1, far finer than the design's integer weights
+    from 2 to wmax (2406.08491 lines 1616-1620), for accuracy: at 0.1
+    the decoder fails as often as the weighted union-find of mwpf
+    (Wu et al. 2508.04969, after Delfosse et al. 2103.08049) on the
+    same shots at d = 5 to 9, where a step of 0.5 fails 3 percent more
+    and Helios's own rule (software_code/main.c lines 51-54) 36 to 45
+    percent more at d = 7 and 9. The engine takes one cycle
+    a decode for the header that starts it (control_node_single_FPGA.v
+    lines 131-142), then reads one whole round a cycle from the unit's
+    memory, as Helios's loading stage takes a round a cycle (lines
+    170-182); the bytes that fill that memory are the off-chip link,
+    priced on controller_to_weak_buffer. The fetch runs after the
+    window's last round has landed, a bound above designs that load
+    while rounds arrive (DecoNet 2504.11805 lines 961-974). The
+    correction leaves in one 25 ns message
     (2603.16203 line 902), rounded up to 3 cycles. The boundary folds
     into the unit's own copy of the rounds (2301.08419 lines 632-640).
     """
@@ -227,7 +238,7 @@ def weak_decoder() -> decoder_settings.DecoderPoolSettings:
         setup_cycles_per_edge=0,
     )
     algorithm = union_find.UnionFindDecoder.Settings(
-        weight_step=0.5, timing=timing
+        weight_step=0.1, timing=timing
     )
     engine = decoder_settings.EngineSettings(
         clock=clock,

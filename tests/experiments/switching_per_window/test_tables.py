@@ -46,6 +46,24 @@ def test_a_window_beside_rounds_union_find_skipped_is_partner_unseen():
     ]
 
 
+def test_a_lone_wrong_window_after_skipped_rounds_is_partner_unseen():
+    spans = [(1, 7, False), (8, None, False), (29, 35, True)]
+
+    classes = tables._answer_classes(spans)
+
+    assert classes == ["right", "right", "wrong_partner_unseen"]
+
+
+def test_folding_takes_the_parity_of_the_windows_inside_a_span():
+    # answers 1, 1, 0 cancel; labels 1, 0, 0 do not
+    partition = ((1, 21),)
+    rows = [window_row(1, 7, 1, 1), window_row(8, 14, 1), window_row(15, 21, 0)]
+
+    spans = tables._folded_spans(partition, rows, ("shot",))
+
+    assert spans == [(1, 21, True)]
+
+
 def test_union_find_alone_pairs_on_switching_spans():
     # union-find alone wrong on 57-63, 64-70 and 71-77; switching
     # escalated 71-91, so 71-77, 78-84 and 85-91 fold into one span
@@ -75,11 +93,13 @@ def test_a_share_holds_its_total_and_a_failure_rate_its_count():
     assert math.isnan(hidden)
 
 
-def window_row(commit_lo: int, commit_hi: int, answer: int) -> dict:
-    """A union-find-alone window_outcomes row with label 0."""
+def window_row(
+    commit_lo: int, commit_hi: int, answer: int, label: int = 0
+) -> dict:
+    """A union-find-alone window_outcomes row."""
     return {
         "commit_lo": str(commit_lo),
         "commit_hi": str(commit_hi),
         "answer": json.dumps(str(answer)),
-        "label": json.dumps("0"),
+        "label": json.dumps(str(label)),
     }

@@ -320,10 +320,12 @@ def wilson_interval(failures: int, shots: int) -> tuple:
     spread_squared = rate * (1 - rate) / shots + z_squared / (4 * shots**2)
     spread = math.sqrt(spread_squared)
     half_width = NORMAL_QUANTILE_95 * spread / denominator
-    # at zero failures the bound is 0 up to rounding
-    rounded_low = centre - half_width
-    low = max(0.0, rounded_low)
-    return low, centre + half_width
+    # the bound reached at zero or all failures is exact, not rounded
+    if failures == 0:
+        return 0.0, centre + half_width
+    if failures == shots:
+        return centre - half_width, 1.0
+    return centre - half_width, centre + half_width
 
 
 def write_rows(path: pathlib.Path, rows: list) -> None:

@@ -49,15 +49,16 @@ class DecoderRequestKey:
     run_sequence: int
 
 
-# What a request's name is on a wire. Three kinds of message carry it,
+# What a request's name is on a wire. Four kinds of message carry it,
 # once in every transfer: the selection, which is the name and, on the
 # direct strong answer route, the weak crossing commit, a region
-# transfer, which is the name and its rounds, and the strong answer,
-# which is the name and its flips. The rule is gem5's: its
-# network sizes a message with no data at control_msg_size, 8 bytes, and
-# one with data at its data plus that same size (gem5
-# src/mem/ruby/network/Network.cc MessageSizeType_to_int and
-# m_data_msg_size, Network.py control_msg_size). gem5's data size is one
+# transfer, which is the name and its rounds, the strong answer, which
+# is the name and its flips, and a boundary between the chip and the
+# host, which is the name and its seam (windows/window_boundaries.py).
+# The rule is gem5's: its network sizes a message with no data at
+# control_msg_size, 8 bytes, and one with data at its data plus that
+# same size (gem5 src/mem/ruby/network/Network.cc MessageSizeType_to_int
+# and m_data_msg_size, Network.py control_msg_size). gem5's data size is one
 # configured number; decsim applies the same sum to a region of any
 # size. The name is decsim's own abstraction of whatever identifies the
 # request, not a published layout: CUDA-Q QEC spends an int64 on the
@@ -177,6 +178,9 @@ class WindowInfo:
     deps: tuple
     dependents: tuple
     detector_positions: Optional[dict] = None
+    # one round's checks by the code card, the layer a boundary updates
+    # when no model places the detectors
+    layer_detector_count: Optional[int] = None
 
     @classmethod
     def from_window(
@@ -184,6 +188,7 @@ class WindowInfo:
         window: Window,
         *,
         detector_positions: Optional[dict] = None,
+        layer_detector_count: Optional[int] = None,
     ) -> "WindowInfo":
         """The window as a policy reads it, with its edges frozen."""
         positions = None
@@ -200,6 +205,7 @@ class WindowInfo:
             deps=tuple(window.deps),
             dependents=tuple(window.dependents),
             detector_positions=positions,
+            layer_detector_count=layer_detector_count,
         )
 
     @property

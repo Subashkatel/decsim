@@ -171,6 +171,9 @@ INPUT_LINK_BY_TIER = {
     ),
 }
 
+# the hop a boundary's delay is kept under, whichever path it rode
+BOUNDARY_HOP = "boundary"
+
 
 @dataclasses.dataclass(frozen=True)
 class ShotConfidence:
@@ -387,14 +390,17 @@ def link_totals(traffic: dict) -> dict:
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """Ticks from the first request to the last delivery by (path, window key).
+    """Ticks from the first request to the last delivery by (hop, window key).
 
     A hop's transfers for one window can overlap (the selection and its
     rounds), so the span is what the window waited and a sum would count
     the overlap twice. A window is keyed by (operation_id, window_index),
     since several streams each have a window 3, as gem5's reorder buffer
     finds an instruction by thread and sequence number
-    (src/cpu/o3/rob.hh:131-134).
+    (src/cpu/o3/rob.hh:131-134). The hop is the path, or BOUNDARY_HOP for
+    a boundary, which rides the path its two sides pick
+    (windows/window_boundaries.py) and so shares the cable with the
+    escalation it does not belong to.
     """
     first_request = {}
     last_delivery = {}
@@ -404,7 +410,8 @@ def link_delay_by_window(transfers: list) -> dict:
         operation_id = identity_records.stable_identity_from_json(
             recorded_operation
         )
-        key = (row["path"], operation_id, attribution["window_id"])
+        hop = _hop_of(row)
+        key = (hop, operation_id, attribution["window_id"])
         request = _hop_start_ticks(row)
         earliest_request = first_request.get(key, request)
         first_request[key] = min(earliest_request, request)
@@ -599,9 +606,7 @@ def window_points_us(
     """
     operation_id, window_id = window.key
     committed = frame_record.committed_ticks
-    handoff_ticks = link_delay.get(
-        ("decoder_to_decoder", operation_id, window_id), 0
-    )
+    handoff_ticks = link_delay.get((BOUNDARY_HOP, operation_id, window_id), 0)
     escalation_ticks = link_delay.get(
         ("weak_decoder_to_strong_decoder", operation_id, window_id), 0
     )
@@ -987,11 +992,11 @@ def parallel_processes_needed(
 def _request_run_sequence(row: dict):
     """The run ordinal of the request a transfer serves, None when it has none.
 
-    A boundary hand-off names its source request instead, and a round's
-    transfer names no request at all.
+    A boundary hand-off is no decode's input, though it names the
+    request that committed it, and a round's transfer names no request.
     """
     relation = row["attribution"].get("relation")
-    if not relation:
+    if not relation or _is_boundary(row):
         return None
     request_key = relation.get("request_key")
     if request_key is None:
@@ -1702,6 +1707,21 @@ def _reaction_microseconds(
     return _span_microseconds(
         frame_record.committed_ticks, window.t_data_complete
     )
+
+
+def _hop_of(row: dict) -> str:
+    """The hop a transfer's delay is kept under: BOUNDARY_HOP, or its path."""
+    if _is_boundary(row):
+        return BOUNDARY_HOP
+    return row["path"]
+
+
+def _is_boundary(row: dict) -> bool:
+    """Whether the transfer carries a boundary, which names its source."""
+    relation = row["attribution"].get("relation")
+    if not relation:
+        return False
+    return "source_window_key" in relation
 
 
 def _hop_start_ticks(row: dict) -> int:

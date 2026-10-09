@@ -225,11 +225,11 @@ Every hop is booked under one path name, the `LinkPath` values in
 | `controller_to_weak_buffer` | the packed round into the weak syndrome buffer |
 | `controller_to_strong_buffer` | a strong-only run's round into the strong syndrome buffer |
 | `weak_buffer_to_weak_decoder` | a window's rounds into a weak unit's memory |
-| `strong_buffer_to_strong_decoder` | the strong region into the strong unit |
-| `weak_decoder_to_strong_decoder` | the escalation's selection, then the strong window's rounds |
-| `decoder_to_decoder` | one committed window's boundary to the next window |
+| `strong_buffer_to_strong_decoder` | the strong region into the strong unit, and one strong decode's boundary to another, both read out of the host's memory |
+| `weak_decoder_to_strong_decoder` | the escalation's selection, then the strong window's rounds; and a weak commit's boundary that a strong window pins |
+| `decoder_to_decoder` | one weak window's committed boundary to the next weak window, on the chip |
 | `weak_decoder_to_frame`, `strong_decoder_to_frame` | a correction to the Pauli frame |
-| `strong_decoder_to_weak_decoder` | a strong answer to the weak chip, which joins it and sends it home on `weak_decoder_to_frame` (`switching.strong_answer_route` `through_weak_chip`) |
+| `strong_decoder_to_weak_decoder` | a strong answer to the weak chip, which joins it and sends it home on `weak_decoder_to_frame` (`switching.strong_answer_route` `through_weak_chip`); and a strong decode's boundary to the weak window after it |
 | `frame_to_controller` | the conditional release |
 | `controller_to_qpu` | the instruction, and its pulse cost |
 

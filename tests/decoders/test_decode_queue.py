@@ -254,22 +254,26 @@ def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
 def test_a_bulk_strong_batch_holds_no_member_that_owes_a_boundary():
     """A strong decode, batched or not, starts only when it owes nothing.
 
-    Four patches escalate both windows, and the boundary between them
-    takes 100 us, so the second windows' strong requests queue long
-    before their boundaries land. A batch started then would decode
-    them without the boundary; they wait instead, and each of the eight
-    strong requests starts owing nothing.
+    Four patches escalate both windows. The second window's strong
+    redo pins its face on the first window's strong commit, which the
+    host reads out of its own memory, and that read takes 100 us, so
+    the second windows' strong requests queue long before their
+    boundaries land. A batch started then would decode them without the
+    boundary; they wait instead, and each of the eight strong requests
+    starts owing nothing.
     """
     base_machine = declared_fabric.switching_machine(
         rounds=6, escalated_windows={0, 1}
     )
     base = base_machine.settings
-    boundary_path = base.links.decoder_to_decoder
+    boundary_path = base.links.strong_buffer_to_strong_decoder
     slow_channel = dataclasses.replace(
         boundary_path.channel, propagation_latency_ticks=100_000_000
     )
     slow_boundary = dataclasses.replace(boundary_path, channel=slow_channel)
-    links = dataclasses.replace(base.links, decoder_to_decoder=slow_boundary)
+    links = dataclasses.replace(
+        base.links, strong_buffer_to_strong_decoder=slow_boundary
+    )
     operations = tuple(
         declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
     )

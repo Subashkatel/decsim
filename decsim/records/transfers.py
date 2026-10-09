@@ -28,23 +28,21 @@ class LinkPath(str, Enum):
     WEAK_BUFFER_TO_WEAK_DECODER = (
         "weak_buffer_to_weak_decoder"  # a window, or a feedback-memory round
     )
-    WEAK_DECODER_TO_STRONG_DECODER = (
-        "weak_decoder_to_strong_decoder"  # an escalation
-    )
-    STRONG_BUFFER_TO_STRONG_DECODER = (
-        "strong_buffer_to_strong_decoder"  # the strong window's input
-    )
+    # an escalation, and a weak boundary a strong window pins
+    WEAK_DECODER_TO_STRONG_DECODER = "weak_decoder_to_strong_decoder"
+    # the strong window's input, and a strong boundary another strong
+    # decode reads, both out of the host's own memory
+    STRONG_BUFFER_TO_STRONG_DECODER = "strong_buffer_to_strong_decoder"
     WEAK_DECODER_TO_FRAME = "weak_decoder_to_frame"  # the weak correction
-    DECODER_TO_DECODER = "decoder_to_decoder"  # a committed window boundary
+    DECODER_TO_DECODER = "decoder_to_decoder"  # a boundary between weak units
     STRONG_DECODER_TO_FRAME = "strong_decoder_to_frame"  # the strong correction
     FRAME_TO_CONTROLLER = "frame_to_controller"  # the conditional release
     CONTROLLER_TO_QPU = "controller_to_qpu"  # the instruction back
     CONTROLLER_TO_STRONG_BUFFER = (
         "controller_to_strong_buffer"  # the room-side write
     )
-    STRONG_DECODER_TO_WEAK_DECODER = (
-        "strong_decoder_to_weak_decoder"  # a strong answer to the chip
-    )
+    # a strong answer to the chip, and a strong boundary to a weak window
+    STRONG_DECODER_TO_WEAK_DECODER = "strong_decoder_to_weak_decoder"
 
 
 @dataclass(frozen=True)
@@ -56,7 +54,7 @@ class RequestTransferRelation:
 
 @dataclass(frozen=True)
 class BoundaryTransferRelation:
-    """Provenance tying one decoder-to-decoder transfer to its boundary.
+    """Provenance tying one transfer to the boundary it carries.
 
     From which window, produced by which request, to which window, and
     both revisions.

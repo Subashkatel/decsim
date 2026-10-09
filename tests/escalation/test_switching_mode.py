@@ -54,12 +54,19 @@ def run_shot(settings, seed: int):
 
 
 def transfers_by_path(result) -> dict:
-    """The run's transfer count on each path of the card."""
+    """The run's transfer count on each path of the card, boundaries apart.
+
+    A boundary rides whichever hop its two sides pick
+    (windows/window_boundaries.py), so it is no escalation, answer or
+    input of the path it shares.
+    """
     transfers = {}
-    for edge in result.link_traffic["semantic_edges"]:
-        path = edge["path"]
-        count = edge["counters"]["transfer_count"]
-        transfers[path] = transfers.get(path, 0) + count
+    for transfer in result.link_traffic["transfers"]:
+        relation = transfer["attribution"]["relation"]
+        if relation and "source_window_key" in relation:
+            continue
+        path = transfer["path"]
+        transfers[path] = transfers.get(path, 0) + 1
     return transfers
 
 
@@ -300,9 +307,10 @@ def test_the_serial_escalation_timeline_is_exact():
     crosses strong_buffer_to_strong_decoder, 6 us, so the strong decode
     starts at 39 us. The Held boundary keeps the next window's job in
     the queue until the strong correction has committed at 74 us and
-    its boundary crossed decoder_to_decoder, 0.5 us; only then does the
-    job take a unit and its input cross weak_buffer_to_weak_decoder,
-    5 us, so it starts at 79.5 us.
+    its boundary crossed from the host down
+    strong_decoder_to_weak_decoder, 4 us; only then does the job take a
+    unit and its input cross weak_buffer_to_weak_decoder, 5 us, so it
+    starts at 83 us.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
     machine.run()
@@ -318,7 +326,7 @@ def test_the_serial_escalation_timeline_is_exact():
     expected_strong_start = decsim_config.microseconds_to_ticks(39.0)
     expected_accepted = decsim_config.microseconds_to_ticks(73.0)
     expected_committed = decsim_config.microseconds_to_ticks(74.0)
-    expected_released_start = decsim_config.microseconds_to_ticks(79.5)
+    expected_released_start = decsim_config.microseconds_to_ticks(83.0)
 
     assert weak_done == expected_weak_done
     assert strong_start == expected_strong_start
@@ -635,9 +643,9 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
     holder once window 0's strong input lands in the unit, 39.0 us here:
     the weak commit at 30.0, the escalation hop of 3.0 and the strong
     buffer's hop of 6.0. Rounds 4 to 6 stay for window 1 until its own
-    commit releases them at 92.5 us: window 1 takes a unit only after
-    the strong commit at 74.0 and the boundary hop of 0.5, so its own
-    input hop of 5.0 follows them.
+    commit releases them at 96.0 us: window 1 takes a unit only after
+    the strong commit at 74.0 and the boundary's hop down from the host
+    of 4.0, so its own input hop of 5.0 follows them.
     """
     machine = fabric.switching_machine(rounds=6, escalated_windows={0})
     probe = declared_run.OccupancyProbe(machine.windows.window_manager)
@@ -651,7 +659,7 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
         (decsim_config.microseconds_to_ticks(0.0), 0),
         (decsim_config.microseconds_to_ticks(33.0), 6),
         (decsim_config.microseconds_to_ticks(39.0), 3),
-        (decsim_config.microseconds_to_ticks(92.5), 0),
+        (decsim_config.microseconds_to_ticks(96.0), 0),
     ]
 
     assert strong_record.window_key == (1, 0)

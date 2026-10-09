@@ -104,6 +104,7 @@ def resolved_operation(operation_id):
         round_count=4,
         round_ticks=config.TICKS_PER_MICROSECOND,
         spatial_node_count=10,
+        syndrome_bits_per_round=8,
     )
 
 
@@ -163,6 +164,9 @@ class RecordingCode:
     def spatial_nodes(self, patch_count):
         self.spatial_node_calls.append(patch_count)
         return patch_count * 10
+
+    def syndrome_bits_per_round(self, patch_count):
+        return patch_count * 8
 
 
 class RecordingLayout:

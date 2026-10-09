@@ -71,6 +71,12 @@ GATE_PATH_CLOCKS = {
     "strong_decoder_to_weak_decoder": ROOM_CLOCK,
 }
 GATE_PHYSICAL_ERROR_PROBABILITY = 0.008
+# the hops across the wall, where a boundary carries the request's name
+# ahead of its seam (windows/window_boundaries.py)
+NAMED_BOUNDARY_PATHS = (
+    "weak_decoder_to_strong_decoder",
+    "strong_decoder_to_weak_decoder",
+)
 
 
 def one_cycle_path(links, path_name: str, clock, latency_cycles: int = 1):
@@ -682,9 +688,9 @@ def test_a_pinned_strong_decode_starts_no_earlier_than_its_pin_lands():
     determined, and Bombin 2303.04846 lines 782-788 make the neighbour's
     correction part of the input task j reads, so a decode whose face is
     pinned may not begin before the message that carries the pin has
-    crossed decoder_to_decoder. Run on a card whose decoder_to_decoder
-    latency is 400 fridge cycles, so the delivery is far from the
-    landing of the rounds.
+    crossed to the host. Run on a card whose weak_decoder_to_strong_decoder
+    latency is 400 room cycles, so a face pinned on a weak commit lands
+    far from the rounds.
     """
     machine = _slow_boundary_machine(declared_run.REDO_WINDOW)
     engine = machine.engine
@@ -717,12 +723,17 @@ def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
 
 
 def _slow_boundary_machine(strong_window) -> machine_module.Machine:
-    """The gate's switching card with a long decoder_to_decoder hop."""
+    """The gate's switching card with a long hop up to the host."""
     settings = gate_switching(strong_window=strong_window)
     slow_path = one_cycle_path(
-        settings.links, "decoder_to_decoder", FRIDGE_CLOCK, latency_cycles=400
+        settings.links,
+        "weak_decoder_to_strong_decoder",
+        ROOM_CLOCK,
+        latency_cycles=400,
     )
-    links = dataclasses.replace(settings.links, decoder_to_decoder=slow_path)
+    links = dataclasses.replace(
+        settings.links, weak_decoder_to_strong_decoder=slow_path
+    )
     settings = dataclasses.replace(settings, links=links)
     return machine_module.Machine.build(settings, 0)
 
@@ -851,7 +862,7 @@ def test_the_redo_window_row_pins_nothing_at_the_operations_first_window():
 
 
 def _pinned_boundary_transfers(result) -> list:
-    """(window index, payload bits) of every pinned face on the wire.
+    """(window index, seam bits) of every pinned face on the wire.
 
     A weak delivery is attributed to the window that produced it; a
     pinned face is attributed to the strong window it lands in, so a
@@ -859,14 +870,44 @@ def _pinned_boundary_transfers(result) -> list:
     own weak commit at a back-to-back seam included.
     """
     pinned = []
-    for transfer in result.link_traffic["transfers"]:
-        if transfer["path"] != "decoder_to_decoder":
-            continue
+    for transfer in _pinned_faces_of(result):
         attribution = transfer["attribution"]
-        if not _is_pinned_face(attribution):
-            continue
-        pinned.append((attribution["window_id"], transfer["payload_bits"]))
+        seam = seam_bits(transfer)
+        pinned.append((attribution["window_id"], seam))
     return pinned
+
+
+def _pinned_faces_of(result) -> list:
+    """Every transfer of the run that carries a pinned face."""
+    pinned = []
+    for transfer in result.link_traffic["transfers"]:
+        if not is_boundary(transfer):
+            continue
+        if not _is_pinned_face(transfer["attribution"]):
+            continue
+        pinned.append(transfer)
+    return pinned
+
+
+def is_boundary(transfer: dict) -> bool:
+    """Whether the transfer carries a boundary, which names its source."""
+    relation = transfer["attribution"]["relation"]
+    if not relation:
+        return False
+    return "source_window_key" in relation
+
+
+def seam_bits(transfer: dict):
+    """A boundary transfer's seam, the name a cross-wall hop adds left out.
+
+    None for a run with no window model, whose wire prices the card.
+    """
+    payload_bits = transfer["payload_bits"]
+    if payload_bits is None:
+        return None
+    if transfer["path"] in NAMED_BOUNDARY_PATHS:
+        return payload_bits - window_records.REQUEST_KEY_WIRE_BITS
+    return payload_bits
 
 
 def _is_pinned_face(attribution: dict) -> bool:
@@ -879,7 +920,7 @@ def _is_pinned_face(attribution: dict) -> bool:
 
 
 def test_the_redo_window_rows_pinned_faces_cross_the_wire():
-    """Every face the redo window pins is a message on decoder_to_decoder.
+    """Every face the redo window pins is a message on a wire.
 
     Skoric 2209.08552 lines 1038-1040 sends the artificial defects block
     to block, and Bombin's Fig. 14
@@ -929,7 +970,7 @@ def test_the_double_window_row_reads_exactly_the_rounds_it_commits():
 
 
 def test_the_double_window_row_pins_its_near_and_its_far_face():
-    """One message per pinned face, both on decoder_to_decoder.
+    """One message per pinned face, both across the cable to the host.
 
     The near face is the window before the strong region, the far face
     the window that restarts the weak chain after it, the boundary the
@@ -948,35 +989,37 @@ def test_the_double_window_row_pins_its_near_and_its_far_face():
     pinned_windows = [window_id for window_id, _payload_bits in pinned]
     assert pinned_windows == [1, 1]
     sources = _pin_sources(result)
+    paths = _pin_paths(result)
     # W1's own dependency, and the window that restarts the chain past
-    # the strong region 4-12
+    # the strong region 4-12, both weak commits on the chip
     assert sources == [0, 4]
+    assert paths == ["weak_decoder_to_strong_decoder"] * 2
 
 
 def _pin_sources(result) -> list:
     """The window that produced each pinned face's boundary, in send order."""
     sources = []
-    for transfer in result.link_traffic["transfers"]:
-        if transfer["path"] != "decoder_to_decoder":
-            continue
+    for transfer in _pinned_faces_of(result):
         attribution = transfer["attribution"]
-        if not _is_pinned_face(attribution):
-            continue
         source_window_id = attribution["relation"]["request_key"]["window_id"]
         sources.append(source_window_id)
     return sources
 
 
+def _pin_paths(result) -> list:
+    """The hop each pinned face rode, in send order."""
+    paths = []
+    for transfer in _pinned_faces_of(result):
+        paths.append(transfer["path"])
+    return paths
+
+
 def _pin_sources_into(result, window_id: int) -> list:
     """The window that produced each face pinned into that strong window."""
     sources = []
-    for transfer in result.link_traffic["transfers"]:
-        if transfer["path"] != "decoder_to_decoder":
-            continue
+    for transfer in _pinned_faces_of(result):
         attribution = transfer["attribution"]
         if attribution["window_id"] != window_id:
-            continue
-        if not _is_pinned_face(attribution):
             continue
         source_window_id = attribution["relation"]["request_key"]["window_id"]
         sources.append(source_window_id)
@@ -1036,7 +1079,7 @@ def test_a_region_at_a_back_to_back_seam_reads_the_rounds_it_commits():
 def test_a_region_at_a_back_to_back_seam_pins_its_near_face_on_itself():
     """The near face's commit is the escalated window's own weak one.
 
-    Each pinned face is one message on decoder_to_decoder: W4, whose
+    Each pinned face is one message to the host: W4, whose
     region sits at the back-to-back seam, pins its own weak commit and
     W7, the window that restarts the chain after it.
     """

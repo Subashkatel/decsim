@@ -34,6 +34,7 @@ import dataclasses
 import functools
 import math
 import pathlib
+import statistics
 import sys
 from typing import Optional
 
@@ -1339,6 +1340,207 @@ def test_a_restarted_window_is_recorded_by_its_first_committed_round():
     assert measurement.samples["admission_wait"] == [0.0]
 
 
+def with_deadline(
+    settings: machine_settings.MachineSettings,
+    deadline_microseconds: float,
+    first_recorded_round: int = 1,
+    last_recorded_round: Optional[int] = None,
+) -> machine_settings.MachineSettings:
+    """The settings with a reaction deadline and a measurement interval."""
+    observation = dataclasses.replace(
+        settings.observation,
+        reaction_deadline_microseconds=deadline_microseconds,
+        first_recorded_round=first_recorded_round,
+        last_recorded_round=last_recorded_round,
+    )
+    return dataclasses.replace(settings, observation=observation)
+
+
+def test_an_overloaded_units_reaction_grows_at_its_load_less_one():
+    """One 5.0 us unit: each window waits 2.072 us longer than the last.
+
+    Its data completes 3 us after the last one's
+    (test_service_is_the_compute_and_the_seam_wait_is_dep_block), so the
+    reaction time grows 2.072 us per 3 us of run, the load 5.072 / 3
+    less 1. The run has no strong tier and sets no deadline, so it has
+    no strong slope and its shot row no deadline column.
+    """
+    measurement = slow_unit_shot(1)
+
+    growth = 2.072 / 3
+    assert measurement.weak_reaction_growth_rate == pytest.approx(growth)
+    assert measurement.strong_reaction_growth_rate is None
+    record = report.record_of([measurement])
+    shot_row = record.shots[0]
+    assert "deadline_missed_windows" not in shot_row
+    assert "first_deadline_miss_us" not in shot_row
+
+
+def test_the_first_deadline_miss_is_the_first_window_over_it():
+    """A 10 us deadline against reactions of 5.076 + 2.072 i us.
+
+    Window 3, whose data completes at 15.008 us, is the first over it
+    at 11.292 us, and windows 3 to 8 all miss.
+    """
+    settings = slow_unit_settings(1)
+    deadline_settings = with_deadline(settings, 10.0)
+    task = task_at(deadline_settings)
+
+    measurement = measured(task)
+
+    assert measurement.first_deadline_miss_us == 15.008
+    assert measurement.deadline_missed_windows == 6
+
+
+def test_a_unit_that_keeps_up_has_no_growth_and_misses_no_deadline():
+    """A 1.0 us unit finishes each window before the next one completes.
+
+    Every window's reaction is the same 1.076 us, so the slope is zero
+    and a 2 us deadline is never passed.
+    """
+    settings = slow_unit_settings(1, card_microseconds=1.0)
+    deadline_settings = with_deadline(settings, 2.0)
+    task = task_at(deadline_settings)
+
+    measurement = measured(task)
+
+    assert measurement.weak_reaction_growth_rate == 0.0
+    assert measurement.deadline_missed_windows == 0
+    assert measurement.first_deadline_miss_us is None
+
+
+def test_an_overloaded_strong_tier_grows_and_first_misses_at_15_us():
+    """Every window escalates to a 10 us strong card, one at a time.
+
+    The strong decodes run in a chain, each waiting on the boundary of
+    the one before, so each window waits 9.248 us more than the last
+    while its data completes 3 us after it; the last window, which
+    commits the readout round, completes with the one before. The slope
+    is numpy's least-squares fit over those arrivals. Against a 35 us
+    deadline the fourth window, 39.984 us from its data at 15.008 us,
+    is the first over it, and the seven from it on miss.
+    """
+    settings = switching_settings(1000000.0)
+    deadline_settings = with_deadline(settings, 35.0)
+    task = task_at(deadline_settings, SWITCHING_ERROR_PROBABILITY)
+    arrivals_us = [
+        6.008,
+        9.008,
+        12.008,
+        15.008,
+        18.008,
+        21.008,
+        24.008,
+        27.008,
+        30.008,
+        30.008,
+    ]
+
+    measurement = measured(task)
+
+    reactions_us = measurement.samples["buffer0_ready_to_frame"]
+    slope, _intercept = numpy.polyfit(arrivals_us, reactions_us, 1)
+    assert measurement.strong_reaction_growth_rate == pytest.approx(slope)
+    assert measurement.weak_reaction_growth_rate is None
+    assert measurement.first_deadline_miss_us == 15.008
+    assert measurement.deadline_missed_windows == 7
+
+
+def test_the_first_deadline_miss_is_the_earliest_on_the_shot_clock():
+    """Two streams, the second 20 rounds late, share one 2.0 us unit.
+
+    Alone, the first stream's windows take 2.011 us; once the second
+    stream's windows share the unit, the first stream's round-22 window,
+    complete at 27.0 us, takes 3.025 us, and the second stream's
+    round-4 window, complete at 29.0 us, 3.032 us. Against a 3 us
+    deadline the earlier miss is the round-22 window, though round 4 is
+    the smaller index, since each stream counts its rounds from 1. Two
+    windows of the first stream and eight of the second miss.
+    """
+    settings = seam_streams_settings(2, stagger_rounds=20)
+    algorithm = dataclasses.replace(
+        settings.weak_decoder.algorithm, preset_latency_microseconds=2.0
+    )
+    one_unit = dataclasses.replace(
+        settings.weak_decoder, unit_count=1, algorithm=algorithm
+    )
+    one_unit_settings = dataclasses.replace(settings, weak_decoder=one_unit)
+    deadline_settings = with_deadline(one_unit_settings, 3.0)
+    task = collect.Task("task", deadline_settings, {})
+
+    measurement = measured(task)
+
+    assert measurement.first_deadline_miss_us == 27.0
+    assert measurement.deadline_missed_windows == 10
+
+
+def test_a_tasks_growth_is_the_mean_over_the_shots_that_measured_one(
+    tmp_path,
+):
+    """Seed 0 at 5 dB escalates no window and seed 1 two.
+
+    Only seed 1 has a strong slope, so the task's is seed 1's; both have
+    a weak one, and the task's is their mean.
+    """
+    calm = switching_shot(5.0, seed=0)
+    escalating = switching_shot(5.0, seed=1)
+
+    rows, _run_dir = run_files.folded_run(tmp_path, [calm, escalating])
+
+    row = rows[0]
+    assert calm.strong_reaction_growth_rate is None
+    strong_growth = escalating.strong_reaction_growth_rate
+    assert row["strong_reaction_growth_rate"] == strong_growth
+    weak_growths = [
+        calm.weak_reaction_growth_rate,
+        escalating.weak_reaction_growth_rate,
+    ]
+    weak_growth = statistics.fmean(weak_growths)
+    assert row["weak_reaction_growth_rate"] == pytest.approx(weak_growth)
+
+
+def test_a_tasks_missed_fraction_is_over_its_recorded_windows(tmp_path):
+    """From round 7 the interval records seven of the nine windows.
+
+    Six of them pass the 10 us deadline, from the window complete at
+    15.008 us.
+    """
+    settings = slow_unit_settings(1)
+    deadline_settings = with_deadline(settings, 10.0, first_recorded_round=7)
+    task = task_at(deadline_settings)
+    measurement = measured(task)
+
+    rows, _run_dir = run_files.folded_run(tmp_path, [measurement])
+
+    row = rows[0]
+    assert row["deadline_missed_windows"] == 6
+    assert row["deadline_missed_fraction"] == 6 / 7
+    assert row["first_deadline_miss_us"] == 15.008
+
+
+def test_an_interval_that_records_no_window_has_no_missed_fraction(
+    tmp_path,
+):
+    """Rounds 2 and 3 hold no window's first committed round.
+
+    The windows commit from rounds 1, 4, 7 and on, so none is recorded:
+    no window missed, and a fraction of no windows is no number.
+    """
+    settings = slow_unit_settings(1)
+    deadline_settings = with_deadline(
+        settings, 10.0, first_recorded_round=2, last_recorded_round=3
+    )
+    task = task_at(deadline_settings)
+    measurement = measured(task)
+
+    rows, _run_dir = run_files.folded_run(tmp_path, [measurement])
+
+    row = rows[0]
+    assert row["deadline_missed_windows"] == 0
+    assert "deadline_missed_fraction" not in row
+    assert "first_deadline_miss_us" not in row
+
+
 def test_the_store_wait_is_not_in_the_hop_the_round_then_crosses():
     """The round waits before the wire is asked for.
 
@@ -1882,6 +2084,185 @@ def test_enough_strong_units_leave_the_same_windows_and_no_wait():
     assert real.strong_wait_max_us > 0.0
     assert ample.strong_held_in_units_max == 0
     assert ample.backlog_peak_rounds < real.backlog_peak_rounds
+
+
+def slower_strong_than_the_shot() -> measure.ShotMeasurement:
+    """Every window escalates to a 100 us strong card on one unit.
+
+    The ten decodes are 1,000 us of work against 30 rounds read out a
+    microsecond apart, so the first strong answer lands after the last
+    round does.
+    """
+    strong_algorithm = charged(100.0)
+    shot = switching_run(
+        1000000.0,
+        observation=("backlog_trace",),
+        strong_algorithm=strong_algorithm,
+    )
+    return measure.measure_shot(shot)
+
+
+def test_a_window_waiting_for_its_strong_answer_keeps_its_rounds_waiting():
+    """A provisional weak commit is not a round's final correction.
+
+    No strong answer is in when the last round arrives, so no round is
+    final and the backlog holds every round the shot produced: Terhal's
+    backlog of syndrome data generated and not yet processed (quoted in
+    Skoric et al. 2209.08552 lines 46-55).
+    """
+    measurement = slower_strong_than_the_shot()
+
+    assert measurement.backlog_peak_rounds == SHOT_ROUNDS
+
+
+def test_an_overloaded_strong_tier_reads_its_offered_load_past_one():
+    """The busy time over the 30 us the rounds took, not over the drain.
+
+    The strong unit spends the run's drain busy, so its busy fraction
+    stays under 1; its offered load is the ten 100 us decodes, and the
+    few cycles each spends fetching and releasing, over 30 us.
+    """
+    measurement = slower_strong_than_the_shot()
+    work_over_generation = 1000.0 / 30.0
+
+    assert measurement.strong_busy_fraction < 1.0
+    assert measurement.strong_offered_load == pytest.approx(
+        work_over_generation, rel=0.001
+    )
+
+
+def test_a_readout_departure_delay_leaves_the_offered_load_where_it_was(
+    monkeypatch,
+):
+    """The span is the QPU's readouts, not the readouts' departures.
+
+    Every readout leaves 1,000 us after it is read out, so the same ten
+    decodes start later, and the 30 us of rounds they were offered over
+    is the same.
+    """
+    prompt = slower_strong_than_the_shot()
+    late_departure = staticmethod(departs_a_millisecond_late)
+    monkeypatch.setattr(
+        stim_device.StimDevice, "readout_departure_tick", late_departure
+    )
+    delayed = slower_strong_than_the_shot()
+
+    assert delayed.strong_offered_load == prompt.strong_offered_load
+
+
+def test_an_idle_patchs_rounds_stretch_the_span_the_load_is_offered_over():
+    """An idle patch's rounds are generated work, so they set the span too.
+
+    A 30-round memory operation runs beside a 300-round one that emits
+    no detector data, so the memory patch idles from round 31 to 300 and
+    the default idle policy charges each idle round a load-only decode
+    on the one 1 us weak unit: 105.372 us of busy time over the 300 us
+    the QPU generated rounds for.
+    """
+    settings = one_tier_machine(1.0)
+    (memory,) = settings.workload.operations
+    quiet = program_records.Operation(
+        2, "quiet", (99,), patches=(99,), emits_detector_data=False
+    )
+    rounds = round_policies.PerOperationRounds(((memory.id, 30), (2, 300)))
+    workload = dataclasses.replace(
+        settings.workload,
+        operations=(memory, quiet),
+        rounds_policy=rounds,
+        workload_record=None,
+    )
+    beside_a_quiet_patch = dataclasses.replace(settings, workload=workload)
+    task = task_at(beside_a_quiet_patch)
+    measurement = measured(task)
+    busy_over_generation = 105.372 / 300.0
+
+    assert measurement.weak_offered_load == pytest.approx(busy_over_generation)
+
+
+def departs_a_millisecond_late(readout, readout_tick: int) -> int:
+    """A source that sends every readout 1,000 us after it is read out."""
+    del readout
+    return readout_tick + 1_000_000_000
+
+
+class ReadoutsAndCommits:
+    """What the QPU read out and what the windows committed, in order."""
+
+    def __init__(self) -> None:
+        self.events = []
+
+    def round_read_out(self, readout) -> None:
+        """The QPU read out a round."""
+        self.events.append(("read", readout.round_index))
+
+    def window_committed(self, window, _contribution) -> None:
+        """A window committed its rounds."""
+        self.events.append(("commit", window.commit_lo, window.commit_hi))
+
+
+def backlog_peak_of(events: list) -> int:
+    """The most rounds read out past the unbroken committed prefix.
+
+    Recomputed from the event stream alone, the readouts and the commits
+    in the order they happened, on a run where every commit is final.
+    """
+    read_out = 0
+    committed = []
+    peak = 0
+    for event in events:
+        read_out, committed = _after_event(event, read_out, committed)
+        prefix = _committed_prefix(committed)
+        waiting = read_out - prefix
+        peak = max(peak, waiting)
+    return peak
+
+
+def _after_event(event: tuple, read_out: int, committed: list) -> tuple:
+    if event[0] == "read":
+        return max(read_out, event[1]), committed
+    commit_range = event[1:]
+    return read_out, [*committed, commit_range]
+
+
+def _committed_prefix(committed: list) -> int:
+    prefix = 0
+    for start_round, end_round in sorted(committed):
+        if start_round > prefix + 1:
+            break
+        prefix = max(prefix, end_round)
+    return prefix
+
+
+def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
+    """The backlog counts a round from its readout, not its publication.
+
+    Six rounds of store and a 5 us unit: from round 10 on, the controller
+    holds packed rounds until the store frees room, so the store has not
+    published them, and the backlog still holds every round read out
+    past the committed prefix.
+    """
+    heard = ReadoutsAndCommits()
+    build = machine_module.Machine.build
+
+    def build_and_listen(
+        settings, seed, built_models=None, online_threshold=None
+    ):
+        machine = build(settings, seed, built_models, online_threshold)
+        device = machine.qpu.device
+        device.trace.round_emitted.connect(heard.round_read_out)
+        window_manager = machine.windows.window_manager
+        sources = window_manager.window_sources()
+        sources.window_committed.connect(heard.window_committed)
+        return machine
+
+    monkeypatch.setattr(machine_module.Machine, "build", build_and_listen)
+    settings = bounded_store_settings()
+    observation = dataclasses.replace(settings.observation, backlog_trace=True)
+    traced = dataclasses.replace(settings, observation=observation)
+    task = task_at(traced)
+    measurement = measured(task)
+
+    assert measurement.backlog_peak_rounds == backlog_peak_of(heard.events)
 
 
 def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):

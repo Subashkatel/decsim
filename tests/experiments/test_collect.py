@@ -99,12 +99,16 @@ WALL_CLOCK_COLUMNS = (
     "strong_queue_max",
     "weak_busy_fraction",
     "strong_busy_fraction",
+    "weak_offered_load",
+    "strong_offered_load",
     "strong_service_sum_us",
     "strong_service_mean_us",
     "parallel_processes_needed",
     "sim_wall_seconds_per_shot",
     "throughput_rounds_per_us",
     "throughput_windows_per_us",
+    "weak_reaction_growth_rate",
+    "strong_reaction_growth_rate",
 )
 
 # the sliding pymatching task's logical_failure, direct_failure and

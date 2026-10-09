@@ -9,6 +9,7 @@ only when the observation section asks for backlog_trace.
 from collections.abc import Mapping
 
 import decsim.engine as engine_module
+import decsim.observe.round_events as round_events_module
 import decsim.observe.run_views as run_views
 import decsim.ports as ports
 
@@ -19,7 +20,9 @@ class DecoderUtilization:
     A unit is busy from leaving the pool's free list to going back, so the
     integral steps exactly where occupancy changes. The pool sweep reads
     each tier's fraction, Triage's utilization rate (2605.04459 lines
-    1024-1031).
+    1024-1031). The span is the whole run, the drain after the last
+    round included, so the fraction is not the tier's offered load; each
+    pool's busy unit ticks are the work it was offered.
     """
 
     def __init__(
@@ -54,15 +57,19 @@ class DecoderUtilization:
             aggregate_average = self._aggregate.time_average()
             aggregate_fraction = aggregate_average / aggregate_total
         per_pool_fraction = {}
+        per_pool_area = {}
         for pool, total in totals.items():
-            average = self._per_pool[pool].time_average()
+            integral = self._per_pool[pool]
+            average = integral.time_average()
             per_pool_fraction[pool] = average / total
+            per_pool_area[pool] = integral.area
         return {
             "observation_span_ticks": self._aggregate.span_ticks,
             "busy_unit_ticks": self._aggregate.area,
             "aggregate_busy_fraction": aggregate_fraction,
             "aggregate_total_units": aggregate_total,
             "per_pool_busy_fraction": per_pool_fraction,
+            "per_pool_busy_unit_ticks": per_pool_area,
             "per_pool_total_units": totals,
         }
 
@@ -76,26 +83,32 @@ class DecoderUtilization:
 
 
 class DecodeBacklog:
-    """The peak count of syndrome rounds not yet decoded.
+    """The peak count of syndrome rounds not yet finally corrected.
 
     Sampled after every action, since the rounds waiting are spread over
-    the window manager and the queues and no one source reports them.
+    the window manager and the queues and no one source reports them. A
+    round counts from its readout, so one the controller holds for room
+    in a full store is in the backlog too.
     """
 
     def __init__(
         self,
         window_manager: ports.WindowBacklog,
         decoder_managers: tuple,
+        round_events: round_events_module.RoundEventRecorder,
     ) -> None:
         self.window_manager = window_manager
         self.decoder_managers = decoder_managers
+        self.round_events = round_events
         self.peak = 0
 
     def observe(self, tick: int) -> None:
         """Sample the backlog after an action and keep its peak."""
         del tick
         view = run_views.backlog_view(
-            self.window_manager, self.decoder_managers
+            self.window_manager,
+            self.decoder_managers,
+            self.round_events.rounds_read_out_by_operation,
         )
         self.peak = max(self.peak, view.total_rounds)
 

@@ -360,11 +360,15 @@ class WindowManager:
 
     # ---- observation
 
-    def rounds_backlog(self) -> tuple:
-        """Rounds arrived but not decoded, per operation in stable order.
+    def final_round_counts(self) -> tuple:
+        """The rounds whose final correction is in place, per operation.
 
-        A row is (operation id, patch, rounds arrived past the unbroken
-        decoded prefix from round 1).
+        A row is (operation id, patch, the unbroken final prefix from
+        round 1), per operation in stable order; the backlog is the rounds
+        read out past it. A window waiting for its strong answer holds a
+        provisional commit only, so it ends the prefix: Terhal's backlog
+        is syndrome data generated and not yet processed (quoted in
+        Skoric et al. 2209.08552 lines 46-55).
         """
         rows = []
         ordered_ids = sorted(
@@ -373,12 +377,9 @@ class WindowManager:
         )
         for operation_id in ordered_ids:
             operation = self.tracker.operation_by_id[operation_id]
-            decoded = self.results.committed_prefix_round_count(operation_id)
-            arrived = self.tracker.rounds_arrived(operation_id)
-            undecoded = arrived - decoded
-            waiting = max(0, undecoded)
+            final = self.results.final_prefix_round_count(operation_id)
             patch = _representative_patch(operation)
-            rows.append((operation_id, patch, waiting))
+            rows.append((operation_id, patch, final))
         return tuple(rows)
 
     def window_sources(self) -> WindowTraceSources:

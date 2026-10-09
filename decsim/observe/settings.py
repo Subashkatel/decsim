@@ -38,14 +38,21 @@ class ObservationSettings:
     it, for instance from a pilot shot's samples in window order.
 
     The interval cuts the latency samples and what is made from them:
-    the means and maxes, the windows' tiers, load and
-    parallel_processes_needed. The logical failure and the predictions
-    stay whole, since a logical error rate is a rate over whole shots,
-    and so do the shot's counts and rates (decoded_windows,
-    escalated_windows, throughput, the queue peaks, busy fractions,
-    switching and backlog columns, the link totals): a report divides
-    one count by another, escalated over decoded windows, and a cut on
-    one side would bias the ratio.
+    the means and maxes, the windows' tiers, the reaction growth rates
+    and deadline misses, load and parallel_processes_needed. The logical
+    failure and the predictions stay whole, since a logical error rate
+    is a rate over whole shots, and so do the shot's counts and rates
+    (decoded_windows, escalated_windows, throughput, the queue peaks,
+    busy fractions, switching and backlog columns, the link totals): a
+    report divides one count by another, escalated over decoded
+    windows, and a cut on one side would bias the ratio.
+
+    reaction_deadline_microseconds is a budget on each recorded window's
+    reaction time (buffer0_ready_to_frame); None, the default, sets
+    none. A shot then counts the windows over it and the shot-clock
+    time the first of them arrived, which says when an overloaded tier,
+    whose wait grows without bound, first breaks the budget over the
+    run length chosen.
 
     The log and the trace are labels (compare=False) and no part of a
     task's id, as sinter keeps output options out of a task's strong id
@@ -53,7 +60,7 @@ class ObservationSettings:
     others stay in the id because they add or shape a shot's columns:
     record_switching_windows and backlog_trace the wait and backlog
     columns, data_movement the shot_data_movement rows, the interval the
-    latency columns.
+    latency columns, the deadline the deadline columns.
     """
 
     log: str = dataclasses.field(compare=False, default="off")
@@ -65,6 +72,7 @@ class ObservationSettings:
     data_movement: bool = False
     first_recorded_round: int = 1
     last_recorded_round: Optional[int] = None
+    reaction_deadline_microseconds: Optional[float] = None
 
     def __post_init__(self) -> None:
         """Every value checked, with the sentence the caller reads."""
@@ -91,6 +99,11 @@ class ObservationSettings:
                 self.last_recorded_round,
                 "rounds",
                 minimum=self.first_recorded_round,
+            )
+        if self.reaction_deadline_microseconds is not None:
+            config.check_microseconds(
+                "observation.reaction_deadline_microseconds",
+                self.reaction_deadline_microseconds,
             )
 
     def records_round(self, round_index: int) -> bool:

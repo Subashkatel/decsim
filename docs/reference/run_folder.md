@@ -113,7 +113,8 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the most jobs that waited in the ready queue at once; a depth counts only when time passes at it, so a job that joins and leaves in one tick never waited |
 | `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
-| `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy |
+| `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy, over the whole run from tick 0 to its last event, the drain after the last round included, so it is not the tier's offered load |
+| `weak_offered_load`, `strong_offered_load` | each tier's load: its units' busy time over its unit count times the span the QPU generated the rounds over, rho = lambda E[S] / c. The span runs from the QPU's first readout to its last plus one round period, an idle patch's rounds included, so a delay the source puts on a readout's departure does not stretch it, and operations that run side by side share it rather than add up. The run drains every decode, so the busy time is the work the rounds offered the tier; above 1 the tier gets work faster than it finishes it and falls behind. A tier the run does not build reads zero |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_sum_us` | the windows the strong tier committed, the rounds its decodes read, and their service added up; a task divides the sum by the windows |
 | `commit_rounds` | r_com, the rounds a window commits, as the code card the QPU ran sizes it: `windows.scheme.commit_rounds`, or the card's own when it is null (the code distance for both shipped cards) |
 | `window_period_us` | a window's inter-arrival, `commit_rounds` times the round period the QPU ran (the card's own when it has one): what `load` divides by, and the deadline a window's decode must beat |
@@ -122,7 +123,9 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `weak_service_mean_us` | each weak decode's compute, its first stage's start to its last stage's end; the same switch |
 | `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from the tick it may start, its enqueue or its window's last boundary arriving after it, to its compute start, for a unit and for the unit's compute; the same switch |
 | `strong_held_in_units_max` | the most strong decodes held in the units' memory at once, landed and free to compute but waiting for a unit's compute, by the rule of the queue peaks. A unit takes the next decode into its memory while it computes, so this wait never shows in `strong_queue_max`; the same switch |
-| `backlog_peak_rounds` | the most rounds produced and not yet decoded at once; only when `observation.backlog_trace` is on |
+| `backlog_peak_rounds` | the most rounds the QPU had read out at once whose final correction was not yet in place: the rounds of an operation past the unbroken run of final windows from its round 1. A round counts from its readout, so one the controller holds for room in a full store counts too. An escalated window's provisional weak commit is not final, so it and every round after it stay in the backlog until its strong answer lands (Terhal's backlog, syndrome data produced and not yet processed, quoted in Skoric 2209.08552 lines 46-55); only when `observation.backlog_trace` is on |
+| `weak_reaction_growth_rate`, `strong_reaction_growth_rate` | the least-squares slope of each recorded window's `buffer0_ready_to_frame` against the tick its data was complete, over the windows that tier committed: microseconds of reaction time gained per microsecond of run. Near 0 when the tier keeps up; above a load of 1 the wait grows without bound, so its mean and p99 say only how long the shot ran, and this slope does not. Over a long run it tends to the offered load less 1 for one server fed without a pause, through an unbounded queue, by stationary arrivals and service; over a few windows of varying service it is an estimate of that. A bounded syndrome buffer holds the backlog upstream, in the controller, before a window's data is complete, so the reaction time can stay flat while the tier is overloaded; there read `backlog_peak_rounds`. Empty for a tier whose recorded windows completed at fewer than two distinct ticks, which leave no slope to fit |
+| `deadline_missed_windows`, `first_deadline_miss_us` | with `observation.reaction_deadline_microseconds` set, the recorded windows whose `buffer0_ready_to_frame` passed it, and the shot-clock time the earliest of them had its data complete, the growth fit's axis, since a round index restarts in each operation's stream; the time is empty when no window missed, and both are empty with no deadline |
 | `referee_windows_checked`, `referee_window_disagreements` | the referee's count, when the decoder's record is wrapped in `TesseractCheckedDecoder.Settings` |
 | `sim_wall_seconds` | how long the simulation itself took to run, on the host |
 | `is_scored` | whether every decode a window committed, provisional or final, got a correction from its backend. A backend that produced none (it raised, returned a vector that is not a correction, or found no correction at all) commits an empty correction in its place, and its shot is unscored. An escalated window's weak answer is committed provisionally before the strong one replaces it, and the replacement does not undo what the provisional commit fed forward: its boundary, when `windows.boundary_policy` ships provisional boundaries (a shipped one is never revised), and its crossing commit, which the strong result keeps. decsim does not trace which of those reached a later decode, so a replaced provisional decode with no correction unscores the shot too. A provisional result never reaches the Pauli frame |
@@ -176,7 +179,8 @@ interval, and a per-round point's round when it does. Every window
 still runs and finishes, so a long shot can leave out its start-up,
 when the queues are empty, and its drain at the end. The interval
 cuts these points, their `_mean_us` and `_max_us` columns, the tier
-split, `load` and `parallel_processes_needed`; `logical_failure`,
+split, the growth rates and deadline columns, `load` and
+`parallel_processes_needed`; `logical_failure`,
 `predictions` and every count and rate in `shots.csv`, `decoded_windows`
 and `escalated_windows` among them, stay over the whole shot.
 
@@ -373,7 +377,8 @@ point the run held:
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | the means |
 | `max_queued_windows` | the deepest queue over the task |
 | `weak_queue_max`, `strong_queue_max` | the deepest each tier's own queue over the task |
-| `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions |
+| `weak_busy_fraction`, `strong_busy_fraction` | the mean busy fractions, each over its shot's whole run, drain included |
+| `weak_offered_load`, `strong_offered_load` | the mean offered loads; a folder whose shots lack them has none |
 | `escalated_windows`, `strong_service_mean_us` | the strong tier's windows over the task, and the task's summed `strong_service_sum_us` over those windows: every strong decode weighs the same, whichever shot ran it. Empty when nothing escalated |
 | `strong_service_bound_us` | Toshio's Theorem 1 bound on one strong decode's time, the unit of `strong_service_mean_us`: tau_gen times the task's generated rounds (its shots' `executed_rounds`) over its escalated windows, which is d tau_gen over the switching rate per d rounds, with tau_gen the shots' `window_period_us` over their `commit_rounds` (2510.25222 eq. (6)); generated rounds and not committed windows, since a double window absorbs windows whose rounds were still generated; infinite when nothing escalated |
 | `parallel_processes_needed` | the largest over the task's shots |
@@ -395,6 +400,18 @@ Then `buffer0_ready_to_frame_<tier>_median_us` and
 window at the task: the formed-to-commit time of the kept windows
 (`weak`) and of the escalated ones (`strong`), each over that tier's own
 sample counts. A tier with no window has no column.
+
+Last come the overload columns. `weak_reaction_growth_rate` and
+`strong_reaction_growth_rate` are the means over the shots that hold
+one, each shot one replication of a run of its length, as Law's
+terminating simulations average per-replication values (WSC 2004,
+p. 69); a tier no shot measured has no column. With
+`observation.reaction_deadline_microseconds` set,
+`deadline_missed_windows` is the sum over the task's shots,
+`deadline_missed_fraction` that sum over every recorded window of the
+task, with no column when the interval recorded no window, and
+`first_deadline_miss_us` the mean over the shots that missed, with no
+column when none did.
 
 ### `run.json`
 

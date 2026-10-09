@@ -91,7 +91,7 @@ def observe(
             trace_writer, links, qpu, control, readout, windows, decoders
         )
     decode_backlog = _decode_backlog(
-        observation, engine, window_manager, decoder_managers
+        observation, engine, window_manager, decoder_managers, round_events
     )
     decoder_utilization = _decoder_utilization(engine, decoder_managers)
     frame_corrections = _frame_corrections(control.pauli_frame)
@@ -465,6 +465,11 @@ def _connect_round_events(
         if component is None:
             continue
         component.trace.round_event.connect(round_events.record)
+    qpu.device.trace.round_emitted.connect(round_events.round_read_out)
+    idle_rounds = control.idle_rounds
+    idle_rounds.trace.idle_round_emitted.connect(
+        round_events.idle_round_read_out
+    )
     instruction_output = control.instruction_output
     instruction_output.trace.output_event.connect(round_events.output)
     strong_syndrome_buffer = readout.strong_syndrome_buffer
@@ -545,11 +550,14 @@ def _decode_backlog(
     engine: engine_module.Engine,
     window_manager,
     decoder_managers: tuple,
+    round_events: round_events_module.RoundEventRecorder,
 ) -> Optional[metrics.DecodeBacklog]:
     """The backlog sampler, after every action, only when asked for."""
     if not observation.backlog_trace:
         return None
-    decode_backlog = metrics.DecodeBacklog(window_manager, decoder_managers)
+    decode_backlog = metrics.DecodeBacklog(
+        window_manager, decoder_managers, round_events
+    )
     engine.action_done.connect(decode_backlog.observe)
     return decode_backlog
 

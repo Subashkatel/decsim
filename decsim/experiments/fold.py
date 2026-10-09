@@ -25,7 +25,7 @@ import heapq
 import math
 import pathlib
 from collections.abc import Callable, Iterator
-from typing import Union
+from typing import Optional, Union
 
 import decsim.experiments.refusal as refusal
 
@@ -157,6 +157,8 @@ class RowTotals:
 
     Each field's role is given at construction, and nothing grows with the
     rows, the shape of sinter's TaskStats (sinter/_data/_task_stats.py).
+    A mean is over the rows that hold the field, since a shot leaves a
+    value out when it has none, as a slope of fewer than two points.
     """
 
     def __init__(
@@ -169,11 +171,13 @@ class RowTotals:
     ) -> None:
         self.rows = 0
         self.means = {}
+        self.held_counts = {}
         self.maxes = {}
         self.sums = {}
         self.true_counts = {}
         for field in means:
             self.means[field] = ExactSum()
+            self.held_counts[field] = 0
         for field in maxes:
             self.maxes[field] = None
         for field in sums:
@@ -185,7 +189,7 @@ class RowTotals:
         """One more row: each role reads the fields it was given."""
         self.rows += 1
         for field, running in self.means.items():
-            running.add(row[field])
+            self._add_a_held_value(field, running, row)
         for field, largest in self.maxes.items():
             self._raise_the_max(field, largest, row)
         for field in self.sums:
@@ -194,16 +198,32 @@ class RowTotals:
             flag = number_of(row[field])
             self.true_counts[field] += bool(flag)
 
-    def mean(self, field: str) -> float:
-        """The field's mean over the rows: their exact sum over the count.
+    def mean(self, field: str) -> Optional[float]:
+        """The field's mean over the rows that hold it; None for none.
 
         This is statistics.fmean, which is math.fsum(values) / n
         (/opt/python/lib/python3.11/statistics.py:436-458), with the sum
         taken as the rows arrived instead of over a list of them.
         """
+        held_count = self.held_counts[field]
+        if held_count == 0:
+            return None
         running = self.means[field]
         total = running.total()
-        return total / self.rows
+        return total / held_count
+
+    def _add_a_held_value(
+        self, field: str, running: ExactSum, row: dict
+    ) -> None:
+        """The row's value to the field's sum, when the row holds one.
+
+        A measured row holds None and a csv row an empty cell.
+        """
+        value = row.get(field)
+        if value is None or value == "":
+            return
+        running.add(value)
+        self.held_counts[field] += 1
 
     def _raise_the_max(self, field: str, largest, row: dict) -> None:
         """The field's largest value so far, the first row's being it."""

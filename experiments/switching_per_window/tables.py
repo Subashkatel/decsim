@@ -9,26 +9,24 @@ can be drawn from them:
   failed shots with the rate's 95% Wilson interval, the windows
   decoded, and the shots with at least one wrong window.
 - window_summary.csv: per configuration and setting, the windows by
-  their final answer: right, wrong alone, or wrong in a seam pair.
+  their final answer's class (ANSWER_CLASSES).
 - switching_summary.csv: per setting, switching's union-find windows
-  by decision (escalated or kept) and by union-find's answer on the
-  window's own rounds (right, wrong alone, wrong in a seam pair, or
-  wrong beside a window union-find never answered), and
-  the escalated windows by Relay-BP-5's outcome against union-find
-  alone on the same rounds.
+  by decision (escalated or kept) and by the class of union-find's
+  answer on the window's own rounds; and the escalated windows by
+  Relay-BP-5's outcome against union-find alone on the same rounds,
+  once with seam pairs counted right (fixed, broke, ...) and once
+  with every wrong label counted wrong (label_fixed, label_broke, ...).
 - union_find_by_gap.csv: switching's union-find windows by their gap
-  in 1 dB bins and by union-find's answer.
+  in 1 dB bins and by the class of union-find's answer.
 - kept_by_detection_events.csv: switching's kept windows by their
-  detection-event count and by union-find's answer.
+  detection-event count and by the class of union-find's answer.
 
 A window is right when its answer equals its label, the parity of the
 true errors it owns (2509.03815 Eq. 1). Two wrong windows that share a
 seam flip the shot twice and cancel: one error near the seam, owned by
 one window and corrected by the other, gives such a pair. Pairs are
 taken left to right in time and do not overlap; a wrong window in no
-pair is wrong alone. An escalated window's union-find answer covers
-only its own rounds, the first of its double window, so it pairs only
-with the window before it.
+pair is wrong alone.
 """
 
 import collections
@@ -47,9 +45,10 @@ SHOWN_FAILURES = 20
 # the normal quantile of a two-sided 95% interval
 NORMAL_QUANTILE_95 = 1.959963984540054
 GAP_BIN_DECIBELS = 1.0
-# union-find never answers the window a double window takes in, so a
-# wrong window beside it in no pair is wrong_partner_unseen, not
-# wrong_alone: an escalated window, or the window after a double window
+# An escalated window commits its own rounds and the next two windows',
+# which union-find never answers. A wrong union-find window beside
+# those rounds in no pair is wrong_partner_unseen, as its seam partner
+# may lie there: an escalated window, or the window after one.
 ANSWER_CLASSES = (
     "right",
     "wrong_alone",
@@ -73,6 +72,7 @@ STRONG_OUTCOMES = (
     "both_wrong",
     "not_converged",
 )
+LABEL_PREFIX = "label_"
 
 csv.field_size_limit(sys.maxsize)
 
@@ -131,9 +131,9 @@ class WindowTables:
     """The counts one pass over window_outcomes.csv gives.
 
     escalated holds each escalated window's (distance, rate, seed, first
-    and last commit round, Relay-BP-5 right, converged); escalated_rounds
-    the same spans by (distance, rate, seed), for the join with
-    union-find alone.
+    and last commit round, class of Relay-BP-5's answer, converged);
+    escalated_rounds the same spans by (distance, rate, seed), for the
+    join with union-find alone.
     """
 
     def __init__(self) -> None:
@@ -175,12 +175,14 @@ class WindowTables:
     def switching_rows(self, strong: collections.Counter) -> list:
         """switching_summary.csv: decisions, answers and strong outcomes."""
         settings = {key[:2] for key in self.decisions}
+        outcome_columns = _strong_columns()
         rows = []
         for setting in sorted(settings):
             row = _setting_row(setting)
-            row.update(_decision_columns(self.decisions, setting))
-            for outcome in STRONG_OUTCOMES:
-                row[outcome] = strong[(*setting, outcome)]
+            decision_columns = _decision_columns(self.decisions, setting)
+            row.update(decision_columns)
+            for column in outcome_columns:
+                row[column] = strong[(*setting, column)]
             rows.append(row)
         return rows
 
@@ -232,11 +234,13 @@ def window_tables(outcomes_path: pathlib.Path, tasks: dict) -> WindowTables:
 def union_find_answers_on(
     outcomes_path: pathlib.Path, tasks: dict, escalated_rounds: dict
 ) -> dict:
-    """Union-find alone's answer and label parity on each escalated span.
+    """Union-find alone's answer on each escalated span, and its edges.
 
     Keyed (distance, rate, seed, commit_lo, commit_hi): the XOR of the
     answers and of the labels of union-find alone's windows inside the
-    span, and the rounds they cover, which must be the whole span.
+    span, the rounds they cover, which must be the whole span, and
+    whether a window just outside either edge is wrong, the span's
+    possible seam partner.
     """
     spans = {}
     for row in _rows(outcomes_path):
@@ -246,24 +250,33 @@ def union_find_answers_on(
         shot_key = (distance, rate, row["seed"])
         shot_spans = escalated_rounds.get(shot_key, ())
         for commit_lo, commit_hi in shot_spans:
-            _add_inside(spans, shot_key, commit_lo, commit_hi, row)
+            span_key = (*shot_key, commit_lo, commit_hi)
+            _add_to_span(spans, span_key, row)
     return spans
 
 
 def strong_on_escalated(
     escalated: list, union_find_answers: dict
 ) -> collections.Counter:
-    """Escalated windows by Relay-BP-5's outcome, per setting."""
+    """Escalated windows by Relay-BP-5's outcome, per setting.
+
+    Counted twice: with a wrong window in a seam pair counted right,
+    and with every wrong label counted wrong (the LABEL_PREFIX columns).
+    """
     counts = collections.Counter()
     for window in escalated:
-        distance, rate, seed, commit_lo, commit_hi, strong_right, converged = (
+        distance, rate, seed, commit_lo, commit_hi, strong_class, converged = (
             window
         )
         span_key = (distance, rate, seed, commit_lo, commit_hi)
         span = union_find_answers[span_key]
-        union_find_right = _span_right(span, span_key)
-        outcome = _strong_outcome(strong_right, union_find_right, converged)
+        union_find_class = _span_class(span, span_key)
+        outcome = _strong_outcome(strong_class, union_find_class, converged)
+        label_outcome = _label_outcome(
+            strong_class, union_find_class, converged
+        )
         counts[(distance, rate, outcome)] += 1
+        counts[(distance, rate, LABEL_PREFIX + label_outcome)] += 1
     return counts
 
 
@@ -332,16 +345,17 @@ class _ShotTally:
             return
         setting, seed = self.key
         self.rows.sort(key=_commit_lo_of)
-        _count_answers(tables, setting, self.rows)
+        final_classes = _count_answers(tables, setting, self.rows)
         if setting[0] == SWITCHING:
-            _count_switching(tables, setting, seed, self.rows)
+            shot = (setting, seed, self.rows, final_classes)
+            _count_switching(tables, shot)
 
 
-def _count_answers(tables: WindowTables, setting: tuple, rows: list) -> None:
+def _count_answers(tables: WindowTables, setting: tuple, rows: list) -> list:
     """Final answers by class, and the shot failed when its parities differ.
 
     The shot fails exactly when its answers' parity differs from its
-    labels' parity (2509.03815 Eq. 2).
+    labels' parity (2509.03815 Eq. 2). Returns each row's class.
     """
     spans = []
     answer_parity = 0
@@ -354,29 +368,33 @@ def _count_answers(tables: WindowTables, setting: tuple, rows: list) -> None:
     classes = _answer_classes(spans)
     for answer_class in classes:
         tables.answers[(*setting, answer_class)] += 1
-    tables.shots_with_wrong[setting] += any(span[2] for span in spans)
+    wrong_flags = [span[2] for span in spans]
+    tables.shots_with_wrong[setting] += any(wrong_flags)
     tables.failed_by_parity[setting] += answer_parity != label_parity
+    return classes
 
 
-def _count_switching(
-    tables: WindowTables, setting: tuple, seed: str, rows: list
-) -> None:
+def _count_switching(tables: WindowTables, shot: tuple) -> None:
     """Each union-find window's decision, answer class, gap and events.
 
     A row with no gap holds no union-find decision and is skipped.
     """
-    decided = [row for row in rows if row["gap_nats"] != ""]
-    spans = [_union_find_span(row) for row in decided]
+    setting, seed, rows, final_classes = shot
+    decided = []
+    for row, final_class in zip(rows, final_classes, strict=True):
+        if row["gap_nats"] != "":
+            decided.append((row, final_class))
+    spans = [_union_find_span(row) for row, _final_class in decided]
     classes = _answer_classes(spans)
     _configuration, distance, rate = setting
-    for row, answer_class in zip(decided, classes, strict=True):
-        is_escalated = row["is_escalated"] == "True"
-        decision = DECISIONS[0] if is_escalated else DECISIONS[1]
+    for (row, final_class), answer_class in zip(decided, classes, strict=True):
+        decision = DECISIONS[row["is_escalated"] != "True"]
         tables.decisions[(distance, rate, decision, answer_class)] += 1
         gap_bin = _gap_bin_of(row)
         tables.gaps[(distance, rate, gap_bin, answer_class)] += 1
-        if is_escalated:
-            _keep_escalated(tables, distance, rate, seed, row)
+        if decision == DECISIONS[0]:
+            window = (distance, rate, seed, row, final_class)
+            _keep_escalated(tables, window)
             continue
         events = int(row["detection_events"])
         tables.events[(distance, rate, events, answer_class)] += 1
@@ -385,8 +403,8 @@ def _count_switching(
 def _union_find_span(row: dict) -> tuple:
     """Union-find's answer on a window's own rounds, as a span to pair.
 
-    An escalated window's own rounds end inside its double window, so
-    the window after the double window is not its neighbour.
+    An escalated window's own rounds end where the two windows it takes
+    in begin, so no window after it is its neighbour.
     """
     commit_lo = int(row["commit_lo"])
     if row["is_escalated"] == "True":
@@ -399,18 +417,17 @@ def _union_find_span(row: dict) -> tuple:
 def _answer_classes(spans: list) -> list:
     """Each span's class in ANSWER_CLASSES.
 
-    A wrong window's partner is unseen when it sits on a side union-find
-    never answered: after an escalated window's own rounds, or before
-    the window after a double window.
+    A wrong window's partner is unseen when it sits beside rounds
+    union-find never answered: an escalated window, or the window after
+    one.
     """
     paired = paired_positions(spans)
     classes = []
     previous_hi = 0
     for position, (_commit_lo, commit_hi, is_wrong) in enumerate(spans):
         is_beside_unseen = commit_hi is None or previous_hi is None
-        answer_class = _answer_class(
-            is_wrong, position in paired, is_beside_unseen
-        )
+        is_paired = position in paired
+        answer_class = _answer_class(is_wrong, is_paired, is_beside_unseen)
         classes.append(answer_class)
         previous_hi = commit_hi
     return classes
@@ -436,24 +453,22 @@ def _is_after(spans: list, open_position, commit_lo: int) -> bool:
     return open_hi is not None and open_hi + 1 == commit_lo
 
 
-def _keep_escalated(
-    tables: WindowTables, distance: int, rate: float, seed: str, row: dict
-) -> None:
+def _keep_escalated(tables: WindowTables, window: tuple) -> None:
     """An escalated window's span and Relay-BP-5 outcome, for the join."""
+    distance, rate, seed, row, final_class = window
     commit_lo = int(row["commit_lo"])
     commit_hi = int(row["commit_hi"])
-    strong_right = row["is_right"] == "True"
     converged = row["decode_status"] == ""
-    window = (
+    escalated = (
         distance,
         rate,
         seed,
         commit_lo,
         commit_hi,
-        strong_right,
+        final_class,
         converged,
     )
-    tables.escalated.append(window)
+    tables.escalated.append(escalated)
     shot_spans = tables.escalated_rounds[(distance, rate, seed)]
     shot_spans.add((commit_lo, commit_hi))
 
@@ -468,6 +483,15 @@ def _decision_columns(decisions: collections.Counter, setting: tuple) -> dict:
     return columns
 
 
+def _strong_columns() -> list:
+    """The strong outcomes, seam-corrected first, then by label."""
+    columns = list(STRONG_OUTCOMES)
+    for outcome in STRONG_OUTCOMES:
+        column = LABEL_PREFIX + outcome
+        columns.append(column)
+    return columns
+
+
 def _gap_bin_of(row: dict) -> int:
     gap_nats = float(row["gap_nats"])
     gap_decibels = threshold_sources.nats_to_decibels(gap_nats)
@@ -475,38 +499,58 @@ def _gap_bin_of(row: dict) -> int:
     return math.floor(gap_bins)
 
 
-def _add_inside(
-    spans: dict, shot_key: tuple, commit_lo: int, commit_hi: int, row: dict
-) -> None:
-    """A union-find-alone window added to a span it lies inside."""
+def _add_to_span(spans: dict, span_key: tuple, row: dict) -> None:
+    """A union-find-alone window added to a span inside or beside it."""
+    _distance, _rate, _seed, commit_lo, commit_hi = span_key
     window_lo = int(row["commit_lo"])
     window_hi = int(row["commit_hi"])
+    span = spans.setdefault(span_key, [0, 0, 0, False])
+    is_edge = window_hi + 1 == commit_lo or window_lo == commit_hi + 1
+    if is_edge:
+        span[3] = span[3] or row["is_right"] == "False"
+        return
     if window_lo < commit_lo or window_hi > commit_hi:
         return
-    span_key = (*shot_key, commit_lo, commit_hi)
-    answer, label, rounds = spans.get(span_key, (0, 0, 0))
-    answer ^= _bit_of(row["answer"])
-    label ^= _bit_of(row["label"])
-    rounds += window_hi - window_lo + 1
-    spans[span_key] = (answer, label, rounds)
+    span[0] ^= _bit_of(row["answer"])
+    span[1] ^= _bit_of(row["label"])
+    span[2] += window_hi - window_lo + 1
 
 
-def _span_right(span: tuple, span_key: tuple) -> bool:
-    """Union-find alone's answers on the span against its labels."""
-    answer, label, rounds = span
+def _span_class(span: list, span_key: tuple) -> str:
+    """Union-find alone's answer class on the span.
+
+    A wrong span with a wrong window just outside an edge is counted as
+    a seam pair.
+    """
+    answer, label, rounds, is_edge_wrong = span
     _distance, _rate, _seed, commit_lo, commit_hi = span_key
     span_rounds = commit_hi - commit_lo + 1
     assert rounds == span_rounds, (
         f"union-find alone's windows do not tile the span {span_key}"
     )
-    return answer == label
+    is_wrong = answer != label
+    return _answer_class(is_wrong, is_edge_wrong, False)
 
 
 def _strong_outcome(
-    strong_right: bool, union_find_right: bool, converged: bool
+    strong_class: str, union_find_class: str, converged: bool
 ) -> str:
+    """The outcome with a wrong window in a seam pair counted right."""
     if not converged:
         return "not_converged"
+    strong_right = strong_class in ("right", "wrong_paired")
+    union_find_right = union_find_class in ("right", "wrong_paired")
+    return STRONG_OUTCOME_OF[(strong_right, union_find_right)]
+
+
+def _label_outcome(
+    strong_class: str, union_find_class: str, converged: bool
+) -> str:
+    """The outcome with every wrong label counted wrong."""
+    if not converged:
+        return "not_converged"
+    strong_right = strong_class == "right"
+    union_find_right = union_find_class == "right"
     return STRONG_OUTCOME_OF[(strong_right, union_find_right)]
 
 

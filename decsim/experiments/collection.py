@@ -41,15 +41,6 @@ class CollectionSettings:
     run whatever the failures; max_shots and max_core_seconds the caps, at
     least one set; piece_rounds the rounds of one piece. Python input
     enters here, so it checks its own values.
-
-    core_seconds_per_shot is an estimate of one shot's core seconds, read
-    off an earlier run's sim_wall_seconds; `decsim run --slurm` packs a
-    fixed-shot task's pieces into jobs by it, and nothing else reads it.
-    It sits here because it is about running the task, not about the
-    machine: like the caps it is no part of the task's id, and the
-    folder records it with the collection. sinter sizes a batch from a
-    shot's time the same way (sinter/_data/_collection_options.py:27-31,
-    max_batch_seconds), from shots it measured.
     """
 
     max_shots: Optional[int] = None
@@ -57,14 +48,12 @@ class CollectionSettings:
     max_failures: Optional[int] = None
     min_shots: int = 0
     piece_rounds: int = DEFAULT_PIECE_ROUNDS
-    core_seconds_per_shot: Optional[float] = None
 
     def __post_init__(self) -> None:
         _check_caps(self)
         _check_optional_count(self.max_shots, "max_shots")
         _check_optional_count(self.max_failures, "max_failures")
-        _check_core_seconds(self.max_core_seconds, "max_core_seconds")
-        _check_core_seconds(self.core_seconds_per_shot, "core_seconds_per_shot")
+        _check_core_seconds(self.max_core_seconds)
         _check_minimum(self.min_shots)
         _check_count(self.piece_rounds, "piece_rounds")
 
@@ -304,11 +293,10 @@ def _check_count(value, key: str) -> None:
     )
 
 
-def _check_core_seconds(value, key: str) -> None:
-    """Core seconds, when given, are a finite number above zero.
+def _check_core_seconds(value) -> None:
+    """The time cap, when given, is a finite number of seconds above zero.
 
-    An infinite time cap is no cap: a task with no other would never
-    stop; an infinite shot estimate packs no job.
+    An infinite cap is no cap: a task with no other would never stop.
     """
     if value is None:
         return
@@ -317,8 +305,8 @@ def _check_core_seconds(value, key: str) -> None:
     if is_finite_number and value > 0:
         return
     raise ValueError(
-        f"collection {key} must be a finite number of seconds above 0, got "
-        f"{value!r}"
+        "collection max_core_seconds must be a finite number of seconds "
+        f"above 0, got {value!r}"
     )
 
 

@@ -24,8 +24,9 @@ import tests.experiments.run_files as run_files
 # shot, and twenty pieces overfill one single-core job
 PACKED_TASKS = {
     "axes": run_files.FOUR_TASK_AXES,
-    "collection": {"max_shots": 5, "core_seconds_per_shot": 280.0},
+    "collection": {"max_shots": 5},
 }
+PIECE_SECONDS = 280.0
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +65,9 @@ def test_cores_are_packed_longest_first_and_the_walltime_is_the_busiest():
 
 def test_pieces_saved_since_the_launch_leave_the_next_plan(tmp_path):
     """A relaunch re-packs only the seeds no piece holds yet."""
-    run_file = run_files.write_run_file(tmp_path, **PACKED_TASKS)
+    run_file = run_files.write_packed_run_file(
+        tmp_path, PIECE_SECONDS, **PACKED_TASKS
+    )
     out_dir = tmp_path / "out"
     arguments = [str(run_file), "--out", str(out_dir), "--slurm"]
     slurm_arguments = [*arguments, "--cores", "1", "--hours", "2"]
@@ -83,8 +86,8 @@ def test_pieces_saved_since_the_launch_leave_the_next_plan(tmp_path):
 
 
 def test_a_relaunch_with_every_piece_saved_plans_no_job(tmp_path, capsys):
-    run_file = run_files.write_run_file(
-        tmp_path, collection={"max_shots": 1, "core_seconds_per_shot": 1.0}
+    run_file = run_files.write_packed_run_file(
+        tmp_path, 1.0, collection={"max_shots": 1}
     )
     out_dir = tmp_path / "out"
     launch = ["run", str(run_file), "--out", str(out_dir), "--slurm"]
@@ -102,23 +105,28 @@ def test_a_relaunch_with_every_piece_saved_plans_no_job(tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
-    ("arguments", "sentence"),
+    ("seconds", "arguments", "sentence"),
     [
         (
+            1.0,
             {"collection": {"max_failures": 1, "max_shots": 5}},
             "stops on failures or time, so its work is unknown before "
             "launch and --slurm cannot pack it",
         ),
         (
+            0.0,
             {"collection": {"max_shots": 5}},
-            "has no core_seconds_per_shot, so --slurm cannot size its work",
+            "is estimated at 0.0 core seconds a shot; give a finite number "
+            "above 0",
         ),
         (
-            {"collection": {"max_shots": 5, "core_seconds_per_shot": 300.0}},
+            300.0,
+            {"collection": {"max_shots": 5}},
             "is estimated at 300.0 core seconds, more than a slice of a "
             "core's 5760 at --hours 2",
         ),
         (
+            1.0,
             {"machine": "switching", "machine_arguments": {"online": {}}},
             "calibrates its threshold online, so its pieces run one after "
             "another and --slurm cannot pack them",
@@ -126,9 +134,9 @@ def test_a_relaunch_with_every_piece_saved_plans_no_job(tmp_path, capsys):
     ],
 )
 def test_a_task_the_launch_cannot_pack_is_refused_before_any_folder(
-    tmp_path, capsys, arguments, sentence
+    tmp_path, capsys, seconds, arguments, sentence
 ):
-    run_file = run_files.write_run_file(tmp_path, **arguments)
+    run_file = run_files.write_packed_run_file(tmp_path, seconds, **arguments)
     out_dir = tmp_path / "out"
     slurm = ["--slurm", "--hours", "2", "--dry-run"]
 
@@ -148,7 +156,9 @@ def test_a_dry_run_writes_one_array_and_a_fold_behind_it(tmp_path, capsys):
     61-minute floor, so both ask 1:01:00. Each line reads back as the
     arguments it was written from.
     """
-    run_file = run_files.write_run_file(tmp_path, **PACKED_TASKS)
+    run_file = run_files.write_packed_run_file(
+        tmp_path, PIECE_SECONDS, **PACKED_TASKS
+    )
     out_dir = tmp_path / "run folder"
     slurm = ["--slurm", "--cores", "1", "--hours", "2", "--dry-run"]
 
@@ -188,6 +198,24 @@ def test_a_dry_run_writes_one_array_and_a_fold_behind_it(tmp_path, capsys):
     assert "every job asks 1:01:00" in printed.out
     assert "  0      1   77%      10" in printed.out
     assert "  1      1   77%      10" in printed.out
+
+
+def test_a_launch_with_no_seconds_file_is_refused_before_any_folder(
+    tmp_path, capsys
+):
+    run_file = run_files.write_run_file(tmp_path, **PACKED_TASKS)
+    out_dir = tmp_path / "out"
+    slurm = ["--slurm", "--hours", "2", "--dry-run"]
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(run_file), "--out", str(out_dir), *slurm])
+
+    printed = capsys.readouterr()
+    seconds_path = tmp_path / "seconds_per_shot.csv"
+    assert f"--slurm sizes its jobs from {seconds_path}, which is missing" in (
+        printed.err
+    )
+    assert not out_dir.exists()
 
 
 def _planned_seeds(run_dir) -> list:

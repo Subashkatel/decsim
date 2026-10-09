@@ -47,6 +47,7 @@ NON_COLUMN_FIELDS = (
     "data_movement",
     "window_statuses",
     "confidence",
+    "window_outcomes",
 )
 # the counters a hold books for the whole shot: a reference is a token
 # on a store's slot and belongs to no path, so these repeat on every row

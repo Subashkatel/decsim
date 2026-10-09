@@ -76,8 +76,9 @@ FOUR_TASKS = {
 # two-hour job holds one shot, and the twenty overfill one single-core job
 FOUR_TASKS_PACKED = {
     "axes": run_files.FOUR_TASK_AXES,
-    "collection": {"max_shots": 5, "core_seconds_per_shot": 280.0},
+    "collection": {"max_shots": 5},
 }
+FOUR_TASKS_PIECE_SECONDS = 280.0
 # the four tasks in pieces of one shot each
 FOUR_TASKS_CUT = {
     "axes": run_files.FOUR_TASK_AXES,
@@ -2130,7 +2131,9 @@ def test_array_jobs_then_the_fold_write_the_local_runs_rows(tmp_path):
     run file reads a file beside it, as a threshold table is read, and
     every job finds it.
     """
-    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_PACKED)
+    config_path = run_files.write_packed_run_file(
+        tmp_path, FOUR_TASKS_PIECE_SECONDS, **FOUR_TASKS_PACKED
+    )
     _read_a_file_beside(config_path)
     local_dir = tmp_path / "local"
     split_dir = tmp_path / "split"
@@ -2151,7 +2154,9 @@ def test_an_array_job_refuses_a_run_file_edited_since_the_launch(
     tmp_path, capsys
 ):
     """Job i of an edited run file may name another task, so it stops."""
-    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_PACKED)
+    config_path = run_files.write_packed_run_file(
+        tmp_path, FOUR_TASKS_PIECE_SECONDS, **FOUR_TASKS_PACKED
+    )
     split_dir = tmp_path / "split"
     job = plan_command.JobShape(cores=1, hours=2, memory_mb=1024)
     plan_command.launch(config_path, split_dir, job, dry_run=True)

@@ -73,18 +73,6 @@ def test_a_time_cap_that_is_no_finite_positive_number_is_refused(value):
     assert message.startswith("collection max_core_seconds must be")
 
 
-@pytest.mark.parametrize("value", [0, -0.2, True, "0.5", math.inf])
-def test_a_shot_estimate_that_is_no_finite_positive_number_is_refused(value):
-    with pytest.raises(ValueError) as refused:
-        collection.CollectionSettings(max_shots=10, core_seconds_per_shot=value)
-
-    message = str(refused.value)
-    assert message == (
-        "collection core_seconds_per_shot must be a finite number of "
-        f"seconds above 0, got {value!r}"
-    )
-
-
 @pytest.mark.parametrize("value", [-1, 1.5, False, None])
 def test_a_minimum_that_is_no_count_is_refused(value):
     with pytest.raises(ValueError) as refused:

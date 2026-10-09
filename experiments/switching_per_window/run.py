@@ -17,11 +17,13 @@ as decoder comparisons do (Toshio et al. 2510.25222 lines 741 and
 1690; Dentelski et al. 2606.08758 lines 381-383 and 1165-1167):
 the shots at which union-find alone makes about 100 failures,
 100 / its rate in Experiment 1. A rate is shown only with at least 20
-failures, with 95% Wilson intervals. core_seconds_per_shot is the
-sim_wall_seconds_per_shot of the same configuration and setting in
-Experiment 1 (switching, union-find alone) or Experiment 3 (Relay-BP-5
-and Tesseract alone); where Experiment 3 has no row, the next higher
-physical error rate's, an upper estimate.
+failures, with 95% Wilson intervals.
+
+seconds_per_shot.csv beside this file sizes the Slurm jobs only: each
+task's sim_wall_seconds_per_shot in Experiment 1 (switching, union-find
+alone) or Experiment 3 (Relay-BP-5 and Tesseract alone) at the same
+setting; where Experiment 3 has no row, the next higher physical error
+rate's, an upper estimate. No result reads it.
 
 Usage
 -----
@@ -66,84 +68,6 @@ UNION_FIND_EXPERIMENT_ONE = {
     (11, 0.003): (35844, 103),
     (11, 0.004): (6445, 123),
     (11, 0.005): (2000, 131),
-}
-# core seconds a shot, each configuration's at (distance, physical
-# error rate), rounded to two figures
-CORE_SECONDS_PER_SHOT = {
-    "union_find_alone": {
-        (5, 0.002): 0.20,
-        (5, 0.003): 0.17,
-        (5, 0.004): 0.20,
-        (5, 0.005): 0.17,
-        (7, 0.002): 0.33,
-        (7, 0.003): 0.31,
-        (7, 0.004): 0.35,
-        (7, 0.005): 0.26,
-        (9, 0.002): 0.52,
-        (9, 0.003): 0.53,
-        (9, 0.004): 0.47,
-        (9, 0.005): 0.39,
-        (11, 0.002): 0.70,
-        (11, 0.003): 0.72,
-        (11, 0.004): 0.71,
-        (11, 0.005): 0.71,
-    },
-    "switching": {
-        (5, 0.002): 8.9,
-        (5, 0.003): 14.0,
-        (5, 0.004): 19.0,
-        (5, 0.005): 22.0,
-        (7, 0.002): 17.0,
-        (7, 0.003): 23.0,
-        (7, 0.004): 34.0,
-        (7, 0.005): 41.0,
-        (9, 0.002): 28.0,
-        (9, 0.003): 38.0,
-        (9, 0.004): 51.0,
-        (9, 0.005): 71.0,
-        (11, 0.002): 42.0,
-        (11, 0.003): 57.0,
-        (11, 0.004): 82.0,
-        (11, 0.005): 170.0,
-    },
-    "relay_bp5_alone": {
-        (5, 0.002): 0.49,
-        (5, 0.003): 0.65,
-        (5, 0.004): 0.60,
-        (5, 0.005): 0.73,
-        (7, 0.002): 1.1,
-        (7, 0.003): 1.8,
-        (7, 0.004): 2.2,
-        (7, 0.005): 3.4,
-        (9, 0.002): 2.5,
-        (9, 0.003): 4.0,
-        (9, 0.004): 9.3,
-        (9, 0.005): 17.0,
-        # no Experiment 3 row: the 0.003 one's
-        (11, 0.002): 9.2,
-        (11, 0.003): 9.2,
-        (11, 0.004): 22.0,
-        (11, 0.005): 78.0,
-    },
-    "tesseract_alone": {
-        (5, 0.002): 1.6,
-        (5, 0.003): 1.7,
-        (5, 0.004): 1.8,
-        (5, 0.005): 1.7,
-        (7, 0.002): 3.0,
-        (7, 0.003): 3.8,
-        (7, 0.004): 3.8,
-        (7, 0.005): 4.4,
-        (9, 0.002): 5.2,
-        (9, 0.003): 5.5,
-        (9, 0.004): 6.1,
-        (9, 0.005): 9.6,
-        # no Experiment 3 row: the 0.003 one's
-        (11, 0.002): 9.6,
-        (11, 0.003): 9.6,
-        (11, 0.004): 12.0,
-        (11, 0.005): 21.0,
-    },
 }
 
 
@@ -233,18 +157,14 @@ def switching_per_window_tasks() -> list:
     for values in grid:
         probability = values["physical_error_probability"]
         distance = values["distance"]
-        setting = (distance, probability)
         metadata = {
             "workload.arguments.physical_error_probability": probability,
             "qpu.distance": distance,
         }
         max_shots = shot_count(distance, probability)
         machines = configurations(baseline, distance, probability)
+        collection = decsim.CollectionSettings(max_shots=max_shots)
         for name, machine in machines.items():
-            seconds_per_shot = CORE_SECONDS_PER_SHOT[name][setting]
-            collection = decsim.CollectionSettings(
-                max_shots=max_shots, core_seconds_per_shot=seconds_per_shot
-            )
             task_name = f"{name}_d{distance}_p{probability}"
             task = decsim.Task(task_name, machine, metadata, collection)
             tasks.append(task)

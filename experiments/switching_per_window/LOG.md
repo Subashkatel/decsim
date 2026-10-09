@@ -143,9 +143,10 @@ What decsim keeps per window, and how (branch `switching-per-window`):
 
 ## Cost (2026-10-09)
 
-`experiments/switching_per_window/run.py` holds N per setting (100 / union-find
-alone's Experiment 1 rate) and each task's core seconds a shot
-(Experiment 1 or 3, same configuration and setting). Core-hours by
+`run.py` holds N per setting (100 / union-find alone's Experiment 1
+rate). `seconds_per_shot.csv` beside it holds each task's core seconds
+a shot (Experiment 1 or 3, same configuration and setting); only the
+Slurm launcher reads it, to size the jobs. Core-hours by
 setting, all four configurations:
 
 | d \ physical error rate | 0.002 | 0.003 | 0.004 | 0.005 |

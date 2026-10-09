@@ -2832,7 +2832,9 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
 
     Every window escalates into a double window, so the rows hold strong
     windows labelled over the rounds they absorbed, each beside the weak
-    answer and label of its own commit rounds.
+    answer and label of its own commit rounds. The outcomes knob alone
+    carries each window's detection events, and the rows stay out of
+    shots.csv, in their own file.
     """
     double_window = strong_window_shapes.DoubleWindow.Settings()
     settings = switching_settings(
@@ -2848,7 +2850,11 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
     rows = measurement.window_outcomes
     answer_parity = _parity_of_cells([row.answer for row in rows])
     label_parity = _parity_of_cells([row.label for row in rows])
+    weak_labels = [json.loads(row.weak_label) for row in rows]
     kinds = {row.ownership_kind for row in rows}
+    (shot_row,) = report.shot_rows([measurement])
     assert measurement.logical_failure == (answer_parity != label_parity)
     assert kinds == {"strong_window"}
-    assert all(row.weak_label is not None for row in rows)
+    assert "1" in weak_labels
+    assert all(row.detection_events is not None for row in rows)
+    assert "window_outcomes" not in shot_row

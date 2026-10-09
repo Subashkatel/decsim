@@ -573,7 +573,7 @@ def _decsim(tmp_path, arguments: list, environment):
     )
 
 
-# The weak base at two distances, four shots each, a second a shot.
+# The weak base at two distances, four shots each.
 TWO_TASK_RUN_FILE = """
 import decsim
 import decsim.settings as machine_settings
@@ -583,7 +583,7 @@ for distance in (3, 5):
     machine = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
     task = decsim.Task(f"d{distance}", machine, {"qpu.distance": distance})
     tasks.append(task)
-collection = decsim.CollectionSettings(max_shots=4, core_seconds_per_shot=1.0)
+collection = decsim.CollectionSettings(max_shots=4)
 experiment = decsim.Experiment("two_tasks", tasks, collection)
 """
 
@@ -592,6 +592,8 @@ def _two_task_run_file(tmp_path) -> pathlib.Path:
     """A run file of two distances."""
     run_file = tmp_path / "two_tasks.py"
     run_file.write_text(TWO_TASK_RUN_FILE)
+    seconds_file = tmp_path / "seconds_per_shot.csv"
+    seconds_file.write_text("task,core_seconds_per_shot\nd3,1.0\nd5,1.0\n")
     return run_file
 
 

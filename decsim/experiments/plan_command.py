@@ -1,9 +1,12 @@
 """`decsim run --slurm`: fixed-shot pieces packed into Slurm jobs, then a fold.
 
 gem5 MultiSim's list-then-run-one-id pattern, with the work packed
-first. Every task stops at a fixed shot count and gives an estimate of
-a shot's core seconds (CollectionSettings.core_seconds_per_shot), so
-its work is known before launch. The launcher records every task,
+first. Every task stops at a fixed shot count, and SECONDS_FILE beside
+the run file gives each task's core seconds a shot, read off an earlier
+run's sim_wall_seconds_per_shot, so its work is known before launch.
+The estimate sizes the jobs only: it is a fact of the launch, not of
+the experiment, so it lives outside the run file and no result reads
+it. The launcher records every task,
 which runs each build, so a refused task queues nothing; cuts each
 task's unsaved seeds into pieces of at most a twentieth of a core's
 budget; and packs them onto cores longest first (Graham, "Bounds on
@@ -31,6 +34,7 @@ sbatch reads SBATCH_ACCOUNT, SBATCH_PARTITION and SBATCH_QOS from the
 environment (sbatch(1)).
 """
 
+import csv
 import dataclasses
 import heapq
 import math
@@ -52,6 +56,8 @@ import decsim.experiments.run_folder as run_folder
 RUN_SCRIPT = "run.sbatch"
 FOLD_SCRIPT = "fold.sbatch"
 JOBS_FILE = "jobs.json"
+# beside the run file: one row per task, its name and core seconds a shot
+SECONDS_FILE = "seconds_per_shot.csv"
 LOGS_FOLDER = "logs"
 # the fold reads every piece once and runs no shot
 FOLD_SHAPE = "--cpus-per-task=1 --mem=16G --time=12:00:00"
@@ -162,15 +168,16 @@ def launch(
     given_path = pathlib.Path(run_file)
     run_path = given_path.resolve()
     study = experiment.load(run_path)
+    seconds_by_task = _seconds_per_shot(run_path)
     for task in study.tasks:
-        _refuse_a_task_it_cannot_pack(study, task, job)
+        _refuse_a_task_it_cannot_pack(study, task, seconds_by_task, job)
     named_dir = run_folder.run_dir_for(study.name, out_dir)
     run_dir = named_dir.resolve()
     _every_id, collections, _started_utc = collect_command.start_the_folder(
         study, study, run_dir, run_path
     )
     budget_seconds = job.core_budget_seconds()
-    planned = _planned_pieces(collections, budget_seconds)
+    planned = _planned_pieces(collections, seconds_by_task, budget_seconds)
     if not planned:
         print(f"every piece is saved; fold them with --fold --out {run_dir}")
         return
@@ -294,8 +301,41 @@ def refuse_an_unnamed_tree() -> None:
         )
 
 
+def _seconds_per_shot(run_path: pathlib.Path) -> dict:
+    """Each task's core seconds a shot, from SECONDS_FILE beside the run."""
+    seconds_path = run_path.parent / SECONDS_FILE
+    if not seconds_path.is_file():
+        raise refusal.RefusalError(
+            f"--slurm sizes its jobs from {seconds_path}, which is missing; "
+            "write it with columns task,core_seconds_per_shot from an "
+            "earlier run's sim_wall_seconds_per_shot"
+        )
+    seconds_by_task = {}
+    with seconds_path.open(newline="") as seconds_file:
+        for row in csv.DictReader(seconds_file):
+            seconds = float(row["core_seconds_per_shot"])
+            _refuse_a_bad_estimate(seconds_path, row["task"], seconds)
+            seconds_by_task[row["task"]] = seconds
+    return seconds_by_task
+
+
+def _refuse_a_bad_estimate(
+    seconds_path: pathlib.Path, task_name: str, seconds: float
+) -> None:
+    """An estimate is a finite number of seconds above zero."""
+    if math.isfinite(seconds) and seconds > 0:
+        return
+    raise refusal.RefusalError(
+        f"{seconds_path}: the task {task_name} is estimated at {seconds} "
+        "core seconds a shot; give a finite number above 0"
+    )
+
+
 def _refuse_a_task_it_cannot_pack(
-    study: experiment.Experiment, task: collect.Task, job: JobShape
+    study: experiment.Experiment,
+    task: collect.Task,
+    seconds_by_task: dict,
+    job: JobShape,
 ) -> None:
     """A task is packed only when its shots and their seconds are known.
 
@@ -316,18 +356,19 @@ def _refuse_a_task_it_cannot_pack(
             "is unknown before launch and --slurm cannot pack it; give it "
             "max_shots alone, or run it without --slurm"
         )
-    if settings.core_seconds_per_shot is None:
+    seconds_per_shot = seconds_by_task.get(task.name)
+    if seconds_per_shot is None:
         raise refusal.RefusalError(
-            f"the task {task.name} has no core_seconds_per_shot, so "
-            "--slurm cannot size its work; set it in its collection from "
-            "an earlier run's sim_wall_seconds"
+            f"the task {task.name} has no row in {SECONDS_FILE}, so "
+            "--slurm cannot size its work; add its core seconds a shot "
+            "from an earlier run's sim_wall_seconds_per_shot"
         )
     budget_seconds = job.core_budget_seconds()
     slice_seconds = budget_seconds / SLICES_PER_CORE
-    if settings.core_seconds_per_shot > slice_seconds:
+    if seconds_per_shot > slice_seconds:
         raise refusal.RefusalError(
             f"a shot of the task {task.name} is estimated at "
-            f"{settings.core_seconds_per_shot} core seconds, more than a "
+            f"{seconds_per_shot} core seconds, more than a "
             f"slice of a core's {budget_seconds:.0f} at --hours "
             f"{job.hours}, so its cores cannot be balanced; raise --hours"
         )
@@ -344,18 +385,23 @@ def _has_a_fixed_shot_count(
     return settings.max_shots is not None
 
 
-def _planned_pieces(collections: list, budget_seconds: float) -> list:
+def _planned_pieces(
+    collections: list, seconds_by_task: dict, budget_seconds: float
+) -> list:
     """Every task's unsaved seeds cut into pieces, task by task."""
     slice_seconds = budget_seconds / SLICES_PER_CORE
     planned = []
     for collection in collections:
-        task_pieces = _task_pieces(collection, slice_seconds)
+        seconds_per_shot = seconds_by_task[collection.name]
+        task_pieces = _task_pieces(collection, seconds_per_shot, slice_seconds)
         planned.extend(task_pieces)
     return planned
 
 
 def _task_pieces(
-    collection: collect_command.TaskCollection, slice_seconds: float
+    collection: collect_command.TaskCollection,
+    seconds_per_shot: float,
+    slice_seconds: float,
 ) -> list:
     """One task's unsaved seeds below max_shots, in pieces.
 
@@ -364,7 +410,6 @@ def _task_pieces(
     holds in memory and loses when killed.
     """
     settings = collection.settings
-    seconds_per_shot = settings.core_seconds_per_shot
     whole_shots = slice_seconds // seconds_per_shot
     slice_shots = int(whole_shots)
     piece_shots = min(collection.piece_shots, slice_shots)

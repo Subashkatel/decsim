@@ -184,10 +184,13 @@ decoder's measured wall clock.
 On a cluster the same pieces run as Slurm jobs. `decsim run
 examples/my_first_sweep.py --slurm --out $PWD/results/first_sweep`
 records every task, so a machine that cannot be built stops it before
-anything is queued. Every task must stop at `max_shots` alone and give
-`core_seconds_per_shot`, an estimate of one shot's core seconds read
-off an earlier run's `sim_wall_seconds` (the example gives 0.5 s,
-distance 7's mean), so the launch knows each task's work. It cuts the
+anything is queued. Every task must stop at `max_shots` alone, and
+`seconds_per_shot.csv` beside the run file gives each task's core
+seconds a shot (columns `task,core_seconds_per_shot`), read off an
+earlier run's `sim_wall_seconds_per_shot`, so the launch knows each
+task's work (`examples/seconds_per_shot.csv` gives 0.5 s, distance 7's
+mean over 20 shots on della-vis1). The estimate sizes the jobs only; no
+result reads it. It cuts the
 unsaved shots into pieces and packs them onto jobs of `--cores` cores
 (3), longest first, so that every core carries about the same work;
 every job asks for the busiest core's work over 0.8 in whole minutes,

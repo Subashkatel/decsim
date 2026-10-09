@@ -413,8 +413,16 @@ def _connect_window_trace(
 def _decode_records(
     observation: observe_settings.ObservationSettings,
 ) -> Optional[decode_records_module.DecodeRecordLedger]:
-    """The switching study's record ledger, only when the section asks."""
-    if not observation.record_switching_windows:
+    """The decode record ledger, when the records that read it ask.
+
+    The switching records and the window outcomes both read each
+    decode's syndrome weight off it.
+    """
+    is_asked = (
+        observation.record_switching_windows
+        or observation.record_window_outcomes
+    )
+    if not is_asked:
         return None
     return decode_records_module.DecodeRecordLedger()
 

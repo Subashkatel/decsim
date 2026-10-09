@@ -2102,6 +2102,61 @@ def slower_strong_than_the_shot() -> measure.ShotMeasurement:
     return measure.measure_shot(shot)
 
 
+def last_commit_ticks(observation) -> int:
+    """The tick the frame committed its last correction of the shot."""
+    commits = []
+    for record in observation.frame_corrections.committed:
+        commits.append(record.committed_ticks)
+    return max(commits)
+
+
+def test_the_end_of_stream_reaction_ends_at_the_last_commit():
+    """The stream's answer is in place at its last correction.
+
+    Ten 100 us strong decodes on one unit end long after round 30 is read
+    out, so the reaction from that readout to the frame's last commit is
+    the end of the stream's own, one sample a shot (Toshio et al.
+    2510.25222 lines 357-363), and past the pooled window mean.
+    """
+    strong_algorithm = charged(100.0)
+    shot = switching_run(1000000.0, strong_algorithm=strong_algorithm)
+    measurement = measure.measure_shot(shot)
+    observation = shot.machine.observation
+    last_commit = last_commit_ticks(observation)
+    last_readout = max(observation.round_events.readout_ticks)
+    span_ticks = last_commit - last_readout
+    expected = config_module.ticks_to_microseconds(span_ticks)
+    pooled = measurement.means["qpu_last_round_to_frame"]
+
+    assert measurement.samples["end_of_stream_reaction"] == [expected]
+    assert expected > pooled
+
+
+def test_a_terminal_double_window_reads_its_region_to_the_last_round():
+    """The strong region's rounds, not its escalated window's, set the clock.
+
+    Windows commit 2 rounds and buffer 3 over 30, and every one
+    escalates into a double window, so the last region starts at window
+    12, which reads through round 29, and absorbs 13 and 14: it reads
+    through round 30. Both QPU anchors read the region's last round, so
+    the latest window's qpu_last_round_to_frame is the end-of-stream
+    reaction, from round 30's readout to the last commit.
+    """
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+    shot = switching_run(
+        1000000.0, strong_window=double_window, commit_rounds=2
+    )
+    measurement = measure.measure_shot(shot)
+    observation = shot.machine.observation
+    last_commit = last_commit_ticks(observation)
+    last_readout = max(observation.round_events.readout_ticks)
+    span_ticks = last_commit - last_readout
+    expected = config_module.ticks_to_microseconds(span_ticks)
+
+    assert measurement.samples["end_of_stream_reaction"] == [expected]
+    assert measurement.maxes["qpu_last_round_to_frame"] == expected
+
+
 def test_a_window_waiting_for_its_strong_answer_keeps_its_rounds_waiting():
     """A provisional weak commit is not a round's final correction.
 
@@ -2190,6 +2245,7 @@ class ReadoutsAndCommits:
 
     def __init__(self) -> None:
         self.events = []
+        self.windows = {}
 
     def round_read_out(self, readout) -> None:
         """The QPU read out a round."""
@@ -2200,21 +2256,34 @@ class ReadoutsAndCommits:
         self.events.append(("commit", window.commit_lo, window.commit_hi))
 
 
-def backlog_peak_of(events: list) -> int:
-    """The most rounds read out past the unbroken committed prefix.
+def backlog_peak_of(events: list, windows) -> int:
+    """The most rounds of windows read out whole past the committed prefix.
 
-    Recomputed from the event stream alone, the readouts and the commits
-    in the order they happened, on a run where every commit is final.
+    Recomputed from the event stream, the readouts and the commits in the
+    order they happened, and the plan's windows, on a run of one
+    SHOT_ROUNDS operation where every commit is final: a window is read
+    out whole once its last round, or the operation's, is read out.
     """
     read_out = 0
     committed = []
     peak = 0
     for event in events:
         read_out, committed = _after_event(event, read_out, committed)
-        prefix = _committed_prefix(committed)
-        waiting = read_out - prefix
+        whole = _read_out_whole(windows, read_out)
+        whole_prefix = _committed_prefix(whole)
+        final_prefix = _committed_prefix(committed)
+        waiting = whole_prefix - final_prefix
         peak = max(peak, waiting)
     return peak
+
+
+def _read_out_whole(windows, read_out: int) -> list:
+    whole = []
+    for window in windows:
+        last_round = min(window.buffer_hi, SHOT_ROUNDS)
+        if last_round <= read_out:
+            whole.append((window.commit_lo, window.commit_hi))
+    return whole
 
 
 def _after_event(event: tuple, read_out: int, committed: list) -> tuple:
@@ -2253,6 +2322,7 @@ def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
         window_manager = machine.windows.window_manager
         sources = window_manager.window_sources()
         sources.window_committed.connect(heard.window_committed)
+        heard.windows = window_manager.planned_windows()
         return machine
 
     monkeypatch.setattr(machine_module.Machine, "build", build_and_listen)
@@ -2262,7 +2332,67 @@ def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
     task = task_at(traced)
     measurement = measured(task)
 
-    assert measurement.backlog_peak_rounds == backlog_peak_of(heard.events)
+    windows = heard.windows.values()
+    expected = backlog_peak_of(heard.events, windows)
+
+    assert measurement.backlog_peak_rounds == expected
+    assert expected > 3
+
+
+def test_a_unit_that_keeps_up_holds_one_windows_commit_rounds():
+    """The window shape's own lag is not in the backlog.
+
+    Each window commits 3 rounds and buffers 3, so up to 5 rounds are
+    read out past the last window read out whole, which an instant
+    decoder holds too. The 1 us unit decodes each window well inside the
+    3 us its commit rounds take, so only the window it decodes waits:
+    3 rounds, and at the end the last window's 6, rounds 25 to 30.
+    """
+    settings = one_tier_machine(1.0)
+    observation = dataclasses.replace(settings.observation, backlog_trace=True)
+    traced = dataclasses.replace(settings, observation=observation)
+    task = task_at(traced)
+    measurement = measured(task)
+
+    assert measurement.backlog_peak_rounds == 6
+
+
+def instant_machine() -> machine_settings.MachineSettings:
+    """The one-tier machine with every cost zero: hops, unit and frame."""
+    base = one_tier_machine(0.0)
+    hop_cycles = {}
+    for path in transfer_records.LinkPath:
+        hop_cycles[path.value] = 0
+    links = fridge_hops(hop_cycles)
+    algorithm = charged(0.0)
+    pool = run_files.decoder_pool(algorithm, FRIDGE_CLOCK)
+    engine = dataclasses.replace(
+        pool.engine, fetch_cycles_per_round=0, release_cycles_per_job=0
+    )
+    instant_pool = dataclasses.replace(pool, engine=engine)
+    frame = dataclasses.replace(base.pauli_frame, write_cycles=0)
+    observation = dataclasses.replace(base.observation, backlog_trace=True)
+    return dataclasses.replace(
+        base,
+        links=links,
+        weak_decoder=instant_pool,
+        pauli_frame=frame,
+        observation=observation,
+    )
+
+
+def test_an_instant_decoder_on_instant_links_holds_no_backlog():
+    """Every window is final at the tick its last round is read out.
+
+    The rounds read out past it are the window shape's, and a round made
+    whole and corrected within one tick never waited.
+    """
+    settings = instant_machine()
+    task = task_at(settings)
+    measurement = measured(task)
+
+    assert measurement.maxes["buffer0_ready_to_frame"] == 0.0
+    assert measurement.backlog_peak_rounds == 0
 
 
 def test_a_shot_that_kept_no_records_writes_no_load_columns(tmp_path):

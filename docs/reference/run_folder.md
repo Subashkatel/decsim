@@ -123,7 +123,7 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `weak_service_mean_us` | each weak decode's compute, its first stage's start to its last stage's end; the same switch |
 | `strong_wait_mean_us`, `strong_wait_max_us` | each strong decode's wait from the tick it may start, its enqueue or its window's last boundary arriving after it, to its compute start, for a unit and for the unit's compute; the same switch |
 | `strong_held_in_units_max` | the most strong decodes held in the units' memory at once, landed and free to compute but waiting for a unit's compute, by the rule of the queue peaks. A unit takes the next decode into its memory while it computes, so this wait never shows in `strong_queue_max`; the same switch |
-| `backlog_peak_rounds` | the most rounds the QPU had read out at once whose final correction was not yet in place: the rounds of an operation past the unbroken run of final windows from its round 1. A round counts from its readout, so one the controller holds for room in a full store counts too. An escalated window's provisional weak commit is not final, so it and every round after it stay in the backlog until its strong answer lands (Terhal's backlog, syndrome data produced and not yet processed, quoted in Skoric 2209.08552 lines 46-55); only when `observation.backlog_trace` is on |
+| `backlog_peak_rounds` | the most rounds at once that the windows' shape had freed for a final correction and that had none yet: per operation, the unbroken run of windows from its round 1 whose every round the QPU had read out, less the unbroken run of final windows, added over the operations. The rounds read out past the first run, a trailing buffer and the next window's rounds so far, are the lag the window shape sets alone, which an instant decoder on instant links holds too, so they are not counted: the column is 0 for that decoder and the decoding's own rounds otherwise, Terhal's backlog (syndrome data produced and not yet processed, quoted in Skoric 2209.08552 lines 46-55) less the constant lag she allows the frame (1302.3428 Sec. II.G.3); Toshio 2510.25222 likewise sets r_op, the circuit's own rounds, apart from what decoding adds (eq. (5)), and taking the window shape's lag as that baseline is decsim's reading. A window counts once its rounds are read out, its successor's included, by the scheme's own rule (memory rounds, which carry no syndrome, once they land), so one whose rounds the controller holds for room in a full store counts too. A tier that keeps up holds only the commit rounds of the window it decodes, and at the end of the stream those of every window the last round completes, which then decode one after another. An escalated window's provisional weak commit is not final, so it and every round after it stay in the backlog until its strong answer lands; only when `observation.backlog_trace` is on |
 | `weak_reaction_growth_rate`, `strong_reaction_growth_rate` | the least-squares slope of each recorded window's `buffer0_ready_to_frame` against the tick its data was complete, over the windows that tier committed: microseconds of reaction time gained per microsecond of run. Near 0 when the tier keeps up; above a load of 1 the wait grows without bound, so its mean and p99 say only how long the shot ran, and this slope does not. Over a long run it tends to the offered load less 1 for one server fed without a pause, through an unbounded queue, by stationary arrivals and service; over a few windows of varying service it is an estimate of that. A bounded syndrome buffer holds the backlog upstream, in the controller, before a window's data is complete, so the reaction time can stay flat while the tier is overloaded; there read `backlog_peak_rounds`. Empty for a tier whose recorded windows completed at fewer than two distinct ticks, which leave no slope to fit |
 | `deadline_missed_windows`, `first_deadline_miss_us` | with `observation.reaction_deadline_microseconds` set, the recorded windows whose `buffer0_ready_to_frame` passed it, and the shot-clock time the earliest of them had its data complete, the growth fit's axis, since a round index restarts in each operation's stream; the time is empty when no window missed, and both are empty with no deadline |
 | `referee_windows_checked`, `referee_window_disagreements` | the referee's count, when the decoder's record is wrapped in `TesseractCheckedDecoder.Settings` |
@@ -168,8 +168,9 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `frame_commit` | the frame accepting a correction, to it being committed |
 | `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |
 | `buffer0_first_round_to_frame` | the window's first round in that syndrome buffer, to the frame |
-| `qpu_last_round_to_frame` | the last round the window needs leaving the QPU, to the frame |
+| `qpu_last_round_to_frame` | the last round the committing decode read leaving the QPU, to the frame: a strong region that absorbed later windows reads past its window, and a buffer that runs into the next operation reads that operation's rounds |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
+| `end_of_stream_reaction` | one sample a shot: the last round any committing decode read leaving the QPU, to the last correction committed at the frame, whichever window holds it. It is the response time from the final syndrome to the correction (Toshio et al. 2510.25222 lines 357-363) and Riverlane's full decoding response time (2410.05202 lines 74-79) up to the frame; a conditional operation's own legs, `frame_to_controller`, the decision-to-pulse cycles and `controller_to_qpu`, run only for an operation another waits on and are not in it. The pooled window points hide it: the final window is one sample among many |
 
 `observation.first_recorded_round` and `observation.last_recorded_round`
 set the measurement interval, both ends included, rounds counted from 1
@@ -180,7 +181,8 @@ still runs and finishes, so a long shot can leave out its start-up,
 when the queues are empty, and its drain at the end. The interval
 cuts these points, their `_mean_us` and `_max_us` columns, the tier
 split, the growth rates and deadline columns, `load` and
-`parallel_processes_needed`; `logical_failure`,
+`parallel_processes_needed`; `end_of_stream_reaction`, which is the
+drain itself, `logical_failure`,
 `predictions` and every count and rate in `shots.csv`, `decoded_windows`
 and `escalated_windows` among them, stay over the whole shot.
 
@@ -284,9 +286,9 @@ value.
 | --- | --- |
 | `task_id`, the swept paths, `algorithm` | the task |
 | `name` | which latency point, from the list above |
-| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows |
+| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows, and for `end_of_stream_reaction`, whose samples are shots |
 | `value_us` | one microsecond value that occurred |
-| `count` | how many windows carried it |
+| `count` | how many windows, rounds or shots carried it |
 
 This is the multiset of a point's window samples, one per tier. A median
 and a p99 need nothing more, and one piece records nothing more for
@@ -393,7 +395,8 @@ Then four columns per latency point, in the order of `POINTS`:
 `<point>_mean_us`, `<point>_median_us`, `<point>_p99_us` and
 `<point>_max_us`. The mean and the max fold over the shot rows; the
 median and the p99 come from the sample counts, through
-`percentile_of_counts`.
+`percentile_of_counts`, and for `end_of_stream_reaction`, one sample a
+shot, they are over the task's shots.
 
 Then `buffer0_ready_to_frame_<tier>_median_us` and
 `buffer0_ready_to_frame_<tier>_p99_us` for each tier that committed a

@@ -360,15 +360,22 @@ class WindowManager:
 
     # ---- observation
 
-    def final_round_counts(self) -> tuple:
-        """The rounds whose final correction is in place, per operation.
+    def backlog_round_counts(self, rounds_read_out_by_operation: dict) -> tuple:
+        """The rounds read out whole and not yet final, per operation.
 
-        A row is (operation id, patch, the unbroken final prefix from
-        round 1), per operation in stable order; the backlog is the rounds
-        read out past it. A window waiting for its strong answer holds a
-        provisional commit only, so it ends the prefix: Terhal's backlog
+        A row is (operation id, patch, rounds), per operation in stable
+        order: the unbroken prefix of windows whose rounds are all read
+        out, less the unbroken prefix of final windows. Terhal's backlog
         is syndrome data generated and not yet processed (quoted in
-        Skoric et al. 2209.08552 lines 46-55).
+        Skoric et al. 2209.08552 lines 46-55), and the Pauli frame may lag
+        by a constant (Terhal 1302.3428 Sec. II.G.3); the rounds read
+        out past the first prefix are that constant, the window shape's.
+        Toshio et al. 2510.25222 keep r_op, the rounds the circuit spends,
+        apart from the rounds the decoding adds (eq. (5), lines 1010-1012
+        of the local text); taking the window shape's lag as that baseline
+        is decsim's reading, not the paper's. A window waiting for its
+        strong answer holds a provisional commit only, so it ends the
+        final prefix.
         """
         rows = []
         ordered_ids = sorted(
@@ -377,9 +384,13 @@ class WindowManager:
         )
         for operation_id in ordered_ids:
             operation = self.tracker.operation_by_id[operation_id]
+            whole = self.results.read_out_prefix_round_count(
+                operation_id, rounds_read_out_by_operation
+            )
             final = self.results.final_prefix_round_count(operation_id)
+            waiting = whole - final
             patch = _representative_patch(operation)
-            rows.append((operation_id, patch, final))
+            rows.append((operation_id, patch, waiting))
         return tuple(rows)
 
     def window_sources(self) -> WindowTraceSources:

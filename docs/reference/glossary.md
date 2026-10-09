@@ -101,6 +101,13 @@ These are not from the papers. The pages use them everywhere.
   memory, with when it became readable and why it was freed.
 - **load**: the service time per window divided by the time between
   windows arriving. Above 1 the decoder cannot keep up.
+- **offered load**: one tier's busy unit time divided by its unit count
+  times the span the QPU generated the rounds over, its first readout
+  to its last plus one round period, an idle patch's rounds included
+  (`weak_offered_load`,
+  `strong_offered_load`). Above 1 the tier falls behind. The **busy
+  fraction** divides the same busy time by the whole run, the drain
+  included, so it is not the offered load.
 - **escalation**: sending a window the weak tier was unsure of to the
   strong tier. The **verdict** is that decision, taken on a finished
   weak decode: keep its correction, or escalate. The **selection** is

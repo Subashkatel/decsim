@@ -553,6 +553,30 @@ def test_a_fold_reports_no_strong_service_mean_for_folders_without_its_sum(
     assert older[0] == _without_columns(whole[0], dropped)
 
 
+def test_a_fold_reports_no_offered_load_for_folders_without_it(tmp_path):
+    """A folder an older tree wrote holds no offered load; it still folds.
+
+    Its summary holds neither offered load and every other column as
+    the whole fold's, the rule the strong service mean keeps.
+    """
+    experiment_dir = _pieces_of_one_task(tmp_path, 4, 2)
+    folders = _piece_folders(experiment_dir)
+    whole_dir = tmp_path / "whole"
+    older_dir = tmp_path / "older"
+    _folded(experiment_dir, folders, whole_dir)
+    _each_without_a_shot_column(folders, "weak_offered_load")
+    _each_without_a_shot_column(folders, "strong_offered_load")
+    _folded(experiment_dir, folders, older_dir)
+
+    whole_path = whole_dir / "sweep.csv"
+    older_path = older_dir / "sweep.csv"
+    whole = _rows_of(whole_path)
+    older = _rows_of(older_path)
+    dropped = ("weak_offered_load", "strong_offered_load")
+    assert set(dropped) <= set(whole[0])
+    assert older[0] == _without_columns(whole[0], dropped)
+
+
 def _each_without_a_shot_column(folders, column) -> None:
     for folder in folders:
         shots_path = pathlib.Path(folder) / "shots.csv"

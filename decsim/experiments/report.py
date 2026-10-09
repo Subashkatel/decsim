@@ -65,6 +65,8 @@ LOAD_MAXES = (
     "strong_held_in_units_max",
     "backlog_peak_rounds",
 )
+# each tier's offered load, which a folder an older tree wrote lacks
+OFFERED_LOADS = ("weak_offered_load", "strong_offered_load")
 # the latency point whose median and p99 sweep.csv also gives per tier:
 # a window's formed-to-commit time, kept (weak) apart from escalated
 # (strong), which the switching studies weigh against each other
@@ -83,6 +85,7 @@ SHOT_MEANS = (
     "sim_wall_seconds",
     "weak_busy_fraction",
     "strong_busy_fraction",
+    *OFFERED_LOADS,
     *LOAD_MEANS,
 )
 SHOT_MAXES = (
@@ -786,6 +789,9 @@ def _add_pool_columns(row: dict, totals) -> None:
     row["strong_queue_max"] = totals.maxes["strong_queue_max"]
     row["weak_busy_fraction"] = totals.mean("weak_busy_fraction")
     row["strong_busy_fraction"] = totals.mean("strong_busy_fraction")
+    for name in OFFERED_LOADS:
+        if name in totals.means:
+            row[name] = totals.mean(name)
     row["escalated_windows"] = totals.sums["escalated_windows"]
     if "strong_service_sum_us" in totals.sums:
         row["strong_service_mean_us"] = _strong_service_mean_us(totals)

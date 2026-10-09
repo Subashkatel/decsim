@@ -168,23 +168,31 @@ class OperationResults:
         segment = self._segment(operation_id)
         segment.required_stream_end = required_stream_end
 
-    # ---- the rounds backlog
+    # ---- the committed prefix
 
     def committed_prefix_round_count(
         self,
         operation_id: Any,  # an opaque identity
     ) -> int:
-        """Rounds decoded in an unbroken prefix from round 1."""
-        committed_ranges = []
+        """Rounds committed in an unbroken prefix from round 1."""
+        committed = self._committed_windows_of(operation_id)
+        return _unbroken_prefix_round_count(committed)
+
+    def final_prefix_round_count(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
+        """Rounds whose final correction is in place, unbroken from round 1.
+
+        A window that escalated holds only its provisional weak commit
+        until the strong answer lands, so its rounds are not final yet;
+        a window it absorbed lies after it and waits with it.
+        """
+        final = []
         for window in self._committed_windows_of(operation_id):
-            committed_ranges.append((window.commit_lo, window.commit_hi))
-        committed_ranges.sort()
-        decoded = 0
-        for start_round, end_round in committed_ranges:
-            if start_round > decoded + 1:
-                break
-            decoded = max(decoded, end_round)
-        return decoded
+            if not is_awaiting_strong(window):
+                final.append(window)
+        return _unbroken_prefix_round_count(final)
 
     # ---- private
 
@@ -349,6 +357,20 @@ def is_awaiting_strong(window: window_records.Window) -> bool:
     if window.is_absorbed:
         return False
     return window.published_request_key is None
+
+
+def _unbroken_prefix_round_count(windows: list) -> int:
+    """The last round of the windows' commit ranges joined from round 1."""
+    commit_ranges = []
+    for window in windows:
+        commit_ranges.append((window.commit_lo, window.commit_hi))
+    commit_ranges.sort()
+    prefix_end = 0
+    for start_round, end_round in commit_ranges:
+        if start_round > prefix_end + 1:
+            break
+        prefix_end = max(prefix_end, end_round)
+    return prefix_end
 
 
 def _stream_place(operation: program_records.Operation, segment) -> tuple:

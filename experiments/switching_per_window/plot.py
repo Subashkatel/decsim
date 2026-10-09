@@ -28,6 +28,8 @@ Latency
  15 How long does each configuration take to react to a window?
  16 How long does each decoder take on a window, against the time the
     QPU takes to measure one?
+Relay-BP-5 on the escalated windows, seam pairs counted right
+ 17 Where Relay-BP-5 and union-find alone differ, who was right?
 
 A share is a count over a total, drawn with its 95% Wilson interval
 when the total holds at least SHOWN_TOTAL windows or shots (TOTAL_RULE).
@@ -137,6 +139,28 @@ WRONG_BARS = {
     ),
 }
 WRONG_BAR_NAMES = {key: (bar[0], bar[2]) for key, bar in WRONG_BARS.items()}
+# figure 17's bars: Relay-BP-5 against union-find alone on the escalated
+# windows, seam pairs counted right; both right is left out, as figure 07
+# leaves out union-find's right windows
+RELAY_BARS = {
+    "fixed": (
+        "Fixed: Relay-BP-5 right, union-find wrong",
+        ("fixed",),
+        "#1b7837",
+    ),
+    "broke": (
+        "Broke: Relay-BP-5 wrong, union-find right",
+        ("broke",),
+        "#c51b7d",
+    ),
+    "both_wrong": ("Both wrong", ("both_wrong",), "#4d4d4d"),
+    "not_converged": (
+        "Relay-BP-5 did not converge",
+        (tables.NOT_CONVERGED,),
+        "#e6ab02",
+    ),
+}
+RELAY_BAR_NAMES = {key: (bar[0], bar[2]) for key, bar in RELAY_BARS.items()}
 # one-panel figures of switching_summary.csv: file, (count columns,
 # total columns), title, y label
 SHARE_FIGURES = (
@@ -234,6 +258,7 @@ def main(results_dir: pathlib.Path) -> None:
     decisions_figure(switching, plots_dir)
     reaction_figures(rows["reaction_time"], plots_dir)
     decode_figure(rows["decode_time"], plots_dir)
+    relay_outcomes_figure(switching, plots_dir)
 
 
 def failure_figure(rows: list, plots_dir: pathlib.Path) -> None:
@@ -336,6 +361,26 @@ def wrong_windows_figure(rows: list, plots_dir: pathlib.Path) -> None:
         axis.set_ylabel("Windows (% of windows decided)")
         bar_axis(axis)
     save(figure, plots_dir, "07_wrong_by_decision.png")
+
+
+def relay_outcomes_figure(rows: list, plots_dir: pathlib.Path) -> None:
+    """17: Relay-BP-5 against union-find alone on the escalated windows.
+
+    A window Relay-BP-5 did not converge on keeps its committed answer, so
+    it is also counted in fixed, broke or both wrong.
+    """
+    title = "Escalated windows: Relay-BP-5 against union-find alone"
+    figure, axis_by_distance = distance_panels(title)
+    for distance, axis in axis_by_distance.items():
+        values = {}
+        for key, (_name, columns, _color) in RELAY_BARS.items():
+            values[key] = switching_shares(
+                rows, distance, columns, tables.STRONG_OUTCOMES
+            )
+        draw_bars(axis, values, RELAY_BAR_NAMES)
+        axis.set_ylabel("Windows (% of escalated windows)")
+        bar_axis(axis)
+    save(figure, plots_dir, "17_relay_against_union_find.png")
 
 
 def gap_figures(rows: list, plots_dir: pathlib.Path) -> None:
@@ -843,14 +888,21 @@ def events_of(row: dict) -> int:
     return int(row["detection_events"])
 
 
-def switching_shares(rows: list, distance: int, columns: tuple) -> list:
-    """The columns' (count, union-find's windows) points, per rate."""
+def switching_shares(
+    rows: list, distance: int, columns: tuple, total_columns: tuple = DECIDED
+) -> list:
+    """The columns' (count, total) points, per rate.
+
+    The total is union-find's windows unless total_columns names another.
+    """
     points = []
     for rate in PHYSICAL_ERROR_RATES:
         row = _setting_row_of(rows, distance, rate)
         point = (0, 0)
         if row is not None:
-            point = (column_sum(row, columns), column_sum(row, DECIDED))
+            count = column_sum(row, columns)
+            total = column_sum(row, total_columns)
+            point = (count, total)
         points.append(point)
     return points
 

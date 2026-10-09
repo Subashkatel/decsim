@@ -163,7 +163,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `selection_wait` | the verdict, or the committing decode's end when later, to its answer leaving for the frame: a finished strong answer kept in its unit's output slot until the verdict's selection has crossed `weak_decoder_to_strong_decoder`, which a speculative strong decode under `run_both_at_once` waits for, and zero for every other window |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
-| `dd_per_window` | one decoder to the next: the boundary handoff |
+| `dd_per_window` | the boundary handoff into the window: the first boundary sent to it, to the last landing, zero for a window no boundary reaches |
 | `output_link_per_window` | the answer's first send toward the Pauli frame, to the frame accepting it: one hop on the `direct` route, and `strong_decoder_to_weak_decoder`, the weak chip's commit and `weak_decoder_to_frame` for a strong answer `through_weak_chip` |
 | `frame_commit` | the frame accepting a correction, to it being committed |
 | `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |

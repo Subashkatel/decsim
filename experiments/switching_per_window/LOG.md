@@ -256,3 +256,10 @@ The run folder (pieces, logs, folded csv files) stays on Della scratch
 at `tmp/runs/2026-10-09_switching_per_window_code/results/2026-10-09_switching_per_window/run`.
 To resume after the array ends, run the same command: it packs only the
 pieces not yet saved. Do not run it while jobs of the array are queued.
+
+Owner decision, 2026-10-09, after the submit: the run continues without
+form B (prefix right), the full detection events of each window (check
+4) and Relay-BP iteration counts. Every Q1 to Q7 metric is saved with
+form A. Those three come later, if needed, from a rerun of selected
+shots: shot n always draws seed n, so a rerun on the same commit gives
+the same shots.

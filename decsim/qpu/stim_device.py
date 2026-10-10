@@ -19,6 +19,7 @@ import numpy
 import stim
 
 import decsim.config as config
+import decsim.detector_error_model.circuit_builds as circuit_builds
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.error_model_sampler as error_model_sampler
@@ -398,7 +399,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             sample_key_by_operation_id={},
             stream_model_by_id={},
             source_binding_by_key={},
-            strong_slicer_by_key={},
         )
 
     def _sampler_for(
@@ -513,21 +513,29 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """The operation's slicer, indexed once for all its strong windows.
 
         Indexing the circuit's faults is the costly step and is the same
-        for every window, so a shot builds it once instead of once per
-        escalation.
+        for every window of every shot of the task, so it is kept by the
+        circuit's text and what else it reads (circuit_builds).
         """
         key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
-        slicer_key = (key, requirement)
-        slicer = self._shots.strong_slicer_by_key.get(slicer_key)
-        if slicer is None:
-            slicer = window_slicer.WindowSlicer(
-                operation.circuit,
-                round_count=round_count,
-                detector_rounds=detector_rounds,
-                fault_model_requirement=requirement,
-            )
-            self._shots.strong_slicer_by_key[slicer_key] = slicer
+        binding = self._shots.source_binding_by_key[key]
+        detector_key = circuit_builds.frozen(detector_rounds)
+        slicer_key = (
+            binding.circuit_text,
+            round_count,
+            detector_key,
+            requirement,
+        )
+        slicer = _STRONG_SLICERS.held(slicer_key)
+        if slicer is not None:
+            return slicer
+        slicer = window_slicer.WindowSlicer(
+            operation.circuit,
+            round_count=round_count,
+            detector_rounds=detector_rounds,
+            fault_model_requirement=requirement,
+        )
+        _STRONG_SLICERS.keep(slicer_key, slicer)
         return slicer
 
     def _bind_source(
@@ -553,6 +561,11 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
                 "source duration differs from the bound finite source"
             )
         return binding.detector_rounds
+
+
+# (circuit text, round count, detector rounds, requirement) -> slicer, in
+# this process; a slicer of a large circuit is large, so few are kept
+_STRONG_SLICERS = circuit_builds.KeptBuilds(kept_count=4)
 
 
 class RecordedStimDevice(StimDevice):
@@ -992,7 +1005,6 @@ class _ShotTable:
     sample_key_by_operation_id: dict = dataclasses.field(default_factory=dict)
     stream_model_by_id: dict = dataclasses.field(default_factory=dict)
     source_binding_by_key: dict = dataclasses.field(default_factory=dict)
-    strong_slicer_by_key: dict = dataclasses.field(default_factory=dict)
 
 
 def _rounds_by_key(declared: Optional[dict]) -> dict:

@@ -525,6 +525,38 @@ def test_a_window_declared_past_the_source_reads_to_its_last_round():
     assert model.detector_ids == tuple(range(12, 32))
 
 
+def test_two_shots_of_one_circuit_slice_strong_windows_from_one_slicer(
+    monkeypatch,
+):
+    circuit = memory_circuit(3, 5, noise=0.00123)
+    window = window_records.Window(
+        operation_id=1,
+        window_index=0,
+        commit_lo=2,
+        commit_hi=3,
+        buffer_hi=4,
+        round_count=5,
+    )
+    built = []
+    real_slicer = stim_device.window_slicer.WindowSlicer
+
+    def counted_slicer(*arguments, **keywords):
+        built.append(1)
+        return real_slicer(*arguments, **keywords)
+
+    monkeypatch.setattr(
+        stim_device.window_slicer, "WindowSlicer", counted_slicer
+    )
+    for seed in (1, 2):
+        copy = stim.Circuit(str(circuit))
+        operation = memory_operation(copy)
+        device = stim_device.StimDevice(seed=seed)
+        device.strong_window_model_for_operation(
+            operation, window, 5, fault_model_requirement=GRAPHLIKE
+        )
+    assert len(built) == 1
+
+
 def qec_burst_scaling_circuit(circuit, qubits, start_round, probabilities):
     """qecburst/circuit.py inject_burst_profile, written out.
 

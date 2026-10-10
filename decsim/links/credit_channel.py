@@ -166,11 +166,14 @@ class CreditWire:
 def check_credit_fields(
     protocol_settings: link_settings.PacketProtocolSettings,
 ) -> None:
-    """The credit loop's latency, which the reliable protocol shares.
+    """The credit loop's buffer and latency, which the reliable protocol shares.
 
-    A credit back before its frame lands would let more than C frames
-    fly.
+    A buffer of no frames never lends a credit, so nothing would cross. A
+    credit back before its frame lands would let more than C frames fly.
     """
+    link_settings.check_positive_count(
+        "receive_buffer_frames", protocol_settings.receive_buffer_frames
+    )
     config.check_cycles(
         "credit_latency_cycles", protocol_settings.credit_latency_cycles
     )

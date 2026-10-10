@@ -60,6 +60,17 @@ def test_a_word_width_on_a_pool_that_reads_in_place_is_refused():
         )
 
 
+def test_an_in_place_fold_on_a_pool_that_reads_in_place_is_refused():
+    """The store holds the only copy; a mask written there corrupts it."""
+    algorithm = matching.PyMatchingDecoder.Settings()
+    sentence = "reads its input in place .copies_input False. has none"
+
+    with pytest.raises(ValueError, match=sentence):
+        decoder_settings.DecoderPoolSettings(
+            algorithm, copies_input=False, copies_boundary_fold=False
+        )
+
+
 def test_a_result_blocking_value_that_is_not_a_boolean_is_refused_by_name():
     """A word is truthy, so "no" would block the unit; only a flag is read."""
     algorithm = matching.PyMatchingDecoder.Settings()

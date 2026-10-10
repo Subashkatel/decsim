@@ -25,7 +25,7 @@ with another `code_state.patch`, is refused:
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `shot_stats.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `shot_stats.csv`, `stat_values.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `task_id`, `first_seed` and `count` (its other counts are its own `shots.csv` columns summed: `is_scored`, `logical_failure`, `sim_wall_seconds`, `executed_rounds` and the `*_windows` status columns), its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a task whose pieces differ in it, a piece without it included), the `state_sha256` of an online task's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended), and the `commit`, `dirty`, `patch_sha256` (the sha256 of the tree's `code_state.patch`, null when it has none), `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a run and a fold refuse a folder holding a piece whose tree is not the one its `run.json` names: another commit, the same commit clean against dirty, or another patch, since its rows would pool two simulators under one `run.json`) |
 | `jobs.json`, `run.sbatch`, `fold.sbatch`, `logs/` | `decsim/experiments/plan_command.py`, `launch` | what `decsim run --slurm` writes: each job's pieces, `[task name, first seed, count]`, longest first; the job array, whose job `i` runs job `i`'s pieces with the run file where it stands, so a file beside it is found; the job that folds after the array; and their Slurm logs, `logs/<array id>_<i>.log` and `logs/fold.log`. A launch again replaces them all, packing only the pieces not yet saved |
 | `tasks/<name>/machine.json`, `tasks/<name>/inputs/` | `decsim/experiments/run_folder.py`, `write_task_record` | each task's record and workload, below, written before any shot and only once every task of the experiment has built and been accepted, so a refused one changes no record. A name the folder holds for a task of another id is refused, and so is a task whose shot runs no round, which sizes no piece. The record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the task's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which `decsim run --fold` folds it by, whatever its run file says later |
@@ -47,6 +47,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
 | `shot_stats.csv` | `decsim/experiments/report.py`, `shot_statistics_rows` | one row per shot per part, statistic and field |
+| `stat_values.csv` | `decsim/experiments/report.py`, `statistic_value_rows` | one row per task, part, statistic and distinct value: how many times it was seen, or for a level how many ticks it was held |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per task, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
 | `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `confidence_shot_count` shots of a task (its `record_options`, a `decsim.experiments.collect.RecordOptions`, 100 by default), written only when a confidence signal decides the escalation |
@@ -297,6 +298,35 @@ A level's `area` is the level times the ticks it held, from tick 0 to
 the shot's end, and `span` is that end, so its mean over the shot is
 `area / span`. `peak` counts only the level a tick ends at. Every field
 but `peak` adds over shots. A part the run does not build has no rows.
+
+| Part | Statistic | Kind | What it is |
+| --- | --- | --- | --- |
+| `<tier>.units` | `units` | count | units in the pool |
+| `<tier>.units` | `busy_units` | level | units whose compute a job holds |
+| `<tier>.queue` | `queued` | level | jobs waiting for a unit |
+| `<tier>.decodes` | `queue_wait` | distribution | ticks from a job's ready time to its dispatch |
+| `<tier>.decodes` | `compute_wait` | distribution | ticks from a job's input landing to its decode's start |
+| `<tier>.decodes` | `service` | distribution | ticks from a decode's start to its decoder's answer |
+| `<tier>.decodes` | `evicted`, `aborted` | count | jobs taken back before their decode started; decodes stopped while running |
+| `decoder_manager` | `queued` | level | jobs waiting over every pool |
+
+`<tier>` is `weak_decoder` or `strong_decoder`. A distribution's
+fields are `count`, `total`, and `minimum` and `maximum` once it holds
+a value.
+
+### `stat_values.csv`
+
+One row per task, part, statistic and distinct value, added over the
+task's shots, so a median or a p99 of a distribution, or the time a
+queue spent at each length, comes off the counts however the shots
+were split.
+
+| Column | What it is |
+| --- | --- |
+| `task_id`, the swept paths, `algorithm` | the task |
+| `path`, `statistic` | as in `shot_stats.csv` |
+| `value` | one value the statistic saw, or one level a level held |
+| `count` | how many times a distribution saw it, or how many ticks a level held it |
 
 ### `window_samples.csv`
 

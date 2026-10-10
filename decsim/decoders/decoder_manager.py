@@ -100,7 +100,7 @@ class DecoderManager:
     def attach_statistics(
         self, run_statistics: statistics_registry.Registry, path: str
     ) -> None:
-        """Record the pool's and the queue's statistics under this path."""
+        """Record the pool's, the queue's and the decodes' statistics."""
         pool = self.pool
         units_path = f"{path}.units"
         group = run_statistics.attach(pool, units_path)
@@ -108,6 +108,8 @@ class DecoderManager:
         group.units.add(unit_count)
         queue_path = f"{path}.queue"
         run_statistics.attach(self.queue, queue_path)
+        decodes_path = f"{path}.decodes"
+        run_statistics.attach(self.service, decodes_path)
 
     def start(self) -> None:
         """Hear every row of the decoder say a model pins no class.

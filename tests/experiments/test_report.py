@@ -6,7 +6,9 @@ them). shot_data_movement.csv holds one row per shot per path off that
 shot's own counters, with the memory class the path crosses, so a
 folder folded from shards carries the rows one unsharded run would have
 written. shot_stats.csv holds one row per shot per part, statistic and
-field, the shot's registry rows as they are. latency_samples.csv holds
+field, the shot's registry rows as they are, and stat_values.csv each
+task's count of every value, added over its shots. latency_samples.csv
+holds
 one measured algorithm wall clock per decoded window, recorded only for
 a decoder named by a table row, each beside its window's inter-arrival,
 the deadline a decode must beat. The confidence files leave out an
@@ -78,6 +80,24 @@ def test_a_shots_statistics_rows_are_its_registrys_rows():
         assert len(own_rows) == len(measurement.statistics)
         assert values == recorded
         assert ("weak_decoder.units", "busy_units", "area") in values
+
+
+def test_a_tasks_value_counts_add_its_shots_counts():
+    measurements = measured_shots(2)
+    rows = report.statistic_value_rows(measurements)
+    added = collections.Counter()
+    for measurement in measurements:
+        for value_count in measurement.statistic_values:
+            key = (value_count.path, value_count.statistic, value_count.value)
+            added[key] += value_count.count
+
+    counted = {
+        (row["path"], row["statistic"], row["value"]): row["count"]
+        for row in rows
+    }
+
+    assert counted == dict(added)
+    assert ("weak_decoder.decodes", "service") in {key[:2] for key in counted}
 
 
 def test_a_shots_rows_add_up_to_that_shots_own_counters():

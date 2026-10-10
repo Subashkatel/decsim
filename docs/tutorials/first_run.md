@@ -204,6 +204,7 @@ run.json
 shot_links.csv
 shot_stats.csv
 shots.csv
+stat_values.csv
 sweep.csv
 tasks
 window_samples.csv

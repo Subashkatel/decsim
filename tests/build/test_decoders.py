@@ -64,8 +64,10 @@ def test_each_managers_statistics_are_kept_at_its_tiers_settings_path():
 
     assert sorted(groups) == [
         "decoder_manager",
+        "strong_decoder.decodes",
         "strong_decoder.queue",
         "strong_decoder.units",
+        "weak_decoder.decodes",
         "weak_decoder.queue",
         "weak_decoder.units",
     ]

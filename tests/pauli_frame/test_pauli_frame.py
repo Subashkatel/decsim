@@ -21,6 +21,7 @@ import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
 import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
 
@@ -246,6 +247,47 @@ def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
     engine.run()
 
     assert continued_at == [14, 14]
+
+
+def test_each_correction_waits_its_own_write_cost_and_is_counted():
+    engine, frame = frame_with_commit_ticks(4)
+    run_statistics = statistics_registry.Registry(engine)
+    run_statistics.attach(frame, "pauli_frame")
+
+    def commit_both():
+        commit(frame, ("stream", 0), (1,))
+        commit(frame, ("stream", 1), (1,))
+
+    engine.schedule(10, commit_both)
+    engine.run()
+
+    assert frame.statistics.commits.count == 2
+    assert frame.statistics.write_wait.value_counts() == {4: 2}
+
+
+def test_the_frames_statistics_are_its_records_on_a_switching_run():
+    """The commits and the write waits are the frame's own records.
+
+    Every escalated window of this run is answered by the strong tier,
+    so the switching side's escalations are the strong commits.
+    """
+    switching = declared_run.switching_run(escalates=True)
+    machine = machine_module.Machine.build(switching.settings, 0)
+    machine.run()
+
+    groups = machine.observation.statistics.groups
+    frame = groups["pauli_frame"]
+    snapshot = machine.control.pauli_frame.snapshot()
+    records = snapshot.records
+    waits = [
+        record.committed_ticks - record.accepted_ticks for record in records
+    ]
+    strong = [record for record in records if record.tier == "strong"]
+    write_wait_ticks = sum(waits)
+
+    assert frame.commits.count == len(records)
+    assert frame.write_wait.total == write_wait_ticks
+    assert groups["switching"].escalated.count == len(strong)
 
 
 def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():

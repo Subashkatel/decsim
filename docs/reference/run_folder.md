@@ -47,6 +47,7 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
 | `shot_stats.csv` | `decsim/experiments/report.py`, `shot_statistics_rows` | one row per shot per part, statistic and field |
+| `stat_summary.csv` | `decsim/experiments/report.py`, `statistic_summary_rows` | one row per task, part, statistic and derived measure, written by the fold |
 | `stat_values.csv` | `decsim/experiments/report.py`, `statistic_value_rows` | one row per task, part, statistic and distinct value: how many times it was seen, or for a level how many ticks it was held |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per task, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
@@ -303,16 +304,40 @@ but `peak` adds over shots. A part the run does not build has no rows.
 | --- | --- | --- | --- |
 | `<tier>.units` | `units` | count | units in the pool |
 | `<tier>.units` | `busy_units` | level | units whose compute a job holds |
-| `<tier>.queue` | `queued` | level | jobs waiting for a unit |
+| `<tier>.queue` | `queued` | level | jobs in the queue: waiting for a unit, or for their predecessor's boundary, which `queue_wait` leaves out |
 | `<tier>.decodes` | `queue_wait` | distribution | ticks from a job's ready time to its dispatch |
 | `<tier>.decodes` | `compute_wait` | distribution | ticks from a job's input landing to its decode's start |
 | `<tier>.decodes` | `service` | distribution | ticks from a decode's start to its decoder's answer |
 | `<tier>.decodes` | `evicted`, `aborted` | count | jobs taken back before their decode started; decodes stopped while running |
 | `decoder_manager` | `queued` | level | jobs waiting over every pool |
+| `<store>` | `rounds`, `bits` | level | rounds and bits held |
+| `<store>` | `stored`, `reads` | count | rounds written; reads of a job's rounds |
+| `<store>` | `port_wait` | distribution | a ported store's ticks from an access's arrival to its port's start |
+| `pauli_frame` | `commits` | count | corrections accepted |
+| `pauli_frame` | `write_wait` | distribution | ticks from a correction's acceptance to its commit |
+| `switching` | `escalated`, `speculative_selected` | count | windows escalated; escalations that took the running speculative decode |
+| `switching` | `held`, `held_cancelled` | count | strong windows held for their release conditions; held ones dropped for a kept weak result |
 
-`<tier>` is `weak_decoder` or `strong_decoder`. A distribution's
+`<tier>` is `weak_decoder` or `strong_decoder`, and `<store>`
+`weak_syndrome_buffer` or `strong_syndrome_buffer`. A distribution's
 fields are `count`, `total`, and `minimum` and `maximum` once it holds
 a value.
+
+### `stat_summary.csv`
+
+One row per task, part, statistic and measure, derived when the fold
+runs from the task's `shot_stats.csv` and `stat_values.csv` rows, so it
+is never in a piece.
+
+| Column | What it is |
+| --- | --- |
+| `task_id`, the swept paths, `algorithm` | the task |
+| `path`, `statistic` | as in `shot_stats.csv` |
+| `measure` | for a count `total` and `per_shot`; for a level `time_mean` (area over span, over every shot) and `peak`; for a distribution `count`, `mean`, `minimum` and `maximum`; for a level or a distribution that saw a value, `p50`, `p90` and `p99` off its value counts, a level's weighted by its ticks at each level |
+| `value` | in the statistic's unit; ticks are picoseconds |
+
+A peak, a minimum and a maximum are over every shot of the task; every
+other field is added over the shots before it is divided.
 
 ### `stat_values.csv`
 

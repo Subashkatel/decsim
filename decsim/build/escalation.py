@@ -99,6 +99,10 @@ class Switching:
         decoders.decoder_manager.escalation_policy = self.policy
         decoders.strong_decoder_manager.escalation_policy = self.policy
 
+    def statistics_parts(self) -> tuple:
+        """The strong redecode, at the switching settings' path."""
+        return (("switching", self.strong_redecode),)
+
     def check_settled(self) -> None:
         """No strong escalation is pending."""
         strong_redecode = self.strong_redecode

@@ -23,6 +23,8 @@ import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.log_sources as log_sources
 import decsim.records.windows as window_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 
 ObservableBits = tuple[int, ...]
@@ -64,8 +66,26 @@ class PauliFrameSnapshot:
 class PauliFrame:
     """Keeps every committed correction.
 
-    It charges each write once.
+    It charges each write once. Its statistics are the corrections it
+    accepted and each one's wait for its write, from acceptance to
+    commit.
     """
+
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "commits",
+            statistic_kinds.Count,
+            "corrections accepted",
+            "corrections",
+        ),
+        statistics_registry.Statistic(
+            "write_wait",
+            statistic_kinds.Distribution,
+            "ticks from a correction's acceptance to its commit",
+            "ticks",
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
 
     def __init__(
         self,
@@ -110,6 +130,9 @@ class PauliFrame:
             logical_observables=observables,
         )
         self._state.records.append(record)
+        self.statistics.commits.add()
+        write_wait = committed_ticks - accepted_ticks
+        self.statistics.write_wait.add(write_wait)
         pending = _PendingWrite(record, on_committed)
         self._state.pending_by_window[window_key] = pending
         self.trace.correction_accepted.fire(record)

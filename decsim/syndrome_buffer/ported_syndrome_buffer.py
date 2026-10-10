@@ -27,6 +27,8 @@ from typing import ClassVar, Optional
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 
 # the port kinds, each by the directions it serves
@@ -103,7 +105,22 @@ class PortedSyndromeBufferSettings:
 
 
 class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
-    """The store whose accesses take words on ports in arrival order."""
+    """The store whose accesses take words on ports in arrival order.
+
+    Beside the plain store's statistics it keeps each access's wait for
+    a free port, from its arrival to its start.
+    """
+
+    STATISTICS = (
+        *syndrome_buffer_module.SyndromeBuffer.STATISTICS,
+        statistics_registry.Statistic(
+            "port_wait",
+            statistic_kinds.Distribution,
+            "ticks from an access's arrival to its port's start",
+            "ticks",
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
 
     def __init__(
         self,
@@ -122,6 +139,7 @@ class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
 
     def book_read(self, round_keys: tuple) -> int:
         """Take the first free port that reads, for every round's words."""
+        self.statistics.reads.add()
         word_count = 0
         for round_key in round_keys:
             stored = self.round_by_key.get(round_key)
@@ -150,6 +168,8 @@ class PortedSyndromeBuffer(syndrome_buffer_module.SyndromeBuffer):
         port.free_ticks = start_ticks + busy_cycles * period_ticks
         latency_cycles = self.settings.access_latency_cycles
         completion_ticks = port.free_ticks + latency_cycles * period_ticks
+        port_wait = start_ticks - arrival_ticks
+        self.statistics.port_wait.add(port_wait)
         self.trace.access_served.fire(
             direction,
             port_index,

@@ -21,6 +21,8 @@ import csv
 import math
 import types
 
+import pytest
+
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.measure as measure
@@ -98,6 +100,44 @@ def test_a_tasks_value_counts_add_its_shots_counts():
 
     assert counted == dict(added)
     assert ("weak_decoder.decodes", "service") in {key[:2] for key in counted}
+
+
+def _summary_values(rows: list, path: str, statistic: str) -> dict:
+    """One statistic's measures off stat_summary.csv rows."""
+    found = {}
+    for row in rows:
+        if (row["path"], row["statistic"]) == (path, statistic):
+            found[row["measure"]] = row["value"]
+    return found
+
+
+def test_the_summary_is_derived_from_the_shots_own_statistics(tmp_path):
+    """Means over the shots' added fields; a peak over every shot."""
+    measurements = measured_shots(2)
+    _rows, run_dir = run_files.folded_run(tmp_path, measurements)
+    summary_path = run_dir / "stat_summary.csv"
+    summary = report.read_rows(summary_path)
+    fields = collections.defaultdict(list)
+    for measurement in measurements:
+        for row in measurement.statistics:
+            fields[(row.path, row.statistic, row.field)].append(row.value)
+    service_count = sum(fields[("weak_decoder.decodes", "service", "count")])
+    service_total = sum(fields[("weak_decoder.decodes", "service", "total")])
+    busy_area = sum(fields[("weak_decoder.units", "busy_units", "area")])
+    busy_span = sum(fields[("weak_decoder.units", "busy_units", "span")])
+    busy_peak = max(fields[("weak_decoder.units", "busy_units", "peak")])
+
+    service = _summary_values(summary, "weak_decoder.decodes", "service")
+    busy = _summary_values(summary, "weak_decoder.units", "busy_units")
+    units = _summary_values(summary, "weak_decoder.units", "units")
+    assert service["count"] == service_count
+    service_mean = service_total / service_count
+    busy_mean = busy_area / busy_span
+    assert service["mean"] == pytest.approx(service_mean)
+    assert service["minimum"] <= service["p50"] <= service["maximum"]
+    assert busy["time_mean"] == pytest.approx(busy_mean)
+    assert busy["peak"] == busy_peak
+    assert units["per_shot"] == 1
 
 
 def test_a_shots_rows_add_up_to_that_shots_own_counters():

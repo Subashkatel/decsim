@@ -62,7 +62,8 @@ def test_each_managers_statistics_are_kept_at_its_tiers_settings_path():
     strong = groups["strong_decoder.queue"].queued
     over_pools = groups[decoder_build.MANAGERS_PATH].queued
 
-    assert sorted(groups) == [
+    decoder_paths = [path for path in sorted(groups) if "decode" in path]
+    assert decoder_paths == [
         "decoder_manager",
         "strong_decoder.decodes",
         "strong_decoder.queue",

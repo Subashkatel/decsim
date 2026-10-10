@@ -117,6 +117,7 @@ EVERY_FILE = (
     "shot_links.csv",
     "shot_stats.csv",
     "stat_values.csv",
+    "stat_summary.csv",
     "window_samples.csv",
 )
 

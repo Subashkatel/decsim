@@ -56,7 +56,7 @@ def reliable_settings(
     bit_error_rate,
     window_packets=16,
     buffer_frames=16,
-    ack_every_packets=66,
+    ack_every_packets=16,
     retry_count=7,
     credit_latency_cycles=2,
     timeout_cycles=200,
@@ -214,7 +214,9 @@ def test_a_message_taken_while_packets_are_out_restarts_the_timer():
     """
     seed = seed_losing((True, False, False, False, False))
     engine = decsim.engine.Engine()
-    settings = reliable_settings(BIT_ERROR_RATE, window_packets=1)
+    settings = reliable_settings(
+        BIT_ERROR_RATE, window_packets=1, ack_every_packets=1
+    )
     channel = seeded_channel(engine, settings, seed)
     delivered = []
     send_at(engine, channel, 0, 200, delivered)
@@ -505,7 +507,10 @@ def test_every_message_arrives_once_in_order_under_loss_property():
         buffer_frames = generator.choice([1, 3, 16])
         engine = decsim.engine.Engine()
         settings = reliable_settings(
-            0.00003, window_packets=window, buffer_frames=buffer_frames
+            0.00003,
+            window_packets=window,
+            buffer_frames=buffer_frames,
+            ack_every_packets=window,
         )
         channel = seeded_channel(engine, settings, trace)
         delivered = []
@@ -516,6 +521,14 @@ def test_every_message_arrives_once_in_order_under_loss_property():
         deliveries = delivery_ticks_of(delivered)
         assert sequences == list(range(count))
         assert deliveries == sorted(deliveries)
+
+
+def test_a_window_smaller_than_the_acknowledgement_interval_is_refused():
+    """rxe_param.h keeps 128 unacknowledged PSNs against an ACK every 64."""
+    sentence = "window_packets 4 is smaller than its ack_every_packets 8"
+
+    with pytest.raises(ValueError, match=sentence):
+        reliable_settings(0.0, window_packets=4, ack_every_packets=8)
 
 
 def test_a_window_of_one_waits_for_each_acknowledgement():

@@ -15,6 +15,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoder_pool as decoder_pool
+import decsim.decoders.decoders as decoders
 import decsim.decoders.detection_events as detection_events
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
@@ -25,6 +26,8 @@ import decsim.records.decoding as decoding_records
 import decsim.records.formation as formation_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 
 
 class FixedRow(decoder_module.DecoderBase):
@@ -139,6 +142,23 @@ def _resolving(manager):
         manager.resolve_weak_request(job, result, keep)
 
     return on_decoded
+
+
+def test_a_decoder_row_that_declares_statistics_records_them():
+    """A row of one's own declares its statistics and needs no wiring."""
+    engine = engine_module.Engine()
+    counting = _CountingDecoder(1.0)
+    plain = decoders.PresetLatencyDecoder(1.0)
+    counting_manager = _manager(engine, counting)
+    plain_manager = _manager(engine, plain)
+    run_statistics = statistics_registry.Registry(engine)
+
+    counting_manager.attach_statistics(run_statistics, "weak_decoder")
+    plain_manager.attach_statistics(run_statistics, "strong_decoder")
+
+    groups = run_statistics.groups
+    assert groups["weak_decoder.algorithm"] is counting.statistics
+    assert "strong_decoder.algorithm" not in groups
 
 
 def test_a_spent_job_is_refused():
@@ -524,3 +544,14 @@ def _second_operations_job():
     second = dataclasses.replace(job.payloads[0], operation_id=2)
     job.payloads = [second]
     return job
+
+
+class _CountingDecoder(decoders.PresetLatencyDecoder):
+    """A preset-latency row that declares a statistic of its own."""
+
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "iterations", statistic_kinds.Count, "solver iterations", "steps"
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)

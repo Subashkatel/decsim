@@ -367,6 +367,10 @@ class ShotMeasurement:
     # every part's statistics as the run's registry rows (path,
     # statistic, field, value); shot_stats.csv holds them
     statistics: list
+    # each statistic's count of every value it saw, or ticks at every
+    # level it held, as the registry's ValueCounts; stat_values.csv adds
+    # them over a task's shots
+    statistic_values: list
 
 
 def measure_shot(
@@ -1116,6 +1120,7 @@ def _measurement(
     confidence = _shot_confidence(settings, observation, seed, record_options)
     window_outcomes = _shot_window_outcomes(observation, owners)
     statistics = observation.statistics.rows()
+    statistic_values = observation.statistics.value_counts()
     return ShotMeasurement(
         task_id=task_id,
         algorithm=algorithm,
@@ -1170,6 +1175,7 @@ def _measurement(
         predictions=predictions,
         window_outcomes=window_outcomes,
         statistics=statistics,
+        statistic_values=statistic_values,
     )
 
 

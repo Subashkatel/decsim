@@ -49,6 +49,7 @@ NON_COLUMN_FIELDS = (
     "confidence",
     "window_outcomes",
     "statistics",
+    "statistic_values",
 )
 # the counters a hold books for the whole shot: a reference is a token
 # on a store's slot and belongs to no path, so these repeat on every row
@@ -164,6 +165,7 @@ class RunRecord:
     shots: list
     shot_links: list
     shot_statistics: list
+    statistic_values: list
     shot_data_movement: list
     window_samples: list
     latency_samples: list
@@ -365,6 +367,26 @@ def shot_statistics_rows(measurements: list) -> list:
     return rows
 
 
+def statistic_value_rows(measurements: list) -> list:
+    """One row per task, part, statistic and distinct value: its count.
+
+    A Distribution's count is how many of its values were that value, a
+    Level's how many ticks it held that level, so a median, a p99 or a
+    time-weighted distribution is read from the counts however the
+    shots were split.
+    """
+    counts = {}
+    for measurement in measurements:
+        task_key = measured_task_key(measurement)
+        for value_count in measurement.statistic_values:
+            _add_a_value_count(counts, task_key, value_count)
+    task_keys = []
+    for task_key, _path, _statistic in counts:
+        task_keys.append(task_key)
+    unique_task_keys = dict.fromkeys(task_keys)
+    return _rows_of_statistic_values(counts, list(unique_task_keys))
+
+
 def window_sample_rows(measurements: list) -> list:
     """One row per task, latency point, tier and distinct value: its count.
 
@@ -492,6 +514,7 @@ def record_of(measurements: list) -> RunRecord:
     shots = shot_rows(measurements)
     links = shot_link_rows(measurements)
     statistics = shot_statistics_rows(measurements)
+    values = statistic_value_rows(measurements)
     movement = shot_data_movement_rows(measurements)
     samples = window_sample_rows(measurements)
     latency = latency_sample_rows(measurements)
@@ -502,6 +525,7 @@ def record_of(measurements: list) -> RunRecord:
         shots,
         links,
         statistics,
+        values,
         movement,
         samples,
         latency,
@@ -512,13 +536,15 @@ def record_of(measurements: list) -> RunRecord:
 
 
 def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
-    """The record's nine files; one with no rows is not written."""
+    """The record's ten files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
     _write_rows(record.shots, shots_path, swept)
     links_path = report_dir / "shot_links.csv"
     _write_rows(record.shot_links, links_path, swept)
     statistics_path = report_dir / "shot_stats.csv"
     _write_rows(record.shot_statistics, statistics_path, swept)
+    values_path = report_dir / "stat_values.csv"
+    _write_rows(record.statistic_values, values_path, swept)
     movement_path = report_dir / "shot_data_movement.csv"
     _write_rows(record.shot_data_movement, movement_path, swept)
     samples_path = report_dir / "window_samples.csv"
@@ -620,6 +646,10 @@ def _fold_the_folders(
     _write_rows(samples_rows, samples_path, swept)
     _fold_shot_links(folders, order, out_dir, swept)
     _fold_shot_statistics(folders, order, out_dir, swept)
+    values = _folded_statistic_values(folders)
+    values_rows = _rows_of_statistic_values(values, list(shot_totals))
+    values_path = out_dir / "stat_values.csv"
+    _write_rows(values_rows, values_path, swept)
     _fold_shot_movement(folders, order, out_dir, swept)
     _fold_latency_samples(folders, order, out_dir, swept)
     _fold_window_confidence(folders, order, out_dir, swept)
@@ -752,6 +782,18 @@ def _folded_counts(folders: list) -> dict:
             continue
         rows = read_rows(path)
         _add_counts_of_rows(counts, rows)
+    return counts
+
+
+def _folded_statistic_values(folders: list) -> dict:
+    """Every folder's stat_values.csv added into one set of counts."""
+    counts = {}
+    for run_dir in folders:
+        path = Path(run_dir) / "stat_values.csv"
+        if not path.is_file():
+            continue
+        for row in read_rows(path):
+            _add_a_value_row(counts, row)
     return counts
 
 
@@ -1099,6 +1141,47 @@ def _add_counts_of_rows(counts: dict, window_samples: list) -> None:
         value = row["value_us"]
         already = at_this_name.get(value, 0)
         at_this_name[value] = already + row["count"]
+
+
+def _add_a_value_count(counts: dict, task_key: tuple, value_count) -> None:
+    """One shot's count of one value of one statistic, onto its task's."""
+    key = (task_key, value_count.path, value_count.statistic)
+    multiset = counts.setdefault(key, {})
+    already = multiset.get(value_count.value, 0)
+    multiset[value_count.value] = already + value_count.count
+
+
+def _add_a_value_row(counts: dict, row: dict) -> None:
+    """One stat_values.csv row onto its task's counts."""
+    task_key = task_key_of(row)
+    key = (task_key, row["path"], row["statistic"])
+    multiset = counts.setdefault(key, {})
+    already = multiset.get(row["value"], 0)
+    multiset[row["value"]] = already + row["count"]
+
+
+def _rows_of_statistic_values(counts: dict, task_keys: list) -> list:
+    """The counts as rows: tasks' order, then path, statistic, value."""
+    positions = _task_positions(task_keys)
+    order = functools.partial(_task_then_key_order, positions)
+    rows = []
+    for key in sorted(counts, key=order):
+        task_key, path, statistic = key
+        multiset = counts[key]
+        for value in sorted(multiset):
+            row = task_columns(task_key)
+            row["path"] = path
+            row["statistic"] = statistic
+            row["value"] = value
+            row["count"] = multiset[value]
+            rows.append(row)
+    return rows
+
+
+def _task_then_key_order(positions: dict, key: tuple) -> tuple:
+    """A (task, path, statistic) key where a single run writes it."""
+    task_key, path, statistic = key
+    return (positions[task_key], path, statistic)
 
 
 def _rows_of_counts(counts: dict, task_keys: list) -> list:

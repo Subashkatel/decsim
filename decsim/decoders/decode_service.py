@@ -26,6 +26,8 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 
 if TYPE_CHECKING:
@@ -41,7 +43,48 @@ class DecodeService:
     job takes its slot, input_landed when every transfer of its input
     has landed, job_started when its decode begins, job_finished when
     its compute ends.
+
+    Its statistics split a decode's life as gem5's O3 CPU splits an
+    instruction's (a queue wait, a wait for a functional unit once
+    ready, the execution; inst_queue.cc:1009-1014): the wait in the
+    queue from ready to dispatch, the wait from the input landing to
+    the decode's start, and the decode itself, in ticks, with the
+    decodes taken back before they started and stopped while running.
     """
+
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "queue_wait",
+            statistic_kinds.Distribution,
+            "ticks from a job's ready time to its dispatch",
+            "ticks",
+        ),
+        statistics_registry.Statistic(
+            "compute_wait",
+            statistic_kinds.Distribution,
+            "ticks from a job's input landing to its decode's start",
+            "ticks",
+        ),
+        statistics_registry.Statistic(
+            "service",
+            statistic_kinds.Distribution,
+            "ticks from a decode's start to its decoder's answer",
+            "ticks",
+        ),
+        statistics_registry.Statistic(
+            "evicted",
+            statistic_kinds.Count,
+            "jobs taken from their unit before their decode started",
+            "jobs",
+        ),
+        statistics_registry.Statistic(
+            "aborted",
+            statistic_kinds.Count,
+            "decodes stopped while running",
+            "jobs",
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
 
     def __init__(
         self,
@@ -148,6 +191,8 @@ class DecodeService:
         if claim_compute:
             self.pool.claim(unit, job)
         job.dispatch_ticks = self.engine.now
+        queue_wait = job.dispatch_ticks - job.ready_time
+        self.statistics.queue_wait.add(queue_wait)
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
         self._log_assignment(job, claim_compute)
@@ -227,6 +272,7 @@ class DecodeService:
         first, because it finds the job's landing through its unit.
         """
         unit = job.unit
+        self.statistics.evicted.add()
         self.staging.cancel(job)
         unit.evict(job)
         if unit.holder is job:
@@ -235,6 +281,7 @@ class DecodeService:
 
     def abort(self, job: decoding_records.DecodeJob) -> None:
         """Stop a running decode: the decoder, its input, its slot."""
+        self.statistics.aborted.add()
         decoder = self.manager.decoder
         decoder.cancel(job)
         self.staging.cancel(job)
@@ -304,15 +351,26 @@ class DecodeService:
             log_sources.DECODER_MANAGER, f"START DECODE {job.label}"
         )
         self.trace.job_started.fire(job, job.unit)
+        start_ticks = self.engine.now
+        compute_wait = start_ticks - _landed_ticks(job)
+        self.statistics.compute_wait.add(compute_wait)
         self._predict_compute_free(job)
         if job.decoder_input is not None:
             # the decoder reads this unit's memory now
             job.payloads = job.decoder_input.fragments()
-        decoder.start(
-            job,
-            self.engine,
-            lambda result: self.manager.decode_completed(job, result),
-        )
+        decoded = functools.partial(self._decoded, job, start_ticks)
+        decoder.start(job, self.engine, decoded)
+
+    def _decoded(
+        self,
+        job: decoding_records.DecodeJob,
+        start_ticks: int,
+        result: Optional[decoding_records.DecodeResult],
+    ) -> None:
+        """The decoder answered: count its time, then the manager settles."""
+        service = self.engine.now - start_ticks
+        self.statistics.service.add(service)
+        self.manager.decode_completed(job, result)
 
     def _assign_service_key(self, job: decoding_records.DecodeJob) -> None:
         """One service key per decode, shared by every request it serves."""
@@ -507,6 +565,13 @@ def _landed_fragments(job: decoding_records.DecodeJob) -> list:
     if job.payloads is None:
         return []
     return job.payloads
+
+
+def _landed_ticks(job: decoding_records.DecodeJob) -> int:
+    """The tick the job's input landed; its dispatch when it had none."""
+    if job.ready_ticks is None:
+        return job.dispatch_ticks
+    return job.ready_ticks
 
 
 @dataclasses.dataclass(frozen=True)

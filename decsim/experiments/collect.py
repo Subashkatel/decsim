@@ -37,6 +37,7 @@ import stim
 import decsim.config as config
 import decsim.experiments.collection as collection_module
 import decsim.machine as machine_module
+import decsim.parameters.in_force as in_force
 import decsim.ports as ports
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
@@ -87,7 +88,9 @@ class Task:
     It follows sinter's Task (sinter/_data/_task.py:18-75). name is the task's
     results folder, and --only picks a task by it. machine is read at the
     task (MachineSettings.at_task), so the strong id covers the number a
-    calibration table gives it. metadata is sinter's json_metadata.
+    calibration table gives it, after the assignments in force while
+    a run file loads (parameters/in_force.py) are applied to it.
+    metadata is sinter's json_metadata.
     collection overrides the experiment's, as sinter's collection_options
     does. online_threshold is the task's calibrator when its threshold
     learns across shots: it is built once here and every shot's build gets
@@ -105,7 +108,8 @@ class Task:
     def __post_init__(self) -> None:
         check_folder_name(self.name, "task")
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
-        machine = self.machine.at_task()
+        assigned = in_force.applied(self.machine)
+        machine = assigned.at_task()
         object.__setattr__(self, "machine", machine)
         if self.online_threshold is None:
             calibrator = _task_calibrator(machine)

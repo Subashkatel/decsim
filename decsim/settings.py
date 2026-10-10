@@ -10,7 +10,7 @@ part's record is defined by the package that owns it.
 
 import dataclasses
 from collections.abc import Mapping
-from typing import Optional, Union
+from typing import ClassVar, Optional, Union
 
 import decsim.config as config
 import decsim.controller.policies as idle_policies
@@ -55,7 +55,24 @@ class MachineSettings:
     part: weak_decoder alone, strong_decoder alone, or both with
     switching, which decodes weak first and escalates a window to the
     strong decoder. None of the three plans no decoding.
+
+    SET_IN_THE_RUN_FILE names the paths the run file built the
+    workload's circuit from or lowered it to: an assignment by path
+    (decsim/parameters/tree.py) would leave the circuit behind, a
+    distance-5 machine running a distance-3 circuit, so they are set in
+    the run file.
     """
+
+    SET_IN_THE_RUN_FILE: ClassVar[tuple] = (
+        "qpu.distance",
+        "workload.operations",
+        "workload.decode_operations",
+        "workload.dynamic_streams",
+        "workload.protected_regions",
+        "workload.physical_circuits",
+        "workload.rounds_policy",
+        "workload.workload_record",
+    )
 
     clock: Optional[config.Clock] = None
     qpu: qpu_settings.QpuSettings = qpu_settings.QpuSettings()

@@ -61,6 +61,7 @@ import pytest
 import stim
 
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
 import decsim.experiments.collect_command as run
 import decsim.experiments.measure as measure_shot
@@ -68,6 +69,8 @@ import decsim.experiments.report as sweep_report
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.parameters.in_force as in_force
+import decsim.parameters.tree as tree
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -850,3 +853,29 @@ class _CrashingRelayDecoder:
 
 def _crashing_relay_type():
     return _CrashingRelayDecoder
+
+
+def test_a_task_reads_its_threshold_table_at_the_machine_assigned_to_it(
+    tmp_path,
+):
+    """A table row is read after the assignments in force, never before.
+
+    The table is keyed by the round period, which `--set` may change, so
+    the row read is the assigned period's (MachineSettings.at_task).
+    """
+    table_path = tmp_path / "calibration.csv"
+    table_path.write_text(
+        "round_period_microseconds,gth_eq4_wilson\n1.1,19.0\n2.0,23.5\n"
+    )
+    machine = run_files.switching_machine()
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    switching = dataclasses.replace(machine.switching, threshold=table)
+    tabled = dataclasses.replace(machine, switching=switching)
+    period = tree.Assignment("qpu.round_period", "2us", "--set")
+
+    with in_force.in_force([period]):
+        task = collect.Task("tabled", tabled)
+
+    threshold = task.machine.switching.threshold
+    assert task.machine.qpu.round_period_microseconds == 2.0
+    assert threshold.threshold_decibels == 23.5

@@ -46,6 +46,7 @@ import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.parameters.assignments as assignments
 import decsim.producers as producers
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
@@ -2367,3 +2368,19 @@ def _run_the_unit_and_note(ran_seeds: list, run_unit, unit, measure):
     end_seed = unit.first_seed + unit.seeds
     ran_seeds.extend(range(unit.first_seed, end_seed))
     return run_unit(unit, measure)
+
+
+def test_run_records_the_assignments_its_tasks_were_built_with(
+    tmp_path, monkeypatch
+):
+    run_file = run_files.write_run_file(tmp_path)
+    out_dir = tmp_path / "out"
+    variable = assignments.ENVIRONMENT_VARIABLE
+    monkeypatch.setenv(variable, "")
+    shots = ["--shots", "1"]
+    flags = ["--set", "weak_decoder.unit_count=2"]
+
+    command.main(["run", str(run_file), "--out", str(out_dir), *shots, *flags])
+
+    manifest = _manifest_of(out_dir)
+    assert manifest["assignments"] == "weak_decoder.unit_count=2"

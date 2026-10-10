@@ -130,3 +130,14 @@ def test_a_field_with_no_default_is_required():
     parameters = fields.parameters_of(framings.RoceV2.Settings)
 
     assert parameters["path_mtu"].default is fields.REQUIRED
+
+
+def test_a_rate_no_decimal_holds_is_written_as_a_fraction_read_back_exactly():
+    parameters = fields.parameters_of(link_settings.CapacitySettings)
+    parameter = parameters["input"]
+    rate = fractions.Fraction(1, 3)
+
+    written = parameter.written(rate)
+
+    assert written == "1/3 bits/us"
+    assert parameter.value_of(written, None, "input") == rate

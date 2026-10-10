@@ -5,8 +5,9 @@
     decsim info <record name>
 
 params prints every settable path of one task's machine (the first, or
-the --only one) with its value as it would be written, its record's
-default where the run file moved it, and the assignment that set it.
+the --only one; a graph's paths for a task built from a graph) with its
+value as it would be written, its record's default where the run file
+moved it, and the assignment that set it.
 --match keeps the paths a pattern reaches, `*` and `**` as `--set`
 takes them. This is gem5's `--list-sim-objects`/config.ini and
 OMNeT++'s `-q params` for decsim's settings tree.
@@ -18,7 +19,7 @@ each part the records its slot takes, so a researcher swaps a part
 
 import argparse
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
@@ -50,15 +51,16 @@ def params(argv: list) -> None:
     put_in_force(parsed.set)
     study = experiment.load_one_task(parsed.run_file, parsed.only)
     task = study.tasks[0]
+    root = settings_root(task)
     every_assignment = _assignments_or_refusal()
-    applied = tree.apply(task.machine, every_assignment)
-    settings = tree.settings_of(task.machine)
+    applied = tree.apply(root, every_assignment)
+    settings = tree.settings_of(root)
     print(f"# {task.name}: path = value  [record default]  (set by)")
     for setting in settings:
         if not _is_matched(parsed.match, setting):
             continue
         origin = applied.origins.get(setting.path, _NO_ORIGIN)
-        if tree.is_set_in_the_run_file(task.machine, setting.path):
+        if tree.is_set_in_the_run_file(root, setting.path):
             origin = _RUN_FILE_ONLY
         line = _setting_line(setting, origin)
         print(line)
@@ -76,6 +78,13 @@ def info(argv: list) -> None:
     for parameter in parameters.values():
         line = _parameter_line(parameter)
         print(line)
+
+
+def settings_root(task: Any) -> Any:
+    """What a task's paths name: its graph if built from one, its machine."""
+    if task.graph is not None:
+        return task.graph
+    return task.machine
 
 
 def put_in_force(flag_texts: list) -> None:

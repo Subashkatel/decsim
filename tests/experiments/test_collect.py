@@ -76,6 +76,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.topology.legacy as legacy
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
@@ -879,3 +880,29 @@ def test_a_task_reads_its_threshold_table_at_the_machine_assigned_to_it(
     threshold = task.machine.switching.threshold
     assert task.machine.qpu.round_period_microseconds == 2.0
     assert threshold.threshold_decibels == 23.5
+
+
+def test_a_task_built_from_a_graph_runs_as_its_settings_with_their_id():
+    settings = run_files.minimal_machine()
+    written = legacy.graph_of(settings)
+
+    from_graph = collect.Task("graph_task", written)
+    from_settings = collect.Task("graph_task", settings)
+
+    assert from_graph.machine == from_settings.machine
+    assert from_graph.strong_id() == from_settings.strong_id()
+    assert from_graph.graph == written
+    assert from_settings.graph is None
+
+
+def test_the_assignments_in_force_name_a_graph_tasks_paths():
+    settings = run_files.minimal_machine()
+    written = legacy.graph_of(settings)
+    assignment = tree.Assignment("weak.unit_count", 3, "a test")
+
+    with in_force.in_force([assignment]):
+        task = collect.Task("graph_task", written)
+
+    pool = task.graph.part("weak")
+    assert pool.settings.unit_count == 3
+    assert task.machine.weak_decoder.unit_count == 3

@@ -409,9 +409,13 @@ def _written_time(microseconds: fractions.Fraction) -> str:
 
 
 def _exact_fraction(number: fractions.Fraction) -> str:
+    """The shortest decimal that reads back as the number, else p/q."""
     if number.denominator == 1:
         return str(number.numerator)
-    return _exact(number)
+    text = _exact(number)
+    if fractions.Fraction(text) == number:
+        return text
+    return f"{number.numerator}/{number.denominator}"
 
 
 def _written_rate(bits_per_microsecond: fractions.Fraction) -> str:

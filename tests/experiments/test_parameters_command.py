@@ -14,6 +14,7 @@ import decsim.experiments.parameters_command as parameters_command
 import decsim.parameters.assignments as assignments
 import decsim.parameters.tree as tree
 import tests.experiments.run_files as run_files
+import tests.experiments.test_describe_command as test_describe_command
 
 
 @pytest.fixture(autouse=True)
@@ -96,3 +97,14 @@ def test_set_flags_are_appended_to_decsim_set_after_it(monkeypatch):
         tree.Assignment("a.b", 2, variable),
         tree.Assignment("a.c", 3, variable),
     ]
+
+
+def test_params_prints_a_graph_tasks_paths_by_part_name(tmp_path, capsys):
+    run_file = tmp_path / "graph_run.py"
+    run_file.write_text(test_describe_command.GRAPH_RUN_FILE)
+
+    command.main(["params", str(run_file)])
+
+    lines = _printed_lines(capsys)
+    assert "weak.unit_count = 1" in lines
+    assert "qpu.distance = 3  [none]  (run file only)" in lines

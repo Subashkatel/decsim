@@ -24,3 +24,6 @@ the [reference](../reference/README.md) pages.
 - [How to record statistics of your own part](record_statistics.md):
   declare them on the class, update them where the event happens, and
   read them in the run folder.
+- [How to write a machine as a graph](write_a_machine_as_a_graph.md):
+  named parts, wires and a fabric, in Python or YAML, set and described
+  by the parts' names.

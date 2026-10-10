@@ -37,6 +37,8 @@ INPUT_BOUNDARY = frozenset(
         "numbers.Integral",
         "numbers.Real",
         "pathlib.Path",
+        # a task's machine is its MachineSettings or a graph of parts
+        "topology_graph.Machine",
     }
 )
 

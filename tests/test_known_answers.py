@@ -1,8 +1,9 @@
 """Known answers and invariants of whole runs, through the Python front end.
 
-Each test builds its machine as a user does, from decsim.settings' bases on
-Stim's rotated surface code memory at distance 3, and checks one law whose
-answer is known without running the machine:
+Each test builds its machine as a user does, from the bases of
+decsim/presets/machines.py on Stim's rotated surface code memory at
+distance 3, and checks one law whose answer is known without running the
+machine:
 
 - zero noise draws no detection event (stim.Circuit.generated with every
   noise channel at 0), so no tier flips a logical observable;
@@ -33,12 +34,14 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
-import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
+import decsim.topology.legacy as legacy
 import decsim.windows.schemes.parallel as parallel
-import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -71,16 +74,16 @@ def run(settings, seed: int = 0) -> collect.Shot:
     return collect.run_shot(task, seed)
 
 
-def weak_only(physical_error_probability: float):
+def weak_only(physical_error_probability: float) -> graph.Machine:
     """The weak decoder baseline at distance 3 on 1 us rounds."""
-    return machine_settings.weak_decoder_baseline(
+    return machines.weak_baseline(
         DISTANCE, physical_error_probability, ROUND_PERIOD_MICROSECONDS
     )
 
 
-def strong_only(physical_error_probability: float):
+def strong_only(physical_error_probability: float) -> graph.Machine:
     """The strong decoder baseline at distance 3 on 1 us rounds."""
-    return machine_settings.strong_decoder_baseline(
+    return machines.strong_baseline(
         DISTANCE, physical_error_probability, ROUND_PERIOD_MICROSECONDS
     )
 
@@ -91,7 +94,6 @@ def switching(physical_error_probability: float, strong_window=REDO_WINDOW):
     The strong side's five hops are one room cycle each.
     """
     base = weak_only(physical_error_probability)
-    strong_base = strong_only(physical_error_probability)
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=UNREACHABLE_DECIBELS
@@ -99,14 +101,9 @@ def switching(physical_error_probability: float, strong_window=REDO_WINDOW):
     slot = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, strong_window=strong_window
     )
-    windows = window_settings.switching_windows(base.windows, strong_window)
-    links = machine_settings.one_cycle_strong_side(base.links)
-    return dataclasses.replace(
-        base,
-        links=links,
-        windows=windows,
-        strong_decoder=strong_base.strong_decoder,
-        switching=slot,
+    fabric = link_cards.strong_side(base.fabric)
+    return machines.with_strong_tier(
+        base, machines.STRONG_BASELINE_POOL, slot, fabric
     )
 
 
@@ -163,7 +160,8 @@ def feedback_settings():
     workload = workload_settings.WorkloadSettings(
         operations=(first, second), rounds_policy=rounds_policy
     )
-    return dataclasses.replace(base, workload=workload)
+    workload_part = graph.Part("workload", workload)
+    return base.with_part(workload_part)
 
 
 def last_round_tick(shot: collect.Shot, operation_id: int) -> int:
@@ -196,14 +194,23 @@ def reaction_ticks(settings) -> int:
     return arrival - last_round
 
 
-def with_latency_added(settings, path_name: str, microseconds: float):
-    """The settings with one path's latency longer by microseconds."""
+def with_latency_added(
+    machine: graph.Machine, path_name: str, microseconds: float
+) -> graph.Machine:
+    """The machine with one path's latency longer by microseconds.
+
+    The path keeps the rest of its wire: on the weak base every hop of
+    the reaction path is an unbounded one with no setup or framing.
+    """
+    settings = legacy.resolved(machine)
     path = getattr(settings.links, path_name)
     latency_ticks = path.channel.propagation_latency_ticks
     latency = config.ticks_to_microseconds(latency_ticks)
     longer = latency + microseconds
-    links = link_profiles.with_path_latency(settings.links, path_name, longer)
-    return dataclasses.replace(settings, links=links)
+    link = fabrics.TimedLink(longer, excludes_receiver_processing=True)
+    links_by_path = {path_name: link}
+    fabric = fabrics.PathLinks(base=machine.fabric, **links_by_path)
+    return dataclasses.replace(machine, fabric=fabric)
 
 
 @pytest.mark.parametrize("path_name", REACTION_PATH)
@@ -266,28 +273,30 @@ def test_every_round_has_one_owner_and_the_frame_takes_each_owner_once(shape):
     assert frame_commits_by_window(shot) == owners_once
 
 
-def charged_pool(pool, microseconds: float, unit_count: int):
+def charged_pool(
+    machine: graph.Machine, pool_name: str, microseconds: float, unit_count: int
+) -> graph.Machine:
     """The pool's units decoding with PyMatching, charged a fixed time."""
     algorithm = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=microseconds
     )
-    return dataclasses.replace(pool, algorithm=algorithm, unit_count=unit_count)
+    return machine.with_settings(
+        pool_name, algorithm=algorithm, unit_count=unit_count
+    )
 
 
-def strong_units_on_double_windows(unit_count: int):
+def strong_units_on_double_windows(unit_count: int) -> graph.Machine:
     """Every window escalating to strong units that take 30 us a region."""
-    settings = switching_on_double_windows(PHYSICAL_ERROR_PROBABILITY)
-    strong = charged_pool(settings.strong_decoder, 30.0, unit_count)
-    return dataclasses.replace(settings, strong_decoder=strong)
+    machine = switching_on_double_windows(PHYSICAL_ERROR_PROBABILITY)
+    return charged_pool(machine, machines.STRONG_POOL, 30.0, unit_count)
 
 
-def weak_units_on_parallel_windows(unit_count: int):
+def weak_units_on_parallel_windows(unit_count: int) -> graph.Machine:
     """The weak base on parallel windows, 20 us a decode."""
-    settings = weak_only(PHYSICAL_ERROR_PROBABILITY)
+    machine = weak_only(PHYSICAL_ERROR_PROBABILITY)
     scheme = parallel.ParallelWindowScheme.Settings()
-    windows = dataclasses.replace(settings.windows, scheme=scheme)
-    weak = charged_pool(settings.weak_decoder, 20.0, unit_count)
-    return dataclasses.replace(settings, windows=windows, weak_decoder=weak)
+    on_parallel = machine.with_settings(machines.WINDOWS, scheme=scheme)
+    return charged_pool(on_parallel, machines.WEAK_POOL, 20.0, unit_count)
 
 
 def commit_ticks_by_window(settings) -> dict:

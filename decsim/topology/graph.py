@@ -31,6 +31,7 @@ from typing import Any, ClassVar, Optional
 
 import decsim.config as config
 import decsim.observe.settings as observe_settings
+import decsim.ports as ports
 import decsim.topology.fabrics as fabrics
 import decsim.topology.part_kinds as part_kinds
 
@@ -91,7 +92,7 @@ class Wire:
 
     source: str
     target: str
-    link: Optional[fabrics.LinkCard] = None
+    link: Optional[ports.LinkCard] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -109,7 +110,7 @@ class Machine:
     clock: Optional[config.Clock] = None
     parts: tuple = ()
     wires: tuple = ()
-    fabric: fabrics.FabricRule = fabrics.ReferenceFabric()
+    fabric: ports.FabricRule = fabrics.ReferenceFabric()
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
     )
@@ -147,6 +148,32 @@ class Machine:
             unbound.extend(unwired)
         return unbound
 
+    def with_part(self, part: Part) -> "Machine":
+        """The machine with this part in place of its namesake, or added."""
+        parts = [kept for kept in self.parts if kept.name != part.name]
+        if len(parts) == len(self.parts):
+            return dataclasses.replace(self, parts=(*self.parts, part))
+        replaced = [_chosen(kept, part) for kept in self.parts]
+        return dataclasses.replace(self, parts=tuple(replaced))
+
+    def with_settings(self, name: str, **changes: Any) -> "Machine":
+        """The machine with fields of one part's record changed."""
+        part = self.part(name)
+        settings = dataclasses.replace(part.settings, **changes)
+        changed = dataclasses.replace(part, settings=settings)
+        return self.with_part(changed)
+
+    def with_wires(self, *wires: Wire) -> "Machine":
+        """The machine with these wires added."""
+        return dataclasses.replace(self, wires=(*self.wires, *wires))
+
+    def without_part(self, name: str) -> "Machine":
+        """The machine with a part and every wire that reaches it gone."""
+        self.part(name)
+        parts = [part for part in self.parts if part.name != name]
+        wires = [wire for wire in self.wires if not _reaches(wire, name)]
+        return dataclasses.replace(self, parts=tuple(parts), wires=tuple(wires))
+
     def _end(self, written: str) -> tuple:
         """The (part, port) a wire's end names."""
         part_name, separator, port_name = written.partition(_PORT_SEPARATOR)
@@ -168,6 +195,20 @@ class Machine:
                 f"its ports are {ports}"
             )
         return (part, port)
+
+
+def _chosen(kept: Part, part: Part) -> Part:
+    """The new part where it shares the kept one's name, else the kept."""
+    if kept.name == part.name:
+        return part
+    return kept
+
+
+def _reaches(wire: Wire, name: str) -> bool:
+    """Whether either end of a wire is a port of the named part."""
+    source_name, _, _ = wire.source.partition(_PORT_SEPARATOR)
+    target_name, _, _ = wire.target.partition(_PORT_SEPARATOR)
+    return name in (source_name, target_name)
 
 
 def _refuse_a_repeated_name(parts: tuple) -> None:

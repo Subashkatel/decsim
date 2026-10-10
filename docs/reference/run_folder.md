@@ -251,7 +251,7 @@ One run is outside that sum, and knowingly: under
 `switching.run_both_at_once` the weak attempt and the strong decode
 overlap rather than follow each other, so adding both would count the
 same wall time twice. `tests/experiments/test_measure.py` asserts the
-identity window by window on `decsim.settings.weak_decoder_baseline`,
+identity window by window on `decsim.presets.machines.weak_baseline`,
 `examples/two_tiers.py`, and the `redo_window_d3` and `cluster_gap_d3`
 tasks of `experiments/switching/run.py`, which are a run with no signal to compute, a run whose signal is a second
 forced-class solve, the same on a host-clock strong tier, and a run

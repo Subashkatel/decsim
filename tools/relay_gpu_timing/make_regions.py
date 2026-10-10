@@ -4,7 +4,7 @@ A region is decsim's memory circuit of 3d rounds, r_strong = r_com +
 2 r_buf at r_com = r_buf = d (Toshio et al. arXiv:2510.25222 lines
 1246-1250), its physical fault catalog as decsim's relay_bp row reads
 it, Stim detector samples, and decsim's gamma table drawn at the keys
-experiments/switching_baseline/run.py strong_decoder_pool() sets. The
+decsim/presets/experiment_one.py strong_decoder_pool() sets. The
 keys travel in the file, so time_decodes.py runs the GPU at the same
 keys the table row will price.
 
@@ -16,16 +16,15 @@ Run with decsim's interpreter, PYTHONPATH=<tree>:<pydeps>:
 
 import argparse
 import dataclasses
-import importlib.util
 import os
 
 import numpy
 import scipy.sparse
 
-import decsim
 import decsim.decoders.relay_belief_propagation.window_decoder as window
 import decsim.detector_error_model.stim_fault_catalog as catalog
 import decsim.frontends.settings as frontend_settings
+import decsim.presets.experiment_one as experiment_one
 import decsim.records.fault_model_contracts as contracts
 
 CODE_TASK = "surface_code:rotated_memory_z"
@@ -34,13 +33,7 @@ GAMMA_SEED = 20260923
 
 def experiment_relay_settings():
     """The Relay-BP keys Experiment 1's strong tier decodes at."""
-    package_dir = os.path.dirname(decsim.__file__)
-    tree = os.path.dirname(package_dir)
-    run_path = os.path.join(tree, "experiments", "switching_baseline", "run.py")
-    spec = importlib.util.spec_from_file_location("switching_run", run_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    pool = module.strong_decoder_pool()
+    pool = experiment_one.strong_decoder_pool()
     return pool.algorithm
 
 

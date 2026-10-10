@@ -1,6 +1,6 @@
 """The Chrome trace of gate point 1: its shape, its chains, its counts.
 
-The event model and its worked example (weak_decoder_baseline d 3
+The event model and its worked example (machines.weak_baseline d 3
 p 0.003 seed 0, the frozen
 suite's first strict point); the copy, reference and move counts are
 data_path.md's hop table. The trace never moves a tick: a run with it on

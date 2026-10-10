@@ -37,13 +37,16 @@ every shot of a task runs what it returned.
 
 ## 2. Hand it to the machine
 
-The machine's `workload` field is the workload, lowered for the
-machine by `WorkloadSettings.running` (`decsim/frontends/settings.py`):
+The machine's `workload` part is the workload, lowered for the
+machine by `WorkloadSettings.running` (`decsim/frontends/settings.py`).
+On a base such as `machines.weak_baseline(distance, 0.001, 1.0)`
+(`decsim/presets/machines.py`), put it in place of the base's own:
 
 ```python
 workload = two_patch_memory(4, distance)
 running = workload_settings.WorkloadSettings.running(workload)
-machine = dataclasses.replace(base, workload=running)
+workload_part = graph.Part("workload", running)
+machine = base.with_part(workload_part)
 ```
 
 The makers decsim ships are in `decsim/producers.py`: `memory_circuit`
@@ -51,8 +54,8 @@ The makers decsim ships are in `decsim/producers.py`: `memory_circuit`
 once), and, with the `deltakit` extra installed, `deltakit_memory`
 (Deltakit's finite memory) and `deltakit_live_memory` (a live memory
 decoded after some rounds, then read out). `memory_workload` in
-`decsim/settings.py` is `memory_circuit` on the rotated surface code,
-running.
+`decsim/presets/machines.py` is `memory_circuit` on the rotated surface
+code, running.
 
 ## Or read the two outputs from files
 

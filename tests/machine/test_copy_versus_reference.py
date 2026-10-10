@@ -29,11 +29,13 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
+import decsim.topology.legacy as legacy
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -53,31 +55,57 @@ SEATS = {
 WEAK_SEATS = ("weak_decoder",)
 BOTH_DECODERS = ("weak_decoder", "strong_decoder")
 CHIP_THEN_HOST_DECODER = ("weak_decoder", "strong_syndrome_buffer")
+
+
+def weak_base(
+    distance: int,
+    physical_error_probability: float,
+    round_period_microseconds: float,
+) -> machine_settings.MachineSettings:
+    """The weak base, resolved, to change its slots in place."""
+    graph_machine = machines.weak_baseline(
+        distance, physical_error_probability, round_period_microseconds
+    )
+    return legacy.resolved(graph_machine)
+
+
+def strong_base(
+    distance: int,
+    physical_error_probability: float,
+    round_period_microseconds: float,
+) -> machine_settings.MachineSettings:
+    """The strong base, resolved, to change its slots in place."""
+    graph_machine = machines.strong_baseline(
+        distance, physical_error_probability, round_period_microseconds
+    )
+    return legacy.resolved(graph_machine)
+
+
 # (machine, windowing scheme, strong window, formed_at): every seat
 # on every path a round takes, on the window shapes that read a round
 # whose predecessor the seat never formed (Skoric's B blocks, and the
 # strong side's regions of both shapes)
 STIM_GRID = (
     (
-        machine_settings.weak_decoder_baseline,
+        weak_base,
         sliding_scheme.SlidingWindowScheme,
         declared_run.REDO_WINDOW,
         ("controller",),
     ),
     (
-        machine_settings.weak_decoder_baseline,
+        weak_base,
         sliding_scheme.SlidingWindowScheme,
         declared_run.REDO_WINDOW,
         ("weak_syndrome_buffer",),
     ),
     (
-        machine_settings.weak_decoder_baseline,
+        weak_base,
         sliding_scheme.SlidingWindowScheme,
         declared_run.REDO_WINDOW,
         WEAK_SEATS,
     ),
     (
-        machine_settings.weak_decoder_baseline,
+        weak_base,
         parallel_scheme.ParallelWindowScheme,
         declared_run.REDO_WINDOW,
         WEAK_SEATS,
@@ -113,13 +141,13 @@ STIM_GRID = (
         CHIP_THEN_HOST_DECODER,
     ),
     (
-        machine_settings.strong_decoder_baseline,
+        strong_base,
         sliding_scheme.SlidingWindowScheme,
         declared_run.REDO_WINDOW,
         ("strong_syndrome_buffer",),
     ),
     (
-        machine_settings.strong_decoder_baseline,
+        strong_base,
         sliding_scheme.SlidingWindowScheme,
         declared_run.REDO_WINDOW,
         ("strong_decoder",),
@@ -132,7 +160,7 @@ YANG_CYCLES = {"decoder": (5, 1)}
 
 def _machine_formed_at(where: str, distance: int = 3):
     """The weak baseline, forming its detection events there."""
-    settings = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
+    settings = weak_base(distance, 0.001, 1.0)
     detection_events = _formed_at(settings, where)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(
@@ -425,7 +453,7 @@ def _store_copy_bits(machine) -> int:
 
 def _machine(**weak_changes):
     """The weak baseline at d=3, counting its data movement."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    settings = weak_base(3, 0.001, 1.0)
     weak = dataclasses.replace(settings.weak_decoder, **weak_changes)
     observation = dataclasses.replace(settings.observation, data_movement=True)
     settings = dataclasses.replace(

@@ -136,17 +136,18 @@ source.
 
 ## 4. Run it and check it against a referent
 
-A machine's decoder is its `weak_decoder` record, whose `algorithm` is
-your record. Start from a base and replace it:
+A machine's decoder is its decoder pool part, named `weak` in the
+bases, whose `algorithm` is your record. Start from a base and set it:
 
 ```python
-base = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+import decsim.presets.machines as machines
+
+base = machines.weak_baseline(3, 0.003, 1.0)
 algorithm = MyDecoder.Settings()
-weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=algorithm)
-machine = dataclasses.replace(base, weak_decoder=weak_decoder)
+machine = base.with_settings(machines.WEAK_POOL, algorithm=algorithm)
 ```
 
-and make a run file of it, as `examples/my_first_sweep.py` is. To check
+give the graph to `decsim.Task`, and make a run file of it, as `examples/my_first_sweep.py` is. To check
 its answers, add a second task whose algorithm is
 `PyMatchingDecoder.Settings()`: at one seed both tasks draw the same
 shot (their `sample_digest` cells in `shots.csv` are equal), and the

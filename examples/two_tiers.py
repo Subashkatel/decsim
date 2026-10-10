@@ -20,16 +20,16 @@ decsim run examples/two_tiers.py
 ```
 """
 
-import dataclasses
-
 import decsim
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.links.link_profiles as link_profiles
-import decsim.settings as machine_settings
-import decsim.windows.settings as window_settings
+import decsim.presets.clocks as clocks
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 
 NAME = "two_tiers"
 DISTANCES = (3, 5)
@@ -54,43 +54,40 @@ switching = escalation_settings.SwitchingSettings(
 )
 weak_decoder = decoder_settings.linear_decoder_pool(
     WEAK_DECODE_MICROSECONDS_PER_ROUND,
-    machine_settings.FRIDGE_CLOCK,
+    clocks.FRIDGE_CLOCK,
     solves_per_window=2,
 )
 strong_decoder = decoder_settings.linear_decoder_pool(
     STRONG_DECODE_MICROSECONDS_PER_ROUND,
-    machine_settings.ROOM_CLOCK,
+    clocks.ROOM_CLOCK,
     solves_per_window=1,
+)
+
+# T_weak_comm on the hop into the weak store and T_strong_comm on the
+# escalation's hop, each the wire alone, as the one-cycle hop it replaces
+weak_communication = fabrics.TimedLink(
+    WEAK_COMMUNICATION_MICROSECONDS, excludes_receiver_processing=True
+)
+strong_communication = fabrics.TimedLink(
+    STRONG_COMMUNICATION_MICROSECONDS, excludes_receiver_processing=True
 )
 
 tasks = []
 for distance in DISTANCES:
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
     )
-    # T_weak_comm on the hop into the weak store, the strong side's hops
-    # one host cycle each, and T_strong_comm on the escalation's hop
-    weak_side = link_profiles.with_path_latency(
-        base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
+    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
+    weak_tier = base.with_part(weak_pool)
+    weak_side = fabrics.PathLinks(
+        controller_to_weak_buffer=weak_communication, base=base.fabric
     )
-    strong_side = machine_settings.one_cycle_strong_side(weak_side)
-    links = link_profiles.with_path_latency(
-        strong_side,
-        "weak_decoder_to_strong_decoder",
-        STRONG_COMMUNICATION_MICROSECONDS,
-    )
-    windows = window_settings.switching_windows(
-        base.windows, switching.strong_window
-    )
-    machine = dataclasses.replace(
-        base,
-        links=links,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
+    # the strong side's other hops one host cycle each
+    fabric = link_cards.strong_side(weak_side, strong_communication)
+    machine = machines.with_strong_tier(
+        weak_tier, strong_decoder, switching, fabric
     )
     # the task's settings, named as the results' columns name them
     metadata = {

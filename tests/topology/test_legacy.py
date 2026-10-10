@@ -2,9 +2,10 @@
 
 The referents are today's records: every shipped task and every
 regression machine, written as a graph, resolves to the record it was
-written from, with the same task id; a graph written by hand resolves
-to the record its parts hold; a graph today's builder cannot build is
-refused as not built yet, never as not allowed.
+written from, with the same task id; so does every preset machine
+(decsim/presets), written back from its record; a graph written by
+hand resolves to the record its parts hold; a graph today's builder
+cannot build is refused as not built yet, never as not allowed.
 """
 
 import dataclasses
@@ -15,17 +16,22 @@ import pytest
 import decsim.experiments.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.links.link_profiles as link_profiles
-import decsim.settings as machine_settings
+import decsim.presets.clocks as clocks
+import decsim.presets.experiment_one as experiment_one
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.topology.legacy as legacy
+import tests.declared_run as declared_run
+import tests.escalation.test_strong_window_shapes as shape_tests
 import tests.experiments.run_files as run_files
 import tests.regression.test_shot_results as regression
 
 THIS_FILE = pathlib.Path(__file__)
 EXPERIMENTS = THIS_FILE.parents[2] / "experiments"
 SHIPPED = ("switching_baseline", "switching", "data_movement")
-FRIDGE_CLOCK = machine_settings.FRIDGE_CLOCK
+FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
 # Experiment 1's cable to the host and the host's poll of its memory
 ROCE_V2_CPU_LEG = fabrics.RoundTripLeg(2.305, 128, 100_000)
 HOST_POLL = fabrics.TimedLink(0.0)
@@ -33,6 +39,14 @@ ROCE_V2_CPU = fabrics.FridgeHostFabric(
     cable=ROCE_V2_CPU_LEG, host_local=HOST_POLL
 )
 STAGE_FOUR = "not implemented yet"
+PRESETS = (
+    "weak_baseline",
+    "strong_baseline",
+    "weak_baseline_with_a_strong_tier",
+    "experiment_one_weak_alone",
+    "experiment_one_strong_alone",
+    "experiment_one_switching",
+)
 
 
 def _shipped_tasks() -> list:
@@ -42,6 +56,27 @@ def _shipped_tasks() -> list:
         loaded = experiment.load(run_file)
         tasks.extend(loaded.tasks)
     return tasks
+
+
+def _preset(name: str) -> graph.Machine:
+    """One preset machine at d = 3, p = 0.001, by its name in PRESETS."""
+    weak_base = machines.weak_baseline(3, 0.001, 1.0)
+    strong_side = link_cards.strong_side(weak_base.fabric)
+    switching = shape_tests.switching_slot(declared_run.REDO_WINDOW)
+    strong_pool = experiment_one.strong_decoder_pool()
+    presets = {
+        "weak_baseline": weak_base,
+        "strong_baseline": machines.strong_baseline(3, 0.001, 1.0),
+        "weak_baseline_with_a_strong_tier": machines.with_strong_tier(
+            weak_base, machines.STRONG_BASELINE_POOL, switching, strong_side
+        ),
+        "experiment_one_weak_alone": experiment_one.weak_alone(3, 0.001),
+        "experiment_one_strong_alone": experiment_one.strong_alone(
+            3, 0.001, strong_pool
+        ),
+        "experiment_one_switching": experiment_one.switching(3, 0.001),
+    }
+    return presets[name]
 
 
 def _weak_graph() -> graph.Machine:
@@ -84,6 +119,24 @@ def test_every_regression_machine_resolves_to_its_record_and_its_id(name):
     assert again.strong_id() == task.strong_id()
 
 
+@pytest.mark.parametrize("name", PRESETS)
+def test_every_preset_machine_resolves_again_from_its_written_record(name):
+    preset = _preset(name)
+    settings = legacy.resolved(preset)
+    task = collect.Task(name, settings)
+
+    written = legacy.graph_of(settings)
+    machine = legacy.resolved(written)
+
+    again = collect.Task(name, machine)
+    written_names = {part.name for part in written.parts}
+    preset_names = {part.name for part in preset.parts}
+    assert machine == settings
+    assert again.strong_id() == task.strong_id()
+    # graph_of also writes the parts a preset leaves at their defaults
+    assert preset_names <= written_names
+
+
 def test_a_hand_written_graph_holds_its_parts_records():
     settings = run_files.minimal_machine()
     written = legacy.graph_of(settings)
@@ -117,7 +170,8 @@ def _linked(wire: graph.Wire, links_by_target: dict) -> graph.Wire:
 
 
 def test_experiment_one_is_its_parts_its_fiber_wires_and_a_cable():
-    settings = regression.experiment_one_weak_alone()
+    preset = regression.experiment_one_weak_alone()
+    settings = legacy.resolved(preset)
     uplink = fabrics.ClockedLink(
         clock=FRIDGE_CLOCK,
         latency_cycles=40,

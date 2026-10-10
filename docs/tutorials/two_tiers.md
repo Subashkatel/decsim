@@ -42,12 +42,12 @@ switching = escalation_settings.SwitchingSettings(
 )
 weak_decoder = decoder_settings.linear_decoder_pool(
     WEAK_DECODE_MICROSECONDS_PER_ROUND,
-    machine_settings.FRIDGE_CLOCK,
+    clocks.FRIDGE_CLOCK,
     solves_per_window=2,
 )
 strong_decoder = decoder_settings.linear_decoder_pool(
     STRONG_DECODE_MICROSECONDS_PER_ROUND,
-    machine_settings.ROOM_CLOCK,
+    clocks.ROOM_CLOCK,
     solves_per_window=1,
 )
 ```
@@ -80,33 +80,62 @@ and prices the algorithm at zero.
 - The strong tier's tau_strong_dec is 10 tau_gen, 10 microseconds a
   round.
 
-Then, for each distance, the loop moves the paper's T_comm, the time
-from a round's measurement to its decoder, onto two links:
+The paper's T_comm, the time from a round's measurement to its
+decoder, is two links, each a latency in microseconds on an unbounded
+wire:
 
 ```python examples/two_tiers.py
-    weak_side = link_profiles.with_path_latency(
-        base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
+weak_communication = fabrics.TimedLink(
+    WEAK_COMMUNICATION_MICROSECONDS, excludes_receiver_processing=True
+)
+strong_communication = fabrics.TimedLink(
+    STRONG_COMMUNICATION_MICROSECONDS, excludes_receiver_processing=True
+)
+```
+
+Then, for each distance, the loop builds the machine as a graph of
+named parts (`decsim/topology/graph.py`), starting from the weak base:
+
+```python examples/two_tiers.py
+    base = machines.weak_baseline(
+        distance,
+        PHYSICAL_ERROR_PROBABILITY,
+        ROUND_PERIOD_MICROSECONDS,
     )
-    strong_side = machine_settings.one_cycle_strong_side(weak_side)
-    links = link_profiles.with_path_latency(
-        strong_side,
-        "weak_decoder_to_strong_decoder",
-        STRONG_COMMUNICATION_MICROSECONDS,
+    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
+    weak_tier = base.with_part(weak_pool)
+    weak_side = fabrics.PathLinks(
+        controller_to_weak_buffer=weak_communication, base=base.fabric
+    )
+    # the strong side's other hops one host cycle each
+    fabric = link_cards.strong_side(weak_side, strong_communication)
+    machine = machines.with_strong_tier(
+        weak_tier, strong_decoder, switching, fabric
     )
 ```
 
-One tau_gen on `controller_to_weak_buffer`, ten on
-`weak_decoder_to_strong_decoder`, the hop an escalation crosses, and
-one cycle on each other hop of the strong side.
+- `with_part` puts the weak decoder in the place of the base's part of
+  the same name, `weak`, in the fridge.
+- The machine's fabric prices every hop no wire prices itself.
+  `PathLinks` gives a hop its link by the hop's name and leaves the
+  rest to its `base`: one tau_gen on `controller_to_weak_buffer`, and
+  the weak base's one cycle on every other hop of the weak side.
+  `link_cards.strong_side` adds the strong side's hops at one host
+  cycle each, and ten tau_gen on `weak_decoder_to_strong_decoder`, the
+  hop an escalation crosses.
+- `machines.with_strong_tier` adds the strong tier on the host: a
+  second syndrome buffer and the strong decoder, the switching record,
+  the wire from the weak decoder's escalation to the strong one, and
+  the windows the strong window needs.
 
 The cards price time and nothing else: both tiers still decode for
 real, on the minimum-weight perfect matching path, so the logical
 failures below are measured and only the time is stated.
 
-Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the
-weak tier and keeps every round a strong re-decode might still ask for;
-`strong_syndrome_buffer` holds the rounds an escalation carries up to
-the strong decoder, and nothing else in this run.
+Two syndrome buffers, not one: `weak_buffer` streams to the weak tier
+and keeps every round a strong re-decode might still ask for;
+`strong_buffer` holds the rounds an escalation carries up to the strong
+decoder, and nothing else in this run.
 
 ## Step 2. Run the sweep
 

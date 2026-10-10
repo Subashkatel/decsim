@@ -47,7 +47,7 @@ heart is one loop:
 ```python examples/priced_cards_example.py
 tasks = []
 for distance in DISTANCES:
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
@@ -55,25 +55,28 @@ for distance in DISTANCES:
     card = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=DECODE_MICROSECONDS
     )
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=card)
-    machine = dataclasses.replace(base, weak_decoder=weak_decoder)
+    machine = base.with_settings(machines.WEAK_POOL, algorithm=card)
 ```
 
-- `weak_decoder_baseline` returns a `MachineSettings`: one record for
-  each part of one machine, the QPU, the controller, the links, the
-  syndrome buffer, the windows, the decoder and the Pauli frame. It has
-  one decoder, which decodes everything. Its shot is ten rounds for each
-  unit of distance, 30 at d = 3;
-  `dataclasses.replace(base, workload=machine_settings.memory_workload(3, 0.001, 300))`
+- `machines.weak_baseline` (`decsim/presets/machines.py`) returns a
+  machine written as a graph: one named part for each piece of one
+  machine, the QPU, the controller, the syndrome buffer, the windows,
+  the decoder and the Pauli frame, the wires between them, and a fabric
+  that prices the links. It has one decoder, the part named `weak`
+  (`machines.WEAK_POOL`), which decodes everything. Its shot is ten
+  rounds for each unit of distance, 30 at d = 3;
+  `base.with_part(graph.Part("workload", machines.memory_workload(3, 0.001, 300)))`
   makes it 300.
-- `dataclasses.replace` changes one field of a record and keeps the
-  rest. Here the decoder's algorithm becomes a **priced card**:
-  PyMatching still decodes every window, but each decode is charged
-  `DECODE_MICROSECONDS`, 1.0 microseconds, however fast your computer
-  is. So every tick on this page is the same on your machine.
+- `with_settings` changes fields of one part's record, found by the
+  part's name, and keeps the rest. Here the decoder's algorithm becomes
+  a **priced card**: PyMatching still decodes every window, but each
+  decode is charged `DECODE_MICROSECONDS`, 1.0 microseconds, however
+  fast your computer is. So every tick on this page is the same on your
+  machine.
 
-After the loop, each machine becomes a `decsim.Task` with a name, `d3`
-for distance 3, and the tasks become a `decsim.Experiment`. Its
+After the loop, each machine, graph as it is, becomes a `decsim.Task`
+with a name, `d3` for distance 3, and the tasks become a
+`decsim.Experiment`. Its
 `COLLECTION` says when a task stops: here at 20 shots.
 
 ## Step 3. Run one shot

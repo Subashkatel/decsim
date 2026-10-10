@@ -25,6 +25,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.circuits as circuit_records
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -132,10 +133,16 @@ def live_settings(
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
+    # the frame's word feedback_microseconds after the decision, at the
+    # reference card's rate; every other hop the reference card's
     reference = link_profiles.logical_reference_profile()
-    links = link_profiles.with_path_latency(
-        reference, "frame_to_controller", feedback_microseconds
+    word_capacity = reference.frame_to_controller.channel.capacity
+    feedback = fabrics.TimedLink(
+        feedback_microseconds, word_capacity.input_bits_per_microsecond
     )
+    fabric = fabrics.PathLinks(frame_to_controller=feedback)
+    routes = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+    links = fabrics.card(fabric, routes, {}, None)
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True
     )

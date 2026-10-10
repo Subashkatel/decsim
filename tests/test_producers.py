@@ -17,8 +17,9 @@ import stim
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.producers as producers
-import decsim.settings as machine_settings
+import decsim.topology.legacy as legacy
 import examples.deltakit_example as deltakit_example
 import examples.live_memory_example as live_memory_example
 
@@ -81,7 +82,8 @@ def test_memory_patches_runs_one_memory_per_patch_at_once():
         distance=3,
         physical_error_probability=0.001,
     )
-    base = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    weak_base = machines.weak_baseline(3, 0.001, 1.0)
+    base = legacy.resolved(weak_base)
     workload = workload_settings.WorkloadSettings.running(patches)
     settings = dataclasses.replace(base, workload=workload)
     machine = machine_module.Machine.build(settings, 0)

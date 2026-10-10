@@ -16,18 +16,25 @@ import decsim.decoders.dispatch_steps.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.engine as engine_module
 import decsim.links.channel as channel_module
-import decsim.links.link_profiles as link_profiles
+import decsim.presets.link_cards as link_cards
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
+import decsim.topology.fabrics as fabrics
 from tests.decoders import windows
 
 REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
 DISPATCHER = dispatch_steps.DISPATCHER
 WORKER = dispatch_steps.WORKER
 ECHO = dispatch_steps.ECHO
-ROCE_V2_GPU_CARD = link_profiles.RoceV2GpuFabric.base_card()
-NVQLINK_GPU_CARD = link_profiles.NvqlinkGpuFabric.base_card()
+# every path of today's card, each end where the reference card puts it
+LEGACY_ROUTES = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+ROCE_V2_GPU_CARD = fabrics.card(
+    link_cards.ROCE_V2_GPU_FABRIC, LEGACY_ROUTES, {}, None
+)
+NVQLINK_GPU_CARD = fabrics.card(
+    link_cards.NVQLINK_GPU_FABRIC, LEGACY_ROUTES, {}, None
+)
 
 
 def _bind_seed(component) -> None:

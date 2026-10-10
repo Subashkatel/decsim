@@ -26,7 +26,6 @@ import dataclasses
 import pytest
 
 import decsim.confidence.complementary as complementary
-import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
@@ -37,12 +36,17 @@ import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.ports as ports
+import decsim.presets.clocks as clocks
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.legacy as legacy
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.schemes.sliding as sliding_scheme
@@ -56,8 +60,8 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 # The gate's switching card: both clocks at 250 MHz, each hop one cycle
 # of its side's clock on an unbounded wire.
-FRIDGE_CLOCK = config.Clock.from_megahertz(250.0)
-ROOM_CLOCK = config.Clock.from_megahertz(250.0)
+FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
+ROOM_CLOCK = clocks.ROOM_CLOCK
 GATE_PATH_CLOCKS = {
     "qpu_to_controller": FRIDGE_CLOCK,
     "controller_to_weak_buffer": FRIDGE_CLOCK,
@@ -81,18 +85,13 @@ NAMED_BOUNDARY_PATHS = (
 
 def one_cycle_path(links, path_name: str, clock, latency_cycles: int = 1):
     """One path of the card on an unbounded wire of one lane."""
-    return link_profiles.path_card(
-        links,
-        path_name,
+    link = fabrics.ClockedLink(
         clock=clock,
         latency_cycles=latency_cycles,
-        bits_per_cycle=None,
         source="the gate's switching card",
-        lane_count=1,
-        setup_cycles_per_transfer=0,
-        header_bits_per_transfer=0,
-        protocol=None,
     )
+    path = getattr(links, path_name)
+    return link.priced(path_name, path, None)
 
 
 def gate_switching(
@@ -127,7 +126,7 @@ def gate_switching(
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=FRIDGE_CLOCK
     )
-    workload = machine_settings.memory_workload(
+    workload = machines.memory_workload(
         distance, physical_error_probability, rounds_per_shot
     )
     observation = observe_settings.ObservationSettings(log_component_io=True)
@@ -158,24 +157,18 @@ def weak_base_switching(
     weak base's chip unit escalates to belief matching on the host, the
     strong side's five hops one room cycle each.
     """
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance, physical_error_probability, round_period_microseconds
     )
     pymatching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=pymatching)
-    links = machine_settings.one_cycle_strong_side(base.links)
-    strong_window = declared_run.REDO_WINDOW
-    windows = window_settings.switching_windows(base.windows, strong_window)
+    weak_base = base.with_settings(machines.WEAK_POOL, algorithm=pymatching)
+    strong_side = link_cards.strong_side(base.fabric)
     strong_decoder = host_belief_matching()
-    switching = switching_slot(strong_window)
-    return dataclasses.replace(
-        base,
-        links=links,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
+    switching = switching_slot(declared_run.REDO_WINDOW)
+    switching_machine = machines.with_strong_tier(
+        weak_base, strong_decoder, switching, strong_side
     )
+    return legacy.resolved(switching_machine)
 
 
 def host_belief_matching() -> decoder_settings.DecoderPoolSettings:

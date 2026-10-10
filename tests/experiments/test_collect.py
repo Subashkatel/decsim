@@ -76,6 +76,7 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
 import decsim.topology.legacy as legacy
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
@@ -443,7 +444,7 @@ def test_a_tasks_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     record = json.loads(record_text)
     links = record["settings"]["links"]
     channel = links["qpu_to_controller"]["channel"]
-    assert links["profile_name"] == "logical_reference"
+    assert links["profile_name"] == fabrics.PROFILE_NAME
     assert channel["configuration_source"] == run_files.REFERENCE_SOURCE
 
 

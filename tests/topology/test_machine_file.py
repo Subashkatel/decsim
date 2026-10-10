@@ -61,8 +61,7 @@ def _constants(tmp_path: pathlib.Path, text: str = CONSTANTS):
 @pytest.mark.parametrize("name", list(regression.SHAPES))
 def test_every_regression_machine_written_out_reads_back(name):
     build = regression.SHAPES[name]
-    settings = build()
-    machine = legacy.graph_of(settings)
+    machine = build()
     workload = machine.part(WORKLOAD)
 
     text = machine_file.dumps(machine)

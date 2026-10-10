@@ -8,7 +8,7 @@ provisions the link carrying it must move together when it changes, and
 not one release apart.
 """
 
-import decsim.links.link_profiles as link_profiles
+import decsim.presets.link_cards as link_cards
 import decsim.records.windows as window_records
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_interactions as window_interactions
@@ -52,7 +52,7 @@ def _planned_region_round_count() -> int:
 
 def _provisioned_region_round_count() -> float:
     """The rounds the bandwidth card provisions the strong input for."""
-    profile = link_profiles.bandwidth_limited_profile(**GEOMETRY)
+    profile = link_cards.bandwidth_limited_card(**GEOMETRY)
     path = profile.strong_buffer_to_strong_decoder
     bits = path.default_payload.input_bits
     return bits / SYNDROME_BITS_PER_ROUND

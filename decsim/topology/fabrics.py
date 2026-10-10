@@ -28,11 +28,12 @@ components/fabrics.py), whose prices reproduced Experiment 1's card.
 
 import dataclasses
 import fractions
-from typing import Optional, Protocol
+from typing import Optional
 
 import decsim.config as config
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
+import decsim.ports as ports
 
 FRIDGE = "fridge"
 HOST = "host"
@@ -72,18 +73,6 @@ LEGACY_SITES = {
 }
 
 
-class LinkCard(Protocol):
-    """A wire's price: a route's path from its reference path."""
-
-    def priced(
-        self,
-        name: str,
-        reference: link_settings.PathSettings,
-        machine_clock: Optional[config.Clock],
-    ) -> link_settings.PathSettings:
-        """The path named name: the reference's payload rule on this wire."""
-
-
 @dataclasses.dataclass(frozen=True)
 class Route:
     """One hop between two parts: its path's name and each end's site."""
@@ -91,13 +80,6 @@ class Route:
     path: str
     source_site: Optional[str]
     target_site: Optional[str]
-
-
-class FabricRule(Protocol):
-    """A fabric: the link each route takes, None for the reference path."""
-
-    def link_for(self, route: Route) -> Optional[LinkCard]:
-        """The link this route takes, or None for the reference path."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -268,7 +250,7 @@ class FixedPath:
 class ReferenceFabric:
     """Every route on the reference card (link_profiles.py)."""
 
-    def link_for(self, route: Route) -> Optional[LinkCard]:
+    def link_for(self, route: Route) -> Optional[ports.LinkCard]:
         """No link: the reference path."""
         del route
         return None
@@ -278,21 +260,21 @@ class ReferenceFabric:
 class PathLinks:
     """A link per path, by the path's name; any other route, the base's."""
 
-    qpu_to_controller: Optional[LinkCard] = None
-    controller_to_weak_buffer: Optional[LinkCard] = None
-    weak_buffer_to_weak_decoder: Optional[LinkCard] = None
-    weak_decoder_to_strong_decoder: Optional[LinkCard] = None
-    strong_buffer_to_strong_decoder: Optional[LinkCard] = None
-    weak_decoder_to_frame: Optional[LinkCard] = None
-    decoder_to_decoder: Optional[LinkCard] = None
-    strong_decoder_to_frame: Optional[LinkCard] = None
-    frame_to_controller: Optional[LinkCard] = None
-    controller_to_qpu: Optional[LinkCard] = None
-    controller_to_strong_buffer: Optional[LinkCard] = None
-    strong_decoder_to_weak_decoder: Optional[LinkCard] = None
-    base: FabricRule = ReferenceFabric()
+    qpu_to_controller: Optional[ports.LinkCard] = None
+    controller_to_weak_buffer: Optional[ports.LinkCard] = None
+    weak_buffer_to_weak_decoder: Optional[ports.LinkCard] = None
+    weak_decoder_to_strong_decoder: Optional[ports.LinkCard] = None
+    strong_buffer_to_strong_decoder: Optional[ports.LinkCard] = None
+    weak_decoder_to_frame: Optional[ports.LinkCard] = None
+    decoder_to_decoder: Optional[ports.LinkCard] = None
+    strong_decoder_to_frame: Optional[ports.LinkCard] = None
+    frame_to_controller: Optional[ports.LinkCard] = None
+    controller_to_qpu: Optional[ports.LinkCard] = None
+    controller_to_strong_buffer: Optional[ports.LinkCard] = None
+    strong_decoder_to_weak_decoder: Optional[ports.LinkCard] = None
+    base: ports.FabricRule = ReferenceFabric()
 
-    def link_for(self, route: Route) -> Optional[LinkCard]:
+    def link_for(self, route: Route) -> Optional[ports.LinkCard]:
         """This path's link, else the base's."""
         link = getattr(self, route.path)
         if link is not None:
@@ -309,11 +291,11 @@ class FridgeHostFabric:
     the fridge takes the base's.
     """
 
-    cable: LinkCard
-    host_local: LinkCard
-    base: FabricRule = ReferenceFabric()
+    cable: ports.LinkCard
+    host_local: ports.LinkCard
+    base: ports.FabricRule = ReferenceFabric()
 
-    def link_for(self, route: Route) -> Optional[LinkCard]:
+    def link_for(self, route: Route) -> Optional[ports.LinkCard]:
         """The cable, the host link, or the base's link for the route."""
         sites = {route.source_site, route.target_site}
         if sites == {FRIDGE, HOST}:
@@ -329,14 +311,14 @@ class CardFabric:
 
     card: link_settings.FabricSettings
 
-    def link_for(self, route: Route) -> Optional[LinkCard]:
+    def link_for(self, route: Route) -> Optional[ports.LinkCard]:
         """The card's path for the route, as written."""
         path = getattr(self.card, route.path)
         return FixedPath(path)
 
 
 def card(
-    rule: FabricRule,
+    rule: ports.FabricRule,
     routes: tuple,
     wire_links: dict,
     machine_clock: Optional[config.Clock],

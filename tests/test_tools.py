@@ -576,11 +576,11 @@ def _decsim(tmp_path, arguments: list, environment):
 # The weak base at two distances, four shots each.
 TWO_TASK_RUN_FILE = """
 import decsim
-import decsim.settings as machine_settings
+import decsim.presets.machines as machines
 
 tasks = []
 for distance in (3, 5):
-    machine = machine_settings.weak_decoder_baseline(distance, 0.001, 1.0)
+    machine = machines.weak_baseline(distance, 0.001, 1.0)
     task = decsim.Task(f"d{distance}", machine, {"qpu.distance": distance})
     tasks.append(task)
 collection = decsim.CollectionSettings(max_shots=4)

@@ -25,7 +25,6 @@ the controller, the stores, the windows and the frame produced.
 import dataclasses
 import functools
 import importlib.util
-import pathlib
 from typing import Any
 
 import ldpc
@@ -70,6 +69,8 @@ import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.ports as ports
+import decsim.presets.experiment_one as experiment_one
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
@@ -90,6 +91,8 @@ import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.topology.graph as graph
+import decsim.topology.legacy as legacy
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
@@ -219,10 +222,10 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
 
 def test_a_new_decoder_is_one_class_and_its_settings_record():
     """Gate point 1's settings run to completion on a decoder added here."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
     fake = FakeWeakDecoder.Settings()
-    weak_decoder = dataclasses.replace(settings.weak_decoder, algorithm=fake)
-    settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
+    with_fake = gate_point.with_settings(machines.WEAK_POOL, algorithm=fake)
+    settings = legacy.resolved(with_fake)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -233,15 +236,15 @@ def test_a_new_decoder_is_one_class_and_its_settings_record():
 
 def test_a_second_table_row_runs_gate_point_one():
     """Gate point 1's settings run to completion on the union_find row."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
     host_time = cycle_count_module.HostMeasuredTime()
     union_find_settings = union_find_decoder.UnionFindDecoder.Settings(
         timing=host_time
     )
-    weak_decoder = dataclasses.replace(
-        settings.weak_decoder, algorithm=union_find_settings
+    with_union_find = gate_point.with_settings(
+        machines.WEAK_POOL, algorithm=union_find_settings
     )
-    settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
+    settings = legacy.resolved(with_union_find)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -261,7 +264,8 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     tick, because no component has queued anything while the rest of the
     machine is still being built.
     """
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
+    settings = legacy.resolved(gate_point)
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
 
@@ -1871,7 +1875,8 @@ class CountingSyndromeBufferSettings(
 
 def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     """Gate point 1's settings run to completion on a store plugged in."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
+    settings = legacy.resolved(gate_point)
     weak_store = settings.weak_syndrome_buffer
     counting = CountingSyndromeBufferSettings(
         bits=weak_store.bits,
@@ -1933,7 +1938,8 @@ class AlwaysReadyFactorySettings:
 
 def test_a_factory_written_outside_decsim_is_built_by_its_record():
     """The part calls the record's build, whatever factory it is."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
+    settings = legacy.resolved(gate_point)
     always_ready = AlwaysReadyFactorySettings()
     settings = dataclasses.replace(settings, magic_state_factory=always_ready)
     machine = machine_module.Machine.build(settings, 0)
@@ -2629,7 +2635,8 @@ DATA_QUBIT_COUNT = 9
 
 def base_run(base):
     """One shot of the base at d=3, p=0.001."""
-    settings = base(3, 0.001, 1.0)
+    graph_machine = base(3, 0.001, 1.0)
+    settings = legacy.resolved(graph_machine)
     machine = machine_module.Machine.build(settings, 0)
     machine.run()
     return machine
@@ -2648,7 +2655,7 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     the data qubits' with the last round, and the store hop the events
     they formed, eight per round.
     """
-    machine = base_run(machine_settings.weak_decoder_baseline)
+    machine = base_run(machines.weak_baseline)
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
@@ -2669,7 +2676,7 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     once, at the width it leaves the controller, and the weak syndrome buffer
     sees none of them.
     """
-    machine = base_run(machine_settings.strong_decoder_baseline)
+    machine = base_run(machines.strong_baseline)
     store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
     readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
     room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
@@ -3031,10 +3038,6 @@ def test_a_matching_arrangement_predicts_what_qldpcs_sliding_windows_predict(
     assert predictions == reference_predictions
 
 
-THIS_FILE = pathlib.Path(__file__)
-EXPERIMENT_ONE_RUN_FILE = (
-    THIS_FILE.parents[2] / "experiments" / "switching_baseline" / "run.py"
-)
 UNION_FIND_DISTANCE = 5
 # Experiment 1's highest rate, where most windows hold defects to match
 UNION_FIND_ERROR_RATE = 0.005
@@ -3042,25 +3045,17 @@ UNION_FIND_ROUNDS = 20  # four windows of d rounds
 UNION_FIND_SHOT_COUNT = 100
 
 
-@functools.cache
-def experiment_one_run_file():
-    """experiments/switching_baseline/run.py, for its machine functions."""
-    specification = importlib.util.spec_from_file_location(
-        "experiment_one_run_file", EXPERIMENT_ONE_RUN_FILE
-    )
-    module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
-    return module
-
-
 def experiment_one_weak_alone() -> machine_settings.MachineSettings:
     """Experiment 1's weak-alone machine on shots of four windows."""
-    run_file = experiment_one_run_file()
-    machine = run_file.weak_alone(UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE)
-    workload = machine_settings.memory_workload(
+    machine = experiment_one.weak_alone(
+        UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE
+    )
+    workload = machines.memory_workload(
         UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE, UNION_FIND_ROUNDS
     )
-    return dataclasses.replace(machine, workload=workload)
+    workload_part = graph.Part("workload", workload)
+    four_windows = machine.with_part(workload_part)
+    return legacy.resolved(four_windows)
 
 
 def note_weak_commit(commits, job, result, outcome, ended_ticks) -> None:
@@ -3145,18 +3140,19 @@ SWITCHING_SHOT_COUNT = 100
 
 def experiment_one_switching_on_matching() -> machine_settings.MachineSettings:
     """Experiment 1's switching machine, PyMatching as its strong tier."""
-    run_file = experiment_one_run_file()
-    machine = run_file.switching(SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE)
-    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    strong_decoder = dataclasses.replace(
-        machine.strong_decoder, algorithm=matching
+    machine = experiment_one.switching(
+        SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE
     )
-    workload = machine_settings.memory_workload(
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    on_matching = machine.with_settings(
+        machines.STRONG_POOL, algorithm=matching
+    )
+    workload = machines.memory_workload(
         SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE, SWITCHING_ROUNDS
     )
-    return dataclasses.replace(
-        machine, strong_decoder=strong_decoder, workload=workload
-    )
+    workload_part = graph.Part("workload", workload)
+    six_windows = on_matching.with_part(workload_part)
+    return legacy.resolved(six_windows)
 
 
 DELIVERED_TIERS = {

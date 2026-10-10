@@ -595,8 +595,24 @@ def _decode_backlog(
     decode_backlog = metrics.DecodeBacklog(
         window_manager, decoder_managers, round_events
     )
-    engine.action_done.connect(decode_backlog.observe)
+    at_tick_end = functools.partial(_sample_at_tick_end, engine, decode_backlog)
+    engine.action_done.connect(at_tick_end)
     return decode_backlog
+
+
+def _sample_at_tick_end(
+    engine: engine_module.Engine,
+    decode_backlog: metrics.DecodeBacklog,
+    tick: int,
+) -> None:
+    """Sample the backlog after a tick's last action only.
+
+    The peak is over the counts ticks end at, so an action with another
+    due at its tick changes nothing the sampler keeps.
+    """
+    if engine.has_action_due_now():
+        return
+    decode_backlog.observe(tick)
 
 
 def _connect_log(

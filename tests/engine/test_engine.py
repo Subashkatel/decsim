@@ -182,3 +182,23 @@ def test_a_descheduled_action_never_runs_and_never_sets_the_time():
 
     assert ran == [0]
     assert engine.now == 5
+
+
+def test_an_action_is_due_now_until_the_last_one_of_its_tick():
+    """A sampler of what ticks end at reads after the last action only."""
+    engine = engine_module.Engine()
+    answers = []
+
+    def first():
+        engine.schedule(0, second)
+        due = engine.has_action_due_now()
+        answers.append(due)
+
+    def second():
+        due = engine.has_action_due_now()
+        answers.append(due)
+
+    engine.schedule(2, first)
+    engine.schedule(5, second)
+    engine.run()
+    assert answers == [True, False, False]

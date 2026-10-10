@@ -52,6 +52,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
+import decsim.parameters.assignments as assignments
 
 RUN_SCRIPT = "run.sbatch"
 FOLD_SCRIPT = "fold.sbatch"
@@ -521,7 +522,8 @@ def _run_lines(
 
     Every path is quoted, which bash and sbatch's own reading of an
     #SBATCH line both undo, and the job's array index is left for bash
-    to expand.
+    to expand. The assignments in force (DECSIM_SET, which --set
+    writes) are exported, so every job builds the tasks the plan holds.
     """
     shape = (
         f"--array={array} --cpus-per-task={job.cores} "
@@ -534,6 +536,11 @@ def _run_lines(
     command = f"{quoted} --job $SLURM_ARRAY_TASK_ID --processes {job.cores}"
     output = shlex.quote(f"--output={log}")
     lines = ["#!/bin/bash", f"#SBATCH {shape}", f"#SBATCH {output}"]
+    written = os.environ.get(assignments.ENVIRONMENT_VARIABLE)
+    if written:
+        quoted_assignments = shlex.quote(written)
+        variable = assignments.ENVIRONMENT_VARIABLE
+        lines.append(f"export {variable}={quoted_assignments}")
     lines.append(command)
     return "\n".join(lines) + "\n"
 

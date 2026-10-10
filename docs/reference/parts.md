@@ -57,6 +57,8 @@ Every field has a default: a timing-only run of distance-three surface code patc
 
 The decode side is three slots, each None when the run has no such part: weak_decoder alone, strong_decoder alone, or both with switching, which decodes weak first and escalates a window to the strong decoder. None of the three plans no decoding.
 
+SET_IN_THE_RUN_FILE names the paths the run file built the workload's circuit from or lowered it to: an assignment by path (decsim/parameters/tree.py) would leave the circuit behind, a distance-5 machine running a distance-3 circuit, so they are set in the run file.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `clock` | `Optional[config.Clock]` | `None` |

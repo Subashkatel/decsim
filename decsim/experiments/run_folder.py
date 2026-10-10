@@ -32,6 +32,7 @@ import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
 import decsim.observe.observation as observation_module
 import decsim.observe.settings as observe_settings
+import decsim.parameters.assignments as assignments
 import decsim.records.program as program_records
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
@@ -646,6 +647,7 @@ def _how_it_ran() -> dict:
         "host": platform.node(),
         "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "argv": sys.argv,
+        "assignments": os.environ.get(assignments.ENVIRONMENT_VARIABLE),
     }
 
 

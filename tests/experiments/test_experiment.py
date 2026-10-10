@@ -23,6 +23,7 @@ import decsim.experiments.collection as collection
 import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
 import decsim.frontends.settings as workload_settings
+import decsim.parameters.assignments as assignments
 import decsim.producers as producers
 import tests.experiments.run_files as run_files
 
@@ -326,3 +327,43 @@ def _calls_a_task_a_point(name: str) -> bool:
     lowered = split_camel_case.lower()
     words = lowered.split("_")
     return "point" in words or "points" in words
+
+
+def test_a_run_file_loaded_with_decsim_set_builds_every_task_with_it(
+    tmp_path, monkeypatch
+):
+    """ns-3's Config::SetDefault: every task built under it takes it."""
+    run_file = run_files.write_run_file(tmp_path, axes=run_files.FOUR_TASK_AXES)
+    variable = assignments.ENVIRONMENT_VARIABLE
+    monkeypatch.setenv(variable, "")
+    plain = experiment.load(run_file)
+    monkeypatch.setenv(variable, "weak_decoder.unit_count=2")
+
+    assigned = experiment.load(run_file)
+
+    for plain_task, assigned_task in zip(
+        plain.tasks, assigned.tasks, strict=True
+    ):
+        pool = dataclasses.replace(
+            plain_task.machine.weak_decoder, unit_count=2
+        )
+        expected = dataclasses.replace(plain_task.machine, weak_decoder=pool)
+        assert assigned_task.machine == expected
+        assert assigned_task.strong_id() != plain_task.strong_id()
+
+
+def test_an_assignment_no_task_reaches_is_refused_naming_the_run_file(
+    tmp_path, monkeypatch
+):
+    run_file = run_files.write_run_file(tmp_path)
+    variable = assignments.ENVIRONMENT_VARIABLE
+    monkeypatch.setenv(variable, "weak_decoder.unit_cont=2")
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        experiment.load(run_file)
+
+    message = str(refused.value)
+    assert message.startswith(
+        f"{run_file}: {variable} weak_decoder.unit_cont=2"
+    )
+    assert "Did you mean weak_decoder.unit_count" in message

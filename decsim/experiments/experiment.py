@@ -21,6 +21,8 @@ from typing import Optional, Union
 import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
+import decsim.parameters.assignments as assignments
+import decsim.parameters.in_force as in_force
 
 _THIS_FILE = pathlib.Path(__file__)
 _RESOLVED_FILE = _THIS_FILE.resolve()
@@ -148,7 +150,9 @@ def load(path: Union[str, pathlib.Path]) -> Experiment:
 
     The file is executed as a module of its own, registered under its
     name so a worker process can unpickle what it defines, and its
-    module-level `experiment` is the run's.
+    module-level `experiment` is the run's. DECSIM_SET's assignments
+    (`decsim run --set` writes them) are in force while it runs, so
+    every task it builds takes them (parameters/in_force.py).
     """
     path = pathlib.Path(path)
     _refuse_a_path_that_is_not_a_file(path)
@@ -201,7 +205,9 @@ def _executed_run_file(path: pathlib.Path):
     module.__file__ = str(path)
     sys.modules[module_name] = module
     with _refused_in(path):
-        exec(code, module.__dict__)
+        assigned = assignments.from_environment()
+        with in_force.in_force(assigned):
+            exec(code, module.__dict__)
     return module
 
 

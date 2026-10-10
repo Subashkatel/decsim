@@ -18,3 +18,6 @@ the [reference](../reference/README.md) pages.
 - [How to plug in a workload maker](plug_in_a_workload_maker.md): a
   function that returns an operation list and its physical circuit,
   handed to the machine.
+- [How to set any parameter without editing code](set_parameters.md):
+  `decsim params`, `decsim info` and `--set path=value`, for one task
+  or every one, on Slurm too.

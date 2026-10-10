@@ -14,6 +14,12 @@ runs, so `decsim trace` never loads Stim. The console script and
         [--out DIR] [--dry-run]
     decsim run --fold --out DIR
     decsim trace follow <file> --round k:n | --window k:n
+    decsim params <run file> [--only NAME] [--match PATTERN]
+    decsim info <record name>
+
+Every run form takes --set PATH=VALUE, repeated, to set any parameter
+of every task's machine (decsim/parameters; `decsim params` lists the
+paths); DECSIM_SET holds more, `;` between them, the flags winning.
 
 What the experiments layer refuses reaches the user as one sentence and
 exit 1 (decsim/experiments/refusal.py); anything else keeps its
@@ -62,9 +68,12 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 def _run(argv: list) -> None:
     """An experiment's tasks, one task, one shot, Slurm, a job, a fold."""
+    import decsim.experiments.parameters_command as parameters_command
+
     parser = _run_parser()
     parsed = parser.parse_args(argv)
     _check_the_run_arguments(parser, parsed)
+    parameters_command.put_in_force(parsed.set)
     if parsed.fold:
         _fold(parsed)
         return
@@ -163,6 +172,8 @@ def _run_parser():
     """
     import argparse
 
+    import decsim.experiments.parameters_command as parameters_command
+
     parser = argparse.ArgumentParser(prog="decsim run")
     parser.add_argument(
         "run_file",
@@ -234,6 +245,7 @@ def _run_parser():
         help="fold the --out folder's saved pieces and run nothing",
     )
     parser.add_argument("--job", type=int, default=None, help=argparse.SUPPRESS)
+    parameters_command.add_set_argument(parser)
     return parser
 
 
@@ -301,6 +313,20 @@ def _trace(argv: list) -> None:
     trace_follow.main(argv)
 
 
+def _params(argv: list) -> None:
+    """One task's settable paths, their values, defaults and setters."""
+    import decsim.experiments.parameters_command as parameters_command
+
+    parameters_command.params(argv)
+
+
+def _info(argv: list) -> None:
+    """One record's parameters and the records each of its parts takes."""
+    import decsim.experiments.parameters_command as parameters_command
+
+    parameters_command.info(argv)
+
+
 def _report_the_refusal(refused: refusal.RefusalError) -> None:
     """One sentence and exit 1, gem5's fatal (src/base/logging.hh)."""
     print(f"decsim: {refused}", file=sys.stderr)
@@ -325,4 +351,6 @@ def _report_no_verb(verb: Optional[str]) -> None:
 _RUN_BY_VERB = {
     "run": _run,
     "trace": _trace,
+    "params": _params,
+    "info": _info,
 }

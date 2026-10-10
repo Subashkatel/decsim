@@ -17,6 +17,8 @@ import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.plan_command as plan_command
 import decsim.experiments.run_folder as run_folder
+import decsim.parameters.assignments as assignments
+import decsim.parameters.in_force as in_force
 import tests.experiments.run_files as run_files
 
 # four tasks of five shots, each estimated at 280 core seconds: a
@@ -239,3 +241,31 @@ def _core_seconds(packed: plan_command.PackedJob) -> list:
     return [
         sum(piece.estimated_seconds for piece in lane) for lane in packed.lanes
     ]
+
+
+def test_a_dry_run_exports_the_assignments_every_job_builds_its_tasks_by(
+    tmp_path, monkeypatch
+):
+    """Each array job loads the run file again, so it takes DECSIM_SET too.
+
+    The assignment changes every task's id, so the seconds file is
+    written for the tasks it builds.
+    """
+    variable = assignments.ENVIRONMENT_VARIABLE
+    assigned = "weak_decoder.unit_count=2"
+    parsed = assignments.parse(assigned, assignments.FLAG)
+    with in_force.in_force(parsed):
+        run_file = run_files.write_packed_run_file(
+            tmp_path, PIECE_SECONDS, **PACKED_TASKS
+        )
+    monkeypatch.setenv(variable, "")
+    out_dir = tmp_path / "run folder"
+    slurm = ["--slurm", "--cores", "1", "--hours", "2", "--dry-run"]
+    flags = ["--set", assigned]
+
+    command.main(["run", str(run_file), "--out", str(out_dir), *slurm, *flags])
+
+    run_script = out_dir / plan_command.RUN_SCRIPT
+    run_text = run_script.read_text()
+    run_lines = run_text.splitlines()
+    assert shlex.split(run_lines[3]) == ["export", f"{variable}={assigned}"]

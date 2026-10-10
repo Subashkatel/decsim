@@ -60,6 +60,7 @@ Each guide adds one kind of thing to the machine.
 - [How to add a store, a link card, a signal, a policy or a scheme](how-to/add_a_store_card_signal_policy_or_scheme.md)
 - [How to add a component to a part](how-to/add_a_component_to_a_part.md)
 - [How to plug in a workload maker](how-to/plug_in_a_workload_maker.md)
+- [How to set any parameter without editing code](how-to/set_parameters.md)
 
 ## Reference
 

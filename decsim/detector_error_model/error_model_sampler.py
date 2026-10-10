@@ -11,12 +11,12 @@ et al. sample their sliding windows the same way
 (SlidingWindowDecoder osd.py:124-125).
 """
 
-import weakref
 from typing import Optional
 
 import numpy
 import stim
 
+import decsim.detector_error_model.circuit_builds as circuit_builds
 import decsim.records.sampled_errors as sampled_error_records
 
 
@@ -69,33 +69,24 @@ class ErrorModelSampler:
 
 
 def sampler_of(circuit: stim.Circuit) -> ErrorModelSampler:
-    """The circuit's sampler, built once and kept while the circuit lives.
+    """The circuit's sampler, built once and kept by the circuit's text.
 
-    A task's shots share their workload's circuit, so the model is read
-    once per task, as decoders/decoder.py keeps a backend per model. The
-    entry lives exactly as long as the circuit, since CPython recycles
-    id() values.
+    A task's shots each install a copy of their workload's circuit, so
+    the model is read once per task when kept by text (circuit_builds),
+    as decoders/decoder.py keeps a backend per model.
     """
-    circuit_identity = id(circuit)
-    entry = _SAMPLERS.get(circuit_identity)
-    if entry is not None:
-        reference, sampler = entry
-        if reference() is circuit:
-            return sampler
+    circuit_text = str(circuit)
+    key = (circuit_text,)
+    sampler = _SAMPLERS.held(key)
+    if sampler is not None:
+        return sampler
     sampler = ErrorModelSampler(circuit)
-
-    def discard_dead_circuit(reference) -> None:
-        current = _SAMPLERS.get(circuit_identity)
-        if current is not None and current[0] is reference:
-            del _SAMPLERS[circuit_identity]
-
-    reference = weakref.ref(circuit, discard_dead_circuit)
-    _SAMPLERS[circuit_identity] = (reference, sampler)
+    _SAMPLERS.keep(key, sampler)
     return sampler
 
 
-# circuit identity -> (circuit reference, sampler), in this process
-_SAMPLERS: dict = {}
+# (circuit text,) -> sampler, in this process
+_SAMPLERS = circuit_builds.KeptBuilds(kept_count=4)
 
 
 def _error_targets(model: stim.DetectorErrorModel) -> tuple[list, list]:

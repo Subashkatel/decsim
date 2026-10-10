@@ -843,3 +843,13 @@ def test_a_read_back_past_rounds_that_measure_nothing_is_refused():
         "further back every round and no stream can keep it; give the "
         "repeated round a measurement"
     )
+
+
+def test_a_copy_of_a_circuit_reads_the_same_table():
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", distance=3, rounds=3
+    )
+    copy = stim.Circuit(str(circuit))
+    first = detector_formation.build_formation_table(circuit, 3)
+    second = detector_formation.build_formation_table(copy, 3)
+    assert first is second

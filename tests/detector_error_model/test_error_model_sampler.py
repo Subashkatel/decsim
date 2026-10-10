@@ -52,8 +52,9 @@ def test_a_fired_error_belongs_to_the_round_of_its_earliest_detector():
     assert fired[0].logical_observables == (1,)
 
 
-def test_a_circuit_is_read_once_while_it_lives():
+def test_a_copy_of_a_circuit_is_read_once():
     circuit = memory_circuit(2, 0.01)
+    copy = stim.Circuit(str(circuit))
     first = error_model_sampler.sampler_of(circuit)
-    second = error_model_sampler.sampler_of(circuit)
+    second = error_model_sampler.sampler_of(copy)
     assert first is second

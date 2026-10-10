@@ -120,9 +120,15 @@ class Registry:
         self.groups: dict = {}
 
     def attach(self, component: Any, path: str) -> Group:
-        """The component's declared statistics, recorded at this path."""
-        group = self.group(path, component.STATISTICS)
-        component.statistics = group
+        """The component's declared statistics, recorded at this path.
+
+        A component that declares none, a researcher's own store written
+        to the port alone, records none and keeps an empty group.
+        """
+        declared = getattr(component, "STATISTICS", ())
+        group = self.group(path, declared)
+        if declared:
+            component.statistics = group
         return group
 
     def group(self, path: str, statistics: Sequence[Statistic]) -> Group:

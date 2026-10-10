@@ -29,6 +29,7 @@ import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.settings as window_settings
@@ -508,3 +509,32 @@ def test_a_write_completes_its_write_cycles_after_the_edge_at_or_after_now():
     the_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
 
     assert the_store.book_write((1, 1), BITS_PER_ROUND) == 40
+
+
+def test_the_rounds_and_bits_held_are_each_rounds_stay_in_the_store():
+    """Round 0 is held from 0 to 30 and round 1 from 10 to 30.
+
+    The rounds held integrate to 30 + 20 round-ticks and the bits to
+    twice that, two bits a round, peaking at both rounds.
+    """
+    engine = engine_module.Engine()
+    settings = syndrome_buffer_module.SyndromeBufferSettings()
+    store = settings.build(engine)
+    run_statistics = statistics_registry.Registry(engine)
+    run_statistics.attach(store, "weak_syndrome_buffer")
+
+    first = packet(0)
+    store.accept_packed_round(first, publication_tick=None)
+    engine.now = 10
+    second = packet(1)
+    store.accept_packed_round(second, publication_tick=None)
+    engine.now = 30
+    store.release_round((1, 0))
+    store.release_round((1, 1))
+    run_statistics.finish()
+
+    statistics = store.statistics
+    assert statistics.rounds.area == 50
+    assert statistics.bits.area == 50 * BITS_PER_ROUND
+    assert statistics.rounds.peak == 2
+    assert statistics.stored.count == 2

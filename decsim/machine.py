@@ -265,6 +265,8 @@ class Machine:
         seeding.bind_run_seed(root_seed, seed_roots)
         run_statistics = statistics_registry.Registry(engine)
         decoders.attach_statistics(run_statistics, settings.window_tier)
+        statistics_parts = (control, readout, switching)
+        _attach_statistics(run_statistics, statistics_parts)
         observation = _observe(
             settings,
             engine,
@@ -383,6 +385,22 @@ def _seed_roots(
         path = (seed_records.RunSeedPathSegment("field", name),)
         roots.append((path, owner))
     return tuple(roots)
+
+
+def _attach_statistics(
+    run_statistics: statistics_registry.Registry, parts: tuple
+) -> None:
+    """Every component each built part names, at the path it names.
+
+    gem5 binds each SimObject's stats into the hierarchy after the
+    objects exist (src/python/m5/stats/__init__.py:277-309); a part not
+    built (None) names none.
+    """
+    for part in parts:
+        if part is None:
+            continue
+        for path, component in part.statistics_parts():
+            run_statistics.attach(component, path)
 
 
 def _observe(

@@ -44,7 +44,10 @@ class WaitingJobs:
 
     STATISTICS = (
         statistics_registry.Statistic(
-            "queued", statistic_kinds.Level, "jobs waiting for a unit", "jobs"
+            "queued",
+            statistic_kinds.Level,
+            "jobs in the queue, for a unit or a boundary",
+            "jobs",
         ),
     )
     statistics = statistics_registry.unrecorded(STATISTICS)

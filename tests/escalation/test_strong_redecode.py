@@ -22,6 +22,7 @@ import decsim.escalation.strong_window_shapes as shapes
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.statistics.registry as statistics_registry
 import tests.declared_run as declared_run
 
 WINDOW_KEY = (1, 2)
@@ -286,6 +287,32 @@ def test_a_speculative_decode_started_with_the_weak_job_is_selected():
     assert len(shape.planned) == 1
     assert len(output.selections) == 1
     assert queue.calls == [("await", WINDOW_KEY, strong_job.request_key)]
+
+
+def test_each_escalation_is_counted_with_its_hold_or_its_selection():
+    held_job = _strong_job(5)
+    held_shape = _Shape(held_job, is_held=True)
+    held_redecode, *_ = _redecode(held_shape)
+    speculative_job = _strong_job(6)
+    speculative_shape = _Shape(speculative_job, is_held=False)
+    speculative_redecode, *_ = _redecode(speculative_shape)
+    run_statistics = statistics_registry.Registry(held_redecode.engine)
+    run_statistics.attach(held_redecode, "switching")
+    run_statistics.attach(speculative_redecode, "switching_speculative")
+
+    held_weak_job = _weak_job()
+    held_redecode.escalate(held_weak_job)
+    weak_job = _weak_job()
+    speculative_redecode.parallel_strong_submission(weak_job)
+    speculative_redecode.escalate(weak_job)
+
+    held = held_redecode.statistics
+    speculative = speculative_redecode.statistics
+    assert (held.escalated.count, held.held.count) == (1, 1)
+    assert held.speculative_selected.count == 0
+    assert speculative.escalated.count == 1
+    assert speculative.speculative_selected.count == 1
+    assert speculative.held.count == 0
 
 
 def test_a_speculative_decode_is_planned_when_its_weak_job_is_released():

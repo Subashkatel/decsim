@@ -27,6 +27,8 @@ import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 
 
@@ -48,6 +50,34 @@ class StrongRedecode:
     decode_queue = ports.Port(ports.DecodeQueue)
     # the strong job's return path
     verdict = ports.Port(ports.WindowVerdict)
+
+    # the windows escalated, those whose speculative strong decode was
+    # selected as it ran, and the strong windows held for their
+    # conditions and dropped held when the weak result was kept
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "escalated", statistic_kinds.Count, "windows escalated", "windows"
+        ),
+        statistics_registry.Statistic(
+            "speculative_selected",
+            statistic_kinds.Count,
+            "escalations that took the running speculative decode",
+            "windows",
+        ),
+        statistics_registry.Statistic(
+            "held",
+            statistic_kinds.Count,
+            "strong windows held for their release conditions",
+            "windows",
+        ),
+        statistics_registry.Statistic(
+            "held_cancelled",
+            statistic_kinds.Count,
+            "held strong windows dropped for a kept weak result",
+            "windows",
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -110,9 +140,11 @@ class StrongRedecode:
         window, whose job is queued behind its selection now or held
         under its conditions.
         """
+        self.statistics.escalated.add()
         key = (weak_job.operation_id, weak_job.window_id)
         speculative_request_key = self.selections.speculative_decode_for(key)
         if speculative_request_key is not None:
+            self.statistics.speculative_selected.add()
             self._send_selection(weak_job, speculative_request_key)
             self.decode_queue.await_strong_result(key, speculative_request_key)
             return
@@ -161,6 +193,7 @@ class StrongRedecode:
         self.decode_queue.cancel_strong(window_key)
 
     def _drop_held(self, window_key: tuple, held) -> None:
+        self.statistics.held_cancelled.add()
         self.pending.take(held)
         self.selections.forget_speculative_decode(window_key)
         self.trace.strong_window_left.fire(
@@ -202,6 +235,7 @@ class StrongRedecode:
             selection_arrival_ticks=selection_arrival_ticks,
         )
         self.pending.register(held)
+        self.statistics.held.add()
         waits_for = pending_strong_windows.waiting_text(conditions)
         self.trace.strong_window_held.fire(
             assignment.request_key, key, waits_for, assignment.round_count

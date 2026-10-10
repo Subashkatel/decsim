@@ -21,6 +21,7 @@ import pytest
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
+import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.declared_run as declared_run
 
@@ -196,6 +197,20 @@ def test_each_access_is_reported_with_its_port_and_its_three_ticks():
         ("read", 0, window, 0, 0, 20),
         ("read", 0, window, 0, 20, 40),
     ]
+
+
+def test_a_read_behind_another_on_the_one_read_port_waits_its_words():
+    engine = engine_module.Engine()
+    store = _store(engine)
+    run_statistics = statistics_registry.Registry(engine)
+    run_statistics.attach(store, "weak_syndrome_buffer")
+    window = _stored_window(store, (8, 8))
+
+    store.book_read(window)
+    store.book_read(window)
+
+    assert store.statistics.reads.count == 2
+    assert store.statistics.port_wait.value_counts() == {0: 1, 20: 1}
 
 
 def test_the_default_shape_is_the_sky130_byte_fifo_one_port_each_way():

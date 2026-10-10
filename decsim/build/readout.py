@@ -180,6 +180,16 @@ class Readout:
         """This part's stochastic owners, each by the name its seed hashes."""
         return (("controller", self.controller),)
 
+    def statistics_parts(self) -> tuple:
+        """Each store the run built, at its settings path."""
+        stores = (
+            ("weak_syndrome_buffer", self.weak_syndrome_buffer),
+            ("strong_syndrome_buffer", self.strong_syndrome_buffer),
+        )
+        return tuple(
+            (path, store) for path, store in stores if store is not None
+        )
+
     def _wire_the_controller_path(self, links: ports.Link) -> None:
         self.controller.link = links
         self.controller.assembler = self.assembler

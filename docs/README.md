@@ -62,6 +62,7 @@ Each guide adds one kind of thing to the machine.
 - [How to plug in a workload maker](how-to/plug_in_a_workload_maker.md)
 - [How to set any parameter without editing code](how-to/set_parameters.md)
 - [How to record statistics of your own part](how-to/record_statistics.md)
+- [How to write a machine as a graph](how-to/write_a_machine_as_a_graph.md)
 
 ## Reference
 

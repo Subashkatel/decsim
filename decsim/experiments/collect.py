@@ -41,6 +41,8 @@ import decsim.parameters.in_force as in_force
 import decsim.ports as ports
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
+import decsim.topology.graph as topology_graph
+import decsim.topology.legacy as legacy
 import decsim.windows.built_window_models as built_window_models
 
 # The key a record's class is written under beside its fields. No field
@@ -96,6 +98,11 @@ class Task:
     learns across shots: it is built once here and every shot's build gets
     it, and a resumed piece keeps its saved state. The strong id holds the
     machine and the metadata only.
+
+    machine may be a graph (decsim/topology/graph.py): the assignments in
+    force then name its paths (uf.unit_count), and it runs as, and is
+    identified by, the MachineSettings it resolves to
+    (topology/legacy.py), with graph keeping the graph as assigned.
     """
 
     name: str
@@ -104,11 +111,17 @@ class Task:
     collection: Optional[collection_module.CollectionSettings] = None
     record_options: RecordOptions = RecordOptions()
     online_threshold: Optional[ports.ThresholdSource] = None
+    graph: Optional[topology_graph.Machine] = dataclasses.field(
+        default=None, init=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         check_folder_name(self.name, "task")
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
         assigned = in_force.applied(self.machine)
+        if isinstance(assigned, topology_graph.Machine):
+            object.__setattr__(self, "graph", assigned)
+            assigned = legacy.resolved(assigned)
         machine = assigned.at_task()
         object.__setattr__(self, "machine", machine)
         if self.online_threshold is None:

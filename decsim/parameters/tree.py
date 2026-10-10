@@ -19,6 +19,15 @@ but for the paths the root names in SET_IN_THE_RUN_FILE: the run file
 built other values from them (the workload's circuit from the
 distance), so a pattern naming one is refused, and `*` and `**` pass
 them by.
+
+A root class may hold parts by name: each field NAMED_PARTS lists holds
+parts, each with a name, settings (a record), settings_hint(), the type
+a record swapped in must meet, and run_file_fields(), its record's
+fields set in the run file only (decsim/topology/graph.py). A part's
+record sits at the part's name, uf.unit_count rather than
+parts[3].settings.unit_count, so name.type swaps the record, and the
+part's other fields sit beside the record's (uf.placed), as an OMNeT++
+network's submodules are addressed by name (simulation manual §10.3).
 """
 
 import dataclasses
@@ -37,6 +46,11 @@ ANY_DEPTH = "**"
 WILDCARD = "*"
 # the root's class attribute naming the paths set in the run file only
 RUN_FILE_PATHS = "SET_IN_THE_RUN_FILE"
+# the root's class attribute naming the fields that hold parts by name
+NAMED_PARTS = "NAMED_PARTS"
+# a named part's own fields that are not parameters beside its record's
+PART_NAME = "name"
+PART_SETTINGS = "settings"
 _ROOT = "the machine"
 
 
@@ -77,10 +91,29 @@ class Applied:
 
 def apply(root: Any, assignments: Sequence[Assignment]) -> Applied:
     """The settings with the assignments applied, the later ones winning."""
-    run_file_paths = getattr(root, RUN_FILE_PATHS, ())
+    run_file_paths = every_run_file_path(root)
     walk = _Walk(assignments, run_file_paths)
     clock = getattr(root, fields.CLOCK, None)
     settings = walk.node(root, (), clock, is_root=True)
+    matched = frozenset(walk.matched)
+    return Applied(settings, dict(walk.origins), matched)
+
+
+def built(
+    record_class: type,
+    assignments: Sequence[Assignment],
+    machine_clock: Optional[config.Clock] = None,
+) -> Applied:
+    """A record of this class built from assignments alone, defaults kept.
+
+    The assignments reach the record's fields by paths from the record
+    (unit_count, algorithm.type, algorithm.weight_step), as a file that
+    writes a part out field by field gives them; a required field no
+    assignment reaches is refused, as a slot's type swap refuses it.
+    """
+    walk = _Walk(assignments, ())
+    record = walk.constructed(record_class, (), machine_clock)
+    settings = walk.node(record, (), machine_clock)
     matched = frozenset(walk.matched)
     return Applied(settings, dict(walk.origins), matched)
 
@@ -94,9 +127,22 @@ def settings_of(root: Any) -> list:
 
 def is_set_in_the_run_file(root: Any, path: str) -> bool:
     """Whether a path lies under one the root sets in the run file only."""
-    run_file_paths = getattr(root, RUN_FILE_PATHS, ())
+    run_file_paths = every_run_file_path(root)
     segments = path.split(".")
     return _is_under_any(segments, run_file_paths)
+
+
+def every_run_file_path(root: Any) -> tuple:
+    """The paths the root sets in the run file only, its named parts' too."""
+    root_paths = getattr(root, RUN_FILE_PATHS, ())
+    paths = list(root_paths)
+    root_class = type(root)
+    named = getattr(root_class, NAMED_PARTS, ())
+    for field in named:
+        parts = getattr(root, field)
+        part_paths = _run_file_paths_of_parts(parts)
+        paths.extend(part_paths)
+    return tuple(paths)
 
 
 def path_text(segments: Sequence[str]) -> str:
@@ -142,12 +188,16 @@ class _Walk:
         clock = own_clock or machine_clock
         if is_root:
             machine_clock = clock
+        named = getattr(record_class, NAMED_PARTS, ())
         for parameter in parameters.values():
             value = getattr(record, parameter.field)
-            child = (*segments, parameter.name)
-            new_value = self._value(
-                parameter, value, child, clock, machine_clock
-            )
+            if parameter.field in named:
+                new_value = self._named_parts(value, segments, machine_clock)
+            else:
+                child = (*segments, parameter.name)
+                new_value = self._value(
+                    parameter, value, child, clock, machine_clock
+                )
             if new_value is not value:
                 changes[parameter.field] = new_value
         if not changes:
@@ -160,6 +210,15 @@ class _Walk:
         if position is None:
             return None
         return self.assignments[position]
+
+    def constructed(
+        self,
+        record_class: type,
+        segments: tuple,
+        machine_clock: Optional[config.Clock],
+    ) -> Any:
+        """A record of this class from its defaults and these assignments."""
+        return self._constructed(record_class, None, segments, machine_clock)
 
     def _last_position(self, segments: tuple) -> Optional[int]:
         if _is_under_any(segments, self.run_file_paths):
@@ -261,12 +320,45 @@ class _Walk:
             if fields.is_record(part):
                 new_part = self.node(part, child, machine_clock)
             new_parts.append(new_part)
-        unchanged = all(
-            new is old for new, old in zip(new_parts, parts, strict=True)
-        )
-        if unchanged:
-            return parts
-        return tuple(new_parts)
+        return _kept_unless_changed(new_parts, parts)
+
+    def _named_parts(
+        self,
+        parts: tuple,
+        segments: tuple,
+        machine_clock: Optional[config.Clock],
+    ) -> tuple:
+        """Each part at its own name, beside the field that holds it."""
+        new_parts = []
+        for part in parts:
+            child = (*segments, part.name)
+            new_part = self._named_part(part, child, machine_clock)
+            new_parts.append(new_part)
+        return _kept_unless_changed(new_parts, parts)
+
+    def _named_part(
+        self,
+        part: Any,
+        segments: tuple,
+        machine_clock: Optional[config.Clock],
+    ) -> Any:
+        """A part's record at the part's path, its own fields beside it."""
+        slot = _settings_slot(part)
+        settings = self._slot(slot, part.settings, segments, machine_clock)
+        changes = {}
+        if settings is not part.settings:
+            changes[PART_SETTINGS] = settings
+        for parameter in _part_parameters(part):
+            value = getattr(part, parameter.field)
+            child = (*segments, parameter.name)
+            new_value = self._value(
+                parameter, value, child, machine_clock, machine_clock
+            )
+            if new_value is not value:
+                changes[parameter.field] = new_value
+        if not changes:
+            return part
+        return _rebuilt(part, changes, segments)
 
     def _type_choice(self, segments: tuple) -> Optional[Assignment]:
         """The later of path.type=... and path=... for a slot."""
@@ -357,6 +449,45 @@ class _Walk:
         assignment = self.last_for(segments)
         _refuse_a_missing_value(assignment, path)
         return parameter.value_of(assignment.written, machine_clock, path)
+
+
+def _run_file_paths_of_parts(parts: tuple) -> list:
+    """Each part's run-file fields, at the part's name."""
+    paths = []
+    for part in parts:
+        run_file_fields = part.run_file_fields()
+        paths.extend(f"{part.name}.{field}" for field in run_file_fields)
+    return paths
+
+
+def _kept_unless_changed(new_parts: list, parts: tuple) -> tuple:
+    """The parts as they were if no part changed, else the new ones."""
+    unchanged = all(
+        new is old for new, old in zip(new_parts, parts, strict=True)
+    )
+    if unchanged:
+        return parts
+    return tuple(new_parts)
+
+
+def _settings_slot(part: Any) -> fields.Parameter:
+    """The part's record as a slot whose type is the one its part takes."""
+    part_class = type(part)
+    parameters = fields.parameters_of(part_class)
+    settings = parameters[PART_SETTINGS]
+    hint = part.settings_hint()
+    return dataclasses.replace(settings, kind=fields.RECORD, hint=hint)
+
+
+def _part_parameters(part: Any) -> list:
+    """A named part's own parameters: every field but its name and record."""
+    part_class = type(part)
+    parameters = fields.parameters_of(part_class)
+    return [
+        parameter
+        for parameter in parameters.values()
+        if parameter.field not in (PART_NAME, PART_SETTINGS)
+    ]
 
 
 def _shared_values(record_class: type, old: Any) -> dict:
@@ -455,20 +586,42 @@ def _matches_any_depth(rest: tuple, segments: tuple) -> bool:
 def _list_node(record: Any, segments: tuple, found: list) -> None:
     record_class = type(record)
     parameters = fields.parameters_of(record_class)
+    named = getattr(record_class, NAMED_PARTS, ())
     for parameter in parameters.values():
         value = getattr(record, parameter.field)
         child = (*segments, parameter.name)
+        if parameter.field in named:
+            _list_named_parts(value, segments, found)
+            continue
         if parameter.kind == fields.RECORD:
             _list_slot(parameter, value, child, found)
             continue
         if _holds_records(value):
             _list_parts(value, child, found)
             continue
-        written = parameter.written(value)
-        default = _written_default(parameter)
-        path = path_text(child)
-        setting = Setting(path, written, default)
-        found.append(setting)
+        _list_value(parameter, value, child, found)
+
+
+def _list_value(
+    parameter: fields.Parameter, value: Any, segments: tuple, found: list
+) -> None:
+    written = parameter.written(value)
+    default = _written_default(parameter)
+    path = path_text(segments)
+    setting = Setting(path, written, default)
+    found.append(setting)
+
+
+def _list_named_parts(parts: tuple, segments: tuple, found: list) -> None:
+    """Each part's record at its name, then the part's own fields."""
+    for part in parts:
+        child = (*segments, part.name)
+        slot = _settings_slot(part)
+        _list_slot(slot, part.settings, child, found)
+        for parameter in _part_parameters(part):
+            value = getattr(part, parameter.field)
+            field_path = (*child, parameter.name)
+            _list_value(parameter, value, field_path, found)
 
 
 def _list_slot(

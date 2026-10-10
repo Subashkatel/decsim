@@ -59,9 +59,11 @@ _UNITS = {
     "Gbps": (RATE, fractions.Fraction(1000)),
     "dB": (DECIBELS, fractions.Fraction(1)),
 }
-# a number, with _ separators and an exponent allowed, then its unit
+# a number, with _ separators and an exponent allowed, or a fraction
+# p/q, then its unit
 _QUANTITY = re.compile(
-    r"^\s*([-+]?[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?)"
+    r"^\s*([-+]?[0-9][0-9_]*/[0-9]+"
+    r"|[-+]?[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?)"
     r"\s*([A-Za-zµ/]*)\s*$"
 )
 _EXAMPLES = {

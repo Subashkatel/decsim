@@ -15,6 +15,7 @@ import pytest
 import decsim.parameters.assignments as assignments_module
 import decsim.parameters.fields as fields
 import decsim.parameters.tree as tree
+import decsim.topology.legacy as legacy
 import tests.experiments.run_files as run_files
 from decsim.decoders.union_find import decoder as union_find
 
@@ -50,8 +51,36 @@ def _settable(machine) -> list:
     return assignments
 
 
+def _weak_graph():
+    machine = run_files.minimal_machine()
+    return legacy.graph_of(machine)
+
+
+def _switching_graph():
+    machine = run_files.switching_machine()
+    return legacy.graph_of(machine)
+
+
+def _with_part(machine, name, **changes):
+    """The graph with one part's record replaced, the referent of a path."""
+    parts = []
+    for part in machine.parts:
+        new_part = part
+        if part.name == name:
+            settings = dataclasses.replace(part.settings, **changes)
+            new_part = dataclasses.replace(part, settings=settings)
+        parts.append(new_part)
+    return dataclasses.replace(machine, parts=tuple(parts))
+
+
 @pytest.mark.parametrize(
-    "build", [run_files.minimal_machine, run_files.switching_machine]
+    "build",
+    [
+        run_files.minimal_machine,
+        run_files.switching_machine,
+        _weak_graph,
+        _switching_graph,
+    ],
 )
 def test_every_value_written_back_gives_the_machine_it_was_read_from(build):
     machine = build()
@@ -184,3 +213,62 @@ def test_the_listing_names_a_slots_type_before_its_parameters():
     fetch_position = paths.index("weak_decoder.engine.fetch_per_round")
     assert type_position < fetch_position
     assert "workload.operations[0].circuit" in paths
+
+
+def test_a_parts_parameter_sits_at_the_parts_name():
+    machine = _weak_graph()
+    replaced = _with_part(machine, "weak", unit_count=3)
+
+    assigned = _applied(machine, ("weak.unit_count", 3))
+
+    assert assigned == replaced
+
+
+def test_a_parts_site_sits_beside_its_records_parameters():
+    machine = _weak_graph()
+
+    assigned = _applied(machine, ("weak.placed", "host"))
+
+    pool = assigned.part("weak")
+    old_pool = machine.part("weak")
+    assert pool.placed == "host"
+    assert pool.settings == old_pool.settings
+
+
+def test_a_parts_record_is_swapped_within_its_kind():
+    machine = _weak_graph()
+
+    assigned = _applied(
+        machine, ("weak_buffer.type", "PortedSyndromeBufferSettings")
+    )
+
+    store = assigned.part("weak_buffer")
+    store_class = type(store.settings)
+    assert store_class.__name__ == "PortedSyndromeBufferSettings"
+    with pytest.raises(
+        fields.ParameterError, match="no record of this slot is named"
+    ):
+        _applied(machine, ("weak_buffer.type", "UnionFindDecoder"))
+
+
+def test_a_parts_cycles_count_on_the_machines_clock():
+    machine = _weak_graph()
+    replaced = _with_part(machine, "controller", packing_cycles_per_round=2)
+
+    assigned = _applied(machine, ("controller.packing_per_round", "8ns"))
+
+    assert assigned == replaced
+
+
+def test_a_graphs_run_file_path_is_named_by_its_part():
+    machine = _weak_graph()
+
+    with pytest.raises(fields.ParameterError, match="set in the run file"):
+        _applied(machine, ("qpu.distance", 5))
+
+
+def test_a_rewired_graph_is_checked_again():
+    machine = _weak_graph()
+
+    with pytest.raises(fields.ParameterError, match="do not pair"):
+        _applied(machine, ("wires[5].source", "frame.decisions"))

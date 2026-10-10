@@ -29,6 +29,10 @@ AURORA_OCTETS_PER_BLOCK = 8
 # and a 12-byte memory write header (pcie-bench model/pcie.py:220-240;
 # Neugebauer et al., SIGCOMM 2018, lines 385-389, "MWr_Hdr is 24B").
 PCIE_MEMORY_WRITE_OVERHEAD_BYTES = 24
+# A TLP's data payload is whole doublewords: its Length field counts
+# DW, and the byte enables mark the bytes a partial first or last DW
+# carries (PCI Express Base Specification 3.0, section 2.2.1).
+PCIE_DOUBLEWORD_BYTES = 4
 
 # Ethernet on the wire: preamble 7, start of frame 1, header 14, FCS 4
 # and the standard 12-byte interframe gap, with a 46-byte minimum
@@ -143,8 +147,9 @@ class PcieTlp:
     """Memory write TLPs of at most max_payload_bytes, 24 bytes on each.
 
     A write of n bytes costs ceil(n / MPS) x 24 + n bytes (pcie-bench
-    model/mem_bw.py:40-41; Neugebauer lines 385-389); one of no bytes is one
-    TLP of overhead, where pcie-bench counts none. Data link ACKs,
+    model/mem_bw.py:40-41; Neugebauer lines 385-389), each TLP's n
+    padded to whole doublewords; one of no bytes is one TLP of overhead,
+    where pcie-bench counts none. Data link ACKs,
     flow-control updates and replay are left out: this row pairs with the
     credit protocol only.
     """
@@ -176,7 +181,9 @@ class PcieTlp:
         chunks = _chunks(message_bytes, self._max_payload_bytes)
         frames = []
         for chunk_bytes in chunks:
-            tlp_bytes = chunk_bytes + PCIE_MEMORY_WRITE_OVERHEAD_BYTES
+            padding_bytes = -chunk_bytes % PCIE_DOUBLEWORD_BYTES
+            data_bytes = chunk_bytes + padding_bytes
+            tlp_bytes = data_bytes + PCIE_MEMORY_WRITE_OVERHEAD_BYTES
             tlp_bits = tlp_bytes * BITS_PER_BYTE
             frames.append(tlp_bits)
         return tuple(frames)

@@ -18,9 +18,7 @@ import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.frame_corrections as frame_corrections_module
 import decsim.observe.log_writers as log_writers
-import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
-import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.referee_audit as referee_audit_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
@@ -32,6 +30,7 @@ import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.wiring as wiring
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 import tests.declared_run as declared_run
 import tests.observe.gate_point as gate_point
@@ -218,14 +217,13 @@ def test_every_listener_the_section_asks_for_is_built_and_heard():
     assert asked.observation.data_movement is not None
     assert asked.observation.decode_records is not None
     assert asked.observation.decode_backlog is not None
-    assert asked.observation.decoder_utilization is not None
     assert asked.observation.window_outcomes is not None
     assert silent.observation.trace_writer is None
     assert silent.observation.data_movement is None
     assert silent.observation.decode_records is None
     assert silent.observation.decode_backlog is None
     assert silent.observation.window_outcomes is None
-    assert silent.observation.decoder_utilization is not None
+    assert silent.observation.statistics is not None
 
 
 class PortOnlyDecoder:
@@ -371,14 +369,13 @@ def _bare_observation(
     """The record those three listeners hang on, every other field empty."""
     windows = window_ledger_module.WindowLedger()
     corrections = frame_corrections_module.FrameCorrections()
-    queue_depth = queue_depth_module.QueueDepthLog()
     counters = controller_counters_module.ControllerCounters()
     commands = command_events_module.CommandEvents()
     stages = stage_records_module.StageLedger()
     rounds = round_events_module.RoundEventRecorder(engine)
     audit = referee_audit_module.RefereeAudit()
     shots = sampled_shots_module.SampledShots()
-    utilization = metrics.DecoderUtilization(engine, {})
+    run_statistics = statistics_registry.Registry(engine)
     return observation_module.Observation(
         log=log,
         windows=windows,
@@ -389,12 +386,11 @@ def _bare_observation(
         data_movement=None,
         decode_records=None,
         runtime_stamps=runtime_stamps,
-        queue_depth=queue_depth,
         controller_counters=counters,
         command_events=commands,
         stages=stages,
         decode_backlog=None,
-        decoder_utilization=utilization,
+        statistics=run_statistics,
         round_events=rounds,
         referee_audit=audit,
         sampled_shots=shots,

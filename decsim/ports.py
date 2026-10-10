@@ -2214,10 +2214,9 @@ class DecoderMemory(Protocol):
 class DecoderUnit(Protocol):
     """A decoder unit, as its listeners see it.
 
-    The pool fires unit_busy(unit) and unit_freed(unit), the service
-    fires each job's dispatch, landing, start and finish with its unit,
-    and a listener reads the unit's names and its memory's size, never
-    its state.
+    The service fires each job's dispatch, landing, start and finish
+    with its unit, and a listener reads the unit's names and its
+    memory's size, never its state.
     """
 
     name: str

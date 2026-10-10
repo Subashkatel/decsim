@@ -64,6 +64,7 @@ import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
 import decsim.windows.built_window_models as built_window_models
 
 
@@ -262,10 +263,13 @@ class Machine:
         parts = (qpu, control, readout, decoders)
         seed_roots = _seed_roots(plan, links, parts, switching)
         seeding.bind_run_seed(root_seed, seed_roots)
+        run_statistics = statistics_registry.Registry(engine)
+        decoders.attach_statistics(run_statistics, settings.window_tier)
         observation = _observe(
             settings,
             engine,
             links,
+            run_statistics,
             qpu=qpu,
             control=control,
             readout=readout,
@@ -302,6 +306,7 @@ class Machine:
         """Start every component, run to quiescence, read the result."""
         self.start()
         self.engine.run()
+        self.observation.statistics.finish()
         if self.switching is not None:
             self.switching.check_settled()
         self.windows.check_settled()
@@ -384,6 +389,7 @@ def _observe(
     settings: machine_settings.MachineSettings,
     engine: engine_module.Engine,
     links: ports.Link,
+    run_statistics: statistics_registry.Registry,
     *,
     qpu: qpu_part.Qpu,
     control: control_part.Control,
@@ -408,6 +414,7 @@ def _observe(
         switching=switching,
         process_name=name,
         traffic_ledger=traffic_ledger,
+        run_statistics=run_statistics,
     )
 
 

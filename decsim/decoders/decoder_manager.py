@@ -39,6 +39,7 @@ import decsim.records.fault_model_contracts as fault_models
 import decsim.records.log_sources as log_sources
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
+import decsim.statistics.registry as statistics_registry
 
 
 class DecoderManager:
@@ -95,6 +96,18 @@ class DecoderManager:
             self.queue, pool, self.service
         )
         self.outcomes = decode_outcomes.DecodeOutcomes(engine, self)
+
+    def attach_statistics(
+        self, run_statistics: statistics_registry.Registry, path: str
+    ) -> None:
+        """Record the pool's and the queue's statistics under this path."""
+        pool = self.pool
+        units_path = f"{path}.units"
+        group = run_statistics.attach(pool, units_path)
+        unit_count = len(pool.units)
+        group.units.add(unit_count)
+        queue_path = f"{path}.queue"
+        run_statistics.attach(self.queue, queue_path)
 
     def start(self) -> None:
         """Hear every row of the decoder say a model pins no class.

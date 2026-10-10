@@ -20,6 +20,8 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 
 if TYPE_CHECKING:
@@ -35,8 +37,17 @@ class WaitingJobs:
 
     Trace sources: job_enqueued(job) as a job joins the queue;
     job_withdrawn(job) as one leaves it unserved; depth_changed(tick,
-    depth) whenever the jobs waiting change.
+    depth) whenever the jobs waiting change. Its statistic is the jobs
+    waiting over time, DART-Q's backlog per decoder instance
+    (2605.09142 lines 1101-1109).
     """
+
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "queued", statistic_kinds.Level, "jobs waiting for a unit", "jobs"
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
 
     def __init__(
         self,
@@ -73,6 +84,7 @@ class WaitingJobs:
         """Report the depth now."""
         now = self.engine.now
         depth = len(self.waiting)
+        self.statistics.queued.set(depth)
         self.trace.depth_changed.fire(now, depth)
 
     def drain_in_scheduler_order(self) -> list:

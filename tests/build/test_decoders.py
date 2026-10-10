@@ -46,6 +46,33 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     assert strong_unit.memory.capacity_bits == 30
 
 
+def test_each_managers_statistics_are_kept_at_its_tiers_settings_path():
+    """The jobs waiting over both pools are the two queues' sum.
+
+    Each queue's level is set before it reports the change, so the sum
+    over the pools holds what the queues hold at every tick: its area is
+    the sum of their areas.
+    """
+    switching = declared_run.switching_run(escalates=True)
+    machine = machine_module.Machine.build(switching.settings, 0)
+    machine.run()
+
+    groups = machine.observation.statistics.groups
+    weak = groups["weak_decoder.queue"].queued
+    strong = groups["strong_decoder.queue"].queued
+    over_pools = groups[decoder_build.MANAGERS_PATH].queued
+
+    assert sorted(groups) == [
+        "decoder_manager",
+        "strong_decoder.queue",
+        "strong_decoder.units",
+        "weak_decoder.queue",
+        "weak_decoder.units",
+    ]
+    assert over_pools.area == weak.area + strong.area
+    assert groups["strong_decoder.units"].busy_units.area > 0
+
+
 def test_an_engine_that_names_no_clock_counts_on_the_machines():
     """No preset clock ticks at 300 MHz, so a unit on one fails here."""
     machine_clock = config.Clock.from_megahertz(300.0)

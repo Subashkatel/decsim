@@ -7,6 +7,7 @@ before the parts because the window models are compiled for the units.
 """
 
 import dataclasses
+import functools
 from typing import Optional
 
 import decsim.config as config
@@ -20,10 +21,24 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.windows as window_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 
 # The name the tier's event-detection stage carries in the trace, the
 # stage ledger and the narrator log.
 FORMATION_STAGE = "detection_event_formation"
+# The path the decode side's own statistics are kept at: the managers'
+# card's path, since the jobs waiting over both pools are theirs.
+MANAGERS_PATH = "decoder_manager"
+STRONG_PATH = "strong_decoder"
+MANAGERS_STATISTICS = (
+    statistics_registry.Statistic(
+        "queued",
+        statistic_kinds.History,
+        "jobs waiting over every pool",
+        "jobs",
+    ),
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,6 +102,29 @@ class Decoders:
             decoder_manager=decoder_manager,
             strong_decoder_manager=strong_decoder_manager,
         )
+
+    def attach_statistics(
+        self,
+        run_statistics: statistics_registry.Registry,
+        window_tier: window_records.DecoderTier,
+    ) -> None:
+        """Each manager's statistics at its tier's settings path.
+
+        The plan's windows decode on the primary manager, whose settings
+        are the window tier's (weak_decoder, or strong_decoder for a
+        strong-only run); the host's manager is the strong tier's.
+        """
+        primary_path = f"{window_tier.value}_decoder"
+        self.decoder_manager.attach_statistics(run_statistics, primary_path)
+        managers = [self.decoder_manager]
+        if self.strong_decoder_manager is not None:
+            self.strong_decoder_manager.attach_statistics(
+                run_statistics, STRONG_PATH
+            )
+            managers.append(self.strong_decoder_manager)
+        over_pools = run_statistics.group(MANAGERS_PATH, MANAGERS_STATISTICS)
+        queues = [manager.queue for manager in managers]
+        _count_the_jobs_waiting_over_pools(over_pools.queued, queues)
 
     def start(self) -> None:
         """Let each manager hear its units before any window model exists."""
@@ -325,3 +363,23 @@ def _decoder_manager(
         clock=manager_settings.clock,
         dispatch_cycles=manager_settings.dispatch_cycles,
     )
+
+
+def _count_the_jobs_waiting_over_pools(queued, queues: list) -> None:
+    """The jobs waiting over the pools as each queue's depth changes.
+
+    The total is the sum of each queue's last depth, sampled whenever
+    either changes; nothing is kept when the run records no statistics.
+    """
+    if queued is statistic_kinds.DISABLED:
+        return
+    note = functools.partial(_note_jobs_waiting, queued, queues)
+    for queue in queues:
+        queue.trace.depth_changed.connect(note)
+
+
+def _note_jobs_waiting(queued, queues: list, tick: int, depth: int) -> None:
+    del tick, depth
+    depths = [queue.statistics.queued.level for queue in queues]
+    total = sum(depths)
+    queued.set(total)

@@ -720,6 +720,7 @@ FOLDED_FILES = (
     "sweep.csv",
     "shots.csv",
     "shot_links.csv",
+    "shot_stats.csv",
     "window_samples.csv",
 )
 

@@ -28,7 +28,6 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
-import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.referee_audit as referee_audit_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
@@ -40,6 +39,7 @@ import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
+import decsim.statistics.registry as statistics_registry
 
 
 def observe(
@@ -55,6 +55,7 @@ def observe(
     switching: Optional[escalation_build.Switching],
     process_name: str,
     traffic_ledger: link_traffic.TrafficLedger,
+    run_statistics: statistics_registry.Registry,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
@@ -72,7 +73,6 @@ def observe(
     _connect_runtime_stamps(
         control.execution_runtime, qpu.factory, runtime_stamps
     )
-    queue_depth = _connect_queue_depth(decoder_managers)
     controller_counters = _connect_controller_counters(control.idle_rounds)
     command_events = _connect_command_events(qpu.device)
     stages = _connect_stage_records(decoders)
@@ -99,7 +99,6 @@ def observe(
     decode_backlog = _decode_backlog(
         observation, engine, window_manager, decoder_managers, round_events
     )
-    decoder_utilization = _decoder_utilization(engine, decoder_managers)
     frame_corrections = _frame_corrections(control.pauli_frame)
     return observation_module.Observation(
         log=log,
@@ -111,7 +110,6 @@ def observe(
         data_movement=data_movement,
         decode_records=decode_records,
         runtime_stamps=runtime_stamps,
-        queue_depth=queue_depth,
         controller_counters=controller_counters,
         command_events=command_events,
         stages=stages,
@@ -119,7 +117,7 @@ def observe(
         sampled_shots=sampled_shots,
         window_outcomes=window_outcomes,
         decode_backlog=decode_backlog,
-        decoder_utilization=decoder_utilization,
+        statistics=run_statistics,
         round_events=round_events,
         confidence=confidence,
     )
@@ -159,16 +157,6 @@ def _decoder_rows(decoders) -> list:
     """Every decoder row of the run's two decoder units, either absent."""
     units = (decoders.primary_decoder, decoders.strong_decoder)
     return decoder_pool.decoder_rows(units)
-
-
-def _connect_queue_depth(decoder_managers) -> queue_depth_module.QueueDepthLog:
-    """The waiting jobs, sampled at every change of either queue's depth."""
-    depth_log = queue_depth_module.QueueDepthLog()
-    for manager in decoder_managers:
-        pool_name = manager.pool.name
-        depth_changed = functools.partial(depth_log.depth_changed, pool_name)
-        manager.queue.trace.depth_changed.connect(depth_changed)
-    return depth_log
 
 
 def _connect_controller_counters(
@@ -560,26 +548,6 @@ def _frame_corrections(
         corrections.correction_committed
     )
     return corrections
-
-
-def _decoder_utilization(
-    engine: engine_module.Engine, decoder_managers
-) -> metrics.DecoderUtilization:
-    """The busy-unit integral, stepping at every pool's claims and returns.
-
-    Always built: every run's pool columns read each tier's busy
-    fraction off it.
-    """
-    units_by_pool = {}
-    for manager in decoder_managers:
-        pool = manager.pool
-        units_by_pool[pool.name] = len(pool.units)
-    utilization = metrics.DecoderUtilization(engine, units_by_pool)
-    for manager in decoder_managers:
-        pool = manager.pool
-        pool.trace.unit_busy.connect(utilization.unit_busy)
-        pool.trace.unit_freed.connect(utilization.unit_freed)
-    return utilization
 
 
 def _decode_backlog(

@@ -606,8 +606,8 @@ def _refuse_a_task_that_runs_no_round(record: dict) -> None:
     raise refusal.RefusalError(
         f"the task {name} runs no QEC round: no operation of its workload "
         "runs a round that emits detector data, so its shots would decode "
-        "nothing; give it a workload, as decsim.settings.memory_workload "
-        "makes one"
+        "nothing; give it a workload, as "
+        "decsim.presets.machines.memory_workload makes one"
     )
 
 

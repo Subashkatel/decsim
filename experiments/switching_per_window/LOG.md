@@ -165,7 +165,8 @@ processes fit in 16 GB.
 ## Machine and latencies (2026-10-08)
 
 Every value is Experiment 1's, written with its source in
-`experiments/switching_baseline/run.py` on main. Values marked
+`experiments/switching_baseline/run.py` on main; that machine now
+lives in `decsim/presets/experiment_one.py`. Values marked
 estimate or chosen have no paper behind them.
 
 | Part | Value | Source |

@@ -20,8 +20,10 @@ import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.presets.machines as machines
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
+import decsim.topology.legacy as legacy
 import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
 
@@ -210,7 +212,8 @@ class CountingFrameConfig(pauli_frame_module.PauliFrameConfig):
 
 def test_a_frame_written_outside_decsim_runs_from_its_record():
     """One record that builds the frame is the whole edit."""
-    base = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    weak_base = machines.weak_baseline(3, 0.001, 1.0)
+    base = legacy.resolved(weak_base)
     frame = base.pauli_frame
     counting = CountingFrameConfig(
         write_cycles=frame.write_cycles, clock=frame.clock
@@ -301,7 +304,7 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     effects). Both folds must agree.
     """
     distance_three = two_tiers.tasks[0]
-    workload = machine_settings.memory_workload(3, 0.01, 30)
+    workload = machines.memory_workload(3, 0.01, 30)
     settings = dataclasses.replace(distance_three.machine, workload=workload)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()

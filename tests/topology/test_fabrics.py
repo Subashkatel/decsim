@@ -1,21 +1,30 @@
 """Links and fabric rules, against the cards decsim ships (fabrics.py).
 
-The referent is each card as link_profiles.py and the shipped run files
-build it: a rule over today's routes gives the card those builders give,
-record for record, so a task built from a rule keeps its id.
+The referent is each card as link_profiles.py, the presets and the
+shipped run files build it: a rule over today's routes gives the card
+those give, record for record, so a task built from a rule keeps its id.
+A link's cycle is gem5's cyclesToTicks (src/sim/clocked_object.hh:227).
 """
 
+import fractions
 import pathlib
 
 import pytest
 
+import decsim.config as config
+import decsim.engine
 import decsim.experiments.experiment as experiment
+import decsim.links.channel as channel_module
 import decsim.links.link_profiles as link_profiles
-import decsim.settings as machine_settings
+import decsim.presets.clocks as clocks
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
+import decsim.records.transfers as transfer_records
 import decsim.topology.fabrics as fabrics
+import decsim.topology.legacy as legacy
 
-FRIDGE = machine_settings.FRIDGE_CLOCK
-ROOM = machine_settings.ROOM_CLOCK
+FRIDGE = clocks.FRIDGE_CLOCK
+ROOM = clocks.ROOM_CLOCK
 THIS_FILE = pathlib.Path(__file__)
 EXPERIMENTS = THIS_FILE.parents[2] / "experiments"
 ONE_FRIDGE_CYCLE = fabrics.ClockedLink(clock=FRIDGE, latency_cycles=1)
@@ -105,27 +114,29 @@ def test_the_reference_fabric_gives_the_reference_card():
 
 
 @pytest.mark.parametrize(
-    ("row", "round_trip", "echo_bits"),
+    ("measured_fabric", "round_trip", "echo_bits"),
     [
-        (link_profiles.RoceV2CpuFabric, 2.305, 128),
-        (link_profiles.RoceV2GpuFabric, 4.5, 128),
-        (link_profiles.NvqlinkGpuFabric, 3.839, 256),
+        (link_cards.ROCE_V2_CPU_FABRIC, 2.305, 128),
+        (link_cards.ROCE_V2_GPU_FABRIC, 4.5, 128),
+        (link_cards.NVQLINK_GPU_FABRIC, 3.839, 256),
     ],
 )
 def test_a_cable_between_fridge_and_host_gives_each_measured_card(
-    row, round_trip, echo_bits
+    measured_fabric, round_trip, echo_bits
 ):
     leg = fabrics.RoundTripLeg(round_trip, echo_bits, 100_000)
     rule = fabrics.FridgeHostFabric(cable=leg, host_local=HOST_POLL)
 
     card = _card(rule)
 
-    assert card == row.base_card()
+    assert card == _card(measured_fabric)
 
 
 def test_the_weak_and_strong_bases_are_links_by_path():
-    weak = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
-    strong = machine_settings.strong_decoder_baseline(3, 0.001, 1.0)
+    weak_graph = machines.weak_baseline(3, 0.001, 1.0)
+    strong_graph = machines.strong_baseline(3, 0.001, 1.0)
+    weak = legacy.resolved(weak_graph)
+    strong = legacy.resolved(strong_graph)
 
     assert _card(WEAK_BASE) == weak.links
     assert _card(STRONG_BASE) == strong.links
@@ -218,3 +229,87 @@ def test_a_strong_pool_placed_in_the_fridge_leaves_the_cable():
 
     reference = link_profiles.logical_reference_profile()
     assert card.strong_decoder_to_frame == reference.strong_decoder_to_frame
+
+
+def test_a_clocked_links_cycles_cost_its_clocks_period_in_whole_ticks():
+    """gem5 cyclesToTicks, clockPeriod() * c (clocked_object.hh:227).
+
+    At 300 MHz the period is 3333 ticks, so three cycles are 9999 ticks
+    and eight bits at eight bits per cycle take one period, the same
+    ticks every other component on the domain charges.
+    """
+    fridge = config.Clock.from_megahertz(300.0)
+    reference = link_profiles.logical_reference_profile()
+    link = fabrics.ClockedLink(
+        clock=fridge,
+        latency_cycles=3,
+        bits_per_cycle=8.0,
+        setup_cycles_per_transfer=3,
+        source="three cycles at 300 MHz",
+    )
+    path = link.priced(
+        "controller_to_weak_buffer", reference.controller_to_weak_buffer, None
+    )
+    engine = decsim.engine.Engine()
+    channel = channel_module.Channel(path.channel, engine)
+    framed = transfer_records.FramedPayload(8)
+    delivered = []
+    channel.send(framed, 0, 0, delivered.append)
+    engine.run()
+    transfer = delivered[0]
+    assert path.channel.propagation_latency_ticks == 9999
+    assert path.setup_ticks == 9999
+    assert transfer.serialization_ticks == 3333
+
+
+def test_a_clocked_links_rate_is_the_exact_fraction_of_its_decimal():
+    """The rate stays the exact fraction of the decimal.
+
+    So two cards of the same numbers name one task (collect.json_value,
+    which a task's id hashes).
+    """
+    reference = link_profiles.logical_reference_profile()
+    fridge = config.Clock.from_megahertz(250.0)
+    link = fabrics.ClockedLink(
+        clock=fridge,
+        latency_cycles=40,
+        bits_per_cycle=38.79,
+        lane_count=4,
+        setup_cycles_per_transfer=2,
+        header_bits_per_transfer=16,
+        source="2603.16203 lines 895-897",
+    )
+
+    path = link.priced(
+        "controller_to_weak_buffer", reference.controller_to_weak_buffer, None
+    )
+
+    rate = path.channel.capacity.input_bits_per_microsecond
+    assert rate == fractions.Fraction(38790)
+    assert path.excludes_receiver_processing is True
+
+
+def test_a_clocked_link_with_no_rate_is_an_unbounded_wire():
+    reference = link_profiles.logical_reference_profile()
+    fridge = config.Clock.from_megahertz(250.0)
+    link = fabrics.ClockedLink(
+        clock=fridge, latency_cycles=1, source="an unbounded wire"
+    )
+
+    path = link.priced("qpu_to_controller", reference.qpu_to_controller, None)
+
+    assert path.channel.capacity is None
+
+
+def test_a_timed_link_on_one_path_moves_that_path_alone():
+    half_a_microsecond = fabrics.TimedLink(
+        0.5, excludes_receiver_processing=True
+    )
+    rule = fabrics.PathLinks(frame_to_controller=half_a_microsecond)
+    reference = link_profiles.logical_reference_profile()
+
+    links = _card(rule)
+
+    changed = links.frame_to_controller.channel
+    assert changed.propagation_latency_ticks == 500_000
+    assert links.controller_to_qpu == reference.controller_to_qpu

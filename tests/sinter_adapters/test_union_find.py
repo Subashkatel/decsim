@@ -10,8 +10,6 @@ _collection_worker_state.py:28), so the two agree shot for shot only if
 the adapter builds the row's graph.
 """
 
-import dataclasses
-
 import numpy
 import pytest
 import sinter
@@ -21,9 +19,10 @@ import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.experiments.collect as collect
 import decsim.frontends.settings as workload_settings
+import decsim.presets.machines as machines
 import decsim.producers as producers
-import decsim.settings as machine_settings
 import decsim.sinter_adapters.union_find as union_find_adapter
+import decsim.topology.graph as graph
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.schemes.naive_online as naive_online
 
@@ -117,20 +116,21 @@ def baseline_task(distance: int, code_task: str, error_rate, algorithm):
     The weak base whose naive_online scheme decodes the operation as one
     window, on one memory shot of the code task.
     """
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance, error_rate, ROUND_PERIOD_MICROSECONDS
     )
     circuit_workload = producers.memory_circuit(
         code_task, ROUNDS, distance, error_rate
     )
     workload = workload_settings.WorkloadSettings.running(circuit_workload)
+    workload_part = graph.Part("workload", workload)
     scheme = naive_online.NaiveOnlineScheme.Settings()
-    windows = dataclasses.replace(base.windows, scheme=scheme)
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=algorithm)
-    settings = dataclasses.replace(
-        base, workload=workload, windows=windows, weak_decoder=weak_decoder
+    with_workload = base.with_part(workload_part)
+    with_windows = with_workload.with_settings(machines.WINDOWS, scheme=scheme)
+    machine = with_windows.with_settings(
+        machines.WEAK_POOL, algorithm=algorithm
     )
-    return collect.Task("task", settings, {})
+    return collect.Task("task", machine, {})
 
 
 def machine_shots(task, seeds) -> tuple:

@@ -19,6 +19,7 @@ import pytest
 
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.settings as machine_settings
 import decsim.windows.schemes.sliding as sliding_scheme
@@ -512,9 +513,7 @@ def _online_gate(physical_error_probability=0.008):
         max_escalation_rate=0.5,
     )
     settings = _gate_on(online)
-    workload = machine_settings.memory_workload(
-        3, physical_error_probability, 30
-    )
+    workload = machines.memory_workload(3, physical_error_probability, 30)
     return dataclasses.replace(settings, workload=workload)
 
 

@@ -18,8 +18,12 @@ same kind of job, with a page of its own:
    registration line is needed: any record with those members fits.
 2. **Write the component.** The record's `build` returns it, and it
    fills the port the field's component fills (`decsim/ports.py`).
-3. **Put the record in the field** with `dataclasses.replace`, as the
-   decoder how-to does for `weak_decoder`.
+3. **Put the record in the machine.** A store is a part of its own:
+   `machine.with_part(graph.Part("weak_buffer", record, "fridge"))`
+   puts it in place of a base's. A signal, a policy or a scheme is a
+   field of a part's record, set by the part's name with
+   `machine.with_settings`, as the decoder how-to does for the `weak`
+   pool.
 4. **Name it.** A short form in a class, a folder or a record's `name`
    needs a row in [the glossary](../reference/glossary.md). A row
    under `decsim/` also joins its package docstring's list of rows,
@@ -37,7 +41,8 @@ same kind of job, with a page of its own:
 
 ## A weak syndrome buffer
 
-- **Field:** `weak_syndrome_buffer`, typed `ports.SyndromeBufferSettings`.
+- **Part:** `weak_buffer` in the bases, the `weak_syndrome_buffer`
+  slot, typed `ports.SyndromeBufferSettings`.
 - **Record:** `bits` (the bound, None for none), `clock` (None is the
   machine's), `prices_read_bits` and `build(engine)`. Set
   `prices_read_bits` to `True` when your store prices a read's bits
@@ -64,50 +69,54 @@ same kind of job, with a page of its own:
 
 ## A link card
 
-A card is numbers, not a class: a `FabricSettings` record, one
-`PathSettings` per hop, put in the machine's `links` field.
+A link is numbers, not a class. A machine's `fabric`
+(`decsim/topology/fabrics.py`) prices each hop no wire prices itself,
+one link per hop; the presets' links and fabrics are in
+`decsim/presets/link_cards.py`, each number beside its source.
 
-- **Start** from a card and replace the hops you have numbers for.
-  `base.links` keeps the hops of the base you start from;
+- **Start** from a base's fabric and give the hops you have numbers for
+  their own links: `fabrics.PathLinks(path_name=link, base=base.fabric)`
+  keeps every other hop of the base you start from, and
+  `dataclasses.replace(machine, fabric=fabric)` puts it in the machine.
+  `fabrics.ReferenceFabric()` prices every hop on
   `link_profiles.logical_reference_profile()`
-  (`decsim/links/link_profiles.py`) is the card of a machine given
-  none. A base's card is that card with the base's own hops set to one
+  (`decsim/links/link_profiles.py`), the card of a machine given none.
+  A base's fabric is that card with the base's own hops set to one
   cycle of their clock, so the two differ.
 - **A strong-side hop alone:** start the machine from
-  `decsim.settings.strong_decoder_baseline(3, 0.001, 1.0)` (distance,
-  physical error probability, round period in microseconds), the strong
-  decoder with no weak decoder in the way. Its decoder is belief
-  matching timed on the host's clock; for a timing that is the same on
-  every host, swap in a priced decoder, as
-  `examples/priced_cards_example.py` does.
-- **One hop in cycles of a clock:** `link_profiles.path_card(links,
-  "weak_decoder_to_strong_decoder", clock=..., latency_cycles=...,
-  bits_per_cycle=..., source=...)` returns the hop's `PathSettings`;
+  `machines.strong_baseline(3, 0.001, 1.0)` (distance, physical error
+  probability, round period in microseconds), the strong decoder with
+  no weak decoder in the way. Its decoder is belief matching timed on
+  the host's clock; for a timing that is the same on every host, swap
+  in a priced decoder, as `examples/priced_cards_example.py` does. On
+  the weak base, `link_cards.strong_side(base.fabric, link)` sets the
+  strong side's hops to one host cycle each and the escalation's hop to
+  `link`.
+- **One hop in cycles of a clock:** `fabrics.ClockedLink(clock=...,
+  latency_cycles=..., bits_per_cycle=..., source=...)`;
   `bits_per_cycle=None` is an unbounded wire.
-- **One hop's latency alone:** `link_profiles.with_path_latency(links,
-  path_name, latency_microseconds)` returns the whole card.
+- **One hop's latency alone:** `fabrics.TimedLink(latency_microseconds,
+  excludes_receiver_processing=True)`, an unbounded wire whose latency
+  times the wire alone, as the one-cycle hop it replaces does.
 - **One hop in microseconds with a rate,** measured end to end:
-
-  ```python
-  capacity = link_settings.CapacitySettings(bits_per_microsecond, source)
-  channel = link_settings.ChannelSettings(
-      path_name, latency_ticks, capacity, source
-  )
-  old_path = getattr(links, path_name)
-  path = dataclasses.replace(
-      old_path, channel=channel, excludes_receiver_processing=False
-  )
-  ```
-
-  Then put `path` in the card with `dataclasses.replace(links, ...)`.
+  `fabrics.TimedLink(latency_microseconds, bits_per_microsecond,
+  source=...)`. Its latency holds the receiver's processing too, as a
+  measured number does.
+- **One wire of a graph** takes its link on the wire,
+  `graph.Wire(source, target, link=link)`, ahead of the fabric's
+  ([Write a machine as a graph](write_a_machine_as_a_graph.md)).
 - **A measured latency already holds its payload's time on the wire.**
   Take bits over rate off the measured number before you write it as
   the hop's latency, or the paper's own transfer prices high.
-- **Two hops on one wire** share a `ChannelSettings.name`; a rate is
-  bits per microsecond, a `fractions.Fraction`.
+- **Two hops on one wire** share a channel: write each hop's whole
+  `PathSettings` with the same `ChannelSettings.name`, and give it as
+  `fabrics.FixedPath(path)`; a rate is bits per microsecond, a
+  `fractions.Fraction`.
 - **Write the paper's numbers in your run file**, each with its source
   in a comment (STYLE.md rule 2), not in decsim.
-- **Check the card** by pricing the paper's own transfer on it: with
+- **Check the card** by pricing the paper's own transfer on it. The
+  card a graph runs on is `legacy.resolved(machine).links`
+  (`decsim/topology/legacy.py`); with
   `fabric = decsim.links.fabric.LinkFabric(card, engine)`,
   `fabric.expected_delay_ticks(path, bits, engine.now)` is what one send
   costs on an idle wire

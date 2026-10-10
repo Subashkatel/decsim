@@ -65,11 +65,12 @@ import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.presets.clocks as clocks
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
@@ -82,6 +83,7 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
 import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
@@ -121,7 +123,7 @@ TWO_TIER_HOPS = {
     "strong_decoder_to_weak_decoder": 3,
 }
 HOPS_SOURCE = "a measurement test's hops, in fridge cycles"
-FRIDGE_CLOCK = machine_settings.FRIDGE_CLOCK
+FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
 # the task cells every hand derivation here is at, and the switching runs'
 TASK_CELLS = {
     run_files.ERROR_RATE_PATH: 0.001,
@@ -157,20 +159,18 @@ def fridge_hops(hops: dict, setup_cycles: Optional[dict] = None):
     reference card's numbers.
     """
     setup_cycles = setup_cycles or {}
-    links = link_profiles.logical_reference_profile()
-    cards = {}
+    links_by_path = {}
     for path_name, latency_cycles in hops.items():
         path_setup_cycles = setup_cycles.get(path_name, 0)
-        cards[path_name] = link_profiles.path_card(
-            links,
-            path_name,
+        links_by_path[path_name] = fabrics.ClockedLink(
             clock=FRIDGE_CLOCK,
             latency_cycles=latency_cycles,
-            bits_per_cycle=None,
-            source=HOPS_SOURCE,
             setup_cycles_per_transfer=path_setup_cycles,
+            source=HOPS_SOURCE,
         )
-    return dataclasses.replace(links, **cards)
+    fabric = fabrics.PathLinks(**links_by_path)
+    routes = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+    return fabrics.card(fabric, routes, {}, None)
 
 
 def charged(microseconds: float):
@@ -612,7 +612,7 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     in the strong columns and the weak columns read zero, the mirror of
     test_the_pool_columns_read_each_tiers_own_queue_and_units.
     """
-    shot = base_shot(machine_settings.strong_decoder_baseline)
+    shot = base_shot(machines.strong_baseline)
     measurement = measure.measure_shot(shot)
 
     assert measurement.weak_queue_max == 0
@@ -1028,9 +1028,9 @@ def shipped_shot(run_file: str, task_name: str):
 
 
 def base_shot(base) -> collect.Shot:
-    """Seed 0 of a shipped base (decsim.settings) at that same task."""
-    settings = base(3, SWITCHING_ERROR_PROBABILITY, 1.0)
-    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+    """Seed 0 of a shipped base (presets/machines.py) at that same task."""
+    machine = base(3, SWITCHING_ERROR_PROBABILITY, 1.0)
+    task = task_at(machine, SWITCHING_ERROR_PROBABILITY)
     return collect.run_shot(task, 0)
 
 
@@ -1082,13 +1082,12 @@ def later_solve_ticks(shot, window_id: int) -> int:
 def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
     """The identity on a machine the repository ships, not a test's own.
 
-    decsim.settings.weak_decoder_baseline decodes each of its nine
-    windows once and answers on that decode, so its confidence step is zero
-    and every window's points are its whole path from its data being
-    complete in the weak syndrome buffer to its correction committed in the
-    frame.
+    machines.weak_baseline decodes each of its nine windows once and
+    answers on that decode, so its confidence step is zero and every
+    window's points are its whole path from its data being complete in
+    the weak syndrome buffer to its correction committed in the frame.
     """
-    shot = base_shot(machine_settings.weak_decoder_baseline)
+    shot = base_shot(machines.weak_baseline)
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)

@@ -27,8 +27,6 @@ decsim run experiments/switching/run.py
 ```
 """
 
-import dataclasses
-
 import decsim
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
@@ -37,10 +35,12 @@ import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.links.link_profiles as link_profiles
 import decsim.ports as ports
-import decsim.settings as machine_settings
-import decsim.windows.settings as window_settings
+import decsim.presets.clocks as clocks
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -51,57 +51,54 @@ PHYSICAL_ERROR_PROBABILITY = 0.008
 # the round period, the paper's tau_gen
 ROUND_PERIOD_MICROSECONDS = 1.0
 STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * ROUND_PERIOD_MICROSECONDS
-STRONG_COMMUNICATION_MICROSECONDS = 10 * ROUND_PERIOD_MICROSECONDS
+# T_strong_comm = 10 tau_gen, 10 us: 2500 cycles of the 250 MHz room clock
+ESCALATION_LINK = fabrics.ClockedLink(
+    clock=clocks.ROOM_CLOCK,
+    latency_cycles=2500,
+    source="T_strong_comm, 2510.25222 lines 1109-1114",
+)
 # the keep threshold of 2510.25222 Sec. IV
 THRESHOLD_DECIBELS = 20.0
 CLUSTER_GAP_COLLECTION = decsim.CollectionSettings(max_shots=50)
 REDO_WINDOW_COLLECTION = decsim.CollectionSettings(max_shots=2000)
 
 
-def cluster_gap_switching(distance: int) -> machine_settings.MachineSettings:
+def cluster_gap_switching(distance: int) -> graph.Machine:
     """Union-find's cluster gap decides; Toshio's strong decoder redoes.
 
-    The union-find decode is charged the host's measured time.
+    The union-find decode is charged the host's measured time, and the
+    escalation's rounds arrive T_strong_comm after it sends them.
     """
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
     host_time = cycle_count.HostMeasuredTime()
     union_find_decoder = union_find.UnionFindDecoder.Settings(timing=host_time)
-    weak_decoder = dataclasses.replace(
-        base.weak_decoder, algorithm=union_find_decoder
+    weak_base = base.with_settings(
+        machines.WEAK_POOL, algorithm=union_find_decoder
     )
     strong_decoder = decoder_settings.linear_decoder_pool(
         STRONG_DECODE_MICROSECONDS_PER_ROUND,
-        machine_settings.ROOM_CLOCK,
+        clocks.ROOM_CLOCK,
         solves_per_window=1,
     )
     cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=12.0)
-    machine = _switching(base, cluster_gap, weak_decoder, strong_decoder)
-    links = link_profiles.with_path_latency(
-        machine.links,
-        "weak_decoder_to_strong_decoder",
-        STRONG_COMMUNICATION_MICROSECONDS,
-    )
-    return dataclasses.replace(machine, links=links)
+    return _switching(weak_base, cluster_gap, strong_decoder, ESCALATION_LINK)
 
 
-def redo_window_switching(distance: int) -> machine_settings.MachineSettings:
+def redo_window_switching(distance: int) -> graph.Machine:
     """PyMatching's complementary gap decides; belief matching redoes.
 
     The strong tier is the strong base's.
     """
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
-    strong_base = machine_settings.strong_decoder_baseline(
-        distance, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
-    )
-    strong_decoder = strong_base.strong_decoder
+    weak_base = base.with_settings(machines.WEAK_POOL, algorithm=matching)
+    strong_decoder = machines.STRONG_BASELINE_POOL
     complementary_gap = complementary.ComplementaryGap.Settings()
-    return _switching(base, complementary_gap, weak_decoder, strong_decoder)
+    return _switching(weak_base, complementary_gap, strong_decoder)
 
 
 def switching_tasks() -> list:
@@ -131,17 +128,17 @@ def switching_tasks() -> list:
 
 
 def _switching(
-    base: machine_settings.MachineSettings,
+    base: graph.Machine,
     confidence: ports.ConfidenceSettings,
-    weak_decoder: decoder_settings.DecoderPoolSettings,
     strong_decoder: decoder_settings.DecoderPoolSettings,
-) -> machine_settings.MachineSettings:
+    escalation: ports.LinkCard = link_cards.ONE_ROOM_CYCLE,
+) -> graph.Machine:
     """The base switching on confidence to a strong decoder on the host.
 
     A weak result is kept at 20 dB or more; any other window is redone
     on the redo window, the strong decode starting after the weak
     verdict, which is free. The strong side's hops are one room cycle
-    each.
+    each, the escalation as given.
     """
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=THRESHOLD_DECIBELS
@@ -149,17 +146,9 @@ def _switching(
     switching_slot = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
-    links = machine_settings.one_cycle_strong_side(base.links)
-    windows = window_settings.switching_windows(
-        base.windows, switching_slot.strong_window
-    )
-    return dataclasses.replace(
-        base,
-        links=links,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching_slot,
+    fabric = link_cards.strong_side(base.fabric, escalation)
+    return machines.with_strong_tier(
+        base, strong_decoder, switching_slot, fabric
     )
 
 

@@ -12,13 +12,11 @@ and `decsim describe` all reach it. Today the graph runs as the
 
 ```python
 import decsim
-import decsim.settings as machine_settings
+import decsim.presets.clocks as clocks
 import decsim.topology.graph as graph
 
-FRIDGE = machine_settings.FRIDGE_CLOCK
-
 machine = graph.Machine(
-    clock=FRIDGE,
+    clock=clocks.FRIDGE_CLOCK,
     parts=(
         graph.Part("qpu", qpu),
         graph.Part("controller", controller),
@@ -50,6 +48,23 @@ For two decoders, add a second store and pool, wire the first pool's
 `escalate` to the second pool's `escalated`, and add a
 `SwitchingSettings` part. A pool alone placed on the host is the strong
 decoder.
+
+The machines decsim ships are graphs already (`decsim/presets/`), with
+their parts named as above. Start from one and change it by name:
+
+```python
+import decsim.presets.machines as machines
+
+base = machines.weak_baseline(5, 0.001, 1.0)
+two_units = base.with_settings(machines.WEAK_POOL, unit_count=2)
+task = decsim.Task("weak_d5", two_units, collection=collection)
+```
+
+`with_settings` changes fields of one part's record, `with_part`
+replaces a part of the same name or adds one, `with_wires` adds wires,
+and `without_part` drops a part and its wires.
+`machines.with_strong_tier` adds a strong decoder on the host that the
+weak one escalates to.
 
 ## 2. Price the links
 

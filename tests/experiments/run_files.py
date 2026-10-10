@@ -38,9 +38,12 @@ import decsim.experiments.pieces as pieces
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
+import decsim.presets.clocks as clocks
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.legacy as legacy
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -136,26 +139,21 @@ def minimal_machine(
     distance = cells.get(DISTANCE_PATH, 3)
     probability = cells.get(ERROR_RATE_PATH, 0.001)
     round_period = cells.get(ROUND_PERIOD_PATH, UNSWEPT_ROUND_PERIOD)
-    base = machine_settings.weak_decoder_baseline(
-        distance, probability, round_period
+    weak_graph = machines.weak_baseline(distance, probability, round_period)
+    readout = fabrics.ClockedLink(
+        clock=clocks.FRIDGE_CLOCK, latency_cycles=1, source=READOUT_SOURCE
     )
-    reference = link_profiles.logical_reference_profile()
-    readout = link_profiles.path_card(
-        reference,
-        "qpu_to_controller",
-        clock=machine_settings.FRIDGE_CLOCK,
-        latency_cycles=1,
-        bits_per_cycle=None,
-        source=READOUT_SOURCE,
-    )
-    links = dataclasses.replace(reference, qpu_to_controller=readout)
+    # the reference card with the readout one fridge cycle
+    fabric = fabrics.PathLinks(qpu_to_controller=readout)
+    graph_base = dataclasses.replace(weak_graph, fabric=fabric)
+    base = legacy.resolved(graph_base)
     charged = PYMATCHING.Settings(
         preset_latency_microseconds=WEAK_DECODE_MICROSECONDS
     )
     algorithm = charged
     if weak_decoder is not None:
         algorithm = ALGORITHMS[weak_decoder]
-    pool = decoder_pool(algorithm, machine_settings.FRIDGE_CLOCK)
+    pool = decoder_pool(algorithm, clocks.FRIDGE_CLOCK)
     code_task = cells.get(CODE_TASK_PATH, CODE_TASK)
     made = producers.memory_circuit(
         code_task, rounds_per_shot, distance, probability
@@ -166,11 +164,7 @@ def minimal_machine(
     if commit_rounds is not None:
         windows = _windows_committing(windows, commit_rounds)
     return dataclasses.replace(
-        base,
-        links=links,
-        weak_decoder=pool,
-        workload=workload,
-        windows=windows,
+        base, weak_decoder=pool, workload=workload, windows=windows
     )
 
 
@@ -207,9 +201,7 @@ def switching_machine(
     windows = window_settings.switching_windows(
         base.windows, switching.strong_window
     )
-    strong_decoder = decoder_pool(
-        ALGORITHMS["pymatching"], machine_settings.ROOM_CLOCK
-    )
+    strong_decoder = decoder_pool(ALGORITHMS["pymatching"], clocks.ROOM_CLOCK)
     return dataclasses.replace(
         base,
         windows=windows,
@@ -229,19 +221,20 @@ def reference_machine(
     clock. Its first shot writes a Chrome trace.
     """
     base = minimal_machine(cells, weak_decoder="pymatching")
-    fridge = machine_settings.FRIDGE_CLOCK
-    cards = {}
+    fridge = clocks.FRIDGE_CLOCK
+    links_by_path = {}
     for path_name, latency_cycles, bits_per_cycle, lane_count in REFERENCE_HOPS:
-        cards[path_name] = link_profiles.path_card(
-            base.links,
-            path_name,
+        links_by_path[path_name] = fabrics.ClockedLink(
             clock=fridge,
             latency_cycles=latency_cycles,
             bits_per_cycle=bits_per_cycle,
-            source=REFERENCE_SOURCE,
             lane_count=lane_count,
+            source=REFERENCE_SOURCE,
         )
-    links = dataclasses.replace(base.links, **cards)
+    # the reference card with every hop of REFERENCE_HOPS priced
+    fabric = fabrics.PathLinks(**links_by_path)
+    routes = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+    links = fabrics.card(fabric, routes, {}, None)
     controller = dataclasses.replace(
         base.controller, decision_to_pulse_cycles=REFERENCE_ISSUE_CYCLES
     )

@@ -13,10 +13,8 @@ decsim run examples/priced_cards_example.py
 ```
 """
 
-import dataclasses
-
 import decsim
-import decsim.settings as machine_settings
+import decsim.presets.machines as machines
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -30,7 +28,7 @@ COLLECTION = decsim.CollectionSettings(max_shots=20)
 
 tasks = []
 for distance in DISTANCES:
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
@@ -38,8 +36,7 @@ for distance in DISTANCES:
     card = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=DECODE_MICROSECONDS
     )
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=card)
-    machine = dataclasses.replace(base, weak_decoder=weak_decoder)
+    machine = base.with_settings(machines.WEAK_POOL, algorithm=card)
     # the task's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (

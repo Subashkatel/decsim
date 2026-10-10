@@ -139,3 +139,71 @@ def test_a_qpus_distance_is_set_in_the_run_file_and_a_pools_nothing():
 
     assert qpu.run_file_fields() == ("distance",)
     assert pool.run_file_fields() == ()
+
+
+def test_a_part_of_a_known_name_takes_its_namesakes_place():
+    machine = _weak_graph()
+    pool = machine.part("weak")
+    two_units = dataclasses.replace(pool.settings, unit_count=2)
+    replacement = graph.Part("weak", two_units, "fridge")
+
+    changed = machine.with_part(replacement)
+
+    names = [part.name for part in changed.parts]
+    assert names == [part.name for part in machine.parts]
+    changed_pool = changed.part("weak")
+    assert changed_pool.settings.unit_count == 2
+
+
+def test_a_part_of_a_new_name_is_added_last():
+    machine = _weak_graph()
+    store = machine.part("weak_buffer")
+    second_store = graph.Part("spare_buffer", store.settings, "host")
+
+    grown = machine.with_part(second_store)
+
+    assert grown.parts[-1] == second_store
+    assert len(grown.parts) == len(machine.parts) + 1
+
+
+def test_a_parts_fields_change_and_its_placement_stays():
+    machine = _weak_graph()
+
+    changed = machine.with_settings("weak", unit_count=3)
+
+    pool = changed.part("weak")
+    assert pool.settings.unit_count == 3
+    assert pool.placed == "fridge"
+
+
+def test_added_wires_follow_the_machines_own():
+    machine = _weak_graph()
+    without = machine.without_part("weak")
+    pool = machine.part("weak")
+    readded = without.with_part(pool)
+    weak_wires = [wire for wire in machine.wires if wire not in without.wires]
+
+    rewired = readded.with_wires(*weak_wires)
+
+    assert rewired.unbound_ports() == []
+    assert rewired.wires[-len(weak_wires) :] == tuple(weak_wires)
+
+
+def test_a_part_removed_takes_every_wire_that_reaches_it():
+    machine = _weak_graph()
+
+    without = machine.without_part("weak")
+
+    ends = []
+    for wire in without.wires:
+        ends.extend((wire.source, wire.target))
+    reaching = [end for end in ends if end.startswith("weak.")]
+    assert reaching == []
+    assert "weak" not in [part.name for part in without.parts]
+
+
+def test_removing_an_unknown_part_is_refused():
+    machine = _weak_graph()
+
+    with pytest.raises(graph.GraphError, match="no part 'relay'"):
+        machine.without_part("relay")

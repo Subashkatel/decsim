@@ -19,14 +19,15 @@ import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
 import decsim.links.window_transfers as window_transfers
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.topology.legacy as legacy
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.round_retention as round_retention
@@ -418,7 +419,7 @@ FOLD_ROUNDS = 15
 
 def _fifteen_rounds(settings, probability: float):
     """The settings on a memory shot of fifteen rounds at distance 3."""
-    workload = machine_settings.memory_workload(3, probability, FOLD_ROUNDS)
+    workload = machines.memory_workload(3, probability, FOLD_ROUNDS)
     return dataclasses.replace(settings, workload=workload)
 
 
@@ -433,7 +434,8 @@ def test_every_window_with_a_predecessor_folds_its_boundary(probability, seed):
     do. The rounds come out of a fold that changed nothing unchanged, so
     every one of five seeds still agrees with whole-circuit PyMatching.
     """
-    base = machine_settings.weak_decoder_baseline(3, probability, 1.0)
+    weak_base = machines.weak_baseline(3, probability, 1.0)
+    base = legacy.resolved(weak_base)
     observation = dataclasses.replace(base.observation, data_movement=True)
     settings = dataclasses.replace(base, observation=observation)
     settings = _fifteen_rounds(settings, probability)

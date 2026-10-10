@@ -2230,3 +2230,31 @@ class WindowBacklog(Protocol):
 
     def backlog_round_counts(self, rounds_read_out_by_operation: dict) -> tuple:
         """Rounds read out whole, not final: (operation id, patch, rounds)."""
+
+
+class LinkCard(Protocol):
+    """A wire's price: a route's path from its reference path.
+
+    The reference and the path it returns are links' PathSettings
+    (decsim/links/settings.py), which this file does not import; a graph
+    puts a card on a wire or in a fabric (decsim/topology/fabrics.py).
+    """
+
+    def priced(
+        self,
+        name: str,
+        reference: Any,  # a links PathSettings
+        machine_clock: Optional[config.Clock],
+    ) -> object:  # a links PathSettings
+        """The path named name: the reference's payload rule on this wire."""
+
+
+class FabricRule(Protocol):
+    """A fabric: the link each route takes, None for the reference path.
+
+    A route is topology.fabrics.Route: a path's name and its two ends'
+    sites.
+    """
+
+    def link_for(self, route: Any) -> Optional[LinkCard]:
+        """The link this route takes, or None for the reference path."""

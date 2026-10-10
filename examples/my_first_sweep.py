@@ -13,10 +13,8 @@ decsim run examples/my_first_sweep.py
 ```
 """
 
-import dataclasses
-
 import decsim
-import decsim.settings as machine_settings
+import decsim.presets.machines as machines
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -29,15 +27,14 @@ COLLECTION = decsim.CollectionSettings(max_shots=400)
 
 tasks = []
 for distance in DISTANCES:
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
     )
     # the baseline charges its decoder a number; this sweep decodes for real
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=matching)
-    machine = dataclasses.replace(base, weak_decoder=weak_decoder)
+    machine = base.with_settings(machines.WEAK_POOL, algorithm=matching)
     # the task's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (

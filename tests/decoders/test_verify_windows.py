@@ -16,9 +16,10 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.verify_windows as verify_windows
 import decsim.engine as engine_module
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
-import decsim.settings as machine_settings
+import decsim.topology.legacy as legacy
 import tests.decoders.windows as windows
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -27,11 +28,11 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 def _algorithm_spans(strong_algorithm) -> list:
     """(start, end) ticks of every algorithm stage of one strong-only run."""
-    base = machine_settings.strong_decoder_baseline(5, 0.001, 1.0)
-    strong_decoder = dataclasses.replace(
-        base.strong_decoder, algorithm=strong_algorithm
+    base = machines.strong_baseline(5, 0.001, 1.0)
+    graph_machine = base.with_settings(
+        machines.STRONG_POOL, algorithm=strong_algorithm
     )
-    settings = dataclasses.replace(base, strong_decoder=strong_decoder)
+    settings = legacy.resolved(graph_machine)
     machine = machine_module.Machine.build(settings)
     machine.run()
     records = machine.observation.stages.records

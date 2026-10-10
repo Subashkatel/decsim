@@ -29,6 +29,7 @@ import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
+import decsim.presets.clocks as clocks
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import tests.declared_run as declared_run
@@ -153,7 +154,7 @@ def never_escalating_settings():
     alone.
     """
     settings = switching_settings(0.0)
-    cycle_count_law = cycle_count.CycleCount(clock=shape_tests.FRIDGE_CLOCK)
+    cycle_count_law = cycle_count.CycleCount(clock=clocks.FRIDGE_CLOCK)
     union_find_decoder = union_find.UnionFindDecoder.Settings(
         timing=cycle_count_law
     )

@@ -123,12 +123,14 @@ class Registry:
         """The component's declared statistics, recorded at this path.
 
         A component that declares none, a researcher's own store written
-        to the port alone, records none and keeps an empty group.
+        to the port alone, records none: it takes no path and is given
+        an empty group no row reads.
         """
         declared = getattr(component, "STATISTICS", ())
+        if not declared:
+            return unrecorded(declared)
         group = self.group(path, declared)
-        if declared:
-            component.statistics = group
+        component.statistics = group
         return group
 
     def group(self, path: str, statistics: Sequence[Statistic]) -> Group:

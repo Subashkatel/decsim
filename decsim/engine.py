@@ -89,6 +89,21 @@ class Engine:
         """
         event.is_descheduled = True
 
+    def has_action_due_now(self) -> bool:
+        """Whether an action still waits at the current tick.
+
+        A sampler of what ticks end at reads only after a tick's last
+        action. A descheduled action at the head may hide one due now,
+        so it answers False then: such a sampler may read a tick twice,
+        and never misses its end.
+        """
+        if not self._event_queue:
+            return False
+        head = self._event_queue[0]
+        if head.is_descheduled:
+            return False
+        return head.time == self.now
+
     @property
     def idle(self) -> bool:
         """True when nothing is scheduled."""

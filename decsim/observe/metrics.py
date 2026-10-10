@@ -85,8 +85,9 @@ class DecoderUtilization:
 class DecodeBacklog:
     """The peak count of rounds read out whole and not finally corrected.
 
-    Sampled after every action, since the rounds waiting are spread over
-    the window manager and the queues and no one source reports them. A
+    Sampled after the last action of every tick, since the rounds
+    waiting are spread over the window manager and the queues and no one
+    source reports them. A
     window counts once its rounds are read out, so one whose rounds the
     controller holds for room in a full store is in the backlog too. The
     peak is over the counts ticks end at, the rule of the queue peaks
@@ -108,7 +109,10 @@ class DecodeBacklog:
         self.rounds = 0
 
     def observe(self, tick: int) -> None:
-        """Sample the backlog after an action; a later tick ends this one."""
+        """Sample the backlog after a tick's last action.
+
+        A later tick ends this one.
+        """
         view = run_views.backlog_view(
             self.window_manager,
             self.decoder_managers,

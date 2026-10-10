@@ -23,8 +23,8 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.machine as machine_module
-import decsim.observe.queue_depth as queue_depth
 import decsim.records.decoding as decoding_records
+import decsim.statistics.registry as statistics_registry
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
 
@@ -171,17 +171,20 @@ def test_a_job_waits_in_scheduler_order():
 def test_the_depth_is_reported_at_every_change():
     engine = engine_module.Engine()
     manager = _manager(engine, 1)
-    depth_log = queue_depth.QueueDepthLog()
-    depth_changed = functools.partial(depth_log.depth_changed, "default")
-    manager.queue.trace.depth_changed.connect(depth_changed)
+    samples = []
+    note_depth = functools.partial(_note_depth, samples)
+    manager.queue.trace.depth_changed.connect(note_depth)
+    run_statistics = statistics_registry.Registry(engine)
+    run_statistics.attach(manager.queue, "weak_decoder.queue")
     _submit(manager, "a")
     _submit(manager, "b")
     engine.run()
+    run_statistics.finish()
     # a queues and leaves at once; b queues behind a's compute and
     # leaves when a's decode ends
-    depths = [depth for _tick, depth in depth_log.samples]
+    depths = [depth for _tick, depth in samples]
     assert depths == [1, 0, 1, 0]
-    assert depth_log.peak == 1
+    assert manager.queue.statistics.queued.peak == 1
 
 
 def test_a_withdrawn_job_leaves_the_depth_when_it_leaves_the_queue():
@@ -194,9 +197,9 @@ def test_a_withdrawn_job_leaves_the_depth_when_it_leaves_the_queue():
     """
     engine = engine_module.Engine()
     manager = _manager(engine, 1)
-    depth_log = queue_depth.QueueDepthLog()
-    depth_changed = functools.partial(depth_log.depth_changed, "default")
-    manager.queue.trace.depth_changed.connect(depth_changed)
+    samples = []
+    note_depth = functools.partial(_note_depth, samples)
+    manager.queue.trace.depth_changed.connect(note_depth)
     _submit(manager, "a")
     _submit(manager, "b")
     waiting = manager.queue.waiting
@@ -204,7 +207,7 @@ def test_a_withdrawn_job_leaves_the_depth_when_it_leaves_the_queue():
     withdrawal_tick = SERVICE_TICKS // 2
     engine.schedule(withdrawal_tick, lambda: manager.queue.remove(withdrawn))
     engine.run()
-    assert depth_log.samples == [(0, 1), (0, 0), (0, 1), (withdrawal_tick, 0)]
+    assert samples == [(0, 1), (0, 0), (0, 1), (withdrawal_tick, 0)]
 
 
 def test_the_queued_escalations_are_served_as_one_bulk_strong_decode():
@@ -337,3 +340,7 @@ def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():
     admissions = [deposits.deposit_count(unit) for unit in units]
     assert every_batch
     assert admissions == [0]
+
+
+def _note_depth(samples, tick, depth):
+    samples.append((tick, depth))

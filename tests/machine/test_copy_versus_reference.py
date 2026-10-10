@@ -465,8 +465,9 @@ def _weak_input_transfers(machine) -> int:
 
 def _busy_unit_ticks(machine) -> int:
     """The time-integrated ticks the pool's units held their compute."""
-    utilization = machine.observation.decoder_utilization.result()
-    return utilization["busy_unit_ticks"]
+    groups = machine.observation.statistics.groups
+    units = groups["weak_decoder.units"]
+    return units.busy_units.area
 
 
 def _weak_input_bits(machine) -> int:

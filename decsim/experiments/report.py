@@ -48,6 +48,7 @@ NON_COLUMN_FIELDS = (
     "window_statuses",
     "confidence",
     "window_outcomes",
+    "statistics",
 )
 # the counters a hold books for the whole shot: a reference is a token
 # on a store's slot and belongs to no path, so these repeat on every row
@@ -134,6 +135,7 @@ SHOT_TRUE_COUNTS = (
 FOLDED_FILES = (
     "shots.csv",
     "shot_links.csv",
+    "shot_stats.csv",
     "shot_data_movement.csv",
     "latency_samples.csv",
     "window_confidence.csv",
@@ -161,6 +163,7 @@ class RunRecord:
 
     shots: list
     shot_links: list
+    shot_statistics: list
     shot_data_movement: list
     window_samples: list
     latency_samples: list
@@ -346,6 +349,22 @@ def shot_link_rows(measurements: list) -> list:
     return rows
 
 
+def shot_statistics_rows(measurements: list) -> list:
+    """One row per shot per part, statistic and field: its value.
+
+    Each part's statistics as its registry rows (statistics/registry.py),
+    the long table SST's CSV output writes: a second pool or another
+    part adds rows and moves no column.
+    """
+    rows = []
+    for measurement in measurements:
+        task_key = measured_task_key(measurement)
+        for statistic_row in measurement.statistics:
+            row = _shot_statistic_row(task_key, measurement, statistic_row)
+            rows.append(row)
+    return rows
+
+
 def window_sample_rows(measurements: list) -> list:
     """One row per task, latency point, tier and distinct value: its count.
 
@@ -472,6 +491,7 @@ def record_of(measurements: list) -> RunRecord:
     """The additive facts of the shots this process measured."""
     shots = shot_rows(measurements)
     links = shot_link_rows(measurements)
+    statistics = shot_statistics_rows(measurements)
     movement = shot_data_movement_rows(measurements)
     samples = window_sample_rows(measurements)
     latency = latency_sample_rows(measurements)
@@ -481,6 +501,7 @@ def record_of(measurements: list) -> RunRecord:
     return RunRecord(
         shots,
         links,
+        statistics,
         movement,
         samples,
         latency,
@@ -491,11 +512,13 @@ def record_of(measurements: list) -> RunRecord:
 
 
 def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
-    """The record's eight files; one with no rows is not written."""
+    """The record's nine files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
     _write_rows(record.shots, shots_path, swept)
     links_path = report_dir / "shot_links.csv"
     _write_rows(record.shot_links, links_path, swept)
+    statistics_path = report_dir / "shot_stats.csv"
+    _write_rows(record.shot_statistics, statistics_path, swept)
     movement_path = report_dir / "shot_data_movement.csv"
     _write_rows(record.shot_data_movement, movement_path, swept)
     samples_path = report_dir / "window_samples.csv"
@@ -596,6 +619,7 @@ def _fold_the_folders(
     samples_rows = _rows_of_counts(counts, list(shot_totals))
     _write_rows(samples_rows, samples_path, swept)
     _fold_shot_links(folders, order, out_dir, swept)
+    _fold_shot_statistics(folders, order, out_dir, swept)
     _fold_shot_movement(folders, order, out_dir, swept)
     _fold_latency_samples(folders, order, out_dir, swept)
     _fold_window_confidence(folders, order, out_dir, swept)
@@ -629,6 +653,14 @@ def _add_a_folded_shot(
 def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> None:
     """Every folder's shot_links.csv into one; no summary reads it."""
     name = "shot_links.csv"
+    _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
+
+
+def _fold_shot_statistics(
+    folders: list, order, out_dir: Path, swept: dict
+) -> None:
+    """Every folder's shot_stats.csv into one; no summary reads it yet."""
+    name = "shot_stats.csv"
     _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
 
 
@@ -1358,6 +1390,17 @@ def _paths_counted(counted: dict) -> list:
     for path in counted["moves_by_path"]:
         paths.add(path)
     return sorted(paths)
+
+
+def _shot_statistic_row(task_key: tuple, measurement, statistic_row) -> dict:
+    """One shot's value of one field of one part's statistic."""
+    row = task_columns(task_key)
+    row["seed"] = measurement.seed
+    row["path"] = statistic_row.path
+    row["statistic"] = statistic_row.statistic
+    row["field"] = statistic_row.field
+    row["value"] = statistic_row.value
+    return row
 
 
 def _shot_movement_row(

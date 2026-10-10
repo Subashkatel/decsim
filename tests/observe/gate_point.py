@@ -10,6 +10,7 @@ import dataclasses
 import hashlib
 import json
 
+import decsim.build.decoders as decoders_part
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
 
@@ -52,7 +53,9 @@ def captured_fields(machine, result) -> dict:
     traffic_text = json.dumps(result.link_traffic, sort_keys=True)
     traffic_bytes = traffic_text.encode()
     traffic_digest = hashlib.sha256(traffic_bytes)
-    depths = [depth for _tick, depth in observation.queue_depth.samples]
+    groups = observation.statistics.groups
+    queued = groups[decoders_part.MANAGERS_PATH].queued
+    depths = [depth for _tick, depth in queued.changes]
     fields = {
         "log_sha256": log_sha256(machine),
         "log_lines": len(observation.log.lines),
@@ -62,7 +65,7 @@ def captured_fields(machine, result) -> dict:
         "operation_results": _result_rows(result.operation_results),
         "link_traffic": result.link_traffic,
         "link_traffic_sha256": traffic_digest.hexdigest(),
-        "queue_log": list(observation.queue_depth.samples),
+        "queue_log": list(queued.changes),
         "max_queue_depth": max(depths, default=0),
         "runtime_timestamps": _stamp_rows(stamps),
         "controller_idle_rounds": observation.controller_counters.idle_rounds,

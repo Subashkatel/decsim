@@ -14,6 +14,7 @@ import json
 
 import pytest
 
+import decsim.build.decoders as decoders_part
 import decsim.decoders.decoders as decoders
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.experiments.collect as collect
@@ -159,10 +160,11 @@ def test_the_trace_moves_no_tick_and_narrates_the_same_log(tmp_path):
     assert plain_result.link_traffic == traced_result.link_traffic
     assert plain_result.operation_results == traced_result.operation_results
     assert plain_frame.records == traced_frame.records
-    assert (
-        plain.observation.queue_depth.samples
-        == traced.observation.queue_depth.samples
-    )
+    plain_groups = plain.observation.statistics.groups
+    traced_groups = traced.observation.statistics.groups
+    plain_queued = plain_groups[decoders_part.MANAGERS_PATH].queued
+    traced_queued = traced_groups[decoders_part.MANAGERS_PATH].queued
+    assert plain_queued.changes == traced_queued.changes
 
 
 def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):

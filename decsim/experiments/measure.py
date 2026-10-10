@@ -15,8 +15,8 @@ import pathlib
 import statistics
 from typing import Any, Optional, Union
 
+import decsim.build.decoders as decoders_part
 import decsim.config as config_module
-import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
@@ -32,6 +32,7 @@ import decsim.records.results as result_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
 
 # Latency points, in path order, in microseconds per window unless noted.
 # Every point is one span, and its comment names the two ticks it runs
@@ -161,6 +162,10 @@ WINDOW_STATUS_COLUMNS = tuple(
     if status is not decoding_records.BackendDecodeStatus.SUCCEEDED
 )
 
+# The settings paths each tier's pool keeps its statistics at
+# (build/decoders.py Decoders.attach_statistics).
+WEAK_POOL_PATH = "weak_decoder"
+STRONG_POOL_PATH = decoders_part.STRONG_PATH
 # which store's output link carries a tier's window in, keyed by the tier
 # whose decode the frame committed rather than by the row's name
 INPUT_LINK_BY_TIER = {
@@ -359,6 +364,9 @@ class ShotMeasurement:
     # each window's answer and label, None unless
     # observation.record_window_outcomes; window_outcomes.csv holds it
     window_outcomes: Optional[tuple]
+    # every part's statistics as the run's registry rows (path,
+    # statistic, field, value); shot_stats.csv holds them
+    statistics: list
 
 
 def measure_shot(
@@ -1085,12 +1093,12 @@ def _measurement(
     window_period_us = commit_rounds * round_period_microseconds
     load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
-    queued = observation.queue_depth.peak
-    primary_tier = settings.window_tier.value
+    managers = observation.statistics.groups[decoders_part.MANAGERS_PATH]
+    queued = managers.queued.peak
     round_period_ticks = config_module.microseconds_to_ticks(
         round_period_microseconds
     )
-    pools = _pool_measures(observation, primary_tier, round_period_ticks)
+    pools = _pool_measures(observation, round_period_ticks)
     strong = _strong_decodes(observation)
     tiers = _tier_records(observation)
     backlog_peak = _backlog_peak_rounds(observation)
@@ -1107,6 +1115,7 @@ def _measurement(
     is_scored_failure = logical_failure and is_scored
     confidence = _shot_confidence(settings, observation, seed, record_options)
     window_outcomes = _shot_window_outcomes(observation, owners)
+    statistics = observation.statistics.rows()
     return ShotMeasurement(
         task_id=task_id,
         algorithm=algorithm,
@@ -1160,6 +1169,7 @@ def _measurement(
         confidence=confidence,
         predictions=predictions,
         window_outcomes=window_outcomes,
+        statistics=statistics,
     )
 
 
@@ -1468,6 +1478,18 @@ class _RefereeCounts:
 
 
 @dataclasses.dataclass(frozen=True)
+class _PoolNumbers:
+    """One pool's load over the shot."""
+
+    queue_max: int
+    busy_fraction: float
+    offered_load: float
+
+
+_NO_POOL = _PoolNumbers(queue_max=0, busy_fraction=0.0, offered_load=0.0)
+
+
+@dataclasses.dataclass(frozen=True)
 class _PoolMeasures:
     """Each tier's pool load over the shot."""
 
@@ -1603,67 +1625,55 @@ def _referee_counts(
 
 def _pool_measures(
     observation: observation_module.Observation,
-    primary_tier: str,
     round_period_ticks: int,
 ) -> _PoolMeasures:
-    """Each pool's own queue peak, busy fraction and load, by tier name.
+    """Each tier's queue peak, busy fraction and load, from its statistics.
 
-    The plan's windows queue in the default pool, so its numbers are the
-    primary tier's; a run without a pool reads zero for it.
-    """
-    peaks = observation.queue_depth.peak_by_pool
-    utilization = observation.decoder_utilization.result()
-    busy = utilization["per_pool_busy_fraction"]
-    offered = _offered_load_by_pool(
-        observation, utilization, round_period_ticks
-    )
-    default_queue_max = peaks.get(decode_queue.DEFAULT_POOL, 0)
-    default_busy_fraction = busy.get(decode_queue.DEFAULT_POOL, 0.0)
-    default_offered_load = offered.get(decode_queue.DEFAULT_POOL, 0.0)
-    if primary_tier == window_records.DecoderTier.STRONG.value:
-        return _PoolMeasures(
-            weak_queue_max=0,
-            strong_queue_max=default_queue_max,
-            weak_busy_fraction=0.0,
-            strong_busy_fraction=default_busy_fraction,
-            weak_offered_load=0.0,
-            strong_offered_load=default_offered_load,
-        )
-    weak_queue_max = default_queue_max
-    strong_queue_max = peaks.get(decode_queue.STRONG_POOL, 0)
-    weak_busy_fraction = default_busy_fraction
-    strong_busy_fraction = busy.get(decode_queue.STRONG_POOL, 0.0)
-    weak_offered_load = default_offered_load
-    strong_offered_load = offered.get(decode_queue.STRONG_POOL, 0.0)
-    return _PoolMeasures(
-        weak_queue_max=weak_queue_max,
-        strong_queue_max=strong_queue_max,
-        weak_busy_fraction=weak_busy_fraction,
-        strong_busy_fraction=strong_busy_fraction,
-        weak_offered_load=weak_offered_load,
-        strong_offered_load=strong_offered_load,
-    )
-
-
-def _offered_load_by_pool(
-    observation: observation_module.Observation,
-    utilization: dict,
-    round_period_ticks: int,
-) -> dict:
-    """Each pool's busy unit ticks over its units times the generation span.
-
-    The run drains every decode, so the busy ticks are the work the
-    rounds offered the pool: rho = lambda E[S] / c, the ratio chain_load
-    forms for the serial chain.
+    A pool's statistics are kept at its tier's settings path, so the
+    plan's windows count for the window tier (weak_decoder, or
+    strong_decoder on a strong-only run); a tier the run lacks reads
+    zero.
     """
     generation_ticks = _generation_span_ticks(observation, round_period_ticks)
-    busy_ticks = utilization["per_pool_busy_unit_ticks"]
-    units = utilization["per_pool_total_units"]
-    offered = {}
-    for pool, pool_busy_ticks in busy_ticks.items():
-        capacity_ticks = units[pool] * generation_ticks
-        offered[pool] = pool_busy_ticks / capacity_ticks
-    return offered
+    run_statistics = observation.statistics
+    weak = _pool_numbers(run_statistics, WEAK_POOL_PATH, generation_ticks)
+    strong = _pool_numbers(run_statistics, STRONG_POOL_PATH, generation_ticks)
+    return _PoolMeasures(
+        weak_queue_max=weak.queue_max,
+        strong_queue_max=strong.queue_max,
+        weak_busy_fraction=weak.busy_fraction,
+        strong_busy_fraction=strong.busy_fraction,
+        weak_offered_load=weak.offered_load,
+        strong_offered_load=strong.offered_load,
+    )
+
+
+def _pool_numbers(
+    run_statistics: statistics_registry.Registry,
+    path: str,
+    generation_ticks: int,
+) -> "_PoolNumbers":
+    """One pool's queue peak, busy fraction and offered load.
+
+    The busy fraction is the busy units' time average over the whole
+    run, drain included, per unit (Triage's utilization, 2605.04459
+    lines 1024-1031); the offered load is the busy unit ticks over the
+    units times the generation span: rho = lambda E[S] / c, the ratio
+    chain_load forms for the serial chain.
+    """
+    units_group = run_statistics.groups.get(f"{path}.units")
+    if units_group is None:
+        return _NO_POOL
+    queue_group = run_statistics.groups[f"{path}.queue"]
+    busy = units_group.busy_units
+    unit_count = units_group.units.count
+    time_average = 0.0
+    if busy.tick:
+        time_average = busy.area / busy.tick
+    busy_fraction = time_average / unit_count
+    capacity_ticks = unit_count * generation_ticks
+    offered_load = busy.area / capacity_ticks
+    return _PoolNumbers(queue_group.queued.peak, busy_fraction, offered_load)
 
 
 def _generation_span_ticks(
@@ -1810,7 +1820,7 @@ def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
 
     Held from the tick it may compute to its compute start, gem5's fuBusy
     wait (src/cpu/o3/inst_queue.cc:1009-1014). A merged batch counts once,
-    and a depth counts only when time passes at it (observe/queue_depth.py).
+    and a depth counts only when time passes at it (statistics/kinds.py).
     """
     change_by_tick = collections.defaultdict(int)
     held_decodes = set()

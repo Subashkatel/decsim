@@ -202,6 +202,7 @@ pieces
 priced_cards_example.py
 run.json
 shot_links.csv
+shot_stats.csv
 shots.csv
 sweep.csv
 tasks

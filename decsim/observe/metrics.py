@@ -1,85 +1,13 @@
-"""The integrated metrics: step functions of time over one run.
+"""The decode backlog: rounds read out and not yet finally corrected.
 
-A step function integrated exactly gives an exact peak and time average,
-over the whole run, as gem5's AvgStor integrates from its reset to
-curTick() (src/base/stats/storage.hh:130-213). DecodeBacklog is built
-only when the observation section asks for backlog_trace.
+DecodeBacklog is built only when the observation section asks for
+backlog_trace. The busy units and the jobs waiting are statistics the
+pools and queues declare (decsim/statistics).
 """
 
-from collections.abc import Mapping
-
-import decsim.engine as engine_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.run_views as run_views
 import decsim.ports as ports
-
-
-class DecoderUtilization:
-    """Time-weighted fraction of decoder units whose compute was busy.
-
-    A unit is busy from leaving the pool's free list to going back, so the
-    integral steps exactly where occupancy changes. The pool sweep reads
-    each tier's fraction, Triage's utilization rate (2605.04459 lines
-    1024-1031). The span is the whole run, the drain after the last
-    round included, so the fraction is not the tier's offered load; each
-    pool's busy unit ticks are the work it was offered.
-    """
-
-    def __init__(
-        self, engine: engine_module.Engine, units_by_pool: Mapping[str, int]
-    ) -> None:
-        self.engine = engine
-        self.total_by_pool = dict(units_by_pool)
-        self.busy_by_pool = dict.fromkeys(self.total_by_pool, 0)
-        self._aggregate = _StepIntegral()
-        self._per_pool: dict = {}
-        for pool in self.total_by_pool:
-            self._per_pool[pool] = _StepIntegral()
-
-    def unit_busy(self, unit: ports.DecoderUnit) -> None:
-        """One unit's compute left its pool's free list."""
-        self.busy_by_pool[unit.pool] += 1
-        self._observe(self.engine.now)
-
-    def unit_freed(self, unit: ports.DecoderUnit) -> None:
-        """One unit's compute went back to its pool's free list."""
-        self.busy_by_pool[unit.pool] -= 1
-        self._observe(self.engine.now)
-
-    def result(self) -> dict:
-        """Aggregate and named per-pool time-weighted busy fractions."""
-        self._observe(self.engine.now)
-        totals = dict(self.total_by_pool)
-        total_values = totals.values()
-        aggregate_total = sum(total_values)
-        aggregate_fraction = 0.0
-        if aggregate_total:
-            aggregate_average = self._aggregate.time_average()
-            aggregate_fraction = aggregate_average / aggregate_total
-        per_pool_fraction = {}
-        per_pool_area = {}
-        for pool, total in totals.items():
-            integral = self._per_pool[pool]
-            average = integral.time_average()
-            per_pool_fraction[pool] = average / total
-            per_pool_area[pool] = integral.area
-        return {
-            "observation_span_ticks": self._aggregate.span_ticks,
-            "busy_unit_ticks": self._aggregate.area,
-            "aggregate_busy_fraction": aggregate_fraction,
-            "aggregate_total_units": aggregate_total,
-            "per_pool_busy_fraction": per_pool_fraction,
-            "per_pool_busy_unit_ticks": per_pool_area,
-            "per_pool_total_units": totals,
-        }
-
-    def _observe(self, tick: int) -> None:
-        """Hold every integral at the busy counts this tick leaves."""
-        busy_counts = self.busy_by_pool.values()
-        total_busy = sum(busy_counts)
-        self._aggregate.observe(tick, total_busy)
-        for pool, busy in self.busy_by_pool.items():
-            self._per_pool[pool].observe(tick, busy)
 
 
 class DecodeBacklog:
@@ -90,9 +18,9 @@ class DecodeBacklog:
     source reports them. A
     window counts once its rounds are read out, so one whose rounds the
     controller holds for room in a full store is in the backlog too. The
-    peak is over the counts ticks end at, the rule of the queue peaks
-    (observe/queue_depth.py): a round made whole and corrected at one
-    tick never waited.
+    peak is over the counts ticks end at, the rule of a Level's peak
+    (statistics/kinds.py): a round made whole and corrected at one tick
+    never waited.
     """
 
     def __init__(
@@ -127,36 +55,3 @@ class DecodeBacklog:
     def peak(self) -> int:
         """The most rounds a tick ended at, the last tick's count included."""
         return max(self.ended_peak, self.rounds)
-
-
-class _StepIntegral:
-    """The integral of a step function from tick 0, sampled at every change.
-
-    The quantity is zero at start, AvgStor's reset (storage.hh:143-146),
-    and a reader integrates to the tick it reads (:198-203). gem5 divides by
-    curTick() - lastReset + 1; a step here holds over [tick, next tick), so
-    the span is the last tick.
-    """
-
-    def __init__(self) -> None:
-        self.last_tick = 0
-        self.last_value = 0
-        self.area = 0
-
-    def observe(self, tick: int, value: int) -> None:
-        """The value holds from this tick until the next observation."""
-        assert tick >= self.last_tick, "metric observations run backwards"
-        self.area += self.last_value * (tick - self.last_tick)
-        self.last_tick = tick
-        self.last_value = value
-
-    @property
-    def span_ticks(self) -> int:
-        """The ticks from the run's start to the last observation."""
-        return self.last_tick
-
-    def time_average(self) -> float:
-        """The area over the span; zero at tick 0."""
-        if not self.span_ticks:
-            return 0.0
-        return self.area / self.span_ticks

@@ -5,12 +5,13 @@ only fields that add are recorded and every summary is derived from
 them). shot_data_movement.csv holds one row per shot per path off that
 shot's own counters, with the memory class the path crosses, so a
 folder folded from shards carries the rows one unsharded run would have
-written. latency_samples.csv holds one measured algorithm wall clock
-per decoded window, recorded only for a decoder named by a table row,
-each beside its window's inter-arrival, the deadline a decode must
-beat. The confidence files leave out an unscored shot, as sinter takes
-a discard out of every failure-conditioned count
-(sinter/_decoding/_decoding.py:120-128).
+written. shot_stats.csv holds one row per shot per part, statistic and
+field, the shot's registry rows as they are. latency_samples.csv holds
+one measured algorithm wall clock per decoded window, recorded only for
+a decoder named by a table row, each beside its window's inter-arrival,
+the deadline a decode must beat. The confidence files leave out an
+unscored shot, as sinter takes a discard out of every failure-conditioned
+count (sinter/_decoding/_decoding.py:120-128).
 """
 
 import collections
@@ -58,6 +59,25 @@ def _column_sums(rows: list, columns: tuple) -> dict:
         for column in columns:
             sums[column] += row[column]
     return sums
+
+
+def test_a_shots_statistics_rows_are_its_registrys_rows():
+    measurements = measured_shots(2)
+    rows = report.shot_statistics_rows(measurements)
+
+    for measurement in measurements:
+        own_rows = [row for row in rows if row["seed"] == measurement.seed]
+        values = {
+            (row["path"], row["statistic"], row["field"]): row["value"]
+            for row in own_rows
+        }
+        recorded = {
+            (row.path, row.statistic, row.field): row.value
+            for row in measurement.statistics
+        }
+        assert len(own_rows) == len(measurement.statistics)
+        assert values == recorded
+        assert ("weak_decoder.units", "busy_units", "area") in values
 
 
 def test_a_shots_rows_add_up_to_that_shots_own_counters():

@@ -112,39 +112,24 @@ def test_a_buffer_of_no_frames_is_refused_by_its_record():
         credit_channel.CreditChannel.Settings(hundred_bit_flits, -1, 2, clock)
 
 
-def test_a_credit_protocol_with_no_clock_stops_the_build():
+def test_a_credit_protocol_with_no_clock_is_refused_by_its_record():
     """The credit latency is cycles, and cycles need a clock."""
-    engine = decsim.engine.Engine()
     hundred_bit_flits = flits(100)
-    protocol = credit_channel.CreditChannel.Settings(
-        hundred_bit_flits, 2, 2, None
-    )
-    capacity = link_settings.CapacitySettings(1_000_000, "test")
-    settings = link_settings.ChannelSettings(
-        "test", 300, capacity, "test", protocol
-    )
 
-    with pytest.raises(AttributeError):
-        credit_channel.CreditChannel(settings, engine)
+    with pytest.raises(ValueError, match="so it needs a clock .got None."):
+        credit_channel.CreditChannel.Settings(hundred_bit_flits, 2, 2, None)
 
 
-def test_a_credit_protocol_on_an_unbounded_wire_stops_at_its_first_frame():
-    """A frame has no wire time without a rate, so the first send stops."""
-    engine = decsim.engine.Engine()
+def test_a_credit_protocol_on_an_unbounded_wire_is_refused_by_its_channel():
+    """A frame has no wire time without a rate."""
     clock = config.Clock(50)
     hundred_bit_flits = flits(100)
     protocol = credit_channel.CreditChannel.Settings(
         hundred_bit_flits, 2, 2, clock
     )
-    settings = link_settings.ChannelSettings(
-        "test", 300, None, "test", protocol
-    )
-    channel = credit_channel.CreditChannel(settings, engine)
-    delivered = []
-    send_at(engine, channel, 0, 500, 0, delivered)
 
-    with pytest.raises(AttributeError, match="input_bits_per_microsecond"):
-        engine.run()
+    with pytest.raises(ValueError, match="has a packet protocol"):
+        link_settings.ChannelSettings("test", 300, None, "test", protocol)
 
 
 def test_with_credits_to_spare_whole_frames_cross_as_the_ideal_row_property():

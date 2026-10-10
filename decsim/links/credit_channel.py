@@ -166,7 +166,7 @@ class CreditWire:
 def check_credit_fields(
     protocol_settings: link_settings.PacketProtocolSettings,
 ) -> None:
-    """The credit loop's buffer and latency, which the reliable protocol shares.
+    """The credit loop's buffer, latency and clock, which the reliable row shares.
 
     A buffer of no frames never lends a credit, so nothing would cross. A
     credit back before its frame lands would let more than C frames fly.
@@ -176,6 +176,21 @@ def check_credit_fields(
     )
     config.check_cycles(
         "credit_latency_cycles", protocol_settings.credit_latency_cycles
+    )
+    _check_clock(protocol_settings.clock)
+
+
+def _check_clock(clock) -> None:
+    """The credit latency is cycles on the card's own clock.
+
+    No machine clock stands in for it, since the card's clock is a
+    sourced hardware number like its other fields.
+    """
+    if isinstance(clock, config.Clock):
+        return
+    raise ValueError(
+        "a credit or reliable protocol counts its credit latency in cycles "
+        f"of its card's clock, so it needs a clock (got {clock!r})"
     )
 
 

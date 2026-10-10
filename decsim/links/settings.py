@@ -125,6 +125,7 @@ class ChannelSettings:
         )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
+        _check_protocol_has_a_rate(self)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -286,6 +287,19 @@ def check_positive_count(name: str, value: object) -> None:
     if config.is_whole_count(value):
         return
     raise ValueError(f"{name} is {value!r}; it is a positive whole number")
+
+
+def _check_protocol_has_a_rate(channel: ChannelSettings) -> None:
+    """A packet protocol times each frame at the wire's rate."""
+    if channel.protocol is None:
+        return
+    if channel.capacity is not None:
+        return
+    raise ValueError(
+        f"channel {channel.name!r} has a packet protocol, which times each "
+        "frame at the wire's rate, and no capacity; give it a capacity or "
+        "leave the protocol out"
+    )
 
 
 def _as_whole_number(value, name: str) -> int:

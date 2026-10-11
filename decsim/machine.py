@@ -293,6 +293,7 @@ class Machine:
             switching=entry_switching,
             seed=seed,
         )
+        decoders.read_program(plan.planned_operations)
         program_build.load_program(plan, control, windows)
         return cls(
             settings=settings,

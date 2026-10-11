@@ -101,6 +101,12 @@ class Decoders:
             strong_requests=strong_requests,
         )
 
+    def read_program(self, operations: tuple) -> None:
+        """Every manager's scheduler reads the planned operations."""
+        for manager in self.managers:
+            scheduler = manager.queue.scheduler
+            scheduler.read_program(operations)
+
     @property
     def decoder_manager(self) -> decoder_manager_module.DecoderManager:
         """The entry pool's manager, which decodes the planner's windows."""

@@ -169,6 +169,18 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 
 `decsim/decoders/schedulers.py`. FIFO's settings: the rule has no knob.
 
+### `LongestUndecoded.Settings`
+
+`decsim/decoders/schedulers.py`. MLS's settings: the rule has no knob.
+
+### `RoundRobin.Settings`
+
+`decsim/decoders/schedulers.py`. RR's settings: the rule has no knob.
+
+### `MostCritical.Settings`
+
+`decsim/decoders/schedulers.py`. MFD's settings: the rule has no knob.
+
 ### `UnitMemorySettings`
 
 `decsim/decoders/settings.py`. The input memory of one decoder unit.

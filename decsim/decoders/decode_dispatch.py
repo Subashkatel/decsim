@@ -58,6 +58,7 @@ class DecodeDispatcher:
             del ordered[index]
             self.queue.restore(ordered)
             self.queue.sample_depth()
+            self.queue.scheduler.served(job)
             self.service.dispatch_to(job, unit, claim_compute)
 
     def _first_placement(self, ordered: list) -> Optional[tuple]:

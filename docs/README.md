@@ -65,6 +65,7 @@ Each guide adds one kind of thing to the machine.
 - [How to write a machine as a graph](how-to/write_a_machine_as_a_graph.md)
 - [How to build a chain of decoders](how-to/build_a_chain_of_decoders.md)
 - [How to route windows to several pools](how-to/route_windows_to_several_pools.md)
+- [How to share a pool among patches](how-to/share_a_pool_among_patches.md)
 
 ## Reference
 

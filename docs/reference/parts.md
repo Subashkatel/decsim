@@ -946,6 +946,8 @@ The interval cuts the latency samples and what is made from them: the means and 
 
 reaction_deadline_microseconds is a budget on each recorded window's reaction time (buffer0_ready_to_frame); None, the default, sets none. A shot then counts the windows over it and the shot-clock time the first of them arrived, which says when an overloaded tier, whose wait grows without bound, first breaks the budget over the run length chosen.
 
+warmup_rounds is the rounds a region of interest leaves out: at the first round past them the run's statistics restart, gem5's m5.stats.reset() (observe/region_of_interest.py). It cuts the statistic rows and what is read from them, the queue peaks, busy fractions, offered loads and backlog peak; the latency samples keep the interval above. 0, the default, measures the whole run.
+
 record_window_outcomes keeps each window's committed answer, and its true label when the source keeps its errors (ErrorModelStimDevice), for window_outcomes.csv (observe/window_outcomes.py).
 
 The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, record_window_outcomes the window_outcomes rows, the interval the latency columns, the deadline the deadline columns.
@@ -963,6 +965,7 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `first_recorded_round` | `int` | `1` |
 | `last_recorded_round` | `Optional[int]` | `None` |
 | `reaction_deadline_microseconds` | `Optional[float]` | `None` |
+| `warmup_rounds` | `int` | `config.added_field(0)` |
 
 ## decsim/pauli_frame
 

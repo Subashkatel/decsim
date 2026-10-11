@@ -55,6 +55,13 @@ class ObservationSettings:
     whose wait grows without bound, first breaks the budget over the
     run length chosen.
 
+    warmup_rounds is the rounds a region of interest leaves out: at the
+    first round past them the run's statistics restart, gem5's
+    m5.stats.reset() (observe/region_of_interest.py). It cuts the
+    statistic rows and what is read from them, the queue peaks, busy
+    fractions, offered loads and backlog peak; the latency samples keep
+    the interval above. 0, the default, measures the whole run.
+
     record_window_outcomes keeps each window's committed answer, and
     its true label when the source keeps its errors
     (ErrorModelStimDevice), for window_outcomes.csv
@@ -81,6 +88,7 @@ class ObservationSettings:
     first_recorded_round: int = 1
     last_recorded_round: Optional[int] = None
     reaction_deadline_microseconds: Optional[float] = None
+    warmup_rounds: int = config.added_field(0)
 
     def __post_init__(self) -> None:
         """Every value checked, with the sentence the caller reads."""
@@ -111,6 +119,9 @@ class ObservationSettings:
                 "rounds",
                 minimum=self.first_recorded_round,
             )
+        config.check_whole_count(
+            "observation.warmup_rounds", self.warmup_rounds, "rounds", 0
+        )
         if self.reaction_deadline_microseconds is not None:
             config.check_microseconds(
                 "observation.reaction_deadline_microseconds",

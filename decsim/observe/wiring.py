@@ -29,6 +29,7 @@ import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
 import decsim.observe.referee_audit as referee_audit_module
+import decsim.observe.region_of_interest as region_of_interest_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
@@ -100,6 +101,13 @@ def observe(
     decode_backlog = _decode_backlog(
         observation, engine, window_manager, decoder_managers, round_events
     )
+    if decode_backlog is not None:
+        run_statistics.on_reset(decode_backlog.reset)
+    region_of_interest = _region_of_interest(observation, run_statistics)
+    if region_of_interest is not None:
+        qpu.device.trace.round_emitted.connect(
+            region_of_interest.round_read_out
+        )
     frame_corrections = _frame_corrections(control.pauli_frame)
     return observation_module.Observation(
         log=log,
@@ -121,6 +129,7 @@ def observe(
         statistics=run_statistics,
         round_events=round_events,
         confidence=confidence,
+        region_of_interest=region_of_interest,
     )
 
 
@@ -542,6 +551,18 @@ def _decode_backlog(
     at_tick_end = functools.partial(_sample_at_tick_end, engine, decode_backlog)
     engine.action_done.connect(at_tick_end)
     return decode_backlog
+
+
+def _region_of_interest(
+    observation: observe_settings.ObservationSettings,
+    run_statistics: statistics_registry.Registry,
+) -> Optional[region_of_interest_module.RegionOfInterest]:
+    """The warm-up's end, only when the run leaves one out."""
+    if observation.warmup_rounds == 0:
+        return None
+    return region_of_interest_module.RegionOfInterest(
+        run_statistics, observation.warmup_rounds
+    )
 
 
 def _sample_at_tick_end(

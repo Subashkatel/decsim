@@ -326,6 +326,10 @@ class Machine:
         self.start()
         self.engine.run()
         self.observation.statistics.finish()
+        region = self.observation.region_of_interest
+        if region is not None:
+            round_events = self.observation.round_events
+            region.check_begun(round_events.rounds_read_out_by_operation)
         for part in self.switching_parts:
             part.check_settled()
         self.windows.check_settled()

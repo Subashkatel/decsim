@@ -190,6 +190,18 @@ drain itself, `logical_failure`,
 `predictions` and every count and rate in `shots.csv`, `decoded_windows`
 and `escalated_windows` among them, stay over the whole shot.
 
+`observation.warmup_rounds` is a region of interest of another kind, a
+reset rather than a filter: at the first round read out past the
+warm-up, of any operation, every part's statistics restart, as gem5's
+`m5.stats.reset()` does. A count or a distribution keeps only what
+happened after; a level keeps the level it holds and restarts its
+area and span; a value the machine is built with, such as a pool's
+units, is kept. It cuts `stats.csv` and `stat_values.csv`, the queue
+peaks, the busy fractions and the offered loads, which are then over
+the rounds read out since, and the backlog peak; the latency points
+keep the interval above. The default, 0, measures the whole run, and a
+run that ends inside its warm-up is refused.
+
 The two `buffer0` totals start the clock where the decoder could first
 have started. The two `qpu` totals start it where the physics did, so
 they also carry the link out of the fridge, the controller's own work

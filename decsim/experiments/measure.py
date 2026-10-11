@@ -1659,8 +1659,9 @@ def _pool_numbers(
 ) -> "_PoolNumbers":
     """One pool's queue peak, busy fraction and offered load.
 
-    The busy fraction is the busy units' time average over the whole
-    run, drain included, per unit (Triage's utilization, 2605.04459
+    The busy fraction is the busy units' time average over the run, or
+    over its region of interest, drain included, per unit (Triage's
+    utilization, 2605.04459
     lines 1024-1031); the offered load is the busy unit ticks over the
     units times the generation span: rho = lambda E[S] / c, the ratio
     chain_load forms for the serial chain.
@@ -1674,8 +1675,8 @@ def _pool_numbers(
     busy = units_group.busy_units
     unit_count = units_group.units.count
     time_average = 0.0
-    if busy.tick:
-        time_average = busy.area / busy.tick
+    if busy.span:
+        time_average = busy.area / busy.span
     busy_fraction = time_average / unit_count
     capacity_ticks = unit_count * generation_ticks
     offered_load = busy.area / capacity_ticks
@@ -1692,9 +1693,16 @@ def _generation_span_ticks(
     readout's way out does not stretch it. Operations that run side by
     side share the span, and a later operation stretches it to its end,
     so it is the wall time the rounds arrived over, where rounds times
-    the round period would count side by side operations twice.
+    the round period would count side by side operations twice. With a
+    region of interest it is the readouts since the region began
+    (observe/region_of_interest.py), the span its busy time is over.
     """
-    readout_ticks = observation.round_events.readout_ticks
+    reset_tick = observation.statistics.reset_tick
+    readout_ticks = [
+        tick
+        for tick in observation.round_events.readout_ticks
+        if tick >= reset_tick
+    ]
     first_readout_tick = min(readout_ticks)
     last_readout_tick = max(readout_ticks)
     readout_span_ticks = last_readout_tick - first_readout_tick

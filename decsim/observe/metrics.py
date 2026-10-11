@@ -36,6 +36,14 @@ class DecodeBacklog:
         self.tick = 0
         self.rounds = 0
 
+    def reset(self, tick: int) -> None:
+        """Begin the region of interest: no tick before this one counts.
+
+        The rounds waiting now stay, a level held into the region.
+        """
+        self.ended_peak = 0
+        self.tick = tick
+
     def observe(self, tick: int) -> None:
         """Sample the backlog after a tick's last action.
 

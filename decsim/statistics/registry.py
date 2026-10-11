@@ -22,6 +22,15 @@ enables and the shared null statistic for the rest (SST's load level:
 a statistic is on when its level is at most the run's), and updates it
 where the event happens; nothing else is wired.
 
+A region of interest restarts every statistic at once (reset), as
+gem5's m5.stats.reset() resets every SimObject's stats and then runs the
+callbacks registered for state kept outside them
+(src/python/m5/stats/__init__.py:439-450; registerResetCallback,
+src/base/statistics.cc:262-280). A statistic declared as configuration,
+a value the machine is built with rather than a count of its events,
+is kept, as gem5 writes a part's parameters to config.ini and its
+statistics to stats.txt.
+
 At the end of the shot the registry's rows are one long table,
 (path, statistic, field, value), as SST's CSV output writes one row per
 component, statistic and field (statoutputcsv.cc:77-102): a new part, a
@@ -29,7 +38,7 @@ second pool or a new link adds rows, never columns.
 """
 
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import decsim.statistics.kinds as kinds
@@ -47,7 +56,8 @@ class Statistic:
 
     kind is a class of kinds.py; unit names the unit its values are in
     (ticks, rounds, jobs, units, bits); level is the least run level
-    that records it.
+    that records it. is_configuration marks a value the machine is
+    built with, such as a pool's units, which a reset keeps.
     """
 
     name: str
@@ -55,6 +65,7 @@ class Statistic:
     description: str
     unit: str
     level: int = BASIC
+    is_configuration: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -118,6 +129,10 @@ class Registry:
         self.clock = clock
         self.level = level
         self.groups: dict = {}
+        # what a reset also restarts, each called with the reset's tick
+        self.reset_callbacks: list = []
+        # the tick the region of interest began at; 0 for the whole run
+        self.reset_tick = 0
 
     def attach(self, component: Any, path: str) -> Group:
         """The component's declared statistics, recorded at this path.
@@ -144,6 +159,19 @@ class Registry:
         group = Group(path, statistics, self.level, self.clock)
         self.groups[path] = group
         return group
+
+    def on_reset(self, callback: Callable[[int], None]) -> None:
+        """Restart state kept outside the registry at every reset."""
+        self.reset_callbacks.append(callback)
+
+    def reset(self) -> None:
+        """Begin the region of interest now: every statistic restarts."""
+        tick = self.clock.now
+        for group in self.groups.values():
+            _reset_group(group)
+        for callback in self.reset_callbacks:
+            callback(tick)
+        self.reset_tick = tick
 
     def finish(self) -> None:
         """Hold every level to now, the shot's last tick."""
@@ -179,6 +207,12 @@ def _accumulator(statistic: Statistic, level: int, clock: Any) -> Any:
     if statistic.level > level:
         return kinds.DISABLED
     return statistic.kind(clock)
+
+
+def _reset_group(group: Group) -> None:
+    for statistic, accumulator in group.accumulators():
+        if not statistic.is_configuration:
+            accumulator.reset()
 
 
 def _rows_of(group: Group) -> list:

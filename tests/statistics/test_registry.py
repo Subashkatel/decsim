@@ -125,6 +125,31 @@ def test_the_value_counts_keep_each_value_and_each_levels_ticks():
     ]
 
 
+def test_a_reset_restarts_the_counts_keeps_configuration_and_calls_back():
+    """gem5's m5.stats.reset(): every stat, then the reset callbacks."""
+    clock = _clock()
+    run = registry.Registry(clock)
+    declared = (
+        registry.Statistic(
+            "units", kinds.Count, "units", "units", is_configuration=True
+        ),
+        registry.Statistic("dispatches", kinds.Count, "jobs", "jobs"),
+    )
+    group = run.group("weak_decoder.units", declared)
+    group.units.add(4)
+    group.dispatches.add(7)
+    heard = []
+    run.on_reset(heard.append)
+
+    clock.now = 30
+    run.reset()
+
+    assert group.units.count == 4
+    assert group.dispatches.count == 0
+    assert heard == [30]
+    assert run.reset_tick == 30
+
+
 def _clock():
     return types.SimpleNamespace(now=0)
 

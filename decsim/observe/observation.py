@@ -16,6 +16,7 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.referee_audit as referee_audit_module
+import decsim.observe.region_of_interest as region_of_interest_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
@@ -54,3 +55,7 @@ class Observation:
     sampled_shots: sampled_shots_module.SampledShots
     window_outcomes: Optional[window_outcomes_module.WindowOutcomes]
     confidence: Optional[decode_records_module.ConfidenceLedger]
+    # None unless the run leaves a warm-up out of its statistics
+    region_of_interest: Optional[region_of_interest_module.RegionOfInterest] = (
+        None
+    )

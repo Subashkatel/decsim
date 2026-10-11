@@ -87,7 +87,11 @@ class DecoderPool:
 
     STATISTICS = (
         statistics_registry.Statistic(
-            "units", statistic_kinds.Count, "units in the pool", "units"
+            "units",
+            statistic_kinds.Count,
+            "units in the pool",
+            "units",
+            is_configuration=True,
         ),
         statistics_registry.Statistic(
             "busy_units",

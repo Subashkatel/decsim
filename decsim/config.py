@@ -10,12 +10,15 @@ on the machine's (with_machine_clock).
 
 import dataclasses
 import math
-from typing import Optional, TypeVar
+from typing import Any, Optional, TypeVar
 
 TICKS_PER_MICROSECOND = 1_000_000
 HALF_TICK = 0.5
 # A settings record with a clock field, which a part may leave None.
 ClockedSettings = TypeVar("ClockedSettings")
+# The metadata key of a field added to a record after ids were recorded
+# from it (added_field).
+ADDED_FIELD = "added_field"
 
 
 def microseconds_to_ticks(microseconds: float) -> int:
@@ -181,6 +184,18 @@ class Clock:
         if remainder == 0:
             return whole_cycles
         return whole_cycles + 1
+
+
+def added_field(default: Any) -> Any:
+    """A field added after ids were recorded, left out of an id at default.
+
+    A task's id hashes every field of its records (experiments/collect.py
+    json_value), so a new field would change every recorded id; one made
+    here is written only when it holds another value, as a protobuf
+    field at its default is left off the wire.
+    """
+    metadata = {ADDED_FIELD: True}
+    return dataclasses.field(default=default, metadata=metadata)
 
 
 def with_machine_clock(

@@ -73,7 +73,12 @@ STRONG_TIER_WIRES = (
     graph.Wire("strong_buffer.reads", "strong.rounds"),
     graph.Wire("strong.corrections", "frame.corrections"),
 )
-ESCALATION = graph.Wire("weak.escalate", "strong.escalated")
+# the weak pool's escalations reach the switching part, whose re-decodes
+# reach the strong pool
+ESCALATION_WIRES = (
+    graph.Wire("weak.escalate", "switching.results"),
+    graph.Wire("switching.redecode", "strong.escalated"),
+)
 # A base's shot is ten rounds per unit of distance.
 BASELINE_ROUNDS_PER_DISTANCE = 10
 _BELIEF_MATCHING = belief_matching.BeliefMatchingDecoder.Settings(
@@ -202,7 +207,7 @@ def with_strong_tier(
     grown = machine
     for part in parts:
         grown = grown.with_part(part)
-    wired = grown.with_wires(*STRONG_TIER_WIRES, ESCALATION)
+    wired = grown.with_wires(*STRONG_TIER_WIRES, *ESCALATION_WIRES)
     if fabric is None:
         return wired
     return dataclasses.replace(wired, fabric=fabric)

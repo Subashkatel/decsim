@@ -18,7 +18,6 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as event_settings
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
-import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
@@ -38,15 +37,16 @@ def _settings_forming_at(formed_at=("controller",)):
     return _machine_settings(detection_events=detection_events)
 
 
-# The two facts the paths of a run are read off: the tier that decodes
-# the plan's windows, and whether regions escalate to the strong tier.
-WEAK_BASELINE = (window_records.WEAK_POOL_ID, False)
-SWITCHING = (window_records.WEAK_POOL_ID, True)
-STRONG_ONLY = (window_records.STRONG_POOL_ID, False)
+# The paths a legacy run's rounds take to a decoder
+# (Layout.formation_paths): the weak tier alone, the weak tier escalating
+# to the strong one, the strong tier alone.
+WEAK_BASELINE = (event_settings.WEAK_PATH,)
+SWITCHING = (event_settings.WEAK_PATH, event_settings.ESCALATION_PATH)
+STRONG_ONLY = (event_settings.STRONG_PATH,)
 
 
 @pytest.mark.parametrize(
-    "run_facts, formed_at",
+    "paths, formed_at",
     [
         (WEAK_BASELINE, ("controller",)),
         (WEAK_BASELINE, ("weak_syndrome_buffer",)),
@@ -58,19 +58,19 @@ STRONG_ONLY = (window_records.STRONG_POOL_ID, False)
         (STRONG_ONLY, ("weak_syndrome_buffer", "strong_decoder")),
     ],
 )
-def test_a_seat_list_every_path_crosses_once_is_built(run_facts, formed_at):
+def test_a_seat_list_every_path_crosses_once_is_built(paths, formed_at):
     settings = _settings_forming_at(formed_at)
     device = _DeviceWithNoFormationTable()
 
     placement = readout_part.build_detection_events(
-        settings.detection_events, None, device, *run_facts
+        settings.detection_events, None, device, paths
     )
 
     assert placement.forms_at(formed_at[0])
 
 
 @pytest.mark.parametrize(
-    "run_facts, formed_at",
+    "paths, formed_at",
     [
         (WEAK_BASELINE, ("strong_decoder",)),
         (WEAK_BASELINE, ("controller", "weak_decoder")),
@@ -79,14 +79,14 @@ def test_a_seat_list_every_path_crosses_once_is_built(run_facts, formed_at):
         (STRONG_ONLY, ("weak_syndrome_buffer",)),
     ],
 )
-def test_a_path_that_crosses_no_seat_or_two_is_refused(run_facts, formed_at):
+def test_a_path_that_crosses_no_seat_or_two_is_refused(paths, formed_at):
     """None decodes raw outcomes; two form events of events."""
     settings = _settings_forming_at(formed_at)
     device = _DeviceWithNoFormationTable()
 
     with pytest.raises(ValueError, match="a path with none decodes raw"):
         readout_part.build_detection_events(
-            settings.detection_events, None, device, *run_facts
+            settings.detection_events, None, device, paths
         )
 
 
@@ -97,7 +97,7 @@ def test_a_placement_that_names_no_clock_forms_on_the_machines():
     device = _DeviceWithNoFormationTable()
 
     placement = readout_part.build_detection_events(
-        detection_events, machine_clock, device, *WEAK_BASELINE
+        detection_events, machine_clock, device, WEAK_BASELINE
     )
 
     assert placement.clock == machine_clock
@@ -179,7 +179,7 @@ def test_a_strong_store_cost_is_refused():
 
     sentence = _strong_store_refusal(costed_strong)
 
-    assert "which only the weak syndrome buffer charges" in sentence
+    assert "which only the store the controller writes charges" in sentence
 
 
 def _strong_store_refusal(strong_store) -> str:

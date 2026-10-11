@@ -27,7 +27,7 @@ each of its rounds takes its slot and wakes the window side.
 
 import pytest
 
-import decsim.build.readout as readout_part
+import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -816,12 +816,12 @@ class _ArrivalConsumer:
 def _written_receiver(engine) -> receiver_module.SyndromeRoundReceiver:
     """The weak syndrome buffer's end: the controller writes its rounds."""
     return receiver_module.SyndromeRoundReceiver(
-        engine, readout_part.WEAK_STORE_INTAKE
+        engine, layout_module.WEAK_STORE_INTAKE
     )
 
 
 def _landed_receiver(engine) -> receiver_module.SyndromeRoundReceiver:
     """The strong syndrome buffer's end: its rounds land whole."""
     return receiver_module.SyndromeRoundReceiver(
-        engine, readout_part.STRONG_STORE_INTAKE
+        engine, layout_module.STRONG_STORE_INTAKE
     )

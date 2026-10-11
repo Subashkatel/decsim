@@ -44,10 +44,13 @@ wire runs from an output to an input that carries the same signal. A
 wrong wire is refused when the machine is made. A required port left
 unwired is refused when the task is built.
 
-For two decoders, add a second store and pool, wire the first pool's
-`escalate` to the second pool's `escalated`, and add a
-`SwitchingSettings` part. A pool alone placed on the host is the strong
-decoder.
+For two decoders, add a second store and pool and a `SwitchingSettings`
+part, the escalate edge between them: wire the first pool's `escalate`
+to the switching part's `results`, and its `redecode` to the second
+pool's `escalated`. A pool alone placed on the host is the strong
+decoder. A machine of more pools adds a switching part per edge; every
+pool but the first is the target of one edge, and its parts' names name
+its hops (`strong_to_deep`), its statistics and its seeds.
 
 The machines decsim ships are graphs already (`decsim/presets/`), with
 their parts named as above. Start from one and change it by name:
@@ -135,7 +138,8 @@ decsim describe run.py --only uf_d5
 latency and rate as the run prices them. A task built from
 `MachineSettings` is printed as the graph it resolves from.
 
-A graph that today's builder cannot build is refused with "not
-implemented yet". That covers three pools, two pools with no escalation
-between them, or a store feeding a store. Stage 4 builds the graph
-itself.
+A graph of two pools and one edge at most runs as the `MachineSettings`
+record it resolves to, and keeps that record's task id. A graph of more
+is identified by itself, and a chain of more than one edge is refused
+with "not implemented yet (stage 4g)" until chains run. Two pools with
+no edge between them, or a store feeding a store, are refused.

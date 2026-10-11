@@ -16,7 +16,7 @@ import statistics
 from typing import Any, Optional, Union
 
 import decsim.build.decoders as decoders_part
-import decsim.build.routes as routes_build
+import decsim.build.layout as layout_module
 import decsim.config as config_module
 import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
@@ -166,7 +166,7 @@ WINDOW_STATUS_COLUMNS = tuple(
 # The settings paths each tier's pool keeps its statistics at
 # (build/decoders.py Decoders.attach_statistics).
 WEAK_POOL_PATH = "weak_decoder"
-STRONG_POOL_PATH = decoders_part.STRONG_PATH
+STRONG_POOL_PATH = layout_module.STRONG_SEAT
 # which store's output link carries a tier's window in, keyed by the tier
 # whose decode the frame committed rather than by the row's name
 INPUT_LINK_BY_TIER = {
@@ -395,10 +395,13 @@ def measure_shot(
     round_period_microseconds = config_module.ticks_to_microseconds(
         device.clock.period_ticks
     )
+    layout = shot.machine.layout
+    routes = layout.routes()
     return _measurement(
         settings,
         observation,
         shot.result,
+        routes=routes,
         record_options=shot.task.record_options,
         code=device.code,
         round_period_microseconds=round_period_microseconds,
@@ -1058,6 +1061,7 @@ def _measurement(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
+    routes: route_records.Routes,
     record_options: collect.RecordOptions,
     code: ports.CodeModel,
     round_period_microseconds: float,
@@ -1076,9 +1080,6 @@ def _measurement(
     owner_rounds = rounds_by_owner.values()
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
-    routes = routes_build.legacy_routes(
-        settings.window_tier, settings.switching
-    )
     samples, window_tiers = collect_samples(
         observation, result, settings.observation, routes
     )

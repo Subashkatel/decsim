@@ -34,6 +34,7 @@ from typing import Optional, Union
 import numpy
 import stim
 
+import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.experiments.collection as collection_module
 import decsim.machine as machine_module
@@ -42,6 +43,7 @@ import decsim.ports as ports
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
 import decsim.topology.graph as topology_graph
+import decsim.topology.graph_layout as graph_layout
 import decsim.topology.legacy as legacy
 import decsim.windows.built_window_models as built_window_models
 
@@ -53,6 +55,9 @@ RECORD_CLASS_KEY = "class"
 EVERY_SHOT = "all"
 # A name a folder can take on any filesystem the results go to.
 FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# The key a new-shape graph's id hashes it under, versioned: a graph
+# that read differently would take a new key, never an old id.
+GRAPH_ID_KEY = "graph_v1"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,9 +105,12 @@ class Task:
     machine and the metadata only.
 
     machine may be a graph (decsim/topology/graph.py): the assignments in
-    force then name its paths (uf.unit_count), and it runs as, and is
-    identified by, the MachineSettings it resolves to
-    (topology/legacy.py), with graph keeping the graph as assigned.
+    force then name its paths (uf.unit_count), and graph keeps the graph
+    as assigned. A graph today's slots hold runs as, and is identified
+    by, the MachineSettings it resolves to (topology/legacy.py). A graph
+    of a new shape is identified by itself, under GRAPH_ID_KEY; it runs
+    on its layout (topology/graph_layout.py), and machine is its entry
+    edge's record, which the reports read.
     """
 
     name: str
@@ -114,6 +122,11 @@ class Task:
     graph: Optional[topology_graph.Machine] = dataclasses.field(
         default=None, init=False, compare=False
     )
+    # a new-shape graph's pools, stores and edges; None for a machine
+    # today's slots hold
+    layout: Optional[layout_module.Layout] = dataclasses.field(
+        default=None, init=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         check_folder_name(self.name, "task")
@@ -121,9 +134,13 @@ class Task:
         assigned = in_force.applied(self.machine)
         if isinstance(assigned, topology_graph.Machine):
             object.__setattr__(self, "graph", assigned)
-            assigned = legacy.resolved(assigned)
+            assigned = _settings_of(assigned)
         machine = assigned.at_task()
         object.__setattr__(self, "machine", machine)
+        if self.graph is not None and not legacy.holds(self.graph):
+            facts = machine.task_facts()
+            layout = graph_layout.layout_of(self.graph, facts)
+            object.__setattr__(self, "layout", layout)
         if self.online_threshold is None:
             calibrator = _task_calibrator(machine)
             object.__setattr__(self, "online_threshold", calibrator)
@@ -136,10 +153,11 @@ class Task:
         (sinter/_data/_task.py:157, 167-204).
         """
         # The key stays "settings", so every recorded id stays valid.
-        value = {
-            "settings": json_value(self.machine, keep_labels=False),
-            "metadata": json_value(self.metadata),
-        }
+        value = {"metadata": json_value(self.metadata)}
+        if self.layout is None:
+            value["settings"] = json_value(self.machine, keep_labels=False)
+        else:
+            value[GRAPH_ID_KEY] = json_value(self.graph, keep_labels=False)
         text = json.dumps(value, sort_keys=True)
         encoded = text.encode("utf8")
         digest = hashlib.sha256(encoded)
@@ -242,7 +260,11 @@ def run_shot(
     """
     wall_start = time.perf_counter()
     machine = machine_module.Machine.build(
-        task.machine, seed, built_models, task.online_threshold
+        task.machine,
+        seed,
+        built_models,
+        task.online_threshold,
+        layout=task.layout,
     )
     result = machine.run()
     wall_end = time.perf_counter()
@@ -284,6 +306,15 @@ def check_folder_name(name: object, what: str) -> None:
         f"the {what} name {name!r} is not a folder name; a name is letters, "
         "digits, '.', '_' and '-', starting with a letter or a digit"
     )
+
+
+def _settings_of(
+    machine: topology_graph.Machine,
+) -> machine_settings.MachineSettings:
+    """The record a graph runs as: its slots' record, or its entry edge's."""
+    if legacy.holds(machine):
+        return legacy.resolved(machine)
+    return graph_layout.entry_settings(machine)
 
 
 def _task_calibrator(
@@ -456,8 +487,17 @@ def _json_record(record: object, form: _JsonForm) -> dict:
         if not field.compare and not form.keep_labels:
             continue
         field_value = getattr(record, field.name)
+        if _is_added_at_default(field, field_value):
+            continue
         fields[field.name] = _json_in(field_value, form)
     return fields
+
+
+def _is_added_at_default(field: dataclasses.Field, value: object) -> bool:
+    """A field added after ids were recorded, holding its default."""
+    if not field.metadata.get(config.ADDED_FIELD, False):
+        return False
+    return value == field.default
 
 
 def _qualified_name(named_class: type) -> str:

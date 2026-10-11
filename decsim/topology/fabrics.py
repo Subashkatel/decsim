@@ -35,6 +35,7 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.routes as route_records
+import decsim.records.transfers as transfer_records
 
 FRIDGE = route_records.FRIDGE
 HOST = route_records.HOST
@@ -76,11 +77,17 @@ LEGACY_SITES = {
 
 @dataclasses.dataclass(frozen=True)
 class Route:
-    """One hop between two parts: its path's name and each end's site."""
+    """One hop between two parts: its path's name and each end's site.
+
+    reference names the reference card's path whose payload rule the hop
+    carries: a graph's own hop carries the rule of the legacy hop with
+    its role (topology/graph_layout.py); None is the path itself.
+    """
 
     path: str
     source_site: Optional[str]
     target_site: Optional[str]
+    reference: Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -276,7 +283,9 @@ class PathLinks:
     base: ports.FabricRule = ReferenceFabric()
 
     def link_for(self, route: Route) -> Optional[ports.LinkCard]:
-        """This path's link, else the base's."""
+        """This path's link, else the base's; a graph's own hop, the base's."""
+        if route.path not in transfer_records.LEGACY_PATHS:
+            return self.base.link_for(route)
         link = getattr(self, route.path)
         if link is not None:
             return link
@@ -313,8 +322,10 @@ class CardFabric:
     card: link_settings.FabricSettings
 
     def link_for(self, route: Route) -> Optional[ports.LinkCard]:
-        """The card's path for the route, as written."""
-        path = getattr(self.card, route.path)
+        """The card's path for the route, as written; none for a new hop."""
+        if route.path not in self.card.path_names():
+            return None
+        path = self.card.path_settings(route.path)
         return FixedPath(path)
 
 
@@ -324,25 +335,26 @@ def card(
     wire_links: dict,
     machine_clock: Optional[config.Clock],
 ) -> link_settings.FabricSettings:
-    """Today's card from a rule: each route's path, a wire's link first.
+    """The card from a rule: each route's path, a wire's link first.
 
     wire_links holds the link a wire carries, by its route's path name;
     a route with no link of its own takes the rule's, and one the rule
-    gives none the reference path.
+    gives none the reference path. A route off the legacy twelve is one
+    of the card's named hops.
     """
     reference = link_profiles.logical_reference_profile()
     paths = {}
+    hops = []
     for route in routes:
-        reference_path = getattr(reference, route.path)
-        link = wire_links.get(route.path)
-        if link is None:
-            link = rule.link_for(route)
-        paths[route.path] = reference_path
-        if link is not None:
-            paths[route.path] = link.priced(
-                route.path, reference_path, machine_clock
-            )
-    return dataclasses.replace(reference, **paths, profile_name=PROFILE_NAME)
+        priced = _priced(route, rule, wire_links, reference, machine_clock)
+        if route.path in transfer_records.LEGACY_PATHS:
+            paths[route.path] = priced
+            continue
+        hop = link_settings.NamedPath(route.path, priced)
+        hops.append(hop)
+    return dataclasses.replace(
+        reference, **paths, profile_name=PROFILE_NAME, hops=tuple(hops)
+    )
 
 
 def legacy_routes(sites: dict) -> tuple:
@@ -358,6 +370,40 @@ def legacy_routes(sites: dict) -> tuple:
         route = Route(path, source_site, target_site)
         routes.append(route)
     return tuple(routes)
+
+
+def _priced(
+    route: Route,
+    rule: ports.FabricRule,
+    wire_links: dict,
+    reference: link_settings.FabricSettings,
+    machine_clock: Optional[config.Clock],
+) -> link_settings.PathSettings:
+    """One route's path: its wire's link, else the rule's, else the reference.
+
+    A graph's own hop rides a channel of its own name, never the legacy
+    hop's whose payload rule it carries.
+    """
+    reference_name = route.reference
+    if reference_name is None:
+        reference_name = route.path
+    reference_path = reference.path_settings(reference_name)
+    if reference_name != route.path:
+        reference_path = _on_its_own_channel(reference_path, route.path)
+    link = wire_links.get(route.path)
+    if link is None:
+        link = rule.link_for(route)
+    if link is None:
+        return reference_path
+    return link.priced(route.path, reference_path, machine_clock)
+
+
+def _on_its_own_channel(
+    path: link_settings.PathSettings, name: str
+) -> link_settings.PathSettings:
+    """The path on a channel of the same settings under another name."""
+    channel = dataclasses.replace(path.channel, name=name)
+    return dataclasses.replace(path, channel=channel)
 
 
 def _site(sites: dict, slot: str) -> Optional[str]:

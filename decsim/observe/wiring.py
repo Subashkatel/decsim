@@ -40,6 +40,7 @@ import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
 import decsim.statistics.registry as statistics_registry
+import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
 
 def observe(
@@ -210,12 +211,8 @@ def _connect_data_movement(
     """
     qpu.device.trace.round_emitted.connect(data_movement.round_emitted)
     links.trace.transfer_delivered.connect(data_movement.transfer_delivered)
-    weak_syndrome_buffer = readout.weak_syndrome_buffer
-    if weak_syndrome_buffer is not None:
-        _connect_store_counts(data_movement, weak_syndrome_buffer)
-    strong_syndrome_buffer = readout.strong_syndrome_buffer
-    if strong_syndrome_buffer is not None:
-        _connect_store_counts(data_movement, strong_syndrome_buffer)
+    for parts in readout.stores:
+        _connect_store_counts(data_movement, parts.store)
     for manager in _decoder_managers(decoders):
         for source in manager.reference_sources():
             source.connect(data_movement.hold_registered)
@@ -243,16 +240,8 @@ def _connect_trace_writer(
     for source in _copy_sources(readout, windows, decoders):
         source.connect(trace_writer.copy_made)
     _connect_controller_trace(trace_writer, readout)
-    weak_syndrome_buffer = readout.weak_syndrome_buffer
-    if weak_syndrome_buffer is not None:
-        _connect_store_trace(
-            trace_writer, weak_syndrome_buffer, "weak syndrome buffer"
-        )
-    strong_syndrome_buffer = readout.strong_syndrome_buffer
-    if strong_syndrome_buffer is not None:
-        _connect_store_trace(
-            trace_writer, strong_syndrome_buffer, "strong syndrome buffer"
-        )
+    for parts in readout.stores:
+        _connect_store_trace(trace_writer, parts.store, parts.plan.label)
     decoder_managers = _decoder_managers(decoders)
     for index, manager in enumerate(decoder_managers):
         _connect_decoder_trace(trace_writer, index, manager)
@@ -310,12 +299,8 @@ def _copy_sources(readout, windows, decoders) -> list:
         readout.controller.trace.copy_made,
         readout.assembler.trace.copy_made,
     ]
-    weak_syndrome_round_receiver = readout.weak_syndrome_round_receiver
-    if weak_syndrome_round_receiver is not None:
-        sources.append(weak_syndrome_round_receiver.trace.copy_made)
-    strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
-    if strong_syndrome_round_receiver is not None:
-        sources.append(strong_syndrome_round_receiver.trace.copy_made)
+    for parts in readout.stores:
+        sources.append(parts.receiver.trace.copy_made)
     for manager in _decoder_managers(decoders):
         for source in manager.copy_sources():
             sources.append(source)
@@ -449,18 +434,25 @@ def _connect_runtime_stamps(
 def _connect_round_events(
     engine: engine_module.Engine, qpu, control, readout
 ) -> round_events_module.RoundEventRecorder:
-    """The recorder hears every round event, output and strong landing."""
+    """The recorder hears every round event, output and strong landing.
+
+    A written store's receiving end is on the readout's path; a landed
+    store's is heard after the outputs, with its stores.
+    """
     round_events = round_events_module.RoundEventRecorder(engine)
-    components = (
+    components = [
         qpu.device,
         readout.assembler,
         readout.held_rounds,
         readout.transmitter,
-        readout.weak_syndrome_round_receiver,
-    )
-    for component in components:
-        if component is None:
+    ]
+    landed = []
+    for parts in readout.stores:
+        if parts.plan.intake.shape == receiver_module.WRITTEN:
+            components.append(parts.receiver)
             continue
+        landed.append(parts)
+    for component in components:
         component.trace.round_event.connect(round_events.record)
     qpu.device.trace.round_emitted.connect(round_events.round_read_out)
     idle_rounds = control.idle_rounds
@@ -469,16 +461,10 @@ def _connect_round_events(
     )
     instruction_output = control.instruction_output
     instruction_output.trace.output_event.connect(round_events.output)
-    strong_syndrome_buffer = readout.strong_syndrome_buffer
-    strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
-    if strong_syndrome_buffer is not None:
-        strong_syndrome_buffer.trace.round_stored.connect(
-            round_events.round_stored
-        )
-    if strong_syndrome_round_receiver is not None:
-        strong_syndrome_round_receiver.trace.round_event.connect(
-            round_events.record
-        )
+    for parts in landed:
+        parts.store.trace.round_stored.connect(round_events.round_stored)
+    for parts in landed:
+        parts.receiver.trace.round_event.connect(round_events.record)
     return round_events
 
 

@@ -86,7 +86,7 @@ def test_an_engine_that_names_no_clock_counts_on_the_machines():
     )
 
     unit = decoder_build.build_decoder_unit(
-        weak, "weak", machine_clock, None, None
+        weak, "weak_decoder", machine_clock, None, None
     )
 
     assert unit.timing.clock == machine_clock
@@ -184,4 +184,6 @@ def test_a_weak_decoder_short_of_the_signals_evidence_is_named_by_its_record():
 
     refusal = "weak_decoder PyMatchingDecoder.Settings cannot serve"
     with pytest.raises(ValueError, match=refusal):
-        decoder_build.build_decoder_unit(tier, "weak", None, None, signal)
+        decoder_build.build_decoder_unit(
+            tier, "weak_decoder", None, None, signal
+        )

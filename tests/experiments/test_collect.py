@@ -60,6 +60,7 @@ import numpy
 import pytest
 import stim
 
+import decsim.config as config
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
@@ -907,3 +908,23 @@ def test_the_assignments_in_force_name_a_graph_tasks_paths():
     pool = task.graph.part("weak")
     assert pool.settings.unit_count == 3
     assert task.machine.weak_decoder.unit_count == 3
+
+
+@dataclasses.dataclass(frozen=True)
+class _GrownRecord:
+    """A record that gained a field after ids were recorded from it."""
+
+    kept: int = 1
+    grown: tuple = config.added_field(())
+
+
+def test_a_field_added_after_ids_were_recorded_is_left_out_at_its_default():
+    """So every id recorded before the field existed stays the same."""
+    record = _GrownRecord()
+    grown = _GrownRecord(grown=(2,))
+
+    at_default = collect.json_value(record, record_classes=False)
+    changed = collect.json_value(grown, record_classes=False)
+
+    assert at_default == {"kept": 1}
+    assert changed == {"kept": 1, "grown": [2]}

@@ -16,7 +16,6 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.parameters_command as parameters_command
 import decsim.links.settings as link_settings
 import decsim.parameters.fields as fields
-import decsim.records.transfers as transfer_records
 import decsim.topology.legacy as legacy
 import decsim.topology.machine_file as machine_file
 
@@ -40,8 +39,9 @@ def describe(argv: list) -> None:
     print(f"# {task.name}, as a graph")
     print(text)
     print("# its paths, as the run prices them: latency, rate")
-    for path in transfer_records.LEGACY_PATHS:
-        path_settings = task.machine.links.path_settings(path)
+    links = task.machine.links
+    for path in links.path_names():
+        path_settings = links.path_settings(path)
         line = path_line(path, path_settings)
         print(line)
 

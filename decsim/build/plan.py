@@ -12,7 +12,6 @@ from typing import Optional, Union
 
 import stim
 
-import decsim.build.escalation as escalation_build
 import decsim.controller.policies as idle_policies
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as detection_event_settings
@@ -73,11 +72,12 @@ def build_plan(
     detection_events: detection_event_settings.DetectionEventSettings,
     switching_settings: Optional[escalation_settings.SwitchingSettings],
     is_bulk_strong: bool,
-    switching: Optional[escalation_build.Switching],
+    switching_parts: tuple = (),
 ) -> Plan:
     """The code, the workload's operations and the window plan.
 
-    A switching run's policy refuses a run shape it cannot serve.
+    switching_settings is the entry edge's; each edge's policy refuses
+    a run shape it cannot serve.
     """
     is_switching = switching_settings is not None
     window_sizes = windows.scheme
@@ -129,8 +129,8 @@ def build_plan(
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
     )
-    if switching is not None:
-        switching.policy.check_plan(run_shape)
+    for part in switching_parts:
+        part.policy.check_plan(run_shape)
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,

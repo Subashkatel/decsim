@@ -6,8 +6,8 @@ that record. So a graph runs as the MachineSettings it resolves to, and
 keeps the id of the record it resolves to. Each part goes to the slot
 its kind and its wiring give it:
 
-    a pool that escalates     weak_decoder; the pool it escalates to,
-                              strong_decoder
+    a pool that escalates     weak_decoder; the pool its switching
+                              part escalates to, strong_decoder
     a pool alone              strong_decoder placed on the host, else
                               weak_decoder
     a store                   the slot of the pool it feeds; a store
@@ -16,9 +16,10 @@ its kind and its wiring give it:
     every other kind          its one slot
 
 Every wire is one of today's paths, and a part's site and a wire's link
-price the path (fabrics.py). A graph today's builder cannot build, three
-pools or a store feeding a store, is refused as not built yet: stage 4
-builds the graph itself.
+price the path (fabrics.py); the two wires through the switching part
+are the escalation's one path. A graph of more pools or edges than the
+slots hold is a new shape (holds), laid out by graph_layout.py; any
+other graph the slots cannot hold, a store feeding a store, is refused.
 """
 
 import decsim.settings as machine_settings
@@ -47,15 +48,34 @@ STRONG_POOL_WIRES = (
     graph.Wire("strong.corrections", "frame.corrections"),
 )
 STRONG_STORE_WRITE = graph.Wire("controller.rounds", "strong_buffer.rounds")
-ESCALATION = graph.Wire("weak.escalate", "strong.escalated")
-_NOT_BUILT = "not implemented yet: stage 4 builds the graph itself"
+# the weak pool's escalations reach the switching part, whose re-decodes
+# reach the strong pool
+ESCALATION_WIRES = (
+    graph.Wire("weak.escalate", "switching.results"),
+    graph.Wire("switching.redecode", "strong.escalated"),
+)
+_NOT_BUILT = "not implemented yet (stage 5)"
 _ESCALATE = "escalate"
 _READS = "reads"
+_REDECODE = "redecode"
+_SWITCHING_SLOT = "switching"
 _DEFAULT_BUFFER = syndrome_buffer.SyndromeBufferSettings()
 
 
 class ShapeError(graph.GraphError):
     """A graph today's builder cannot build, named by what it holds."""
+
+
+def holds(machine: graph.Machine) -> bool:
+    """Whether today's slots hold the graph: two pools and one edge at most.
+
+    A graph they hold runs as, and keeps the id of, the MachineSettings
+    it resolves to; any other is a new shape.
+    """
+    by_kind = _parts_by_kind(machine)
+    pools = by_kind.get("decoder_pool", [])
+    edges = by_kind.get(_SWITCHING_SLOT, [])
+    return len(pools) <= 2 and len(edges) <= 1
 
 
 def resolved(machine: graph.Machine) -> machine_settings.MachineSettings:
@@ -95,6 +115,18 @@ def graph_of(settings: machine_settings.MachineSettings) -> graph.Machine:
         wires=wires,
         fabric=fabric,
         observation=settings.observation,
+    )
+
+
+def redecode_target(machine: graph.Machine, switching_name: str) -> graph.Part:
+    """The pool a switching part's re-decodes reach; refused when none."""
+    written = f"{switching_name}.{_REDECODE}"
+    for wire in machine.wires:
+        if wire.source == written:
+            return _part_at(machine, wire.target)
+    raise graph.GraphError(
+        f"{written} reaches no pool: an escalate edge re-decodes on the "
+        "pool its redecode port is wired to"
     )
 
 
@@ -162,7 +194,8 @@ def _escalating_pools(machine: graph.Machine, escalations: list) -> dict:
         )
     escalation = escalations[0]
     weak = _part_at(machine, escalation.source)
-    strong = _part_at(machine, escalation.target)
+    switching = _part_at(machine, escalation.target)
+    strong = redecode_target(machine, switching.name)
     return {"weak_decoder": weak, "strong_decoder": strong}
 
 
@@ -197,7 +230,11 @@ def _fed_stores(machine: graph.Machine, pool_slots: dict) -> dict:
 
 
 def _wire_links(machine: graph.Machine, slot_by_part: dict) -> dict:
-    """Each wire's own link by its path; a wire on no path refused."""
+    """Each wire's own link by its path; a wire on no path refused.
+
+    A wire to or from the switching part is the escalation's path, from
+    the weak pool to the strong one.
+    """
     links = {}
     for wire in machine.wires:
         path = _path_of(wire, slot_by_part)
@@ -210,7 +247,13 @@ def _path_of(wire: graph.Wire, slot_by_part: dict) -> str:
     """The path of today's card a wire is, by the slots at its ends."""
     source_name, _, _ = wire.source.partition(".")
     target_name, _, _ = wire.target.partition(".")
-    ends = (slot_by_part[source_name], slot_by_part[target_name])
+    source_slot = slot_by_part[source_name]
+    target_slot = slot_by_part[target_name]
+    if source_slot == _SWITCHING_SLOT:
+        source_slot = POOL_SLOTS[0]
+    if target_slot == _SWITCHING_SLOT:
+        target_slot = POOL_SLOTS[1]
+    ends = (source_slot, target_slot)
     path = PATH_BY_ENDS.get(ends)
     if path is None:
         raise ShapeError(
@@ -302,7 +345,7 @@ def _tier_parts(settings: machine_settings.MachineSettings) -> tuple:
         framed = _with_frame(pool_wires, settings)
         wires.extend(framed)
     if _has_two_pools(settings):
-        wires.append(ESCALATION)
+        wires.extend(ESCALATION_WIRES)
     return tuple(parts), tuple(wires)
 
 

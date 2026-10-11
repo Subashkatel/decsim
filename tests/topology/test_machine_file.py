@@ -79,7 +79,7 @@ def test_a_file_holds_only_what_differs_from_the_defaults():
     text = machine_file.dumps(machine)
 
     assert "unit_count" not in text
-    assert "type: DecoderPoolSettings" in text
+    assert "type: DecoderPool\n" in text
 
 
 def test_a_part_reads_its_fields_and_constants_as_set_reads_them(tmp_path):

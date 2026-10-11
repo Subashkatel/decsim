@@ -1,18 +1,18 @@
-"""The switching part: the confidence, the policy and the strong window side.
+"""The switching parts: one per escalate edge, its verdict and its redo side.
 
-A switching run decodes weak first and escalates a window on low
-confidence. This part binds the re-decode, the signal and the policy
-onto the window side's and the decoder managers' optional ports; a run
-with no switching leaves them unbound, as a gem5 cache with no
-prefetcher holds a NULL one (src/mem/cache/Cache.py:108).
+A switching run decodes on the entry pool first and escalates a window
+along an edge on low confidence. Each edge's part binds its re-decode,
+its source's signal and its policy onto the window side's and the
+decoder managers' optional ports; a run with no edge leaves them
+unbound, as a gem5 cache with no prefetcher holds a NULL one
+(src/mem/cache/Cache.py:108).
 """
 
 import dataclasses
 from typing import TYPE_CHECKING, Optional
 
-import decsim.build.routes as routes_build
+import decsim.build.layout as layout_module
 import decsim.config as config
-import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.settings as escalation_settings
@@ -32,14 +32,17 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class Switching:
-    """One run's switching side, from the escalation decision onward.
+    """One escalate edge's switching side, from the escalation decision on.
 
-    regions says which rounds an escalated window covers, shape lays the
-    strong window over them, pending_strong_windows holds one until its
-    conditions are met, and strong_redecode submits it and takes its
-    result back.
+    edge is the edge's plan and target_store the store its target pool
+    reads. regions says which rounds an escalated window covers, shape
+    lays the strong window over them, pending_strong_windows holds one
+    until its conditions are met, and strong_redecode submits it and
+    takes its result back.
     """
 
+    edge: layout_module.EdgePlan
+    target_store: str
     confidence_signal: ports.ConfidenceSignal
     policy: ports.EscalationPolicy
     regions: strong_regions.StrongRegions
@@ -51,23 +54,28 @@ class Switching:
     @classmethod
     def build(
         cls,
-        settings: escalation_settings.SwitchingSettings,
-        weak_decoder: decoder_settings.DecoderPoolSettings,
+        edge: layout_module.EdgePlan,
+        layout: layout_module.Layout,
         engine: engine_module.Engine,
         online_threshold: Optional[ports.ThresholdSource] = None,
         machine_clock: Optional[config.Clock] = None,
     ) -> "Switching":
-        """The signal from the weak decoder, the policy, the strong side.
+        """The signal from the source pool, the policy, the redo side.
 
-        The confidence is built from the weak decoder's own settings and
-        the task's threshold. The policy decides on online_threshold,
+        The confidence is built from the source pool's own settings and
+        the edge's threshold. The policy decides on online_threshold,
         the task's calibrator, when the threshold learns across shots.
         The verdict is priced on the switching clock, the machine's when
         the settings name none.
         """
+        settings = edge.settings
+        hops = edge.hops
+        source = layout.pool(hops.source)
+        target = layout.pool(hops.target)
+        source_settings = source.settings
         threshold_nats = settings.threshold.threshold_nats
         signal = settings.confidence.build(
-            weak_decoder.algorithm, threshold_nats
+            source_settings.algorithm, threshold_nats
         )
         threshold = _threshold_source(settings, online_threshold)
         policy = settings.build_policy(threshold)
@@ -75,11 +83,12 @@ class Switching:
         shape = settings.strong_window.build(engine)
         pending = pending_strong_windows.PendingStrongWindows()
         costs = _verdict_costs(settings, machine_clock)
-        hops = routes_build.legacy_edge(settings.strong_answer_route)
         strong_redecode = strong_redecode_module.StrongRedecode(
             engine, hops, costs
         )
         return cls(
+            edge=edge,
+            target_store=target.store,
             confidence_signal=signal,
             policy=policy,
             regions=regions,
@@ -95,25 +104,29 @@ class Switching:
         windows: "windows_part.Windows",
         decoders: "decoders_part.Decoders",
     ) -> None:
-        """Wire the strong side, then bind it on the ports left empty."""
+        """Wire the redo side, then bind it on the ports left empty."""
         self._wire_the_strong_side(plan, windows)
         strong_redecode = self.strong_redecode
-        strong_redecode.carried_from = readout.weak_syndrome_buffer
-        strong_redecode.strong_receiver = readout.strong_syndrome_round_receiver
-        strong_redecode.strong_output = readout.strong_output
-        strong_redecode.decode_queue = decoders.strong_decoder_manager
+        carried = readout.store_parts(self.edge.carried_from)
+        target_store = readout.store_parts(self.target_store)
+        source_manager = decoders.manager_of(strong_redecode.source)
+        target_manager = decoders.manager_of(strong_redecode.target)
+        strong_redecode.carried_from = carried.store
+        strong_redecode.strong_receiver = target_store.receiver
+        strong_redecode.strong_output = target_store.output
+        strong_redecode.decode_queue = target_manager
         strong_redecode.policy = self.policy
         windows.gap_join.signal = self.confidence_signal
-        decoders.decoder_manager.escalation_policy = self.policy
-        decoders.strong_decoder_manager.escalation_policy = self.policy
-
-    def edges(self) -> escalate_edges.EscalateEdges:
-        """The run's one escalate edge, from the weak pool to the strong."""
-        return escalate_edges.EscalateEdges((self.strong_redecode,))
+        source_manager.escalation_policy = self.policy
+        target_manager.escalation_policy = self.policy
 
     def statistics_parts(self) -> tuple:
-        """The strong redecode, at the switching settings' path."""
-        return (("switching", self.strong_redecode),)
+        """The strong redecode, at the edge's path."""
+        return ((self.edge.name, self.strong_redecode),)
+
+    def seed_roots(self) -> tuple:
+        """The policy, at the edge's seed root."""
+        return ((self.edge.policy_seed, self.policy),)
 
     def check_settled(self) -> None:
         """No strong escalation is pending."""
@@ -150,27 +163,40 @@ class Switching:
 
 
 def build_switching(
-    settings: Optional[escalation_settings.SwitchingSettings],
-    weak_decoder: Optional[decoder_settings.DecoderPoolSettings],
+    layout: layout_module.Layout,
     engine: engine_module.Engine,
     online_threshold: Optional[ports.ThresholdSource] = None,
     machine_clock: Optional[config.Clock] = None,
-) -> Optional[Switching]:
-    """The switching part of a run whose slot is filled; None otherwise."""
-    if settings is None:
-        return None
-    return Switching.build(
-        settings, weak_decoder, engine, online_threshold, machine_clock
-    )
+) -> tuple:
+    """One switching part per escalate edge, in graph order.
+
+    The task's calibrator, online_threshold, decides on the entry edge,
+    the one whose threshold the task learns.
+    """
+    parts = []
+    threshold = online_threshold
+    for edge in layout.edges:
+        part = Switching.build(edge, layout, engine, threshold, machine_clock)
+        parts.append(part)
+        threshold = None
+    return tuple(parts)
 
 
-def escalate_edges_of(
-    switching: Optional[Switching],
-) -> escalate_edges.EscalateEdges:
-    """The run's escalate edges; none on a run with no switching."""
-    if switching is None:
-        return escalate_edges.EscalateEdges()
-    return switching.edges()
+def signal_by_pool(switching_parts: tuple) -> dict:
+    """Each source pool's confidence signal; none with no edge."""
+    signals = {}
+    for part in switching_parts:
+        source = part.strong_redecode.source
+        signals[source] = part.confidence_signal
+    return signals
+
+
+def escalate_edges_of(switching_parts: tuple) -> escalate_edges.EscalateEdges:
+    """The run's escalate edges, in graph order."""
+    edges = []
+    for part in switching_parts:
+        edges.append(part.strong_redecode)
+    return escalate_edges.EscalateEdges(tuple(edges))
 
 
 def _verdict_costs(

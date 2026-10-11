@@ -482,7 +482,7 @@ class SyndromeRoundReceiver:
         self._narrate_intake(round_key, packet_bits, packet, hop)
         if self.windows is not None:
             self.windows.accept_room_round(
-                packet.operation_id, packet.round_index
+                self.store, packet.operation_id, packet.round_index
             )
         # Arrival can create a live window's first hold. Publish before
         # reclamation, as gem5 services targets before freeing an entry

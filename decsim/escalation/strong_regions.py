@@ -237,13 +237,6 @@ class StrongRegions:
         """The rounds the operation runs, as this window is planned."""
         return self.tracker.round_count_for_window(operation_id, window)
 
-    def strong_rounds_stored(
-        self,
-        operation_id: Any,  # an opaque identity
-    ) -> int:
-        """How far the strong syndrome buffer is filled for the operation."""
-        return self.tracker.strong_rounds_arrived(operation_id)
-
     def _plan_region(
         self,
         weak_window: window_records.Window,

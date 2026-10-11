@@ -135,7 +135,7 @@ def test_each_hop_is_named_by_the_parts_at_its_ends():
 
 
 def test_the_entry_store_is_written_and_a_targets_store_landed():
-    """An escalated window's rounds come from the entry store (stage 4)."""
+    """An escalated window's rounds come from its source pool's store."""
     chain = chain_machine()
     layout = laid_out(chain)
 
@@ -146,7 +146,8 @@ def test_the_entry_store_is_written_and_a_targets_store_landed():
     assert entry_store.intake.shape == receiver_module.WRITTEN
     assert deep_store.intake.shape == receiver_module.LANDED
     assert deep_store.intake.escalation.path_name == "strong_to_deep"
-    assert deep_edge.carried_from == "weak_buffer"
+    assert deep_store.intake.escalation.source_name == "strong_buffer"
+    assert deep_edge.carried_from == "strong_buffer"
 
 
 def test_a_round_reaches_each_pool_through_one_path_of_seats():
@@ -158,7 +159,7 @@ def test_a_round_reaches_each_pool_through_one_path_of_seats():
     assert paths == (
         ("controller", "weak_buffer", "weak"),
         ("controller", "weak_buffer", "strong_buffer", "strong"),
-        ("controller", "weak_buffer", DEEP_STORE, DEEP_POOL),
+        ("controller", "weak_buffer", "strong_buffer", DEEP_STORE, DEEP_POOL),
     )
 
 

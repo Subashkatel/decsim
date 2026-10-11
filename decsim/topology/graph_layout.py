@@ -116,7 +116,6 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
     """
     shape = _shape(machine)
     frame_name = _frame_name(machine)
-    entry_store = shape.entry_store()
     pools = []
     stores = []
     for pool in shape.pools:
@@ -126,7 +125,8 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
         stores.append(store_plan)
     edges = []
     for edge in shape.edges:
-        edge_plan = _edge_plan(edge, entry_store.name, task_facts)
+        carried_from = shape.store_by_pool[edge.source.name]
+        edge_plan = _edge_plan(edge, carried_from.name, task_facts)
         edges.append(edge_plan)
     return layout_module.Layout(tuple(pools), tuple(stores), tuple(edges))
 
@@ -390,14 +390,17 @@ def _store_plan(shape: _Shape, pool: graph.Part) -> layout_module.StorePlan:
 def _escalation_hop(
     shape: _Shape, pool: graph.Part
 ) -> Optional[receiver_module.Hop]:
-    """The hop an escalated region lands in a target's store over."""
+    """The hop an escalated region lands in a target's store over.
+
+    The region is carried from the store its source pool reads.
+    """
     entering = [edge for edge in shape.edges if edge.target.name == pool.name]
     if not entering:
         return None
     edge = entering[0]
-    entry_store = shape.entry_store()
+    carried_from = shape.store_by_pool[edge.source.name]
     forward = _hop(edge.source.name, pool.name)
-    return receiver_module.Hop(forward, entry_store.name)
+    return receiver_module.Hop(forward, carried_from.name)
 
 
 def _edge_plan(

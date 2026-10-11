@@ -87,8 +87,9 @@ class _Fixture:
         self.store = _Store()
         retention = types.SimpleNamespace(
             weak_store=self.store,
-            strong_store=None,
             release_hold_if_live=lambda _owner, _store: None,
+            release_potential_strong=lambda _key: None,
+            landing_stores=tuple,
         )
         self.release = _Release()
         self.completions = []

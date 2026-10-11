@@ -22,6 +22,7 @@ on both tiers so the run is deterministic, puts a run in that regime.
 """
 
 import dataclasses
+import types
 
 import pytest
 
@@ -1146,10 +1147,11 @@ def _strong_window_keys(machine) -> set:
 class _StoredRounds:
     """A retention that answers with the rounds the window reads."""
 
-    def strong_window_input(self, builder, window) -> tuple:
+    def strong_window_input(self, builder, window, target) -> tuple:
         """The stored rounds, whatever the builder and the window are."""
         del builder
         del window
+        del target
         return ("the stored rounds",)
 
 
@@ -1178,7 +1180,12 @@ def _folding_shape(retention, courier):
     shape.retention = retention
     shape.courier = courier
     shape.builder = _UnusedBuilder()
+    shape.edge = _EDGE_TO_STRONG
     return shape
+
+
+# the edge the folding shape lays windows out for, read for its target
+_EDGE_TO_STRONG = types.SimpleNamespace(target=window_records.STRONG_POOL_ID)
 
 
 class _UnusedBuilder:

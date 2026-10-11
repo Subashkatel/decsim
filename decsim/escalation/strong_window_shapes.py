@@ -365,7 +365,7 @@ class DoubleWindow(StrongWindowPorts):
         crossing = self.rounds_to_carry(assignment)
         if crossing:
             return None
-        stored_through = self.regions.strong_rounds_stored(held.key[0])
+        stored_through = self.retention.landed_through(held.key[0])
         if stored_through < held.resolved_region.plan.context_hi:
             return None
         return self._build_strong_job(held)
@@ -559,7 +559,10 @@ def strong_job_payloads(
         shape.courier.pin_strong_face(
             source_key, strong_window, model, operation, request_key
         )
-    return shape.retention.strong_window_input(shape.builder, strong_window)
+    target = shape.edge.target
+    return shape.retention.strong_window_input(
+        shape.builder, strong_window, target
+    )
 
 
 def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
@@ -618,9 +621,7 @@ def _assignment_of(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> pending_strong_windows.StrongAssignment:
     """The job now, or the assignment held until its rounds are stored."""
-    crossing = shape.retention.context_rounds_in_flight(
-        held.key, held.read_keys
-    )
+    crossing = _rounds_not_stored(shape, held)
     if crossing:
         _log_hold(shape, held, crossing)
         return pending_strong_windows.StrongAssignment(
@@ -665,8 +666,11 @@ def _job_once_stored(
 def _rounds_not_stored(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> tuple:
-    """The rounds the row reads that the strong syndrome buffer lacks."""
-    return shape.retention.context_rounds_in_flight(held.key, held.read_keys)
+    """The rounds the row reads that its edge's landing store lacks."""
+    target = shape.edge.target
+    return shape.retention.context_rounds_in_flight(
+        held.key, held.read_keys, target
+    )
 
 
 def _log_hold(

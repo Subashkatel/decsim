@@ -159,16 +159,21 @@ class Layout:
 
         The entry pool reads the store the controller writes; an edge's
         target reads its own store, which takes an escalated window's
-        rounds from the store the edge carries them from.
+        rounds from the store the edge carries them from, so a round
+        reaches a pool down a chain through every store before it.
         """
         entry = self.entry_pool
-        entry_path = (CONTROLLER_SEAT, entry.store, entry.names.seat)
+        entry_stores = (CONTROLLER_SEAT, entry.store)
+        stores_by_pool = {entry.pool: entry_stores}
+        entry_path = (*entry_stores, entry.names.seat)
         paths = [entry_path]
         for edge in self.edges:
             hops = edge.hops
             target = self.pool(hops.target)
-            seat = target.names.seat
-            path = (CONTROLLER_SEAT, edge.carried_from, target.store, seat)
+            carried = stores_by_pool[hops.source]
+            stores = (*carried, target.store)
+            stores_by_pool[hops.target] = stores
+            path = (*stores, target.names.seat)
             paths.append(path)
         return tuple(paths)
 

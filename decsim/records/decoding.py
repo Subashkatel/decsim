@@ -638,17 +638,21 @@ class DecoderEvidence(Enum):
     FORCED_CLASS_WEIGHT is the minimum weight inside a pinned logical
     class, honest only from a decoder that minimises weight inside it (Lee
     et al. 2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and radii a
-    cluster decode grew (Meister et al. 2405.07433 Algorithm 2).
+    cluster decode grew (Meister et al. 2405.07433 Algorithm 2); CONSENSUS
+    is the share of an ensemble's members that vote with its majority
+    (Shutty et al. 2401.12434 Sec. V).
     """
 
     FORCED_CLASS_WEIGHT = "forced_class_weight"
     CLUSTER_GROWTH = "cluster_growth"
+    CONSENSUS = "consensus"
 
 
 # The named capabilities follow the sets they are built from.
 NO_DECODER_EVIDENCE = frozenset()
 FORCED_CLASS_SOLVES = frozenset({DecoderEvidence.FORCED_CLASS_WEIGHT})
 CLUSTER_GROWTH_EVIDENCE = frozenset({DecoderEvidence.CLUSTER_GROWTH})
+CONSENSUS_EVIDENCE = frozenset({DecoderEvidence.CONSENSUS})
 
 
 class BackendDecodeStatus(Enum):
@@ -743,6 +747,14 @@ class DecodeResult:
     # BackendFailureReason of a backend that produced no correction, whose
     # empty stand-in is the correction above; None when it produced one
     no_correction_reason: Optional[BackendFailureReason] = None
+    # every fault the decode selected, owned or not, in the columns of
+    # fault_representation: the error set an ensemble prices; None from
+    # a row that selects none
+    selected_faults: Optional[numpy.ndarray] = None
+    fault_representation: Optional[fault_models.FaultRepresentation] = None
+    # an ensemble's share of members voting with its majority; None from
+    # any other row
+    agreement: Optional[float] = None
 
 
 @dataclass(frozen=True)

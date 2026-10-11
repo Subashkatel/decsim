@@ -12,6 +12,9 @@ learns from by the windows it escalates.
                    succeeded: nonconverged, invalid or failed
     always         escalate every window
     never          keep every window
+    agreement      keep an ensemble's answer at or above a share of its
+                   members agreeing; all of them by default (Shutty et
+                   al. 2401.12434 Sec. V)
 """
 
 import dataclasses
@@ -36,6 +39,7 @@ class GapThreshold:
 
         name = "gap_threshold"
         reads_threshold = True
+        reads_consensus = False
 
         def build(self) -> "GapThreshold":
             """A verdict on the gap against the threshold."""
@@ -69,6 +73,7 @@ class Status:
 
         name = "status"
         reads_threshold = False
+        reads_consensus = False
 
         def build(self) -> "Status":
             """A verdict on the backend's reported status."""
@@ -92,6 +97,56 @@ class Status:
         return ESCALATE
 
 
+class Agreement:
+    """Keep an ensemble's answer when enough of its members agree.
+
+    Harmony's layered decoding (Shutty et al. 2401.12434 Sec. V) runs
+    the second pass "if and only if the first pass ensemble fails to
+    yield a consensus prediction": minimum 1.0, the default, escalates
+    on any dissent. A lower minimum keeps a majority short of
+    unanimity. It reads the consensus row's soft output, and a result
+    with none escalates.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """minimum is the share of members that must vote with the majority."""
+
+        minimum: float = 1.0
+        name = "agreement"
+        reads_threshold = False
+        reads_consensus = True
+
+        def __post_init__(self) -> None:
+            if not 0.0 < self.minimum <= 1.0:
+                raise ValueError(
+                    "switching.verdict.minimum must be in (0, 1], got "
+                    f"{self.minimum}"
+                )
+
+        def build(self) -> "Agreement":
+            """A verdict on the ensemble's agreement."""
+            return Agreement(self.minimum)
+
+    def __init__(self, minimum: float) -> None:
+        self.minimum = minimum
+
+    def decide(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold: ports.ThresholdSource,
+    ) -> decoding_records.Verdict:
+        """Keep at an agreement at or above the minimum; escalate otherwise."""
+        del job, threshold
+        soft_output = result.soft_output
+        if soft_output is None:
+            return ESCALATE
+        if soft_output.gap >= self.minimum:
+            return KEEP
+        return ESCALATE
+
+
 class Always:
     """Escalate every window: the target re-decodes them all."""
 
@@ -101,6 +156,7 @@ class Always:
 
         name = "always"
         reads_threshold = False
+        reads_consensus = False
 
         def build(self) -> "Always":
             """A verdict that escalates every window."""
@@ -126,6 +182,7 @@ class Never:
 
         name = "never"
         reads_threshold = False
+        reads_consensus = False
 
         def build(self) -> "Never":
             """A verdict that keeps every window."""

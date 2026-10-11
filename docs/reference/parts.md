@@ -98,6 +98,10 @@ SET_IN_THE_RUN_FILE names the paths the run file built the workload's circuit fr
 | --- | --- | --- |
 | `walk_microseconds` | `Optional[float]` | `None` |
 
+### `Consensus.Settings`
+
+`decsim/confidence/consensus.py`. The consensus row, which takes no setting.
+
 ### `ExtraClusterGap.Settings`
 
 `decsim/confidence/extra_cluster.py`. Its settings: walk_microseconds prices the growth, or None.
@@ -164,6 +168,45 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 | Field | Type | Default |
 | --- | --- | --- |
 | `latency_microseconds` | `float` | `1.0` |
+
+### `PoolingSettings`
+
+`decsim/decoders/ensembles.py`. A pooling row's settings record (this module), which builds it.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `reads_likelihood` | `bool` |
+| `build(self)` | `object` |
+
+### `Vote.Settings`
+
+`decsim/decoders/ensembles.py`. The vote row, which takes no setting.
+
+### `SumLikelihood.Settings`
+
+`decsim/decoders/ensembles.py`. The sum-likelihood row, which takes no setting.
+
+### `MostLikely.Settings`
+
+`decsim/decoders/ensembles.py`. The most-likely row, which takes no setting.
+
+### `FirstConverged.Settings`
+
+`decsim/decoders/ensembles.py`. count is VibeLSD's M, the converged members it waits for.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `count` | `int` | `1` |
+
+### `EnsembleDecoder.Settings`
+
+`decsim/decoders/ensembles.py`. members are decoder rows; pooling is a row of this module.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `members` | `tuple` | `()` |
+| `pooling` | `PoolingSettings` | `MostLikely.Settings()` |
 
 ### `FifoScheduler.Settings`
 
@@ -457,12 +500,13 @@ The facts at_task and for_task read are MachineSettings.task_facts, keyed by thr
 
 `decsim/escalation/settings.py`. A verdict row's settings record (verdicts.py).
 
-reads_threshold says whether the verdict decides on the edge's threshold.
+reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output.
 
 | Member | Type |
 | --- | --- |
 | `name` | `str` |
 | `reads_threshold` | `bool` |
+| `reads_consensus` | `bool` |
 | `build(self)` | `ports.EscalationVerdict` |
 
 ### `ReplaceRuleSettings`
@@ -602,6 +646,14 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 ### `Status.Settings`
 
 `decsim/escalation/verdicts.py`. The status row, which takes no setting.
+
+### `Agreement.Settings`
+
+`decsim/escalation/verdicts.py`. minimum is the share of members that must vote with the majority.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `minimum` | `float` | `1.0` |
 
 ### `Always.Settings`
 

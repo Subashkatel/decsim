@@ -36,3 +36,6 @@ the [reference](../reference/README.md) pages.
 - [How to share a pool among patches](share_a_pool_among_patches.md):
   VQD's critical-first schedulers (MLS, RR, MFD) for a pool with fewer
   units than patches.
+- [How to decode a window with an ensemble](decode_a_window_with_an_ensemble.md):
+  Harmony's and VibeLSD's poolings in one pool, and escalating the
+  windows its members disagree on.

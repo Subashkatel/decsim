@@ -402,6 +402,8 @@ def result_from_selected_faults(
         boundary_data=boundary_data,
         decode_status=decode_status,
         crossing_commit=crossing_commit,
+        selected_faults=selected_faults,
+        fault_representation=placed_faults.representation,
     )
 
 

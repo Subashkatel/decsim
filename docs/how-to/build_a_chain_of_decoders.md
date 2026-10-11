@@ -58,6 +58,9 @@ A switching part's `verdict` decides on each result of its source pool
 - `status`: escalate a result its backend did not report as succeeded,
   as BP+OSD runs OSD only when BP does not converge.
 - `always` and `never`: escalate or keep every window.
+- `agreement`: escalate an ensemble's answer its members do not agree
+  on, beside `confidence=Consensus.Settings()`
+  ([decode a window with an ensemble](decode_a_window_with_an_ensemble.md)).
 
 A verdict that reads no gap takes `confidence=NoSignal.Settings()`, so
 its source pool computes no soft output; its `threshold` is set but

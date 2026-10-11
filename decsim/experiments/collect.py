@@ -15,7 +15,6 @@ handed on the moment it ends, so a caller saves it while others run.
 """
 
 import collections
-import concurrent.futures
 import dataclasses
 import enum
 import hashlib
@@ -37,6 +36,7 @@ import stim
 import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.experiments.collection as collection_module
+import decsim.experiments.unit_pool as unit_pool
 import decsim.machine as machine_module
 import decsim.parameters.in_force as in_force
 import decsim.ports as ports
@@ -208,15 +208,24 @@ def run_units(
 ) -> None:
     """Every unit run, each handed on the moment it ends.
 
-    A job killed at its time limit loses only the units still running. The
-    unit carries the task as it ran, its calibrator having learned, in a
-    worker process when there is a pool.
+    A unit is handed to the pool only when one ends, so a job killed at
+    its time limit loses only the units still running. The unit carries
+    the task as it ran, its calibrator having learned, in a worker
+    process when there is a pool.
     """
-    outcomes = _unit_outcomes(units, measure, processes)
-    for position, outcome in outcomes:
-        unit = units[position]
-        ran_unit = dataclasses.replace(unit, task=outcome.task)
-        on_unit_done(ran_unit, outcome)
+    queued = iter(units)
+    with unit_pool.UnitPool(run_unit, measure, processes) as pool:
+        _submit_while_there_is_room(pool, queued)
+        while pool.running:
+            _tag, unit, outcome = pool.next_ended()
+            ran_unit = ran_as(unit, outcome)
+            on_unit_done(ran_unit, outcome)
+            _submit_while_there_is_room(pool, queued)
+
+
+def ran_as(unit: "Unit", outcome: result_records.UnitOutcome) -> "Unit":
+    """The unit with the task as it ran, its calibrator having learned."""
+    return dataclasses.replace(unit, task=outcome.task)
 
 
 def run_unit(
@@ -441,63 +450,13 @@ def _top_level_name(path: importlib.metadata.PackagePath) -> str:
     return module_name or str(path)
 
 
-def _unit_outcomes(
-    units: list, measure: Callable[[Shot], object], processes: int
-):
-    """Each unit's position and outcome as it ends, run here or in a pool."""
-    if processes <= 1:
-        for position, unit in enumerate(units):
-            outcome = run_unit(unit, measure)
-            yield position, outcome
-        return
-    yield from _pooled_outcomes(units, measure, processes)
-
-
-def _pooled_outcomes(
-    units: list, measure: Callable[[Shot], object], processes: int
-):
-    """Each unit's position and outcome as it ends, `processes` at a time.
-
-    A unit is handed to the pool only when one ends (FIRST_COMPLETED), so a
-    killed job loses at most the running units.
-    """
-    queued = enumerate(units)
-    running = {}
-    pool = concurrent.futures.ProcessPoolExecutor(processes)
-    try:
-        _submit_up_to(pool, running, queued, measure, processes)
-        while running:
-            yield from _ended_outcomes(running)
-            _submit_up_to(pool, running, queued, measure, processes)
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-
-
-def _ended_outcomes(running: dict):
-    """The running units that have ended, each position and outcome, taken out.
-
-    It waits until at least one has ended.
-    """
-    ended, _still_running = concurrent.futures.wait(
-        running, return_when=concurrent.futures.FIRST_COMPLETED
-    )
-    for future in ended:
-        position = running.pop(future)
-        outcome = future.result()
-        yield position, outcome
-
-
-def _submit_up_to(
-    pool, running: dict, queued, measure: Callable[[Shot], object], limit: int
-) -> None:
-    """Queued units handed to the pool until `limit` of them run."""
-    while len(running) < limit:
-        queued_unit = next(queued, None)
-        if queued_unit is None:
+def _submit_while_there_is_room(pool: unit_pool.UnitPool, queued) -> None:
+    """Queued units handed to the pool until it is full or none is left."""
+    while pool.has_room():
+        unit = next(queued, None)
+        if unit is None:
             return
-        position, unit = queued_unit
-        future = pool.submit(run_unit, unit, measure)
-        running[future] = position
+        pool.submit(None, unit)
 
 
 def _json_record(record: object, form: _JsonForm) -> dict:

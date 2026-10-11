@@ -362,32 +362,29 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
 
     Open and Closed are frozen, so one instance stands for every edge
     with the same interval: a window has tens of thousands of edges and
-    a few hundred distinct intervals. The distinct bounds are found in
-    numpy and each edge picks its instance from a table, since a Python
-    pass over the edges was a fifth of a weak-alone d13 shot.
+    a few hundred distinct intervals, and one object per edge would be
+    most of a decode's Python time. A numpy.unique over the bounds was
+    seven times slower than this dict at d13 (stage7_plan.md, 7a).
     """
-    is_open = is_closed == 0
-    open_edges = numpy.flatnonzero(is_open)
-    bounds = numpy.stack((lower_tick, upper_tick), axis=1)
-    open_bounds = bounds[open_edges]
-    distinct, picked = numpy.unique(open_bounds, axis=0, return_inverse=True)
-    table = _interval_table(distinct)
-    rows = numpy.zeros(len(is_closed), dtype=numpy.intp)
-    rows[open_edges] = picked + 1
-    chosen = table[rows]
-    intervals = chosen.tolist()
+    closed = evidence_records.Closed()
+    closed_flags = is_closed.tolist()
+    lower_ticks = lower_tick.tolist()
+    upper_ticks = upper_tick.tolist()
+    open_by_bounds = {}
+    intervals = []
+    for edge_index, closed_flag in enumerate(closed_flags):
+        if closed_flag:
+            intervals.append(closed)
+            continue
+        lower = lower_ticks[edge_index]
+        upper = upper_ticks[edge_index]
+        bounds = (lower, upper)
+        interval = open_by_bounds.get(bounds)
+        if interval is None:
+            interval = evidence_records.Open(lower, upper)
+            open_by_bounds[bounds] = interval
+        intervals.append(interval)
     return tuple(intervals)
-
-
-def _interval_table(distinct) -> numpy.ndarray:
-    """Closed at row 0, then one Open per distinct pair of bounds."""
-    pairs = distinct.tolist()
-    row_count = len(pairs) + 1
-    table = numpy.empty(row_count, dtype=object)
-    table[0] = evidence_records.Closed()
-    for row, (lower, upper) in enumerate(pairs, start=1):
-        table[row] = evidence_records.Open(lower, upper)
-    return table
 
 
 def _require_one_interval_per_edge(

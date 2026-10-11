@@ -67,6 +67,7 @@ The machine attaches each part after it is built, at its settings path:
 | a syndrome buffer | `weak_syndrome_buffer`, `strong_syndrome_buffer` |
 | the frame | `pauli_frame` |
 | the strong redecode | `switching` |
+| the verdict an edge asks | `switching.verdict` |
 
 A part that declares no statistics takes no path. A new kind of
 component in a part (see [How to add a component to a part](add_a_component_to_a_part.md))

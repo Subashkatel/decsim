@@ -263,6 +263,7 @@ class WindowDecoderBase(DecoderBase):
         result.detection_events = syndrome
         result.iterations = answer.iterations
         result.no_correction_reason = answer.no_correction_reason
+        result.evidence = answer.evidence
         return result, finished_ns - started_ns
 
     def window_answer(

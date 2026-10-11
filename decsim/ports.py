@@ -1921,8 +1921,11 @@ class EscalationPolicy(Protocol):
     and is told, the shape of gem5's conditional predictor
     (src/cpu/pred/conditional.hh: lookup answers, update teaches): it
     builds no job and sends nothing. check_plan refuses, once at build,
-    a run the policy cannot serve.
+    a run the policy cannot serve. verdict is the row it asks of each
+    weak result, whose statistics are recorded at <edge>.verdict.
     """
+
+    verdict: "EscalationVerdict"
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""

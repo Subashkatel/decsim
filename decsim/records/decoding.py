@@ -7,7 +7,7 @@ escalation policy reads them with the result, and so does the frame's
 record of the correction it accepted, which closes the decode.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional, Union
@@ -699,6 +699,8 @@ class WindowDecode:
     cluster_evidence: Optional[evidence_records.UnionFindHardEvidence] = None
     iterations: Optional[int] = None
     no_correction_reason: Optional[BackendFailureReason] = None
+    # the decoder's own named numbers, which DecodeResult.evidence carries
+    evidence: Optional[Mapping[str, float]] = None
 
 
 @dataclass(frozen=True)
@@ -766,6 +768,9 @@ class DecodeResult:
     # a decoding batch's answer for each member, by its request key
     # (decoders/batching.py); None from any other decode
     member_results: Optional[dict] = None
+    # a decoder's own named numbers, for a verdict of its own to read;
+    # decsim reads none of them. None from every shipped row
+    evidence: Optional[Mapping[str, float]] = None
 
 
 @dataclass(frozen=True)

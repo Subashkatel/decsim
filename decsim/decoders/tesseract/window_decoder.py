@@ -43,7 +43,7 @@ _Status = decoding_records.BackendDecodeStatus
 _Reason = decoding_records.BackendFailureReason
 
 
-class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
+class TesseractWindowDecoder(seeding.AtomicRunSeedConsumer):
     """Decode one physical fault view with the official Tesseract backend.
 
     The detector orders are drawn from the settings' detector_order_seed,
@@ -56,7 +56,7 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         self, settings: "tesseract_decoder.TesseractDecoder.Settings"
     ) -> None:
         self.settings = settings
-        seeding._AtomicRunSeedConsumer.__init__(self, None)
+        seeding.AtomicRunSeedConsumer.__init__(self, None)
         self._installed_seed = None
         self.compiled_by_model: dict = {}
         self._worker_process_id = os.getpid()

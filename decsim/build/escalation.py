@@ -135,10 +135,15 @@ class Switching:
         self._bind_the_deadline(decoders)
 
     def statistics_parts(self) -> tuple:
-        """The strong redecode at the edge's path, and its deadline's."""
+        """The strong redecode at the edge's path; its verdict's, deadline's.
+
+        A verdict row that declares statistics records them at
+        <edge>.verdict; a row that declares none takes no path.
+        """
         name = self.edge.name
         strong_redecode = self.strong_redecode
-        parts = [(name, strong_redecode)]
+        verdict = self.policy.verdict
+        parts = [(name, strong_redecode), (f"{name}.verdict", verdict)]
         deadline = strong_redecode.deadline
         if deadline is not None:
             parts.append((f"{name}.deadline", deadline))

@@ -12,6 +12,7 @@ import dataclasses
 
 import pytest
 
+import decsim.confidence.no_signal as no_signal
 import decsim.decoders.settings as decoder_settings
 import decsim.parameters.assignments as assignments_module
 import decsim.parameters.fields as fields
@@ -183,6 +184,16 @@ def test_a_part_is_added_to_an_empty_slot_and_emptied_again():
     channel = added.links.qpu_to_controller.channel
     assert channel.capacity.input_bits_per_microsecond == 100_000
     assert emptied == machine
+
+
+def test_none_in_a_slot_that_must_hold_a_record_is_the_row_named_none():
+    machine = run_files.switching_machine()
+
+    applied = _applied(machine, ("switching.confidence.type", "none"))
+
+    assert applied.switching.confidence == no_signal.NoSignal.Settings()
+    with pytest.raises(fields.ParameterError, match="named 'none'"):
+        _applied(machine, ("weak_decoder.algorithm.type", "none"))
 
 
 def test_a_new_part_with_a_required_field_unset_is_refused_by_its_path():

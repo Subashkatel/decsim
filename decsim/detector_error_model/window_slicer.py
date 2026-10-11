@@ -107,8 +107,9 @@ class WindowSlicer:
         explicitly_prior_faults: Optional[
             dict[fault_model_contracts.FaultRepresentation, Container[int]]
         ],
+        is_last: bool = False,
     ) -> fault_model_contracts.WindowErrorModel:
-        """One window outside the plan, never terminal.
+        """One window outside the plan, terminal only when is_last.
 
         Its ownership starts empty and is not kept, so one slicer serves
         every window cut on its own from the circuit, and the circuit is
@@ -119,7 +120,7 @@ class WindowSlicer:
             first_commit_round,
             last_commit_round,
             last_buffer_round,
-            is_last=False,
+            is_last,
         )
         no_commits = _no_commits(self.catalogs)
         return self._sliced(

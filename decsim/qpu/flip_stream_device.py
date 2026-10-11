@@ -25,7 +25,8 @@ read once off a short circuit of the program, as the flips are against
 it (FlipSimulator: "measurement flips ... relative to the noiseless
 reference"). The formation table is the template's, moved in time
 (detector_error_model/periodic_formation.py). The truth is the
-observables' flips, kept across rollovers.
+observables' flips, kept across rollovers. A window's model is a short
+circuit's, moved in time likewise (moved_stream_models.py).
 """
 
 import dataclasses
@@ -39,8 +40,8 @@ import decsim.config as config
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.periodic_formation as periodic_formation
 import decsim.ports as ports
+import decsim.qpu.moved_stream_models as moved_stream_models
 import decsim.qpu.stim_device as stim_device
-import decsim.qpu.stim_stream_models as stream_models
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.fault_model_contracts as fault_models
@@ -154,7 +155,9 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
         del round_count
         program = self._program_for(stream_operation)
         self._models_by_stream_id[stream_operation.id] = (
-            stream_models.GrowingStimModels(program, fault_model_requirement)
+            moved_stream_models.MovedStimModels(
+                program, fault_model_requirement
+            )
         )
         return None
 

@@ -236,6 +236,19 @@ def test_likelihood_pooling_over_two_representations_is_refused_for_now():
         settings.build()
 
 
+def test_a_member_on_a_strong_backend_is_refused_for_now():
+    """A backend prices each decode on its device, not on the host."""
+    fixed = _FixedMember.Settings((0,), 1)
+    on_a_device = _FixedMember(fixed)
+    on_a_device.priced_by_its_backend = True
+    member = fixed.build()
+    vote = ensembles.Vote()
+    members = (member, on_a_device)
+
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
+        ensembles.EnsembleDecoder(members, vote, False)
+
+
 def test_the_consensus_row_reports_the_agreement_as_its_soft_output():
     result = _result((1,))
     result.agreement = 0.75

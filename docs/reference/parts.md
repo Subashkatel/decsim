@@ -146,6 +146,31 @@ packing_rounds_in_flight bounds the rounds in the packing stage (round_assembly.
 
 ## decsim/decoders
 
+### `LawSettings`
+
+`decsim/decoders/batching.py`. A law row's settings record (this module), which builds it.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `build(self)` | `BatchLaw` |
+
+### `Sum.Settings`
+
+`decsim/decoders/batching.py`. The sum law, which takes no setting.
+
+### `Slowest.Settings`
+
+`decsim/decoders/batching.py`. The slowest law, which takes no setting.
+
+### `DecodeEach.Settings`
+
+`decsim/decoders/batching.py`. law is a row of this module: sum (the default) or slowest.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `law` | `LawSettings` | `Sum.Settings()` |
+
 ### `PoolSettings`
 
 `decsim/decoders/decoder_pool.py`. One pool as the root derives it from its tier's settings.
@@ -251,6 +276,14 @@ clock is the domain the stages count on, None for the machine's; the four stage 
 | `release_cycles_per_job` | `int` | `1` |
 | `release_cycles_per_round` | `int` | `0` |
 
+### `BatchingSettings`
+
+`decsim/decoders/settings.py`. A pool's batching row's settings record (batching.py).
+
+| Member | Type |
+| --- | --- |
+| `build(self)` | `batching.Batching` |
+
 ### `DecoderPoolSettings`
 
 `decsim/decoders/settings.py`. One tier's pool of decoder units.
@@ -263,6 +296,8 @@ unit_memory is one unit's input SRAM (UnitMemorySettings); a unit overlaps input
 
 result_blocks_unit says when a unit's compute goes back to its pool: False at the decode's end or when the confidence walk charged on it ends, as Chen's frame manager takes the correction without blocking the decoder (2605.30765 lines 1618-1620); True when the result is read, a unit with no output buffer stalled until its output is taken (Bascones et al. 2605.01035 lines 607-609 add FIFOs to avoid that stall). It is read on the tier that decodes the plan's windows.
 
+batching, None by default, is the pool's batching row (batching.py): decode_each serves the re-decodes waiting for a unit as one batch, decodes each member with the algorithm and prices the batch by its law, sum or slowest. Only a pool an edge escalates to batches.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `algorithm` | `ports.DecoderSettings` | required |
@@ -272,6 +307,7 @@ result_blocks_unit says when a unit's compute goes back to its pool: False at th
 | `copies_input` | `bool` | `True` |
 | `copies_boundary_fold` | `bool` | `True` |
 | `result_blocks_unit` | `bool` | `False` |
+| `batching` | `Optional[BatchingSettings]` | `config.added_field(None)` |
 
 ### `SchedulerSettings`
 

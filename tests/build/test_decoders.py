@@ -17,6 +17,7 @@ import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
 import decsim.confidence.consensus as consensus
 import decsim.config as config
+import decsim.decoders.batching as batching
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
@@ -218,6 +219,33 @@ def test_the_consensus_row_needs_an_ensemble_on_the_source_pool():
     )
 
     with pytest.raises(ValueError, match="only the ensemble row"):
+        machine_module.Machine.build(settings, 0)
+
+
+def test_a_pool_no_edge_escalates_to_may_not_batch():
+    decode_each = batching.DecodeEach.Settings()
+    settings = declared_fabric.switching_settings(
+        rounds=6, escalated_windows=set()
+    )
+    weak = dataclasses.replace(settings.weak_decoder, batching=decode_each)
+    settings = dataclasses.replace(settings, weak_decoder=weak)
+
+    with pytest.raises(ValueError, match="no edge escalates to"):
+        machine_module.Machine.build(settings, 0)
+
+
+def test_a_pools_batching_beside_bulk_strong_is_refused():
+    decode_each = batching.DecodeEach.Settings()
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+    settings = declared_fabric.switching_settings(
+        rounds=6, escalated_windows=set()
+    )
+    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
+    settings = dataclasses.replace(
+        settings, strong_decoder=strong, decoder_manager=bulk
+    )
+
+    with pytest.raises(ValueError, match="keep one"):
         machine_module.Machine.build(settings, 0)
 
 

@@ -39,3 +39,6 @@ the [reference](../reference/README.md) pages.
 - [How to decode a window with an ensemble](decode_a_window_with_an_ensemble.md):
   Harmony's and VibeLSD's poolings in one pool, and escalating the
   windows its members disagree on.
+- [How to batch a pool's decodes](batch_a_pools_decodes.md): the
+  re-decodes waiting for a unit decoded as one batch, priced by the sum
+  or the slowest of its members.

@@ -12,12 +12,19 @@ import decsim.observe.stage_records as stage_records
 
 
 class _Record:
-    """The two fields the ledger keys a record by."""
+    """The fields the ledger keys a record by."""
 
-    def __init__(self, operation_id: int, window_id: int, stage: str) -> None:
+    def __init__(
+        self,
+        operation_id: int,
+        window_id: int,
+        stage: str,
+        served_windows: tuple = (),
+    ) -> None:
         self.operation_id = operation_id
         self.window_id = window_id
         self.stage = stage
+        self.served_windows = served_windows
 
 
 def test_every_record_is_kept_in_the_order_the_stages_ended():
@@ -42,3 +49,15 @@ def test_one_windows_records_come_back_in_stage_order():
     ledger.stage_recorded(second)
 
     assert ledger.records_for(1, 0) == (first, second)
+
+
+def test_a_merged_batchs_records_are_filed_under_each_window_it_served():
+    """A batch's own key is (-1, 0); its members' windows find it too."""
+    ledger = stage_records.StageLedger()
+    batch = _Record(-1, 0, "algorithm", served_windows=((3, 0), (4, 0)))
+
+    ledger.stage_recorded(batch)
+
+    assert ledger.records_for(3, 0) == (batch,)
+    assert ledger.records_for(4, 0) == (batch,)
+    assert ledger.records_for(-1, 0) == (batch,)

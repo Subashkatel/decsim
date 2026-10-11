@@ -274,6 +274,20 @@ class StrongRequests:
             record = self._record((window_key, pool))
             record.live = [LiveStrongRequest(request_job, batch)]
 
+    def reopen(self, batch: decoding_records.DecodeJob) -> list:
+        """A waiting batch's live members, each serving itself again.
+
+        A batch that found no unit is opened before the queue merges
+        again, so a member a cancel left alone is its own decode.
+        """
+        members = self.members_of(batch)
+        for member in members:
+            pool = member.request_key.pool
+            key = (member.strong_decode_for, pool)
+            record = self._record(key)
+            record.live = [LiveStrongRequest(member, member)]
+        return members
+
     def finish_service(self, service_job: decoding_records.DecodeJob) -> None:
         """The physical decode ended; its requests are no longer running."""
         keys = tuple(self.by_window)
@@ -399,15 +413,18 @@ class StrongRequests:
     ) -> tuple:
         """Per-request completions of one finished strong decode.
 
-        A merged batch carries timing only, so each member gets an empty
-        result. The unit is read here, before the decode's end frees the
-        job's slot, since its output slot holds the result.
+        A decoding batch answers each live member with its own result
+        (batching.py); a timing-only batch gives each an empty one. The
+        unit is read here, before the decode's end frees the job's slot,
+        since its output slot holds the result.
         """
         unit = service_job.unit
         requests = self.members_of(service_job)
         if not _is_merged_service(requests, result):
             request = requests[0]
             return (StrongCompletion(request, result, now, unit),)
+        if result.member_results is not None:
+            return _own_results(requests, result, now, unit)
         populated = _populated_accuracy_fields(result)
         if populated:
             listed = ", ".join(populated)
@@ -592,6 +609,18 @@ def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:
         if value is not None:
             populated.append(field_name)
     return populated
+
+
+def _own_results(
+    requests: list, result: decoding_records.DecodeResult, now: int, unit
+) -> tuple:
+    """Each live member's completion, carrying the member's own result."""
+    deliveries = []
+    for request in requests:
+        own = result.member_results[request.request_key]
+        completion = StrongCompletion(request, own, now, unit)
+        deliveries.append(completion)
+    return tuple(deliveries)
 
 
 def _is_merged_service(

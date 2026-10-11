@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from typing import Optional
 
+import decsim.build.decoders as decoders_build
 import decsim.build.escalation as escalation_build
 import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
@@ -660,6 +661,7 @@ def _plan(task: collect.Task) -> plan_build.Plan:
     switching_parts = escalation_build.build_switching(
         layout, engine, task.online_threshold
     )
+    batches_each_member = decoders_build.batches_each_member(layout)
     return plan_build.build_plan(
         settings.qpu,
         settings.workload,
@@ -669,6 +671,7 @@ def _plan(task: collect.Task) -> plan_build.Plan:
         settings.switching,
         settings.decoder_manager.bulk_strong,
         switching_parts,
+        batches_each_member,
     )
 
 

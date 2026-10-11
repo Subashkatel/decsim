@@ -507,10 +507,20 @@ class DecoderManager:
         deliveries = self.strong_requests.deliveries_for(job, result, now)
         job.completed = True
         self.service.free(job)
-        members = self.strong_requests.members_of(job)
+        members = self._held_inputs(job)
         self.service.release_inputs(members)
-        self.outcomes.conclude_strong(job, result, deliveries)
+        self.outcomes.conclude_strong(job, deliveries)
         self.dispatcher.run()
+
+    def _held_inputs(self, job: decoding_records.DecodeJob) -> list:
+        """The requests whose input the decode held, to free at its end.
+
+        A merged batch holds every member it was formed with: one
+        cancelled while the batch held a unit rode on with it.
+        """
+        if job.batch_members:
+            return list(job.batch_members)
+        return self.strong_requests.members_of(job)
 
     def _self_contained_decode_done(
         self, job: decoding_records.DecodeJob, result
@@ -583,8 +593,18 @@ class DecoderManager:
     def _cancel_staged_strong(
         self, live: strong_requests_module.LiveStrongRequest
     ) -> None:
-        """Cancelled in its slot before its decode started."""
+        """Cancelled in its slot before its decode started.
+
+        A batch with other members left goes on without decoding this
+        one (batching.py), whose input may still be crossing into the
+        unit: it rides the batch, which frees it at its end
+        (_held_inputs).
+        """
         job = live.service_job
+        if self.strong_requests.has_survivors(job):
+            live.request_job.cancelled = True
+            self._report_member_left(live)
+            return
         job.cancelled = True
         self.service.evict(job)
         self.service.release_input(live.request_job)
@@ -598,9 +618,15 @@ class DecoderManager:
     def _cancel_queued_strong(
         self, live: strong_requests_module.LiveStrongRequest
     ) -> None:
+        """Cancelled while queued; a batch with other members stays.
+
+        The next dispatch opens a waiting batch into its live members
+        (decode_queue.py), so the cancelled one leaves it then.
+        """
         job = live.service_job
-        self.service.cancel_input(job)
-        self.queue.remove(job)
+        if not self.strong_requests.has_survivors(job):
+            self.service.cancel_input(job)
+            self.queue.remove(job)
         # Credits belong to the original request, never to a batch service
         # job, and the request is its own service job before dispatch.
         self.service.release_input(live.request_job)
@@ -617,12 +643,7 @@ class DecoderManager:
         job = live.service_job
         if self.strong_requests.has_survivors(job):
             self.service.release_input(live.request_job)
-            self.outcomes.report_request(
-                live.request_job,
-                None,
-                decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
-                None,
-            )
+            self._report_member_left(live)
             return
         job.cancelled = True
         self.service.abort(job)
@@ -632,6 +653,17 @@ class DecoderManager:
             live.request_job,
             None,
             decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE,
+            None,
+        )
+
+    def _report_member_left(
+        self, live: strong_requests_module.LiveStrongRequest
+    ) -> None:
+        """One member of a batch that goes on without it was cancelled."""
+        self.outcomes.report_request(
+            live.request_job,
+            None,
+            decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
             None,
         )
 

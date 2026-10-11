@@ -73,11 +73,13 @@ def build_plan(
     switching_settings: Optional[escalation_settings.SwitchingSettings],
     is_bulk_strong: bool,
     switching_parts: tuple = (),
+    batches_each_member: bool = False,
 ) -> Plan:
     """The code, the workload's operations and the window plan.
 
     switching_settings is the entry edge's; each edge's policy refuses
-    a run shape it cannot serve.
+    a run shape it cannot serve. batches_each_member says a pool's
+    batching row decodes its batches member by member.
     """
     is_switching = switching_settings is not None
     window_sizes = windows.scheme
@@ -128,6 +130,7 @@ def build_plan(
         is_bulk_strong=is_bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
+        batches_each_member=batches_each_member,
     )
     leaves_the_entry_pool = True
     for part in switching_parts:

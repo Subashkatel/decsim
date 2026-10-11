@@ -64,6 +64,8 @@ class StrongBackendDecoder(decoder_module.DecoderBase):
     same run seed.
     """
 
+    priced_by_its_backend = True
+
     def __init__(
         self, backend: ports.StrongBackend, bases: str = "together"
     ) -> None:

@@ -67,6 +67,7 @@ Each guide adds one kind of thing to the machine.
 - [How to route windows to several pools](how-to/route_windows_to_several_pools.md)
 - [How to share a pool among patches](how-to/share_a_pool_among_patches.md)
 - [How to decode a window with an ensemble](how-to/decode_a_window_with_an_ensemble.md)
+- [How to batch a pool's decodes](how-to/batch_a_pools_decodes.md)
 
 ## Reference
 

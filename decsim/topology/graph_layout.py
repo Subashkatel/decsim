@@ -38,6 +38,7 @@ import decsim.build.layout as layout_module
 import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.refusals as refusals
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 import decsim.topology.fabrics as fabrics
@@ -266,7 +267,7 @@ def _router(machine: graph.Machine) -> Optional[graph.Part]:
         names = [part.name for part in routers]
         raise graph.GraphError(
             f"the routers {names}: a machine of more than one router is "
-            "not implemented yet (stage 5)"
+            f"not implemented yet; {refusals.REFUSALS}"
         )
     return routers[0]
 
@@ -351,7 +352,8 @@ def _refuse_an_edge_from_a_later_entry(entries: tuple, edges: tuple) -> None:
         raise graph.GraphError(
             f"{edge.part.name} escalates from {edge.source.name}, an entry "
             "pool past the first: an escalate edge from such a pool is not "
-            "implemented yet (stage 5)"
+            "implemented yet, its boundaries being the first's; "
+            f"{refusals.REFUSALS}"
         )
 
 

@@ -45,7 +45,7 @@ first within a tier:
   hears of each job its pool dispatches (`served`). A row of your own
   implements both, and `pop`.
 - A program with a stream (a protected region) is refused, not
-  implemented yet (stage 5). A stream's critical point is a segment's
+  implemented yet ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)). A stream's critical point is a segment's
   end, which the scheduler does not read.
 - Triage's EDF and MDF are not built. They rank slices of a constraint
   graph, whose neighbours may not decode at once, by a compiled

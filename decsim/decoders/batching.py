@@ -21,7 +21,7 @@ and prices the batch by a law:
 The sources time batches of shots; a batch here is of windows, the
 blocks 2604.12841 batches on one GPU. A strong backend row prices one
 region per submit and states no batch time, so batching it is refused,
-not implemented yet (stage 5). A measured batch table is not built:
+not implemented yet. A measured batch table is not built:
 the measured curves (2604.12841 Fig. 18) are a network's, which no row
 here runs.
 """
@@ -32,6 +32,7 @@ from typing import Optional, Protocol
 import decsim.decoders.decoder as decoder_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.refusals as refusals
 
 
 class BatchLaw(Protocol):
@@ -208,5 +209,5 @@ def _refuse_a_backend_row(decoder: object) -> None:
     raise NotImplementedError(
         f"decode_each over {row.__name__}: a strong backend prices one "
         "region per submit and states no batch time; batching it is not "
-        "implemented yet (stage 5)"
+        f"implemented yet; {refusals.REFUSALS}"
     )

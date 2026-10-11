@@ -70,8 +70,8 @@ verdict. The edge counts `rescues` and `misses`.
 
 ## What is refused for now
 
-Each of these raises "not implemented yet (stage 5)" when the machine is
-built:
+Each of these raises "not implemented yet", with its reason and a pointer
+to this table, when the machine is built:
 
 | Refused | Why |
 |---|---|

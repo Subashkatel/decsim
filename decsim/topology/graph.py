@@ -206,7 +206,7 @@ class Machine:
             record_class = type(part.settings)
             raise GraphError(
                 f"{written}: {part_name} is a {record_class.__name__}, "
-                "whose ports are not implemented yet (stage 5)"
+                "whose ports are not implemented yet"
             )
         port = kind.port(port_name)
         if port is None:

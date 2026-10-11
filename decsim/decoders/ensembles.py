@@ -39,6 +39,7 @@ import decsim.decoders.decoder as decoder_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.seeds as seed_records
+import decsim.refusals as refusals
 
 _SUCCEEDED = decoding_records.BackendDecodeStatus.SUCCEEDED
 
@@ -495,7 +496,7 @@ def _refuse_a_backend_member(members: tuple) -> None:
         raise NotImplementedError(
             f"ensemble member {row.__name__}: a strong backend prices "
             "each decode on its device, and timing a member there is not "
-            "implemented yet (stage 5)"
+            f"implemented yet; {refusals.REFUSALS}"
         )
 
 
@@ -508,8 +509,8 @@ def _refuse_mixed_representations(members: tuple) -> None:
     names = sorted(representation.value for representation in representations)
     raise NotImplementedError(
         f"ensemble members select faults in {names}: pricing one against "
-        "another is not implemented yet (stage 5); Harmony recovers a "
-        "matching's hyperedge errors by an edge-decomposition matching "
-        "(2401.12434 Sec. III.2). Pool by vote, or list members of one "
-        "representation"
+        "another is not implemented yet; Harmony recovers a matching's "
+        "hyperedge errors by an edge-decomposition matching (2401.12434 "
+        "Sec. III.2). Pool by vote, or list members of one representation; "
+        f"{refusals.REFUSALS}"
     )

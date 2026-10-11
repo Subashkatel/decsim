@@ -13,6 +13,7 @@ import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
+import decsim.refusals as refusals
 
 
 class Switching:
@@ -113,7 +114,7 @@ class Switching:
             raise NotImplementedError(
                 f"switching.strong_window {row_name} with a pool's "
                 "batching: a batch of deferred strong windows is not "
-                "implemented yet (stage 5)"
+                f"implemented yet; {refusals.REFUSALS}"
             )
         if self.threshold.audits_by_escalating:
             raise ValueError(
@@ -134,7 +135,8 @@ def _refuse_batches_beside_run_both(plan: decoding_records.RunShape) -> None:
     if plan.batches_each_member:
         raise NotImplementedError(
             "a pool's batching with run_both_at_once, a batch of every "
-            "window's speculative decode, is not implemented yet (stage 5)"
+            "window's speculative decode, is not implemented yet; "
+            f"{refusals.REFUSALS}"
         )
 
 

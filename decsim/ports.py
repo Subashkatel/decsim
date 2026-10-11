@@ -880,6 +880,25 @@ class EscalateEdge(Protocol):
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the target pool to re-decode the source job's window."""
 
+    def accept_target_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A target decode ended: to the next edge's join, else the verdict."""
+
+    def enqueue_target(
+        self,
+        job: decoding_records.DecodeJob,
+        send_input: Callable[[Callable[[], None]], int],
+    ) -> None:
+        """Queue a target job; the edge out of the target may start beside."""
+
+    def start_beside_source(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """A source job past the entry was queued: decode it here too."""
+
     def submit_if_commit_releases(self, window_key: tuple) -> None:
         """A window committed: a target window waiting on it leaves."""
 

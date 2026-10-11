@@ -500,6 +500,9 @@ class DecodeJob:
     strong_decode_for: Optional[tuple] = (
         None  # (operation_id, window_id) this strong job re-decodes
     )
+    # the windows whose committed boundary a target job folds at its
+    # faces; a redo of this job at the next edge pins the same faces
+    pinned_faces: tuple = ()
     cancelled: bool = False  # cancelled speculative decodes discard completion
     completed: bool = (
         False  # terminal flag; admission refuses reuse of a completed job
@@ -781,7 +784,10 @@ class RunShape:
     Machine.build. is_absorbing_strong_window is the strong window row's
     declaration that its region replaces the weak windows it covers (the
     double window, Toshio et al. 2510.25222 Sec. III C). commit_round_count
-    and buffer_round_count size every window.
+    and buffer_round_count size every window. Each edge checks the run
+    with its own strong window row; leaves_the_entry_pool says whether
+    the edge decides on the entry pool's windows, whose boundaries the
+    boundary policy ships.
     """
 
     # the ports.WindowingScheme and ports.BoundaryPolicy, opaque to the
@@ -796,3 +802,4 @@ class RunShape:
     is_bulk_strong: bool
     has_dynamic_streams: bool
     has_static_decode_plan: bool
+    leaves_the_entry_pool: bool = True

@@ -154,15 +154,12 @@ class RedoWindow(StrongWindowPorts):
         self, weak_job: decoding_records.DecodeJob
     ) -> pending_strong_windows.StrongAssignment:
         """The near-pinned job, built now or held for its own rounds."""
-        key = (weak_job.operation_id, weak_job.window_id)
-        region = self.regions.redo_region(key)
-        pinned_source_key = self.regions.redo_pin_source(key)
-        folded_boundaries = _declared_faces(pinned_source_key)
+        region, folded_boundaries, model = _redo_of(self, weak_job)
         held = _held_redo(
             self,
             weak_job,
-            region.window,
-            region.context_read_keys,
+            region,
+            model,
             folded_boundaries,
         )
         return _assignment_of(self, held)
@@ -523,7 +520,7 @@ class DoubleWindow(StrongWindowPorts):
         self.retention.require_rounds_retained(
             held.label, payloads, plan.context_lo, plan.context_hi
         )
-        return _strong_redecode_job(
+        job = _strong_redecode_job(
             self,
             held.weak_job,
             held.strong_window,
@@ -532,6 +529,8 @@ class DoubleWindow(StrongWindowPorts):
             held.strong_request_key,
             held.strong_request_created_ticks,
         )
+        job.pinned_faces = held.folded_boundaries
+        return job
 
 
 # a row that pins no face, the redo window at the operation's
@@ -579,6 +578,30 @@ def escalated_label(
     return f"{target.word}({operation.name} W{source_job.window_id})"
 
 
+def _redo_of(
+    shape: StrongWindowPorts, source_job: decoding_records.DecodeJob
+) -> tuple:
+    """The region a redo decodes again, the faces it pins, its model.
+
+    A window the entry pool decoded is redone over its commit region,
+    its past face pinned on its earlier neighbour. A revision a pool
+    past the entry made is redone over that revision's own region, on
+    the faces it was pinned on and with the error model it was decoded
+    on, so its seams hold what its neighbours were already given and
+    the same decoder at depth gives the same answer.
+    """
+    if source_job.kind is decoding_records.DecodeJobKind.STRONG_REDECODE:
+        region = shape.regions.revision_region(source_job.window)
+        model = source_job.detector_error_model
+        return region, source_job.pinned_faces, model
+    key = (source_job.operation_id, source_job.window_id)
+    region = shape.regions.redo_region(key)
+    pinned_source_key = shape.regions.redo_pin_source(key)
+    faces = _declared_faces(pinned_source_key)
+    model = shape.regions.redecode_model(key, region.window, faces)
+    return region, faces, model
+
+
 def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
     """The faces a row pins, as StrongAssignment names them."""
     if pinned_source_key is None:
@@ -605,13 +628,12 @@ def _pinned_faces(
 def _held_redo(
     shape: StrongWindowPorts,
     weak_job: decoding_records.DecodeJob,
-    strong_window: window_records.Window,
-    read_keys: tuple,
+    region: strong_regions.RedoRegion,
+    model,
     folded_boundaries: tuple,
 ) -> "_HeldStrongRedo":
     """What a row keeps from its plan: its window, its reads, its faces."""
     key = (weak_job.operation_id, weak_job.window_id)
-    model = shape.regions.redecode_model(key, strong_window, folded_boundaries)
     target = shape.edge.target
     request_key = shape.builder.new_request_key(
         weak_job.operation_id, weak_job.window_id, target
@@ -622,8 +644,8 @@ def _held_redo(
         key=key,
         weak_job=weak_job,
         label=label,
-        read_keys=read_keys,
-        strong_window=strong_window,
+        read_keys=region.context_read_keys,
+        strong_window=region.window,
         model=model,
         operation=operation,
         request_key=request_key,
@@ -713,7 +735,7 @@ def _strong_job_of(
         held.request_key,
         held.folded_boundaries,
     )
-    return _strong_redecode_job(
+    job = _strong_redecode_job(
         shape,
         held.weak_job,
         held.strong_window,
@@ -722,6 +744,8 @@ def _strong_job_of(
         held.request_key,
         held.request_created_ticks,
     )
+    job.pinned_faces = held.folded_boundaries
+    return job
 
 
 def _strong_redecode_job(

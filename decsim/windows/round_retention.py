@@ -328,6 +328,7 @@ class RoundRetention:
         job.input_hold = functools.partial(
             self._release_strong_input, owner, target
         )
+        self._hold_for_the_next_edge(job)
 
     # ---- what a strong window holds
 
@@ -774,6 +775,37 @@ class RoundRetention:
         round_identities = round_identities_of(job.payloads)
         store.register_hold(in_flight, round_identities)
 
+    def _hold_for_the_next_edge(self, job: decoding_records.DecodeJob) -> None:
+        """The edge out of the job's pool keeps the rounds the job reads.
+
+        Its verdict on the job's result redoes the same region, so the
+        window's potential read on that edge's stores names those rounds
+        until the verdict or the window's final commit, as it names a
+        weak window's own.
+        """
+        next_target = self._next_target(job.request_key.pool)
+        if next_target is None:
+            return
+        potential = decoding_records.PotentialStrong(
+            job.strong_decode_for, next_target
+        )
+        identities = round_identities_of(job.payloads)
+        for store in self._strong_context_stores(next_target):
+            _replace_or_register(store, potential, identities)
+
+    def _next_target(
+        self, pool: window_records.PoolId
+    ) -> Optional[window_records.PoolId]:
+        """The target of the edge that leaves pool; None when none does."""
+        stores = self.stores_by_edge.get(pool)
+        if stores is None:
+            return None
+        _carried_from, pool_store = stores
+        for target, edge_stores in self.stores_by_edge.items():
+            if edge_stores[0] is pool_store:
+                return target
+        return None
+
     def _release_strong_input(self, owner, target) -> None:
         """The strong input landed in its unit: both stores let it go."""
         for store in self._strong_context_stores(target):
@@ -791,6 +823,14 @@ def round_identities_of(payloads: list) -> tuple:
 def _stored_through(tracker, store, operation_id) -> int:
     """The operation's highest round the store holds, by its arrivals."""
     return tracker.strong_rounds_arrived(operation_id, store)
+
+
+def _replace_or_register(store, holder, round_keys: tuple) -> None:
+    """Point the holder at these rounds, live or not."""
+    if store.has_hold(holder):
+        store.replace_hold(holder, round_keys)
+        return
+    store.register_hold(holder, round_keys)
 
 
 def _replace_if_live(store, holder, round_keys: list) -> None:

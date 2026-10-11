@@ -136,6 +136,43 @@ def test_a_windows_attempt_holds_its_forced_class_requests():
     assert not requests.by_window
 
 
+def test_a_cancelled_middle_request_closes_its_attempt_on_the_next_edge():
+    """A chain's middle job opens an attempt; a cancel ends it with it."""
+    requests = _chain_requests()
+    request_key = _request_key(7)
+    job = _strong_job(request_key)
+    requests.admit_strong(job, now=0)
+
+    requests.take_live((1, 0), window_records.STRONG_POOL_ID)
+
+    assert requests.by_window == {}
+
+
+def test_an_abandoned_middle_result_closes_its_attempt_when_dropped():
+    requests = _chain_requests()
+    request_key = _request_key(7)
+    job = _strong_job(request_key)
+    requests.admit_strong(job, now=0)
+    requests.abandon((1, 0), window_records.STRONG_POOL_ID)
+    requests.finish_service(job)
+    completion = _completion(job)
+
+    is_dropped = requests.drop_abandoned(completion)
+
+    assert is_dropped
+    assert requests.by_window == {}
+
+
+def _chain_requests():
+    """The ledger of a chain whose strong pool escalates on to deep."""
+    deep = window_records.PoolId("deep")
+    target_by_source = {
+        window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID,
+        window_records.STRONG_POOL_ID: deep,
+    }
+    return strong_requests_module.StrongRequests(target_by_source)
+
+
 def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     requests = strong_requests_module.StrongRequests()
     first_key = _request_key(1)

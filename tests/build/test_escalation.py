@@ -13,12 +13,18 @@ import pytest
 import decsim.build.escalation as escalation_build
 import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
+import decsim.confidence.no_signal as no_signal
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.escalation.verdicts as verdicts
+import decsim.experiments.collect as collect
+import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.settings as machine_settings
+import tests.declared_run as declared_run
 import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -97,11 +103,10 @@ def test_a_switching_record_builds_the_policy_its_run_binds():
 _DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
 _TWO_SOLVES = complementary.ComplementaryGap.Settings()
 _PAST_THE_ENTRY_CHANGES = [
-    {"run_both_at_once": True},
     {"strong_window": _DOUBLE_WINDOW},
     {"confidence": _TWO_SOLVES},
 ]
-_PAST_THE_ENTRY_IDS = ["run_both_at_once", "double_window", "two_solves"]
+_PAST_THE_ENTRY_IDS = ["double_window", "two_solves"]
 
 
 @pytest.mark.parametrize(
@@ -110,8 +115,8 @@ _PAST_THE_ENTRY_IDS = ["run_both_at_once", "double_window", "two_solves"]
 def test_an_edge_past_the_entry_refuses_what_only_the_entry_does(change):
     """An edge past the entry waits for stage 5 on what reads its source.
 
-    A speculative decode, an absorbing region and a gap of two solves
-    each work on the entry pool's windows alone.
+    An absorbing region and a gap of two solves each work on the entry
+    pool's windows alone.
     """
     deep_switching = dataclasses.replace(
         layout_tests.DEEP_SWITCHING_SLOT, **change
@@ -133,3 +138,101 @@ def test_an_edge_past_the_entry_builds_on_one_solve():
 
     edges = [part.edge.name for part in parts]
     assert edges == ["switching", layout_tests.DEEP_SWITCHING]
+
+
+def test_an_edge_past_a_double_window_may_start_beside_its_source():
+    """Each edge checks the run with its own window row.
+
+    The entry's double window ships its boundaries eagerly and starts
+    late; the deep edge redoes the strong revision, may start with it,
+    and ships no boundary of the entry pool's.
+    """
+    speculates = dataclasses.replace(
+        layout_tests.DEEP_SWITCHING_SLOT, run_both_at_once=True
+    )
+    chain = layout_tests.chain_machine(speculates, _DOUBLE_WINDOW)
+    task = collect.Task("chain", chain)
+
+    machine = machine_module.Machine.build(
+        task.machine, 0, None, task.online_threshold, layout=task.layout
+    )
+
+    deep_edge = machine.windows.window_manager.edges.edges[1]
+    assert deep_edge.policy.decodes_both_at_once(None)
+
+
+def test_an_edge_past_the_entry_reads_its_signal_off_its_source():
+    """A cluster gap at 0 dB keeps every window: the deep pool answers none.
+
+    The deep edge's join computes the gap from the strong pool's union-
+    find solve; a deep verdict with no gap would escalate them all.
+    """
+    zero_decibels = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=0.0
+    )
+    keeps_all = dataclasses.replace(
+        layout_tests.DEEP_SWITCHING_SLOT, threshold=zero_decibels
+    )
+    redo = strong_window_shapes.RedoWindow.Settings()
+    chain = layout_tests.chain_machine(keeps_all, redo)
+    always = verdicts.Always.Settings()
+    escalates_all = chain.with_settings("switching", verdict=always)
+    task = collect.Task("chain", escalates_all)
+
+    shot = collect.run_shot(task, 0)
+
+    snapshot = shot.machine.control.pauli_frame.snapshot()
+    tiers = {record.tier for record in snapshot.records}
+    assert tiers == {"strong"}
+
+
+@pytest.mark.parametrize("seed", [1, 2])
+def test_a_deep_redo_on_the_strong_decoder_gives_the_strong_answers(seed):
+    """Union-find at both depths: each deep answer is the strong one.
+
+    Both edges escalate every window. The strong pool decodes double
+    windows and the deep pool redoes each strong revision on its region,
+    faces and error model. A redo on a model of its own answered seam
+    windows differently on these seeds at d=3, p=0.01.
+    """
+    chain = _double_then_deep_redo()
+    task = collect.Task("chain", chain)
+    machine = machine_module.Machine.build(
+        task.machine, seed, None, task.online_threshold, layout=task.layout
+    )
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
+    machine.run()
+
+    strong = _answers_of(requests, "strong")
+    deep = _answers_of(requests, "deep")
+
+    assert len(strong) == 4
+    assert deep == strong
+
+
+def _double_then_deep_redo():
+    """Union-find double windows, every one redone by union-find again."""
+    always = verdicts.Always.Settings()
+    no_gap = no_signal.NoSignal.Settings()
+    deep = dataclasses.replace(
+        layout_tests.DEEP_SWITCHING_SLOT, confidence=no_gap, verdict=always
+    )
+    entry = dataclasses.replace(deep, strong_window=declared_run.DOUBLE_WINDOW)
+    base = machines.weak_baseline(3, 0.01, 1.0)
+    middle = layout_tests.MIDDLE_POOL
+    two_pools = machines.with_strong_tier(base, middle, entry)
+    return machines.with_escalation(
+        two_pools, machines.STRONG_POOL, "deep", middle, deep
+    )
+
+
+def _answers_of(requests, pool_name: str) -> dict:
+    """Each window's logical observables, as one pool answered it."""
+    answers = {}
+    for ended in requests.ended:
+        job = ended.job
+        if job.request_key.pool.word == pool_name:
+            observables = ended.result.logical_observables
+            answers[job.strong_decode_for] = tuple(observables)
+    return answers

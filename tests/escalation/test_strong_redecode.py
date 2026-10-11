@@ -209,6 +209,12 @@ class _DecodeQueue:
     def accept_selection(self, window_key, request_key):
         self.calls.append(("accept", window_key, request_key))
 
+    def cancel_strong(self, window_key):
+        self.calls.append(("cancel", window_key))
+
+    def abandon_strong(self, window_key):
+        self.calls.append(("abandon", window_key))
+
 
 def _redecode(shape, receiver_row=_StrongReceiver):
     engine = engine_module.Engine()
@@ -230,6 +236,51 @@ def _redecode(shape, receiver_row=_StrongReceiver):
     redecode.decode_queue = queue
     redecode.verdict = verdict
     return redecode, decoder_output, strong_output, queue, verdict
+
+
+class _Join:
+    """The next edge's confidence join, holding what reaches it."""
+
+    signal = None
+
+    def __init__(self) -> None:
+        self.results = []
+
+    def accept_result(self, job, result) -> None:
+        """One target decode finished."""
+        self.results.append((job, result))
+
+    def unresolved_windows(self) -> tuple:
+        """Nothing waits here."""
+        return ()
+
+
+class _NextEdge:
+    """The edge out of the target pool, hearing what reaches it."""
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def start_beside_source(self, source_job) -> None:
+        """A target job was queued."""
+        self.calls.append(("start", source_job))
+
+    def cancel_strong_request(self, window_key) -> None:
+        """A keep upstream cancelled the window."""
+        self.calls.append(("cancel", window_key))
+
+    def abandon_strong_request(self, window_key) -> None:
+        """A keep upstream let the window's decodes run out."""
+        self.calls.append(("abandon", window_key))
+
+
+class _BothAtOnce:
+    """A policy that starts every target decode beside its source."""
+
+    def decodes_both_at_once(self, window) -> bool:
+        """Every window."""
+        del window
+        return True
 
 
 class _Verdict:
@@ -261,8 +312,80 @@ def test_a_job_built_now_is_queued_behind_its_selection():
     assert _call_names(queue) == ["enqueue", "await"]
     _kind, queued, _send_input, return_path = queue.calls[0]
     assert queued is strong_job
-    assert return_path == verdict.accept_revision
+    assert return_path == redecode.accept_target_result
     assert queue.calls[1] == ("await", WINDOW_KEY, strong_job.request_key)
+
+
+def test_a_target_result_meets_the_verdict_when_no_edge_leaves_the_target():
+    strong_job = _strong_job(5)
+    shape = _Shape(strong_job, is_held=False)
+    redecode, _output, _strong, _queue, verdict = _redecode(shape)
+    result = object()
+
+    redecode.accept_target_result(strong_job, result)
+
+    assert verdict.results == [(strong_job, result)]
+
+
+def test_a_target_result_reaches_the_join_of_the_edge_that_leaves_it():
+    """The next edge's signal reads the result before any verdict."""
+    strong_job = _strong_job(5)
+    shape = _Shape(strong_job, is_held=False)
+    redecode, _output, _strong, _queue, verdict = _redecode(shape)
+    join = _Join()
+    redecode.target_join = join
+    result = object()
+
+    redecode.accept_target_result(strong_job, result)
+
+    assert join.results == [(strong_job, result)]
+    assert verdict.results == []
+
+
+def test_a_queued_target_job_starts_the_edge_out_of_its_pool_beside_it():
+    strong_job = _strong_job(5)
+    shape = _Shape(strong_job, is_held=False)
+    redecode, _output, _strong, _queue, _verdict = _redecode(shape)
+    next_edge = _NextEdge()
+    redecode.next_edge = next_edge
+    weak_job = _weak_job()
+
+    redecode.escalate(weak_job)
+
+    assert next_edge.calls == [("start", strong_job)]
+
+
+@pytest.mark.parametrize("ending", ["cancel", "abandon"])
+def test_a_keep_ends_the_windows_work_on_the_edge_out_of_the_target(ending):
+    """What a keep does to the target's decode it does one edge down."""
+    strong_job = _strong_job(5)
+    shape = _Shape(strong_job, is_held=False)
+    redecode, _output, _strong, queue, _verdict = _redecode(shape)
+    next_edge = _NextEdge()
+    redecode.next_edge = next_edge
+    end = getattr(redecode, f"{ending}_strong_request")
+
+    end(WINDOW_KEY)
+
+    assert queue.calls == [(ending, WINDOW_KEY)]
+    assert next_edge.calls == [(ending, WINDOW_KEY)]
+
+
+def test_a_decode_started_beside_a_source_past_the_entry_is_selected():
+    """One depth down, the speculative decode is the one selected."""
+    deep_job = _strong_job(8)
+    shape = _Shape(deep_job, is_held=False)
+    redecode, output, _strong, queue, _verdict = _redecode(shape)
+    redecode.policy = _BothAtOnce()
+    source_job = _strong_job(5)
+
+    redecode.start_beside_source(source_job)
+    redecode.escalate(source_job)
+
+    assert shape.planned == [source_job]
+    assert len(output.selections) == 1
+    assert _call_names(queue) == ["enqueue", "await"]
+    assert queue.calls[0][1] is deep_job
 
 
 def test_a_held_job_leaves_when_the_window_it_named_commits():

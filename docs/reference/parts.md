@@ -999,6 +999,17 @@ qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The defaults are t
 | `qubit_count` | `int` | `144` |
 | `logical_qubit_count` | `int` | `12` |
 
+### `FlipStreamDevice.Settings`
+
+`decsim/qpu/flip_stream_device.py`. rollover_rounds is how often the simulator lets go of its past.
+
+stabilizer_randomization draws the random outcomes of the first measurement of each stabilizer, as Stim does by default; off, the rollover changes no bit.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `rollover_rounds` | `int` | `DEFAULT_ROLLOVER_ROUNDS` |
+| `stabilizer_randomization` | `bool` | `True` |
+
 ### `UniformLayout.Settings`
 
 `decsim/qpu/layouts.py`. The uniform layout has no keys: every patch takes the run's card.

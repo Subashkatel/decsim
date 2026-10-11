@@ -82,6 +82,23 @@ def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
     return furthest_count
 
 
+def measurements_read_back(fragment: stim.Circuit) -> int:
+    """How many measurements before the fragment any of its records reads.
+
+    Every rec[-k] counts, a detector's, an observable's or a classically
+    controlled gate's: a simulator that kept fewer could not run the
+    fragment (stim.FlipSimulator raises on a record it does not hold).
+    """
+    furthest_count = 0
+    measured_so_far = 0
+    for instruction in _flat_instructions(fragment):
+        for offset in _record_offsets(instruction):
+            before_start = -offset - measured_so_far
+            furthest_count = max(furthest_count, before_start)
+        measured_so_far += _measurement_count(instruction)
+    return furthest_count
+
+
 class StreamingDetectorFormer:
     """One seat's former for one operation: a raw packet in, events out.
 
@@ -166,7 +183,7 @@ class StreamingDetectorFormer:
         they read that this seat was never given comes with the read
         (rounds_needed_before).
         """
-        _check_formation_prefix(self.table, table)
+        table.check_extends(self.table)
         self.table = table
 
     def _let_go_of_unread_packets(self) -> None:
@@ -345,19 +362,6 @@ def _formation_table(
         observables=tuple(observables),
         live_reach=live_reach,
     )
-
-
-def _check_formation_prefix(
-    previous: formation_records.FormationTable,
-    table: formation_records.FormationTable,
-) -> None:
-    for round_index, width in previous.packet_width_by_round.items():
-        if table.packet_width_by_round.get(round_index) != width:
-            raise RuntimeError("formation extension changes an existing packet")
-    previous_detector_count = len(previous.detectors)
-    detector_prefix = table.detectors[:previous_detector_count]
-    if detector_prefix != previous.detectors:
-        raise RuntimeError("formation extension changes an existing detector")
 
 
 def _circuit_tables(

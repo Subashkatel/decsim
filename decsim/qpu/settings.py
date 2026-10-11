@@ -6,6 +6,7 @@ from typing import Optional, Union
 import decsim.config as config
 import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
+import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.stim_device as stim_device
@@ -25,6 +26,7 @@ SourceSettings = Union[
     syndrome_devices.SyndromeBitDevice.Settings,
     stim_device.RecordedStimDevice.Settings,
     streaming_stim_device.StreamingStimDevice.Settings,
+    flip_stream_device.FlipStreamDevice.Settings,
     stim_device.BurstStimDevice.Settings,
     stim_device.ErrorModelStimDevice.Settings,
 ]

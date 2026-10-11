@@ -86,9 +86,12 @@ class Decoders:
         strong_requests = strong_requests_module.StrongRequests(
             target_by_source
         )
+        target_pools = target_by_source.values()
+        targets = set(target_pools)
         managers = []
         for pool in pools:
-            manager = _decoder_manager(clocked_manager, engine, pool)
+            is_target = pool.plan.pool in targets
+            manager = _decoder_manager(clocked_manager, engine, pool, is_target)
             manager.decoder = pool.unit
             manager.strong_requests = strong_requests
             managers.append(manager)
@@ -372,16 +375,21 @@ def _decoder_manager(
     manager_settings: decoder_settings.DecoderManagerSettings,
     engine: engine_module.Engine,
     pool: PoolUnits,
+    is_target: bool,
 ) -> decoder_manager_module.DecoderManager:
-    """One manager over its pool, on the run's one manager card."""
+    """One manager over its pool, on the run's one manager card.
+
+    bulk_strong merges the queue of every pool an edge escalates to.
+    """
     scheduler = manager_settings.scheduler.build()
     plan = pool.plan
+    merges_strong = manager_settings.bulk_strong and is_target
     return decoder_manager_module.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool.settings,
         pool_id=plan.pool,
-        bulk_strong=manager_settings.bulk_strong,
+        merges_strong=merges_strong,
         clock=manager_settings.clock,
         dispatch_cycles=manager_settings.dispatch_cycles,
     )

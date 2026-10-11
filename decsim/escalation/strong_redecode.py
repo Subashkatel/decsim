@@ -35,7 +35,6 @@ import decsim.statistics.kinds as statistic_kinds
 import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 import decsim.windows.revision_rules as revision_rules
-import decsim.windows.window_commits as window_commits
 
 
 class StrongRedecode:
@@ -44,8 +43,8 @@ class StrongRedecode:
     hops names the edge: its source, the pool whose results meet its
     verdict; its target, the pool that re-decodes the windows it
     escalates; and the forward hop its selections and regions ride.
-    costs is the verdict's own clock and cycles
-    (windows/window_commits.py).
+    rules says how the window side takes its verdicts and revisions,
+    the verdict priced on its own clock (windows/revision_rules.py).
     """
 
     # the rule that keeps or escalates a source result
@@ -101,12 +100,10 @@ class StrongRedecode:
         self,
         engine: engine_module.Engine,
         hops: route_records.EdgeHops,
-        costs: window_commits.VerdictCosts,
         rules: revision_rules.EdgeRules = revision_rules.DEFAULT_RULES,
     ) -> None:
         self.engine = engine
         self.hops = hops
-        self.costs = costs
         self.rules = rules
         self.selections = _StrongSelections()
         # the rounds sent up and not landed yet, so a wake-up while a

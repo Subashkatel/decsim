@@ -84,9 +84,9 @@ class Switching:
         shape = settings.strong_window.build(engine)
         pending = pending_strong_windows.PendingStrongWindows()
         costs = _verdict_costs(settings, machine_clock)
-        rules = _edge_rules(settings)
+        rules = _edge_rules(settings, costs)
         strong_redecode = strong_redecode_module.StrongRedecode(
-            engine, hops, costs, rules
+            engine, hops, rules
         )
         return cls(
             edge=edge,
@@ -111,15 +111,12 @@ class Switching:
         strong_redecode = self.strong_redecode
         carried = readout.store_parts(self.edge.carried_from)
         target_store = readout.store_parts(self.target_store)
-        source_manager = decoders.manager_of(strong_redecode.source)
         target_manager = decoders.manager_of(strong_redecode.target)
         strong_redecode.carried_from = carried.store
         strong_redecode.strong_receiver = target_store.receiver
         strong_redecode.strong_output = target_store.output
         strong_redecode.decode_queue = target_manager
         strong_redecode.policy = self.policy
-        windows.gap_join.signal = self.confidence_signal
-        source_manager.escalation_policy = self.policy
         target_manager.escalation_policy = self.policy
 
     def statistics_parts(self) -> tuple:
@@ -149,6 +146,8 @@ class Switching:
         regions.tracker = windows.tracker
         regions.retention = windows.retention
         shape = self.shape
+        strong_redecode = self.strong_redecode
+        shape.edge = strong_redecode
         shape.regions = regions
         shape.planner = windows.planner
         shape.retention = windows.retention
@@ -156,7 +155,6 @@ class Switching:
         shape.requester = windows.requester
         shape.ledger = windows.ledger
         shape.courier = windows.courier
-        strong_redecode = self.strong_redecode
         strong_redecode.shape = shape
         strong_redecode.pending = self.pending_strong_windows
         strong_redecode.retention = windows.retention
@@ -173,12 +171,16 @@ def build_switching(
     """One switching part per escalate edge, in graph order.
 
     The task's calibrator, online_threshold, decides on the entry edge,
-    the one whose threshold the task learns.
+    the one whose threshold the task learns. An edge past the entry
+    takes neither a speculative decode, a region that absorbs its
+    source's windows, nor a confidence of two solves (stage 5).
     """
     parts = []
     threshold = online_threshold
     for edge in layout.edges:
         part = Switching.build(edge, layout, engine, threshold, machine_clock)
+        if parts:
+            _refuse_past_the_entry(part)
         parts.append(part)
         threshold = None
     return tuple(parts)
@@ -216,13 +218,14 @@ def _verdict_costs(
 
 def _edge_rules(
     settings: escalation_settings.SwitchingSettings,
+    costs: window_commits.VerdictCosts,
 ) -> revision_rules.EdgeRules:
-    """The edge's replace rule and cancel rule, built from its settings."""
+    """The edge's rules built from its settings, its verdict at costs."""
     replace_rule = settings.replace_rule
     cancel_rule = settings.cancel_rule
     replace = replace_rule.build()
     cancel = cancel_rule.build()
-    return revision_rules.EdgeRules(replace, cancel)
+    return revision_rules.EdgeRules(replace, cancel, costs)
 
 
 def _threshold_source(
@@ -233,3 +236,24 @@ def _threshold_source(
     if online_threshold is not None:
         return online_threshold
     return settings.threshold.build()
+
+
+def _refuse_past_the_entry(part: Switching) -> None:
+    """Refuse what only the entry edge's windows can do yet."""
+    edge = part.edge
+    settings = edge.settings
+    shape = settings.strong_window
+    signal = part.confidence_signal
+    if settings.run_both_at_once:
+        _refuse(edge, "run_both_at_once")
+    if shape.absorbs_weak_windows:
+        _refuse(edge, f"strong_window {shape.name}")
+    if signal.forced_logical_classes:
+        _refuse(edge, "a confidence of two solves")
+
+
+def _refuse(edge: layout_module.EdgePlan, what: str) -> None:
+    raise NotImplementedError(
+        f"escalate edge {edge.name!r}: {what} on an edge that does not "
+        f"leave the entry pool is not implemented yet (stage 5)"
+    )

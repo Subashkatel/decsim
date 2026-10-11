@@ -688,4 +688,4 @@ def test_the_decision_and_the_verdict_run_on_the_machines_clock():
     assert settings.windows.clock is None
     assert settings.switching.clock is None
     assert requester.clock == machine_clock
-    assert edge.costs.clock == machine_clock
+    assert edge.rules.costs.clock == machine_clock

@@ -3,13 +3,13 @@
 As gem5's instruction queue hands out ready work through one scheduling
 rule (src/cpu/o3/inst_queue.hh:160-178, scheduleReadyInsts), the
 scheduler's pop is that rule here (schedulers.py). Under
-DecoderManagerSettings.bulk_strong the strong pool alone is served as
-one merged batch: every queued strong job, timing-only, becomes one
-decode serving every member request. Toshio et al. 2510.25222 lines
-1253-1264 ask for bulk decoding of one escalation's own region; merging
-several escalated windows goes past that, as the cheapest strong tier a
-run can be priced against, the floor of the tuning the paper leaves open
-(lines 1259-1262).
+DecoderManagerSettings.bulk_strong the queue of each pool an escalate
+edge leads to is served as one merged batch: every queued strong job,
+timing-only, becomes one decode serving every member request. Toshio et
+al. 2510.25222 lines 1253-1264 ask for bulk decoding of one escalation's
+own region; merging several escalated windows goes past that, as the
+cheapest strong tier a run can be priced against, the floor of the
+tuning the paper leaves open (lines 1259-1262).
 """
 
 import dataclasses
@@ -63,7 +63,8 @@ class WaitingJobs:
         self.scheduler = scheduler
         self.waiting: list = []
         self.manager = manager
-        # decoder_manager.bulk_strong on the strong pool's queue
+        # decoder_manager.bulk_strong on the queue of a pool an edge
+        # escalates to
         self.merges_strong = merges_strong
         self.trace = _TraceSources()
 

@@ -123,7 +123,10 @@ class PlacedFaultModel:
         object.__setattr__(self, "source_fault_ids", source_fault_ids)
         flips_by_column = {}
         for column, detector_ids in self.boundary_flips.items():
-            flips = tuple(int(detector_id) for detector_id in detector_ids)
+            # map(int, ...) is the same ints, a third of the time a
+            # generator takes over a moved stream window's handoffs
+            ints = map(int, detector_ids)
+            flips = tuple(ints)
             flips_by_column[int(column)] = flips
         frozen_flips = types.MappingProxyType(flips_by_column)
         object.__setattr__(self, "boundary_flips", frozen_flips)

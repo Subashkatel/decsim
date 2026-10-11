@@ -258,6 +258,18 @@ def assembled_table(
     )
 
 
+def moved_coordinates(coordinates: tuple, shift: int, step: tuple) -> tuple:
+    """A detector's coordinates moved shift rounds; unmoved with no step."""
+    if not step:
+        return coordinates
+    moved = []
+    for coordinate, delta in zip(coordinates, step, strict=True):
+        moved_by = shift * delta
+        moved_coordinate = coordinate + moved_by
+        moved.append(moved_coordinate)
+    return tuple(moved)
+
+
 class _PacketWidths(Mapping):
     """A periodic table's packet widths, read by round."""
 
@@ -342,7 +354,7 @@ def _moved_detector(recipe, index_shift: int, shift: int, step: tuple):
     records = tuple(
         (record_round + shift, slot) for record_round, slot in recipe.records
     )
-    coordinates = _moved_coordinates(recipe.coordinates, shift, step)
+    coordinates = moved_coordinates(recipe.coordinates, shift, step)
     detector_index = recipe.detector_index + index_shift
     round_index = recipe.round_index + shift
     return dataclasses.replace(
@@ -352,18 +364,6 @@ def _moved_detector(recipe, index_shift: int, shift: int, step: tuple):
         records=records,
         coordinates=coordinates,
     )
-
-
-def _moved_coordinates(coordinates: tuple, shift: int, step: tuple) -> tuple:
-    """A detector's coordinates moved shift rounds; unmoved with no step."""
-    if not step:
-        return coordinates
-    moved = []
-    for coordinate, delta in zip(coordinates, step, strict=True):
-        moved_by = shift * delta
-        moved_coordinate = coordinate + moved_by
-        moved.append(moved_coordinate)
-    return tuple(moved)
 
 
 def _moved_observable(template: StreamTemplate, recipe, shift: int):

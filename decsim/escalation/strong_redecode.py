@@ -14,7 +14,8 @@ several (CUDA-Q QEC's enqueue_syndromes, realtime_decoding.rst lines
 52-56). When both tiers decode at once (Step 1), it builds the
 speculative strong decode beside the weak job and selects it at the
 verdict; a landed strong input waits for its selection before it
-decodes.
+decodes. An edge with a deadline (deadlines.py) starts that decode
+when its trigger fires, before the verdict, as DART-Q's rescue.
 """
 
 import dataclasses
@@ -23,6 +24,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 import decsim.engine as engine_module
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
@@ -74,6 +76,8 @@ class StrongRedecode:
     # the edge that leaves the target pool: it may start beside a target
     # job, and a keep here ends its work on the window too
     next_edge = ports.Port(ports.EscalateEdge, optional=True)
+    # the source job's deadline and its rescue; none on most edges
+    deadline = ports.Port(deadlines.Deadline, optional=True)
 
     # the windows escalated, those whose speculative strong decode was
     # selected as it ran, and the strong windows held for their
@@ -157,6 +161,9 @@ class StrongRedecode:
         names the attempt; its signal joins the companions' solves.
         """
         attempt = self._attempt_of(job)
+        next_edge = self.next_edge
+        if next_edge is not None:
+            next_edge.arm_deadline(job)
         for attempt_job in attempt:
             send_input = self._strong_input_send(
                 attempt_job, selection_arrival_ticks
@@ -164,9 +171,9 @@ class StrongRedecode:
             self.decode_queue.enqueue(
                 attempt_job, send_input, self.accept_target_result
             )
-        if self.next_edge is None:
+        if next_edge is None:
             return
-        self.next_edge.start_beside_source(job)
+        next_edge.start_beside_source(job)
 
     def start_beside_source(
         self, source_job: decoding_records.DecodeJob
@@ -180,6 +187,57 @@ class StrongRedecode:
         if not self.policy.decodes_both_at_once(source_job.window):
             return
         submission = self._planned_speculative_decode(source_job)
+        if submission is None:
+            return
+        self.enqueue_target(submission.job, None)
+
+    # ---- the deadline
+
+    def arm_deadline(self, source_job: decoding_records.DecodeJob) -> None:
+        """A source job arrives at its pool: its deadline starts now.
+
+        DART-Q's deadline is the job's arrival plus the slack budget
+        (Bhave et al. 2605.09142 Sec. III-A, Eq. 1); the source's queue
+        is read before the job joins it.
+        """
+        if self.deadline is None:
+            return
+        rescue = functools.partial(self._rescue, source_job)
+        self.deadline.arm(source_job, rescue)
+
+    def note_source_result(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """The source result reached the verdict: met or missed."""
+        if self.deadline is None:
+            return
+        self.deadline.note_result(source_job)
+
+    def result_is_unavailable(
+        self, source_job: decoding_records.DecodeJob
+    ) -> bool:
+        """Whether the source result came late and counts as no answer.
+
+        "a late decode output is treated as unavailable at the required
+        control boundary" (2605.09142 Sec. III-C), so the target answers.
+        """
+        if self.deadline is None:
+            return False
+        return self.deadline.is_unavailable(source_job)
+
+    def _rescue(self, source_job: decoding_records.DecodeJob) -> None:
+        """The trigger fired: the target decodes before the verdict.
+
+        The rescue is the speculative decode (Toshio et al. 2510.25222
+        Step 1) started late, so the verdict selects it or cancels it as
+        it would one started with the source job.
+        """
+        self.engine.log(
+            log_sources.DECODER_MANAGER,
+            f"{source_job.label}: deadline trigger -> target decode "
+            "started before the verdict",
+        )
+        submission = self.parallel_strong_submission(source_job)
         if submission is None:
             return
         self.enqueue_target(submission.job, None)
@@ -280,6 +338,7 @@ class StrongRedecode:
         held = self.pending.held_for(window_key)
         if held is not None:
             self._drop_held(window_key, held)
+        self._disarm(window_key)
         self.selections.forget_speculative_decode(window_key)
         self.decode_queue.cancel_strong(window_key)
         if self.next_edge is not None:
@@ -295,10 +354,17 @@ class StrongRedecode:
         held = self.pending.held_for(window_key)
         if held is not None:
             self._drop_held(window_key, held)
+        self._disarm(window_key)
         self.selections.forget_speculative_decode(window_key)
         self.decode_queue.abandon_strong(window_key)
         if self.next_edge is not None:
             self.next_edge.abandon_strong_request(window_key)
+
+    def _disarm(self, window_key: tuple) -> None:
+        """The window's source job here was dropped: no deadline, no rescue."""
+        if self.deadline is None:
+            return
+        self.deadline.disarm(window_key)
 
     def _drop_held(self, window_key: tuple, held) -> None:
         self.statistics.held_cancelled.add()

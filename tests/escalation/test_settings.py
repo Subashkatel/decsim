@@ -13,7 +13,9 @@ import pytest
 
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
@@ -45,6 +47,23 @@ def test_a_switching_record_refuses_a_strong_answer_route_it_lacks():
         "switching.strong_answer_route must be one of "
         "('direct', 'through_weak_chip'), got 'by_courier'"
     )
+
+
+def test_a_deadline_beside_both_decoders_started_at_once_is_refused():
+    """A rescue starts the target on its trigger; Step 1 starts it always."""
+    deadline = deadlines.Deadline.Settings(slack_microseconds=10.0)
+
+    with pytest.raises(ValueError, match="run_both_at_once"):
+        _switching(deadline=deadline, run_both_at_once=True)
+
+
+def test_a_deadline_beside_an_absorbing_window_is_refused():
+    """A rescue starts the target early; a double window starts it late."""
+    deadline = deadlines.Deadline.Settings(slack_microseconds=10.0)
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+
+    with pytest.raises(ValueError, match="double_window"):
+        _switching(deadline=deadline, strong_window=double_window)
 
 
 def test_a_route_through_the_weak_chip_with_no_clock_is_refused():

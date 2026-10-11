@@ -11,6 +11,7 @@ from typing import Optional, Protocol
 
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.verdicts as verdicts
@@ -88,6 +89,21 @@ class CancelRuleSettings(Protocol):
         """A fresh rule."""
 
 
+class DeadlineSettings(Protocol):
+    """An edge's deadline record (deadlines.py).
+
+    slack_microseconds is the budget from the source job's arrival.
+    """
+
+    name: str
+    slack_microseconds: float
+    trigger: deadlines.TriggerSettings
+    late_source_result: str
+
+    def build(self, engine: engine_module.Engine) -> deadlines.Deadline:
+        """A fresh deadline on the run's engine."""
+
+
 class StrongWindowSettings(Protocol):
     """A strong window row's settings record (strong_window_shapes.py).
 
@@ -129,6 +145,13 @@ class SwitchingSettings:
     what a keep does to the strong decode already asked for
     (windows/revision_rules.py).
 
+    deadline, None by default, gives each source job a deadline and a
+    trigger that starts the target decode before the verdict, and makes
+    a late source result unavailable (deadlines.py, after DART-Q,
+    Bhave et al. 2605.09142). It starts the target early, so it
+    contradicts run_both_at_once, which starts it with every source
+    job, and an absorbing strong window, which starts it late.
+
     strong_answer_route names one of records/routes.py
     ANSWER_ROUTE_NAMES, the way a strong answer reaches the frame.
     direct, the default: the strong host joins the weak crossing
@@ -154,6 +177,7 @@ class SwitchingSettings:
     verdict: VerdictSettings = config.added_field(GAP_THRESHOLD)
     replace_rule: ReplaceRuleSettings = config.added_field(LATEST_REVISION)
     cancel_rule: CancelRuleSettings = config.added_field(CANCEL_DOWNSTREAM)
+    deadline: Optional[DeadlineSettings] = config.added_field(None)
 
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)
@@ -164,6 +188,8 @@ class SwitchingSettings:
                 f"switching.strong_answer_route must be one of "
                 f"{tuple(routes)}, got {self.strong_answer_route!r}"
             )
+        if self.deadline is not None:
+            self._refuse_deadline_contradictions()
 
     def build_policy(
         self, threshold: ports.ThresholdSource
@@ -177,3 +203,20 @@ class SwitchingSettings:
             built_verdict,
             verdict.reads_threshold,
         )
+
+    def _refuse_deadline_contradictions(self) -> None:
+        """A deadline starts the target early; these start it otherwise."""
+        if self.run_both_at_once:
+            raise ValueError(
+                "switching.deadline starts the target decode when its "
+                "trigger fires; run_both_at_once starts it with every "
+                "source job (the two policies contradict; pick one)"
+            )
+        shape = self.strong_window
+        if shape.absorbs_weak_windows:
+            raise ValueError(
+                f"switching.deadline starts the target decode before the "
+                f"verdict; strong_window {shape.name} defers it until "
+                f"the far weak boundary exists (the two policies "
+                f"contradict; pick one)"
+            )

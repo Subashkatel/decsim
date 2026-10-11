@@ -903,6 +903,19 @@ class EscalateEdge(Protocol):
     ) -> None:
         """A source job past the entry was queued: decode it here too."""
 
+    def arm_deadline(self, source_job: decoding_records.DecodeJob) -> None:
+        """A source job arrives: its deadline, when the edge has one."""
+
+    def note_source_result(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """The source result reached the verdict: met or missed."""
+
+    def result_is_unavailable(
+        self, source_job: decoding_records.DecodeJob
+    ) -> bool:
+        """Whether the source result missed its deadline and counts as none."""
+
     def submit_if_commit_releases(self, window_key: tuple) -> None:
         """A window committed: a target window waiting on it leaves."""
 
@@ -1073,6 +1086,9 @@ class DecodeQueue(Protocol):
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back a window's not-yet-started decode; it is superseded."""
+
+    def waiting_jobs(self) -> int:
+        """The jobs queued and not dispatched, read by a deadline trigger."""
 
     def release_window(self, window_key: tuple) -> None:
         """The window's last boundary arrived: its queued jobs may start."""

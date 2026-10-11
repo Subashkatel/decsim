@@ -94,6 +94,8 @@ class Switching:
         strong_redecode = strong_redecode_module.StrongRedecode(
             engine, hops, rules
         )
+        if settings.deadline is not None:
+            strong_redecode.deadline = settings.deadline.build(engine)
         return cls(
             edge=edge,
             target_store=target.store,
@@ -128,10 +130,17 @@ class Switching:
         )
         target_manager.escalation_policy = self.policy
         self._bind_the_source_join(windows, decoders)
+        self._bind_the_deadline(decoders)
 
     def statistics_parts(self) -> tuple:
-        """The strong redecode, at the edge's path."""
-        return ((self.edge.name, self.strong_redecode),)
+        """The strong redecode at the edge's path, and its deadline's."""
+        name = self.edge.name
+        strong_redecode = self.strong_redecode
+        parts = [(name, strong_redecode)]
+        deadline = strong_redecode.deadline
+        if deadline is not None:
+            parts.append((f"{name}.deadline", deadline))
+        return tuple(parts)
 
     def seed_roots(self) -> tuple:
         """The policy, at the edge's seed root."""
@@ -167,6 +176,14 @@ class Switching:
         join.signal = self.confidence_signal
         join.verdict = windows.verdict
         join.decode_queue = decoders.manager_of(source)
+
+    def _bind_the_deadline(self, decoders: "decoders_part.Decoders") -> None:
+        """The backlog trigger reads the source pool's queue."""
+        deadline = self.strong_redecode.deadline
+        if deadline is None:
+            return
+        source = self.strong_redecode.source
+        deadline.source_queue = decoders.manager_of(source)
 
     def _wire_the_strong_side(
         self, plan: "plan_build.Plan", windows: "windows_part.Windows"
@@ -319,11 +336,20 @@ def _refuse_past_the_entry(part: Switching) -> None:
     settings = edge.settings
     shape = settings.strong_window
     if shape.absorbs_weak_windows:
-        _refuse(edge, f"strong_window {shape.name}")
+        _refuse(edge, f"strong_window {shape.name}", _ABSORBING_PAST_THE_ENTRY)
 
 
-def _refuse(edge: layout_module.EdgePlan, what: str) -> None:
+# why an absorbing window is not built past the entry
+_ABSORBING_PAST_THE_ENTRY = (
+    "Toshio et al. 2510.25222 Sec. III C defines it over a sliding "
+    "weak chain's neighbouring windows, which a pool past the entry "
+    "does not decode, and a redo_window there already re-decodes the "
+    "region its source revision covered"
+)
+
+
+def _refuse(edge: layout_module.EdgePlan, what: str, reason: str) -> None:
     raise NotImplementedError(
         f"escalate edge {edge.name!r}: {what} on an edge that does not "
-        f"leave the entry pool is not implemented yet (stage 5)"
+        f"leave the entry pool is not implemented yet (stage 5): {reason}"
     )

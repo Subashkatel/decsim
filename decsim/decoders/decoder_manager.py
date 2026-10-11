@@ -284,6 +284,10 @@ class DecoderManager:
         self.strong_requests.resolve_weak(window_key, self.pool_id)
         self.dispatcher.run()
 
+    def waiting_jobs(self) -> int:
+        """The jobs queued and not dispatched, read by a deadline trigger."""
+        return len(self.queue.waiting)
+
     def _withdraw_job(self, job: decoding_records.DecodeJob) -> None:
         """Take one unstarted job out of its queue or its slot."""
         if job.service_started or job.completed:

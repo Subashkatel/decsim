@@ -261,6 +261,10 @@ class _NextEdge:
     def __init__(self) -> None:
         self.calls = []
 
+    def arm_deadline(self, source_job) -> None:
+        """A target job arrives at its pool, the source of this edge."""
+        self.calls.append(("arm", source_job))
+
     def start_beside_source(self, source_job) -> None:
         """A target job was queued."""
         self.calls.append(("start", source_job))
@@ -363,6 +367,7 @@ def test_a_target_result_reaches_the_join_of_the_edge_that_leaves_it():
 
 
 def test_a_queued_target_job_starts_the_edge_out_of_its_pool_beside_it():
+    """The edge out hears the job's arrival, its deadline, before it queues."""
     strong_job = _strong_job(5)
     shape = _Shape(strong_job, is_held=False)
     redecode, _output, _strong, _queue, _verdict = _redecode(shape)
@@ -372,7 +377,7 @@ def test_a_queued_target_job_starts_the_edge_out_of_its_pool_beside_it():
 
     redecode.escalate(weak_job)
 
-    assert next_edge.calls == [("start", strong_job)]
+    assert next_edge.calls == [("arm", strong_job), ("start", strong_job)]
 
 
 @pytest.mark.parametrize("ending", ["cancel", "abandon"])

@@ -246,6 +246,7 @@ class EnsembleDecoder(decoder_module.DecoderBase):
         self, members: tuple, pooling: object, reads_likelihood: bool
     ) -> None:
         _refuse_a_member_without_windows(members)
+        _refuse_a_backend_member(members)
         if reads_likelihood:
             _refuse_mixed_representations(members)
         self.members = members
@@ -380,12 +381,7 @@ def _member_run(
     index: int, member: object, job: decoding_records.DecodeJob, now: int
 ) -> MemberRun:
     """The member's result and time: measured on the host, or declared."""
-    if member.occupancy(job) is None:
-        result, elapsed_nanoseconds = member.decode_timed(job)
-        ticks = member.ticks_after_decode(result, elapsed_nanoseconds, now)
-        return MemberRun(index, result, ticks)
-    result = member.decode(job)
-    ticks = member.latency(job)
+    result, ticks = decoder_module.timed_decode(member, job, now)
     return MemberRun(index, result, ticks)
 
 
@@ -489,6 +485,18 @@ def _refuse_a_member_without_windows(members: tuple) -> None:
             "ensemble pools corrections, so every member must return one"
         )
         raise ValueError(message)
+
+
+def _refuse_a_backend_member(members: tuple) -> None:
+    for member in members:
+        if not getattr(member, "priced_by_its_backend", False):
+            continue
+        row = type(member)
+        raise NotImplementedError(
+            f"ensemble member {row.__name__}: a strong backend prices "
+            "each decode on its device, and timing a member there is not "
+            "implemented yet (stage 5)"
+        )
 
 
 def _refuse_mixed_representations(members: tuple) -> None:

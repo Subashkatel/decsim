@@ -596,13 +596,19 @@ def switching_run(
     threshold_cycles=0,
     switch_cycles=0,
     strong_copies_input=True,
+    strong_algorithm=None,
+    strong_batching=None,
 ):
     """Weak-primary switching on the declared fabric.
 
     escalates declares every window's confidence gap 0.0 (escalate)
     rather than 1.0 (keep the weak result) against the threshold.
+    strong_algorithm replaces the declared strong row; strong_batching
+    is the strong pool's batching row.
     """
     weak, strong = switching_decoders(escalates)
+    if strong_algorithm is not None:
+        strong = strong_algorithm
     weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak,
@@ -614,6 +620,7 @@ def switching_run(
         algorithm=strong,
         copies_input=strong_copies_input,
         engine=DECLARED_ENGINE,
+        batching=strong_batching,
     )
     workload = declared_workload(operations, rounds)
     plain_windows = window_settings.WindowSettings()

@@ -45,6 +45,7 @@ import pytest
 import decsim.confidence.complementary as complementary
 import decsim.config as config_module
 import decsim.decoders.backend_outcome as backend_outcome
+import decsim.decoders.batching as batching
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
@@ -977,6 +978,32 @@ def test_an_escalated_windows_points_sum_to_its_reaction_time():
 
     totals = chain_sum_ticks(measurement)
     assert totals == reaction_ticks(measurement)
+
+
+def test_a_batched_windows_points_sum_to_its_reaction_time():
+    """A merged batch's stages are found under each member's window.
+
+    Four patches escalate every window to one 10.0 us strong unit that
+    decodes each member of a batch and adds their times (batching.py,
+    sum), so a batch of two holds the unit 20 us. The batch's own key
+    is no window's, yet every window's chain still adds up to its
+    reaction time, and the twenty batched windows' service is the two
+    decodes'.
+    """
+    settings = switching_settings(1000000.0, patch_count=4)
+    decode_each = batching.DecodeEach.Settings()
+    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
+    settings = dataclasses.replace(settings, strong_decoder=strong)
+    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+
+    measurement = measured(task)
+
+    services = measurement.samples["service"]
+    batched = [service for service in services if service > 20.0]
+    totals = chain_sum_ticks(measurement)
+    assert totals == reaction_ticks(measurement)
+    assert len(services) == 40
+    assert len(batched) == 20
 
 
 def test_a_kept_weak_result_is_measured_on_the_weak_hops():

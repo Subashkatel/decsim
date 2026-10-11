@@ -10,6 +10,7 @@ import dataclasses
 from typing import Optional, Protocol
 
 import decsim.config as config
+import decsim.decoders.batching as batching
 import decsim.decoders.schedulers as schedulers
 import decsim.ports as ports
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -73,6 +74,13 @@ class EngineSettings:
             config.check_cycles(f"engine.{key}", cycles)
 
 
+class BatchingSettings(Protocol):
+    """A pool's batching row's settings record (batching.py)."""
+
+    def build(self) -> batching.Batching:
+        """The batching, which decodes a merged batch over the pool's row."""
+
+
 @dataclasses.dataclass(frozen=True)
 class DecoderPoolSettings:
     """One tier's pool of decoder units.
@@ -110,6 +118,11 @@ class DecoderPoolSettings:
     read, a unit with no output buffer stalled until its output is taken
     (Bascones et al. 2605.01035 lines 607-609 add FIFOs to avoid that
     stall). It is read on the tier that decodes the plan's windows.
+
+    batching, None by default, is the pool's batching row (batching.py):
+    decode_each serves the re-decodes waiting for a unit as one batch,
+    decodes each member with the algorithm and prices the batch by its
+    law, sum or slowest. Only a pool an edge escalates to batches.
     """
 
     algorithm: ports.DecoderSettings
@@ -122,6 +135,7 @@ class DecoderPoolSettings:
     copies_input: bool = True
     copies_boundary_fold: bool = True
     result_blocks_unit: bool = False
+    batching: Optional[BatchingSettings] = config.added_field(None)
 
     def __post_init__(self) -> None:
         _check_unit_count(self.unit_count)

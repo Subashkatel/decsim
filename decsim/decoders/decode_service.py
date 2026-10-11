@@ -273,7 +273,7 @@ class DecodeService:
         """
         unit = job.unit
         self.statistics.evicted.add()
-        self.staging.cancel(job)
+        self._cancel_held_inputs(job)
         unit.evict(job)
         if unit.holder is job:
             unit.release_compute()
@@ -284,7 +284,7 @@ class DecodeService:
         self.statistics.aborted.add()
         decoder = self.manager.decoder
         decoder.cancel(job)
-        self.staging.cancel(job)
+        self._cancel_held_inputs(job)
         self.free(job)
 
     def release_input(self, job: decoding_records.DecodeJob) -> None:
@@ -439,6 +439,16 @@ class DecodeService:
         self, source: str, member: decoding_records.DecodeJob
     ) -> None:
         self.engine.log_io(source, lambda: _receiving_text(member))
+
+    def _cancel_held_inputs(self, job: decoding_records.DecodeJob) -> None:
+        """Drop the job's input, and each input a merged batch holds.
+
+        A batch's members cross into the unit under their own keys, so a
+        batch's own cancel would leave their landings on the way.
+        """
+        self.staging.cancel(job)
+        for member in job.batch_members:
+            self.staging.cancel(member)
 
     def _transfer_members(self, job: decoding_records.DecodeJob) -> list:
         members = []

@@ -113,7 +113,7 @@ def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     requests.select((1, 0), strong_key)
     result = decoding_records.DecodeResult(1, 0, logical_observables=(1,))
     deliveries = requests.deliveries_for(strong_job, result, now=30)
-    outcomes.conclude_strong(strong_job, result, deliveries)
+    outcomes.conclude_strong(strong_job, deliveries)
     assert delivered == [(strong_job, result)]
     assert policy.learned == [((1, 0), result)]
     assert requests.unsettled() == {}
@@ -146,7 +146,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     requests.begin_selection((1, 0), strong_key)
     result = decoding_records.DecodeResult(1, 0, logical_observables=(1,))
     deliveries = requests.deliveries_for(strong_job, result, now=30)
-    outcomes.conclude_strong(strong_job, result, deliveries)
+    outcomes.conclude_strong(strong_job, deliveries)
     assert delivered == []
     assert unit.output_windows() == [(1, 0)]
     assert requests.select((1, 0), strong_key) is True

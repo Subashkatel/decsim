@@ -5,6 +5,17 @@ that blocks holds its unit until the result is read (Chen 2605.30765);
 the copy and in-place rows put the rounds where the unit reads them.
 A new row through the pool is tests/machine/test_machine.py::
 test_a_new_decoder_is_one_class_and_its_settings_record.
+
+A cancelled member of a merged strong batch leaves the rest their
+batch. The batch timelines run four memories on the declared switching
+fabric (tests/escalation/declared_fabric.py), a weak unit each, one
+strong unit of two input slots decoding each batch member in 30 us,
+and a 10 us deadline whose late weak result meets the verdict
+(test_deadlines.py): every W0 is rescued at 25 us, and its rounds
+reach the strong side at 28 us. The unit takes mem1 W0, its input
+landing at 34 us, and stages mem2 W0; mem3 W0 and mem4 W0 wait as one
+batch. At 30 us each weak result meets its verdict, mem1's first: a
+kept one cancels its rescue, a doubted one selects it.
 """
 
 import dataclasses
@@ -12,6 +23,7 @@ import dataclasses
 import pytest
 
 import decsim.config as config
+import decsim.decoders.batching as batching
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoder_pool as decoder_pool
@@ -22,12 +34,16 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.detector_error_model.detection_event_formation as event_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
+import decsim.escalation.deadlines as deadlines
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.formation as formation_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.statistics.kinds as statistic_kinds
 import decsim.statistics.registry as statistics_registry
+import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as declared_fabric
 
 
 class FixedRow(decoder_module.DecoderBase):
@@ -559,3 +575,104 @@ class _CountingDecoder(decoders.PresetLatencyDecoder):
         ),
     )
     statistics = statistics_registry.unrecorded(STATISTICS)
+
+
+def test_a_queued_batch_that_loses_a_member_serves_the_rest():
+    """mem4 is kept and leaves the waiting batch; mem3 W0 decodes alone.
+
+    mem1 W0 decodes 34-64 us and mem2 W0 64-94 us. At 64 us the freed
+    slot opens the batch into mem3 W0 alone, whose input lands at 70 us;
+    it decodes 94-124 us, lands at 128 us and commits at 129 us.
+    """
+    machine = _rescued_memories(doubted={1, 2, 3})
+
+    records = _committed_by_window(machine)
+
+    assert records[(3, 0)] == ("strong", _microseconds(129.0))
+    assert records[(4, 0)][0] == "weak"
+
+
+def test_a_staged_batch_that_loses_a_member_decodes_the_rest():
+    """mem1's keep frees the unit, which stages the batch at 30 us.
+
+    mem2's keep frees the other slot, and mem4's leaves the staged batch
+    without its member. The inputs land at 36 us and the batch decodes
+    mem3 W0 alone, 36-66 us; the answer lands at 70 us and commits at
+    71 us.
+    """
+    machine = _rescued_memories(doubted={3})
+
+    records = _committed_by_window(machine)
+
+    assert records[(3, 0)] == ("strong", _microseconds(71.0))
+    assert records[(4, 0)][0] == "weak"
+
+
+def test_a_staged_batch_whose_members_all_leave_settles_every_window():
+    """Every weak result is kept: no input of the batch lands after it.
+
+    Each W0 commits its weak result at 33 us and each W1 at 48.5 us.
+    """
+    machine = _rescued_memories(doubted=set())
+
+    records = _committed_by_window(machine)
+
+    tiers = set()
+    for tier, _ticks in records.values():
+        tiers.add(tier)
+    assert len(records) == 8
+    assert tiers == {"weak"}
+
+
+def _rescued_memories(doubted: set) -> machine_module.Machine:
+    """The four rescued memories, those in doubted escalated, run."""
+    deadline = deadlines.Deadline.Settings(
+        slack_microseconds=10.0, late_source_result="revision"
+    )
+    switching = declared_run.declared_switching(deadline=deadline)
+    settings = declared_fabric.switching_settings(
+        rounds=6, escalated_windows=set(), switching=switching
+    )
+    operations = []
+    for operation_id in range(1, 5):
+        memory = declared_run.memory_operation(operation_id)
+        operations.append(memory)
+    workload = dataclasses.replace(settings.workload, operations=operations)
+    is_escalated = _of_operations(doubted)
+    weak_microseconds = declared_fabric.DECLARED_MICROSECONDS["weak"]
+    weak_row = declared_run.DeclaredConfidenceDecoder.Settings(
+        weak_microseconds, is_escalated
+    )
+    weak = dataclasses.replace(
+        settings.weak_decoder, algorithm=weak_row, unit_count=4
+    )
+    decode_each = batching.DecodeEach.Settings()
+    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
+    settings = dataclasses.replace(
+        settings, workload=workload, weak_decoder=weak, strong_decoder=strong
+    )
+    machine = machine_module.Machine.build(settings, 0)
+    machine.run()
+    return machine
+
+
+def _of_operations(operation_ids: set):
+    """Whether a job's operation is one of these."""
+
+    def is_escalated(job) -> bool:
+        return job.operation_id in operation_ids
+
+    return is_escalated
+
+
+def _committed_by_window(machine: machine_module.Machine) -> dict:
+    """Each window's committing tier and commit tick."""
+    snapshot = machine.control.pauli_frame.snapshot()
+    records = {}
+    for record in snapshot.records:
+        records[record.window_key] = (record.tier, record.committed_ticks)
+    return records
+
+
+def _microseconds(microseconds: float) -> int:
+    return config.microseconds_to_ticks(microseconds)

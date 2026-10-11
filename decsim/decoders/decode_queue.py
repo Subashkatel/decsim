@@ -152,7 +152,7 @@ class WaitingJobs:
         for _ in range(len(queue)):
             queued = self.scheduler.pop(queue)
             if strong_requests_module.is_merged_batch(queued):
-                members = self.manager.strong_requests.members_of(queued)
+                members = self.manager.strong_requests.reopen(queued)
                 jobs.extend(members)
             else:
                 jobs.append(queued)
@@ -167,10 +167,12 @@ def pool_tag_of(pool: str) -> str:
 
 
 def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
-    """One timing-only decode serving every member request.
+    """One decode serving every member request.
 
-    The batch is decoded like any strong job: its timing-only result is
-    split into one empty completion per member request at decode end.
+    The batch is decoded like any strong job. Timing-only, its result is
+    split into one empty completion per member request at decode end;
+    under a pool's decode_each row each member is decoded and gets its
+    own result (batching.py).
     """
     total_rounds = 0
     earliest_ready_time = jobs[0].ready_time
@@ -190,6 +192,7 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
         kind=decoding_records.DecodeJobKind.STRONG_BATCH,
         spatial_nodes=jobs[0].spatial_nodes,
         strong_decode_for=first_window_key,
+        batch_members=tuple(jobs),
     )
 
 

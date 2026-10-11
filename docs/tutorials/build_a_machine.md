@@ -68,6 +68,7 @@ layout = layout_module.legacy_layout(settings)
 switching_parts = escalation_build.build_switching(
     layout, engine, machine_clock=settings.clock
 )
+batches_each_member = decoders_part.batches_each_member(layout)
 plan = plan_build.build_plan(
     settings.qpu,
     settings.workload,
@@ -77,6 +78,7 @@ plan = plan_build.build_plan(
     settings.switching,
     settings.decoder_manager.bulk_strong,
     switching_parts,
+    batches_each_member,
 )
 formation_paths = layout.formation_paths()
 detection_events = readout_part.build_detection_events(

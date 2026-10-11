@@ -55,11 +55,8 @@ class Switching:
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
         _refuse_flush_terminal(plan.scheme)
-        if plan.is_bulk_strong and self.run_both_at_once:
-            raise ValueError(
-                "bulk_strong is only meaningful in serial mode "
-                "(run_both_at_once=False)"
-            )
+        if self.run_both_at_once:
+            _refuse_batches_beside_run_both(plan)
         if not plan.is_absorbing_strong_window:
             # the boundaries the policy ships are the entry pool's
             if plan.leaves_the_entry_pool:
@@ -112,6 +109,12 @@ class Switching:
                 "not supported: deferred strong windows are submitted "
                 "one per escalation"
             )
+        if plan.batches_each_member:
+            raise NotImplementedError(
+                f"switching.strong_window {row_name} with a pool's "
+                "batching: a batch of deferred strong windows is not "
+                "implemented yet (stage 5)"
+            )
         if self.threshold.audits_by_escalating:
             raise ValueError(
                 "online threshold calibration is serial-only: an "
@@ -119,6 +122,20 @@ class Switching:
                 "committed observables, and an absorbing strong window "
                 "owns a larger extent than the audited window"
             )
+
+
+def _refuse_batches_beside_run_both(plan: decoding_records.RunShape) -> None:
+    """Batches serve escalations; run_both_at_once decodes every window."""
+    if plan.is_bulk_strong:
+        raise ValueError(
+            "bulk_strong is only meaningful in serial mode "
+            "(run_both_at_once=False)"
+        )
+    if plan.batches_each_member:
+        raise NotImplementedError(
+            "a pool's batching with run_both_at_once, a batch of every "
+            "window's speculative decode, is not implemented yet (stage 5)"
+        )
 
 
 def _refuse_flush_terminal(scheme) -> None:

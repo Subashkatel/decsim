@@ -233,6 +233,14 @@ def build_pool_units(
     return tuple(built)
 
 
+def batches_each_member(layout: layout_module.Layout) -> bool:
+    """Whether any pool decodes its merged batches member by member."""
+    for plan in layout.pools:
+        if _batching_of(plan) is not None:
+            return True
+    return False
+
+
 def _pool(
     tier_settings: Optional[decoder_settings.DecoderPoolSettings],
     name: str,
@@ -349,7 +357,18 @@ def _staged_unit(
         after=(release,),
         clock=clocked_engine.clock,
     )
-    return staged_decoder.StagedDecoder(algorithm, timing)
+    batch_decoder = _batch_decoder(tier_settings, algorithm)
+    return staged_decoder.StagedDecoder(algorithm, timing, batch_decoder)
+
+
+def _batch_decoder(
+    tier_settings: decoder_settings.DecoderPoolSettings, algorithm
+) -> Optional[object]:
+    """The pool's batching over its algorithm; None when it has none."""
+    if tier_settings.batching is None:
+        return None
+    batching = tier_settings.batching.build()
+    return batching.over(algorithm)
 
 
 def _formation_stage(
@@ -375,13 +394,10 @@ def _decoder_manager(
     pool: PoolUnits,
     is_target: bool,
 ) -> decoder_manager_module.DecoderManager:
-    """One manager over its pool, on the run's one manager card.
-
-    bulk_strong merges the queue of every pool an edge escalates to.
-    """
+    """One manager over its pool, on the run's one manager card."""
     scheduler = manager_settings.scheduler.build()
     plan = pool.plan
-    merges_strong = manager_settings.bulk_strong and is_target
+    merges_strong = _merges_strong(manager_settings, plan, is_target)
     return decoder_manager_module.DecoderManager(
         engine,
         scheduler=scheduler,
@@ -391,6 +407,39 @@ def _decoder_manager(
         clock=manager_settings.clock,
         dispatch_cycles=manager_settings.dispatch_cycles,
     )
+
+
+def _merges_strong(
+    manager_settings: decoder_settings.DecoderManagerSettings,
+    plan: layout_module.PoolPlan,
+    is_target: bool,
+) -> bool:
+    """Whether the pool serves its waiting re-decodes as one batch.
+
+    bulk_strong batches every pool an edge escalates to, timing-only; a
+    pool's batching row batches that pool, decoding each member.
+    """
+    if _batching_of(plan) is None:
+        return manager_settings.bulk_strong and is_target
+    path = plan.names.statistics_path
+    if not is_target:
+        raise ValueError(
+            f"{path}.batching batches the re-decodes an edge escalates "
+            f"to, and no edge escalates to {path}; remove the key"
+        )
+    if manager_settings.bulk_strong:
+        raise ValueError(
+            f"{path}.batching and decoder_manager.bulk_strong both batch "
+            f"{path}'s re-decodes; keep one"
+        )
+    return True
+
+
+def _batching_of(plan: layout_module.PoolPlan) -> Optional[object]:
+    """The pool's batching row; None for no row or no decoder."""
+    if plan.settings is None:
+        return None
+    return plan.settings.batching
 
 
 def _count_the_jobs_waiting_over_pools(queued, queues: list) -> None:

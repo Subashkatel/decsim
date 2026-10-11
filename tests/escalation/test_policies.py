@@ -20,6 +20,7 @@ import decsim.build.escalation as escalation_build
 import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
 import decsim.config as config
+import decsim.decoders.batching as batching
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
@@ -230,6 +231,25 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build():
             escalated_windows=set(),
             strong_window=declared_run.DOUBLE_WINDOW,
             run_both_at_once=True,
+        )
+
+
+def test_a_pool_that_batches_beside_run_both_at_once_is_refused_for_now():
+    decode_each = batching.DecodeEach.Settings()
+
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
+        declared_run.switching_run(
+            run_both_at_once=True, strong_batching=decode_each
+        )
+
+
+def test_a_pool_that_batches_under_a_double_window_is_refused_for_now():
+    decode_each = batching.DecodeEach.Settings()
+
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
+        declared_run.switching_run(
+            strong_window=declared_run.DOUBLE_WINDOW,
+            strong_batching=decode_each,
         )
 
 

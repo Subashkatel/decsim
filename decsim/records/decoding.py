@@ -536,6 +536,10 @@ class DecodeJob:
     # read one number; None until then, and under controller-side
     # formation nothing ever asks (decoders/detection_events.py)
     detection_event_rounds: Optional[tuple] = None
+    # a merged strong batch's request jobs as the batch was formed, the
+    # ones cancelled since included: the inputs it holds and decodes
+    # (decode_queue.py); empty on every other job
+    batch_members: tuple = ()
 
     def payload_bits(self) -> Optional[int]:
         """The bits of the job's payloads and the rounds before them.
@@ -628,6 +632,10 @@ class DecoderStageRecord:
     # input held when the stage closed (last_round_by_operation); a
     # strong region reads past the window it answers for
     last_rounds_read: tuple = ()
+    # the (operation id, window id) of every request the decode serves:
+    # a merged batch's are its members' windows, which its own (-1, 0)
+    # does not name (observe/stage_records.py files it under each)
+    served_windows: tuple = ()
 
 
 class DecoderEvidence(Enum):
@@ -755,6 +763,9 @@ class DecodeResult:
     # an ensemble's share of members voting with its majority; None from
     # any other row
     agreement: Optional[float] = None
+    # a decoding batch's answer for each member, by its request key
+    # (decoders/batching.py); None from any other decode
+    member_results: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -799,7 +810,9 @@ class RunShape:
     and buffer_round_count size every window. Each edge checks the run
     with its own strong window row; leaves_the_entry_pool says whether
     the edge decides on the entry pool's windows, whose boundaries the
-    boundary policy ships.
+    boundary policy ships. is_bulk_strong says decoder_manager.bulk_strong
+    batches the strong re-decodes timing-only; batches_each_member that a
+    pool's batching row batches them and decodes each member.
     """
 
     # the ports.WindowingScheme and ports.BoundaryPolicy, opaque to the
@@ -815,3 +828,4 @@ class RunShape:
     has_dynamic_streams: bool
     has_static_decode_plan: bool
     leaves_the_entry_pool: bool = True
+    batches_each_member: bool = False

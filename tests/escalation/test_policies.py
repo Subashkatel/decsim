@@ -202,9 +202,11 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
 # ---- one law per port method
 
 
-def test_switching_decodes_both_tiers_at_once_when_asked():
+def test_switching_decodes_both_tiers_at_once_only_when_asked():
     parallel = _switching(run_both_at_once=True)
-    assert parallel.tiers_for_ready_window(WINDOW) == BOTH_TIERS
+    serial = _switching(run_both_at_once=False)
+    assert parallel.decodes_both_at_once(WINDOW)
+    assert not serial.decodes_both_at_once(WINDOW)
 
 
 def test_a_strong_result_teaches_the_online_source():

@@ -130,7 +130,7 @@ class WindowGapJoin:
                 self.decode_queue.close_companion_request(
                     solve.job, solve.result
                 )
-        self.verdict.accept_result(answer.job, answer.result)
+        self.verdict.accept_revision(answer.job, answer.result)
 
 
 def _answering_solve(held: list) -> HeldSolve:

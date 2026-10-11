@@ -46,14 +46,16 @@ class DecoderPool:
     """What each tier's decoder manager is built over.
 
     active and chip are the unit and pool settings of the tier that
-    decodes the plan's windows (active None with no decoder); strong and
-    host are the strong tier's, on a switching run only.
+    decodes the plan's windows (active None with no decoder), the pool
+    window_pool names; strong and host are the strong tier's, on a
+    switching run only.
     """
 
     active: Optional[ports.Decoder]
     strong: Optional[ports.Decoder]
     chip: decoder_pool_module.PoolSettings
     host: Optional[decoder_pool_module.PoolSettings]
+    window_pool: window_records.PoolId = window_records.WEAK_POOL_ID
 
 
 @dataclasses.dataclass(frozen=True)
@@ -85,13 +87,18 @@ class Decoders:
             manager_settings, machine_clock
         )
         strong_requests = strong_requests_module.StrongRequests()
-        decoder_manager = _decoder_manager(clocked_manager, engine, pool.chip)
+        decoder_manager = _decoder_manager(
+            clocked_manager, engine, pool.chip, pool.window_pool
+        )
         decoder_manager.decoder = pool.active
         decoder_manager.strong_requests = strong_requests
         strong_decoder_manager = None
         if pool.host is not None:
             strong_decoder_manager = _decoder_manager(
-                clocked_manager, engine, pool.host
+                clocked_manager,
+                engine,
+                pool.host,
+                window_records.STRONG_POOL_ID,
             )
             strong_decoder_manager.decoder = pool.strong
             strong_decoder_manager.strong_requests = strong_requests
@@ -201,7 +208,13 @@ def build_decoder_pool(
         window_decoder, decode_queue.DEFAULT_POOL, active_formation, blocks_unit
     )
     if not escalates:
-        return DecoderPool(active=active, strong=None, chip=chip, host=None)
+        return DecoderPool(
+            active=active,
+            strong=None,
+            chip=chip,
+            host=None,
+            window_pool=window_tier,
+        )
     strong_formation = _tier_formation(detection_events, "strong_decoder")
     strong = build_decoder_unit(
         strong_decoder, "strong", machine_clock, strong_formation, None
@@ -209,7 +222,13 @@ def build_decoder_pool(
     host = _pool(
         strong_decoder, decode_queue.STRONG_POOL, strong_formation, False
     )
-    return DecoderPool(active=active, strong=strong, chip=chip, host=host)
+    return DecoderPool(
+        active=active,
+        strong=strong,
+        chip=chip,
+        host=host,
+        window_pool=window_tier,
+    )
 
 
 def _pool(
@@ -352,6 +371,7 @@ def _decoder_manager(
     manager_settings: decoder_settings.DecoderManagerSettings,
     engine: engine_module.Engine,
     pool_settings: decoder_pool_module.PoolSettings,
+    pool_id: window_records.PoolId,
 ) -> decoder_manager_module.DecoderManager:
     """One manager over its pool, on the run's one manager card."""
     scheduler = manager_settings.scheduler.build()
@@ -359,6 +379,7 @@ def _decoder_manager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=pool_id,
         bulk_strong=manager_settings.bulk_strong,
         clock=manager_settings.clock,
         dispatch_cycles=manager_settings.dispatch_cycles,

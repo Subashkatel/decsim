@@ -66,11 +66,14 @@ class DecoderManager:
         *,
         scheduler: schedulers.Scheduler,
         pool_settings: decoder_pool_module.PoolSettings,
+        pool_id: window_records.PoolId = window_records.WEAK_POOL_ID,
         bulk_strong: bool = False,
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
     ):
         self.engine = engine
+        # the pool the requests this manager serves are for
+        self.pool_id = pool_id
         pool = decoder_pool_module.DecoderPool(self, pool_settings)
         is_strong_pool = pool_settings.name == decode_queue.STRONG_POOL
         merges_strong = bulk_strong and is_strong_pool
@@ -280,7 +283,7 @@ class DecoderManager:
             )
         for job in jobs:
             self._withdraw_job(job)
-        self.strong_requests.resolve_weak(window_key)
+        self.strong_requests.resolve_weak(window_key, self.pool_id)
         self.dispatcher.run()
 
     def _withdraw_job(self, job: decoding_records.DecodeJob) -> None:
@@ -410,7 +413,7 @@ class DecoderManager:
                 decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
                 completion.decode_output_ticks,
             )
-        live = self.strong_requests.take_live(key)
+        live = self.strong_requests.take_live(key, self.pool_id)
         if live is None:
             if completion is not None:
                 self.strong_requests.counts.cancelled += 1

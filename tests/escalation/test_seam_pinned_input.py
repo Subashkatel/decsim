@@ -112,9 +112,9 @@ def _column_by_detectors(flip) -> dict:
 class _Capture:
     """What one run of a pinned row shows: its results, pins and inputs.
 
-    The three seams it reads are the two the committer answers on
-    (accept_result, accept_strong_result), the courier's pin, and the
-    gate that folds the boundary into the landed input.
+    The three seams it reads are the one every revision returns on
+    (accept_revision), the courier's pin, and the gate that folds the
+    boundary into the landed input.
     """
 
     def __init__(self) -> None:
@@ -123,21 +123,17 @@ class _Capture:
         self.masked = []
 
     def install(self, monkeypatch) -> None:
-        """Watch the four calls; monkeypatch undoes it after the test.
+        """Watch the three calls; monkeypatch undoes it after the test.
 
         The patches are plain functions, so each call still arrives with
         the component it was made on.
         """
         capture = self
 
-        def weak_result(verdict, job, result) -> None:
-            capture.note_result((job.operation_id, job.window_id), job, result)
-            _WEAK_RESULT(verdict, job, result)
-
-        def strong_result(verdict, job, result) -> None:
+        def revision(verdict, job, result) -> None:
             key = (job.request_key.operation_id, job.request_key.window_id)
             capture.note_result(key, job, result)
-            _STRONG_RESULT(verdict, job, result)
+            _REVISION(verdict, job, result)
 
         def pin(courier, source_key, destination, model, operation, key):
             capture.note_pin(source_key, destination.key)
@@ -150,10 +146,7 @@ class _Capture:
             capture.note_input(job, raw, masked)
 
         verdict_class = window_commits.WindowVerdict
-        monkeypatch.setattr(verdict_class, "accept_result", weak_result)
-        monkeypatch.setattr(
-            verdict_class, "accept_strong_result", strong_result
-        )
+        monkeypatch.setattr(verdict_class, "accept_revision", revision)
         courier_class = window_boundaries.BoundaryCourier
         monkeypatch.setattr(courier_class, "pin_strong_face", pin)
         gate_class = decode_requests.WindowInputGate
@@ -197,8 +190,7 @@ class _Capture:
         return sources
 
 
-_WEAK_RESULT = window_commits.WindowVerdict.accept_result
-_STRONG_RESULT = window_commits.WindowVerdict.accept_strong_result
+_REVISION = window_commits.WindowVerdict.accept_revision
 _PIN = window_boundaries.BoundaryCourier.pin_strong_face
 _MASK = decode_requests.WindowInputGate.mask_input
 

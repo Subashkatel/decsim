@@ -59,10 +59,18 @@ class DecodeOutcomes:
         result: decoding_records.DecodeResult,
         verdict: decoding_records.Verdict,
     ) -> None:
-        """The window side decided this weak request: close the attempt."""
-        key = (job.operation_id, job.window_id)
-        self.trace.verdict_given.fire(key, job.request_key, verdict)
-        self.manager.strong_requests.resolve_weak(key)
+        """The window side decided this request: close the attempt.
+
+        A revision along an escalate edge ended its request when it was
+        delivered (complete_strong); only its attempt on the next edge
+        closes here.
+        """
+        key = _destination_of(job)
+        request_key = job.request_key
+        self.trace.verdict_given.fire(key, request_key, verdict)
+        self.manager.strong_requests.resolve_weak(key, request_key.pool)
+        if job.strong_decode_for is not None:
+            return
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
         outcomes = decoding_records.RequestProcessingOutcome
         processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
@@ -145,6 +153,13 @@ class DecodeOutcomes:
     ) -> None:
         """A request ended outside a conclusion: cancelled or withdrawn."""
         self.trace.request_ended.fire(job, result, outcome, decode_output_ticks)
+
+
+def _destination_of(job: decoding_records.DecodeJob) -> tuple:
+    """The window a job decodes for: its own, or the one it re-decodes."""
+    if job.strong_decode_for is not None:
+        return job.strong_decode_for
+    return (job.operation_id, job.window_id)
 
 
 @dataclasses.dataclass(frozen=True)

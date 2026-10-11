@@ -28,6 +28,8 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 REGION_LINK_TICKS = 5
+# the legacy edge's forward hop, which an escalated region rides
+_REGION_HOP = transfer_records.WEAK_DECODER_TO_STRONG_DECODER
 
 
 class _Transfers:
@@ -237,7 +239,8 @@ def _selection_bits(route: str, weak_job) -> int:
     output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
     strong_key = _request_key(window_records.STRONG_POOL_ID)
-    output.send_selection(weak_job, strong_key, _ignore)
+    hop = transfer_records.WEAK_DECODER_TO_STRONG_DECODER
+    output.send_selection(hop, weak_job, strong_key, _ignore)
     ((path, _label, _tier, payload_bits),) = transfers.sent
     assert path == transfer_records.WEAK_DECODER_TO_STRONG_DECODER
     return payload_bits
@@ -389,14 +392,14 @@ def test_an_escalated_region_leaves_when_its_weak_store_read_ends(read_ticks):
     routes = _routes()
     output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
-    output.weak_store = _WeakStore(engine, read_ticks)
     output.link = _Link()
+    store = _WeakStore(engine, read_ticks)
     region = _region()
 
-    expected_delay = output.send_region(region, _ignore)
+    expected_delay = output.send_region(_REGION_HOP, store, region, _ignore)
     engine.run()
 
-    assert output.weak_store.read_keys == [((4, 2), (4, 3))]
+    assert store.read_keys == [((4, 2), (4, 3))]
     assert transfers.left_at == [100 + read_ticks]
     assert expected_delay == read_ticks + REGION_LINK_TICKS
 
@@ -408,10 +411,10 @@ def test_a_region_that_waits_on_its_read_is_priced_as_its_message():
     routes = _routes()
     output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = _RegionTransfers(engine)
-    output.weak_store = _WeakStore(engine, 30)
     output.link = _Link()
+    store = _WeakStore(engine, 30)
     region = _region()
 
-    output.send_region(region, _ignore)
+    output.send_region(_REGION_HOP, store, region, _ignore)
 
     assert output.link.asked == [(130, 64 + 16)]

@@ -69,12 +69,16 @@ def unsized_fragment(round_index, fragment_index=0):
 
 
 def job_of(payloads, label="w0", window_id=7):
+    request_key = window_records.DecoderRequestKey(
+        41, window_id, window_records.WEAK_POOL_ID, 0
+    )
     return decoding_records.DecodeJob(
         operation_id=41,
         window_id=window_id,
         round_count=len(payloads),
         payloads=list(payloads),
         label=label,
+        request_key=request_key,
     )
 
 

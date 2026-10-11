@@ -53,15 +53,10 @@ class Switching:
         )
         _refuse_absorbing_window_run(plan)
 
-    def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
-        """The weak tier, and the strong tier too when both run at once."""
+    def decodes_both_at_once(self, window: window_records.Window) -> bool:
+        """Whether the strong tier starts beside the weak one (Step 1)."""
         del window
-        if self.run_both_at_once:
-            return (
-                window_records.WEAK_POOL_ID,
-                window_records.STRONG_POOL_ID,
-            )
-        return (window_records.WEAK_POOL_ID,)
+        return self.run_both_at_once
 
     def verdict_for_weak_result(
         self,

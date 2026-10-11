@@ -30,6 +30,7 @@ import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.topology.legacy as legacy
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.round_retention as round_retention
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
@@ -177,9 +178,7 @@ class _Fixture:
         self.builder.interaction = interaction
         self.builder.gate = gate
         self.queue = _RecordingQueue()
-        verdict = types.SimpleNamespace(
-            accept_result=_ignore_result, accept_strong_result=_ignore_result
-        )
+        verdict = types.SimpleNamespace(accept_revision=_ignore_result)
         self.requester = decode_requests.DecodeRequester(
             decision_cycles=decision_cycles,
             clock=clock,
@@ -189,6 +188,7 @@ class _Fixture:
         self.requester.builder = self.builder
         self.requester.decode_queue = self.queue
         self.requester.verdict = verdict
+        self.requester.edges = escalate_edges.EscalateEdges()
         self.requester.store_output = store_output
         self.retention.register_window((1, 0), self.window)
         self.interaction = interaction
@@ -226,7 +226,7 @@ class _Fixture:
         packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
         self.store.accept_packed_round(packet, publication_tick=round_index)
         self.arrived = round_index
-        self.requester.request_if_ready(self.window, None)
+        self.requester.request_if_ready(self.window)
 
 
 def test_a_complete_window_is_requested_once():
@@ -234,7 +234,7 @@ def test_a_complete_window_is_requested_once():
     _arrive_all(fixture, (1, 2, 3, 4))
     assert fixture.queue.enqueued == []
     fixture.arrive(5)
-    fixture.requester.request_if_ready(fixture.window, None)
+    fixture.requester.request_if_ready(fixture.window)
     assert len(fixture.queue.enqueued) == 1
     (job, send_input) = fixture.queue.enqueued[0]
     assert job.window is fixture.window
@@ -302,7 +302,7 @@ def test_a_withdrawn_window_is_requested_again_fresh():
     assert fixture.queue.withdrawn == [(1, 0)]
     assert not fixture.window.queued
     assert fixture.window.t_queued is None
-    fixture.requester.request_if_ready(fixture.window, None)
+    fixture.requester.request_if_ready(fixture.window)
     assert len(fixture.queue.enqueued) == 2
     (second_job, _send_input) = fixture.queue.enqueued[1]
     assert second_job is not first_job
@@ -684,7 +684,8 @@ def test_the_decision_and_the_verdict_run_on_the_machines_clock():
     machine = machine_module.Machine.build(settings)
 
     requester = machine.windows.requester
+    (edge,) = requester.edges.edges
     assert settings.windows.clock is None
     assert settings.switching.clock is None
     assert requester.clock == machine_clock
-    assert requester.verdict.clock == machine_clock
+    assert edge.costs.clock == machine_clock

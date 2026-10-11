@@ -18,6 +18,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
 
@@ -121,11 +122,6 @@ class _Fixture:
         tracker = types.SimpleNamespace(operation_by_id={4: operation})
         self.courier = _RecordingCourier()
         self.results = _RecordingResults()
-        self.escalation = types.SimpleNamespace(
-            escalate=lambda job: self.escalated.append(job),
-            submit_if_commit_releases=lambda key: self.after_weak.append(key),
-            cancel_strong_request=lambda key: self.kept.append(key),
-        )
         self.escalated = []
         self.after_weak = []
         self.kept = []
@@ -139,6 +135,23 @@ class _Fixture:
         self.decode_queue = types.SimpleNamespace(
             resolve_weak_request=self._resolve, read_result=self._read
         )
+        costs = window_commits.VerdictCosts(
+            clock=clock,
+            threshold_cycles=threshold_cycles,
+            switch_cycles=switch_cycles,
+        )
+        self.escalation = types.SimpleNamespace(
+            source=window_records.WEAK_POOL_ID,
+            target=window_records.STRONG_POOL_ID,
+            policy=self.policy,
+            costs=costs,
+            decode_queue=self.decode_queue,
+            escalate=self.escalated.append,
+            submit_if_commit_releases=self.after_weak.append,
+            cancel_strong_request=self.kept.append,
+        )
+        edge = (self.escalation,)
+        edges = escalate_edges.EscalateEdges(edge)
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)
         decoder_output = decoder_output_module.DecoderOutput(
@@ -150,18 +163,12 @@ class _Fixture:
         committer.courier = self.courier
         committer.decoder_output = decoder_output
         committer.results = self.results
-        committer.strong_redecode = self.escalation
+        committer.edges = edges
         self.committer = committer
-        self.verdict = window_commits.WindowVerdict(
-            self.engine,
-            clock=clock,
-            threshold_cycles=threshold_cycles,
-            switch_cycles=switch_cycles,
-        )
+        self.verdict = window_commits.WindowVerdict(self.engine)
         self.verdict.planner = planner
         self.verdict.tracker = tracker
-        self.verdict.escalation_policy = self.policy
-        self.verdict.strong_redecode = self.escalation
+        self.verdict.edges = edges
         self.verdict.decode_queue = self.decode_queue
         self.verdict.committer = committer
 
@@ -191,7 +198,7 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     job = fixture.job(window_records.WEAK_POOL_ID, 0)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.engine.schedule(
-        10, lambda: fixture.verdict.accept_result(job, result)
+        10, lambda: fixture.verdict.accept_revision(job, result)
     )
     fixture.engine.run()
     assert fixture.window.t_done == 10
@@ -231,7 +238,7 @@ def test_a_kept_result_releases_held_strong_windows_at_its_verdict():
     job = fixture.job(window_records.WEAK_POOL_ID, 0)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
     fixture.engine.schedule(
-        10, lambda: fixture.verdict.accept_result(job, result)
+        10, lambda: fixture.verdict.accept_revision(job, result)
     )
     fixture.engine.run()
     assert fixture.frame.commits == [(14, (4, 1), (1, 0))]
@@ -242,7 +249,7 @@ def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():
     fixture = _Fixture()
     job = fixture.job(window_records.WEAK_POOL_ID, 0, awaiting=True)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
-    fixture.verdict.accept_result(job, result)
+    fixture.verdict.accept_revision(job, result)
     assert fixture.transfers.sent == []
     assert fixture.frame.commits == []
     assert fixture.window.committed
@@ -259,11 +266,11 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     weak_result = decoding_records.DecodeResult(
         4, 1, logical_observables=(1, 0)
     )
-    fixture.verdict.accept_result(weak, weak_result)
+    fixture.verdict.accept_revision(weak, weak_result)
     strong = fixture.job(window_records.STRONG_POOL_ID, 1)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(0, 1))
     fixture.engine.schedule(
-        20, lambda: fixture.verdict.accept_strong_result(strong, result)
+        20, lambda: fixture.verdict.accept_revision(strong, result)
     )
     fixture.engine.run()
     (path, _key, tier, _bits) = fixture.transfers.sent[0]
@@ -293,12 +300,12 @@ def test_a_strong_result_keeps_the_weak_commit_of_the_crossing_faults():
     weak_result = decoding_records.DecodeResult(
         4, 1, logical_observables=(1, 0), crossing_commit=crossing
     )
-    fixture.verdict.accept_result(weak, weak_result)
+    fixture.verdict.accept_revision(weak, weak_result)
     strong = fixture.job(window_records.STRONG_POOL_ID, 1)
     strong_result = decoding_records.DecodeResult(
         4, 1, logical_observables=(0, 1)
     )
-    fixture.verdict.accept_strong_result(strong, strong_result)
+    fixture.verdict.accept_revision(strong, strong_result)
     fixture.engine.run()
     assert fixture.results.replaced == [((4, 1), (1, 1))]
 
@@ -312,12 +319,12 @@ def test_the_frame_receives_the_strong_result_with_the_crossing_commit():
     weak_result = decoding_records.DecodeResult(
         4, 1, logical_observables=(1, 0), crossing_commit=crossing
     )
-    fixture.verdict.accept_result(weak, weak_result)
+    fixture.verdict.accept_revision(weak, weak_result)
     strong = fixture.job(window_records.STRONG_POOL_ID, 1)
     strong_result = decoding_records.DecodeResult(
         4, 1, logical_observables=(0, 1)
     )
-    fixture.verdict.accept_strong_result(strong, strong_result)
+    fixture.verdict.accept_revision(strong, strong_result)
     fixture.engine.run()
     committed_flips = [flips for _tick, _key, flips in fixture.frame.commits]
     assert committed_flips == [(1, 1)]
@@ -418,7 +425,7 @@ def test_a_verdict_without_confidence_pays_no_threshold_cycles():
     job = fixture.job(window_records.WEAK_POOL_ID, 0, awaiting=True)
     result = decoding_records.DecodeResult(4, 1)
 
-    fixture.verdict.accept_result(job, result)
+    fixture.verdict.accept_revision(job, result)
 
     assert fixture.engine.idle
     assert fixture.reads == [(1, job.request_key)]
@@ -433,7 +440,7 @@ def test_threshold_and_switch_cycles_are_charged_in_sequence():
     soft_output = decoding_records.SoftOutput(0.0, source)
     result = decoding_records.DecodeResult(4, 1, soft_output=soft_output)
 
-    fixture.verdict.accept_result(job, result)
+    fixture.verdict.accept_revision(job, result)
     fixture.engine.run()
 
     assert fixture.verdict_ticks == [30]

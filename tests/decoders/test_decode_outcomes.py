@@ -55,8 +55,15 @@ def _delivering_to(delivered):
 
 def _weak_job(delivered):
     on_decoded = _delivering_to(delivered)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.WEAK_POOL_ID, 0
+    )
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3, on_decoded=on_decoded
+        operation_id=1,
+        window_id=0,
+        round_count=3,
+        on_decoded=on_decoded,
+        request_key=request_key,
     )
 
 
@@ -69,7 +76,7 @@ def test_a_kept_weak_request_closes_the_attempt():
     outcomes.deliver_weak(job, result)
     assert delivered == [(job, result)]
     outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
-    assert (1, 0) not in requests.by_window
+    assert not requests.by_window
 
 
 def test_an_escalated_weak_request_closes_the_attempt():
@@ -83,7 +90,7 @@ def test_an_escalated_weak_request_closes_the_attempt():
     outcomes.resolve_weak_request(
         job, result, decoding_records.Verdict.ESCALATE
     )
-    assert (1, 0) not in requests.by_window
+    assert not requests.by_window
 
 
 def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():

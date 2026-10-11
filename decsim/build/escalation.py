@@ -10,6 +10,8 @@ prefetcher holds a NULL one (src/mem/cache/Cache.py:108).
 import dataclasses
 from typing import TYPE_CHECKING, Optional
 
+import decsim.build.routes as routes_build
+import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -18,6 +20,8 @@ import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
+import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.window_commits as window_commits
 
 if TYPE_CHECKING:
     import decsim.build.decoders as decoders_part
@@ -51,12 +55,15 @@ class Switching:
         weak_decoder: decoder_settings.DecoderPoolSettings,
         engine: engine_module.Engine,
         online_threshold: Optional[ports.ThresholdSource] = None,
+        machine_clock: Optional[config.Clock] = None,
     ) -> "Switching":
         """The signal from the weak decoder, the policy, the strong side.
 
         The confidence is built from the weak decoder's own settings and
         the task's threshold. The policy decides on online_threshold,
         the task's calibrator, when the threshold learns across shots.
+        The verdict is priced on the switching clock, the machine's when
+        the settings name none.
         """
         threshold_nats = settings.threshold.threshold_nats
         signal = settings.confidence.build(
@@ -67,7 +74,11 @@ class Switching:
         regions = strong_regions.StrongRegions()
         shape = settings.strong_window.build(engine)
         pending = pending_strong_windows.PendingStrongWindows()
-        strong_redecode = strong_redecode_module.StrongRedecode(engine)
+        costs = _verdict_costs(settings, machine_clock)
+        hops = routes_build.legacy_edge(settings.strong_answer_route)
+        strong_redecode = strong_redecode_module.StrongRedecode(
+            engine, hops, costs
+        )
         return cls(
             confidence_signal=signal,
             policy=policy,
@@ -87,17 +98,18 @@ class Switching:
         """Wire the strong side, then bind it on the ports left empty."""
         self._wire_the_strong_side(plan, windows)
         strong_redecode = self.strong_redecode
+        strong_redecode.carried_from = readout.weak_syndrome_buffer
         strong_redecode.strong_receiver = readout.strong_syndrome_round_receiver
         strong_redecode.strong_output = readout.strong_output
         strong_redecode.decode_queue = decoders.strong_decoder_manager
-        windows.committer.strong_redecode = strong_redecode
-        windows.verdict.strong_redecode = strong_redecode
-        windows.window_manager.strong_redecode = strong_redecode
+        strong_redecode.policy = self.policy
         windows.gap_join.signal = self.confidence_signal
-        windows.verdict.escalation_policy = self.policy
-        windows.requester.escalation_policy = self.policy
         decoders.decoder_manager.escalation_policy = self.policy
         decoders.strong_decoder_manager.escalation_policy = self.policy
+
+    def edges(self) -> escalate_edges.EscalateEdges:
+        """The run's one escalate edge, from the weak pool to the strong."""
+        return escalate_edges.EscalateEdges((self.strong_redecode,))
 
     def statistics_parts(self) -> tuple:
         """The strong redecode, at the switching settings' path."""
@@ -142,11 +154,36 @@ def build_switching(
     weak_decoder: Optional[decoder_settings.DecoderPoolSettings],
     engine: engine_module.Engine,
     online_threshold: Optional[ports.ThresholdSource] = None,
+    machine_clock: Optional[config.Clock] = None,
 ) -> Optional[Switching]:
     """The switching part of a run whose slot is filled; None otherwise."""
     if settings is None:
         return None
-    return Switching.build(settings, weak_decoder, engine, online_threshold)
+    return Switching.build(
+        settings, weak_decoder, engine, online_threshold, machine_clock
+    )
+
+
+def escalate_edges_of(
+    switching: Optional[Switching],
+) -> escalate_edges.EscalateEdges:
+    """The run's escalate edges; none on a run with no switching."""
+    if switching is None:
+        return escalate_edges.EscalateEdges()
+    return switching.edges()
+
+
+def _verdict_costs(
+    settings: escalation_settings.SwitchingSettings,
+    machine_clock: Optional[config.Clock],
+) -> window_commits.VerdictCosts:
+    """The threshold and switch cycles, on the switching clock."""
+    clocked = config.with_machine_clock(settings, machine_clock)
+    return window_commits.VerdictCosts(
+        clock=clocked.clock,
+        threshold_cycles=clocked.threshold_cycles,
+        switch_cycles=clocked.switch_cycles,
+    )
 
 
 def _threshold_source(

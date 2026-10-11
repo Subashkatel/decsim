@@ -464,12 +464,16 @@ def _lines_containing(lines: list, text: str) -> list:
 def _enqueue_timed_jobs(manager, decode_microseconds, send_input, on_decoded):
     """Job J<n> decodes for decode_microseconds[n]; all ready at tick 0."""
     for operation_id, microseconds in enumerate(decode_microseconds):
+        request_key = window_records.DecoderRequestKey(
+            operation_id, 0, window_records.WEAK_POOL_ID, 0
+        )
         job = decoding_records.DecodeJob(
             operation_id=operation_id,
             window_id=0,
             round_count=microseconds,
             label=f"J{operation_id}",
             ready_time=0,
+            request_key=request_key,
         )
         manager.enqueue(job, send_input, on_decoded)
 

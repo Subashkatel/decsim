@@ -6,10 +6,14 @@ blocks pass their artificial defects on (2209.08552 lines 268-275) and
 qLDPC its net_error (qldpc/decoders/sinter.py decode_shots_to_error).
 The frame commit downstream never gates the next window.
 
-WindowVerdict is every window job's on_decoded: it applies the
-threshold, escalates or cancels, and tells the decode queue.
-WindowCommitter then commits the window and hands the correction on; the
-decoder side sends it to the frame (decoders/decoder_output.py).
+Every decode of a window is a revision: the first is the window pool's,
+and each escalate edge the window crosses adds one on its target pool.
+WindowVerdict is every job's on_decoded: a revision whose pool an edge
+leaves meets that edge's verdict, which escalates or cancels, and tells
+the pool's decode queue; a revision no edge leaves is final.
+WindowCommitter then commits the revision and hands the correction on;
+the decoder side sends the final one to the frame
+(decoders/decoder_output.py), which takes one write per window.
 """
 
 import dataclasses
@@ -26,32 +30,88 @@ import decsim.records.log_sources as log_sources
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
+import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_planner as window_planner
 
 
-class WindowCommitter:
-    """Commits each window once.
+@dataclasses.dataclass(frozen=True)
+class VerdictCosts:
+    """An edge's verdict, priced on its own clock.
 
-    The strong redecode, None when the run never escalates, hears every
-    weak boundary as the courier takes it, because a held strong window
-    waits for the boundaries the weak decoder determined (Toshio et al.
-    2510.25222 lines 1248-1250). The caller's on_result_read runs at the
-    commit, where the window side has the result. Trace source:
+    threshold_cycles prices the threshold on a result with a soft
+    output; switch_cycles prices the switch on an escalation. Zero
+    costs keep the handoff synchronous.
+    """
+
+    clock: Optional[config.Clock] = None
+    threshold_cycles: int = 0
+    switch_cycles: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class Revision:
+    """One decode of a window: the first, or one along an escalate edge.
+
+    is_first is the window pool's decode, which commits the window; a
+    later revision replaces what the earlier ones committed.
+    """
+
+    window: window_records.Window
+    operation: program_records.Operation
+    result: decoding_records.DecodeResult
+    request_key: window_records.DecoderRequestKey
+    is_first: bool
+
+
+class WindowCommitter:
+    """Commits each window once, then each later revision over it.
+
+    Every escalate edge hears every boundary as the courier takes it,
+    because a held strong window waits for the boundaries the weak
+    decoder determined (Toshio et al. 2510.25222 lines 1248-1250). The
+    caller's on_result_read runs at the first revision's commit, where
+    the window side has the result; a target pool never blocks its unit
+    on a result (build/decoders.py _blocks_unit). Trace source:
     window_committed(window, contribution) at every commit.
     """
 
     courier = ports.Port(window_boundaries.BoundaryCourier)
     decoder_output = ports.Port(ports.DecoderOutput)
     results = ports.Port(operation_results.OperationResults)
-    # the strong tier's window side; None when the run never escalates
-    strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
+    edges = ports.Port(escalate_edges.EscalateEdges)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.trace = _TraceSources()
+
+    def commit_revision(
+        self,
+        revision: Revision,
+        is_final: bool,
+        on_result_read: Callable[[], None],
+    ) -> None:
+        """Commit the first revision, or replace the window's with a later one.
+
+        A later final revision goes home and finalizes the window; a
+        later provisional one replaces the prediction and waits for the
+        next edge's answer.
+        """
+        window = revision.window
+        operation = revision.operation
+        result = revision.result
+        request_key = revision.request_key
+        if revision.is_first:
+            self.commit_or_publish(
+                window, operation, result, request_key, is_final, on_result_read
+            )
+            return
+        if is_final:
+            self.publish_strong(window, operation, result, request_key)
+            return
+        self.replace_provisionally(window, result)
 
     def commit_or_publish(
         self,
@@ -124,6 +184,22 @@ class WindowCommitter:
             window, operation, result, request_key, finish
         )
 
+    def replace_provisionally(
+        self,
+        window: window_records.Window,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A later revision that escalates again replaces the prediction.
+
+        The window stays awaiting its final revision: nothing goes to
+        the frame and no boundary leaves.
+        """
+        result = _with_the_crossing_commit(window, result)
+        _record_the_decode(window, result)
+        if result.logical_observables is None:
+            return
+        self.results.replace_prediction(window.key, result.logical_observables)
+
     def note_decode_finished(self, window: window_records.Window) -> None:
         """Stamp the window with the tick its decode answered."""
         window.t_done = self.engine.now
@@ -191,125 +267,164 @@ class WindowCommitter:
 
     def _release_held_strong_windows(self, window_key: tuple) -> None:
         """The weak boundary is handed on: a strong window held on it leaves."""
-        if self.strong_redecode is None:
-            return
-        self.strong_redecode.submit_if_commit_releases(window_key)
+        for edge in self.edges.edges:
+            edge.submit_if_commit_releases(window_key)
 
 
 class WindowVerdict:
-    """Applies the threshold to one window's result; the job's on_decoded.
+    """Gives each revision its verdict; every job's on_decoded.
 
-    The threshold and switch logic are priced on the verdict's own
-    clock, like gem5's frontend and forward latencies (src/mem/XBar.py);
-    zero costs keep the handoff synchronous.
+    A revision of a pool an escalate edge leaves meets that edge's
+    policy, priced on the edge's own clock, like gem5's frontend and
+    forward latencies (src/mem/XBar.py); zero costs keep the handoff
+    synchronous. A revision no edge leaves is final. window_pool
+    decodes the planner's windows, so its revision is the first.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker_module.RoundTracker)
-    # the switching policy; None on a run with no switching, which keeps
-    # every result
-    escalation_policy = ports.Port(ports.EscalationPolicy, optional=True)
-    # the strong tier's window side; None when the run never escalates
-    strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
+    # the window pool's manager; an edge's target pool is its edge's
     decode_queue = ports.Port(ports.DecodeQueue)
     committer = ports.Port(WindowCommitter)
+    edges = ports.Port(escalate_edges.EscalateEdges)
 
     def __init__(
         self,
         engine: engine_module.Engine,
-        clock: Optional[config.Clock] = None,
-        threshold_cycles: int = 0,
-        switch_cycles: int = 0,
+        window_pool: window_records.PoolId = window_records.WEAK_POOL_ID,
     ) -> None:
         self.engine = engine
-        self.clock = clock
-        self.threshold_cycles = threshold_cycles
-        self.switch_cycles = switch_cycles
+        self.window_pool = window_pool
 
-    def accept_result(
+    def accept_revision(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """The window's answer: apply the threshold, publish or escalate.
+        """A decode of the window finished: its verdict, or its final commit.
 
         Toshio et al. 2510.25222 Sec. III A, step 3: a kept result rides
         its output link to the frame and commits as final; a result
-        below the threshold asks the strong tier for the window after
-        the switch cost, then commits provisionally, its boundary
-        leaving with the commit.
+        below the threshold asks the next pool for the window after the
+        switch cost, then commits provisionally, its boundary leaving
+        with the first commit. A strong result no edge leaves is final.
         """
-        key = (job.operation_id, job.window_id)
-        window = self.planner.windows_by_key[key]
-        self.committer.note_decode_finished(window)
-        cycles = self.threshold_cycles
-        if cycles == 0 or result.soft_output is None:
-            self._form_verdict(job, result)
+        pool = job.request_key.pool
+        edge = self.edges.leaving(pool)
+        is_first = pool == self.window_pool
+        if not is_first and edge is None:
+            self._commit_final_revision(job, result)
             return
-        if self.escalation_policy is None:
-            self._form_verdict(job, result)
+        if is_first:
+            window = self._window_of(job)
+            self.committer.note_decode_finished(window)
+        self._price_the_threshold(job, result, edge)
+
+    def _price_the_threshold(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        edge: Optional[ports.EscalateEdge],
+    ) -> None:
+        if edge is None or result.soft_output is None:
+            self._form_verdict(job, result, edge)
             return
-        edge = self.clock.edge(cycles, self.engine.now)
-        delay = edge - self.engine.now
-        decide = functools.partial(self._form_verdict, job, result)
+        costs = edge.costs
+        if costs.threshold_cycles == 0:
+            self._form_verdict(job, result, edge)
+            return
+        tick = costs.clock.edge(costs.threshold_cycles, self.engine.now)
+        delay = tick - self.engine.now
+        decide = functools.partial(self._form_verdict, job, result, edge)
         self.engine.schedule(delay, decide, label="escalation threshold")
 
-    def accept_strong_result(
+    def _commit_final_revision(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """A strong decode finished: publish it, then finalize the window."""
-        key = (job.request_key.operation_id, job.request_key.window_id)
-        window = self.planner.windows_by_key[key]
-        operation = self.tracker.operation_by_id[window.operation_id]
-        self.committer.publish_strong(
-            window, operation, result, job.request_key
-        )
+        """A later revision no edge leaves: publish it, finalize the window."""
+        revision = self._revision(job, result)
+        self.committer.commit_revision(revision, True, _nothing_to_read)
 
     def _form_verdict(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
+        edge: Optional[ports.EscalateEdge],
     ) -> None:
-        verdict = self._verdict_for(job, result)
-        if verdict is decoding_records.Verdict.KEEP or self.switch_cycles == 0:
-            self._apply_verdict(job, result, verdict)
+        verdict = _verdict_for(job, result, edge)
+        if verdict is decoding_records.Verdict.KEEP:
+            self._apply_verdict(job, result, verdict, edge)
             return
-        edge = self.clock.edge(self.switch_cycles, self.engine.now)
-        delay = edge - self.engine.now
-        apply = functools.partial(self._apply_verdict, job, result, verdict)
+        costs = edge.costs
+        if costs.switch_cycles == 0:
+            self._apply_verdict(job, result, verdict, edge)
+            return
+        tick = costs.clock.edge(costs.switch_cycles, self.engine.now)
+        delay = tick - self.engine.now
+        apply = functools.partial(
+            self._apply_verdict, job, result, verdict, edge
+        )
         self.engine.schedule(delay, apply, label="escalation switch")
-
-    def _verdict_for(
-        self,
-        job: decoding_records.DecodeJob,
-        result: decoding_records.DecodeResult,
-    ) -> decoding_records.Verdict:
-        """The policy's verdict; a run with no switching keeps every result."""
-        if self.escalation_policy is None:
-            return decoding_records.Verdict.KEEP
-        return self.escalation_policy.verdict_for_weak_result(job, result)
 
     def _apply_verdict(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
         verdict: decoding_records.Verdict,
+        edge: Optional[ports.EscalateEdge],
     ) -> None:
-        key = (job.operation_id, job.window_id)
-        window = self.planner.windows_by_key[key]
-        operation = self.tracker.operation_by_id[job.operation_id]
+        revision = self._revision(job, result)
         is_final = verdict is decoding_records.Verdict.KEEP
         if not is_final:
-            self.strong_redecode.escalate(job)
-        elif self.strong_redecode is not None:
-            self.strong_redecode.cancel_strong_request(key)
-        self.decode_queue.resolve_weak_request(job, result, verdict)
-        read_result = functools.partial(self.decode_queue.read_result, job)
-        self.committer.commit_or_publish(
-            window, operation, result, job.request_key, is_final, read_result
-        )
+            edge.escalate(job)
+        elif edge is not None:
+            edge.cancel_strong_request(revision.window.key)
+        queue = self._queue_of(job.request_key.pool)
+        queue.resolve_weak_request(job, result, verdict)
+        read_result = functools.partial(queue.read_result, job)
+        self.committer.commit_revision(revision, is_final, read_result)
+
+    def _revision(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> Revision:
+        window = self._window_of(job)
+        operation = self.tracker.operation_by_id[window.operation_id]
+        request_key = job.request_key
+        is_first = request_key.pool == self.window_pool
+        return Revision(window, operation, result, request_key, is_first)
+
+    def _window_of(
+        self, job: decoding_records.DecodeJob
+    ) -> window_records.Window:
+        request_key = job.request_key
+        key = (request_key.operation_id, request_key.window_id)
+        return self.planner.windows_by_key[key]
+
+    def _queue_of(self, pool: window_records.PoolId) -> ports.DecodeQueue:
+        """The manager that served a revision of pool."""
+        if pool == self.window_pool:
+            return self.decode_queue
+        edge = self.edges.entering(pool)
+        return edge.decode_queue
+
+
+def _verdict_for(
+    job: decoding_records.DecodeJob,
+    result: decoding_records.DecodeResult,
+    edge: Optional[ports.EscalateEdge],
+) -> decoding_records.Verdict:
+    """The edge's verdict; a revision no edge leaves is kept."""
+    if edge is None:
+        return decoding_records.Verdict.KEEP
+    return edge.policy.verdict_for_weak_result(job, result)
+
+
+def _nothing_to_read() -> None:
+    """A target pool's result left its unit when its decode ended."""
 
 
 def _record_the_decode(

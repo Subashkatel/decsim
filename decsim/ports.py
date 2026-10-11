@@ -518,10 +518,11 @@ class WindowInput(Protocol):
 
     def accept_room_round(
         self,
+        store: "SyndromeBuffer",
         operation_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
-        """Record a round that landed in the strong syndrome buffer instead."""
+        """Record a round that landed in a store a region lands in."""
 
     def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
         """A boundary landed in the window; True when it owed no other."""
@@ -602,16 +603,28 @@ class WindowRetention(Protocol):
     """The rounds a window may still read, as the escalation side sees it.
 
     Which store a strong window reads is the retention's to say, so a
-    caller asks for holds and input, never for a store.
+    caller asks for holds and input, never for a store. A call that
+    takes target asks about the edge to that pool: the store it carries
+    from and the store it lands in; None is the entry edge.
     """
 
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
         """The strong job's context becomes its input hold."""
 
     def strong_window_input(
-        self, builder: "WindowJobBuilder", window: window_records.Window
+        self,
+        builder: "WindowJobBuilder",
+        window: window_records.Window,
+        target: Optional[window_records.PoolId] = None,
     ) -> list:
-        """The room-side payloads of a strong window, first round stamped."""
+        """The payloads of a target's window, first round stamped."""
+
+    def landed_through(
+        self,
+        operation_id: Any,  # an opaque identity
+        target: Optional[window_records.PoolId] = None,
+    ) -> int:
+        """The operation's highest round the edge's landing store holds."""
 
     def hold_strong_context(
         self,
@@ -626,11 +639,20 @@ class WindowRetention(Protocol):
         request, or None.
         """
 
-    def context_rounds_in_flight(self, key: tuple, read_keys: tuple) -> tuple:
-        """The rounds the strong syndrome buffer lacks that the weak one has."""
+    def context_rounds_in_flight(
+        self,
+        key: tuple,
+        read_keys: tuple,
+        target: Optional[window_records.PoolId] = None,
+    ) -> tuple:
+        """The rounds the edge's landing store lacks that its source has."""
 
-    def escalated_rounds(self, round_keys: list) -> tuple:
-        """The weak syndrome buffer's packets of these rounds, to carry up."""
+    def escalated_rounds(
+        self,
+        round_keys: list,
+        target: Optional[window_records.PoolId] = None,
+    ) -> tuple:
+        """The packets of these rounds in the store the edge carries from."""
 
     def guard_restart_reads(
         self,
@@ -702,8 +724,13 @@ class WindowRetention(Protocol):
     ) -> None:
         """Refuse a new consumer if an already-arrived round was released."""
 
-    def require_strong_retained(self, round_keys: list, purpose: str) -> None:
-        """The same, on the strong syndrome buffer."""
+    def require_strong_retained(
+        self,
+        round_keys: list,
+        purpose: str,
+        target: Optional[window_records.PoolId] = None,
+    ) -> None:
+        """The same, on the edge's landing store."""
 
 
 @runtime_checkable
@@ -730,8 +757,9 @@ class WindowRounds(Protocol):
     def strong_rounds_arrived(
         self,
         operation_id: Any,  # an opaque identity
+        store: "SyndromeBuffer",
     ) -> int:
-        """The rounds of the operation stored in the strong syndrome buffer."""
+        """The operation's highest round stored in that store."""
 
 
 @runtime_checkable

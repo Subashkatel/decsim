@@ -4,8 +4,11 @@ A window holds [start_round, buffer_hi], with any successor overflow, in
 the store its tier reads. When the strong tier may re-decode it, the
 same rounds and those a strong redo reads (records/windows.py
 strong_context_bounds) are also held as a potential strong read in both
-stores: the chip keeps them until the verdict and carries them up with
-the escalation (Toshio et al. 2510.25222 lines 1247-1250). At admission
+stores of each escalate edge, the one it carries from and the one it
+lands in: the chip keeps them until the verdict and carries them up
+with the escalation (Toshio et al. 2510.25222 lines 1247-1250). A chain
+keeps one per edge, so a pool's store keeps a window's rounds until the
+pool's own verdict; the window's final commit ends them all. At admission
 the window's hold becomes its request's, released once the input lands
 in the unit's memory. Under the double window, a window an earlier one
 bounds also keeps the rounds its restart would re-read
@@ -29,6 +32,7 @@ buffer and the queue that holds it (src/mem/cache/base.hh
 allocateMissBuffer).
 """
 
+import dataclasses
 import functools
 from typing import Any, Optional
 
@@ -46,9 +50,11 @@ class RoundRetention:
     A holder is a window or a request.
     """
 
-    # a run whose plan's windows the strong tier decodes has no weak store
+    # the entry edge's two stores: the one the entry pool reads, and the
+    # one its target reads. A run whose plan's windows the strong tier
+    # decodes has no weak store; a run that reads no rounds from the room
+    # side has no store there
     weak_store = ports.Port(ports.RetainedRounds, optional=True)
-    # a run that reads no rounds from the room side has no store there
     strong_store = ports.Port(ports.RetainedRounds, optional=True)
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker.RoundTracker)
@@ -69,6 +75,18 @@ class RoundRetention:
         # that forms the detection events (detection_events.formed_at),
         # None when none does
         self.strong_side_seat = strong_side_seat
+        # each escalate edge's store it carries from and store it lands
+        # in, by its target pool, in graph order (add_edge)
+        self.stores_by_edge: dict = {}
+
+    def add_edge(
+        self,
+        target: window_records.PoolId,
+        carried_from: ports.RetainedRounds,
+        landed_in: ports.RetainedRounds,
+    ) -> None:
+        """An escalate edge's two stores, which keep its potential reads."""
+        self.stores_by_edge[target] = (carried_from, landed_in)
 
     # ---- the stores
 
@@ -98,8 +116,7 @@ class RoundRetention:
         for owner, identities in buffering_plan.weak_holds:
             self.primary_store.register_hold(owner, identities)
         for owner, identities in buffering_plan.potential_holds:
-            for store in self._strong_context_stores():
-                store.register_hold(owner, identities)
+            self._hold_on_every_edge(owner, identities)
 
     def release_round_if_unheld(self, round_key: tuple) -> None:
         """Free a weak syndrome buffer round whose every consumer resolved."""
@@ -124,8 +141,7 @@ class RoundRetention:
         self.primary_store.register_hold(reads, primary_reads)
         potential = decoding_records.PotentialStrong(key)
         held = primary_reads + strong_context
-        for store in self._strong_context_stores():
-            store.register_hold(potential, held)
+        self._hold_on_every_edge(potential, held)
         self._hold_later_stream_reads(window)
 
     def release_later_stream_reads(
@@ -302,12 +318,16 @@ class RoundRetention:
         rounds stay stored until the input lands in the unit's memory,
         on the chip too, so the region could be carried up again.
         """
-        in_flight = decoding_records.StrongInputInFlight(job.request_key)
-        owner = decoding_records.DecoderInputHold(job.request_key)
-        for store in self._strong_context_stores():
+        request_key = job.request_key
+        target = request_key.pool
+        in_flight = decoding_records.StrongInputInFlight(request_key)
+        owner = decoding_records.DecoderInputHold(request_key)
+        for store in self._strong_context_stores(target):
             self._move_to_in_flight(store, job, in_flight)
             _move_hold_to_input(store, in_flight, owner, job)
-        job.input_hold = functools.partial(self._release_strong_input, owner)
+        job.input_hold = functools.partial(
+            self._release_strong_input, owner, target
+        )
 
     # ---- what a strong window holds
 
@@ -332,18 +352,37 @@ class RoundRetention:
         return self.primary_store.has_operation(operation_id)
 
     def strong_window_input(
-        self, builder: ports.WindowJobBuilder, window: window_records.Window
+        self,
+        builder: ports.WindowJobBuilder,
+        window: window_records.Window,
+        target: Optional[window_records.PoolId] = None,
     ) -> list:
-        """The room-side payloads of a strong window, its first round stamped.
+        """The payloads of a target's window, its first round stamped.
 
         Which store a strong window reads is the retention's to say, so
-        the shape asks for the input rather than for the store.
+        the shape asks for the input rather than for the store: the store
+        the edge to target lands in, the entry edge's by default.
         """
-        builder.stamp_first_round(window, self.strong_store)
-        return builder.assemble_payloads(window, self.strong_store)
+        _carried_from, landed_in = self._edge_stores(target)
+        builder.stamp_first_round(window, landed_in)
+        return builder.assemble_payloads(window, landed_in)
 
-    def context_rounds_in_flight(self, key: tuple, read_keys: tuple) -> tuple:
-        """The rounds the strong syndrome buffer lacks that the weak one has.
+    def landed_through(
+        self,
+        operation_id: Any,  # an opaque identity
+        target: Optional[window_records.PoolId] = None,
+    ) -> int:
+        """The operation's highest round the edge's landing store holds."""
+        _carried_from, landed_in = self._edge_stores(target)
+        return self.tracker.strong_rounds_arrived(operation_id, landed_in)
+
+    def context_rounds_in_flight(
+        self,
+        key: tuple,
+        read_keys: tuple,
+        target: Optional[window_records.PoolId] = None,
+    ) -> tuple:
+        """The rounds the edge's landing store lacks that its source has.
 
         A round the QPU has not produced yet is not late. A round that
         reached the weak syndrome buffer and is not in the strong syndrome
@@ -353,41 +392,48 @@ class RoundRetention:
         report loudly. A caller carries or waits for the first and never
         for the second.
         """
+        carried_from, landed_in = self._edge_stores(target)
+        arrived_for = self._arrivals_counted_for(carried_from)
         crossing = []
         released = []
         for round_key in read_keys:
-            arrived = self.tracker.rounds_arrived(round_key[0])
+            arrived = arrived_for(round_key[0])
             if round_key[1] > arrived:
                 continue
-            fragments = self.strong_store.retained_fragments(round_key)
+            fragments = landed_in.retained_fragments(round_key)
             if fragments is not None:
                 continue
-            if self.strong_store.is_round_held(round_key):
+            if landed_in.is_round_held(round_key):
                 crossing.append(round_key)
                 continue
             released.append(round_key)
         if released:
             raise RuntimeError(
-                f"strong context for {key} arrived at the weak syndrome buffer "
-                f"and is neither stored in the strong syndrome buffer nor "
-                f"expected there: "
+                f"strong context for {key} arrived at the store it is "
+                f"carried from and is neither stored in the store it lands "
+                f"in nor expected there: "
                 f"{released} (the rounds were released while a strong "
                 f"window still reads them)"
             )
         return tuple(crossing)
 
-    def escalated_rounds(self, round_keys: list) -> tuple:
-        """The weak syndrome buffer's packets of these rounds, to carry up.
+    def escalated_rounds(
+        self,
+        round_keys: list,
+        target: Optional[window_records.PoolId] = None,
+    ) -> tuple:
+        """The packets of these rounds in the store the edge carries from.
 
         The rounds are there: the window's potential strong read keeps
         them on the chip until its verdict, and the request's hold after.
         """
+        carried_from, _landed_in = self._edge_stores(target)
         packets = []
         for round_key in round_keys:
-            fragments = self.weak_store.retained_fragments(round_key)
+            fragments = carried_from.retained_fragments(round_key)
             assert fragments is not None, (
-                f"round {round_key} left the weak syndrome buffer before "
-                f"its escalation carried it"
+                f"round {round_key} left the store it is carried from "
+                f"before its escalation carried it"
             )
             packet = round_records.SyndromeRoundPacket(
                 round_key[0], round_key[1], fragments
@@ -403,11 +449,12 @@ class RoundRetention:
         restart_key: Optional[tuple],
     ) -> None:
         """The window's potential strong read becomes the request's hold."""
-        potential_hold = decoding_records.PotentialStrong(key)
+        target = strong_request_key.pool
+        potential_hold = decoding_records.PotentialStrong(key, target)
         pending_hold = decoding_records.PendingStrong(
             strong_request_key, restart_key
         )
-        stores = self._strong_context_stores()
+        stores = self._strong_context_stores(target)
         for store in stores:
             store.transfer_hold(potential_hold, pending_hold)
         for store in stores:
@@ -442,9 +489,25 @@ class RoundRetention:
         return guard
 
     def release_strong_hold_if_live(self, owner: decoding_records.Hold) -> None:
-        """Drop a strong context hold, in both stores, when it is registered."""
+        """Drop an entry edge hold, in both stores, when it is registered."""
         for store in self._strong_context_stores():
             self.release_hold_if_live(owner, store)
+
+    def release_potential_strong(self, key: tuple) -> None:
+        """The window is final: no edge re-decodes it, so each read ends."""
+        for target in self._edge_targets():
+            potential = decoding_records.PotentialStrong(key, target)
+            for store in self._strong_context_stores(target):
+                self.release_hold_if_live(potential, store)
+
+    def landing_stores(self) -> tuple:
+        """Each store a region lands in: every edge's, else the strong one."""
+        stores = []
+        for _carried_from, landed_in in self.stores_by_edge.values():
+            stores.append(landed_in)
+        if not stores and self.strong_store is not None:
+            stores.append(self.strong_store)
+        return tuple(stores)
 
     def release_absorbed_strong_hold(
         self,
@@ -460,7 +523,8 @@ class RoundRetention:
         the strong window too, and the absorbed window is never decoded,
         so no reader of it is left.
         """
-        absorbed = decoding_records.PotentialStrong(key)
+        entry_target = self._entry_target()
+        absorbed = decoding_records.PotentialStrong(key, entry_target)
         absorbed_identities = self.strong_store.hold_round_identities(absorbed)
         replacement_identities = self.strong_store.hold_round_identities(
             replacement
@@ -470,7 +534,9 @@ class RoundRetention:
         )
         replacements = set(replacement_identities)
         if restart_key is not None:
-            restart_potential = decoding_records.PotentialStrong(restart_key)
+            restart_potential = decoding_records.PotentialStrong(
+                restart_key, entry_target
+            )
             restart_identities = self.strong_store.hold_round_identities(
                 restart_potential
             )
@@ -527,8 +593,13 @@ class RoundRetention:
         restart_read_keys,
     ) -> list:
         """Every room-side round the plan must keep while it lands."""
-        escalated_potential = decoding_records.PotentialStrong(key)
-        restart_potential = decoding_records.PotentialStrong(restart_key)
+        entry_target = self._entry_target()
+        escalated_potential = decoding_records.PotentialStrong(
+            key, entry_target
+        )
+        restart_potential = decoding_records.PotentialStrong(
+            restart_key, entry_target
+        )
         escalated_identities = self.strong_store.hold_round_identities(
             escalated_potential
         )
@@ -544,9 +615,15 @@ class RoundRetention:
         )
         return guarded
 
-    def require_strong_retained(self, round_keys: list, purpose: str) -> None:
-        """Every listed round must still sit in the strong syndrome buffer."""
-        self.require_retained(round_keys, purpose, self.strong_store)
+    def require_strong_retained(
+        self,
+        round_keys: list,
+        purpose: str,
+        target: Optional[window_records.PoolId] = None,
+    ) -> None:
+        """Every listed round must still sit in the edge's landing store."""
+        _carried_from, landed_in = self._edge_stores(target)
+        self.require_retained(round_keys, purpose, landed_in)
 
     def require_retained(
         self,
@@ -556,9 +633,7 @@ class RoundRetention:
     ) -> None:
         """Reject a new consumer if any already-arrived input was released."""
         store = self.store_for(store)
-        arrived_for = self.tracker.rounds_arrived
-        if store is not self.weak_store:
-            arrived_for = self.tracker.strong_rounds_arrived
+        arrived_for = self._arrivals_counted_for(store)
         missing = []
         for round_key in round_keys:
             if _is_released(store, arrived_for, round_key):
@@ -600,11 +675,11 @@ class RoundRetention:
     ) -> None:
         """Move the window's potential strong, read and restart holds."""
         strong_context = self.strong_context_read_keys(window, primary_reads)
-        potential = decoding_records.PotentialStrong(key)
         held = primary_reads + strong_context
-        for store in self._strong_context_stores():
-            if store.has_hold(potential):
-                store.replace_hold(potential, held)
+        for target in self._edge_targets():
+            potential = decoding_records.PotentialStrong(key, target)
+            for store in self._strong_context_stores(target):
+                _replace_if_live(store, potential, held)
         reads = decoding_records.WindowReads(key)
         if self.primary_store.has_hold(reads):
             self.primary_store.replace_hold(reads, primary_reads)
@@ -635,15 +710,57 @@ class RoundRetention:
             round_keys.append((operation_id, round_index))
         return round_keys
 
-    def _strong_context_stores(self) -> tuple:
-        """The stores that keep a window's strong context: both, or none."""
+    def _strong_context_stores(
+        self, target: Optional[window_records.PoolId] = None
+    ) -> tuple:
+        """The stores that keep an edge's strong context: both, or none."""
         if self.is_strong_context_retained:
-            return (self.weak_store, self.strong_store)
+            return self._edge_stores(target)
         return ()
+
+    def _edge_stores(
+        self, target: Optional[window_records.PoolId] = None
+    ) -> tuple:
+        """The stores an edge carries from and lands in; else the entry's."""
+        entry_stores = (self.weak_store, self.strong_store)
+        return self.stores_by_edge.get(target, entry_stores)
+
+    def _edge_targets(self) -> tuple:
+        """Each edge's target in graph order; else the strong pool."""
+        if self.stores_by_edge:
+            return tuple(self.stores_by_edge)
+        return (window_records.STRONG_POOL_ID,)
+
+    def _entry_target(self) -> window_records.PoolId:
+        """The entry edge's target, whose double window absorbs windows."""
+        targets = self._edge_targets()
+        return targets[0]
+
+    def _hold_on_every_edge(
+        self, potential: decoding_records.PotentialStrong, held
+    ) -> None:
+        """Register the window's potential read on each edge's stores."""
+        for target in self._edge_targets():
+            owner = dataclasses.replace(potential, target=target)
+            for store in self._strong_context_stores(target):
+                store.register_hold(owner, held)
+
+    def _arrivals_counted_for(self, store):
+        """The arrival counter of a store.
+
+        The weak store counts the rounds published; a store a region
+        lands in counts its own.
+        """
+        if store is self.weak_store:
+            return self.tracker.rounds_arrived
+        return functools.partial(_stored_through, self.tracker, store)
 
     def _move_to_in_flight(self, store, job, in_flight) -> None:
         """One store's potential or pending hold becomes the input in flight."""
-        potential = decoding_records.PotentialStrong(job.strong_decode_for)
+        request_key = job.request_key
+        potential = decoding_records.PotentialStrong(
+            job.strong_decode_for, request_key.pool
+        )
         pending = decoding_records.PendingStrong(job.request_key)
         if store.has_hold(potential):
             store.transfer_hold(potential, in_flight)
@@ -654,9 +771,9 @@ class RoundRetention:
         round_identities = round_identities_of(job.payloads)
         store.register_hold(in_flight, round_identities)
 
-    def _release_strong_input(self, owner) -> None:
+    def _release_strong_input(self, owner, target) -> None:
         """The strong input landed in its unit: both stores let it go."""
-        for store in self._strong_context_stores():
+        for store in self._strong_context_stores(target):
             store.release_hold(owner)
 
 
@@ -666,6 +783,17 @@ def round_identities_of(payloads: list) -> tuple:
     for fragment in payloads:
         identities[(fragment.operation_id, fragment.round_index)] = None
     return tuple(identities)
+
+
+def _stored_through(tracker, store, operation_id) -> int:
+    """The operation's highest round the store holds, by its arrivals."""
+    return tracker.strong_rounds_arrived(operation_id, store)
+
+
+def _replace_if_live(store, holder, round_keys: list) -> None:
+    """Point a live holder at these rounds; nothing for one gone."""
+    if store.has_hold(holder):
+        store.replace_hold(holder, round_keys)
 
 
 def _hold_or_replace(store, holder, round_keys: list) -> None:

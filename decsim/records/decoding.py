@@ -112,9 +112,14 @@ class WindowReads:
 
 @dataclass(frozen=True)
 class PotentialStrong:
-    """A hold: a window's rounds, kept in case its weak result escalates."""
+    """A hold: a window's rounds, kept in case its weak result escalates.
+
+    target is the pool of the edge the hold is for: a chain keeps one
+    in each edge's two stores (windows/round_retention.py).
+    """
 
     window_key: tuple
+    target: window_records.PoolId = window_records.STRONG_POOL_ID
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the held window's own."""

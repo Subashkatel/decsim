@@ -297,20 +297,21 @@ class WindowManager:
 
     def accept_room_round(
         self,
+        store: ports.SyndromeBuffer,
         operation_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
-        """The strong syndrome buffer stored a round.
+        """A store a region lands in stored a round.
 
-        Wake the strong tier's listeners, and drive readiness when the
-        strong tier is primary.
+        Wake every edge's listeners, and drive readiness when the store
+        is the one the primary tier reads.
         """
-        self.tracker.note_room_round(operation_id, round_index)
+        self.tracker.note_room_round(store, operation_id, round_index)
         self._wake_strong_tier(operation_id)
-        if self.retention.primary_tier != window_records.STRONG_POOL_ID:
+        if self.retention.primary_store is not store:
             return
         operation = self.tracker.operation_by_id[operation_id]
-        stored_through = self.tracker.strong_rounds_arrived(operation_id)
+        stored_through = self.tracker.strong_rounds_arrived(operation_id, store)
         self._count_arrival(operation, stored_through)
         self._update_stream(operation_id)
         self._wake_windows(operation)

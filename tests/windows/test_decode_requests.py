@@ -137,7 +137,7 @@ class _Fixture:
             effective_round_count_for_window=lambda _operation_id, _window: 6,
             round_count_for_window=lambda _operation_id, _window=None: 6,
             rounds_arrived=lambda _operation_id: self.arrived,
-            strong_rounds_arrived=lambda _operation_id: 0,
+            strong_rounds_arrived=lambda _operation_id, _store: 0,
             has_first_round=self._has_first_round,
             is_data_complete=self._is_data_complete,
             is_buffer_filled_by_memory=lambda _window: False,

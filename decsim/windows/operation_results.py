@@ -87,9 +87,8 @@ class OperationResults:
         self._update_committed_round_count(window.operation_id)
         for dependent_key in window.dependents:
             self.retention.release_restart_reads(dependent_key)
-        if is_final and self.retention.strong_store is not None:
-            potential = decoding_records.PotentialStrong(window.key)
-            self.retention.release_strong_hold_if_live(potential)
+        if is_final:
+            self.retention.release_potential_strong(window.key)
 
     # ---- delivery
 
@@ -375,17 +374,17 @@ class OperationResults:
         return False
 
     def _strong_store_references(self, operation_id) -> bool:
-        strong_store = self.retention.strong_store
-        if strong_store is None:
-            return False
-        return strong_store.has_live_operation_reference(operation_id)
+        """Whether a live hold in a store a region lands in names it."""
+        for store in self.retention.landing_stores():
+            if store.has_live_operation_reference(operation_id):
+                return True
+        return False
 
     def _close_strong_store_operation(self, operation_id) -> None:
-        strong_store = self.retention.strong_store
-        if strong_store is None:
-            return
-        if strong_store.has_operation(operation_id):
-            strong_store.close_operation(operation_id)
+        """Retire the operation in every store a region lands in."""
+        for store in self.retention.landing_stores():
+            if store.has_operation(operation_id):
+                store.close_operation(operation_id)
 
 
 def is_awaiting_strong(window: window_records.Window) -> bool:

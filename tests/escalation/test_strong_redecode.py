@@ -135,7 +135,8 @@ class _DecoderOutput:
 class _Retention:
     """The weak syndrome buffer's rounds, one three-bit fragment each."""
 
-    def escalated_rounds(self, round_keys):
+    def escalated_rounds(self, round_keys, target=None):
+        del target
         packets = []
         for operation_id, round_index in round_keys:
             fragment = round_records.RetainedSyndromeFragment(

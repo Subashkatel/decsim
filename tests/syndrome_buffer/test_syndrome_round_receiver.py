@@ -807,7 +807,10 @@ class _ArrivalConsumer:
     def __init__(self, store: syndrome_buffer_module.SyndromeBuffer) -> None:
         self.store = store
 
-    def accept_room_round(self, operation_id: int, round_index: int) -> None:
+    def accept_room_round(
+        self, store, operation_id: int, round_index: int
+    ) -> None:
+        del store
         reads = decoding_records.WindowReads((operation_id, 0))
         round_key = (operation_id, round_index)
         self.store.register_hold(reads, [round_key])

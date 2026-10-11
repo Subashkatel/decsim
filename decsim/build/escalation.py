@@ -117,6 +117,9 @@ class Switching:
         strong_redecode.strong_output = target_store.output
         strong_redecode.decode_queue = target_manager
         strong_redecode.policy = self.policy
+        windows.retention.add_edge(
+            strong_redecode.target, carried.store, target_store.store
+        )
         target_manager.escalation_policy = self.policy
 
     def statistics_parts(self) -> tuple:

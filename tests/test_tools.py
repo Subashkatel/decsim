@@ -660,3 +660,20 @@ def test_a_tree_git_does_not_vouch_for_is_refused_where_it_starts(
     assert "ALLOW_DIRTY=1" in completed.stderr
     assert not (tmp_path / "submissions.txt").exists()
     assert not results_dir.exists()
+
+
+def test_the_speed_check_fails_a_task_past_the_slowdown_on_its_medians():
+    """Medians, so one slow repeat of the base hides nothing.
+
+    steady's median here is 1.15 s against 1.0 s, inside a slowdown of
+    0.2; slower's is 1.25 s against 1.0 s, past it.
+    """
+    speed_check = _tool("speed_check")
+    timings = {
+        "steady": {"base": [1.0, 1.0, 5.0], "here": [1.1, 1.2, 1.15]},
+        "slower": {"base": [1.0, 1.0, 1.0], "here": [1.3, 1.25, 0.5]},
+    }
+
+    slower = speed_check.slower_tasks(timings, 0.2)
+
+    assert slower == ["slower"]

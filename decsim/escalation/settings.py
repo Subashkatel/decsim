@@ -52,11 +52,13 @@ class VerdictSettings(Protocol):
     """A verdict row's settings record (verdicts.py).
 
     reads_threshold says whether the verdict decides on the edge's
-    threshold.
+    threshold; reads_consensus whether it decides on an ensemble's
+    agreement, the consensus row's soft output.
     """
 
     name: str
     reads_threshold: bool
+    reads_consensus: bool
 
     def build(self) -> ports.EscalationVerdict:
         """A fresh verdict."""

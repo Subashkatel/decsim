@@ -12,6 +12,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Optional
 
 import decsim.build.layout as layout_module
+import decsim.confidence.consensus as consensus
 import decsim.confidence.gap_join as gap_join_module
 import decsim.confidence.no_signal as no_signal
 import decsim.config as config
@@ -84,6 +85,7 @@ class Switching:
             source_settings.algorithm, threshold_nats
         )
         _refuse_a_threshold_with_no_gap(settings, signal)
+        _refuse_agreement_without_consensus(settings, signal)
         threshold = _threshold_source(settings, online_threshold)
         policy = settings.build_policy(threshold)
         regions = strong_regions.StrongRegions()
@@ -330,6 +332,31 @@ def _refuse_a_threshold_with_no_gap(
         f"switching.verdict {verdict.name} reads a confidence gap, and "
         "confidence none gives none; name a status, always or never "
         "verdict, or a confidence row"
+    )
+
+
+def _refuse_agreement_without_consensus(
+    settings: escalation_settings.SwitchingSettings,
+    signal: ports.ConfidenceSignal,
+) -> None:
+    """The agreement verdict and the consensus row go together.
+
+    The consensus row reports a share of members, not a gap in nats, so
+    a threshold verdict would compare it against the wrong unit; the
+    agreement verdict reads no other row's soft output.
+    """
+    is_agreement = settings.verdict.reads_consensus
+    is_consensus = signal.source == consensus.CONSENSUS_SOURCE
+    if is_agreement == is_consensus:
+        return
+    if is_agreement:
+        raise ValueError(
+            "switching.verdict agreement reads an ensemble's agreement; "
+            "name confidence consensus beside it"
+        )
+    raise ValueError(
+        "confidence consensus reports a share of an ensemble's members, "
+        "not a gap: name verdict agreement beside it"
     )
 
 

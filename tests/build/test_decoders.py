@@ -15,15 +15,18 @@ import pytest
 import decsim.build.decoders as decoder_build
 import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
+import decsim.confidence.consensus as consensus
 import decsim.config as config
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
+import decsim.escalation.verdicts as verdicts
 import decsim.machine as machine_module
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.topology.graph_layout as graph_layout
 import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as declared_fabric
 import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -202,6 +205,20 @@ class _FormedBeforeEveryPool:
     def forms_at(self, seat: str) -> bool:
         del seat
         return False
+
+
+def test_the_consensus_row_needs_an_ensemble_on_the_source_pool():
+    confidence = consensus.Consensus.Settings()
+    agreement = verdicts.Agreement.Settings()
+    switching = declared_run.declared_switching(
+        confidence=confidence, verdict=agreement
+    )
+    settings = declared_fabric.switching_settings(
+        rounds=6, escalated_windows=set(), switching=switching
+    )
+
+    with pytest.raises(ValueError, match="only the ensemble row"):
+        machine_module.Machine.build(settings, 0)
 
 
 def test_bulk_strong_merges_the_queue_of_every_pool_an_edge_leads_to():

@@ -42,8 +42,9 @@ class WindowTraceSources:
     window_planned when the plan or a stream lays a window,
     window_data_complete when its rounds are all there,
     solve_held when one of a window's several solves waits for the
-    others, window_committed when its correction is the frame's, and
-    window_absorbed when a strong window takes it over instead.
+    others, window_committed when its correction is the frame's,
+    window_final once its record is final, and window_absorbed when a
+    strong window takes it over instead.
     edge_traces holds each escalate edge's own sources, in graph order:
     a strong window held for its conditions, and its leaving.
     """
@@ -51,6 +52,7 @@ class WindowTraceSources:
     window_planned: trace_source.TraceSource
     window_data_complete: trace_source.TraceSource
     window_committed: trace_source.TraceSource
+    window_final: trace_source.TraceSource
     # the silent source on a run that escalates nothing
     window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
     # the silent source on a run whose confidence reads one solve
@@ -436,6 +438,7 @@ class WindowManager:
             window_planned=self.planner.trace.window_planned,
             window_data_complete=builder.trace.window_data_complete,
             window_committed=committer.trace.window_committed,
+            window_final=committer.trace.window_final,
             window_absorbed=absorbed,
             solve_held=held,
             edge_traces=tuple(edge_traces),

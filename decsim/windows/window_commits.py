@@ -78,8 +78,10 @@ class WindowCommitter:
     decoder determined (Toshio et al. 2510.25222 lines 1248-1250). The
     caller's on_result_read runs at the first revision's commit, where
     the window side has the result; a target pool never blocks its unit
-    on a result (build/decoders.py _blocks_unit). Trace source:
-    window_committed(window, contribution) at every commit.
+    on a result (build/decoders.py _blocks_unit). Trace sources:
+    window_committed(window, contribution) at every commit, and
+    window_final(window) once the window's record is final: after the
+    frame took its one correction and the commit that follows it.
     """
 
     courier = ports.Port(window_boundaries.BoundaryCourier)
@@ -257,6 +259,8 @@ class WindowCommitter:
             self.courier.hand_on(window, operation, result, request_key, False)
             self._release_held_strong_windows(window.key)
         self.results.deliver_if_final(operation)
+        if is_final:
+            self.trace.window_final.fire(window)
 
     def finish_strong(
         self,
@@ -280,6 +284,7 @@ class WindowCommitter:
         self.results.note_window_final(window)
         self.results.release_committed_segments(operation.id)
         self.results.deliver_if_final(operation)
+        self.trace.window_final.fire(window)
 
     def _kept_revisions(self, revision: Revision, is_final: bool) -> tuple:
         """The window's earlier revisions; this one kept unless it is final."""
@@ -549,3 +554,4 @@ class _TraceSources:
     """Every event the window committer reports, as one member."""
 
     window_committed: trace_source.TraceSource = trace_source.new_source()
+    window_final: trace_source.TraceSource = trace_source.new_source()

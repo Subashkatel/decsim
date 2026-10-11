@@ -526,6 +526,19 @@ class TraceWriter:
         }
         self._instant("Window planner", "solve held", "window,confidence", args)
 
+    def window_final(self, window: window_records.Window) -> None:
+        """The window's record is final, under the request that decided it.
+
+        An escalated window's weak commit is provisional, and its strong
+        answer finalizes it with no commit of its own, so this instant is
+        the one that marks it.
+        """
+        args = {
+            "window": window_text(window.key),
+            "request": request_text(window.published_request_key),
+        }
+        self._instant("Window planner", "window final", "window", args)
+
     def window_absorbed(self, key: tuple, owner_key: tuple) -> None:
         """A strong window covers the window; the weak chain skips it."""
         args = {

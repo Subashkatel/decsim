@@ -39,7 +39,7 @@ class RoundEventRecorder:
 
     def round_read_out(self, readout: round_records.QPUReadout) -> None:
         """The QPU read out one round, or one fragment of it."""
-        self.readout_ticks.append(self.engine.now)
+        self.note_readout_tick()
         by_operation = self.rounds_read_out_by_operation
         latest = by_operation.get(readout.operation_id, 0)
         by_operation[readout.operation_id] = max(latest, readout.round_index)
@@ -57,7 +57,7 @@ class RoundEventRecorder:
         operation's backlog.
         """
         del operation_id, patch, round_index
-        self.readout_ticks.append(self.engine.now)
+        self.note_readout_tick()
 
     def round_stored(
         self, round_key: tuple, _packet: round_records.SyndromeRoundPacket
@@ -65,3 +65,34 @@ class RoundEventRecorder:
         """A round landed in the strong store."""
         operation_id, round_index = round_key
         self.stored_rounds.append((self.engine.now, operation_id, round_index))
+
+    def note_readout_tick(self) -> None:
+        """The tick the QPU read a round out, an idle patch's included."""
+        self.readout_ticks.append(self.engine.now)
+
+
+class FoldingRoundEventRecorder(RoundEventRecorder):
+    """A stream's recorder: no row kept, the rounds read out counted.
+
+    A stream measures as it goes (observation.folds_windows,
+    experiments/stream_measures.py), so a row kept per round would only
+    grow; the rounds read out of each operation are what the backlog
+    sampler reads (observe/metrics.py).
+    """
+
+    def record(self, event: round_records.RoundEvent) -> None:
+        """A round's transition, kept by nobody in a stream."""
+        del event
+
+    def output(self, event: round_records.ControllerOutputEvent) -> None:
+        """An output transition, kept by nobody in a stream."""
+        del event
+
+    def round_stored(
+        self, round_key: tuple, _packet: round_records.SyndromeRoundPacket
+    ) -> None:
+        """A strong-store landing, kept by nobody in a stream."""
+        del round_key
+
+    def note_readout_tick(self) -> None:
+        """The stream's measures keep the generation span's two ends."""

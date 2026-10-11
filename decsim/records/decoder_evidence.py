@@ -13,9 +13,12 @@ it half a tick at a time, so a decode leaves an interval per edge.
 """
 
 import dataclasses
+import functools
 import math
 import numbers
 from typing import Union
+
+import numpy
 
 # one tick of an edge length is this many natural-log units of weight
 DEFAULT_WEIGHT_STEP = 0.1
@@ -87,6 +90,34 @@ class UnionFindGraph:
     # a reader of the growth knows what its distances mean
     weight_step: float = DEFAULT_WEIGHT_STEP
 
+    @functools.cached_property
+    def edge_arrays(self) -> tuple:
+        """Endpoints and lengths in edge order, laid out once per graph.
+
+        Every decode on the graph reads them; laid out per decode they
+        were a quarter of a weak-alone d13 shot (stage7_plan.md). They
+        are read-only, since every decode shares them.
+        """
+        detectors_a = []
+        detectors_b = []
+        lengths = []
+        for edge in self.edges:
+            detectors_a.append(edge.detector_a)
+            detectors_b.append(edge.detector_b)
+            lengths.append(edge.length_half_ticks)
+        endpoint_a = _read_only(detectors_a, numpy.int32)
+        endpoint_b = _read_only(detectors_b, numpy.int32)
+        length_half_ticks = _read_only(lengths, numpy.int64)
+        return endpoint_a, endpoint_b, length_half_ticks
+
+    @functools.cached_property
+    def logical_parities(self) -> numpy.ndarray:
+        """Each edge's logical row, the parity its first segment carries."""
+        parities = []
+        for edge in self.edges:
+            parities.append(edge.logical_observables[0])
+        return _read_only(parities, numpy.uint8)
+
 
 @dataclasses.dataclass(frozen=True)
 class UnionFindHardEvidence:
@@ -129,3 +160,9 @@ def normalized_weight_step(
     if not math.isfinite(normalized) or normalized <= 0.0:
         raise ValueError(f"{key} must be finite and positive")
     return normalized
+
+
+def _read_only(values: list, dtype) -> numpy.ndarray:
+    array = numpy.asarray(values, dtype=dtype)
+    array.flags.writeable = False
+    return array

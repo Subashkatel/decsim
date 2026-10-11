@@ -341,6 +341,17 @@ def test_a_defect_that_takes_in_even_clusters_moves_roots_and_no_parity():
     assert steps_of([8]) == (step,)
 
 
+def test_edges_with_equal_intervals_share_one_instance():
+    """Open and Closed are frozen, so one instance stands for each value."""
+    evidence = evidence_of([0, 5])
+    intervals = evidence.edge_intervals
+    identities = map(id, intervals)
+    distinct_instances = set(identities)
+    distinct_values = set(intervals)
+    assert len(distinct_instances) == len(distinct_values)
+    assert len(distinct_values) < len(intervals)
+
+
 def test_an_empty_syndrome_takes_no_step_and_peels_no_tree():
     evidence = evidence_of([])
     assert evidence.growth_steps == ()

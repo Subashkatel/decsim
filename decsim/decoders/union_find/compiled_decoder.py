@@ -149,7 +149,7 @@ def decode(
     graph: evidence_records.UnionFindGraph, residual_syndrome: numpy.ndarray
 ) -> GrowthOutcome:
     """Grow, take the forest and peel one residual syndrome on one graph."""
-    endpoint_a, endpoint_b, lengths = _graph_arrays(graph)
+    endpoint_a, endpoint_b, lengths = graph.edge_arrays
     edge_count = len(graph.edges)
     selected = numpy.zeros(edge_count, dtype=numpy.uint8)
     is_closed = numpy.zeros(edge_count, dtype=numpy.uint8)
@@ -221,8 +221,8 @@ def cluster_gap(
     """
     edge_count = len(graph.edges)
     _require_one_interval_per_edge(edge_count, edge_intervals)
-    endpoint_a, endpoint_b, lengths = _graph_arrays(graph)
-    parities = _logical_parities(graph)
+    endpoint_a, endpoint_b, lengths = graph.edge_arrays
+    parities = graph.logical_parities
     is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
     gap = numpy.zeros(1, dtype=numpy.int64)
     walk = cluster_gap_entry_point()
@@ -259,8 +259,8 @@ def extra_growth(
     """
     edge_count = len(graph.edges)
     _require_one_interval_per_edge(edge_count, edge_intervals)
-    endpoint_a, endpoint_b, lengths = _graph_arrays(graph)
-    parities = _logical_parities(graph)
+    endpoint_a, endpoint_b, lengths = graph.edge_arrays
+    parities = graph.logical_parities
     syndrome = numpy.asarray(residual_syndrome, dtype=numpy.uint8)
     is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
     step_room = edge_count + 1
@@ -345,21 +345,6 @@ def _bound(symbol: str, argument_types: list):
     return function
 
 
-def _graph_arrays(graph: evidence_records.UnionFindGraph) -> tuple:
-    """The graph as the three flat arrays the C reads, in edge order."""
-    detectors_a = []
-    detectors_b = []
-    lengths = []
-    for edge in graph.edges:
-        detectors_a.append(edge.detector_a)
-        detectors_b.append(edge.detector_b)
-        lengths.append(edge.length_half_ticks)
-    endpoint_a = numpy.asarray(detectors_a, dtype=numpy.int32)
-    endpoint_b = numpy.asarray(detectors_b, dtype=numpy.int32)
-    length_half_ticks = numpy.asarray(lengths, dtype=numpy.int64)
-    return endpoint_a, endpoint_b, length_half_ticks
-
-
 def _refuse_failure(status: int) -> None:
     if status == _OK:
         return
@@ -377,28 +362,32 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
 
     Open and Closed are frozen, so one instance stands for every edge
     with the same interval: a window has tens of thousands of edges and
-    a few hundred distinct intervals, and one object per edge would be
-    most of a decode's Python time.
+    a few hundred distinct intervals. The distinct bounds are found in
+    numpy and each edge picks its instance from a table, since a Python
+    pass over the edges was a fifth of a weak-alone d13 shot.
     """
-    closed = evidence_records.Closed()
-    closed_flags = is_closed.tolist()
-    lower_ticks = lower_tick.tolist()
-    upper_ticks = upper_tick.tolist()
-    open_by_bounds = {}
-    intervals = []
-    for edge_index, closed_flag in enumerate(closed_flags):
-        if closed_flag:
-            intervals.append(closed)
-            continue
-        lower = lower_ticks[edge_index]
-        upper = upper_ticks[edge_index]
-        bounds = (lower, upper)
-        interval = open_by_bounds.get(bounds)
-        if interval is None:
-            interval = evidence_records.Open(lower, upper)
-            open_by_bounds[bounds] = interval
-        intervals.append(interval)
+    is_open = is_closed == 0
+    open_edges = numpy.flatnonzero(is_open)
+    bounds = numpy.stack((lower_tick, upper_tick), axis=1)
+    open_bounds = bounds[open_edges]
+    distinct, picked = numpy.unique(open_bounds, axis=0, return_inverse=True)
+    table = _interval_table(distinct)
+    rows = numpy.zeros(len(is_closed), dtype=numpy.intp)
+    rows[open_edges] = picked + 1
+    chosen = table[rows]
+    intervals = chosen.tolist()
     return tuple(intervals)
+
+
+def _interval_table(distinct) -> numpy.ndarray:
+    """Closed at row 0, then one Open per distinct pair of bounds."""
+    pairs = distinct.tolist()
+    row_count = len(pairs) + 1
+    table = numpy.empty(row_count, dtype=object)
+    table[0] = evidence_records.Closed()
+    for row, (lower, upper) in enumerate(pairs, start=1):
+        table[row] = evidence_records.Open(lower, upper)
+    return table
 
 
 def _require_one_interval_per_edge(
@@ -417,14 +406,6 @@ def _require_one_interval_per_edge(
         f"graph has {edge_count} edges and the growth left "
         f"{interval_count} intervals"
     )
-
-
-def _logical_parities(graph: evidence_records.UnionFindGraph):
-    """Each edge's logical row, the parity its first segment carries."""
-    parities = []
-    for edge in graph.edges:
-        parities.append(edge.logical_observables[0])
-    return numpy.asarray(parities, dtype=numpy.uint8)
 
 
 def _interval_arrays(edge_intervals: tuple) -> tuple:

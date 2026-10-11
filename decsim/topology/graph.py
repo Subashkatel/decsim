@@ -72,15 +72,16 @@ class Part:
             return type(self.settings)
         return part_kinds.slot_hint(kind)
 
-    def run_file_fields(self) -> tuple:
-        """The record's fields the run file built the workload's circuit from.
+    def run_file_fields(self, workload: object) -> tuple:
+        """The record's fields the machine's workload fixes.
 
-        A part of no kind has none; a QPU has its distance.
+        A part of no kind has none; a QPU has its distance when the
+        workload was made at one.
         """
         kind = self.kind
         if kind is None:
             return ()
-        return part_kinds.run_file_fields(kind)
+        return part_kinds.run_file_fields(kind, workload)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -135,6 +136,16 @@ class Machine:
                 return part
         names = [part.name for part in self.parts]
         raise GraphError(f"no part {name!r}; the parts are {names}")
+
+    def set_in_the_run_file(self) -> tuple:
+        """The paths the graph's workload fixes, each at its part's name."""
+        workload = part_kinds.workload_of(self.parts)
+        paths = []
+        for part in self.parts:
+            run_file_fields = part.run_file_fields(workload)
+            for field in run_file_fields:
+                paths.append(f"{part.name}.{field}")
+        return tuple(paths)
 
     def unbound_ports(self) -> list:
         """Every required port no wire reaches, as part.port."""

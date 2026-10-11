@@ -49,6 +49,47 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 | `name` | `str` |
 | `build(self, weak_algorithm: DecoderSettings, threshold_nats: Optional[float])` | `ConfidenceSignal` |
 
+### `WorkloadMakerSettings`
+
+`decsim/ports.py`. A workload maker's row: its parameters, made into a workload at a task.
+
+The workload slot takes a workload lowered in Python or a maker row (decsim/producers.py), lowered when the task is made against the qpu the task has. fixes_the_distance says the workload was made at a distance of its own (from files, say), so the qpu's distance is not set by path.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `fixes_the_distance` | `bool` |
+| `lowered_for(self, qpu: object)` | `object` |
+
+### `MemorySettings`
+
+`decsim/producers.py`. A memory experiment at the qpu's distance, on one patch or several.
+
+physical_error_probability is p on each of Stim's four channels; with noise the channels are noise's and p is the task's label, which a threshold table and the reports read. One of rounds and rounds_per_distance is given: a shot's rounds, or that many for each unit of the distance. code_task is a Stim task whose circuit is the qpu's card's code (code_geometry.py stim_memory_tasks), or None for patches with no circuit. patches run at once, side by side (memory_patches). decoded False decodes nothing: the readout-and-frame baseline.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `physical_error_probability` | `float` | required |
+| `rounds` | `Optional[int]` | `None` |
+| `rounds_per_distance` | `Optional[int]` | `None` |
+| `code_task` | `Optional[str]` | `'surface_code:rotated_memory_z'` |
+| `patches` | `int` | `1` |
+| `noise` | `Optional[workload_settings.StimNoise]` | `None` |
+| `decoded` | `bool` | `True` |
+
+### `LiveMemorySettings`
+
+`decsim/producers.py`. Live fragments read from a folder, decoded after some rounds.
+
+fragments is a folder of the four fragments and physical.json (workload_files.read_fragments). The prefix is decoded, and the patch waits, protected, until the decoded result releases it (live_memory); examples/live_memory_example.py runs it on StreamingStimDevice. feedback_boundary_mode is the workload's (frontends/settings.py).
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `fragments` | `pathlib.Path` | required |
+| `decode_after_rounds` | `int` | required |
+| `patch` | `str` | `'memory-patch'` |
+| `feedback_boundary_mode` | `str` | `'trailing_buffer'` |
+
 ### `MachineSettings`
 
 `decsim/settings.py`. One settings record per part of the machine.
@@ -57,7 +98,7 @@ Every field has a default: a timing-only run of distance-three surface code patc
 
 The decode side is three slots, each None when the run has no such part: weak_decoder alone, strong_decoder alone, or both with switching, which decodes weak first and escalates a window to the strong decoder. None of the three plans no decoding. router, None by default, sends each window to one of several entry pools; only a graph of its own shape holds more than one (windows/routers.py).
 
-SET_IN_THE_RUN_FILE names the paths the run file built the workload's circuit from or lowered it to: an assignment by path (decsim/parameters/tree.py) would leave the circuit behind, a distance-5 machine running a distance-3 circuit, so they are set in the run file.
+workload is a workload lowered in Python or a maker row (decsim/producers.py), which at_task lowers against the qpu, so the task's id and every shot see the lowered workload. A workload made at a distance of its own fixes the qpu's: set_in_the_run_file names the paths an assignment by path (decsim/parameters/tree.py) may not change, since it would leave the circuit behind, a distance-5 machine running a distance-3 circuit.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -75,7 +116,7 @@ SET_IN_THE_RUN_FILE names the paths the run file built the workload's circuit fr
 | `decoder_manager` | `decoder_settings.DecoderManagerSettings` | `decoder_settings.DecoderManagerSettings()` |
 | `switching` | `Optional[escalation_settings.SwitchingSettings]` | `None` |
 | `pauli_frame` | `Optional[pauli_frame_module.PauliFrameConfig]` | `None` |
-| `workload` | `workload_settings.WorkloadSettings` | `workload_settings.WorkloadSettings()` |
+| `workload` | `Union[workload_settings.WorkloadSettings, ports.WorkloadMakerSettings]` | `workload_settings.WorkloadSettings()` |
 | `magic_state_factory` | `qpu_settings.FactorySettings` | `magic_state_factories.InfiniteFactory.Settings()` |
 | `observation` | `observe_settings.ObservationSettings` | `observe_settings.ObservationSettings()` |
 | `router` | `Optional[routers.Router.Settings]` | `config.added_field(None)` |
@@ -705,6 +746,8 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 
 `decsim/frontends/settings.py`. The program the machine runs: a maker's workload, lowered.
 
+fixes_the_distance and fields_set_in_the_run_file name what an assignment by path may not change (decsim/settings.py): the circuit was made at the qpu's distance and lowered to these fields.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `operations` | `tuple` | `()` |
@@ -940,11 +983,13 @@ A write is one XOR into a register, one cycle of the frame unit: Yang et al. (26
 
 `decsim/qpu/code_geometry.py`. The surface card has no keys beyond the qpu's distance.
 
+stim_memory_tasks are the Stim generator's tasks whose circuit is this card's code (src/stim/gen/gen_surface_code.cc).
+
 ### `BivariateBicycleCodeModel.Settings`
 
 `decsim/qpu/code_geometry.py`. The card's own keys.
 
-qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines 180-184); its distance is twelve when the run names none.
+qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines 180-184); its distance is twelve when the run names none. Stim generates no circuit of it, so stim_memory_tasks is empty.
 
 | Field | Type | Default |
 | --- | --- | --- |

@@ -25,6 +25,7 @@ the controller, the stores, the windows and the frame produced.
 import dataclasses
 import functools
 import importlib.util
+import pathlib
 from typing import Any
 
 import ldpc
@@ -1824,6 +1825,47 @@ def test_a_machine_built_from_its_record_reads_the_tables_row(tmp_path):
     threshold = machine.switching.policy.threshold
     twelve_decibels = threshold_sources.decibels_to_nats(12.0)
     assert threshold.threshold_nats == twelve_decibels
+
+
+def test_settings_read_at_the_task_hold_their_memory_row_lowered():
+    """The row is made at the qpu's distance; reading again changes nothing."""
+    memory = producers.MemorySettings(0.002, rounds=6)
+    qpu = qpu_settings.QpuSettings(distance=5)
+    settings = machine_settings.MachineSettings(qpu=qpu, workload=memory)
+
+    read = settings.at_task()
+    read_again = read.at_task()
+
+    assert read.workload == machines.memory_workload(5, 0.002, 6)
+    assert read_again is read
+
+
+def test_a_lowered_workload_fixes_the_distance_and_its_lowered_fields():
+    lowered = machine_settings.MachineSettings()
+
+    paths = lowered.set_in_the_run_file()
+
+    assert paths == (
+        "qpu.distance",
+        "workload.operations",
+        "workload.decode_operations",
+        "workload.dynamic_streams",
+        "workload.protected_regions",
+        "workload.physical_circuits",
+        "workload.rounds_policy",
+        "workload.workload_record",
+    )
+
+
+def test_a_memory_row_fixes_nothing_and_a_live_memory_the_distance():
+    memory = producers.MemorySettings(0.002, rounds=6)
+    fragments = pathlib.Path("fragments")
+    live = producers.LiveMemorySettings(fragments, 2)
+    with_memory = machine_settings.MachineSettings(workload=memory)
+    with_live = machine_settings.MachineSettings(workload=live)
+
+    assert with_memory.set_in_the_run_file() == ()
+    assert with_live.set_in_the_run_file() == ("qpu.distance",)
 
 
 def test_settings_whose_threshold_reads_no_table_are_their_own_reading():

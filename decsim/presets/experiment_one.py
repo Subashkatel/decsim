@@ -38,6 +38,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
+import decsim.producers as producers
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
@@ -110,8 +111,9 @@ def weak_alone(
     decoder_manager = decoder_settings.DecoderManagerSettings(
         clock=clocks.FRIDGE_CLOCK
     )
-    workload = machines.memory_workload(
-        distance, physical_error_probability, ROUNDS_PER_SHOT
+    # made at the task, so it follows an assigned qpu.distance
+    workload = producers.MemorySettings(
+        physical_error_probability, rounds=ROUNDS_PER_SHOT
     )
     # both machines lay out the same last window, the lookahead tail
     sliding_windows = window_plan()

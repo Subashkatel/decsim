@@ -6,22 +6,33 @@ memory_patches places copies of it with SHIFT_COORDS (Stim
 doc/file_format_stim_circuit.md, SHIFT_COORDS). The Deltakit makers
 make the workloads examples/deltakit_example.py and
 examples/live_memory_example.py build by hand, and the runs on the
-tools' machines are compared field by field.
+tools' machines are compared field by field. The rows are lowered at a
+qpu: memory is memory_circuit or memory_patches at the qpu's distance,
+Stim's four channels at p unless noise sets them apart, and live_memory
+is live_memory over the fragments a folder holds.
 """
 
 import dataclasses
+import pathlib
 
 import pytest
 import stim
 
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
+import decsim.frontends.workload_files as workload_files
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.producers as producers
+import decsim.qpu.code_geometry as code_geometry
+import decsim.qpu.settings as qpu_settings
 import decsim.topology.legacy as legacy
 import examples.deltakit_example as deltakit_example
 import examples.live_memory_example as live_memory_example
+import tests.qpu.memory_programs as memory_programs
+
+Z_MEMORY = "surface_code:rotated_memory_z"
+X_MEMORY = "surface_code:rotated_memory_x"
 
 
 def test_the_memory_circuit_is_stims_generated_circuit():
@@ -116,6 +127,154 @@ def test_no_patches_is_refused():
         )
 
 
+def test_a_memory_is_the_presets_workload_at_the_qpus_distance():
+    memory = producers.MemorySettings(0.002, rounds=12)
+    qpu = _qpu(5)
+
+    lowered = memory.lowered_for(qpu)
+
+    assert lowered == machines.memory_workload(5, 0.002, 12)
+
+
+def test_rounds_per_distance_runs_that_many_rounds_a_unit_of_distance():
+    memory = producers.MemorySettings(0.002, rounds_per_distance=10)
+    qpu = _qpu(7)
+
+    lowered = memory.lowered_for(qpu)
+
+    assert lowered == machines.memory_workload(7, 0.002, 70)
+
+
+def test_a_qpu_that_names_no_distance_takes_its_cards_own():
+    memory = producers.MemorySettings(0.002, rounds_per_distance=2)
+    qpu = _qpu(None)
+
+    lowered = memory.lowered_for(qpu)
+
+    assert lowered == machines.memory_workload(3, 0.002, 6)
+
+
+def test_a_memory_states_its_rounds_once():
+    with pytest.raises(ValueError, match="states its rounds once"):
+        producers.MemorySettings(0.002, rounds=5, rounds_per_distance=2)
+    with pytest.raises(ValueError, match="states its rounds once"):
+        producers.MemorySettings(0.002)
+
+
+def test_noise_at_p_on_every_channel_is_the_memory_at_p():
+    noise = workload_settings.StimNoise(0.002, 0.002, 0.002, 0.002)
+    noisy = producers.MemorySettings(0.002, rounds=6, noise=noise)
+    plain = producers.MemorySettings(0.002, rounds=6)
+    qpu = _qpu(3)
+
+    noisy_lowered = noisy.lowered_for(qpu)
+    plain_lowered = plain.lowered_for(qpu)
+
+    assert noisy_lowered == plain_lowered
+
+
+def test_noise_sets_stims_four_channels_apart_and_p_stays_the_label():
+    noise = workload_settings.StimNoise(0.001, 0.002, 0.003, 0.004)
+    memory = producers.MemorySettings(0.005, rounds=4, noise=noise)
+    qpu = _qpu(3)
+
+    lowered = memory.lowered_for(qpu)
+
+    generated = stim.Circuit.generated(
+        Z_MEMORY,
+        rounds=4,
+        distance=3,
+        after_clifford_depolarization=0.001,
+        before_round_data_depolarization=0.002,
+        before_measure_flip_probability=0.003,
+        after_reset_flip_probability=0.004,
+    )
+    record = lowered.workload_record
+    (operation,) = record.operations
+    assert operation.circuit == generated
+    assert record.physical_error_probability == 0.005
+
+
+def test_several_patches_are_the_memory_patches_maker():
+    memory = producers.MemorySettings(0.002, rounds=4, patches=2)
+    qpu = _qpu(3)
+
+    lowered = memory.lowered_for(qpu)
+
+    workload = producers.memory_patches(Z_MEMORY, 4, 2, 3, 0.002)
+    assert lowered == workload_settings.WorkloadSettings.running(workload)
+
+
+def test_an_x_memory_is_stims_x_task():
+    memory = producers.MemorySettings(0.002, rounds=4, code_task=X_MEMORY)
+    qpu = _qpu(3)
+
+    lowered = memory.lowered_for(qpu)
+
+    workload = producers.memory_circuit(X_MEMORY, 4, 3, 0.002)
+    assert lowered == workload_settings.WorkloadSettings.running(workload)
+
+
+def test_a_task_of_another_code_than_the_card_is_refused():
+    memory = producers.MemorySettings(0.002, rounds=4)
+    card = code_geometry.BivariateBicycleCodeModel.Settings()
+    qpu = qpu_settings.QpuSettings(code_card=card)
+
+    with pytest.raises(ValueError, match="another code than the qpu's card"):
+        memory.lowered_for(qpu)
+
+
+def test_a_memory_with_no_task_runs_patches_with_no_circuit():
+    memory = producers.MemorySettings(
+        0.002, rounds=4, code_task=None, patches=2
+    )
+    card = code_geometry.BivariateBicycleCodeModel.Settings()
+    qpu = qpu_settings.QpuSettings(code_card=card)
+
+    lowered = memory.lowered_for(qpu)
+
+    workload = producers.memory_without_circuit(4, 2, 0.002)
+    circuits = [operation.circuit for operation in workload.operations]
+    assert lowered == workload_settings.WorkloadSettings.running(workload)
+    assert circuits == [None, None]
+
+
+def test_a_memory_not_decoded_decodes_no_operation():
+    memory = producers.MemorySettings(0.002, rounds=4, decoded=False)
+    qpu = _qpu(3)
+
+    lowered = memory.lowered_for(qpu)
+
+    assert lowered.decode_operations == ()
+
+
+def test_a_live_memory_is_the_live_maker_over_its_fragments(
+    tmp_path: pathlib.Path,
+):
+    program = memory_programs.memory_program()
+    program = dataclasses.replace(program, round_period_microseconds=1.1)
+    workload = producers.live_memory(program, 2)
+    workload_files.write_workload(workload, tmp_path)
+    fragments = tmp_path / "fragments"
+    memory = producers.LiveMemorySettings(fragments, 2)
+    qpu = _qpu(3)
+
+    lowered = memory.lowered_for(qpu)
+
+    assert lowered == workload_settings.WorkloadSettings.running(workload)
+
+
+def test_a_live_memory_fixes_the_distance_and_a_memory_follows_it():
+    fragments = pathlib.Path("fragments")
+    live = producers.LiveMemorySettings(fragments, 2)
+    memory = producers.MemorySettings(0.002, rounds=4)
+    lowered = workload_settings.WorkloadSettings()
+
+    assert live.fixes_the_distance
+    assert not memory.fixes_the_distance
+    assert lowered.fixes_the_distance
+
+
 def _run(settings, seed):
     machine = machine_module.Machine.build(settings, seed)
     result = machine.run()
@@ -189,3 +348,7 @@ def test_the_live_deltakit_memory_maker_runs_what_the_live_tool_runs():
     assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)
     assert _commands(machine) == _commands(tool_machine)
     assert measurements == tool_measurements
+
+
+def _qpu(distance) -> qpu_settings.QpuSettings:
+    return qpu_settings.QpuSettings(distance=distance)

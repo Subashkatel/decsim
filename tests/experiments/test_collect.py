@@ -72,12 +72,14 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.parameters.in_force as in_force
 import decsim.parameters.tree as tree
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as topology_graph
 import decsim.topology.legacy as legacy
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
@@ -184,6 +186,31 @@ def test_a_chain_task_copied_by_replace_keeps_its_graph_and_layout():
 
     assert copy.layout == task.layout
     assert copy.strong_id() == task.strong_id()
+
+
+def test_a_chains_id_holds_its_workload_lowered():
+    """A memory row and the workload it lowers to are one chain's id."""
+    chain = layout_tests.chain_machine()
+    task = collect.Task("chain", chain)
+    workload = topology_graph.Part("workload", task.machine.workload)
+    lowered = chain.with_part(workload)
+
+    lowered_task = collect.Task("chain", lowered)
+
+    assert lowered_task.strong_id() == task.strong_id()
+
+
+def test_a_distance_in_force_makes_the_memory_again_at_that_distance():
+    base = machines.weak_baseline(3, 0.002, 1.0)
+    at_five = machines.weak_baseline(5, 0.002, 1.0)
+    distance = tree.Assignment("qpu.distance", 5, "a test")
+
+    with in_force.in_force([distance]):
+        assigned = collect.Task("memory", base)
+    built = collect.Task("memory", at_five)
+
+    assert assigned.machine == built.machine
+    assert assigned.strong_id() == built.strong_id()
 
 
 def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):

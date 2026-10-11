@@ -76,7 +76,8 @@ def test_a_bases_shot_is_ten_rounds_a_unit_of_distance_on_the_fridge_clock():
     weak_base = machines.weak_baseline(5, 0.002, 1.0)
     fifty_rounds = machines.memory_workload(5, 0.002, 50)
 
-    settings = legacy.resolved(weak_base)
+    resolved = legacy.resolved(weak_base)
+    settings = resolved.at_task()
 
     assert settings.workload == fifty_rounds
     assert settings.clock == clocks.FRIDGE_CLOCK
@@ -185,7 +186,8 @@ def test_an_escalation_grows_a_chain_one_pool_and_edge_at_a_time():
         deep_switching,
     )
 
-    settings = graph_layout.entry_settings(chain)
+    entry = graph_layout.entry_settings(chain)
+    settings = entry.at_task()
     facts = settings.task_facts()
     layout = graph_layout.layout_of(chain, facts)
     edges = [(edge.name, edge.carried_from) for edge in layout.edges]

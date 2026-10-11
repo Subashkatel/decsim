@@ -15,6 +15,7 @@ import pytest
 import decsim.parameters.assignments as assignments_module
 import decsim.parameters.fields as fields
 import decsim.parameters.tree as tree
+import decsim.presets.machines as machines
 import decsim.topology.legacy as legacy
 import tests.experiments.run_files as run_files
 from decsim.decoders.union_find import decoder as union_find
@@ -265,6 +266,30 @@ def test_a_graphs_run_file_path_is_named_by_its_part():
 
     with pytest.raises(fields.ParameterError, match="set in the run file"):
         _applied(machine, ("qpu.distance", 5))
+
+
+def test_a_distance_is_set_by_path_where_the_memory_is_made_at_the_task():
+    machine = machines.weak_baseline(3, 0.002, 1.0)
+
+    assigned = _applied(machine, ("qpu.distance", 5))
+
+    qpu = assigned.part("qpu")
+    assert qpu.settings.distance == 5
+
+
+def test_a_memory_rows_own_fields_are_set_by_path():
+    machine = machines.weak_baseline(3, 0.002, 1.0)
+
+    assigned = _applied(
+        machine,
+        ("workload.rounds_per_distance", "none"),
+        ("workload.rounds", 40),
+        ("workload.physical_error_probability", 0.004),
+    )
+
+    workload = assigned.part("workload")
+    assert workload.settings.rounds == 40
+    assert workload.settings.physical_error_probability == 0.004
 
 
 def test_a_rewired_graph_is_checked_again():

@@ -252,7 +252,7 @@ def chip_side_costs() -> graph.Machine:
 
 def no_decoder() -> graph.Machine:
     base = weak_alone()
-    without_decodes = base.with_settings("workload", decode_operations=())
+    without_decodes = base.with_settings("workload", decoded=False)
     return without_decodes.without_part(machines.WEAK_POOL)
 
 

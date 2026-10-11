@@ -60,14 +60,14 @@ def _constants(tmp_path: pathlib.Path, text: str = CONSTANTS):
 
 @pytest.mark.parametrize("name", list(regression.SHAPES))
 def test_every_regression_machine_written_out_reads_back(name):
+    """Its workload is a memory row, written out as the rest is."""
     build = regression.SHAPES[name]
     machine = build()
-    workload = machine.part(WORKLOAD)
 
     text = machine_file.dumps(machine)
-    read = machine_file.loads(text, python_parts={WORKLOAD: workload})
+    read = machine_file.loads(text)
 
-    assert f"{WORKLOAD}: python" in text
+    assert f"{WORKLOAD}:\n    type: memory" in text
     assert read.parts == machine.parts
     assert read == machine
 

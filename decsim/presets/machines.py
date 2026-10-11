@@ -322,9 +322,10 @@ def _baseline(
     fridge cycle, 4 ns (2605.04892 Table I, lines 1051 and 1063).
     """
     qpu = _stim_qpu(distance, round_period_microseconds)
-    rounds_per_shot = BASELINE_ROUNDS_PER_DISTANCE * distance
-    workload = memory_workload(
-        distance, physical_error_probability, rounds_per_shot
+    # made at the task, so it follows an assigned qpu.distance
+    workload = producers.MemorySettings(
+        physical_error_probability,
+        rounds_per_distance=BASELINE_ROUNDS_PER_DISTANCE,
     )
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=clocks.FRIDGE_CLOCK

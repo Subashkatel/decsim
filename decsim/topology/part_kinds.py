@@ -34,6 +34,7 @@ REDECODES = "redecodes"
 CORRECTIONS = "corrections"
 DECISIONS = "decisions"
 COMMANDS = "commands"
+_WORKLOAD_SLOT = "workload"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,18 +169,30 @@ def slot_hint(kind: PartKind) -> Any:
     return hints[first_slot]
 
 
-def run_file_fields(kind: PartKind) -> tuple:
-    """The fields of the kind's record set in the run file only.
+def run_file_fields(kind: PartKind, workload: object) -> tuple:
+    """The fields of the kind's record that the machine's workload fixes.
 
-    MachineSettings names them by slot (qpu.distance); a part of the kind
-    names them by its own name.
+    MachineSettings names them by slot (qpu.distance,
+    settings.set_in_the_run_file_with); a part of the kind names them by
+    its own name.
     """
     found = []
-    for path in settings.MachineSettings.SET_IN_THE_RUN_FILE:
+    paths = settings.set_in_the_run_file_with(workload)
+    for path in paths:
         slot, _, field = path.partition(".")
         if slot in kind.slots:
             found.append(field)
     return tuple(found)
+
+
+def workload_of(parts: tuple) -> object:
+    """The workload the parts run: the workload part's, else the default."""
+    for part in parts:
+        kind = part.kind
+        if kind is not None and _WORKLOAD_SLOT in kind.slots:
+            return part.settings
+    defaults = settings.MachineSettings()
+    return defaults.workload
 
 
 @functools.cache

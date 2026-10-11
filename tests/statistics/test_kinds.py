@@ -128,3 +128,81 @@ def test_a_disabled_statistic_keeps_nothing():
 
     assert disabled.fields() == []
     assert disabled.value_counts() == {}
+
+
+def _level_at(steps, tick):
+    """The level held over the tick: the last set at or before it."""
+    held = 0
+    for step_tick, level in steps:
+        if step_tick > tick:
+            break
+        held = level
+    return held
+
+
+def _reset_at(kind, steps, reset_tick, end_tick):
+    """The statistic set at each step, reset after reset_tick's steps."""
+    clock = types.SimpleNamespace(now=0)
+    statistic = kind(clock)
+    is_reset = False
+    for tick, level in steps:
+        if tick > reset_tick and not is_reset:
+            clock.now = reset_tick
+            statistic.reset()
+            is_reset = True
+        clock.now = tick
+        statistic.set(level)
+    clock.now = end_tick
+    statistic.finish()
+    return statistic
+
+
+def test_a_reset_level_keeps_its_level_and_counts_from_the_reset_on():
+    """gem5's AvgStor::reset: total to 0 and lastReset to now, level kept.
+
+    The referents are read off the whole run's step function over the
+    ticks from the reset to the end.
+    """
+    for seed in range(10):
+        steps = _random_steps(seed)
+        end_tick = steps[-1][0] + 7
+        generator = random.Random(seed)
+        reset_tick = generator.randrange(1, steps[-1][0])
+        ticks = range(reset_tick, end_tick)
+        held = [_level_at(steps, tick) for tick in ticks]
+        ended = [*held, _level_at(steps, end_tick)]
+
+        level = _reset_at(kinds.Level, steps, reset_tick, end_tick)
+
+        assert level.area == sum(held)
+        assert level.span == end_tick - reset_tick
+        assert level.peak == max(ended)
+
+
+def test_a_reset_history_starts_its_series_at_the_level_held():
+    steps = [(2, 3), (5, 1), (9, 4)]
+
+    history = _reset_at(kinds.History, steps, 6, 12)
+
+    assert history.changes == [(6, 1), (9, 4)]
+    assert history.fields() == [("area", 15), ("span", 6), ("peak", 4)]
+
+
+def test_a_reset_count_and_distribution_keep_nothing_from_before():
+    count = kinds.Count(None)
+    distribution = kinds.Distribution(None)
+    count.add(4)
+    distribution.add(9)
+
+    count.reset()
+    distribution.reset()
+    count.add()
+    distribution.add(2)
+
+    assert count.fields() == [("count", 1)]
+    assert distribution.fields() == [
+        ("count", 1),
+        ("total", 2),
+        ("minimum", 2),
+        ("maximum", 2),
+    ]

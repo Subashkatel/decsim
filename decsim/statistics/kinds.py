@@ -19,6 +19,12 @@ derived when the table is read, as gem5 evaluates a Formula at dump.
 
 Every kind is built on the run's clock, anything with a `now` in ticks
 (the engine), as every gem5 stat reads curTick(); only a Level reads it.
+
+reset() starts a region of interest, as gem5's m5.stats.reset() does
+(src/python/m5/stats/__init__.py:439-450): a Count or a Distribution
+forgets what it kept, and a Level keeps its level and restarts its area
+and span at now, gem5's AvgStor::reset (src/base/stats/storage.hh: total
+to 0, last and lastReset to curTick(), current kept).
 """
 
 import collections
@@ -35,6 +41,10 @@ class Count:
     def add(self, amount: int = 1) -> None:
         """Add amount events."""
         self.count += amount
+
+    def reset(self) -> None:
+        """No events from here on yet."""
+        self.count = 0
 
     def finish(self) -> None:
         """Nothing holds over time."""
@@ -71,6 +81,13 @@ class Distribution:
         if self.maximum is None or value > self.maximum:
             self.maximum = value
 
+    def reset(self) -> None:
+        """No values from here on yet."""
+        self.counts = collections.Counter()
+        self.total = 0
+        self.minimum = None
+        self.maximum = None
+
     def finish(self) -> None:
         """Nothing holds over time."""
 
@@ -92,7 +109,8 @@ class Level:
     """A level that holds from one change to the next, from tick 0 at 0.
 
     A step holds over [tick, next change), so its area is level x ticks
-    and the span is the last tick seen, the integral gem5's AvgStor keeps
+    and the span is the ticks held since tick 0 or the last reset, the
+    integral gem5's AvgStor keeps
     (src/base/stats/storage.hh:126-213). The peak counts only the level a
     tick ends at: a level set and replaced in one tick never held, as a
     queue's length is weighed by time (gem5 adds current * (curTick() -
@@ -117,14 +135,31 @@ class Level:
         self.tick = tick
         self.level = level
 
+    def reset(self) -> None:
+        """Restart at now with the level held: nothing held before counts."""
+        self.tick = self.clock.now
+        self.area = 0
+        self.peak = 0
+        self.ticks_by_level = collections.Counter()
+
     def finish(self) -> None:
         """Hold the last level to now, the shot's end; the end counts."""
         self.set(self.level)
         self.peak = max(self.peak, self.level)
 
+    @property
+    def span(self) -> int:
+        """The ticks held since tick 0 or the last reset.
+
+        Every held tick is at some level, so it is the sum of the ticks
+        at each level: the last tick seen when nothing was reset.
+        """
+        held = self.ticks_by_level.values()
+        return sum(held)
+
     def fields(self) -> list:
         """(field, value) pairs: area, span and peak."""
-        return [("area", self.area), ("span", self.tick), ("peak", self.peak)]
+        return [("area", self.area), ("span", self.span), ("peak", self.peak)]
 
     def value_counts(self) -> dict:
         """The ticks spent at each level."""
@@ -153,6 +188,11 @@ class History(Level):
         change = (self.tick, level)
         self.changes.append(change)
 
+    def reset(self) -> None:
+        """Restart at now; the series starts with the level held now."""
+        Level.reset(self)
+        self.changes = [(self.tick, self.level)]
+
     def finish(self) -> None:
         """Hold the last level to now; the series is not extended."""
         Level.set(self, self.level)
@@ -166,6 +206,9 @@ class Disabled:
         """Nothing is kept."""
 
     def set(self, level: int) -> None:
+        """Nothing is kept."""
+
+    def reset(self) -> None:
         """Nothing is kept."""
 
     def finish(self) -> None:

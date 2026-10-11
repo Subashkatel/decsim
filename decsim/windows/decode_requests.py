@@ -383,6 +383,9 @@ class DecodeRequester:
         self.decision_cycles = decision_cycles
         # the windows whose decision has not ended, by window key
         self.deciding_by_window: dict = {}
+        # the keys of windows withdrawn and open again, until the window
+        # manager's cursor has gone back to them
+        self.withdrawn_keys: set = set()
 
     def request_ready_windows(self, windows: list) -> None:
         """Request each window that has its data, in the given order."""
@@ -613,6 +616,7 @@ class DecodeRequester:
         it dispatches in the same order (src/cpu/o3/iew.cc 1451-1452).
         """
         window.queued = False
+        self.withdrawn_keys.add(window.key)
         window.t_queued = None
         window.t_dispatch = None
         window.service_began = False

@@ -246,6 +246,20 @@ def test_a_tan_seam_waits_in_its_slot_and_never_holds_the_only_unit():
     assert result.operation_results[0].logical_failure is False
 
 
+def test_a_seam_starting_before_the_core_ahead_of_it_is_stamped_first():
+    """The request walk reaches a window that starts out of index order.
+
+    Tan's seam (1, 2) reads from round 4 and the core (1, 1) before it
+    from round 6, so the seam's first round lands two rounds earlier.
+    """
+    machine, _result = _tan_sandwich_run(unit_count=1)
+    windows = machine.observation.windows.windows
+    seam = windows[(1, 2)]
+    core = windows[(1, 1)]
+    assert seam.start_round < core.start_round
+    assert seam.t_first_round < core.t_first_round
+
+
 def test_a_round_arriving_after_the_last_window_committed_is_refused():
     """The device is a plug-in, so a round past the plan is its mistake.
 

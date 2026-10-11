@@ -12,6 +12,7 @@ boundary waits for a final result. A strong window whose face is pinned
 reads the same records (pin_strong_face).
 """
 
+import collections.abc
 import copy
 import dataclasses
 import functools
@@ -391,7 +392,7 @@ class BoundaryCourier:
     def _targets(self, window: window_records.Window) -> tuple:
         """The dependents the interaction selects, absorbed ones left out."""
         window_info = window_records.WindowInfo.from_window(window)
-        window_infos = self._window_infos()
+        window_infos = _WindowInfoView(self.planner.windows_by_key)
         selected = self.interaction.boundary_targets(window_info, window_infos)
         targets = []
         for dependent_key in selected:
@@ -400,12 +401,6 @@ class BoundaryCourier:
                 continue
             targets.append(dependent_key)
         return tuple(targets)
-
-    def _window_infos(self) -> dict:
-        infos = {}
-        for key, window in self.planner.windows_by_key.items():
-            infos[key] = window_records.WindowInfo.from_window(window)
-        return infos
 
     def _send_one(
         self,
@@ -589,6 +584,30 @@ class _BoundaryRecord:
         self.delivery_version_by_dependent: dict = {}
         self.released_dependents: set = set()
         self.held: Optional[HeldBoundary] = None
+
+
+class _WindowInfoView(collections.abc.Mapping):
+    """Every planned window as an interaction reads it, built when read.
+
+    An interaction may read any window while it picks a boundary's
+    targets, so it is handed the whole plan; each WindowInfo is built on
+    its first read rather than for every window on every send, which
+    made a long run quadratic in its windows. The view reads the plan as
+    it stands during the call.
+    """
+
+    def __init__(self, windows_by_key: dict) -> None:
+        self.windows_by_key = windows_by_key
+
+    def __getitem__(self, key: tuple) -> window_records.WindowInfo:
+        window = self.windows_by_key[key]
+        return window_records.WindowInfo.from_window(window)
+
+    def __iter__(self) -> collections.abc.Iterator:
+        return iter(self.windows_by_key)
+
+    def __len__(self) -> int:
+        return len(self.windows_by_key)
 
 
 def _wire_bits(

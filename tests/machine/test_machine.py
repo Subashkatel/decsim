@@ -1840,6 +1840,19 @@ def test_settings_read_at_the_task_hold_their_memory_row_lowered():
     assert read_again is read
 
 
+def test_a_readout_route_on_a_patch_no_operation_reads_out_is_refused():
+    memory = producers.MemorySettings(0.002, rounds=3)
+    qpu = qpu_settings.QpuSettings(distance=3)
+    settings = machine_settings.MachineSettings(qpu=qpu, workload=memory)
+    base_path = settings.links.qpu_to_controller
+    route = _readout_route(base_path, ("nowhere",), "nowhere", 1_000)
+    links = dataclasses.replace(settings.links, readout_routes=(route,))
+    routed = dataclasses.replace(settings, links=links)
+
+    with pytest.raises(ValueError, match="never be taken"):
+        routed.at_task()
+
+
 def test_a_lowered_workload_fixes_the_distance_and_its_lowered_fields():
     lowered = machine_settings.MachineSettings()
 

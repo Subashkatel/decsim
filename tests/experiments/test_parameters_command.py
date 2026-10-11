@@ -95,6 +95,31 @@ def test_params_match_keeps_the_paths_its_pattern_reaches(tmp_path, capsys):
     assert lines[1:] == ["weak_decoder.engine.clock = 250MHz  [none]"]
 
 
+def test_info_with_no_name_lists_every_slot_and_the_records_it_takes(
+    capsys,
+):
+    slots = parameters_command.every_slot()
+
+    command.main(["info"])
+
+    lines = _printed_lines(capsys)
+    assert len(lines) == len(slots) + 1
+    algorithm = [
+        line for line in lines if line.startswith("DecoderPool.algorithm: ")
+    ]
+    assert len(algorithm) == 1
+    assert "union_find" in algorithm[0]
+
+
+def test_info_reads_a_name_with_a_dot_as_an_import_path(capsys):
+    path = "tests.parameters.test_kinds.PluginDecoder.Settings"
+
+    command.main(["info", path])
+
+    lines = _printed_lines(capsys)
+    assert lines[0] == f"nested_plugin: {path}"
+
+
 def test_info_prints_a_records_parameters_and_its_parts_choices(capsys):
     command.main(["info", "DecoderPool"])
 

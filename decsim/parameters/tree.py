@@ -642,7 +642,7 @@ def _list_slot(
         found.append(nothing)
         return
     record_class = type(value)
-    name = kinds.written_name(record_class)
+    name = kinds.unique_name(record_class)
     chosen = Setting(f"{path}.{TYPE}", name, None)
     found.append(chosen)
     _list_node(value, segments, found)

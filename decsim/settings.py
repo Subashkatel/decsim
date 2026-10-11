@@ -25,6 +25,7 @@ import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.ports as ports
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.routers as routers
@@ -149,6 +150,7 @@ class MachineSettings:
         settings already read returns them unchanged.
         """
         settings = self._with_workload_lowered()
+        _refuse_a_route_on_a_patch_no_operation_has(settings)
         switching = settings.switching
         if switching is None:
             return settings
@@ -198,3 +200,44 @@ def _check_decode_slots(settings: MachineSettings) -> None:
         "not; a run with no switching decodes its windows on one decoder, "
         "so set switching or drop one decoder"
     )
+
+
+def _refuse_a_route_on_a_patch_no_operation_has(
+    settings: MachineSettings,
+) -> None:
+    """A readout route on a patch no operation reads out is never taken.
+
+    The fabric takes a route by a readout's whole footprint and
+    qpu_to_controller for every other (links/fabric.py), so such a route
+    would be ignored in silence. A footprint is an operation's patches,
+    one of them, or its qubits (qpu/syndrome_devices.py), so only a
+    patch no operation has is certain to match nothing.
+    """
+    routes = settings.links.readout_routes
+    workload_record = settings.workload.workload_record
+    if not routes or workload_record is None:
+        return
+    occupied = _patches_read_out(workload_record)
+    for route in routes:
+        unknown = _patches_not_in(route.patch_ids, occupied)
+        if unknown:
+            raise ValueError(
+                f"the readout route for patches {list(route.patch_ids)} "
+                f"names {unknown}, which no operation reads out, so it would "
+                "never be taken; the operations read out "
+                f"{sorted(occupied, key=repr)}"
+            )
+
+
+def _patches_not_in(patches: tuple, occupied: set) -> list:
+    return [patch for patch in patches if patch not in occupied]
+
+
+def _patches_read_out(workload_record: object) -> set:
+    """Every patch a readout's footprint can hold."""
+    patches = set()
+    for operation in workload_record.operations:
+        footprint = program_records.patches_of(operation)
+        patches.update(footprint)
+        patches.update(operation.qubits)
+    return patches

@@ -124,6 +124,12 @@ def dumps(machine: graph.Machine) -> str:
     A part holding a Python object is written `python`, left for load's
     python_parts.
     """
+    document = document_of(machine)
+    return yaml.safe_dump(document, sort_keys=False, width=79)
+
+
+def document_of(machine: graph.Machine) -> dict:
+    """The machine as the plain mapping dumps writes, for YAML or json."""
     document = {}
     if machine.clock is not None:
         document["clock"] = fields.Parameter.written(_CLOCK, machine.clock)
@@ -133,7 +139,7 @@ def dumps(machine: graph.Machine) -> str:
         document["fabric"] = record_document(machine.fabric)
     if machine.observation != _DEFAULT_OBSERVATION:
         document["observation"] = _fields_document(machine.observation)
-    return yaml.safe_dump(document, sort_keys=False, width=79)
+    return document
 
 
 def record_of(document: Mapping, clock: Any, where: str) -> Any:
@@ -183,18 +189,8 @@ def clock_of(written: Any, where: str = "a clock") -> Any:
 def record_document(record: Any) -> dict:
     """A record as YAML: its type, then each field off its default."""
     record_class = type(record)
-    name = unique_name(record_class)
+    name = kinds.unique_name(record_class)
     return {TYPE: name, **_fields_document(record)}
-
-
-def unique_name(record_class: type) -> str:
-    """The first of a record's names no other record has, else its path."""
-    offered = kinds.every_record_class()
-    for name in kinds.names_of(record_class):
-        matches = kinds.records_named(name, offered)
-        if len(matches) == 1:
-            return name
-    return kinds.import_path(record_class)
 
 
 # the machine's clock field, which writes and reads a frequency
@@ -317,6 +313,8 @@ def _record_class(name: str, where: str) -> type:
     found = matches or by_path
     if len(found) == 1:
         return found[0]
+    if not found and "." in name:
+        return kinds.imported_class(name, where)
     names = kinds.every_name(offered)
     near = units.did_you_mean(name, names)
     raise fields.ParameterError(
@@ -381,7 +379,7 @@ def _fabric(document: Any, clock: Any, origin: str) -> Any:
 def _observation(document: Any, clock: Any, origin: str) -> Any:
     if document is None:
         return _DEFAULT_OBSERVATION
-    name = unique_name(observe_settings.ObservationSettings)
+    name = kinds.unique_name(observe_settings.ObservationSettings)
     typed = {TYPE: name, **document}
     return record_of(typed, clock, f"{origin}: observation")
 

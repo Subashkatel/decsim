@@ -62,10 +62,12 @@ def test_the_gross_code_card_has_144_decoding_graph_nodes_per_round():
     assert card.spatial_nodes(1) == 144
 
 
-def test_the_bicycle_card_commits_d_rounds_and_buffers_none_by_default():
+def test_the_bicycle_card_commits_d_rounds_and_refuses_an_unwritten_buffer():
     card = code_geometry.BivariateBicycleCodeModel()
+
     assert card.commit_rounds() == 12
-    assert card.buffer_rounds() == 0
+    with pytest.raises(ValueError, match="windows.scheme.buffer_rounds"):
+        card.buffer_rounds()
 
 
 def test_the_surface_card_commit_override_replaces_d():
@@ -73,7 +75,7 @@ def test_the_surface_card_commit_override_replaces_d():
     assert card.commit_rounds() == 2
 
 
-def test_the_bicycle_card_buffer_override_replaces_zero():
+def test_the_bicycle_card_buffer_is_the_one_the_windows_write():
     card = code_geometry.BivariateBicycleCodeModel(buffer_rounds_override=3)
     assert card.buffer_rounds() == 3
 

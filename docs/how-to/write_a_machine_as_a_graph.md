@@ -132,11 +132,15 @@ YAML.
 decsim params run.py --only uf_d5
 decsim run run.py --set uf.unit_count=2 --set uf.placed=host
 decsim describe run.py --only uf_d5
+decsim describe run.py --only uf_d5 --json
 ```
 
 `describe` prints the task's machine as YAML, then every path's
 latency and rate as the run prices them. A task built from
-`MachineSettings` is printed as the graph it resolves from.
+`MachineSettings` is printed as the graph it resolves from. `--json`
+writes the same graph and paths as one json object, for a script to
+read. A record decsim does not define is written by its import path, so
+the text reads back.
 
 A graph of two pools and one edge at most runs as the `MachineSettings`
 record it resolves to, and keeps that record's task id. A graph of more

@@ -207,9 +207,19 @@ class BivariateBicycleCodeModel:
         return self.commit_rounds_override
 
     def buffer_rounds(self) -> int:
-        """Look-ahead rounds per decode window; none by default."""
+        """Look-ahead rounds per decode window, as the windows write it.
+
+        The card holds no default. The sliding windows decoded on a
+        bivariate-bicycle code in 2601.17757 (Fig. 13, line 1348) buffer d
+        rounds after d committed, and no source gives none; a default
+        taken in silence would change a run under an unchanged id.
+        """
         if self.buffer_rounds_override is None:
-            return 0
+            raise ValueError(
+                "the bivariate-bicycle card has no look-ahead of its own; "
+                "write windows.scheme.buffer_rounds (2601.17757 Fig. 13 "
+                "buffers d rounds)"
+            )
         return self.buffer_rounds_override
 
     def spatial_nodes(self, patch_count: int) -> int:

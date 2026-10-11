@@ -10,6 +10,7 @@ prefetcher holds a NULL one (src/mem/cache/Cache.py:108).
 import dataclasses
 from typing import TYPE_CHECKING, Optional
 
+import decsim.build.layout as layout_module
 import decsim.build.routes as routes_build
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
@@ -98,9 +99,11 @@ class Switching:
         """Wire the strong side, then bind it on the ports left empty."""
         self._wire_the_strong_side(plan, windows)
         strong_redecode = self.strong_redecode
-        strong_redecode.carried_from = readout.weak_syndrome_buffer
-        strong_redecode.strong_receiver = readout.strong_syndrome_round_receiver
-        strong_redecode.strong_output = readout.strong_output
+        entry_store = readout.stores[0]
+        target_store = readout.store_parts(layout_module.STRONG_STORE)
+        strong_redecode.carried_from = entry_store.store
+        strong_redecode.strong_receiver = target_store.receiver
+        strong_redecode.strong_output = target_store.output
         strong_redecode.decode_queue = decoders.strong_decoder_manager
         strong_redecode.policy = self.policy
         windows.gap_join.signal = self.confidence_signal
@@ -162,6 +165,14 @@ def build_switching(
     return Switching.build(
         settings, weak_decoder, engine, online_threshold, machine_clock
     )
+
+
+def signal_by_pool(switching: Optional[Switching]) -> dict:
+    """Each source pool's confidence signal; none with no switching."""
+    if switching is None:
+        return {}
+    source = switching.strong_redecode.source
+    return {source: switching.confidence_signal}
 
 
 def escalate_edges_of(

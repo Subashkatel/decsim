@@ -38,6 +38,7 @@ repository.
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
@@ -58,8 +59,8 @@ distance 3: one record for each part of the machine.
 Some things are built from the settings before any part exists, because
 more than one part is built for them: the switching part, the plan (the
 windows, the circuit and the round clock), the detection event
-formation, the decoder units, and the store slots: which syndrome
-buffers a decoder reads, and whether it reads them in place.
+formation, the layout (each pool, the store it reads, whether it reads
+it in place, and each escalate edge), and the decoder units.
 
 ```python
 engine = engine_module.Engine()
@@ -89,17 +90,10 @@ detection_events = readout_part.build_detection_events(
     window_tier,
     escalates,
 )
-pool = decoders_part.build_decoder_pool(
-    window_decoder,
-    settings.strong_decoder,
-    window_tier,
-    escalates,
-    settings.clock,
-    detection_events,
-    switching.confidence_signal,
-)
-weak_store_slot, strong_store_slot = machine_module.store_slots(
-    settings, window_tier, pool
+layout = layout_module.legacy_layout(settings)
+signal_by_pool = escalation_build.signal_by_pool(switching)
+pools = decoders_part.build_pool_units(
+    layout, settings.clock, detection_events, signal_by_pool
 )
 policy_type = type(switching.policy)
 print(policy_type.__name__, plan.round_ticks)
@@ -132,8 +126,7 @@ control = control_part.Control.build(
 readout = readout_part.Readout.build(
     settings.controller,
     settings.links,
-    weak_store_slot,
-    strong_store_slot,
+    layout.stores,
     settings.clock,
     engine,
     detection_events,
@@ -153,8 +146,13 @@ windows = windows_part.Windows.build(
     links,
     window_models,
 )
+target_by_source = layout.target_by_source()
 decoders = decoders_part.Decoders.build(
-    settings.decoder_manager, settings.clock, engine, pool
+    settings.decoder_manager,
+    settings.clock,
+    engine,
+    pools,
+    target_by_source,
 )
 ```
 

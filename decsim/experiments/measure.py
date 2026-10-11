@@ -16,6 +16,7 @@ import statistics
 from typing import Any, Optional, Union
 
 import decsim.build.decoders as decoders_part
+import decsim.build.layout as layout_module
 import decsim.build.routes as routes_build
 import decsim.config as config_module
 import decsim.experiments.collect as collect
@@ -166,7 +167,7 @@ WINDOW_STATUS_COLUMNS = tuple(
 # The settings paths each tier's pool keeps its statistics at
 # (build/decoders.py Decoders.attach_statistics).
 WEAK_POOL_PATH = "weak_decoder"
-STRONG_POOL_PATH = decoders_part.STRONG_PATH
+STRONG_POOL_PATH = layout_module.STRONG_SEAT
 # which store's output link carries a tier's window in, keyed by the tier
 # whose decode the frame committed rather than by the row's name
 INPUT_LINK_BY_TIER = {

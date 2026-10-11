@@ -7,8 +7,9 @@ reads it. A store exists only when a decoder reads it.
 """
 
 import dataclasses
-from typing import Optional, Union
+from typing import Any, Optional
 
+import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.round_assembly as round_assembly
@@ -22,61 +23,29 @@ import decsim.engine as engine_module
 import decsim.links.settings as link_settings
 import decsim.links.window_transfers as window_transfers
 import decsim.ports as ports
-import decsim.records.log_sources as log_sources
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
-
-# the hops that land in the stores, by the names their log and copies use
-CONTROLLER_TO_WEAK_STORE = receiver_module.Hop(
-    "controller_to_weak_buffer", "controller assembler"
-)
-CONTROLLER_TO_STRONG_STORE = receiver_module.Hop(
-    "controller_to_strong_buffer", "controller assembler"
-)
-ESCALATION_TO_STRONG_STORE = receiver_module.Hop(
-    "weak_decoder_to_strong_decoder", "weak syndrome buffer"
-)
-# how each store takes its rounds
-WEAK_STORE_INTAKE = receiver_module.StoreIntake(
-    name=log_sources.WEAK_BUFFER,
-    seat="weak_syndrome_buffer",
-    shape="written",
-    controller_write=CONTROLLER_TO_WEAK_STORE,
-)
-STRONG_STORE_INTAKE = receiver_module.StoreIntake(
-    name=log_sources.STRONG_BUFFER,
-    seat="strong_syndrome_buffer",
-    shape="landed",
-    controller_write=CONTROLLER_TO_STRONG_STORE,
-    escalation=ESCALATION_TO_STRONG_STORE,
-)
 
 
 @dataclasses.dataclass(frozen=True)
-class StoreSlot:
-    """One decoder's read access to a syndrome buffer.
+class StoreParts:
+    """One store, its outgoing end and its receiving end, and its plan."""
 
-    reads_in_place: the unit reads the rounds where the store keeps them
-    (DecoderPoolSettings.copies_input False).
-    """
-
-    settings: Union[
-        syndrome_buffer_module.SyndromeBufferSettings,
-        ported_syndrome_buffer.PortedSyndromeBufferSettings,
-    ]
-    reads_in_place: bool
+    plan: layout_module.StorePlan
+    store: ports.SyndromeBuffer
+    output: round_output.SyndromeBufferOutput
+    receiver: receiver_module.SyndromeRoundReceiver
 
 
 @dataclasses.dataclass(frozen=True)
 class Readout:
     """Every component a round passes on its way into the stores.
 
-    A store no decoder reads has its three fields None. primary_output is
-    the outgoing end of the store the plan's windows read.
+    stores holds each store the layout reads, the entry store first: the
+    one the controller writes, whose outgoing end serves the plan's
+    windows.
     """
 
     controller: controller_module.Controller
@@ -89,25 +58,14 @@ class Readout:
     held_rounds: syndrome_round_sender.HeldRounds
     store_transfers: window_transfers.WindowTransfers
     memory_arrivals: memory_rounds.MemoryRoundArrivals
-    weak_syndrome_buffer: Optional[ports.SyndromeBuffer]
-    weak_output: Optional[round_output.SyndromeBufferOutput]
-    weak_syndrome_round_receiver: Optional[
-        receiver_module.SyndromeRoundReceiver
-    ]
-    strong_syndrome_buffer: Optional[ports.SyndromeBuffer]
-    strong_output: Optional[round_output.SyndromeBufferOutput]
-    strong_syndrome_round_receiver: Optional[
-        receiver_module.SyndromeRoundReceiver
-    ]
-    primary_output: Optional[round_output.SyndromeBufferOutput]
+    stores: tuple
 
     @classmethod
     def build(
         cls,
         controller_settings: controller_settings_module.ControllerSettings,
         link_card: link_settings.FabricSettings,
-        weak_store_slot: Optional[StoreSlot],
-        strong_store_slot: Optional[StoreSlot],
+        store_plans: tuple,
         machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         detection_events: ports.DetectionEventPlacement,
@@ -115,8 +73,8 @@ class Readout:
     ) -> "Readout":
         """Every component of the readout path, wired to one another."""
         _check_readout_cost_is_priced(controller_settings, link_card)
-        _check_one_price_for_a_read(weak_store_slot, link_card)
-        _check_strong_store_charges_nothing(strong_store_slot)
+        for plan in store_plans:
+            _check_the_store_prices(plan, link_card)
         clocked_controller = config.with_machine_clock(
             controller_settings, machine_clock
         )
@@ -125,21 +83,16 @@ class Readout:
         packing_line = syndrome_round_sender.HeldRounds(engine)
         in_flight_bound = controller_settings.packing_rounds_in_flight
         rounds_in_flight = round_assembly.RoundsInFlight(in_flight_bound)
-        landing_path = _landing_path(weak_store_slot, strong_store_slot)
+        landing_path = _landing_path(store_plans)
         sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
         transmitter = round_transmission.RoundTransmitter(engine)
         held_rounds = syndrome_round_sender.HeldRounds(engine)
         store_transfers = window_transfers.WindowTransfers(engine)
         memory_arrivals = memory_rounds.MemoryRoundArrivals(engine)
-        weak_store, weak_output, weak_receiver = _weak_store(
-            weak_store_slot, machine_clock, engine
-        )
-        strong_store, strong_output, strong_receiver = _strong_store(
-            strong_store_slot, engine
-        )
-        primary_output = weak_output
-        if weak_output is None:
-            primary_output = strong_output
+        stores = []
+        for plan in store_plans:
+            parts = _store_parts(plan, machine_clock, engine)
+            stores.append(parts)
         readout = cls(
             controller=controller,
             detection_events=detection_events,
@@ -151,19 +104,72 @@ class Readout:
             held_rounds=held_rounds,
             store_transfers=store_transfers,
             memory_arrivals=memory_arrivals,
-            weak_syndrome_buffer=weak_store,
-            weak_output=weak_output,
-            weak_syndrome_round_receiver=weak_receiver,
-            strong_syndrome_buffer=strong_store,
-            strong_output=strong_output,
-            strong_syndrome_round_receiver=strong_receiver,
-            primary_output=primary_output,
+            stores=tuple(stores),
         )
         readout._wire_the_controller_path(links)
-        readout._wire_the_weak_store(links)
-        readout._wire_the_strong_store(links)
-        readout._wire_the_primary_store()
+        for parts in readout.stores:
+            readout._wire_the_store(parts, links)
+        readout._wire_the_entry_store()
         return readout
+
+    def store_parts(self, name: str) -> Optional[StoreParts]:
+        """The parts of the store of this name; None when it was not built."""
+        for parts in self.stores:
+            if parts.plan.name == name:
+                return parts
+        return None
+
+    @property
+    def primary_output(self) -> Optional[round_output.SyndromeBufferOutput]:
+        """The entry store's outgoing end; None with no store."""
+        if not self.stores:
+            return None
+        entry = self.stores[0]
+        return entry.output
+
+    # A legacy machine's stores, by their slots' names; each is None
+    # when the machine has no such store.
+
+    @property
+    def weak_syndrome_buffer(self) -> Optional[ports.SyndromeBuffer]:
+        """The weak store."""
+        return self._legacy_part(layout_module.WEAK_STORE, "store")
+
+    @property
+    def weak_output(self) -> Optional[round_output.SyndromeBufferOutput]:
+        """The weak store's outgoing end."""
+        return self._legacy_part(layout_module.WEAK_STORE, "output")
+
+    @property
+    def weak_syndrome_round_receiver(
+        self,
+    ) -> Optional[receiver_module.SyndromeRoundReceiver]:
+        """The weak store's receiving end."""
+        return self._legacy_part(layout_module.WEAK_STORE, "receiver")
+
+    @property
+    def strong_syndrome_buffer(self) -> Optional[ports.SyndromeBuffer]:
+        """The strong store."""
+        return self._legacy_part(layout_module.STRONG_STORE, "store")
+
+    @property
+    def strong_output(self) -> Optional[round_output.SyndromeBufferOutput]:
+        """The strong store's outgoing end."""
+        return self._legacy_part(layout_module.STRONG_STORE, "output")
+
+    @property
+    def strong_syndrome_round_receiver(
+        self,
+    ) -> Optional[receiver_module.SyndromeRoundReceiver]:
+        """The strong store's receiving end."""
+        return self._legacy_part(layout_module.STRONG_STORE, "receiver")
+
+    def _legacy_part(self, name: str, field_name: str) -> Any:
+        """One field of the named store's parts; None with no such store."""
+        parts = self.store_parts(name)
+        if parts is None:
+            return None
+        return getattr(parts, field_name)
 
     def connect(
         self,
@@ -172,23 +178,19 @@ class Readout:
     ) -> None:
         """Tell the window side of every round that lands."""
         self.memory_arrivals.windows = windows
-        if self.weak_syndrome_round_receiver is not None:
-            self.weak_syndrome_round_receiver.windows = windows
         self.store_transfers.retention = retention
-        if self.strong_syndrome_round_receiver is not None:
-            self.strong_syndrome_round_receiver.windows = windows
+        for parts in self.stores:
+            parts.receiver.windows = windows
 
     def check_settled(self) -> None:
         """No round is still on its way; the stores before the waiting line.
 
         A round held for room is the symptom and the hold that keeps the
-        store full the cause, so the stores are asked first.
+        store full the cause, so the stores are asked first, entry first.
         """
         self.assembler.check_settled()
-        if self.weak_syndrome_round_receiver is not None:
-            self.weak_syndrome_round_receiver.check_settled()
-        if self.strong_syndrome_round_receiver is not None:
-            self.strong_syndrome_round_receiver.check_settled()
+        for parts in self.stores:
+            parts.receiver.check_settled()
         self.syndrome_round_sender.check_settled()
         self.transmitter.check_settled()
         self.detection_events.check_settled()
@@ -199,13 +201,10 @@ class Readout:
 
     def statistics_parts(self) -> tuple:
         """Each store the run built, at its settings path."""
-        stores = (
-            ("weak_syndrome_buffer", self.weak_syndrome_buffer),
-            ("strong_syndrome_buffer", self.strong_syndrome_buffer),
-        )
-        return tuple(
-            (path, store) for path, store in stores if store is not None
-        )
+        parts_by_path = []
+        for parts in self.stores:
+            parts_by_path.append((parts.plan.name, parts.store))
+        return tuple(parts_by_path)
 
     def _wire_the_controller_path(self, links: ports.Link) -> None:
         self.controller.link = links
@@ -226,50 +225,40 @@ class Readout:
         self.transmitter.memory_arrivals = self.memory_arrivals
         self.store_transfers.link = links
 
-    def _wire_the_weak_store(self, links: ports.Link) -> None:
-        receiver = self.weak_syndrome_round_receiver
-        if receiver is None:
-            return
-        self.weak_syndrome_buffer.held_rounds = self.held_rounds
-        self.weak_output.transfers = self.store_transfers
-        self.weak_output.store = self.weak_syndrome_buffer
-        self.weak_output.link = links
-        self.weak_output.detection_events = self.detection_events
-        receiver.store = self.weak_syndrome_buffer
-        receiver.output = self.weak_output
-        receiver.detection_events = self.detection_events
-        self.transmitter.receiver = receiver
+    def _wire_the_store(self, parts: StoreParts, links: ports.Link) -> None:
+        """One store between its receiving end and its outgoing end.
 
-    def _wire_the_strong_store(self, links: ports.Link) -> None:
-        receiver = self.strong_syndrome_round_receiver
-        if receiver is None:
+        A written store takes its rounds from the transmitter; a landed
+        one tells the memory arrivals of each round it stores.
+        """
+        store = parts.store
+        output = parts.output
+        receiver = parts.receiver
+        store.held_rounds = self.held_rounds
+        output.transfers = self.store_transfers
+        output.store = store
+        output.link = links
+        output.detection_events = self.detection_events
+        receiver.store = store
+        receiver.output = output
+        receiver.detection_events = self.detection_events
+        if parts.plan.intake.shape == receiver_module.WRITTEN:
+            self.transmitter.receiver = receiver
             return
-        self.strong_syndrome_buffer.held_rounds = self.held_rounds
-        self.strong_output.transfers = self.store_transfers
-        self.strong_output.store = self.strong_syndrome_buffer
-        self.strong_output.link = links
-        self.strong_output.detection_events = self.detection_events
-        receiver.store = self.strong_syndrome_buffer
-        receiver.output = self.strong_output
         receiver.memory_arrivals = self.memory_arrivals
-        receiver.detection_events = self.detection_events
 
-    def _wire_the_primary_store(self) -> None:
+    def _wire_the_entry_store(self) -> None:
         """The store the plan's windows read: the one the sender writes.
 
         It tells the seats what leaves it: every read holds its rounds
         there until they have landed and formed, so a round that leaves
         it is formed nowhere after.
         """
-        primary_store = self.weak_syndrome_buffer
-        primary_receiver = self.weak_syndrome_round_receiver
-        if self.primary_output is self.strong_output:
-            primary_store = self.strong_syndrome_buffer
-            primary_receiver = self.strong_syndrome_round_receiver
-        if primary_store is None:
+        if not self.stores:
             return
-        primary_store.detection_events = self.detection_events
-        self.syndrome_round_sender.receiver = primary_receiver
+        entry = self.stores[0]
+        entry.store.detection_events = self.detection_events
+        self.syndrome_round_sender.receiver = entry.receiver
 
 
 def build_detection_events(
@@ -299,69 +288,62 @@ def build_detection_events(
     return formation.SeatedFormation(source, clocked_settings)
 
 
-def _weak_store(
-    slot: Optional[StoreSlot],
+def _store_parts(
+    plan: layout_module.StorePlan,
     machine_clock: Optional[config.Clock],
     engine: engine_module.Engine,
-) -> tuple:
-    """The weak syndrome buffer, its outgoing end and its receiving end."""
-    if slot is None:
-        return None, None, None
-    store_settings = config.with_machine_clock(slot.settings, machine_clock)
+) -> StoreParts:
+    """One store, its outgoing end and its receiving end."""
+    store_settings = plan.settings
+    if plan.takes_machine_clock:
+        store_settings = config.with_machine_clock(
+            store_settings, machine_clock
+        )
     store = store_settings.build(engine)
     output = round_output.SyndromeBufferOutput(
         engine,
-        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
-        "weak syndrome buffer",
-        slot.reads_in_place,
-        "weak_decoder",
+        plan.read_hop,
+        plan.label,
+        plan.reads_in_place,
+        plan.reader,
     )
-    receiver = receiver_module.SyndromeRoundReceiver(engine, WEAK_STORE_INTAKE)
-    return store, output, receiver
+    receiver = receiver_module.SyndromeRoundReceiver(engine, plan.intake)
+    return StoreParts(plan, store, output, receiver)
 
 
-def _strong_store(
-    slot: Optional[StoreSlot], engine: engine_module.Engine
-) -> tuple:
-    """The strong syndrome buffer, its outgoing end and its receiving end."""
-    if slot is None:
-        return None, None, None
-    store = slot.settings.build(engine)
-    output = round_output.SyndromeBufferOutput(
-        engine,
-        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER,
-        "strong syndrome buffer",
-        slot.reads_in_place,
-        "strong_decoder",
-    )
-    receiver = receiver_module.SyndromeRoundReceiver(
-        engine, STRONG_STORE_INTAKE
-    )
-    return store, output, receiver
+def _landing_path(store_plans: tuple) -> Optional[transfer_records.LinkPath]:
+    """The hop the entry store's rounds land over; None for a written one.
 
-
-def _landing_path(
-    weak_store_slot: Optional[StoreSlot], strong_store_slot: Optional[StoreSlot]
-) -> Optional[transfer_records.LinkPath]:
-    """The hop a landed store's rounds cross; None for a written store.
-
-    The weak store, when the run has one, is the store the windows read,
-    and takes its rounds written; a run whose only store is the strong
-    one writes it over controller_to_strong_buffer.
+    An entry store the controller writes takes its rounds through the
+    transmitter; one that takes them landed, as a strong-only run's
+    strong store does, is reached over its controller hop.
     """
-    if weak_store_slot is not None or strong_store_slot is None:
+    if not store_plans:
         return None
-    return transfer_records.CONTROLLER_TO_STRONG_BUFFER
+    entry = store_plans[0]
+    intake = entry.intake
+    if intake.shape == receiver_module.WRITTEN:
+        return None
+    return intake.controller_write.path_name
 
 
-def _check_strong_store_charges_nothing(slot: Optional[StoreSlot]) -> None:
-    """Refuse a cost on the strong syndrome buffer: it is never paid."""
-    if slot is None:
+def _check_the_store_prices(
+    plan: layout_module.StorePlan, link_card: link_settings.FabricSettings
+) -> None:
+    """A written store may price its reads; a landed one charges nothing."""
+    if plan.intake.shape == receiver_module.WRITTEN:
+        _check_one_price_for_a_read(plan, link_card)
         return
-    settings = slot.settings
+    _check_landed_store_charges_nothing(plan)
+
+
+def _check_landed_store_charges_nothing(plan: layout_module.StorePlan) -> None:
+    """Refuse a cost on a landed store: it is never paid."""
+    settings = plan.settings
+    label = plan.label
     if settings.prices_read_bits:
         raise ValueError(
-            "the strong syndrome buffer takes SyndromeBufferSettings, not "
+            f"the {label} takes SyndromeBufferSettings, not "
             "PortedSyndromeBufferSettings: it stores a round as it lands "
             "and books no port access"
         )
@@ -369,9 +351,9 @@ def _check_strong_store_charges_nothing(slot: Optional[StoreSlot]) -> None:
     if not charged:
         return
     raise ValueError(
-        f"the strong syndrome buffer's settings set {charged}, which only "
-        "the weak syndrome buffer charges; the strong syndrome buffer "
-        "stores a round as it lands and charges nothing, so leave them out"
+        f"the {label}'s settings set {charged}, which only the store the "
+        f"controller writes charges; the {label} stores a round as it "
+        "lands and charges nothing, so leave them out"
     )
 
 
@@ -388,22 +370,19 @@ def _charged_cost_fields(settings) -> list:
 
 
 def _check_one_price_for_a_read(
-    weak_store_slot: Optional[StoreSlot],
-    link_card: link_settings.FabricSettings,
+    plan: layout_module.StorePlan, link_card: link_settings.FabricSettings
 ) -> None:
-    """A ported weak store prices its reads; a link rate would charge twice."""
-    if weak_store_slot is None:
+    """A ported store prices its reads; a link rate would charge twice."""
+    if not plan.settings.prices_read_bits:
         return
-    if not weak_store_slot.settings.prices_read_bits:
-        return
-    path = link_card.weak_buffer_to_weak_decoder
+    path = link_card.path_settings(plan.read_hop)
     if path.channel.capacity is None:
         return
     raise ValueError(
-        "weak_syndrome_buffer kind ported_syndrome_buffer prices the read "
-        "out of the store by its words, and links.weak_buffer_to_weak_decoder "
-        "has a rate that would charge the same bits again; set its "
-        "bits_per_cycle to null"
+        f"{plan.name} kind ported_syndrome_buffer prices the read out of "
+        f"the store by its words, and links.{plan.read_hop} has a rate "
+        "that would charge the same bits again; set its bits_per_cycle "
+        "to null"
     )
 
 

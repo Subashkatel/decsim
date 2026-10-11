@@ -49,7 +49,9 @@ import decsim.records.rounds as round_records
 import decsim.trace_source as trace_source
 
 # how a store takes its rounds, as the module docstring says
-INTAKES = ("written", "landed")
+WRITTEN = "written"
+LANDED = "landed"
+INTAKES = (WRITTEN, LANDED)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -234,7 +236,7 @@ class SyndromeRoundReceiver:
             raise RuntimeError(
                 f"{self.intake.name} ended with {in_flight} writes in flight"
             )
-        if self.intake.shape == "landed" or self.store.occupied_bits:
+        if self.intake.shape == LANDED or self.store.occupied_bits:
             self.store.check_settled()
 
     def _write(

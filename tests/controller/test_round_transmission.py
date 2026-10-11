@@ -20,7 +20,7 @@ import dataclasses
 
 import pytest
 
-import decsim.build.readout as readout_part
+import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
@@ -184,7 +184,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     store_output.store = store
     store_output.link = links
     weak_receiver = receiver_module.SyndromeRoundReceiver(
-        engine, readout_part.WEAK_STORE_INTAKE
+        engine, layout_module.WEAK_STORE_INTAKE
     )
     weak_receiver.store = store
     weak_receiver.output = store_output

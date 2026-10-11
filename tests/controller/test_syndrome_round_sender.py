@@ -27,7 +27,7 @@ left by). The crossing's own delay is the card's, on the reference
 profile.
 """
 
-import decsim.build.readout as readout_part
+import decsim.build.layout as layout_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -124,7 +124,7 @@ def sender_with(
     links = fabric_module.LinkFabric(profile, engine)
     windows = RecordingWindows()
     weak_receiver = receiver_module.SyndromeRoundReceiver(
-        engine, readout_part.WEAK_STORE_INTAKE
+        engine, layout_module.WEAK_STORE_INTAKE
     )
     weak_receiver.store = weak_store
     weak_receiver.windows = windows

@@ -36,6 +36,7 @@ import stim
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
@@ -382,7 +383,10 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     settings = distance_three.machine
     engine = engine_module.Engine()
     switching = escalation_build.build_switching(
-        settings.switching, settings.weak_decoder, engine
+        settings.switching,
+        settings.weak_decoder,
+        engine,
+        machine_clock=settings.clock,
     )
     plan = plan_build.build_plan(
         settings.qpu,
@@ -404,18 +408,10 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         window_tier,
         escalates,
     )
-    signal = switching.confidence_signal
-    pool = decoders_part.build_decoder_pool(
-        window_decoder,
-        settings.strong_decoder,
-        window_tier,
-        escalates,
-        settings.clock,
-        detection_events,
-        signal,
-    )
-    weak_store_slot, strong_store_slot = machine_module.store_slots(
-        settings, window_tier, pool
+    layout = layout_module.legacy_layout(settings)
+    signal_by_pool = escalation_build.signal_by_pool(switching)
+    pools = decoders_part.build_pool_units(
+        layout, settings.clock, detection_events, signal_by_pool
     )
     links = machine_module.build_links(settings, engine)
     qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -430,8 +426,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     readout = readout_part.Readout.build(
         settings.controller,
         settings.links,
-        weak_store_slot,
-        strong_store_slot,
+        layout.stores,
         settings.clock,
         engine,
         detection_events,
@@ -451,8 +446,13 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         links,
         built_models,
     )
+    target_by_source = layout.target_by_source()
     decoders = decoders_part.Decoders.build(
-        settings.decoder_manager, settings.clock, engine, pool
+        settings.decoder_manager,
+        settings.clock,
+        engine,
+        pools,
+        target_by_source,
     )
     arrivals = readout.memory_arrivals
     unbound = "MemoryRoundArrivals.windows was read before it was bound"

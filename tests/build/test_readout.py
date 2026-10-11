@@ -179,7 +179,7 @@ def test_a_strong_store_cost_is_refused():
 
     sentence = _strong_store_refusal(costed_strong)
 
-    assert "which only the weak syndrome buffer charges" in sentence
+    assert "which only the store the controller writes charges" in sentence
 
 
 def _strong_store_refusal(strong_store) -> str:

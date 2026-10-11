@@ -47,6 +47,7 @@ from typing import Optional
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.build.program as program_build
 import decsim.build.qpu as qpu_part
@@ -61,7 +62,6 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.seeds as seed_records
-import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
@@ -128,6 +128,7 @@ class Machine:
             settings.decoder_manager.bulk_strong,
             switching,
         )
+        layout = layout_module.legacy_layout(settings)
         window_tier = settings.window_tier
         window_decoder = settings.decoder_settings_for(window_tier.word)
         escalates = settings.switching is not None
@@ -138,20 +139,9 @@ class Machine:
             window_tier,
             escalates,
         )
-        confidence_signal = None
-        if switching is not None:
-            confidence_signal = switching.confidence_signal
-        pool = decoders_part.build_decoder_pool(
-            window_decoder,
-            settings.strong_decoder,
-            window_tier,
-            escalates,
-            settings.clock,
-            detection_events,
-            confidence_signal,
-        )
-        weak_store_slot, strong_store_slot = store_slots(
-            settings, window_tier, pool
+        signal_by_pool = escalation_build.signal_by_pool(switching)
+        pools = decoders_part.build_pool_units(
+            layout, settings.clock, detection_events, signal_by_pool
         )
         links = build_links(settings, engine)
         qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -166,8 +156,7 @@ class Machine:
         readout = readout_part.Readout.build(
             settings.controller,
             settings.links,
-            weak_store_slot,
-            strong_store_slot,
+            layout.stores,
             settings.clock,
             engine,
             detection_events,
@@ -186,8 +175,13 @@ class Machine:
             links,
             built_models,
         )
+        target_by_source = layout.target_by_source()
         decoders = decoders_part.Decoders.build(
-            settings.decoder_manager, settings.clock, engine, pool
+            settings.decoder_manager,
+            settings.clock,
+            engine,
+            pools,
+            target_by_source,
         )
         return cls.assemble(
             settings,
@@ -268,7 +262,7 @@ class Machine:
         seed_roots = _seed_roots(plan, links, parts, switching)
         seeding.bind_run_seed(root_seed, seed_roots)
         run_statistics = statistics_registry.Registry(engine)
-        decoders.attach_statistics(run_statistics, settings.window_tier)
+        decoders.attach_statistics(run_statistics)
         statistics_parts = (control, readout, switching)
         _attach_statistics(run_statistics, statistics_parts)
         observation = _observe(
@@ -326,35 +320,6 @@ def build_links(
 ) -> ports.Link:
     """The link fabric, on the run's links card."""
     return fabric.LinkFabric(settings.links, engine)
-
-
-def store_slots(
-    settings: machine_settings.MachineSettings,
-    window_tier: window_records.PoolId,
-    pool: decoders_part.DecoderPool,
-) -> tuple:
-    """The weak and the strong syndrome buffer slots; None for an unread one.
-
-    Each pool says whether its units read the rounds in place.
-    """
-    if pool.active is None:
-        return None, None
-    chip_reads_in_place = not pool.chip.copies_input
-    if window_tier == window_records.STRONG_POOL_ID:
-        strong_store_slot = readout_part.StoreSlot(
-            settings.strong_syndrome_buffer, chip_reads_in_place
-        )
-        return None, strong_store_slot
-    weak_store_slot = readout_part.StoreSlot(
-        settings.weak_syndrome_buffer, chip_reads_in_place
-    )
-    if pool.host is None:
-        return weak_store_slot, None
-    host_reads_in_place = not pool.host.copies_input
-    strong_store_slot = readout_part.StoreSlot(
-        settings.strong_syndrome_buffer, host_reads_in_place
-    )
-    return weak_store_slot, strong_store_slot
 
 
 def _seed_roots(

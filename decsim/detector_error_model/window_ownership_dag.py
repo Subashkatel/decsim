@@ -271,7 +271,7 @@ def _excluded_faults(
         every_fault = list(range(len(catalog.detector_sets)))
         excluded_faults[representation] = (
             window_placement.faults_touching_excluded_rounds(
-                slicer.fault_index.fault_rounds[representation],
+                slicer.fault_index.arrays[representation],
                 fault_exclusion_ranges,
                 every_fault,
             )

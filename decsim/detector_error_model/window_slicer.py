@@ -199,7 +199,7 @@ class WindowSlicer:
         return window_placement.placed_faults_for_window(
             catalog=catalog,
             context=context,
-            fault_rounds=self.fault_index.fault_rounds[representation],
+            arrays=self.fault_index.arrays[representation],
             candidate_faults=candidate_faults,
             committed_elsewhere=committed_elsewhere,
             explicitly_owned_faults=explicitly_owned_faults,
@@ -312,7 +312,8 @@ class _FaultIndex:
 
     `fault_rounds` lists each fault's rounds, one per detector it flips;
     `faults_by_round` lists the faults touching each round, in catalog
-    order.
+    order; `arrays` is the catalog and those rounds laid out for
+    placement.
     """
 
     fault_rounds: dict[
@@ -320,6 +321,10 @@ class _FaultIndex:
     ]
     faults_by_round: dict[
         fault_model_contracts.FaultRepresentation, dict[int, list[int]]
+    ]
+    arrays: dict[
+        fault_model_contracts.FaultRepresentation,
+        window_placement.CatalogArrays,
     ]
 
 
@@ -357,12 +362,18 @@ def _index_faults(
     """Every catalog indexed by round, keyed by representation."""
     fault_rounds = {}
     faults_by_round = {}
+    arrays = {}
     for representation, catalog in catalogs.items():
         rounds_per_fault = _rounds_per_fault(catalog, round_by_detector)
         fault_rounds[representation] = rounds_per_fault
         faults_by_round[representation] = _faults_by_round(rounds_per_fault)
+        arrays[representation] = window_placement.catalog_arrays(
+            catalog, rounds_per_fault
+        )
     return _FaultIndex(
-        fault_rounds=fault_rounds, faults_by_round=faults_by_round
+        fault_rounds=fault_rounds,
+        faults_by_round=faults_by_round,
+        arrays=arrays,
     )
 
 

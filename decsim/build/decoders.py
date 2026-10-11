@@ -121,23 +121,6 @@ class Decoders:
                 units.append(pool.unit)
         return tuple(units)
 
-    @property
-    def strong_decoder_manager(
-        self,
-    ) -> Optional[decoder_manager_module.DecoderManager]:
-        """The manager of the first edge's target; None with no edge."""
-        if len(self.managers) < 2:
-            return None
-        return self.managers[1]
-
-    @property
-    def strong_decoder(self) -> Optional[ports.Decoder]:
-        """The unit of the first edge's target; None with no edge."""
-        if len(self.pools) < 2:
-            return None
-        target = self.pools[1]
-        return target.unit
-
     def manager_of(
         self, pool: window_records.PoolId
     ) -> decoder_manager_module.DecoderManager:

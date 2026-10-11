@@ -146,17 +146,13 @@ def _connect_result_ledger(window_manager) -> result_ledger_module.ResultLedger:
 
 
 def _decoder_managers(decoders) -> tuple:
-    """The chip's manager and, when the run escalates, the host's."""
-    managers = [decoders.decoder_manager]
-    strong = decoders.strong_decoder_manager
-    if strong is not None:
-        managers.append(strong)
-    return tuple(managers)
+    """Every pool's manager, the entry pool's first."""
+    return decoders.managers
 
 
 def _decoder_rows(decoders) -> list:
-    """Every decoder row of the run's two decoder units, either absent."""
-    units = (decoders.primary_decoder, decoders.strong_decoder)
+    """Every decoder row of the run's decoder units, in graph order."""
+    units = [pool.unit for pool in decoders.pools]
     return decoder_pool.decoder_rows(units)
 
 

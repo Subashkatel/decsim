@@ -866,7 +866,7 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     )
 
     machine = machine_module.Machine.build(settings, RUN_SEED)
-    store = machine.readout.weak_syndrome_buffer
+    store = _weak_store(machine)
     stalled = functools.partial(_refuse_a_round_still_held, store)
     machine.engine.schedule(STALL_GUARD_TICKS, stalled, label="stall guard")
 
@@ -1521,7 +1521,8 @@ def test_joint_live_memory_can_use_the_weak_primary_tier(
     _assert_joint_acquisitions(run)
     assert run.result.terminal_status == "complete"
     assert run.result.event_queue_empty
-    assert run.machine.readout.weak_syndrome_buffer.occupancy == 0
+    weak_store = _weak_store(run.machine)
+    assert weak_store.occupancy == 0
     assert run.weak_writes
     paths = _transfer_paths(run)
     assert "controller_to_weak_buffer" in paths
@@ -1881,9 +1882,10 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    assert type(machine.readout.weak_syndrome_buffer) is CountingSyndromeBuffer
+    weak_store = _weak_store(machine)
+    assert type(weak_store) is CountingSyndromeBuffer
     fired = declared_run.log_lines_containing(machine, "fires round")
-    assert machine.readout.weak_syndrome_buffer.stored_count == len(fired)
+    assert weak_store.stored_count == len(fired)
     assert fired
 
 
@@ -2500,9 +2502,12 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
     """
     machine = declared_run.switching_run(escalates=True, rounds=9)
 
-    assert machine.readout.weak_syndrome_buffer.occupancy == 0
-    assert machine.readout.strong_syndrome_buffer.occupancy == 0
-    receiver = machine.readout.strong_syndrome_round_receiver
+    weak_store = _weak_store(machine)
+    strong_store = _strong_store(machine)
+    receiver = _strong_receiver(machine)
+
+    assert weak_store.occupancy == 0
+    assert strong_store.occupancy == 0
     assert receiver.reserved_bits_by_round == {}
 
 
@@ -2789,7 +2794,7 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing():
     free_machine, free_run = late_landing_shot(strong_crossing_cycles=0)
 
     assert priced_run.terminal_status == "complete"
-    receiver = priced_machine.readout.strong_syndrome_round_receiver
+    receiver = _strong_receiver(priced_machine)
     assert receiver.store.occupancy == 0
     assert frame_commit_ticks(priced_machine) == frame_commit_ticks(
         free_machine
@@ -3199,7 +3204,8 @@ def switching_shot(settings, seed: int, models) -> tuple:
     decoders = machine.decoders
     weak_outcomes = decoders.decoder_manager.outcomes
     weak_outcomes.trace.request_ended.connect(listener)
-    strong_outcomes = decoders.strong_decoder_manager.outcomes
+    strong_manager = decoders.manager_of(window_records.STRONG_POOL_ID)
+    strong_outcomes = strong_manager.outcomes
     strong_outcomes.trace.request_ended.connect(listener)
     result = machine.run()
     observation = machine.observation
@@ -3703,7 +3709,7 @@ def _run(
     weak_writes = []
     strong_occupancies = []
     machine.qpu.device.trace.round_emitted.connect(packets.append)
-    weak_store = machine.readout.weak_syndrome_buffer
+    weak_store = _weak_store(machine)
     if weak_store is not None:
         weak_store.trace.round_stored.connect(
             lambda *event: weak_writes.append(event)
@@ -3711,8 +3717,8 @@ def _run(
     observe = functools.partial(
         _record_strong_occupancy, machine, strong_occupancies
     )
-    if machine.readout.strong_syndrome_buffer is not None:
-        strong_store = machine.readout.strong_syndrome_buffer
+    strong_store = _strong_store(machine)
+    if strong_store is not None:
         strong_store.trace.round_stored.connect(observe)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
@@ -3738,8 +3744,9 @@ def _record_strong_occupancy(
     _packet: round_records.SyndromeRoundPacket,
 ) -> None:
     """The strong store's bits held and reserved, as its room test sums them."""
-    stored_bits = machine.readout.strong_syndrome_buffer.occupied_bits
-    receiver = machine.readout.strong_syndrome_round_receiver
+    strong_store = _strong_store(machine)
+    stored_bits = strong_store.occupied_bits
+    receiver = _strong_receiver(machine)
     reserved_widths = receiver.reserved_bits_by_round.values()
     reserved_bits = sum(reserved_widths)
     taken = stored_bits + reserved_bits
@@ -3790,10 +3797,11 @@ def _assert_actual_truth(run: _Run) -> None:
 
 
 def _assert_drained(run: _Run) -> None:
-    weak_store = run.machine.readout.weak_syndrome_buffer
+    weak_store = _weak_store(run.machine)
     assert weak_store is None or weak_store.occupancy == 0
-    assert run.machine.readout.strong_syndrome_buffer.occupancy == 0
-    receiver = run.machine.readout.strong_syndrome_round_receiver
+    strong_store = _strong_store(run.machine)
+    assert strong_store.occupancy == 0
+    receiver = _strong_receiver(run.machine)
     assert receiver.reserved_bits_by_round == {}
     units = run.machine.decoders.decoder_manager.pool.units
     occupied = [unit.memory.occupied_bits for unit in units]
@@ -4011,7 +4019,7 @@ def _run_static(
 ) -> tuple[_Run, dict]:
     machine = machine_module.Machine.build(settings, seed)
     weak_writes = []
-    weak_store = machine.readout.weak_syndrome_buffer
+    weak_store = _weak_store(machine)
     if weak_store is not None:
         weak_store.trace.round_stored.connect(
             lambda *event: weak_writes.append(event)
@@ -4020,7 +4028,7 @@ def _run_static(
     released = functools.partial(
         _record_release, machine, release_ticks_by_round
     )
-    strong_store = machine.readout.strong_syndrome_buffer
+    strong_store = _strong_store(machine)
     strong_store.trace.round_released.connect(released)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
@@ -4423,3 +4431,16 @@ class _FifthRoundReadsTheFirst(circuit_records.RepeatedStimCircuit):
 
 _ADDED_ON_ROUND = {5: stim.Circuit("DETECTOR rec[-1] rec[-5]")}
 _NOTHING_ADDED = stim.Circuit()
+
+
+def _weak_store(machine: machine_module.Machine):
+    return machine.readout.store_named(layout_module.WEAK_STORE)
+
+
+def _strong_store(machine: machine_module.Machine):
+    return machine.readout.store_named(layout_module.STRONG_STORE)
+
+
+def _strong_receiver(machine: machine_module.Machine):
+    strong = machine.readout.store_parts(layout_module.STRONG_STORE)
+    return strong.receiver

@@ -24,6 +24,7 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
+import decsim.records.windows as window_records
 import decsim.statistics.registry as statistics_registry
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
@@ -295,7 +296,7 @@ def test_a_bulk_strong_batch_holds_no_member_that_owes_a_boundary():
         decoder_manager=decoder_manager,
     )
     machine = machine_module.Machine.build(settings, 0)
-    manager = machine.decoders.strong_decoder_manager
+    manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
     debts_at_start = []
 
     def record_debts(job, unit):
@@ -336,7 +337,8 @@ def test_a_bulk_strong_batch_reads_in_place_on_a_strong_tier_that_does():
     every_batch = declared_run.log_lines_containing(
         machine, "START DECODE strong-batch"
     )
-    units = machine.decoders.strong_decoder_manager.pool.units
+    strong_manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
+    units = strong_manager.pool.units
     admissions = [deposits.deposit_count(unit) for unit in units]
     assert every_batch
     assert admissions == [0]

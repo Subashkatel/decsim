@@ -7,7 +7,7 @@ reads it. A store exists only when a decoder reads it.
 """
 
 import dataclasses
-from typing import Any, Optional
+from typing import Optional
 
 import decsim.build.layout as layout_module
 import decsim.config as config
@@ -124,7 +124,10 @@ class Readout:
         """The store of this name; None for no name or a store not built."""
         if name is None:
             return None
-        return self._legacy_part(name, "store")
+        parts = self.store_parts(name)
+        if parts is None:
+            return None
+        return parts.store
 
     @property
     def primary_output(self) -> Optional[round_output.SyndromeBufferOutput]:
@@ -133,50 +136,6 @@ class Readout:
             return None
         entry = self.stores[0]
         return entry.output
-
-    # A legacy machine's stores, by their slots' names; each is None
-    # when the machine has no such store.
-
-    @property
-    def weak_syndrome_buffer(self) -> Optional[ports.SyndromeBuffer]:
-        """The weak store."""
-        return self._legacy_part(layout_module.WEAK_STORE, "store")
-
-    @property
-    def weak_output(self) -> Optional[round_output.SyndromeBufferOutput]:
-        """The weak store's outgoing end."""
-        return self._legacy_part(layout_module.WEAK_STORE, "output")
-
-    @property
-    def weak_syndrome_round_receiver(
-        self,
-    ) -> Optional[receiver_module.SyndromeRoundReceiver]:
-        """The weak store's receiving end."""
-        return self._legacy_part(layout_module.WEAK_STORE, "receiver")
-
-    @property
-    def strong_syndrome_buffer(self) -> Optional[ports.SyndromeBuffer]:
-        """The strong store."""
-        return self._legacy_part(layout_module.STRONG_STORE, "store")
-
-    @property
-    def strong_output(self) -> Optional[round_output.SyndromeBufferOutput]:
-        """The strong store's outgoing end."""
-        return self._legacy_part(layout_module.STRONG_STORE, "output")
-
-    @property
-    def strong_syndrome_round_receiver(
-        self,
-    ) -> Optional[receiver_module.SyndromeRoundReceiver]:
-        """The strong store's receiving end."""
-        return self._legacy_part(layout_module.STRONG_STORE, "receiver")
-
-    def _legacy_part(self, name: str, field_name: str) -> Any:
-        """One field of the named store's parts; None with no such store."""
-        parts = self.store_parts(name)
-        if parts is None:
-            return None
-        return getattr(parts, field_name)
 
     def connect(
         self,

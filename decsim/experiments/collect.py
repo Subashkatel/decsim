@@ -106,8 +106,10 @@ class Task:
 
     machine may be a graph (decsim/topology/graph.py): the assignments in
     force then name its paths (uf.unit_count), and graph keeps the graph
-    as assigned. A graph today's slots hold runs as, and is identified
-    by, the MachineSettings it resolves to (topology/legacy.py). A graph
+    as assigned. graph is a field of the record, so a copy made with
+    dataclasses.replace keeps it, and its layout is laid out again. A
+    graph today's slots hold runs as, and is identified by, the
+    MachineSettings it resolves to (topology/legacy.py). A graph
     of a new shape is identified by itself, under GRAPH_ID_KEY; it runs
     on its layout (topology/graph_layout.py), and machine is its entry
     edge's record, which the reports read.
@@ -120,7 +122,7 @@ class Task:
     record_options: RecordOptions = RecordOptions()
     online_threshold: Optional[ports.ThresholdSource] = None
     graph: Optional[topology_graph.Machine] = dataclasses.field(
-        default=None, init=False, compare=False
+        default=None, compare=False
     )
     # a new-shape graph's pools, stores and edges; None for a machine
     # today's slots hold

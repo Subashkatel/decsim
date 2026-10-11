@@ -30,7 +30,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.routes as route_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
@@ -163,18 +162,6 @@ WINDOW_STATUS_COLUMNS = tuple(
     if status is not decoding_records.BackendDecodeStatus.SUCCEEDED
 )
 
-# The settings paths each tier's pool keeps its statistics at
-# (build/decoders.py Decoders.attach_statistics).
-WEAK_POOL_PATH = "weak_decoder"
-STRONG_POOL_PATH = layout_module.STRONG_SEAT
-# which store's output link carries a tier's window in, keyed by the tier
-# whose decode the frame committed rather than by the row's name
-INPUT_LINK_BY_TIER = {
-    window_records.WEAK_POOL_ID: (transfer_records.WEAK_BUFFER_TO_WEAK_DECODER),
-    window_records.STRONG_POOL_ID: (
-        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER
-    ),
-}
 
 # the hop a boundary's delay is kept under, whichever path it rode
 BOUNDARY_HOP = "boundary"
@@ -396,12 +383,11 @@ def measure_shot(
         device.clock.period_ticks
     )
     layout = shot.machine.layout
-    routes = layout.routes()
     return _measurement(
         settings,
         observation,
         shot.result,
-        routes=routes,
+        layout=layout,
         record_options=shot.task.record_options,
         code=device.code,
         round_period_microseconds=round_period_microseconds,
@@ -780,11 +766,14 @@ def collect_samples(
     result: result_records.RunResult,
     observation_settings: observe_settings.ObservationSettings,
     routes: route_records.Routes,
+    input_hops: dict,
 ) -> tuple:
     """Every recorded point's microsecond samples, and each window's tier.
 
     Every point describes the decode the frame committed, named by the
-    frame record's tier and run ordinal. Only the windows and rounds in
+    frame record's tier and run ordinal; input_hops is the hop each
+    pool's input rides (Layout.input_hop_by_pool), keyed by the pool
+    whose decode the frame committed. Only the windows and rounds in
     the measurement interval are sampled, but for the end-of-stream
     reaction, which is the drain the interval leaves out. It stays whole
     past the size
@@ -819,8 +808,7 @@ def collect_samples(
     ):
         decode = _committed_decode(stages, frame_record)
         first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
-        input_link = INPUT_LINK_BY_TIER[decode.tier]
-        input_path = input_link
+        input_path = input_hops[decode.tier]
         stage_us = _stage_microseconds(stages, frame_record)
         window_samples = window_points_us(
             window,
@@ -1061,7 +1049,7 @@ def _measurement(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
-    routes: route_records.Routes,
+    layout: layout_module.Layout,
     record_options: collect.RecordOptions,
     code: ports.CodeModel,
     round_period_microseconds: float,
@@ -1080,8 +1068,10 @@ def _measurement(
     owner_rounds = rounds_by_owner.values()
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
+    routes = layout.routes()
+    input_hops = layout.input_hop_by_pool()
     samples, window_tiers = collect_samples(
-        observation, result, settings.observation, routes
+        observation, result, settings.observation, routes, input_hops
     )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
@@ -1106,7 +1096,8 @@ def _measurement(
     round_period_ticks = config_module.microseconds_to_ticks(
         round_period_microseconds
     )
-    pools = _pool_measures(observation, round_period_ticks)
+    pool_paths = layout.statistics_path_by_pool()
+    pools = _pool_measures(observation, round_period_ticks, pool_paths)
     strong = _strong_decodes(observation)
     tiers = _tier_records(observation)
     backlog_peak = _backlog_peak_rounds(observation)
@@ -1636,18 +1627,21 @@ def _referee_counts(
 def _pool_measures(
     observation: observation_module.Observation,
     round_period_ticks: int,
+    pool_paths: dict,
 ) -> _PoolMeasures:
     """Each tier's queue peak, busy fraction and load, from its statistics.
 
-    A pool's statistics are kept at its tier's settings path, so the
-    plan's windows count for the window tier (weak_decoder, or
-    strong_decoder on a strong-only run); a tier the run lacks reads
-    zero.
+    pool_paths is where each pool keeps its statistics
+    (Layout.statistics_path_by_pool). The weak row reads the pool whose
+    results write weak, the strong row the one that writes strong (a
+    strong-only run's window pool); a tier the run lacks reads zero.
     """
     generation_ticks = _generation_span_ticks(observation, round_period_ticks)
     run_statistics = observation.statistics
-    weak = _pool_numbers(run_statistics, WEAK_POOL_PATH, generation_ticks)
-    strong = _pool_numbers(run_statistics, STRONG_POOL_PATH, generation_ticks)
+    weak_path = pool_paths.get(window_records.WEAK_POOL_ID)
+    strong_path = pool_paths.get(window_records.STRONG_POOL_ID)
+    weak = _pool_numbers(run_statistics, weak_path, generation_ticks)
+    strong = _pool_numbers(run_statistics, strong_path, generation_ticks)
     return _PoolMeasures(
         weak_queue_max=weak.queue_max,
         strong_queue_max=strong.queue_max,
@@ -1660,7 +1654,7 @@ def _pool_measures(
 
 def _pool_numbers(
     run_statistics: statistics_registry.Registry,
-    path: str,
+    path: Optional[str],
     generation_ticks: int,
 ) -> "_PoolNumbers":
     """One pool's queue peak, busy fraction and offered load.
@@ -1671,6 +1665,8 @@ def _pool_numbers(
     units times the generation span: rho = lambda E[S] / c, the ratio
     chain_load forms for the serial chain.
     """
+    if path is None:
+        return _NO_POOL
     units_group = run_statistics.groups.get(f"{path}.units")
     if units_group is None:
         return _NO_POOL

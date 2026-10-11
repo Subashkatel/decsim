@@ -22,6 +22,7 @@ import pytest
 import stim
 
 import decsim.build.decoders as decoder_build
+import decsim.build.layout as layout_module
 import decsim.confidence.cluster as cluster
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
@@ -359,11 +360,8 @@ def _formed_at(settings, where: str):
 
 
 def _services(machine) -> list:
-    """The decode service of each side's manager, the chip's then the host's."""
-    services = [machine.decoders.decoder_manager.service]
-    if machine.decoders.strong_decoder_manager is not None:
-        services.append(machine.decoders.strong_decoder_manager.service)
-    return services
+    """The decode service of each pool's manager, the entry pool's first."""
+    return [manager.service for manager in machine.decoders.managers]
 
 
 def _rounds_read_by_tier(machine) -> dict:
@@ -835,7 +833,7 @@ def test_no_seat_or_store_keeps_a_round_for_an_observable(round_count: int):
     held_by_seat = {}
     note = functools.partial(_note_packets, held_by_seat)
     machine.readout.detection_events.trace.state_held.connect(note)
-    store = machine.readout.weak_syndrome_buffer
+    store = machine.readout.store_named(layout_module.WEAK_STORE)
     stored_rounds = []
     count = functools.partial(_note_stored_rounds, store, stored_rounds)
     store.trace.round_stored.connect(count)

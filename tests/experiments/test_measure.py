@@ -58,6 +58,7 @@ import decsim.decoders.verify_windows as verify_windows
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.escalation.verdicts as verdicts
 import decsim.experiments.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -89,6 +90,7 @@ import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
 import tests.qpu.memory_programs as memory_programs
+import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.measured_table import decoder as measured_table_decoder
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -2052,12 +2054,8 @@ class StrongResidentsWaitingOnCompute:
 
     def __init__(self, machine) -> None:
         self.units = []
-        for manager in (
-            machine.decoders.decoder_manager,
-            machine.decoders.strong_decoder_manager,
-        ):
-            if manager is not None:
-                self.units.extend(manager.service.pool.units)
+        for manager in machine.decoders.managers:
+            self.units.extend(manager.service.pool.units)
         self.depth_by_tick = {}
 
     def sample(self, now: int) -> None:
@@ -3043,3 +3041,28 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
     assert "1" in weak_labels
     assert all(row.detection_events is not None for row in rows)
     assert "window_outcomes" not in shot_row
+
+
+def test_a_chains_deep_windows_are_measured_on_the_deep_pools_input():
+    """A window the third pool answered reads that pool's own input hop.
+
+    Each edge escalates every window, so the deep pool answers all four;
+    the weak row reads the entry pool's statistics at its part's name.
+    """
+    chain = _always_escalating_chain()
+    task = collect.Task("chain", chain)
+    shot = collect.run_shot(task, 0)
+
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.window_tiers == (layout_tests.DEEP_POOL,) * 4
+    assert measurement.weak_busy_fraction > 0.0
+
+
+def _always_escalating_chain():
+    always = verdicts.Always.Settings()
+    deep_switching = dataclasses.replace(
+        layout_tests.DEEP_SWITCHING_SLOT, verdict=always
+    )
+    chain = layout_tests.chain_machine(deep_switching=deep_switching)
+    return chain.with_settings("switching", verdict=always)

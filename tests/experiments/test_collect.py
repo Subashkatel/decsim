@@ -82,6 +82,7 @@ import decsim.topology.legacy as legacy
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
+import tests.topology.test_graph_layout as layout_tests
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
@@ -171,6 +172,18 @@ EXACT_NUMBERS = [
     (7, 7),
     (0.001, 0.001),
 ]
+
+
+def test_a_chain_task_copied_by_replace_keeps_its_graph_and_layout():
+    """A run caps a task's shots on a copy; the copy runs the same chain."""
+    chain = layout_tests.chain_machine()
+    task = collect.Task("chain", chain)
+    options = collect.RecordOptions()
+
+    copy = dataclasses.replace(task, record_options=options)
+
+    assert copy.layout == task.layout
+    assert copy.strong_id() == task.strong_id()
 
 
 def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):

@@ -129,8 +129,14 @@ def build_plan(
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
     )
+    leaves_the_entry_pool = True
     for part in switching_parts:
-        part.policy.check_plan(run_shape)
+        edge_settings = part.edge.settings
+        edge_shape = _edge_run_shape(
+            run_shape, edge_settings, leaves_the_entry_pool
+        )
+        part.policy.check_plan(edge_shape)
+        leaves_the_entry_pool = False
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,
@@ -304,6 +310,21 @@ def _strong_window_settings(
     if switching is None:
         return escalation_settings.SwitchingSettings.strong_window
     return switching.strong_window
+
+
+def _edge_run_shape(
+    run_shape: decoding_records.RunShape,
+    edge_settings: escalation_settings.SwitchingSettings,
+    leaves_the_entry_pool: bool,
+) -> decoding_records.RunShape:
+    """The run as one edge checks it: with its own strong window row."""
+    strong_window = edge_settings.strong_window
+    return dataclasses.replace(
+        run_shape,
+        strong_window=strong_window.name,
+        is_absorbing_strong_window=strong_window.absorbs_weak_windows,
+        leaves_the_entry_pool=leaves_the_entry_pool,
+    )
 
 
 def _scheme(windows: window_settings.WindowSettings):

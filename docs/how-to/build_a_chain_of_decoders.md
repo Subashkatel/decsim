@@ -67,7 +67,13 @@ built.
 `replace_rule` says which revision the frame takes: `latest`, the
 default, or `best_status`. `cancel_rule` says what a keep does to the
 target's decode of the window: `cancel_downstream`, the default, or
-`no_cancel` (`decsim/windows/revision_rules.py`).
+`no_cancel` (`decsim/windows/revision_rules.py`). A keep does the same
+to every decode further down the chain that was started for the window.
+
+`run_both_at_once=True` on an edge starts its target's decode with its
+source's job instead of after the verdict. On an edge past the entry,
+that is when the source pool's job is queued. The verdict then selects
+the running decode or cancels it.
 
 ## 3. Set and read it
 
@@ -83,9 +89,9 @@ statistics.
 
 ## What a chain does not do yet
 
-An edge that does not leave the entry pool redoes the window it
-escalates, decides on one solve, and starts its target's decode only
-after its verdict. `run_both_at_once`, a strong window that absorbs
-weak windows (`DoubleWindow`) and a two-solve confidence on such an
-edge are refused with "not implemented yet (stage 5)". The timelines a
-chain follows are worked by hand in `tests/machine/test_chains.py`.
+An edge that does not leave the entry pool redoes the region its
+source pool decoded, on the same faces and the same error model, and
+decides on one solve. A strong window that absorbs weak windows
+(`DoubleWindow`) and a two-solve confidence on such an edge are
+refused with "not implemented yet (stage 5)". The timelines a chain
+follows are worked by hand in `tests/machine/test_chains.py`.

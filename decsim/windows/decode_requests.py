@@ -581,9 +581,7 @@ class DecodeRequester:
             # the speculative strong decode started with the weak job (Toshio
             # 2510.25222 lines 598-601) is its edge's target's to serve
             edge = self.edges.entering(job.request_key.pool)
-            edge.decode_queue.enqueue(
-                job, submission.send_input, self.verdict.accept_revision
-            )
+            edge.enqueue_target(job, submission.send_input)
             return
         job.window.t_queued = self.builder.engine.now
         on_decoded = self.verdict.accept_revision

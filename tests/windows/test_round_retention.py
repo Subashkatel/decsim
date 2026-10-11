@@ -502,6 +502,45 @@ def test_a_final_window_ends_its_reads_on_every_edge():
     assert held == [False] * 6
 
 
+def test_a_middle_jobs_rounds_stay_held_for_the_edge_after_it():
+    """The deep edge redoes the strong revision, rounds 6 and 7 too.
+
+    The strong job reads past the window's own rounds 1-5, as a double
+    window does; once its input lands, the strong store still keeps
+    every round it read for the deep edge's verdict.
+    """
+    retention, stores = _chain_retention()
+    _weak, strong, _deep = stores
+    window = _chain_window()
+    retention.register_window((1, 0), window)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.STRONG_POOL_ID, 0
+    )
+    payloads = []
+    for round_index in range(1, 8):
+        fragment = _raw_fragment(round_index)
+        payloads.append(fragment)
+    job = decoding_records.DecodeJob(
+        operation_id=1,
+        window_id=0,
+        round_count=7,
+        strong_decode_for=(1, 0),
+        request_key=request_key,
+        payloads=payloads,
+    )
+
+    retention.hold_strong_input(job)
+    job.input_hold()
+
+    to_deep = decoding_records.PotentialStrong((1, 0), DEEP_POOL)
+    held = []
+    for round_index in range(1, 8):
+        is_held = strong.is_round_held((1, round_index))
+        held.append(is_held)
+    assert strong.has_hold(to_deep)
+    assert held == [True] * 7
+
+
 def test_a_deep_edge_carries_its_rounds_from_the_middle_store():
     retention, stores = _chain_retention()
     _weak, strong, _deep = stores

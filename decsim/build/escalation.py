@@ -12,6 +12,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Optional
 
 import decsim.build.layout as layout_module
+import decsim.confidence.gap_join as gap_join_module
 import decsim.confidence.no_signal as no_signal
 import decsim.config as config
 import decsim.engine as engine_module
@@ -40,7 +41,9 @@ class Switching:
     reads. regions says which rounds an escalated window covers, shape
     lays the strong window over them, pending_strong_windows holds one
     until its conditions are met, and strong_redecode submits it and
-    takes its result back.
+    takes its result back. source_join reads the source pool's results
+    for the edge's signal on an edge past the entry; the entry edge's
+    is the window side's (build/windows.py).
     """
 
     edge: layout_module.EdgePlan
@@ -52,6 +55,7 @@ class Switching:
     shape: strong_window_shapes.StrongWindowPorts
     pending_strong_windows: pending_strong_windows.PendingStrongWindows
     strong_redecode: strong_redecode_module.StrongRedecode
+    source_join: Optional[gap_join_module.WindowGapJoin] = None
 
     @classmethod
     def build(
@@ -123,6 +127,7 @@ class Switching:
             strong_redecode.target, carried.store, target_store.store
         )
         target_manager.escalation_policy = self.policy
+        self._bind_the_source_join(windows, decoders)
 
     def statistics_parts(self) -> tuple:
         """The strong redecode, at the edge's path."""
@@ -133,14 +138,35 @@ class Switching:
         return ((self.edge.policy_seed, self.policy),)
 
     def check_settled(self) -> None:
-        """No strong escalation is pending."""
+        """No strong escalation is pending, and no source solve unjoined."""
         strong_redecode = self.strong_redecode
-        if not strong_redecode.has_pending():
+        if strong_redecode.has_pending():
+            pending = strong_redecode.pending_work()
+            raise RuntimeError(
+                f"the run ended with pending strong escalations: {pending}"
+            )
+        if self.source_join is None:
             return
-        pending = strong_redecode.pending_work()
-        raise RuntimeError(
-            f"the run ended with pending strong escalations: {pending}"
-        )
+        unresolved = self.source_join.unresolved_windows()
+        if unresolved:
+            raise RuntimeError(
+                f"the run ended with windows holding an unjoined solve on "
+                f"edge {self.edge.name!r}: {unresolved}"
+            )
+
+    def _bind_the_source_join(
+        self,
+        windows: "windows_part.Windows",
+        decoders: "decoders_part.Decoders",
+    ) -> None:
+        """The source join reads the edge's signal off the source's results."""
+        join = self.source_join
+        if join is None:
+            return
+        source = self.strong_redecode.source
+        join.signal = self.confidence_signal
+        join.verdict = windows.verdict
+        join.decode_queue = decoders.manager_of(source)
 
     def _wire_the_strong_side(
         self, plan: "plan_build.Plan", windows: "windows_part.Windows"
@@ -177,8 +203,8 @@ def build_switching(
 
     The task's calibrator, online_threshold, decides on the entry edge,
     the one whose threshold the task learns. An edge past the entry
-    takes neither a speculative decode, a region that absorbs its
-    source's windows, nor a confidence of two solves (stage 5).
+    takes neither a region that absorbs its source's windows nor a
+    confidence of two solves (stage 5).
     """
     parts = []
     threshold = online_threshold
@@ -186,9 +212,33 @@ def build_switching(
         part = Switching.build(edge, layout, engine, threshold, machine_clock)
         if parts:
             _refuse_past_the_entry(part)
+            join = gap_join_module.WindowGapJoin(engine)
+            part = dataclasses.replace(part, source_join=join)
         parts.append(part)
         threshold = None
     return tuple(parts)
+
+
+def join_the_chain(switching_parts: tuple) -> None:
+    """Each edge past the entry joins the results of the pool it leaves.
+
+    The edge into that pool hands its target's results to the join, so
+    the signal of the edge out reads them before its verdict, as the
+    entry edge's signal reads the entry pool's solves. It also starts
+    the edge out beside each target job it queues, and passes a keep's
+    cancel on to it.
+    """
+    redecode_by_target = {}
+    for part in switching_parts:
+        redecode = part.strong_redecode
+        redecode_by_target[redecode.target] = redecode
+    for part in switching_parts:
+        if part.source_join is None:
+            continue
+        source = part.strong_redecode.source
+        entering = redecode_by_target[source]
+        entering.target_join = part.source_join
+        entering.next_edge = part.strong_redecode
 
 
 def signal_by_pool(switching_parts: tuple) -> dict:
@@ -270,8 +320,6 @@ def _refuse_past_the_entry(part: Switching) -> None:
     settings = edge.settings
     shape = settings.strong_window
     signal = part.confidence_signal
-    if settings.run_both_at_once:
-        _refuse(edge, "run_both_at_once")
     if shape.absorbs_weak_windows:
         _refuse(edge, f"strong_window {shape.name}")
     if signal.forced_logical_classes:

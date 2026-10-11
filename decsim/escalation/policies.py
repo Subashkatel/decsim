@@ -61,7 +61,9 @@ class Switching:
                 "(run_both_at_once=False)"
             )
         if not plan.is_absorbing_strong_window:
-            _refuse_eager_serial_boundaries(plan.boundary_policy)
+            # the boundaries the policy ships are the entry pool's
+            if plan.leaves_the_entry_pool:
+                _refuse_eager_serial_boundaries(plan.boundary_policy)
             return
         self._refuse_absorbing_window_contradictions(plan)
         _refuse_absorbing_window_scheme(

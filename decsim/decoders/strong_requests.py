@@ -272,7 +272,11 @@ class StrongRequests:
     def take_live(
         self, window_key: tuple, pool: window_records.PoolId
     ) -> Optional[LiveStrongRequest]:
-        """Drop and return the destination's live request on pool, if any."""
+        """Drop and return the destination's live request on pool, if any.
+
+        The request will meet no verdict, so the attempt it opened on the
+        edge its pool is the source of closes with it.
+        """
         key = (window_key, pool)
         record = self.by_window.get(key)
         if record is None:
@@ -280,6 +284,8 @@ class StrongRequests:
         live = record.live
         record.live = None
         self._drop_if_empty(key)
+        if live is not None:
+            self._close_attempt(window_key, live.request_job)
         return live
 
     def abandon(self, window_key: tuple, pool: window_records.PoolId) -> None:
@@ -296,11 +302,13 @@ class StrongRequests:
 
     def drop_abandoned(self, completion: StrongCompletion) -> bool:
         """Whether a finished result is an abandoned request's, dropped now."""
-        request_key = completion.request_job.request_key
+        request_job = completion.request_job
+        request_key = request_job.request_key
         if request_key not in self.abandoned_request_keys:
             return False
         self.abandoned_request_keys.discard(request_key)
         self.counts.abandoned += 1
+        self._close_attempt(request_job.strong_decode_for, request_job)
         return True
 
     def has_survivors(self, service_job: decoding_records.DecodeJob) -> bool:
@@ -428,6 +436,23 @@ class StrongRequests:
         key = self._attempt_key(window_key, job.request_key.pool)
         record = self._record(key)
         record.open_weak_requests.add(job.request_key)
+
+    def _close_attempt(
+        self, window_key: tuple, job: decoding_records.DecodeJob
+    ) -> None:
+        """The job's decode will meet no verdict: its attempt is closed.
+
+        Only a pool that is the source of an edge opened one.
+        """
+        pool = job.request_key.pool
+        if pool not in self.target_by_source:
+            return
+        key = self._attempt_key(window_key, pool)
+        record = self.by_window.get(key)
+        if record is None:
+            return
+        record.open_weak_requests.discard(job.request_key)
+        self._drop_if_empty(key)
 
     def _attempt_key(
         self, window_key: tuple, pool: window_records.PoolId

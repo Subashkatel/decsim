@@ -259,6 +259,7 @@ class Machine:
         )
         for part in switching_parts:
             part.connect(plan, readout, windows, decoders)
+        escalation_build.join_the_chain(switching_parts)
         entry_switching = None
         if switching_parts:
             entry_switching = switching_parts[0]

@@ -67,6 +67,12 @@ class StrongRedecode:
     decode_queue = ports.Port(ports.DecodeQueue)
     # the strong job's return path
     verdict = ports.Port(ports.WindowVerdict)
+    # the join of the edge that leaves the target pool, which reads the
+    # target's results for that edge's signal; none when no edge leaves
+    target_join = ports.Port(ports.WindowGapJoin, optional=True)
+    # the edge that leaves the target pool: it may start beside a target
+    # job, and a keep here ends its work on the window too
+    next_edge = ports.Port(ports.EscalateEdge, optional=True)
 
     # the windows escalated, those whose speculative strong decode was
     # selected as it ran, and the strong windows held for their
@@ -123,6 +129,49 @@ class StrongRedecode:
         """The pool that re-decodes the windows this edge escalates."""
         return self.hops.target
 
+    def accept_target_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A target decode ended: to the next edge's join, else the verdict.
+
+        A target pool that is the source of an edge of its own reads its
+        results for that edge's signal first, as the entry pool's solves
+        reach the requester's join.
+        """
+        if self.target_join is None:
+            self.verdict.accept_revision(job, result)
+            return
+        self.target_join.accept_result(job, result)
+
+    def enqueue_target(
+        self,
+        job: decoding_records.DecodeJob,
+        send_input: Callable[[Callable[[], None]], int],
+    ) -> None:
+        """Queue a target job; the edge out of the target may start beside."""
+        self.decode_queue.enqueue(job, send_input, self.accept_target_result)
+        if self.next_edge is None:
+            return
+        self.next_edge.start_beside_source(job)
+
+    def start_beside_source(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """A source job past the entry was queued: decode it here too.
+
+        The speculative decode starts with the source pool's job (Toshio
+        et al. 2510.25222 lines 598-601), one depth down. The source job
+        was built with its faces pinned, so nothing defers it.
+        """
+        if not self.policy.decodes_both_at_once(source_job.window):
+            return
+        submission = self._planned_speculative_decode(source_job)
+        if submission is None:
+            return
+        self.enqueue_target(submission.job, submission.send_input)
+
     # ---- the two entries
 
     def parallel_strong_submission(
@@ -176,7 +225,7 @@ class StrongRedecode:
         """
         self.statistics.escalated.add()
         key = (weak_job.operation_id, weak_job.window_id)
-        speculative_request_key = self.selections.speculative_decode_for(key)
+        speculative_request_key = self.selections.take_speculative_decode(key)
         if speculative_request_key is not None:
             self.statistics.speculative_selected.add()
             self._send_selection(weak_job, speculative_request_key)
@@ -195,12 +244,7 @@ class StrongRedecode:
     # ---- the two events that meet a declared condition
 
     def submit_if_commit_releases(self, window_key: tuple) -> None:
-        """A weak window committed: a strong window waiting on it leaves.
-
-        The committed window's own speculative strong decode, selected or
-        cancelled by its verdict, is forgotten.
-        """
-        self.selections.forget_speculative_decode(window_key)
+        """A weak window committed: a strong window waiting on it leaves."""
         released = self.pending.released_by_commit(window_key)
         self._submit_released(released)
 
@@ -224,7 +268,10 @@ class StrongRedecode:
         held = self.pending.held_for(window_key)
         if held is not None:
             self._drop_held(window_key, held)
+        self.selections.forget_speculative_decode(window_key)
         self.decode_queue.cancel_strong(window_key)
+        if self.next_edge is not None:
+            self.next_edge.cancel_strong_request(window_key)
 
     def abandon_strong_request(self, window_key: tuple) -> None:
         """A kept weak result: a held request ends, a submitted one runs out.
@@ -236,12 +283,14 @@ class StrongRedecode:
         held = self.pending.held_for(window_key)
         if held is not None:
             self._drop_held(window_key, held)
+        self.selections.forget_speculative_decode(window_key)
         self.decode_queue.abandon_strong(window_key)
+        if self.next_edge is not None:
+            self.next_edge.abandon_strong_request(window_key)
 
     def _drop_held(self, window_key: tuple, held) -> None:
         self.statistics.held_cancelled.add()
         self.pending.take(held)
-        self.selections.forget_speculative_decode(window_key)
         self.trace.strong_window_left.fire(
             held.assignment.request_key,
             window_key,
@@ -364,9 +413,7 @@ class StrongRedecode:
         send_input = self._strong_input_send(
             strong_job, selection_arrival_ticks
         )
-        self.decode_queue.enqueue(
-            strong_job, send_input, self.verdict.accept_revision
-        )
+        self.enqueue_target(strong_job, send_input)
 
     def _strong_input_send(
         self,
@@ -457,10 +504,10 @@ class _StrongSelections:
     ) -> None:
         self.speculative_key_by_window[window_key] = request_key
 
-    def speculative_decode_for(
+    def take_speculative_decode(
         self, window_key: tuple
     ) -> Optional[window_records.DecoderRequestKey]:
-        return self.speculative_key_by_window.get(window_key)
+        return self.speculative_key_by_window.pop(window_key, None)
 
     def forget_speculative_decode(self, window_key: tuple) -> None:
         self.speculative_key_by_window.pop(window_key, None)

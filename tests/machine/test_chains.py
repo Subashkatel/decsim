@@ -71,19 +71,40 @@ def chain_run(
     record keeps the switching records, and the decode records they read.
     """
     declared = chain_graph(weak_doubts, strong_doubts, record=record)
-    layout = layout_tests.laid_out(declared)
-    entry_settings = graph_layout.entry_settings(declared)
-    machine = machine_module.Machine.build(entry_settings, 0, layout=layout)
+    machine = chain_built(declared)
     machine.run()
     return machine
 
 
+def chain_built(declared: graph.Machine) -> machine_module.Machine:
+    """A declared chain built on seed 0, not yet run."""
+    layout = layout_tests.laid_out(declared)
+    entry_settings = graph_layout.entry_settings(declared)
+    return machine_module.Machine.build(entry_settings, 0, layout=layout)
+
+
 def chain_graph(
-    weak_doubts: set, strong_doubts: set, *, record: bool = False
+    weak_doubts: set,
+    strong_doubts: set,
+    *,
+    record: bool = False,
+    entry_window=declared_run.REDO_WINDOW,
+    rounds: int = 9,
+    deep_speculates: bool = False,
+    entry_speculates: bool = False,
 ) -> graph.Machine:
-    """The declared chain: each pool escalates the windows it doubts."""
+    """The declared chain: each pool escalates the windows it doubts.
+
+    The entry edge lays its strong windows out by entry_window; the deep
+    edge redoes the strong revision. Each edge that speculates starts
+    its target's decode with its source's job.
+    """
     settings = fabric.switching_settings(
-        rounds=9, escalated_windows=weak_doubts, record=record
+        rounds=rounds,
+        escalated_windows=weak_doubts,
+        strong_window=entry_window,
+        run_both_at_once=entry_speculates,
+        record=record,
     )
     base = legacy.graph_of(settings)
     strong_microseconds = fabric.DECLARED_MICROSECONDS["strong"]
@@ -92,7 +113,7 @@ def chain_graph(
         strong_microseconds, is_doubted
     )
     with_doubts = base.with_settings("strong", algorithm=strong_algorithm)
-    chain = _with_a_deep_pool(with_doubts)
+    chain = _with_a_deep_pool(with_doubts, deep_speculates)
     card_fabric = DeclaredHops(settings.links)
     return dataclasses.replace(chain, fabric=card_fabric)
 
@@ -154,6 +175,76 @@ def test_a_window_doubted_twice_is_answered_by_the_deep_pool():
     assert released_start == _ticks(137.0)
 
 
+def test_a_deep_decode_started_with_the_strong_one_is_selected():
+    """The deep edge starts beside the strong job, 36 us sooner.
+
+    W0's rounds land in the strong store at 33 us and the strong job
+    leaves its hold; the deep edge plans its decode then and carries the
+    rounds on over strong_to_deep (3 us) to the deep store at 36 us,
+    then to the deep unit (6 us): the deep decode starts at 42 us and
+    ends at 92 us. The strong result at 69 us is doubted and selects
+    it. The answer rides deep_to_frame (4 us) to 96 us and commits at
+    97 us; W1's held boundary leaves at 92 us, crosses deep_to_weak
+    (4 us) and W1's input (5 us), so W1 starts at 101 us.
+    """
+    declared = chain_graph({0}, {0}, deep_speculates=True)
+    machine = chain_built(declared)
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
+    machine.run()
+
+    first = _first_record(machine)
+    deep_start = _log_tick(machine, "START DECODE deep(mem1 W0)")
+    released_start = _log_tick(machine, "START DECODE mem1 W1")
+    outcomes = _outcomes_of(requests, DEEP_POOL)
+
+    assert first.tier == DEEP_POOL
+    assert deep_start == _ticks(42.0)
+    assert first.accepted_ticks == _ticks(96.0)
+    assert first.committed_ticks == _ticks(97.0)
+    assert released_start == _ticks(101.0)
+    assert outcomes == ["STRONG_FORWARDED_FOR_DELIVERY"]
+
+
+def test_a_kept_strong_result_cancels_the_deep_decode_beside_it():
+    """The serial keep's timeline; the deep decode ends at 69 us."""
+    declared = chain_graph({0}, set(), deep_speculates=True)
+    machine = chain_built(declared)
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
+    machine.run()
+
+    first = _first_record(machine)
+    released_start = _log_tick(machine, "START DECODE mem1 W1")
+    outcomes = _outcomes_of(requests, DEEP_POOL)
+
+    assert first.tier == "strong"
+    assert first.accepted_ticks == _ticks(73.0)
+    assert first.committed_ticks == _ticks(74.0)
+    assert released_start == _ticks(78.0)
+    assert outcomes == ["STRONG_CANCELLED_DURING_SERVICE"]
+
+
+def test_a_kept_weak_result_cancels_every_decode_started_beside_it():
+    """A keep cancels the strong decode and the deep one it started."""
+    declared = chain_graph(
+        set(), set(), deep_speculates=True, entry_speculates=True
+    )
+    machine = chain_built(declared)
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
+    machine.run()
+
+    strong = _outcomes_of(requests, "strong")
+    deep = _outcomes_of(requests, DEEP_POOL)
+    snapshot = machine.control.pauli_frame.snapshot()
+    tiers = {record.tier for record in snapshot.records}
+
+    assert tiers == {"weak"}
+    assert strong == ["STRONG_CANCELLED_DURING_SERVICE"] * 3
+    assert deep == ["STRONG_CANCELLED_DURING_SERVICE"] * 3
+
+
 def test_every_store_of_a_chain_settles_empty():
     """Every hold the three stores placed ends with the last commit."""
     machine = chain_run({0, 1, 2}, {0, 2})
@@ -173,15 +264,72 @@ def test_every_pools_decodes_are_recorded():
     assert pools == {"weak", "strong", DEEP_POOL}
 
 
-def _with_a_deep_pool(machine: graph.Machine) -> graph.Machine:
+def test_a_deep_redo_decodes_the_strong_revision_on_its_own_terms():
+    """One decoder at both depths gives one answer.
+
+    The strong pool's double window over W1 commits the rounds it
+    absorbed from W2 and pins its far face on the restart window. The
+    deep redo reads that region, not W1's planner window, pins the same
+    faces and decodes on the error model the strong pool decoded on.
+    """
+    declared = chain_graph(
+        {1}, {1}, entry_window=declared_run.DOUBLE_WINDOW, rounds=15
+    )
+    machine = chain_built(declared)
+    requests = declared_run.EndedRequests()
+    requests.attach(machine)
+    machine.run()
+
+    strong_job = _job_of(requests, "strong")
+    deep_job = _job_of(requests, DEEP_POOL)
+
+    assert _bounds(deep_job) == _bounds(strong_job)
+    assert deep_job.pinned_faces == strong_job.pinned_faces
+    assert deep_job.detector_error_model is strong_job.detector_error_model
+
+
+def _with_a_deep_pool(
+    machine: graph.Machine, speculates: bool
+) -> graph.Machine:
     """The strong pool escalating on to a deep pool on the host."""
     deep_algorithm = decoders.PresetLatencyDecoder.Settings(DEEP_MICROSECONDS)
     deep_pool = decoder_settings.DecoderPoolSettings(
         algorithm=deep_algorithm, engine=declared_run.DECLARED_ENGINE
     )
-    deep_switching = declared_run.declared_switching()
+    deep_switching = declared_run.declared_switching(
+        run_both_at_once=speculates
+    )
     return machines.with_escalation(
         machine, machines.STRONG_POOL, DEEP_POOL, deep_pool, deep_switching
+    )
+
+
+def _job_of(requests: declared_run.EndedRequests, pool_name: str):
+    """The one job a pool decoded for an escalated window."""
+    jobs = []
+    for ended in requests.ended:
+        if ended.job.request_key.pool.word == pool_name:
+            jobs.append(ended.job)
+    (job,) = jobs
+    return job
+
+
+def _outcomes_of(requests: declared_run.EndedRequests, pool_name: str):
+    """The outcome names of one pool's requests, in the order they ended."""
+    names = []
+    for ended in requests.ended:
+        if ended.job.request_key.pool.word == pool_name:
+            names.append(ended.outcome.name)
+    return names
+
+
+def _bounds(job) -> tuple:
+    window = job.window
+    return (
+        window.buffer_lo,
+        window.commit_lo,
+        window.commit_hi,
+        window.buffer_hi,
     )
 
 

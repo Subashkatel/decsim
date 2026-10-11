@@ -71,11 +71,35 @@ class StrongRegions:
         """
         weak_window = self.planner.window_at(key)
         strong_window = _near_pinned_window_of(weak_window)
+        return self._region_over(strong_window)
+
+    def revision_region(
+        self, source_window: window_records.Window
+    ) -> RedoRegion:
+        """A target revision's own rounds, read again on a fresh window.
+
+        The redo at the next edge decodes what the revision decoded, a
+        double window's whole region included.
+        """
+        bounds = (
+            source_window.buffer_lo,
+            source_window.commit_lo,
+            source_window.commit_hi,
+            source_window.buffer_hi,
+        )
+        strong_window = _window_over(
+            source_window.operation_id, source_window.window_index, bounds
+        )
+        return self._region_over(strong_window)
+
+    def _region_over(self, strong_window: window_records.Window) -> RedoRegion:
+        """The redo of strong_window: its recipes' earlier rounds, its own."""
+        operation_id = strong_window.operation_id
         read_keys = self.retention.strong_rounds_before(
-            key[0], strong_window.buffer_lo, strong_window.buffer_hi
+            operation_id, strong_window.buffer_lo, strong_window.buffer_hi
         )
         read_keys += self.retention.read_keys_for_bounds(
-            key[0],
+            operation_id,
             strong_window.buffer_lo,
             strong_window.buffer_hi,
             strong_window,

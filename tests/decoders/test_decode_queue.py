@@ -36,10 +36,16 @@ SERVICE_TICKS = config.microseconds_to_ticks(SERVICE_MICROSECONDS)
 class ShortestJobFirst:
     """The job with the fewest rounds is served first, whatever its age."""
 
+    def read_program(self, operations: tuple) -> None:
+        del operations
+
     def pop(self, queue: list):
         shortest = min(queue, key=_round_count)
         queue.remove(shortest)
         return shortest
+
+    def served(self, job) -> None:
+        del job
 
 
 def _round_count(job):

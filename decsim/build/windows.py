@@ -65,7 +65,7 @@ class Windows:
         switching_settings: Optional[escalation_settings.SwitchingSettings],
         window_decoder: Optional[decoder_settings.DecoderPoolSettings],
         strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
-        window_tier: window_records.DecoderTier,
+        window_tier: window_records.PoolId,
         machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         plan: plan_build.Plan,
@@ -241,7 +241,7 @@ class Windows:
 
 def _retention(
     plan: plan_build.Plan,
-    window_tier: window_records.DecoderTier,
+    window_tier: window_records.PoolId,
     is_switching: bool,
 ) -> round_retention_module.RoundRetention:
     """Which store holds a window's rounds, and for how long.

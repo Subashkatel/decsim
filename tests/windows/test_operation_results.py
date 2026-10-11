@@ -111,7 +111,7 @@ class _Fixture:
         return list(windows)
 
     def commit(
-        self, key, bits, is_final=True, tier=window_records.DecoderTier.WEAK
+        self, key, bits, is_final=True, tier=window_records.WEAK_POOL_ID
     ):
         window = self.windows[key]
         window.committed = True
@@ -159,7 +159,7 @@ def test_a_window_awaiting_strong_holds_the_operation_result():
     window = fixture.windows[(1, 1)]
     fixture.results.replace_prediction((1, 1), (0, 0))
     window.published_request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 7
+        1, 1, window_records.STRONG_POOL_ID, 7
     )
     fixture.results.deliver_if_final(fixture.operation)
     assert fixture.release.released == [1]

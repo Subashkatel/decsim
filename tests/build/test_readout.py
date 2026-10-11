@@ -40,9 +40,9 @@ def _settings_forming_at(formed_at=("controller",)):
 
 # The two facts the paths of a run are read off: the tier that decodes
 # the plan's windows, and whether regions escalate to the strong tier.
-WEAK_BASELINE = (window_records.DecoderTier.WEAK, False)
-SWITCHING = (window_records.DecoderTier.WEAK, True)
-STRONG_ONLY = (window_records.DecoderTier.STRONG, False)
+WEAK_BASELINE = (window_records.WEAK_POOL_ID, False)
+SWITCHING = (window_records.WEAK_POOL_ID, True)
+STRONG_ONLY = (window_records.STRONG_POOL_ID, False)
 
 
 @pytest.mark.parametrize(

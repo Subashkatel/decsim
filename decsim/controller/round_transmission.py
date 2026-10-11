@@ -34,9 +34,9 @@ class RoundTransmitter:
     link = ports.Port(ports.Link)
     # the decoders' end of the memory route, which hears its landing
     memory_arrivals = ports.Port(ports.MemoryRoundArrivals)
-    # The weak syndrome buffer's port toward the controller: it handles what
-    # lands there and asks the store to send what leaves it
-    weak_receiver = ports.Port(ports.WeakSyndromeRoundReceiver)
+    # The written store's port toward the controller: it handles what lands
+    # there and asks the store to send what leaves it
+    receiver = ports.Port(ports.SyndromeRoundReceiver)
     # the line in front of the packing stage, which a round that left
     # its route frees a place for
     packing_line = ports.Port(ports.HeldRounds)
@@ -87,7 +87,7 @@ class RoundTransmitter:
         gem5's port hands the packet to the peer's receive method
         (src/mem/port.hh:603-614).
         """
-        self.weak_receiver.receive_round(packed, self._leave_after_publication)
+        self.receiver.receive_written(packed, self._leave_after_publication)
 
     def _leave_after_publication(self) -> None:
         """Leave in the event after publication.
@@ -116,7 +116,7 @@ class RoundTransmitter:
 
     def _write_feedback_memory(self, packed: round_records.PackedRound) -> None:
         deliver = functools.partial(self._deliver_feedback_memory, packed)
-        self.weak_receiver.send_memory_round(packed, deliver)
+        self.receiver.send_memory_round(packed, deliver)
 
     def _deliver_feedback_memory(
         self, packed: round_records.PackedRound

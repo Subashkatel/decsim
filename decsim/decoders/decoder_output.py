@@ -122,8 +122,8 @@ class DecoderOutput:
         self.engine = engine
         self.clock = clock
         self.route_by_tier = {
-            window_records.DecoderTier.WEAK: WEAK_ANSWER_ROUTE,
-            window_records.DecoderTier.STRONG: (
+            window_records.WEAK_POOL_ID: WEAK_ANSWER_ROUTE,
+            window_records.STRONG_POOL_ID: (
                 STRONG_ANSWER_ROUTES[strong_answer_route]
             ),
         }
@@ -142,7 +142,7 @@ class DecoderOutput:
         whose commit step sends it home; the frame's priced write, when
         the run has a frame, gates on_committed.
         """
-        route = self.route_by_tier[request_key.tier]
+        route = self.route_by_tier[request_key.pool]
         flip_bits = result_payload_bits(result, operation)
         commit = functools.partial(
             self._commit, window.key, result, request_key, on_committed
@@ -231,7 +231,7 @@ class DecoderOutput:
     def _selection_bits(self, weak_job: decoding_records.DecodeJob) -> int:
         """The request's name, then the crossing commit the host joins."""
         name_bits = window_records.REQUEST_KEY_WIRE_BITS
-        strong_route = self.route_by_tier[window_records.DecoderTier.STRONG]
+        strong_route = self.route_by_tier[window_records.STRONG_POOL_ID]
         if strong_route.down is not None:
             return name_bits
         crossing_bits = crossing_commit_bits(weak_job)

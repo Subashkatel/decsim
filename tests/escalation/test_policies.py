@@ -62,8 +62,8 @@ WINDOW = window_records.Window(
 )
 JOB = decoding_records.DecodeJob(operation_id=1, window_id=1, round_count=6)
 BOTH_TIERS = (
-    window_records.DecoderTier.WEAK,
-    window_records.DecoderTier.STRONG,
+    window_records.WEAK_POOL_ID,
+    window_records.STRONG_POOL_ID,
 )
 
 
@@ -112,7 +112,7 @@ def _weak_gaps(machine) -> list[float]:
     """
     gaps = []
     for record in machine.observation.decode_records.requests:
-        if record.request_key.tier is not window_records.DecoderTier.WEAK:
+        if record.request_key.pool != window_records.WEAK_POOL_ID:
             continue
         if record.soft_output is None:
             continue

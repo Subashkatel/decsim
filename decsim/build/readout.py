@@ -22,16 +22,37 @@ import decsim.engine as engine_module
 import decsim.links.settings as link_settings
 import decsim.links.window_transfers as window_transfers
 import decsim.ports as ports
+import decsim.records.log_sources as log_sources
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-from decsim.syndrome_buffer import (
-    strong_syndrome_round_receiver as strong_receiver_module,
+import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
+
+# the hops that land in the stores, by the names their log and copies use
+CONTROLLER_TO_WEAK_STORE = receiver_module.Hop(
+    "controller_to_weak_buffer", "controller assembler"
 )
-from decsim.syndrome_buffer import (
-    weak_syndrome_round_receiver as weak_receiver_module,
+CONTROLLER_TO_STRONG_STORE = receiver_module.Hop(
+    "controller_to_strong_buffer", "controller assembler"
+)
+ESCALATION_TO_STRONG_STORE = receiver_module.Hop(
+    "weak_decoder_to_strong_decoder", "weak syndrome buffer"
+)
+# how each store takes its rounds
+WEAK_STORE_INTAKE = receiver_module.StoreIntake(
+    name=log_sources.WEAK_BUFFER,
+    seat="weak_syndrome_buffer",
+    shape="written",
+    controller_write=CONTROLLER_TO_WEAK_STORE,
+)
+STRONG_STORE_INTAKE = receiver_module.StoreIntake(
+    name=log_sources.STRONG_BUFFER,
+    seat="strong_syndrome_buffer",
+    shape="landed",
+    controller_write=CONTROLLER_TO_STRONG_STORE,
+    escalation=ESCALATION_TO_STRONG_STORE,
 )
 
 
@@ -71,12 +92,12 @@ class Readout:
     weak_syndrome_buffer: Optional[ports.SyndromeBuffer]
     weak_output: Optional[round_output.SyndromeBufferOutput]
     weak_syndrome_round_receiver: Optional[
-        weak_receiver_module.WeakSyndromeRoundReceiver
+        receiver_module.SyndromeRoundReceiver
     ]
     strong_syndrome_buffer: Optional[ports.SyndromeBuffer]
     strong_output: Optional[round_output.SyndromeBufferOutput]
     strong_syndrome_round_receiver: Optional[
-        strong_receiver_module.StrongSyndromeRoundReceiver
+        receiver_module.SyndromeRoundReceiver
     ]
     primary_output: Optional[round_output.SyndromeBufferOutput]
 
@@ -104,7 +125,8 @@ class Readout:
         packing_line = syndrome_round_sender.HeldRounds(engine)
         in_flight_bound = controller_settings.packing_rounds_in_flight
         rounds_in_flight = round_assembly.RoundsInFlight(in_flight_bound)
-        sender = syndrome_round_sender.SyndromeRoundSender(engine)
+        landing_path = _landing_path(weak_store_slot, strong_store_slot)
+        sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
         transmitter = round_transmission.RoundTransmitter(engine)
         held_rounds = syndrome_round_sender.HeldRounds(engine)
         store_transfers = window_transfers.WindowTransfers(engine)
@@ -149,17 +171,12 @@ class Readout:
         retention: ports.WindowRetention,
     ) -> None:
         """Tell the window side of every round that lands."""
-        self.syndrome_round_sender.windows = windows
         self.memory_arrivals.windows = windows
         if self.weak_syndrome_round_receiver is not None:
             self.weak_syndrome_round_receiver.windows = windows
         self.store_transfers.retention = retention
         if self.strong_syndrome_round_receiver is not None:
             self.strong_syndrome_round_receiver.windows = windows
-
-    def start(self) -> None:
-        """Let the sender read which store the plan's windows come from."""
-        self.syndrome_round_sender.start()
 
     def check_settled(self) -> None:
         """No round is still on its way; the stores before the waiting line.
@@ -221,9 +238,7 @@ class Readout:
         receiver.store = self.weak_syndrome_buffer
         receiver.output = self.weak_output
         receiver.detection_events = self.detection_events
-        self.transmitter.weak_receiver = receiver
-        self.syndrome_round_sender.weak_receiver = receiver
-        self.syndrome_round_sender.weak_store = self.weak_syndrome_buffer
+        self.transmitter.receiver = receiver
 
     def _wire_the_strong_store(self, links: ports.Link) -> None:
         receiver = self.strong_syndrome_round_receiver
@@ -238,27 +253,30 @@ class Readout:
         receiver.output = self.strong_output
         receiver.memory_arrivals = self.memory_arrivals
         receiver.detection_events = self.detection_events
-        self.syndrome_round_sender.strong_receiver = receiver
 
     def _wire_the_primary_store(self) -> None:
-        """The store the plan's windows read tells the seats what leaves it.
+        """The store the plan's windows read: the one the sender writes.
 
-        Every read holds its rounds there until they have landed and
-        formed, so a round that leaves it is formed nowhere after.
+        It tells the seats what leaves it: every read holds its rounds
+        there until they have landed and formed, so a round that leaves
+        it is formed nowhere after.
         """
         primary_store = self.weak_syndrome_buffer
+        primary_receiver = self.weak_syndrome_round_receiver
         if self.primary_output is self.strong_output:
             primary_store = self.strong_syndrome_buffer
+            primary_receiver = self.strong_syndrome_round_receiver
         if primary_store is None:
             return
         primary_store.detection_events = self.detection_events
+        self.syndrome_round_sender.receiver = primary_receiver
 
 
 def build_detection_events(
     detection_event_settings: event_settings.DetectionEventSettings,
     machine_clock: Optional[config.Clock],
     device: ports.SyndromeSource,
-    window_tier: window_records.DecoderTier,
+    window_tier: window_records.PoolId,
     escalates: bool,
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
@@ -298,7 +316,7 @@ def _weak_store(
         slot.reads_in_place,
         "weak_decoder",
     )
-    receiver = weak_receiver_module.WeakSyndromeRoundReceiver(engine)
+    receiver = receiver_module.SyndromeRoundReceiver(engine, WEAK_STORE_INTAKE)
     return store, output, receiver
 
 
@@ -316,8 +334,24 @@ def _strong_store(
         slot.reads_in_place,
         "strong_decoder",
     )
-    receiver = strong_receiver_module.StrongSyndromeRoundReceiver(engine)
+    receiver = receiver_module.SyndromeRoundReceiver(
+        engine, STRONG_STORE_INTAKE
+    )
     return store, output, receiver
+
+
+def _landing_path(
+    weak_store_slot: Optional[StoreSlot], strong_store_slot: Optional[StoreSlot]
+) -> Optional[transfer_records.LinkPath]:
+    """The hop a landed store's rounds cross; None for a written store.
+
+    The weak store, when the run has one, is the store the windows read,
+    and takes its rounds written; a run whose only store is the strong
+    one writes it over controller_to_strong_buffer.
+    """
+    if weak_store_slot is not None or strong_store_slot is None:
+        return None
+    return transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
 
 
 def _check_strong_store_charges_nothing(slot: Optional[StoreSlot]) -> None:
@@ -396,10 +430,10 @@ def _check_readout_cost_is_priced(
 
 
 def _paths_of_the_run(
-    window_tier: window_records.DecoderTier, escalates: bool
+    window_tier: window_records.PoolId, escalates: bool
 ) -> tuple:
     """The paths this run's rounds take to a decoder, the primary first."""
-    if window_tier is window_records.DecoderTier.STRONG:
+    if window_tier == window_records.STRONG_POOL_ID:
         return (event_settings.STRONG_PATH,)
     if escalates:
         return (event_settings.WEAK_PATH, event_settings.ESCALATION_PATH)

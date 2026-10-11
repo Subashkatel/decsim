@@ -303,7 +303,7 @@ class WindowManager:
         """
         self.tracker.note_room_round(operation_id, round_index)
         self._wake_strong_tier(operation_id)
-        if self.retention.primary_tier is not window_records.DecoderTier.STRONG:
+        if self.retention.primary_tier != window_records.STRONG_POOL_ID:
             return
         operation = self.tracker.operation_by_id[operation_id]
         stored_through = self.tracker.strong_rounds_arrived(operation_id)

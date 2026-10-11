@@ -125,7 +125,7 @@ class Machine:
             switching,
         )
         window_tier = settings.window_tier
-        window_decoder = settings.decoder_settings_for(window_tier.value)
+        window_decoder = settings.decoder_settings_for(window_tier.word)
         escalates = settings.switching is not None
         detection_events = readout_part.build_detection_events(
             settings.detection_events,
@@ -258,7 +258,6 @@ class Machine:
         # model, and the sender asks the wired window side where it reads
         decoders.start()
         windows.start()
-        readout.start()
         # the window side's one stochastic owner is the switching policy
         parts = (qpu, control, readout, decoders)
         seed_roots = _seed_roots(plan, links, parts, switching)
@@ -326,7 +325,7 @@ def build_links(
 
 def store_slots(
     settings: machine_settings.MachineSettings,
-    window_tier: window_records.DecoderTier,
+    window_tier: window_records.PoolId,
     pool: decoders_part.DecoderPool,
 ) -> tuple:
     """The weak and the strong syndrome buffer slots; None for an unread one.
@@ -336,7 +335,7 @@ def store_slots(
     if pool.active is None:
         return None, None
     chip_reads_in_place = not pool.chip.copies_input
-    if window_tier is window_records.DecoderTier.STRONG:
+    if window_tier == window_records.STRONG_POOL_ID:
         strong_store_slot = readout_part.StoreSlot(
             settings.strong_syndrome_buffer, chip_reads_in_place
         )

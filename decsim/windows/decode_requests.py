@@ -129,7 +129,7 @@ class DecodeRequestBuilder:
         self,
         operation_id: Any,  # an opaque identity
         window_id: int,
-        tier: window_records.DecoderTier,
+        tier: window_records.PoolId,
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
         request_key = window_records.DecoderRequestKey(
@@ -175,7 +175,7 @@ class DecodeRequestBuilder:
         self,
         window: window_records.Window,
         operation: program_records.Operation,
-        tier: window_records.DecoderTier,
+        tier: window_records.PoolId,
         store: ports.RetainedRounds,
         forced_logical_class: Optional[int] = None,
     ) -> decoding_records.DecodeJob:
@@ -226,7 +226,7 @@ class DecodeRequestBuilder:
         receiving them again.
         """
         request_key = self.new_request_key(
-            job.operation_id, job.window_id, job.request_key.tier
+            job.operation_id, job.window_id, job.request_key.pool
         )
         label = f"{job.label} class {forced_logical_class}"
         payloads = list(job.payloads)
@@ -473,7 +473,7 @@ class DecodeRequester:
         primary_tier = self.retention.primary_tier
         submissions = []
         for tier in deciding.tiers:
-            if tier is primary_tier:
+            if tier == primary_tier:
                 submissions.extend(deciding.primary_submissions)
                 continue
             strong_redecode = deciding.strong_redecode

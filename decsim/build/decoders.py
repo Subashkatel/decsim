@@ -106,7 +106,7 @@ class Decoders:
     def attach_statistics(
         self,
         run_statistics: statistics_registry.Registry,
-        window_tier: window_records.DecoderTier,
+        window_tier: window_records.PoolId,
     ) -> None:
         """Each manager's statistics at its tier's settings path.
 
@@ -114,7 +114,7 @@ class Decoders:
         are the window tier's (weak_decoder, or strong_decoder for a
         strong-only run); the host's manager is the strong tier's.
         """
-        primary_path = f"{window_tier.value}_decoder"
+        primary_path = f"{window_tier.word}_decoder"
         self.decoder_manager.attach_statistics(run_statistics, primary_path)
         managers = [self.decoder_manager]
         if self.strong_decoder_manager is not None:
@@ -178,7 +178,7 @@ def build_decoder_unit(
 def build_decoder_pool(
     window_decoder: Optional[decoder_settings.DecoderPoolSettings],
     strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
-    window_tier: window_records.DecoderTier,
+    window_tier: window_records.PoolId,
     escalates: bool,
     machine_clock: Optional[config.Clock],
     detection_events: ports.DetectionEventPlacement,
@@ -190,7 +190,7 @@ def build_decoder_pool(
     event-detection logic, so a round both tiers read is formed and
     charged by each.
     """
-    active_tier = window_tier.value
+    active_tier = window_tier.word
     active_seat = f"{active_tier}_decoder"
     active_formation = _tier_formation(detection_events, active_seat)
     active = build_decoder_unit(

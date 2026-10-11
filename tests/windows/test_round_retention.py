@@ -49,7 +49,7 @@ def _retention(store, round_counts: dict, successors: dict):
     )
     retention = round_retention.RoundRetention(
         is_strong_context_retained=False,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
     )
     retention.weak_store = store
     retention.planner = planner
@@ -89,7 +89,7 @@ def _strong_retention(strong_store, rounds_arrived: int):
     weak_store = _store()
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
     )
     retention.weak_store = weak_store
     retention.strong_store = strong_store
@@ -154,7 +154,7 @@ def _reach_growing_table():
 def _forming_retention(table, **forms):
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
         **forms,
     )
     retention.detection_events = _placement(table)
@@ -234,7 +234,7 @@ def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
     )
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
         strong_side_seat="strong_decoder",
     )
     retention.detection_events = formation.SeatedFormation(None, settings)
@@ -303,7 +303,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
     retention.register_window((1, 0), window)
     _publish_rounds(store, 1, (1, 2, 3, 4, 5))
     request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     job = decoding_records.DecodeJob(
         operation_id=1, window_id=0, round_count=5, request_key=request_key
@@ -365,7 +365,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     store.register_hold(claim, claimed)
     _publish_rounds(store, 1, range(1, 10))
     request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 0
+        1, 1, window_records.WEAK_POOL_ID, 0
     )
     job = decoding_records.DecodeJob(
         operation_id=1, window_id=1, round_count=6, request_key=request_key

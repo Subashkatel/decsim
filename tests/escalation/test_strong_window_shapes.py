@@ -219,7 +219,7 @@ def _heard_requests(machine) -> declared_run.EndedRequests:
 
 def _strong_job(requests: declared_run.EndedRequests, window_id: int):
     """The strong decode job one window's escalation sent, as it ended."""
-    strong = requests.of_tier(window_records.DecoderTier.STRONG)
+    strong = requests.of_tier(window_records.STRONG_POOL_ID)
     for ended in strong:
         if ended.job.request_key.window_id == window_id:
             return ended.job

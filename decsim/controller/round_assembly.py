@@ -63,8 +63,8 @@ class RoundsInFlight:
 
     def _on_route(self) -> int:
         """The rounds sent and not yet heard of by the windows."""
-        strong_crossing_count = self.syndrome_round_sender.strong_crossing_count
-        return self.transmitter.in_flight + strong_crossing_count
+        crossing_count = self.syndrome_round_sender.crossing_count
+        return self.transmitter.in_flight + crossing_count
 
 
 class RoundAssembler:

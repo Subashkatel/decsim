@@ -40,14 +40,14 @@ class _Transfers:
     def send_for_window(
         self, path, window, _operation, request_key, payload_bits, on_delivered
     ):
-        self.sent.append((path, window.key, request_key.tier, payload_bits))
+        self.sent.append((path, window.key, request_key.pool, payload_bits))
         self.sent_ticks.append(self.engine.now)
         self.engine.schedule(self.delay_ticks, on_delivered)
 
     def send_for_job(
         self, path, job, *, payload_bits, request_key, on_delivered
     ):
-        self.sent.append((path, job.label, request_key.tier, payload_bits))
+        self.sent.append((path, job.label, request_key.pool, payload_bits))
         self.engine.schedule(self.delay_ticks, on_delivered)
         return self.delay_ticks
 
@@ -155,8 +155,8 @@ def test_each_tier_publishes_over_its_own_output_link():
     window = _window()
     operation = _operation(1)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
-    weak_key = _request_key(window_records.DecoderTier.WEAK)
-    strong_key = _request_key(window_records.DecoderTier.STRONG)
+    weak_key = _request_key(window_records.WEAK_POOL_ID)
+    strong_key = _request_key(window_records.STRONG_POOL_ID)
     output.publish(window, operation, result, weak_key, _ignore)
     output.publish(window, operation, result, strong_key, _ignore)
     engine.run()
@@ -170,14 +170,14 @@ def test_each_tier_publishes_over_its_own_output_link():
 def test_a_strong_answer_is_its_flip_behind_the_requests_name():
     """It crosses the wall out of order, so it says which request it answers."""
     one_flip = (1,)
-    strong = window_records.DecoderTier.STRONG
+    strong = window_records.STRONG_POOL_ID
     assert _published_bits(strong, one_flip) == 64 + 1
 
 
 def test_a_weak_answer_is_its_flip_alone():
     """It stays on the board with its frame, and no name is priced there."""
     one_flip = (1,)
-    weak = window_records.DecoderTier.WEAK
+    weak = window_records.WEAK_POOL_ID
     assert _published_bits(weak, one_flip) == 1
 
 
@@ -198,7 +198,7 @@ def test_a_strong_answer_through_the_weak_chip_commits_there_then_goes_home():
     committed = []
     on_committed = functools.partial(_note, committed, engine)
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
-    strong = window_records.DecoderTier.STRONG
+    strong = window_records.STRONG_POOL_ID
     strong_key = _request_key(strong)
     window = _window()
     operation = _operation(1)
@@ -222,7 +222,7 @@ def _selection_bits(route: str, weak_job) -> int:
         engine, strong_answer_route=route
     )
     output.transfers = transfers
-    strong_key = _request_key(window_records.DecoderTier.STRONG)
+    strong_key = _request_key(window_records.STRONG_POOL_ID)
     output.send_selection(weak_job, strong_key, _ignore)
     ((path, _label, _tier, payload_bits),) = transfers.sent
     assert path is transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
@@ -320,7 +320,7 @@ def test_the_frames_write_gates_the_commit_and_a_frameless_run_does_not():
     output.frame = frame
     committed = []
     result = decoding_records.DecodeResult(4, 1, logical_observables=(1,))
-    key = _request_key(window_records.DecoderTier.WEAK)
+    key = _request_key(window_records.WEAK_POOL_ID)
     window = _window()
     operation = _operation(1)
     on_committed = functools.partial(_note, committed, engine)
@@ -360,7 +360,7 @@ def _region() -> round_records.EscalatedRegion:
         )
         packet = round_records.SyndromeRoundPacket(4, round_index, (fragment,))
         packets.append(packet)
-    strong_key = _request_key(window_records.DecoderTier.STRONG)
+    strong_key = _request_key(window_records.STRONG_POOL_ID)
     return round_records.EscalatedRegion.of(strong_key, tuple(packets))
 
 

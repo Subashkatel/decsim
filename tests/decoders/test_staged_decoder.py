@@ -95,7 +95,7 @@ def fetch_and_release_timing():
 def decode_job(window_id=0, round_count=3):
     """A weak-tier window job with nothing to decode."""
     request_key = window_records.DecoderRequestKey(
-        1, window_id, window_records.DecoderTier.WEAK, window_id
+        1, window_id, window_records.WEAK_POOL_ID, window_id
     )
     return decoding_records.DecodeJob(
         operation_id=1,

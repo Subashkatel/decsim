@@ -113,11 +113,11 @@ class PauliFrame:
             earlier_tier = self._tier_of(window_key)
             raise RuntimeError(
                 f"window {window_key} already has a {earlier_tier} "
-                f"correction; the {request_key.tier.value} correction "
+                f"correction; the {request_key.pool.word} correction "
                 f"(request {request_key.run_sequence}) is a second write"
             )
         observables = _as_observable_bits(logical_observables)
-        tier = request_key.tier.value
+        tier = request_key.pool.word
         self._log_received(tier, window_key, observables)
         accepted_ticks = self.engine.now
         committed_ticks = self._write_edge(accepted_ticks)

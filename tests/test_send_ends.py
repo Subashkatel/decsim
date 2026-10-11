@@ -158,9 +158,6 @@ DELIVERY_CALLBACKS = {
         "_publish",
         "_write_feedback_memory",
     ),
-    ("controller/syndrome_round_sender.py", "CONTROLLER_TO_STRONG_BUFFER"): (
-        "_land_in_strong_store",
-    ),
     ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (
         None,
         None,

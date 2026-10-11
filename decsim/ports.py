@@ -319,33 +319,53 @@ class SyndromeRoundSender(Protocol):
 
     The sender reserves room in every syndrome buffer the round must
     reach and sends it on; a round that finds no room waits in line for
-    a retry. strong_crossing_count is the strong-primary rounds sent and
-    not yet landed, which the packing stage's bound on rounds in flight
-    counts (controller/round_assembly.py RoundsInFlight).
+    a retry. crossing_count is the rounds sent to a store that takes them
+    landed and not yet landed there, which the packing stage's bound on
+    rounds in flight counts (controller/round_assembly.py RoundsInFlight).
     """
 
-    strong_crossing_count: int
+    crossing_count: int
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it found no room."""
 
 
 @runtime_checkable
-class StrongSyndromeRoundReceiver(Protocol):
-    """The strong syndrome buffer's receiving end, as its two senders see it.
+class SyndromeRoundReceiver(Protocol):
+    """A syndrome buffer's receiving end, as its senders see it.
 
-    The bits still crossing toward the store count as room taken: a
-    round's or an escalated region's room is reserved before it leaves
-    and kept when it lands.
+    This end owns the store's room and its landing: the bits still
+    crossing toward the store count as room taken, so a round's or an
+    escalated region's room is reserved before it leaves and kept until
+    it is stored. A store takes the controller's rounds written or
+    landed (syndrome_buffer/syndrome_round_receiver.py).
     """
 
     def has_room(self, packed: round_records.PackedRound) -> bool:
-        """Whether this round's write can land."""
+        """Whether this round fits beside the stored and the crossing ones."""
 
     def reserve_write(self, packed: round_records.PackedRound) -> None:
         """Take the room this crossing round will need, before it leaves."""
 
-    def receive_round(self, packed: round_records.PackedRound) -> None:
+    def receive_written(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        """Take one written round: store it, announce it, then on_published.
+
+        on_published runs once the windows have heard of the round, which
+        is where the sender's count of rounds in flight lets it go.
+        """
+
+    def send_memory_round(
+        self,
+        packed: round_records.PackedRound,
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Write one timing-only round, then send it to the decoder."""
+
+    def receive_landed(self, packed: round_records.PackedRound) -> None:
         """Store a landed round and deliver it on its canonical route."""
 
     def reserve_region(self, region: round_records.EscalatedRegion) -> None:
@@ -361,40 +381,6 @@ class StrongSyndromeRoundReceiver(Protocol):
         on_stored is called once the store holds every round, which is
         later than the landing when this seat forms the rounds first.
         """
-
-
-@runtime_checkable
-class WeakSyndromeRoundReceiver(Protocol):
-    """The weak syndrome round receiver, as the controller sees it.
-
-    This end owns the store's room and its landing: has_room counts the
-    bits stored and those reserved for writes in flight, and a landed
-    round is stored, readable from that tick, and announced.
-    """
-
-    def has_room(self, packed: round_records.PackedRound) -> bool:
-        """Whether this round fits beside the stored and the crossing ones."""
-
-    def reserve_write(self, packed: round_records.PackedRound) -> None:
-        """Take the room this crossing round will need, before it leaves."""
-
-    def receive_round(
-        self,
-        packed: round_records.PackedRound,
-        on_published: Callable[[], None],
-    ) -> None:
-        """Take one landed round: store it, announce it, then on_published.
-
-        on_published runs once the windows have heard of the round, which
-        is where the sender's count of rounds in flight lets it go.
-        """
-
-    def send_memory_round(
-        self,
-        packed: round_records.PackedRound,
-        on_delivered: Callable[[], None],
-    ) -> None:
-        """Write one landed timing-only round, then send it to the decoder."""
 
 
 @runtime_checkable
@@ -761,7 +747,7 @@ class WindowJobBuilder(Protocol):
         self,
         operation_id: Any,  # an opaque identity
         window_id: int,
-        tier: window_records.DecoderTier,
+        tier: window_records.PoolId,
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
 
@@ -1857,7 +1843,7 @@ class EscalationPolicy(Protocol):
 
     def tiers_for_ready_window(
         self, window: window_records.Window
-    ) -> tuple[window_records.DecoderTier, ...]:
+    ) -> tuple[window_records.PoolId, ...]:
         """The tiers that decode the complete window now, primary first.
 
         Asked once per window, when its rounds are complete and its

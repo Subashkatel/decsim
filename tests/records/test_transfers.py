@@ -50,7 +50,7 @@ def test_a_regions_rounds_are_named_under_each_packets_own_operation():
         operation_id=2, round_index=1, fragments=(patch_b,)
     )
     request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 0
+        1, 1, window_records.STRONG_POOL_ID, 0
     )
     region = round_records.EscalatedRegion(
         request_key, (last_of_the_first, first_of_the_next), wire_bits=4

@@ -77,7 +77,7 @@ plan = plan_build.build_plan(
     switching,
 )
 window_tier = settings.window_tier
-window_decoder = settings.decoder_settings_for(window_tier.value)
+window_decoder = settings.decoder_settings_for(window_tier.word)
 escalates = settings.switching is not None
 detection_events = readout_part.build_detection_events(
     settings.detection_events,

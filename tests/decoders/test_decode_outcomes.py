@@ -90,7 +90,7 @@ def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     outcomes, requests, policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     strong_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 5
+        1, 0, window_records.STRONG_POOL_ID, 5
     )
     on_decoded = _delivering_to(delivered)
     strong_job = decoding_records.DecodeJob(
@@ -121,7 +121,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     strong_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 5
+        1, 0, window_records.STRONG_POOL_ID, 5
     )
     on_decoded = _delivering_to(delivered)
     strong_job = decoding_records.DecodeJob(
@@ -158,7 +158,7 @@ def test_the_terminal_source_carries_every_ended_request():
     delivered = []
     job = _weak_job(delivered)
     job.request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     job.service_dispatch_ticks = 0
     job.window = window_records.Window(

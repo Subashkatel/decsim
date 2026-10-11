@@ -42,7 +42,7 @@ def test_a_regions_rounds_before_ride_under_its_one_name():
     lines 195-207), so the message is the name and six bits.
     """
     request_key = window_records.DecoderRequestKey(
-        7, 0, window_records.DecoderTier.STRONG, 1
+        7, 0, window_records.STRONG_POOL_ID, 1
     )
     two_bits = make_fragment()
     first = round_records.SyndromeRoundPacket(7, 1, (two_bits,))
@@ -61,7 +61,7 @@ def test_a_regions_rounds_before_ride_under_its_one_name():
 def test_a_successors_rounds_are_never_rounds_before():
     """Round 1 of operation 8 follows the window; round 2 of 7 precedes it."""
     request_key = window_records.DecoderRequestKey(
-        7, 0, window_records.DecoderTier.STRONG, 1
+        7, 0, window_records.STRONG_POOL_ID, 1
     )
     two_bits = make_fragment()
     before = round_records.SyndromeRoundPacket(7, 2, (two_bits,))

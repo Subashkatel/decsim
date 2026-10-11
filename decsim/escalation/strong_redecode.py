@@ -45,7 +45,7 @@ class StrongRedecode:
     # syndrome buffer sends the strong input
     decoder_output = ports.Port(ports.DecoderOutput)
     # the strong syndrome buffer's receiving end, where the region lands
-    strong_receiver = ports.Port(ports.StrongSyndromeRoundReceiver)
+    strong_receiver = ports.Port(ports.SyndromeRoundReceiver)
     strong_output = ports.Port(ports.SyndromeBufferOutput)
     decode_queue = ports.Port(ports.DecodeQueue)
     # the strong job's return path

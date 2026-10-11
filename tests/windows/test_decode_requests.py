@@ -88,7 +88,7 @@ def _arrive_all(fixture, round_indices) -> None:
 
 def _completed_weak_jobs(requests, window_id: int) -> list:
     """One window's weak jobs whose requests were forwarded for delivery."""
-    weak = requests.of_tier(window_records.DecoderTier.WEAK)
+    weak = requests.of_tier(window_records.WEAK_POOL_ID)
     outcomes = decoding_records.RequestProcessingOutcome
     completed = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
     jobs = []
@@ -143,7 +143,7 @@ class _Fixture:
         )
         self.retention = round_retention.RoundRetention(
             is_strong_context_retained=False,
-            primary_tier=window_records.DecoderTier.WEAK,
+            primary_tier=window_records.WEAK_POOL_ID,
         )
         self.retention.weak_store = self.store
         self.retention.planner = self.planner
@@ -328,10 +328,10 @@ def test_a_decode_job_is_priced_for_the_rounds_it_reads():
     tail = tail_request.job
     assert regular.request_key.window_id == 1
     assert tail.request_key.window_id == 2
-    assert regular.request_key.tier is window_records.DecoderTier.WEAK
+    assert regular.request_key.pool == window_records.WEAK_POOL_ID
     assert (regular.window.start_round, regular.window.buffer_hi) == (4, 9)
     assert regular.round_count == 6
-    assert tail.request_key.tier is window_records.DecoderTier.WEAK
+    assert tail.request_key.pool == window_records.WEAK_POOL_ID
     assert (tail.window.start_round, tail.window.buffer_hi) == (7, 12)
     assert tail.round_count == 3
 
@@ -568,7 +568,7 @@ def test_a_speculative_decode_leaves_at_its_windows_decision():
 
 def _speculative_jobs(requests) -> dict:
     """Window index -> its speculative strong decode's job."""
-    strong = requests.of_tier(window_records.DecoderTier.STRONG)
+    strong = requests.of_tier(window_records.STRONG_POOL_ID)
     jobs = {}
     for ended in strong:
         window_id = ended.job.request_key.window_id

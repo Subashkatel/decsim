@@ -380,7 +380,7 @@ def _relation_json(relation) -> Optional[dict]:
                 key.operation_id
             ),
             "window_id": key.window_id,
-            "tier": key.tier.value,
+            "tier": key.pool.word,
             "run_sequence": key.run_sequence,
         }
     }

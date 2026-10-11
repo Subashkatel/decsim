@@ -169,10 +169,10 @@ STRONG_POOL_PATH = decoders_part.STRONG_PATH
 # which store's output link carries a tier's window in, keyed by the tier
 # whose decode the frame committed rather than by the row's name
 INPUT_LINK_BY_TIER = {
-    window_records.DecoderTier.WEAK: (
+    window_records.WEAK_POOL_ID: (
         transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
     ),
-    window_records.DecoderTier.STRONG: (
+    window_records.STRONG_POOL_ID: (
         transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
     ),
 }
@@ -831,7 +831,7 @@ def collect_samples(
         )
         for name, value in window_samples.items():
             samples[name].append(value)
-        window_tiers.append(decode.tier.value)
+        window_tiers.append(decode.tier.word)
     decoded = decoded_windows(observation)
     samples["end_of_stream_reaction"] = end_of_stream_reaction_us(
         decoded, stages, qpu_send
@@ -889,7 +889,7 @@ def end_of_stream_reaction_us(
 
 
 def reaction_growth_rate(
-    recorded: list, tier: window_records.DecoderTier
+    recorded: list, tier: window_records.PoolId
 ) -> Optional[float]:
     """How fast a tier's reaction time grows along the shot, in us per us.
 
@@ -916,7 +916,7 @@ def reaction_growth_rate(
     arrivals_us = []
     reactions_us = []
     for window, frame_record in recorded:
-        if frame_record.tier != tier.value:
+        if frame_record.tier != tier.word:
             continue
         arrival_us = _arrival_microseconds(window)
         reaction_us = _reaction_microseconds(window, frame_record)
@@ -981,7 +981,7 @@ def active_decoder_kind(
     settings: machine_settings.MachineSettings,
 ) -> Optional[Union[str, float]]:
     """The kind of the tier that decodes the plan's windows."""
-    tier = settings.window_tier.value
+    tier = settings.window_tier.word
     tier_settings = settings.decoder_settings_for(tier)
     if tier_settings is None:
         return None
@@ -1082,11 +1082,9 @@ def _measurement(
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
     recorded = recorded_windows(observation, settings.observation)
-    weak_growth = reaction_growth_rate(
-        recorded, window_records.DecoderTier.WEAK
-    )
+    weak_growth = reaction_growth_rate(recorded, window_records.WEAK_POOL_ID)
     strong_growth = reaction_growth_rate(
-        recorded, window_records.DecoderTier.STRONG
+        recorded, window_records.STRONG_POOL_ID
     )
     missed_windows, first_miss_us = deadline_misses(
         recorded, settings.observation.reaction_deadline_microseconds
@@ -1256,7 +1254,7 @@ def _window_outcome_row(
     request_key = window.published_request_key
     tier = None
     if request_key is not None:
-        tier = request_key.tier.value
+        tier = request_key.pool.word
     verdict = _verdict_of(observation, window)
     detection_events = weights.get(request_key)
     is_right = None
@@ -1455,7 +1453,7 @@ class _CommittedDecode:
     the frame record's tier and run ordinal name the one that committed.
     """
 
-    tier: window_records.DecoderTier
+    tier: window_records.PoolId
     compute_start_ticks: int
     done_ticks: int
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
@@ -1714,8 +1712,8 @@ def _strong_decodes(
     rounds = 0
     service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
-        tier = window_records.DecoderTier(frame_record.tier)
-        if tier is not window_records.DecoderTier.STRONG:
+        tier = window_records.PoolId(frame_record.tier)
+        if tier != window_records.STRONG_POOL_ID:
             continue
         decode = _committed_decode(stages, frame_record)
         windows += 1
@@ -1792,7 +1790,7 @@ def _weak_syndrome_weights(requests: list) -> list:
     """The set bits of every weak request's landed input that has bits."""
     weights = []
     for request in requests:
-        is_weak = request.request_key.tier is window_records.DecoderTier.WEAK
+        is_weak = request.request_key.pool == window_records.WEAK_POOL_ID
         if is_weak and request.syndrome_weight is not None:
             weights.append(request.syndrome_weight)
     return weights
@@ -1851,7 +1849,7 @@ def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
     chosen = []
     for request in requests:
         key = request.request_key
-        if key.tier.value == tier and key.run_sequence in lives:
+        if key.pool.word == tier and key.run_sequence in lives:
             chosen.append(request)
     return chosen
 
@@ -1945,7 +1943,7 @@ def _committed_decode(stages, frame_record) -> _CommittedDecode:
     record's, so a merged batch answers for every window it served and a
     window decoded more than once never mixes two decodes.
     """
-    tier = window_records.DecoderTier(frame_record.tier)
+    tier = window_records.PoolId(frame_record.tier)
     operation_id, window_id = frame_record.window_key
     records = _committing_stage_records(
         stages, operation_id, window_id, frame_record.run_sequence

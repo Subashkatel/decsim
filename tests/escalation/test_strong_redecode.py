@@ -51,7 +51,7 @@ def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
 
 def _strong_job(sequence: int) -> decoding_records.DecodeJob:
     request_key = window_records.DecoderRequestKey(
-        1, 2, window_records.DecoderTier.STRONG, sequence
+        1, 2, window_records.STRONG_POOL_ID, sequence
     )
     return decoding_records.DecodeJob(
         operation_id=1,

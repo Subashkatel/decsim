@@ -13,11 +13,14 @@ in the output slot of the unit that produced it (decoder_unit.py), as a
 sender keeps a packet until the far side accepts it (gem5
 port.hh:244-255).
 
-Invariants: a destination window has at most one unconsumed result per
-target pool; a destination decodes on an edge's source once at a time,
-so a target's result reaches the attempt that asked; a result with no
-possible consumer is an error, never dropped (Toshio et al. 2510.25222,
-one strong re-decode per escalated window).
+Invariants: a destination window has at most one unconsumed attempt per
+target pool: one request, or one per forced logical class when the edge
+after the pool reads a complementary gap, which takes the minimum-weight
+correction in each class (Toshio et al. 2510.25222 Sec. II C; Smith et
+al. 2405.03766 Sec. II); a destination decodes on an edge's source once
+at a time, so a target's result reaches the attempt that asked; a result
+with no possible consumer is an error, never dropped (Toshio et al.
+2510.25222, one strong re-decode per escalated window).
 """
 
 import dataclasses
@@ -100,20 +103,26 @@ class StrongPhase(enum.Enum):
 class WindowRequests:
     """One destination window's requests, in one record.
 
-    live is the strong request admitted for it and the job serving that
-    request; phase and selected_request_key are how far its demand for
-    a strong result has travelled; open_weak_requests are the request
-    keys of its weak attempt, one or two, still without a directive.
+    live are the strong requests of its attempt admitted and not yet
+    finished, with the jobs serving them; phase and selected_request_key
+    are how far its demand for a strong result has travelled, the key
+    naming the attempt by its lead request; results_owed counts the
+    selected attempt's results still to reach it; companions_by_lead
+    counts the forced-class companions admitted beside each lead;
+    open_weak_requests are the request keys of its weak attempt, one or
+    two, still without a directive.
     """
 
-    live: Optional[LiveStrongRequest] = None
+    live: list = dataclasses.field(default_factory=list)
     phase: StrongPhase = StrongPhase.NONE
     selected_request_key: Optional[window_records.DecoderRequestKey] = None
+    results_owed: int = 0
+    companions_by_lead: dict = dataclasses.field(default_factory=dict)
     open_weak_requests: set = dataclasses.field(default_factory=set)
 
     def is_empty(self) -> bool:
         """Whether the window is waiting on nothing and asks for nothing."""
-        if self.live is not None:
+        if self.live:
             return False
         if self.phase is not StrongPhase.NONE:
             return False
@@ -165,12 +174,17 @@ class StrongRequests:
         window_key = job.strong_decode_for
         pool = job.request_key.pool
         record = self._record((window_key, pool))
-        if record.live is not None:
+        lead_key = attempt_lead_of(job)
+        is_companion = lead_key != job.request_key
+        if record.live and not is_companion:
             raise RuntimeError(
                 f"duplicate strong decode for window {window_key}: a "
                 "destination window has at most one unconsumed strong result"
             )
-        record.live = LiveStrongRequest(job, job)
+        if is_companion:
+            _admit_companion(record, lead_key)
+        live = LiveStrongRequest(job, job)
+        record.live.append(live)
         job.request_admitted_ticks = now
         if pool in self.target_by_source:
             self._open_attempt(window_key, job)
@@ -203,21 +217,23 @@ class StrongRequests:
 
         A request cancelled while its input crossed the link is not.
         """
-        live = self.live(job.strong_decode_for, job.request_key.pool)
-        if live is None:
-            return False
-        return live.request_job is job
+        window_key = job.strong_decode_for
+        pool = job.request_key.pool
+        for live in self.live_requests(window_key, pool):
+            if live.request_job is job:
+                return True
+        return False
 
     # -------------------------------------------------------- queries
 
-    def live(
+    def live_requests(
         self, window_key: tuple, pool: window_records.PoolId
-    ) -> Optional[LiveStrongRequest]:
-        """The request live for the destination on a target pool, or None."""
+    ) -> list:
+        """The requests live for the destination on a target pool."""
         record = self.by_window.get((window_key, pool))
         if record is None:
-            return None
-        return record.live
+            return []
+        return list(record.live)
 
     def members_of(self, service_job: decoding_records.DecodeJob) -> list:
         """The request jobs one physical decode serves, in admission order."""
@@ -256,37 +272,36 @@ class StrongRequests:
         ):
             pool = request_job.request_key.pool
             record = self._record((window_key, pool))
-            record.live = LiveStrongRequest(request_job, batch)
+            record.live = [LiveStrongRequest(request_job, batch)]
 
     def finish_service(self, service_job: decoding_records.DecodeJob) -> None:
         """The physical decode ended; its requests are no longer running."""
         keys = tuple(self.by_window)
         for key in keys:
             record = self.by_window[key]
-            if record.live is None:
+            remaining = _not_served_by(record.live, service_job)
+            if len(remaining) == len(record.live):
                 continue
-            if record.live.service_job is service_job:
-                record.live = None
-                self._drop_if_empty(key)
+            record.live = remaining
+            self._drop_if_empty(key)
 
-    def take_live(
-        self, window_key: tuple, pool: window_records.PoolId
-    ) -> Optional[LiveStrongRequest]:
-        """Drop and return the destination's live request on pool, if any.
+    def take_live(self, window_key: tuple, pool: window_records.PoolId) -> list:
+        """Drop and return the destination's live requests on pool.
 
-        The request will meet no verdict, so the attempt it opened on the
-        edge its pool is the source of closes with it.
+        The requests will meet no verdict, so the attempt each opened on
+        the edge its pool is the source of closes with it.
         """
         key = (window_key, pool)
         record = self.by_window.get(key)
         if record is None:
-            return None
-        live = record.live
-        record.live = None
+            return []
+        taken = record.live
+        record.live = []
+        record.companions_by_lead = {}
         self._drop_if_empty(key)
-        if live is not None:
+        for live in taken:
             self._close_attempt(window_key, live.request_job)
-        return live
+        return taken
 
     def abandon(self, window_key: tuple, pool: window_records.PoolId) -> None:
         """The destination's live request on pool runs out, unwanted.
@@ -294,11 +309,9 @@ class StrongRequests:
         Its decode goes on, and its result is dropped when it ends
         (drop_abandoned).
         """
-        live = self.live(window_key, pool)
-        if live is None:
-            return
-        request_key = live.request_job.request_key
-        self.abandoned_request_keys.add(request_key)
+        for live in self.live_requests(window_key, pool):
+            request_key = live.request_job.request_key
+            self.abandoned_request_keys.add(request_key)
 
     def drop_abandoned(self, completion: StrongCompletion) -> bool:
         """Whether a finished result is an abandoned request's, dropped now."""
@@ -331,6 +344,8 @@ class StrongRequests:
         record = self._record((key, request_key.pool))
         record.phase = StrongPhase.WAITING_SELECTION
         record.selected_request_key = request_key
+        companions = record.companions_by_lead.get(request_key, 0)
+        record.results_owed = 1 + companions
 
     def select(
         self, key: tuple, request_key: window_records.DecoderRequestKey
@@ -356,12 +371,13 @@ class StrongRequests:
         False leaves it in the output slot of the unit that produced it,
         for the demand that is still coming.
         """
-        request_key = completion.request_job.request_key
+        request_job = completion.request_job
+        request_key = request_job.request_key
         key = (request_key.operation_id, request_key.window_id)
         pool = request_key.pool
-        if self._takes_the_awaited_result(key, request_key):
+        if self._takes_the_awaited_result(key, request_job):
             return True
-        if self.live(key, pool) is not None:
+        if self._has_a_newer_request(key, request_job):
             raise RuntimeError(
                 f"strong result for window {key} arrived after a newer "
                 "strong request took the destination's next result: "
@@ -413,21 +429,40 @@ class StrongRequests:
     # ------------------------------------------------------- private
 
     def _takes_the_awaited_result(
-        self, key: tuple, request_key: window_records.DecoderRequestKey
+        self, key: tuple, request_job: decoding_records.DecodeJob
     ) -> bool:
-        """Whether the destination was waiting for exactly this result."""
-        record_key = (key, request_key.pool)
+        """Whether the destination was waiting for this attempt's result.
+
+        The selection names the attempt; it is over once each of the
+        attempt's results has arrived.
+        """
+        lead_key = attempt_lead_of(request_job)
+        record_key = (key, lead_key.pool)
         record = self.by_window.get(record_key)
         if record is None:
             return False
         if record.phase is not StrongPhase.WAITING_RESULT:
             return False
-        if record.selected_request_key != request_key:
+        if record.selected_request_key != lead_key:
             return False
+        record.results_owed -= 1
+        if record.results_owed > 0:
+            return True
         record.phase = StrongPhase.NONE
         record.selected_request_key = None
+        record.companions_by_lead.pop(lead_key, None)
         self._drop_if_empty(record_key)
         return True
+
+    def _has_a_newer_request(
+        self, key: tuple, request_job: decoding_records.DecodeJob
+    ) -> bool:
+        """Whether a later attempt took the destination's next result."""
+        lead_key = attempt_lead_of(request_job)
+        for live in self.live_requests(key, lead_key.pool):
+            if attempt_lead_of(live.request_job) != lead_key:
+                return True
+        return False
 
     def _open_attempt(
         self, window_key: tuple, job: decoding_records.DecodeJob
@@ -481,8 +516,7 @@ class StrongRequests:
         """Every live strong request, in the order its window was admitted."""
         live_requests = []
         for record in self.by_window.values():
-            if record.live is not None:
-                live_requests.append(record.live)
+            live_requests.extend(record.live)
         return live_requests
 
     # ---------------------------------------------------- observation
@@ -500,6 +534,19 @@ class StrongRequests:
         return unsettled
 
 
+def attempt_lead_of(
+    job: decoding_records.DecodeJob,
+) -> window_records.DecoderRequestKey:
+    """The request that names the job's attempt: its own, or its lead's.
+
+    A forced-class companion reads its lead's input, so the input key
+    it shares is the lead's request key.
+    """
+    if job.input_key is None:
+        return job.request_key
+    return job.input_key
+
+
 def is_merged_batch(job: decoding_records.DecodeJob) -> bool:
     """A batch serves several strong requests and has no request itself."""
     return job.kind is decoding_records.DecodeJobKind.STRONG_BATCH
@@ -510,11 +557,32 @@ def _states_of(record: WindowRequests) -> list:
     states = []
     if record.phase is not StrongPhase.NONE:
         states.append(record.phase.value)
-    if record.live is not None:
+    if record.live:
         states.append("still holding a strong request")
     if record.open_weak_requests:
         states.append("decoding with no outcome")
     return states
+
+
+def _admit_companion(
+    record: WindowRequests, lead_key: window_records.DecoderRequestKey
+) -> None:
+    """Count a companion beside its lead; a selected attempt owes it too."""
+    count = record.companions_by_lead.get(lead_key, 0)
+    record.companions_by_lead[lead_key] = count + 1
+    if record.phase is StrongPhase.NONE:
+        return
+    if record.selected_request_key == lead_key:
+        record.results_owed += 1
+
+
+def _not_served_by(live_requests: list, service_job) -> list:
+    """The live requests another decode than service_job serves."""
+    remaining = []
+    for live in live_requests:
+        if live.service_job is not service_job:
+            remaining.append(live)
+    return remaining
 
 
 def _populated_accuracy_fields(result: decoding_records.DecodeResult) -> list:

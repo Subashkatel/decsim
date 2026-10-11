@@ -315,10 +315,11 @@ class DecodeService:
     def take_strong_output(
         self, window_key: tuple
     ) -> Optional[strong_requests_module.StrongCompletion]:
-        """Take the finished result waiting for that destination, if any.
+        """Take a finished result waiting for that destination, if any.
 
-        A destination has at most one, so the first unit holding one for
-        this window is the one.
+        A destination has at most one attempt, so every result held for
+        this window is that attempt's; the first unit holding one gives
+        its oldest.
         """
         for unit in self.pool.units:
             completion = unit.take_output(window_key)

@@ -890,9 +890,13 @@ class EscalateEdge(Protocol):
     def enqueue_target(
         self,
         job: decoding_records.DecodeJob,
-        send_input: Callable[[Callable[[], None]], int],
+        selection_arrival_ticks: Optional[int],
     ) -> None:
-        """Queue a target job; the edge out of the target may start beside."""
+        """Queue a target job and its companions; the next edge may start.
+
+        selection_arrival_ticks is the tick the job's selection lands,
+        None for a decode started before its verdict.
+        """
 
     def start_beside_source(
         self, source_job: decoding_records.DecodeJob

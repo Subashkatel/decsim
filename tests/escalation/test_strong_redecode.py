@@ -274,6 +274,26 @@ class _NextEdge:
         self.calls.append(("abandon", window_key))
 
 
+class _Builder:
+    """Numbers each new request after the ones the stubs made."""
+
+    def __init__(self) -> None:
+        self.sequence = 20
+
+    def new_request_key(self, operation_id, window_id, pool):
+        """The next request key of the run."""
+        self.sequence += 1
+        return window_records.DecoderRequestKey(
+            operation_id, window_id, pool, self.sequence
+        )
+
+
+class _TwoClasses:
+    """A signal that reads one solve per logical class."""
+
+    forced_logical_classes = (0, 1)
+
+
 class _BothAtOnce:
     """A policy that starts every target decode beside its source."""
 
@@ -386,6 +406,34 @@ def test_a_decode_started_beside_a_source_past_the_entry_is_selected():
     assert len(output.selections) == 1
     assert _call_names(queue) == ["enqueue", "await"]
     assert queue.calls[0][1] is deep_job
+
+
+def test_a_target_job_leaves_with_a_solve_per_class_the_next_edge_reads():
+    """The companion reads the lead's input and answers the same window."""
+    strong_job = _strong_job(5)
+    shape = _Shape(strong_job, is_held=False)
+    shape.builder = _Builder()
+    shape.engine = engine_module.Engine()
+    redecode, _output, _strong, queue, _verdict = _redecode(shape)
+    join = _Join()
+    join.signal = _TwoClasses()
+    redecode.target_join = join
+    weak_job = _weak_job()
+
+    redecode.escalate(weak_job)
+
+    enqueued = []
+    for call in queue.calls:
+        if call[0] == "enqueue":
+            enqueued.append(call[1])
+    lead, companion = enqueued
+    assert lead is strong_job
+    assert (lead.forced_logical_class, companion.forced_logical_class) == (
+        0,
+        1,
+    )
+    assert companion.input_key == lead.request_key
+    assert companion.strong_decode_for == lead.strong_decode_for
 
 
 def test_a_held_job_leaves_when_the_window_it_named_commits():

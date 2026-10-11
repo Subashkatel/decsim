@@ -35,6 +35,7 @@ import decsim.statistics.kinds as statistic_kinds
 import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 import decsim.windows.revision_rules as revision_rules
+import decsim.windows.round_retention as round_retention
 
 
 class StrongRedecode:
@@ -148,10 +149,21 @@ class StrongRedecode:
     def enqueue_target(
         self,
         job: decoding_records.DecodeJob,
-        send_input: Callable[[Callable[[], None]], int],
+        selection_arrival_ticks: Optional[int],
     ) -> None:
-        """Queue a target job; the edge out of the target may start beside."""
-        self.decode_queue.enqueue(job, send_input, self.accept_target_result)
+        """Queue a target job and its companions; the next edge may start.
+
+        The edge out of the target starts beside the job itself, which
+        names the attempt; its signal joins the companions' solves.
+        """
+        attempt = self._attempt_of(job)
+        for attempt_job in attempt:
+            send_input = self._strong_input_send(
+                attempt_job, selection_arrival_ticks
+            )
+            self.decode_queue.enqueue(
+                attempt_job, send_input, self.accept_target_result
+            )
         if self.next_edge is None:
             return
         self.next_edge.start_beside_source(job)
@@ -170,7 +182,7 @@ class StrongRedecode:
         submission = self._planned_speculative_decode(source_job)
         if submission is None:
             return
-        self.enqueue_target(submission.job, submission.send_input)
+        self.enqueue_target(submission.job, None)
 
     # ---- the two entries
 
@@ -410,10 +422,38 @@ class StrongRedecode:
         selection_arrival_ticks: int,
     ) -> None:
         """Queue the strong job; its input is sent at dispatch."""
-        send_input = self._strong_input_send(
-            strong_job, selection_arrival_ticks
-        )
-        self.enqueue_target(strong_job, send_input)
+        self.enqueue_target(strong_job, selection_arrival_ticks)
+
+    def _attempt_of(self, job: decoding_records.DecodeJob) -> list:
+        """The job, and a companion per other class the next edge forces.
+
+        A complementary gap on the edge out of the target takes the
+        lightest correction in each logical class (Toshio et al.
+        2510.25222 Sec. II C; Smith et al. 2405.03766 Sec. II), solved
+        at once (Mishima et al. 2605.14637 App. B). The solves read one
+        input, kept until the last of them has it.
+        """
+        forced_classes = self._forced_classes()
+        if not forced_classes:
+            return [job]
+        job.forced_logical_class = forced_classes[0]
+        attempt = [job]
+        for forced_class in forced_classes[1:]:
+            companion = strong_window_shapes.forced_class_companion(
+                self.shape, job, forced_class
+            )
+            attempt.append(companion)
+        shared = round_retention.SharedInputHold(job.input_hold, len(attempt))
+        for attempt_job in attempt:
+            attempt_job.input_hold = shared.release
+        return attempt
+
+    def _forced_classes(self) -> tuple:
+        """The classes the next edge's signal pins its source's solves to."""
+        if self.target_join is None:
+            return ()
+        signal = self.target_join.signal
+        return signal.forced_logical_classes
 
     def _strong_input_send(
         self,

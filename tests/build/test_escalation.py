@@ -102,24 +102,12 @@ def test_a_switching_record_builds_the_policy_its_run_binds():
 
 _DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
 _TWO_SOLVES = complementary.ComplementaryGap.Settings()
-_PAST_THE_ENTRY_CHANGES = [
-    {"strong_window": _DOUBLE_WINDOW},
-    {"confidence": _TWO_SOLVES},
-]
-_PAST_THE_ENTRY_IDS = ["double_window", "two_solves"]
 
 
-@pytest.mark.parametrize(
-    "change", _PAST_THE_ENTRY_CHANGES, ids=_PAST_THE_ENTRY_IDS
-)
-def test_an_edge_past_the_entry_refuses_what_only_the_entry_does(change):
-    """An edge past the entry waits for stage 5 on what reads its source.
-
-    An absorbing region and a gap of two solves each work on the entry
-    pool's windows alone.
-    """
+def test_an_edge_past_the_entry_refuses_an_absorbing_window():
+    """An absorbing region works on the entry pool's windows alone yet."""
     deep_switching = dataclasses.replace(
-        layout_tests.DEEP_SWITCHING_SLOT, **change
+        layout_tests.DEEP_SWITCHING_SLOT, strong_window=_DOUBLE_WINDOW
     )
     chain = layout_tests.chain_machine(deep_switching)
     layout = layout_tests.laid_out(chain)
@@ -127,6 +115,26 @@ def test_an_edge_past_the_entry_refuses_what_only_the_entry_does(change):
 
     with pytest.raises(NotImplementedError, match=r"stage 5"):
         escalation_build.build_switching(layout, engine)
+
+
+def test_a_gap_of_two_solves_past_the_entry_needs_a_source_that_pins():
+    """Union-find cannot solve inside a fixed logical class.
+
+    A virtual detector that pins the class breaks the locality its
+    clusters grow by (Lee et al. 2510.05795 Sec. 2.1.1), so the middle
+    pool cannot feed a complementary gap.
+    """
+    deep_switching = dataclasses.replace(
+        layout_tests.DEEP_SWITCHING_SLOT, confidence=_TWO_SOLVES
+    )
+    redo = strong_window_shapes.RedoWindow.Settings()
+    chain = layout_tests.chain_machine(deep_switching, redo)
+    task = collect.Task("chain", chain)
+
+    with pytest.raises(ValueError, match="cannot serve the confidence"):
+        machine_module.Machine.build(
+            task.machine, 0, None, task.online_threshold, layout=task.layout
+        )
 
 
 def test_an_edge_past_the_entry_builds_on_one_solve():

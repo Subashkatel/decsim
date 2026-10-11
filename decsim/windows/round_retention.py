@@ -34,6 +34,7 @@ allocateMissBuffer).
 
 import dataclasses
 import functools
+from collections.abc import Callable
 from typing import Any, Optional
 
 import decsim.ports as ports
@@ -810,6 +811,27 @@ class RoundRetention:
         """The strong input landed in its unit: both stores let it go."""
         for store in self._strong_context_stores(target):
             store.release_hold(owner)
+
+
+class SharedInputHold:
+    """One store hold released when the last job that reads it has landed.
+
+    The forced-class solves of one window read the same rounds, so
+    the store keeps them until every one of them has its input,
+    the lifetime a zero-copy send owes its source (the kernel's dmaengine
+    client rule that a mapping lives until the transfer completes).
+    """
+
+    def __init__(self, release: Callable[[], None], reader_count: int) -> None:
+        self.hold_release = release
+        self.readers_left = reader_count
+
+    def release(self) -> None:
+        """One reader has its input; the rounds go when the last one does."""
+        self.readers_left -= 1
+        if self.readers_left > 0:
+            return
+        self.hold_release()
 
 
 def round_identities_of(payloads: list) -> tuple:

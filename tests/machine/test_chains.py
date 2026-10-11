@@ -23,6 +23,7 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
+import decsim.records.decoding as decoding_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
@@ -33,6 +34,39 @@ import tests.topology.test_graph_layout as layout_tests
 
 DEEP_MICROSECONDS = 50.0
 DEEP_POOL = "deep"
+
+
+class DeclaredTwoSolves:
+    """A declared gap read off one solve per forced logical class.
+
+    The strong decoder declares each solve's gap, and the signal hands
+    on the first solve's: the complementary gap is one number per
+    window, from the lightest correction in each class (Toshio et al.
+    2510.25222 Sec. II C).
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The declared two-solve signal, as the switching slot names it."""
+
+        name = "declared_two_solves"
+
+        def build(self, weak_algorithm, threshold_nats):
+            """The signal; it reads neither the decoder nor the threshold."""
+            del weak_algorithm
+            del threshold_nats
+            return DeclaredTwoSolves()
+
+    source = declared_run.DECLARED_CONFIDENCE_SOURCE
+    fault_model_requirement = None
+    decoder_evidence_requirement = frozenset()
+    evidence_refusal = "the declared signal needs no evidence"
+    forced_logical_classes = (0, 1)
+
+    def compute(self, solves):
+        """The first solve's declared soft output, computed in no time."""
+        soft_output = solves[0].soft_output
+        return decoding_records.SoftOutputComputation(soft_output)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -92,12 +126,14 @@ def chain_graph(
     rounds: int = 9,
     deep_speculates: bool = False,
     entry_speculates: bool = False,
+    deep_confidence=None,
 ) -> graph.Machine:
     """The declared chain: each pool escalates the windows it doubts.
 
     The entry edge lays its strong windows out by entry_window; the deep
     edge redoes the strong revision. Each edge that speculates starts
-    its target's decode with its source's job.
+    its target's decode with its source's job. deep_confidence replaces
+    the deep edge's declared one-solve signal.
     """
     settings = fabric.switching_settings(
         rounds=rounds,
@@ -113,7 +149,7 @@ def chain_graph(
         strong_microseconds, is_doubted
     )
     with_doubts = base.with_settings("strong", algorithm=strong_algorithm)
-    chain = _with_a_deep_pool(with_doubts, deep_speculates)
+    chain = _with_a_deep_pool(with_doubts, deep_speculates, deep_confidence)
     card_fabric = DeclaredHops(settings.links)
     return dataclasses.replace(chain, fabric=card_fabric)
 
@@ -245,6 +281,64 @@ def test_a_kept_weak_result_cancels_every_decode_started_beside_it():
     assert deep == ["STRONG_CANCELLED_DURING_SERVICE"] * 3
 
 
+def test_a_deep_edge_on_two_strong_solves_waits_for_both():
+    """The strong pool solves W0 once per class, one after the other.
+
+    Both inputs reach the one strong unit at 39 us. Class 0 decodes
+    39-69 us and class 1 69-99 us, so the deep edge's gap joins at
+    99 us. The rounds then ride strong_to_deep (3 us) and the deep
+    input (6 us): the deep decode runs 108-158 us, its answer lands at
+    162 us over deep_to_frame (4 us) and commits at 163 us. W1's
+    boundary leaves at 158 us, crosses deep_to_weak (4 us) and W1's
+    input (5 us), so W1 starts at 167 us.
+    """
+    machine = _two_solve_chain({0}, {0}, speculates=False)
+
+    first = _first_record(machine)
+    join = _log_tick(machine, "GAP JOIN strong(mem1 W0)")
+    deep_start = _log_tick(machine, "START DECODE deep(mem1 W0)")
+    released_start = _log_tick(machine, "START DECODE mem1 W1")
+
+    assert first.tier == DEEP_POOL
+    assert join == _ticks(99.0)
+    assert deep_start == _ticks(108.0)
+    assert first.accepted_ticks == _ticks(162.0)
+    assert first.committed_ticks == _ticks(163.0)
+    assert released_start == _ticks(167.0)
+
+
+def test_a_strong_answer_kept_on_two_solves_leaves_at_the_join():
+    """Kept at 99 us: the frame at 103 us, a commit at 104 us, W1 at 108."""
+    machine = _two_solve_chain({0}, set(), speculates=False)
+
+    first = _first_record(machine)
+    released_start = _log_tick(machine, "START DECODE mem1 W1")
+
+    assert first.tier == "strong"
+    assert first.accepted_ticks == _ticks(103.0)
+    assert first.committed_ticks == _ticks(104.0)
+    assert released_start == _ticks(108.0)
+
+
+def test_a_deep_decode_beside_two_strong_solves_waits_for_their_join():
+    """Started with the strong job at 42 us, done at 92, selected at 99.
+
+    The selection rides strong_to_deep (3 us) to 102 us, and the answer
+    deep_to_frame (4 us) to 106 us; it commits at 107 us and W1 starts
+    at 111 us.
+    """
+    machine = _two_solve_chain({0}, {0}, speculates=True)
+
+    first = _first_record(machine)
+    deep_start = _log_tick(machine, "START DECODE deep(mem1 W0)")
+    released_start = _log_tick(machine, "START DECODE mem1 W1")
+
+    assert deep_start == _ticks(42.0)
+    assert first.accepted_ticks == _ticks(106.0)
+    assert first.committed_ticks == _ticks(107.0)
+    assert released_start == _ticks(111.0)
+
+
 def test_every_store_of_a_chain_settles_empty():
     """Every hold the three stores placed ends with the last commit."""
     machine = chain_run({0, 1, 2}, {0, 2})
@@ -289,7 +383,7 @@ def test_a_deep_redo_decodes_the_strong_revision_on_its_own_terms():
 
 
 def _with_a_deep_pool(
-    machine: graph.Machine, speculates: bool
+    machine: graph.Machine, speculates: bool, confidence
 ) -> graph.Machine:
     """The strong pool escalating on to a deep pool on the host."""
     deep_algorithm = decoders.PresetLatencyDecoder.Settings(DEEP_MICROSECONDS)
@@ -299,6 +393,10 @@ def _with_a_deep_pool(
     deep_switching = declared_run.declared_switching(
         run_both_at_once=speculates
     )
+    if confidence is not None:
+        deep_switching = dataclasses.replace(
+            deep_switching, confidence=confidence
+        )
     return machines.with_escalation(
         machine, machines.STRONG_POOL, DEEP_POOL, deep_pool, deep_switching
     )
@@ -312,6 +410,20 @@ def _job_of(requests: declared_run.EndedRequests, pool_name: str):
             jobs.append(ended.job)
     (job,) = jobs
     return job
+
+
+def _two_solve_chain(weak_doubts, strong_doubts, speculates: bool):
+    """The declared chain whose deep edge reads two strong solves, run."""
+    signal = DeclaredTwoSolves.Settings()
+    declared = chain_graph(
+        weak_doubts,
+        strong_doubts,
+        deep_speculates=speculates,
+        deep_confidence=signal,
+    )
+    machine = chain_built(declared)
+    machine.run()
+    return machine
 
 
 def _outcomes_of(requests: declared_run.EndedRequests, pool_name: str):

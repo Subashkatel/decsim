@@ -55,7 +55,8 @@ class UnitSlots:
     residents are the jobs whose input occupies or reserves an input
     slot (in transfer or landed), in dispatch order; at most the
     resident capacity. finished are the results this unit has produced
-    that nobody has taken yet, by destination window.
+    that nobody has taken yet, by destination window, in the order they
+    finished: one, or one per forced class of an attempt.
     """
 
     residents: list = dataclasses.field(default_factory=list)
@@ -211,16 +212,24 @@ class DecoderUnit:
     ) -> None:
         """Keep one finished result until its destination asks for it.
 
-        A destination has at most one unconsumed strong result
-        (StrongRequests.admit_strong).
+        A destination has at most one unconsumed attempt
+        (StrongRequests.admit_strong), whose forced-class results may
+        finish on one unit.
         """
-        self.slots.finished[window_key] = completion
+        waiting = self.slots.finished.setdefault(window_key, [])
+        waiting.append(completion)
 
     def take_output(
         self, window_key: tuple
     ) -> Optional[strong_requests_module.StrongCompletion]:
-        """Take the result waiting for that destination, or None."""
-        return self.slots.finished.pop(window_key, None)
+        """Take the oldest result waiting for that destination, or None."""
+        waiting = self.slots.finished.get(window_key)
+        if not waiting:
+            return None
+        completion = waiting.pop(0)
+        if not waiting:
+            del self.slots.finished[window_key]
+        return completion
 
     def output_windows(self) -> list:
         """The destinations whose results are still waiting here."""

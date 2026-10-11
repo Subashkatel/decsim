@@ -203,8 +203,7 @@ def build_switching(
 
     The task's calibrator, online_threshold, decides on the entry edge,
     the one whose threshold the task learns. An edge past the entry
-    takes neither a region that absorbs its source's windows nor a
-    confidence of two solves (stage 5).
+    takes no region that absorbs its source windows yet (stage 5).
     """
     parts = []
     threshold = online_threshold
@@ -319,11 +318,8 @@ def _refuse_past_the_entry(part: Switching) -> None:
     edge = part.edge
     settings = edge.settings
     shape = settings.strong_window
-    signal = part.confidence_signal
     if shape.absorbs_weak_windows:
         _refuse(edge, f"strong_window {shape.name}")
-    if signal.forced_logical_classes:
-        _refuse(edge, "a confidence of two solves")
 
 
 def _refuse(edge: layout_module.EdgePlan, what: str) -> None:

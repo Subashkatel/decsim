@@ -578,6 +578,46 @@ def escalated_label(
     return f"{target.word}({operation.name} W{source_job.window_id})"
 
 
+def forced_class_companion(
+    shape: StrongWindowPorts,
+    lead: decoding_records.DecodeJob,
+    forced_logical_class: int,
+) -> decoding_records.DecodeJob:
+    """The lead's solve pinned to another logical class, on its rounds.
+
+    Its own request, so its transfer is priced and recorded on its own,
+    and the lead's request key as its input identity, so a unit that
+    holds the lead's rounds reads them (DecodeRequestBuilder's
+    build_forced_companion, for a target job).
+    """
+    request_key = shape.builder.new_request_key(
+        lead.operation_id, lead.window_id, lead.request_key.pool
+    )
+    label = f"{lead.label} class {forced_logical_class}"
+    payloads = list(lead.payloads)
+    job = decoding_records.DecodeJob(
+        operation_id=lead.operation_id,
+        window_id=lead.window_id,
+        round_count=lead.round_count,
+        ready_time=shape.engine.now,
+        label=label,
+        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
+        spatial_nodes=lead.spatial_nodes,
+        code=lead.code,
+        detector_error_model=lead.detector_error_model,
+        payloads=payloads,
+        window=lead.window,
+        strong_decode_for=lead.strong_decode_for,
+        request_key=request_key,
+        input_key=lead.request_key,
+        request_created_ticks=lead.request_created_ticks,
+        gate=lead.gate,
+        forced_logical_class=forced_logical_class,
+    )
+    job.pinned_faces = lead.pinned_faces
+    return job
+
+
 def _redo_of(
     shape: StrongWindowPorts, source_job: decoding_records.DecodeJob
 ) -> tuple:

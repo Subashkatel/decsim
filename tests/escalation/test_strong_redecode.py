@@ -24,7 +24,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.statistics.registry as statistics_registry
-import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
 
 WINDOW_KEY = (1, 2)
@@ -218,8 +217,7 @@ def _redecode(shape, receiver_row=_StrongReceiver):
     queue = _DecodeQueue()
     verdict = _Verdict()
     hops = routes_build.legacy_edge("direct")
-    costs = window_commits.VerdictCosts()
-    redecode = strong_redecode_module.StrongRedecode(engine, hops, costs)
+    redecode = strong_redecode_module.StrongRedecode(engine, hops)
     redecode.shape = shape
     redecode.pending = pending_module.PendingStrongWindows()
     redecode.retention = _Retention()

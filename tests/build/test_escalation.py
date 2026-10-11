@@ -8,14 +8,18 @@ and the escalation ports stay unbound.
 
 import dataclasses
 
+import pytest
+
 import decsim.build.escalation as escalation_build
 import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.settings as machine_settings
+import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -88,3 +92,44 @@ def test_a_switching_record_builds_the_policy_its_run_binds():
     switching = _built(settings, engine)
 
     assert isinstance(switching.policy, _OwnPolicy)
+
+
+_DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
+_TWO_SOLVES = complementary.ComplementaryGap.Settings()
+_PAST_THE_ENTRY_CHANGES = [
+    {"run_both_at_once": True},
+    {"strong_window": _DOUBLE_WINDOW},
+    {"confidence": _TWO_SOLVES},
+]
+_PAST_THE_ENTRY_IDS = ["run_both_at_once", "double_window", "two_solves"]
+
+
+@pytest.mark.parametrize(
+    "change", _PAST_THE_ENTRY_CHANGES, ids=_PAST_THE_ENTRY_IDS
+)
+def test_an_edge_past_the_entry_refuses_what_only_the_entry_does(change):
+    """An edge past the entry waits for stage 5 on what reads its source.
+
+    A speculative decode, an absorbing region and a gap of two solves
+    each work on the entry pool's windows alone.
+    """
+    deep_switching = dataclasses.replace(
+        layout_tests.DEEP_SWITCHING_SLOT, **change
+    )
+    chain = layout_tests.chain_machine(deep_switching)
+    layout = layout_tests.laid_out(chain)
+    engine = engine_module.Engine()
+
+    with pytest.raises(NotImplementedError, match=r"stage 5"):
+        escalation_build.build_switching(layout, engine)
+
+
+def test_an_edge_past_the_entry_builds_on_one_solve():
+    chain = layout_tests.chain_machine()
+    layout = layout_tests.laid_out(chain)
+    engine = engine_module.Engine()
+
+    parts = escalation_build.build_switching(layout, engine)
+
+    edges = [part.edge.name for part in parts]
+    assert edges == ["switching", layout_tests.DEEP_SWITCHING]

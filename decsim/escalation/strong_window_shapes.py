@@ -52,6 +52,9 @@ class StrongWindowPorts:
     requester = ports.Port(ports.WindowRequests)
     ledger = ports.Port(ports.LogicalLedger)
     courier = ports.Port(ports.BoundaryCourier)
+    # the edge whose windows this shape lays out: a request it opens is
+    # for the edge's target pool
+    edge = ports.Port(ports.EscalateEdge)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -263,10 +266,9 @@ class DoubleWindow(StrongWindowPorts):
         release_conditions says which.
         """
         key = (weak_job.operation_id, weak_job.window_id)
+        target = self.edge.target
         strong_request_key = self.builder.new_request_key(
-            weak_job.operation_id,
-            weak_job.window_id,
-            window_records.STRONG_POOL_ID,
+            weak_job.operation_id, weak_job.window_id, target
         )
         strong_request_created_ticks = self.engine.now
         near_source_key = self.regions.double_window_near_face(key)
@@ -593,10 +595,9 @@ def _held_redo(
     """What a row keeps from its plan: its window, its reads, its faces."""
     key = (weak_job.operation_id, weak_job.window_id)
     model = shape.regions.redecode_model(key, strong_window, folded_boundaries)
+    target = shape.edge.target
     request_key = shape.builder.new_request_key(
-        weak_job.operation_id,
-        weak_job.window_id,
-        window_records.STRONG_POOL_ID,
+        weak_job.operation_id, weak_job.window_id, target
     )
     operation = shape.regions.operation(weak_job.operation_id)
     return _HeldStrongRedo(

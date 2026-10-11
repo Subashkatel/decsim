@@ -828,12 +828,11 @@ class EscalateEdge(Protocol):
     target: window_records.PoolId
     # the rule that keeps or escalates a source result
     policy: "EscalationPolicy"
-    # the verdict's clock and cycles (windows/window_commits.py)
-    costs: Any
     # the target pool's manager
     decode_queue: "DecodeQueue"
-    # which of a window's revisions the frame takes, and what a keep
-    # does to the target's decode (windows/revision_rules.py EdgeRules)
+    # which of a window's revisions the frame takes, what a keep does to
+    # the target's decode, and the verdict's clock and cycles
+    # (windows/revision_rules.py EdgeRules)
     rules: Any
 
     def parallel_strong_submission(

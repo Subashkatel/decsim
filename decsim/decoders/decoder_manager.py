@@ -67,7 +67,7 @@ class DecoderManager:
         scheduler: schedulers.Scheduler,
         pool_settings: decoder_pool_module.PoolSettings,
         pool_id: window_records.PoolId = window_records.WEAK_POOL_ID,
-        bulk_strong: bool = False,
+        merges_strong: bool = False,
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
     ):
@@ -75,8 +75,6 @@ class DecoderManager:
         # the pool the requests this manager serves are for
         self.pool_id = pool_id
         pool = decoder_pool_module.DecoderPool(self, pool_settings)
-        is_strong_pool = pool_settings.name == decode_queue.STRONG_POOL
-        merges_strong = bulk_strong and is_strong_pool
         self.queue = decode_queue.WaitingJobs(
             engine, scheduler, self, merges_strong
         )

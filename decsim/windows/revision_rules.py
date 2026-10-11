@@ -147,10 +147,15 @@ class NoCancel:
 
 @dataclasses.dataclass(frozen=True)
 class EdgeRules:
-    """An edge's replace rule and cancel rule, built."""
+    """How the window side takes an edge's verdicts and revisions.
+
+    replace and cancel are the edge's replace rule and cancel rule,
+    built; costs prices its verdict on its own clock.
+    """
 
     replace: ports.ReplaceRule
     cancel: ports.CancelRule
+    costs: window_commits.VerdictCosts = window_commits.VerdictCosts()
 
 
 # the rules of an edge whose settings name none: today's

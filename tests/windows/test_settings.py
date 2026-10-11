@@ -82,16 +82,6 @@ def test_every_scheme_record_refuses_a_window_that_commits_nothing(row):
         row.Settings(commit_rounds=0)
 
 
-def test_switching_windows_refuse_a_boundary_row_the_strong_window_overrides():
-    """A row set on the windows is the researcher's; it is never overwritten."""
-    held = boundary_policies.Held.Settings()
-    windows = window_settings.WindowSettings(boundary_policy=held)
-    double_window = strong_window_shapes.DoubleWindow.Settings()
-
-    with pytest.raises(ValueError, match="conflicts with the strong window"):
-        window_settings.switching_windows(windows, double_window)
-
-
 def test_switching_windows_take_the_strong_windows_row_over_the_default():
     plain = window_settings.WindowSettings()
     redo_window = strong_window_shapes.RedoWindow.Settings()

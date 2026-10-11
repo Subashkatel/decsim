@@ -257,6 +257,11 @@ class Machine:
         )
         for part in switching_parts:
             part.connect(plan, readout, windows, decoders)
+        entry_switching = None
+        if switching_parts:
+            entry_switching = switching_parts[0]
+            # a window's solves join on the entry edge's signal alone
+            windows.gap_join.signal = entry_switching.confidence_signal
         # the managers hear their rows before the planner compiles a
         # model, and the sender asks the wired window side where it reads
         decoders.start()
@@ -269,9 +274,6 @@ class Machine:
         decoders.attach_statistics(run_statistics)
         statistics_parts = (control, readout, *switching_parts)
         _attach_statistics(run_statistics, statistics_parts)
-        entry_switching = None
-        if switching_parts:
-            entry_switching = switching_parts[0]
         observation = _observe(
             settings,
             engine,

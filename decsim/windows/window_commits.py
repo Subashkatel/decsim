@@ -348,7 +348,7 @@ class WindowVerdict:
         if edge is None or result.soft_output is None:
             self._form_verdict(job, result, edge)
             return
-        costs = edge.costs
+        costs = edge.rules.costs
         if costs.threshold_cycles == 0:
             self._form_verdict(job, result, edge)
             return
@@ -376,7 +376,7 @@ class WindowVerdict:
         if verdict is decoding_records.Verdict.KEEP:
             self._apply_verdict(job, result, verdict, edge)
             return
-        costs = edge.costs
+        costs = edge.rules.costs
         if costs.switch_cycles == 0:
             self._apply_verdict(job, result, verdict, edge)
             return

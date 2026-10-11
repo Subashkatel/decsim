@@ -13,13 +13,17 @@ import dataclasses
 import pytest
 
 import decsim.build.decoders as decoder_build
+import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
 import decsim.config as config
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
+import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.records.seeds as seed_records
+import decsim.topology.graph_layout as graph_layout
 import tests.declared_run as declared_run
+import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -187,3 +191,34 @@ def test_a_weak_decoder_short_of_the_signals_evidence_is_named_by_its_record():
         decoder_build.build_decoder_unit(
             tier, "weak_decoder", None, None, signal
         )
+
+
+class _FormedBeforeEveryPool:
+    """A placement that forms each round before any pool reads it."""
+
+    def forms_at(self, seat: str) -> bool:
+        del seat
+        return False
+
+
+def test_bulk_strong_merges_the_queue_of_every_pool_an_edge_leads_to():
+    """The entry pool decodes the planner's windows, one job each."""
+    chain = layout_tests.chain_machine()
+    settings = graph_layout.entry_settings(chain)
+    layout = layout_tests.laid_out(chain)
+    engine = engine_module.Engine()
+    parts = escalation_build.build_switching(layout, engine)
+    signals = escalation_build.signal_by_pool(parts)
+    placement = _FormedBeforeEveryPool()
+    pools = decoder_build.build_pool_units(
+        layout, settings.clock, placement, signals
+    )
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+    targets = layout.target_by_source()
+
+    decoders = decoder_build.Decoders.build(
+        bulk, settings.clock, engine, pools, targets
+    )
+
+    merges = [manager.queue.merges_strong for manager in decoders.managers]
+    assert merges == [False, True, True]

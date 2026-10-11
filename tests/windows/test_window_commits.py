@@ -141,16 +141,18 @@ class _Fixture:
             threshold_cycles=threshold_cycles,
             switch_cycles=switch_cycles,
         )
+        rules = revision_rules.EdgeRules(
+            revision_rules.LATEST, revision_rules.CANCEL, costs
+        )
         self.escalation = types.SimpleNamespace(
             source=window_records.WEAK_POOL_ID,
             target=window_records.STRONG_POOL_ID,
             policy=self.policy,
-            costs=costs,
             decode_queue=self.decode_queue,
             escalate=self.escalated.append,
             submit_if_commit_releases=self.after_weak.append,
             cancel_strong_request=self.kept.append,
-            rules=revision_rules.DEFAULT_RULES,
+            rules=rules,
         )
         edge = (self.escalation,)
         edges = escalate_edges.EscalateEdges(edge)

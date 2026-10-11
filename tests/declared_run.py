@@ -325,12 +325,8 @@ class EndedRequests:
         self.ended: list = []
 
     def attach(self, machine) -> None:
-        """Hear the requests of both decoder managers the run has."""
-        part = machine.decoders
-        managers = (part.decoder_manager, part.strong_decoder_manager)
-        for manager in managers:
-            if manager is None:
-                continue
+        """Hear the requests of every decoder manager the run has."""
+        for manager in machine.decoders.managers:
             manager.outcomes.trace.request_ended.connect(self.request_ended)
 
     def request_ended(self, job, result, outcome, decode_output_ticks) -> None:
@@ -370,13 +366,9 @@ class FinishedDecodes:
         self.finished: list = []
 
     def attach(self, machine) -> None:
-        """Hear the decode services of both decoder managers the run has."""
-        part = machine.decoders
-        managers = (part.decoder_manager, part.strong_decoder_manager)
+        """Hear the decode services of every decoder manager the run has."""
         listener = functools.partial(self.job_finished, machine.engine)
-        for manager in managers:
-            if manager is None:
-                continue
+        for manager in machine.decoders.managers:
             manager.service.trace.job_finished.connect(listener)
 
     def job_finished(self, engine, job, unit) -> None:
@@ -407,12 +399,8 @@ class UnitMemoryDeposits:
         self.held_bits_by_unit: dict = {}
 
     def attach(self, machine) -> None:
-        """Hear the unit memories of both decoder managers the run has."""
-        part = machine.decoders
-        managers = (part.decoder_manager, part.strong_decoder_manager)
-        for manager in managers:
-            if manager is None:
-                continue
+        """Hear the unit memories of every decoder manager the run has."""
+        for manager in machine.decoders.managers:
             for unit in manager.pool.units:
                 self._hear(unit)
 

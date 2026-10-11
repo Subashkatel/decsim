@@ -145,6 +145,19 @@ def test_a_chain_seeds_its_entry_edge_as_the_two_pool_machine_does():
     assert chain_edges == [*two_pool_edges, f"{DEEP_SWITCHING}_policy"]
 
 
+def test_each_pool_reads_its_input_off_its_own_store_and_keeps_its_name():
+    chain = chain_machine()
+    layout = laid_out(chain)
+
+    input_hops = layout.input_hop_by_pool()
+    paths = layout.statistics_path_by_pool()
+
+    deep = window_records.PoolId(DEEP_POOL)
+    assert input_hops[deep] == f"{DEEP_STORE}_to_{DEEP_POOL}"
+    assert paths[deep] == DEEP_POOL
+    assert len(input_hops) == 3
+
+
 def test_each_hop_is_named_by_the_parts_at_its_ends():
     chain = chain_machine()
     layout = laid_out(chain)

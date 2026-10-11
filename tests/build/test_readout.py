@@ -11,6 +11,7 @@ import dataclasses
 
 import pytest
 
+import decsim.build.layout as layout_module
 import decsim.build.readout as readout_part
 import decsim.config as config
 import decsim.decoders.decoders as decoders
@@ -159,7 +160,7 @@ def test_a_strong_store_with_only_a_capacity_is_built():
 
     machine = machine_module.Machine.build(planned)
 
-    assert machine.readout.strong_syndrome_buffer is not None
+    assert machine.readout.store_named(layout_module.STRONG_STORE) is not None
 
 
 def test_a_ported_strong_store_is_refused():
@@ -198,10 +199,11 @@ def test_a_weak_only_run_reads_nothing_from_the_room_side():
     machine = declared_run.weak_only_run()
     readout = machine.readout
 
-    assert readout.primary_output is readout.weak_output
-    assert readout.strong_syndrome_buffer is None
-    assert readout.strong_syndrome_round_receiver is None
-    assert readout.strong_output is None
+    weak = readout.store_parts(layout_module.WEAK_STORE)
+    strong = readout.store_parts(layout_module.STRONG_STORE)
+
+    assert readout.primary_output is weak.output
+    assert strong is None
 
 
 def test_a_readout_cost_on_the_controller_needs_a_card_that_excludes_it():

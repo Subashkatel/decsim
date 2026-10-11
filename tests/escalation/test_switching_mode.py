@@ -23,6 +23,7 @@ import json
 
 import pytest
 
+import decsim.build.layout as layout_module
 import decsim.confidence.cluster as cluster
 import decsim.config as decsim_config
 import decsim.decoders.union_find.cycle_count as cycle_count
@@ -553,7 +554,8 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
     assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
     assert counts.cancelled == 3
     assert counts.needed == 0
-    machine.readout.strong_syndrome_round_receiver.check_settled()
+    strong = machine.readout.store_parts(layout_module.STRONG_STORE)
+    strong.receiver.check_settled()
 
 
 def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
@@ -625,7 +627,7 @@ def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
         host_kinds.add(job.kind)
 
     chip = machine.decoders.decoder_manager
-    host = machine.decoders.strong_decoder_manager
+    host = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
     chip.outcomes.trace.request_ended.connect(ended_on_chip)
     host.outcomes.trace.request_ended.connect(ended_on_host)
     machine.run()

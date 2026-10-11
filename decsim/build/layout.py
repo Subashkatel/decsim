@@ -150,6 +150,27 @@ class Layout:
         target = self.pool(hops.target)
         return (entry.store, target.store)
 
+    def input_hop_by_pool(self) -> dict:
+        """The hop each pool's input rides: its store's read hop.
+
+        A pool with no store, a run that decodes nothing, has none.
+        """
+        read_hop_by_store = {}
+        for store in self.stores:
+            read_hop_by_store[store.name] = store.read_hop
+        hops = {}
+        for plan in self.pools:
+            if plan.store in read_hop_by_store:
+                hops[plan.pool] = read_hop_by_store[plan.store]
+        return hops
+
+    def statistics_path_by_pool(self) -> dict:
+        """The path each pool's statistics sit at."""
+        paths = {}
+        for plan in self.pools:
+            paths[plan.pool] = plan.names.statistics_path
+        return paths
+
     def target_by_source(self) -> dict:
         """The pool each source pool escalates to."""
         targets = {}

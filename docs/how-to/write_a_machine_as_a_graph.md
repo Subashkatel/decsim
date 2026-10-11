@@ -140,6 +140,6 @@ latency and rate as the run prices them. A task built from
 
 A graph of two pools and one edge at most runs as the `MachineSettings`
 record it resolves to, and keeps that record's task id. A graph of more
-is identified by itself, and a chain of more than one edge is refused
-with "not implemented yet (stage 4g)" until chains run. Two pools with
-no edge between them, or a store feeding a store, are refused.
+is identified by itself; [How to build a chain of
+decoders](build_a_chain_of_decoders.md) grows one. A pool no edge
+reaches, or a store feeding a store, is refused.

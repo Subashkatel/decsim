@@ -21,6 +21,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
 import decsim.topology.graph_layout as graph_layout
 import tests.declared_run as declared_run
 import tests.topology.test_graph_layout as layout_tests
@@ -45,7 +46,8 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     machine = machine_module.Machine.build(bounded, 0)
 
     weak_unit = machine.decoders.decoder_manager.pool.units[0]
-    strong_unit = machine.decoders.strong_decoder_manager.pool.units[0]
+    strong_manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
+    strong_unit = strong_manager.pool.units[0]
     assert weak_unit.memory.capacity_bits == 12
     assert strong_unit.memory.capacity_bits == 30
 
@@ -167,7 +169,8 @@ def test_each_managers_scheduler_is_seeded_on_its_own_path():
     machine = machine_module.Machine.build(settings, 7)
 
     chip_scheduler = machine.decoders.decoder_manager.queue.scheduler
-    host_scheduler = machine.decoders.strong_decoder_manager.queue.scheduler
+    strong_manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
+    host_scheduler = strong_manager.queue.scheduler
     assert len(chip_scheduler.reserved_seeds) == 1
     assert len(host_scheduler.reserved_seeds) == 1
     assert chip_scheduler.reserved_seeds != host_scheduler.reserved_seeds

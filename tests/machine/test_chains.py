@@ -63,10 +63,27 @@ class DeclaredHops:
         )
 
 
-def chain_run(weak_doubts: set, strong_doubts: set) -> machine_module.Machine:
-    """The declared chain, run: each pool escalates the windows it doubts."""
+def chain_run(
+    weak_doubts: set, strong_doubts: set, *, record: bool = False
+) -> machine_module.Machine:
+    """The declared chain, run: each pool escalates the windows it doubts.
+
+    record keeps the switching records, and the decode records they read.
+    """
+    declared = chain_graph(weak_doubts, strong_doubts, record=record)
+    layout = layout_tests.laid_out(declared)
+    entry_settings = graph_layout.entry_settings(declared)
+    machine = machine_module.Machine.build(entry_settings, 0, layout=layout)
+    machine.run()
+    return machine
+
+
+def chain_graph(
+    weak_doubts: set, strong_doubts: set, *, record: bool = False
+) -> graph.Machine:
+    """The declared chain: each pool escalates the windows it doubts."""
     settings = fabric.switching_settings(
-        rounds=9, escalated_windows=weak_doubts
+        rounds=9, escalated_windows=weak_doubts, record=record
     )
     base = legacy.graph_of(settings)
     strong_microseconds = fabric.DECLARED_MICROSECONDS["strong"]
@@ -77,12 +94,7 @@ def chain_run(weak_doubts: set, strong_doubts: set) -> machine_module.Machine:
     with_doubts = base.with_settings("strong", algorithm=strong_algorithm)
     chain = _with_a_deep_pool(with_doubts)
     card_fabric = DeclaredHops(settings.links)
-    declared = dataclasses.replace(chain, fabric=card_fabric)
-    layout = layout_tests.laid_out(declared)
-    entry_settings = graph_layout.entry_settings(declared)
-    machine = machine_module.Machine.build(entry_settings, 0, layout=layout)
-    machine.run()
-    return machine
+    return dataclasses.replace(chain, fabric=card_fabric)
 
 
 def test_a_chain_that_doubts_nothing_runs_as_the_weak_pool_alone():
@@ -149,6 +161,16 @@ def test_every_store_of_a_chain_settles_empty():
     left = [len(parts.store.round_by_key) for parts in machine.readout.stores]
 
     assert left == [0, 0, 0]
+
+
+def test_every_pools_decodes_are_recorded():
+    """The run's records hear the deep pool beside the first two."""
+    machine = chain_run({0}, {0}, record=True)
+
+    requests = machine.observation.decode_records.requests
+    pools = {record.request_key.pool.word for record in requests}
+
+    assert pools == {"weak", "strong", DEEP_POOL}
 
 
 def _with_a_deep_pool(machine: graph.Machine) -> graph.Machine:

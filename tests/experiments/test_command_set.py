@@ -1056,7 +1056,7 @@ def test_a_task_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
 
 
 def test_a_stopped_task_says_so_once(tmp_path, capsys):
-    """The collector counts every task after each share; one line a stop."""
+    """The collector counts a task as each piece ends; one line a stop."""
     task = run_files.first_task()
     task_id = task.strong_id()
     _write_a_saved_piece(tmp_path, task_id, 0, [True, False])
@@ -1069,7 +1069,7 @@ def test_a_stopped_task_says_so_once(tmp_path, capsys):
     collection.next_units(tmp_path, 1)
     capsys.readouterr()
 
-    collection.count_the_pending(tmp_path)
+    collection.count_the_finished(tmp_path)
 
     printed = capsys.readouterr()
     assert printed.err == ""
@@ -1199,6 +1199,28 @@ def test_an_online_task_cut_and_resumed_is_the_uncut_task(tmp_path):
     assert cut_decisions == whole_decisions
     assert whole_trajectory[-1]["window_count"] == "20"
     assert cut_trajectory == whole_trajectory
+
+
+def test_a_pool_of_two_writes_the_shots_one_process_writes(tmp_path):
+    """Pieces end in any order on a pool; each task's prefix is the same.
+
+    Four tasks of one-shot pieces run until each stops, once on this
+    process and once on a pool of two that starts each piece as a worker
+    frees.
+    """
+    collection = {"max_shots": 4, "max_failures": 1, "piece_rounds": 15}
+    run_file = run_files.write_run_file(
+        tmp_path, axes=run_files.FOUR_TASK_AXES, collection=collection
+    )
+    study = experiment.load(run_file)
+    alone_dir = tmp_path / "alone"
+    pooled_dir = tmp_path / "pooled"
+
+    collect_command.collect_experiment(study, alone_dir, run_file)
+    collect_command.collect_experiment(study, pooled_dir, run_file, processes=2)
+
+    assert _shot_decisions(pooled_dir) == _shot_decisions(alone_dir)
+    assert _piece_names(pooled_dir) == _piece_names(alone_dir)
 
 
 def test_a_second_run_of_one_experiment_learns_from_the_start(tmp_path):

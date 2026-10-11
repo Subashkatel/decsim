@@ -12,11 +12,13 @@ reaches the weak pool of any of them.
                        windows to a strong tier on the host
     with_escalation    a machine whose pool escalates on to one more
                        pool, a chain grown one edge at a time
+    with_router        a machine whose entry store feeds a router to
+                       its entry pool and more, a decoder per patch
     memory_workload    one memory shot of Stim's rotated surface code
 """
 
 import dataclasses
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
@@ -42,6 +44,7 @@ import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.routers as routers
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -58,6 +61,7 @@ WEAK_POOL = "weak"
 STRONG_STORE = "strong_buffer"
 STRONG_POOL = "strong"
 SWITCHING = "switching"
+ROUTER = "router"
 # the loop every machine closes: readout, decision, pulse
 LOOP_WIRES = (
     graph.Wire("qpu.readout", "controller.readout"),
@@ -251,6 +255,42 @@ def with_escalation(
     grown = machine
     for part in parts:
         grown = grown.with_part(part)
+    return grown.with_wires(*wires)
+
+
+def with_router(
+    machine: graph.Machine,
+    rule: Any,
+    pools: tuple,
+    entry_store: str = WEAK_STORE,
+    entry_pool: str = WEAK_POOL,
+    site: str = fabrics.FRIDGE,
+) -> graph.Machine:
+    """The machine whose entry store feeds a router to several entry pools.
+
+    The router, named router, sends each window to the pool its rule
+    names (windows/routers.py): the machine's entry pool, first, or one
+    of pools, each (name, DecoderPoolSettings) at site, read from the
+    entry store over its own hop, entry_store_to_name, and answering the
+    frame. by_patch is VQD's decoder per logical qubit (Maurya and
+    Tannu 2406.17995v2 Sec. 4.1).
+    """
+    router_settings = routers.Router.Settings(rule)
+    router_part = graph.Part(ROUTER, router_settings)
+    rewired = machine.without_wire(
+        f"{entry_store}.reads", f"{entry_pool}.rounds"
+    )
+    grown = rewired.with_part(router_part)
+    wires = [
+        graph.Wire(f"{entry_store}.reads", f"{ROUTER}.rounds"),
+        graph.Wire(f"{ROUTER}.windows", f"{entry_pool}.rounds"),
+    ]
+    for name, pool in pools:
+        part = graph.Part(name, pool, site)
+        grown = grown.with_part(part)
+        windows = graph.Wire(f"{ROUTER}.windows", f"{name}.rounds")
+        corrections = graph.Wire(f"{name}.corrections", f"{FRAME}.corrections")
+        wires.extend((windows, corrections))
     return grown.with_wires(*wires)
 
 

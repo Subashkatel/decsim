@@ -67,7 +67,7 @@ class ShapeError(graph.GraphError):
 
 
 def holds(machine: graph.Machine) -> bool:
-    """Whether today's slots hold the graph: two pools and one edge at most.
+    """Whether today's slots hold the graph: two pools, one edge, no router.
 
     A graph they hold runs as, and keeps the id of, the MachineSettings
     it resolves to; any other is a new shape.
@@ -75,6 +75,9 @@ def holds(machine: graph.Machine) -> bool:
     by_kind = _parts_by_kind(machine)
     pools = by_kind.get("decoder_pool", [])
     edges = by_kind.get(_SWITCHING_SLOT, [])
+    routers = by_kind.get("router", [])
+    if routers:
+        return False
     return len(pools) <= 2 and len(edges) <= 1
 
 

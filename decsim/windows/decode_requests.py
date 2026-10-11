@@ -26,6 +26,7 @@ import decsim.trace_source as trace_source
 import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.routers as routers
 import decsim.windows.window_commits as window_commits
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_planner as window_planner
@@ -55,6 +56,8 @@ class WindowInputGate:
         # windows, a strong re-decode by the strong tier.
         self.copies_the_window_fold = copies_the_window_fold
         self.copies_the_strong_fold = copies_the_strong_fold
+        # the fold of each entry pool past the first a router feeds
+        self.copies_fold_by_entry_pool: dict = {}
 
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the input the decode reads.
@@ -92,9 +95,12 @@ class WindowInputGate:
 
     def _copies_the_fold(self, job: decoding_records.DecodeJob) -> bool:
         """The fold of the tier that decodes this job."""
-        if job.kind is decoding_records.DecodeJobKind.WINDOW:
-            return self.copies_the_window_fold
-        return self.copies_the_strong_fold
+        if job.kind is not decoding_records.DecodeJobKind.WINDOW:
+            return self.copies_the_strong_fold
+        pool = job.request_key.pool
+        return self.copies_fold_by_entry_pool.get(
+            pool, self.copies_the_window_fold
+        )
 
     def _masked_round(self, state, window_info, round_input):
         fragments = []
@@ -346,6 +352,9 @@ class DecodeRequester:
     gap_join is the confidence join of a run whose gap is two
     forced-class solves; it is both jobs' on_decoded and None when the
     run's weak decoder reports its own soft output from one decode.
+    decode_queue, store_output and gap_join are the primary tier's; a
+    router names each window's entry pool and holds every other entry
+    pool's (windows/routers.py).
     """
 
     tracker = ports.Port(round_tracker_module.RoundTracker)
@@ -362,6 +371,8 @@ class DecodeRequester:
     store_output = ports.Port(ports.SyndromeBufferOutput)
     # a run whose weak decoder reports its own soft output has no join
     gap_join = ports.Port(ports.WindowGapJoin, optional=True)
+    # the router of a machine of several entry pools; None for one
+    router = ports.Port(routers.Router, optional=True)
 
     def __init__(
         self,
@@ -417,11 +428,11 @@ class DecodeRequester:
         """
         store = self.retention.primary_store
         self.builder.stamp_first_round(window, store)
-        primary_tier = self.retention.primary_tier
-        forced_classes = self._forced_logical_classes()
+        entry_pool = self._pool_for(window)
+        forced_classes = self._forced_logical_classes(entry_pool)
         first_class = _first_forced_class(forced_classes)
         job = self.builder.build(
-            window, operation, primary_tier, store, first_class
+            window, operation, entry_pool, store, first_class
         )
         window.queued = True
         primary_jobs = self._primary_jobs(job, forced_classes)
@@ -450,7 +461,7 @@ class DecodeRequester:
         """Admit the primary jobs and the speculative decode beside them."""
         submissions = list(deciding.primary_submissions)
         job = deciding.job
-        edge = self._primary_edge()
+        edge = self.edges.leaving(job.request_key.pool)
         if edge is not None:
             # the queue is read before the job joins it (deadlines.py)
             edge.arm_deadline(job)
@@ -476,11 +487,60 @@ class DecodeRequester:
             submissions.append(submission)
         return submissions
 
-    def _forced_logical_classes(self) -> tuple:
-        """The classes this run's confidence has each window pinned to."""
-        if self.gap_join is None:
+    def _forced_logical_classes(self, pool: window_records.PoolId) -> tuple:
+        """The classes the pool's confidence has each window pinned to."""
+        gap_join = self._join_of(pool)
+        if gap_join is None:
             return ()
-        return self.gap_join.signal.forced_logical_classes
+        return gap_join.signal.forced_logical_classes
+
+    # ---- private: the entry pool a window is decoded on
+
+    def _pool_for(self, window: window_records.Window) -> window_records.PoolId:
+        """The entry pool that decodes the window: the router's, or the one."""
+        if self.router is None:
+            return self.retention.primary_tier
+        return self.router.pool_for(window)
+
+    def _routed_side(
+        self, pool: window_records.PoolId
+    ) -> Optional[routers.EntrySide]:
+        """The side of an entry pool past the first; None for the first."""
+        if self.router is None:
+            return None
+        return self.router.side_of(pool)
+
+    def _queue_of(self, pool: window_records.PoolId) -> ports.DecodeQueue:
+        """The manager of an entry pool."""
+        side = self._routed_side(pool)
+        if side is None:
+            return self.decode_queue
+        return side.decode_queue
+
+    def _join_of(
+        self, pool: window_records.PoolId
+    ) -> Optional[ports.WindowGapJoin]:
+        """The join of an entry pool's solves; None when it has none."""
+        side = self._routed_side(pool)
+        if side is None:
+            return self.gap_join
+        return side.gap_join
+
+    def _store_output_of(
+        self, pool: window_records.PoolId
+    ) -> ports.SyndromeBufferOutput:
+        """The entry store's end that sends to an entry pool."""
+        side = self._routed_side(pool)
+        if side is None:
+            return self.store_output
+        return side.store_output
+
+    def _routed_queues(self) -> list:
+        """Every entry pool's manager past the first, in build order."""
+        if self.router is None:
+            return []
+        sides = self.router.sides()
+        return [side.decode_queue for side in sides]
 
     def _primary_jobs(
         self, job: decoding_records.DecodeJob, forced_classes: tuple
@@ -505,7 +565,8 @@ class DecodeRequester:
         The send is the store's own (syndrome_buffer/round_output.py);
         the decoder manager calls it at dispatch.
         """
-        send_input = self.store_output.input_send_for(job, is_input_held)
+        store_output = self._store_output_of(job.request_key.pool)
+        send_input = store_output.input_send_for(job, is_input_held)
         return decoding_records.Submission(job, send_input)
 
     def _bind_input_hold(self, primary_jobs: list, window_reads) -> bool:
@@ -557,7 +618,9 @@ class DecodeRequester:
         window.service_began = False
         has_dropped_decision = self._withdraw_decision(window.key)
         if not has_dropped_decision:
-            self.decode_queue.withdraw_window(window.key)
+            entry_pool = self._pool_for(window)
+            decode_queue = self._queue_of(entry_pool)
+            decode_queue.withdraw_window(window.key)
 
     def release_window(self, window_key: tuple) -> None:
         """The window's last boundary arrived: its waiting decodes may start.
@@ -567,7 +630,8 @@ class DecodeRequester:
         in its edge's target manager. A speculative strong decode the
         primary edge waited to plan until this boundary is submitted
         first; then every manager releases the window, the primary's
-        first and each edge's target in graph order.
+        first, each other entry pool's, then each edge's target in graph
+        order.
         """
         edge = self._primary_edge()
         if edge is not None:
@@ -576,6 +640,8 @@ class DecodeRequester:
             for submission in started:
                 self._admit(submission)
         self.decode_queue.release_window(window_key)
+        for decode_queue in self._routed_queues():
+            decode_queue.release_window(window_key)
         for edge in self.edges.edges:
             edge.decode_queue.release_window(window_key)
 
@@ -588,10 +654,13 @@ class DecodeRequester:
             edge.enqueue_target(job, None)
             return
         job.window.t_queued = self.builder.engine.now
+        entry_pool = job.request_key.pool
         on_decoded = self.verdict.accept_revision
-        if self.gap_join is not None:
-            on_decoded = self.gap_join.accept_result
-        self.decode_queue.enqueue(job, submission.send_input, on_decoded)
+        gap_join = self._join_of(entry_pool)
+        if gap_join is not None:
+            on_decoded = gap_join.accept_result
+        decode_queue = self._queue_of(entry_pool)
+        decode_queue.enqueue(job, submission.send_input, on_decoded)
 
     def _withdraw_decision(self, window_key: tuple) -> bool:
         """Drop a window still in its decision and release its input hold."""

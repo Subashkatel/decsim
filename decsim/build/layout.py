@@ -73,7 +73,9 @@ class StorePlan:
     the seat of the pool that reads it, and reads_in_place whether that
     pool's units read the rounds where the store keeps them.
     takes_machine_clock is a store whose writes and reads are priced
-    on the machine's clock when it names none of its own.
+    on the machine's clock when it names none of its own. other_readers
+    are the entry pools past the first that a router feeds from the
+    entry store, each a StoreReader.
     """
 
     name: str
@@ -84,6 +86,22 @@ class StorePlan:
     reader: str
     reads_in_place: bool
     takes_machine_clock: bool
+    other_readers: tuple = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class StoreReader:
+    """One more pool reading a store: its pool, hop, seat and read.
+
+    A router's entry pools share the entry store, each reading it over
+    a hop of its own, as VQD's decoders each take their syndromes from
+    the Arbiter (Maurya and Tannu 2406.17995v2 Sec. 5).
+    """
+
+    pool: window_records.PoolId
+    read_hop: transfer_records.LinkPath
+    reader: str
+    reads_in_place: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,17 +125,26 @@ class Layout:
     """A machine's pools, stores and edges, each entry first.
 
     The entry pool decodes the planner's windows and reads the entry
-    store, the one the controller writes.
+    store, the one the controller writes. router, None for most
+    machines, sends each window to one of entry_count entry pools, the
+    first pools laid out (windows/routers.py).
     """
 
     pools: tuple
     stores: tuple
     edges: tuple
+    router: Optional[Any] = None
+    entry_count: int = 1
 
     @property
     def entry_pool(self) -> PoolPlan:
-        """The pool that decodes the planner's windows."""
+        """The first pool that decodes the planner's windows."""
         return self.pools[0]
+
+    @property
+    def entry_pools(self) -> tuple:
+        """Every pool that decodes the planner's windows, first first."""
+        return self.pools[: self.entry_count]
 
     def pool(self, pool: window_records.PoolId) -> PoolPlan:
         """The plan of one pool."""
@@ -162,6 +189,9 @@ class Layout:
         for plan in self.pools:
             if plan.store in read_hop_by_store:
                 hops[plan.pool] = read_hop_by_store[plan.store]
+        for store in self.stores:
+            for reader in store.other_readers:
+                hops[reader.pool] = reader.read_hop
         return hops
 
     def statistics_path_by_pool(self) -> dict:
@@ -195,16 +225,18 @@ class Layout:
     def formation_paths(self) -> tuple:
         """The seats a round passes from the controller to each pool.
 
-        The entry pool reads the store the controller writes; an edge's
+        Each entry pool reads the store the controller writes; an edge's
         target reads its own store, which takes an escalated window's
         rounds from the store the edge carries them from, so a round
         reaches a pool down a chain through every store before it.
         """
-        entry = self.entry_pool
-        entry_stores = (CONTROLLER_SEAT, entry.store)
-        stores_by_pool = {entry.pool: entry_stores}
-        entry_path = (*entry_stores, entry.names.seat)
-        paths = [entry_path]
+        stores_by_pool = {}
+        paths = []
+        for entry in self.entry_pools:
+            entry_stores = (CONTROLLER_SEAT, entry.store)
+            stores_by_pool[entry.pool] = entry_stores
+            entry_path = (*entry_stores, entry.names.seat)
+            paths.append(entry_path)
         for edge in self.edges:
             hops = edge.hops
             target = self.pool(hops.target)

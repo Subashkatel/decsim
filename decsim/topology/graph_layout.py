@@ -13,8 +13,11 @@ order the switching parts are written.
 
 The entry pool reads the store the controller writes; an edge's target
 reads its own store, which takes an escalated window's rounds from the
-store its source pool reads. Two pools no edge joins trade boundaries
-on a hop of their own. A store no pool reads is not built.
+store its source pool reads. A router between the entry store and
+several pools makes each of them an entry pool: they share that store,
+each over a hop of its own, and the first wired is the entry the
+legacy names go to (windows/routers.py). Two pools no edge joins trade
+boundaries on a hop of their own. A store no pool reads is not built.
 
 The entry pool, its edge and that edge's target draw their seeds at the
 roots the legacy slots give them, and every other part at its own name:
@@ -89,6 +92,7 @@ CONTROLLER_LABEL = "controller assembler"
 _POOL_KIND = "decoder_pool"
 _STORE_KIND = "syndrome_buffer"
 _SWITCHING_KIND = "switching"
+_ROUTER_KIND = "router"
 
 
 def entry_settings(machine: graph.Machine) -> machine_settings.MachineSettings:
@@ -136,15 +140,26 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
     for pool in shape.pools:
         pool_plan = _pool_plan(pool, shape, frame_name)
         pools.append(pool_plan)
+        if pool in shape.entries[1:]:
+            continue
         store_plan = _store_plan(shape, pool)
         stores.append(store_plan)
+    stores[0] = _with_other_readers(stores[0], shape)
     edges = []
     for edge in shape.edges:
         carried_from = shape.store_by_pool[edge.source.name]
         policy_seed = _policy_seed(shape, edge)
         edge_plan = _edge_plan(edge, carried_from.name, policy_seed, task_facts)
         edges.append(edge_plan)
-    return layout_module.Layout(tuple(pools), tuple(stores), tuple(edges))
+    router = shape.router_settings()
+    entry_count = len(shape.entries)
+    return layout_module.Layout(
+        tuple(pools),
+        tuple(stores),
+        tuple(edges),
+        router=router,
+        entry_count=entry_count,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -160,18 +175,28 @@ class _Edge:
 class _Shape:
     """A graph's pools in build order, its edges, each pool's store.
 
-    store_by_pool maps a pool's name to the store part it reads.
+    store_by_pool maps a pool's name to the store part it reads; entries
+    are the pools that decode the planner's windows, first first, and
+    router the part that feeds them, None for one entry pool.
     """
 
     machine: graph.Machine
     pools: tuple
     edges: tuple
     store_by_pool: dict
+    entries: tuple
+    router: Optional[graph.Part] = None
 
     @property
     def entry(self) -> graph.Part:
-        """The pool that decodes the planner's windows."""
+        """The first pool that decodes the planner's windows."""
         return self.pools[0]
+
+    def router_settings(self) -> Optional[Any]:
+        """The router's record; None for a machine with no router."""
+        if self.router is None:
+            return None
+        return self.router.settings
 
     def entry_store(self) -> graph.Part:
         """The store the entry pool reads."""
@@ -188,12 +213,16 @@ def _shape(machine: graph.Machine) -> _Shape:
     for part in switching_parts:
         edge = _edge(machine, part)
         edges.append(edge)
-    entry = _entry_pool(pools, edges)
-    ordered_pools, ordered_edges = _from_the_entry(entry, pools, edges)
+    router = _router(machine)
+    entries = _entry_pools(machine, pools, edges, router)
+    ordered_pools, ordered_edges = _from_the_entries(entries, pools, edges)
+    _refuse_an_edge_from_a_later_entry(entries, ordered_edges)
     store_by_pool = {}
     for pool in ordered_pools:
         store_by_pool[pool.name] = _store_read_by(machine, pool)
-    return _Shape(machine, ordered_pools, ordered_edges, store_by_pool)
+    return _Shape(
+        machine, ordered_pools, ordered_edges, store_by_pool, entries, router
+    )
 
 
 def _refuse_unbound_ports(machine: graph.Machine) -> None:
@@ -228,31 +257,102 @@ def _edge(machine: graph.Machine, part: graph.Part) -> _Edge:
     return _Edge(part, source, target)
 
 
-def _entry_pool(pools: list, edges: list) -> graph.Part:
-    """The one pool no edge reaches."""
-    targets = {edge.target.name for edge in edges}
-    entries = [pool for pool in pools if pool.name not in targets]
+def _router(machine: graph.Machine) -> Optional[graph.Part]:
+    """The machine's router; None for none, and at most one."""
+    routers = _parts_of_kind(machine, _ROUTER_KIND)
+    if not routers:
+        return None
+    if len(routers) > 1:
+        names = [part.name for part in routers]
+        raise graph.GraphError(
+            f"the routers {names}: a machine of more than one router is "
+            "not implemented yet (stage 5)"
+        )
+    return routers[0]
+
+
+def _entry_pools(
+    machine: graph.Machine,
+    pools: list,
+    edges: list,
+    router: Optional[graph.Part],
+) -> tuple:
+    """The pools no edge reaches: one, or each a router feeds, in its order."""
+    entries = _unreached(pools, edges)
+    if router is not None:
+        return _routed_entries(machine, router, entries)
     if len(entries) == 1:
-        return entries[0]
+        return tuple(entries)
     names = [pool.name for pool in entries]
     raise graph.GraphError(
         f"the pools {names} are reached by no escalate edge: a machine "
-        "decodes the planner's windows on one pool, and every other pool "
-        "is the target of one edge"
+        "decodes the planner's windows on one pool, or on each pool a "
+        "router feeds, and every other pool is the target of one edge"
     )
 
 
-def _from_the_entry(entry: graph.Part, pools: list, edges: list) -> tuple:
-    """The pools and edges from the entry, each edge in written order."""
-    ordered_pools = [entry]
+def _unreached(pools: list, edges: list) -> list:
+    """The pools no edge reaches, in build order."""
+    targets = {edge.target.name for edge in edges}
+    return [pool for pool in pools if pool.name not in targets]
+
+
+def _routed_entries(
+    machine: graph.Machine, router: graph.Part, entries: list
+) -> tuple:
+    """The pools the router feeds, once each pool no edge reaches is one."""
+    routed = _routed_pools(machine, router)
+    _refuse_entries_the_router_misses(entries, routed)
+    return routed
+
+
+def _routed_pools(machine: graph.Machine, router: graph.Part) -> tuple:
+    """The pools the router's windows port reaches, in wire order."""
+    windows = f"{router.name}.windows"
+    routed = []
+    for wire in machine.wires:
+        if wire.source == windows:
+            pool = _part_at(machine, wire.target)
+            routed.append(pool)
+    return tuple(routed)
+
+
+def _refuse_entries_the_router_misses(entries: list, routed: tuple) -> None:
+    routed_names = {pool.name for pool in routed}
+    missed = [pool.name for pool in entries if pool.name not in routed_names]
+    if not missed:
+        return
+    raise graph.GraphError(
+        f"the pools {missed} are reached by no escalate edge and no "
+        "router: with a router, the planner's windows are decoded on the "
+        "pools it feeds"
+    )
+
+
+def _from_the_entries(entries: tuple, pools: list, edges: list) -> tuple:
+    """The pools and edges from the entries, each edge in written order."""
+    ordered_pools = list(entries)
     ordered_edges = []
     for pool in ordered_pools:
         leaving = _edges_leaving(pool, edges)
         ordered_edges.extend(leaving)
         for edge in leaving:
             ordered_pools.append(edge.target)
-    _refuse_the_unreached(entry, pools, ordered_pools)
+    _refuse_the_unreached(entries[0], pools, ordered_pools)
     return tuple(ordered_pools), tuple(ordered_edges)
+
+
+def _refuse_an_edge_from_a_later_entry(entries: tuple, edges: tuple) -> None:
+    """Only the first entry pool escalates yet."""
+    later = {pool.name for pool in entries[1:]}
+    for edge in edges:
+        if edge.source.name not in later:
+            continue
+        raise graph.GraphError(
+            f"{edge.part.name} escalates from {edge.source.name}, an entry "
+            "pool past the first: an escalate edge from such a pool is not "
+            "implemented yet (stage 5)"
+        )
 
 
 def _edges_leaving(pool: graph.Part, edges: list) -> list:
@@ -274,7 +374,10 @@ def _refuse_the_unreached(
 
 
 def _store_read_by(machine: graph.Machine, pool: graph.Part) -> graph.Part:
-    """The store whose reads port reaches the pool's rounds."""
+    """The store whose reads port reaches the pool's rounds.
+
+    A router's pool reads the store whose reads reach the router.
+    """
     rounds = f"{pool.name}.rounds"
     for wire in machine.wires:
         if wire.target != rounds:
@@ -283,6 +386,8 @@ def _store_read_by(machine: graph.Machine, pool: graph.Part) -> graph.Part:
         kind = source.kind
         if kind.name == _STORE_KIND:
             return source
+        if kind.name == _ROUTER_KIND:
+            return _store_read_by(machine, source)
     raise graph.GraphError(
         f"{rounds} is wired to no store: a pool reads its rounds from "
         "a syndrome buffer"
@@ -331,13 +436,14 @@ def _hop(source_name: str, target_name: str) -> str:
 def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
     """How a pool's store takes its rounds.
 
-    The controller writes the entry store, unless the entry pool sits on
-    the host, which reads a store the rounds land in, as a legacy
-    strong-only run's does; an edge's target store takes its rounds as
-    they land.
+    The controller writes the entry store, unless the first entry pool
+    sits on the host, which reads a store the rounds land in, as a
+    legacy strong-only run's does; an edge's target store takes its
+    rounds as they land.
     """
-    if pool.name != shape.entry.name:
+    if pool not in shape.entries:
         return receiver_module.LANDED
+    pool = shape.entry
     if _site(pool) == fabrics.HOST:
         return receiver_module.LANDED
     return receiver_module.WRITTEN
@@ -377,7 +483,7 @@ def _seed_roots(shape: _Shape, pool: graph.Part) -> tuple:
     """A pool's unit and manager seed roots: its legacy slot's, else its own."""
     if pool.name == shape.entry.name:
         return _ENTRY_SEED_ROOTS
-    if pool.name == shape.edges[0].target.name:
+    if shape.edges and pool.name == shape.edges[0].target.name:
         return _ENTRY_TARGET_SEED_ROOTS
     return (pool.name, f"{pool.name}_manager")
 
@@ -418,6 +524,24 @@ def _store_plan(shape: _Shape, pool: graph.Part) -> layout_module.StorePlan:
         reads_in_place=reads_in_place,
         takes_machine_clock=is_written,
     )
+
+
+def _with_other_readers(
+    entry_store: layout_module.StorePlan, shape: _Shape
+) -> layout_module.StorePlan:
+    """The entry store, read by each entry pool past the first too."""
+    readers = []
+    for pool in shape.entries[1:]:
+        pool_id = window_records.PoolId(pool.name)
+        read_hop = _hop(entry_store.name, pool.name)
+        reader = layout_module.StoreReader(
+            pool=pool_id,
+            read_hop=read_hop,
+            reader=pool.name,
+            reads_in_place=not pool.settings.copies_input,
+        )
+        readers.append(reader)
+    return dataclasses.replace(entry_store, other_readers=tuple(readers))
 
 
 def _escalation_hop(
@@ -513,11 +637,6 @@ def _pool_routes(
     intake_shape = _intake_shape(shape, pool)
     pool_site = _site(pool)
     store_site = _site(store)
-    write = _route(
-        (controller_name, store.name),
-        (fabrics.FRIDGE, store_site),
-        ("write", intake_shape),
-    )
     read = _route(
         (store.name, pool.name),
         (store_site, pool_site),
@@ -532,6 +651,14 @@ def _pool_routes(
         (pool.name, pool.name),
         (pool_site, pool_site),
         ("same_pool", pool_site),
+    )
+    if pool in shape.entries[1:]:
+        # the entry store is written once, on the first entry's route
+        return (read, answer, same_pool)
+    write = _route(
+        (controller_name, store.name),
+        (fabrics.FRIDGE, store_site),
+        ("write", intake_shape),
     )
     return (write, read, answer, same_pool)
 
@@ -609,7 +736,8 @@ def _wire_links(shape: _Shape) -> dict:
     """Each wire's own link by the hop it prices.
 
     A wire between parts held once prices its shared hop; a wire to or
-    from a switching part prices its edge's forward hop.
+    from a switching part prices its edge's forward hop, and one from a
+    router the read of the store that feeds it.
     """
     machine = shape.machine
     target_by_switching = {}
@@ -617,6 +745,10 @@ def _wire_links(shape: _Shape) -> dict:
     for edge in shape.edges:
         target_by_switching[edge.part.name] = edge.target.name
         source_by_switching[edge.part.name] = edge.source.name
+    if shape.router is not None:
+        # a wire from the router prices the entry store's read
+        entry_store = shape.entry_store()
+        source_by_switching[shape.router.name] = entry_store.name
     links = {}
     for wire in machine.wires:
         if wire.link is None:

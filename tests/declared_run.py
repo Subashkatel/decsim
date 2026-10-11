@@ -433,25 +433,30 @@ def operations_or_one(operations):
     return [memory_operation(1)]
 
 
-def weak_only_run(
+def weak_only_run(*, seed=0, probes=(), **changes):
+    """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
+
+    One complete machine keeps every path fixed while a test replaces
+    only the component card whose reaction-time shift it measures.
+    changes are weak_only_settings' own.
+    """
+    settings = weak_only_settings(**changes)
+    return run_machine(settings, seed, probes)
+
+
+def weak_only_settings(
     *,
     rounds=6,
     operations=None,
-    seed=0,
     io_trace=False,
     weak_syndrome_buffer=None,
     copies_input=True,
     windows=None,
     controller=None,
     observation=None,
-    probes=(),
     clock=None,
 ):
-    """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
-
-    One complete machine keeps every path fixed while a test replaces
-    only the component card whose reaction-time shift it measures.
-    """
+    """The weak-only baseline's settings, not yet built."""
     workload = declared_workload(operations, rounds)
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
     algorithm = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
@@ -483,7 +488,7 @@ def weak_only_run(
         settings = dataclasses.replace(
             settings, weak_syndrome_buffer=weak_syndrome_buffer
         )
-    return run_machine(settings, seed, probes)
+    return settings
 
 
 def strong_only_run(

@@ -24,18 +24,33 @@ import decsim.links.settings as link_settings
 import decsim.links.window_transfers as window_transfers
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
 
 @dataclasses.dataclass(frozen=True)
 class StoreParts:
-    """One store, its outgoing end and its receiving end, and its plan."""
+    """One store, its outgoing end and its receiving end, and its plan.
+
+    other_outputs holds an outgoing end per entry pool past the first a
+    router feeds from this store, as (pool, output) pairs.
+    """
 
     plan: layout_module.StorePlan
     store: ports.SyndromeBuffer
     output: round_output.SyndromeBufferOutput
     receiver: receiver_module.SyndromeRoundReceiver
+    other_outputs: tuple = ()
+
+    def output_for(
+        self, pool: window_records.PoolId
+    ) -> round_output.SyndromeBufferOutput:
+        """The outgoing end that sends to one of the other entry pools."""
+        for reader_pool, output in self.other_outputs:
+            if reader_pool == pool:
+                return output
+        raise KeyError(pool)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -201,10 +216,14 @@ class Readout:
         output = parts.output
         receiver = parts.receiver
         store.held_rounds = self.held_rounds
-        output.transfers = self.store_transfers
-        output.store = store
-        output.link = links
-        output.detection_events = self.detection_events
+        outputs = [output]
+        for _, other_output in parts.other_outputs:
+            outputs.append(other_output)
+        for each_output in outputs:
+            each_output.transfers = self.store_transfers
+            each_output.store = store
+            each_output.link = links
+            each_output.detection_events = self.detection_events
         receiver.store = store
         receiver.output = output
         receiver.detection_events = self.detection_events
@@ -273,7 +292,17 @@ def _store_parts(
         plan.reader,
     )
     receiver = receiver_module.SyndromeRoundReceiver(engine, plan.intake)
-    return StoreParts(plan, store, output, receiver)
+    other_outputs = []
+    for reader in plan.other_readers:
+        other_output = round_output.SyndromeBufferOutput(
+            engine,
+            reader.read_hop,
+            plan.label,
+            reader.reads_in_place,
+            reader.reader,
+        )
+        other_outputs.append((reader.pool, other_output))
+    return StoreParts(plan, store, output, receiver, tuple(other_outputs))
 
 
 def _landing_path(store_plans: tuple) -> Optional[transfer_records.LinkPath]:

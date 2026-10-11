@@ -29,6 +29,7 @@ import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
 import decsim.topology.legacy as legacy
 import decsim.topology.machine_file as machine_file
+import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
 
@@ -235,6 +236,38 @@ def test_pools_no_edge_joins_are_refused():
         graph_layout.entry_settings(cut)
 
 
+def test_a_router_makes_each_pool_it_feeds_an_entry_pool():
+    routed = _routed_chain()
+
+    layout = laid_out(routed)
+    entry_names = [plan.names.seat for plan in layout.entry_pools]
+
+    assert entry_names == [machines.WEAK_POOL, _ROUTED_POOL]
+    assert layout.router.rule == _ROUTED_BY_PATCH
+
+
+def test_an_edge_from_an_entry_pool_past_the_first_is_refused():
+    """Only the first entry pool escalates yet (stage 5)."""
+    routed = _routed_chain()
+    switching = graph.Part("routed_switching", DEEP_SWITCHING_SLOT)
+    without_deep_edge = routed.without_part(DEEP_SWITCHING)
+    results = graph.Wire(f"{_ROUTED_POOL}.escalate", "routed_switching.results")
+    redecode = graph.Wire("routed_switching.redecode", f"{DEEP_POOL}.escalated")
+    with_edge = without_deep_edge.with_part(switching)
+    escalating = with_edge.with_wires(results, redecode)
+
+    with pytest.raises(graph.GraphError, match="not implemented yet"):
+        laid_out(escalating)
+
+
+def test_a_pool_reached_by_no_edge_and_no_router_is_refused():
+    routed = _routed_chain()
+    cut = routed.without_part(DEEP_SWITCHING)
+
+    with pytest.raises(graph.GraphError, match="no escalate edge and no"):
+        graph_layout.entry_settings(cut)
+
+
 def test_a_chains_task_is_identified_by_its_graph():
     """Its entry edge's record is a legacy one, whose id it never takes."""
     chain = chain_machine()
@@ -256,6 +289,34 @@ def test_a_chain_read_back_from_its_file_keeps_its_id():
     again = collect.Task("chain", read)
     assert read == chain
     assert again.strong_id() == first.strong_id()
+
+
+def test_a_routed_machine_read_back_from_its_file_keeps_its_id():
+    routed = _routed_chain()
+    workload = routed.part(WORKLOAD)
+    text = machine_file.dumps(routed)
+
+    read = machine_file.loads(text, python_parts={WORKLOAD: workload})
+
+    first = collect.Task("routed", routed)
+    again = collect.Task("routed", read)
+    assert read == routed
+    assert again.strong_id() == first.strong_id()
+
+
+_ROUTED_POOL = "fpga_b"
+_ROUTED_BY_PATCH = routers.ByPatch.Settings(
+    pool_by_patch=((0, machines.WEAK_POOL),)
+)
+
+
+def _routed_chain() -> graph.Machine:
+    """The chain whose weak store feeds a router to weak and fpga_b."""
+    chain = chain_machine()
+    weak = chain.part(machines.WEAK_POOL)
+    return machines.with_router(
+        chain, _ROUTED_BY_PATCH, ((_ROUTED_POOL, weak.settings),)
+    )
 
 
 def _pool_seeds(layout) -> list:

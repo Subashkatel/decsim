@@ -66,6 +66,7 @@ import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.routers as routers
 
 
 @dataclasses.dataclass(frozen=True)
@@ -237,6 +238,7 @@ class Machine:
             retention=windows.retention,
         )
         input_fold = decoders.decoder_manager.input_fold()
+        routed_sides = _routed_sides(layout, readout, decoders)
         windows.connect(
             weak_store=weak_store,
             strong_store=strong_store,
@@ -250,6 +252,7 @@ class Machine:
             conditional_release=control.conditional_release,
             factory=qpu.factory,
             detection_events=readout.detection_events,
+            routed_sides=routed_sides,
         )
         control.connect(
             qpu=qpu.device,
@@ -418,6 +421,31 @@ def _process_name(
     kind = settings.escalation_kind
     distance = settings.qpu.distance
     return f"decsim {kind} d{distance} seed{seed}"
+
+
+def _routed_sides(
+    layout: layout_module.Layout,
+    readout: readout_part.Readout,
+    decoders: decoders_part.Decoders,
+) -> tuple:
+    """Each entry pool past the first: its manager and its store's end.
+
+    The entry store sends to each over a hop of its own (layout
+    StoreReader); none of them has an edge leaving it yet, so none has
+    a join.
+    """
+    entry_pools = layout.entry_pools
+    if len(entry_pools) == 1:
+        return ()
+    entry_store = readout.stores[0]
+    sides = []
+    for entry in entry_pools[1:]:
+        pool = entry.pool
+        manager = decoders.manager_of(pool)
+        store_output = entry_store.output_for(pool)
+        side = routers.EntrySide(pool, manager, store_output)
+        sides.append(side)
+    return tuple(sides)
 
 
 def _root_seed(value) -> Optional[int]:

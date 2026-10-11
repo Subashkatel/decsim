@@ -55,7 +55,7 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 
 Every field has a default: a timing-only run of distance-three surface code patches with no decoder. clock is the machine's clock, the one every part that names none of its own counts its cycles on.
 
-The decode side is three slots, each None when the run has no such part: weak_decoder alone, strong_decoder alone, or both with switching, which decodes weak first and escalates a window to the strong decoder. None of the three plans no decoding.
+The decode side is three slots, each None when the run has no such part: weak_decoder alone, strong_decoder alone, or both with switching, which decodes weak first and escalates a window to the strong decoder. None of the three plans no decoding. router, None by default, sends each window to one of several entry pools; only a graph of its own shape holds more than one (windows/routers.py).
 
 SET_IN_THE_RUN_FILE names the paths the run file built the workload's circuit from or lowered it to: an assignment by path (decsim/parameters/tree.py) would leave the circuit behind, a distance-5 machine running a distance-3 circuit, so they are set in the run file.
 
@@ -78,6 +78,7 @@ SET_IN_THE_RUN_FILE names the paths the run file built the workload's circuit fr
 | `workload` | `workload_settings.WorkloadSettings` | `workload_settings.WorkloadSettings()` |
 | `magic_state_factory` | `qpu_settings.FactorySettings` | `magic_state_factories.InfiniteFactory.Settings()` |
 | `observation` | `observe_settings.ObservationSettings` | `observe_settings.ObservationSettings()` |
+| `router` | `Optional[routers.Router.Settings]` | `config.added_field(None)` |
 
 ## decsim/confidence
 
@@ -1020,6 +1021,32 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 ### `NoCancel.Settings`
 
 `decsim/windows/revision_rules.py`. The row that never cancels, which takes no setting.
+
+### `RuleSettings`
+
+`decsim/windows/routers.py`. A routing rule's settings record (this module).
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `pool_for(self, operation: program_records.Operation)` | `str` |
+| `check_operations(self, operations: tuple, pool_names: tuple)` | `None` |
+
+### `ByPatch.Settings`
+
+`decsim/windows/routers.py`. The table: (patch, pool name) pairs, one pair per patch.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `pool_by_patch` | `tuple` | `()` |
+
+### `Router.Settings`
+
+`decsim/windows/routers.py`. The router's rule (this module's rows).
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `rule` | `RuleSettings` | `ByPatch.Settings()` |
 
 ### `SchemeSettings`
 

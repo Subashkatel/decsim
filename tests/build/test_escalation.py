@@ -24,6 +24,7 @@ import decsim.experiments.collect as collect
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.settings as machine_settings
+import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -114,6 +115,19 @@ def test_an_edge_past_the_entry_refuses_an_absorbing_window():
     engine = engine_module.Engine()
 
     with pytest.raises(NotImplementedError, match=r"stage 5"):
+        escalation_build.build_switching(layout, engine)
+
+
+def test_an_absorbing_window_beside_a_router_is_refused():
+    """It would withdraw windows the router sent to another pool."""
+    double = layout_tests.chain_machine(entry_window=_DOUBLE_WINDOW)
+    weak = double.part(machines.WEAK_POOL)
+    rule = routers.ByPatch.Settings(pool_by_patch=((0, machines.WEAK_POOL),))
+    routed = machines.with_router(double, rule, (("fpga_b", weak.settings),))
+    layout = layout_tests.laid_out(routed)
+    engine = engine_module.Engine()
+
+    with pytest.raises(NotImplementedError, match="beside a router"):
         escalation_build.build_switching(layout, engine)
 
 

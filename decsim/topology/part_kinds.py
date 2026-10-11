@@ -81,7 +81,8 @@ class PartKind:
 # corrections from every pool. A pool's results reach a switching part,
 # an escalate edge, whose verdict sends a window it escalates on to the
 # re-decode of the pool it targets; a pool takes at most one edge in and
-# one out, so the pools form a tree from the pool that decodes first.
+# one out, so the pools form a tree from each pool that decodes first:
+# one, or each pool a router feeds.
 _QPU_PORTS = (
     Port("readout", OUTPUT, MEASUREMENTS),
     Port("pulses", INPUT, COMMANDS),
@@ -101,6 +102,12 @@ _DECODER_POOL_PORTS = (
     Port("corrections", OUTPUT, CORRECTIONS, is_required=False),
     Port("escalate", OUTPUT, ESCALATIONS, is_required=False),
     Port("escalated", INPUT, REDECODES, is_required=False),
+)
+# A router sits between the entry store and the entry pools: the store's
+# reads reach it, and its windows reach every pool it routes to.
+_ROUTER_PORTS = (
+    Port("rounds", INPUT, ROUNDS),
+    Port("windows", OUTPUT, ROUNDS, is_many=True),
 )
 # A switching record set on a run with no second pool escalates
 # nowhere, so its ports are not required.
@@ -134,6 +141,7 @@ KINDS = (
     PartKind("windows", ("windows",)),
     PartKind("decoder_manager", ("decoder_manager",)),
     PartKind("switching", ("switching",), _SWITCHING_PORTS),
+    PartKind("router", ("router",), _ROUTER_PORTS),
     PartKind("workload", ("workload",)),
     PartKind("magic_state_factory", ("magic_state_factory",)),
 )

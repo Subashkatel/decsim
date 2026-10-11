@@ -219,7 +219,7 @@ def build_pool_units(
             plan.settings, names.seat, machine_clock, formation, signal
         )
         blocks_unit = False
-        if index == 0:
+        if index < layout.entry_count:
             blocks_unit = _blocks_unit(plan.settings)
         settings = _pool(plan.settings, names.queue, formation, blocks_unit)
         pool = PoolUnits(plan, unit, settings)

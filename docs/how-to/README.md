@@ -30,3 +30,6 @@ the [reference](../reference/README.md) pages.
 - [How to build a chain of decoders](build_a_chain_of_decoders.md): a
   pool added behind another, the verdict its edge decides on, and what
   the run reports for it.
+- [How to route windows to several pools](route_windows_to_several_pools.md):
+  a router in front of the entry pool, a rule that names each window's
+  pool, and what it costs.

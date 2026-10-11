@@ -28,6 +28,7 @@ import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_commits as window_commits
@@ -39,7 +40,8 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    gap_join is None on a run with no switching.
+    gap_join is None on a run with no switching, and router on a run of
+    one entry pool.
     """
 
     models: window_planner_module.WindowModels
@@ -58,6 +60,7 @@ class Windows:
     requester: decode_requests.DecodeRequester
     gap_join: Optional[gap_join_module.WindowGapJoin]
     window_manager: window_manager_module.WindowManager
+    router: Optional[routers.Router] = None
 
     @classmethod
     def build(
@@ -100,6 +103,10 @@ class Windows:
         gate = decode_requests.WindowInputGate(
             copies_the_window_fold, copies_the_strong_fold
         )
+        for other_entry in layout.entry_pools[1:]:
+            copies = _copies_the_boundary_fold(other_entry.settings)
+            gate.copies_fold_by_entry_pool[other_entry.pool] = copies
+        router = _router(layout, plan.planned_operations)
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
@@ -135,6 +142,7 @@ class Windows:
             requester=requester,
             gap_join=gap_join,
             window_manager=window_manager,
+            router=router,
         )
         windows._wire_the_plan(plan)
         windows._wire_the_window_chain(links)
@@ -155,8 +163,14 @@ class Windows:
         conditional_release: ports.ReleaseReceiver,
         factory: ports.MagicStateFactory,
         detection_events: ports.DetectionEventPlacement,
+        routed_sides: tuple = (),
     ) -> None:
-        """Read from the stores, decode on the managers, commit to the frame."""
+        """Read from the stores, decode on the managers, commit to the frame.
+
+        routed_sides are the entry pools past the first, each a
+        routers.EntrySide, which the router hands each window it sends
+        there.
+        """
         self.models.decoder = primary_decoder
         for target_decoder in target_decoders:
             self.models.escalates_to(target_decoder)
@@ -176,6 +190,8 @@ class Windows:
         self.results.factory = factory
         if self.gap_join is not None:
             self.gap_join.decode_queue = decode_queue
+        for side in routed_sides:
+            self.router.add_side(side)
 
     def start(self) -> None:
         """Build every planned window's model, then its first boundary."""
@@ -244,6 +260,13 @@ class Windows:
         requester.gap_join = self.gap_join
         if self.gap_join is not None:
             self.gap_join.verdict = verdict
+        router = self.router
+        if router is None:
+            return
+        router.tracker = self.tracker
+        requester.router = router
+        verdict.router = router
+        self.courier.router = router
 
 
 def _retention(
@@ -261,6 +284,23 @@ def _retention(
         primary_tier=window_tier,
         strong_side_seat=formation_reads.strong_side_seat,
     )
+
+
+def _router(
+    layout: layout_module.Layout, operations: tuple
+) -> Optional[routers.Router]:
+    """The router of the layout's entry pools; None for one entry pool.
+
+    Its rule must send every operation to one of them.
+    """
+    if layout.router is None:
+        return None
+    pool_names = []
+    for entry in layout.entry_pools:
+        pool_names.append(entry.pool.word)
+    rule = layout.router.rule
+    rule.check_operations(operations, tuple(pool_names))
+    return layout.router.build()
 
 
 def _gap_join(

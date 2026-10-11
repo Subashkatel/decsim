@@ -33,6 +33,7 @@ import decsim.trace_source as trace_source
 import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.routers as routers
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_planner as window_planner
 
@@ -301,7 +302,8 @@ class WindowVerdict:
     policy, priced on the edge's own clock, like gem5's frontend and
     forward latencies (src/mem/XBar.py); zero costs keep the handoff
     synchronous. A revision no edge leaves is final. window_pool
-    decodes the planner's windows, so its revision is the first.
+    decodes the planner's windows, so its revision is the first, as is
+    the revision of every other entry pool a router feeds.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -310,6 +312,8 @@ class WindowVerdict:
     decode_queue = ports.Port(ports.DecodeQueue)
     committer = ports.Port(WindowCommitter)
     edges = ports.Port(escalate_edges.EscalateEdges)
+    # the router of a machine of several entry pools; None for one
+    router = ports.Port(routers.Router, optional=True)
 
     def __init__(
         self,
@@ -334,7 +338,7 @@ class WindowVerdict:
         """
         pool = job.request_key.pool
         edge = self.edges.leaving(pool)
-        is_first = pool == self.window_pool
+        is_first = self._is_an_entry_pool(pool)
         if not is_first and edge is None:
             self._commit_final_revision(job, result)
             return
@@ -420,7 +424,7 @@ class WindowVerdict:
         window = self._window_of(job)
         operation = self.tracker.operation_by_id[window.operation_id]
         request_key = job.request_key
-        is_first = request_key.pool == self.window_pool
+        is_first = self._is_an_entry_pool(request_key.pool)
         commit_region = _commit_region_of(job, window)
         return Revision(
             window, operation, result, request_key, is_first, commit_region
@@ -437,8 +441,26 @@ class WindowVerdict:
         """The manager that served a revision of pool."""
         if pool == self.window_pool:
             return self.decode_queue
+        side = self._routed_side(pool)
+        if side is not None:
+            return side.decode_queue
         edge = self.edges.entering(pool)
         return edge.decode_queue
+
+    def _is_an_entry_pool(self, pool: window_records.PoolId) -> bool:
+        """Whether the pool decodes the planner's windows."""
+        if pool == self.window_pool:
+            return True
+        side = self._routed_side(pool)
+        return side is not None
+
+    def _routed_side(
+        self, pool: window_records.PoolId
+    ) -> Optional[routers.EntrySide]:
+        """The side of an entry pool past the first; None for any other."""
+        if self.router is None:
+            return None
+        return self.router.side_of(pool)
 
 
 def _verdict_for(

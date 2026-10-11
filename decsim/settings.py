@@ -27,6 +27,7 @@ import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 
 
@@ -41,7 +42,9 @@ class MachineSettings:
     The decode side is three slots, each None when the run has no such
     part: weak_decoder alone, strong_decoder alone, or both with
     switching, which decodes weak first and escalates a window to the
-    strong decoder. None of the three plans no decoding.
+    strong decoder. None of the three plans no decoding. router, None
+    by default, sends each window to one of several entry pools; only a
+    graph of its own shape holds more than one (windows/routers.py).
 
     SET_IN_THE_RUN_FILE names the paths the run file built the
     workload's circuit from or lowered it to: an assignment by path
@@ -98,6 +101,7 @@ class MachineSettings:
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
     )
+    router: Optional[routers.Router.Settings] = config.added_field(None)
 
     def __post_init__(self) -> None:
         _check_decode_slots(self)

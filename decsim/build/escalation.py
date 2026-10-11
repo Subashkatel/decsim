@@ -220,13 +220,16 @@ def build_switching(
 
     The task's calibrator, online_threshold, decides on the entry edge,
     the one whose threshold the task learns. An edge past the entry
-    takes no region that absorbs its source windows yet (stage 5).
+    takes no region that absorbs its source windows yet, nor does one
+    beside a router (stage 5).
     """
     parts = []
     threshold = online_threshold
     for edge in layout.edges:
         part = Switching.build(edge, layout, engine, threshold, machine_clock)
-        if parts:
+        if not parts:
+            _refuse_absorbing_beside_a_router(part, layout)
+        else:
             _refuse_past_the_entry(part)
             join = gap_join_module.WindowGapJoin(engine)
             part = dataclasses.replace(part, source_join=join)
@@ -346,6 +349,23 @@ _ABSORBING_PAST_THE_ENTRY = (
     "does not decode, and a redo_window there already re-decodes the "
     "region its source revision covered"
 )
+
+
+def _refuse_absorbing_beside_a_router(
+    part: Switching, layout: layout_module.Layout
+) -> None:
+    """An absorbing window withdraws its neighbours from the entry pool."""
+    if layout.entry_count == 1:
+        return
+    edge = part.edge
+    shape = edge.settings.strong_window
+    if not shape.absorbs_weak_windows:
+        return
+    raise NotImplementedError(
+        f"escalate edge {edge.name!r}: strong_window {shape.name} beside a "
+        "router is not implemented yet (stage 5): it absorbs neighbouring "
+        "windows the router may have sent to another entry pool"
+    )
 
 
 def _refuse(edge: layout_module.EdgePlan, what: str, reason: str) -> None:

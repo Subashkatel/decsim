@@ -167,6 +167,16 @@ class Machine:
         """The machine with these wires added."""
         return dataclasses.replace(self, wires=(*self.wires, *wires))
 
+    def without_wire(self, source: str, target: str) -> "Machine":
+        """The machine with the wire from source to target gone."""
+        wires = []
+        for wire in self.wires:
+            if wire.source != source or wire.target != target:
+                wires.append(wire)
+        if len(wires) == len(self.wires):
+            raise GraphError(f"no wire from {source} to {target}")
+        return dataclasses.replace(self, wires=tuple(wires))
+
     def without_part(self, name: str) -> "Machine":
         """The machine with a part and every wire that reaches it gone."""
         self.part(name)

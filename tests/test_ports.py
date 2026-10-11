@@ -31,6 +31,7 @@ import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
+import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -58,6 +59,7 @@ SOURCE_ROWS = {
     "syndrome_bits": syndrome_devices.SyndromeBitDevice,
     "recorded_stim": stim_device.RecordedStimDevice,
     "streaming_stim": streaming_stim_device.StreamingStimDevice,
+    "flip_stream": flip_stream_device.FlipStreamDevice,
     "error_model_stim": stim_device.ErrorModelStimDevice,
 }
 # the decoders decsim ships whose record has defaults of its own;

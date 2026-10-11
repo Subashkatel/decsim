@@ -47,27 +47,13 @@ class ObservableRecipe:
     reference_parity: int
 
 
-@dataclasses.dataclass(frozen=True)
-class FormationTable:
-    """Every recipe read off one circuit, over its packet layout.
+class TableReads:
+    """What a seat reads off a table, from its per-round recipes alone.
 
-    readout_slot_start is the slot where the folded data readout begins in
-    the last packet, or None. live_reach, on a live stream's table, is how
-    many rounds back a round not yet run may read (rounds_read_back); None
-    on a whole operation's table.
+    A table gives detectors_of_round, detectors and _reach_from; the
+    whole operation's table (FormationTable) and a stream's translated
+    one (detector_error_model/periodic_formation.py) share these reads.
     """
-
-    round_count: int
-    packet_width_by_round: dict[int, int]
-    readout_slot_start: Optional[int]
-    detectors: tuple[DetectorRecipe, ...]
-    observables: tuple[ObservableRecipe, ...]
-    live_reach: Optional[int] = None
-
-    def detectors_of_round(self, round_index: int) -> list[DetectorRecipe]:
-        """The detectors formed when this round's packet arrives."""
-        detectors = self._detectors_by_round.get(round_index, ())
-        return list(detectors)
 
     def rounds_read_by(self, round_indices: Iterable[int]) -> set[int]:
         """The rounds whose packets forming these rounds reads, and no more.
@@ -108,12 +94,9 @@ class FormationTable:
         read_rounds = range(earliest_round, first_round)
         return tuple(read_rounds)
 
-    def rounds_reading(self, round_index: int) -> tuple[int, ...]:
-        """The later rounds whose formation reads this round's packet.
-
-        A round's own formation always has its own packet, so it is not listed.
-        """
-        return self._later_readers_by_round.get(round_index, ())
+    def stream_template(self) -> Optional[object]:
+        """The template a stream's table is moved from; None for a circuit's."""
+        return None
 
     def detector_rounds(self) -> dict[int, int]:
         """Each detector's round, the map resolve_detector_rounds yields."""
@@ -122,11 +105,55 @@ class FormationTable:
             for recipe in self.detectors
         }
 
+
+@dataclasses.dataclass(frozen=True)
+class FormationTable(TableReads):
+    """Every recipe read off one circuit, over its packet layout.
+
+    readout_slot_start is the slot where the folded data readout begins in
+    the last packet, or None. live_reach, on a live stream's table, is how
+    many rounds back a round not yet run may read (rounds_read_back); None
+    on a whole operation's table.
+    """
+
+    round_count: int
+    packet_width_by_round: dict[int, int]
+    readout_slot_start: Optional[int]
+    detectors: tuple[DetectorRecipe, ...]
+    observables: tuple[ObservableRecipe, ...]
+    live_reach: Optional[int] = None
+
+    def detectors_of_round(self, round_index: int) -> list[DetectorRecipe]:
+        """The detectors formed when this round's packet arrives."""
+        detectors = self._detectors_by_round.get(round_index, ())
+        return list(detectors)
+
+    def rounds_reading(self, round_index: int) -> tuple[int, ...]:
+        """The later rounds whose formation reads this round's packet.
+
+        A round's own formation always has its own packet, so it is not listed.
+        """
+        return self._later_readers_by_round.get(round_index, ())
+
     def observable_slots_of_round(
         self, round_index: int
     ) -> tuple[tuple[int, int], ...]:
         """(observable index, slot) for each observable record in the packet."""
         return self._observable_slots_by_round.get(round_index, ())
+
+    def check_extends(self, previous: "FormationTable") -> None:
+        """Refuse a longer table that changes a round the previous had."""
+        for round_index, width in previous.packet_width_by_round.items():
+            if self.packet_width_by_round.get(round_index) != width:
+                raise RuntimeError(
+                    "formation extension changes an existing packet"
+                )
+        previous_detector_count = len(previous.detectors)
+        detector_prefix = self.detectors[:previous_detector_count]
+        if detector_prefix != previous.detectors:
+            raise RuntimeError(
+                "formation extension changes an existing detector"
+            )
 
     def _reach_from(self, first_round: int) -> int:
         """How far before first_round its or a later detector reads."""

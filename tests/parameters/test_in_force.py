@@ -11,6 +11,7 @@ import decsim.experiments.collect as collect
 import decsim.parameters.fields as fields
 import decsim.parameters.in_force as in_force
 import decsim.parameters.tree as tree
+import decsim.topology.constants as constants_module
 import tests.experiments.run_files as run_files
 
 ORIGIN = "--set"
@@ -65,3 +66,29 @@ def test_an_assignment_one_task_reaches_is_not_refused_for_the_others():
         switched = collect.Task("switching", switching)
 
     assert switched.machine.strong_decoder.unit_count == 2
+
+
+def test_a_misspelt_constant_is_refused_with_the_near_constant(tmp_path):
+    path = tmp_path / "constants.yaml"
+    path.write_text("memory:\n  probability: 0.002\n")
+    misspelt = _assignment("constants.memory.probabilty", 0.004)
+
+    with pytest.raises(fields.ParameterError) as refused:
+        with in_force.in_force([misspelt]):
+            constants_module.read(path)
+
+    message = str(refused.value)
+    assert "Did you mean constants.memory.probability" in message
+
+
+def test_the_assignments_in_force_are_none_outside_a_load():
+    machine = run_files.minimal_machine()
+    unit_count = _assignment("weak_decoder.unit_count", 2)
+
+    with in_force.in_force([unit_count]):
+        inside = in_force.current()
+        collect.Task("first", machine)
+    outside = in_force.current()
+
+    assert inside == (unit_count,)
+    assert outside == ()

@@ -1,0 +1,7 @@
+# Switching per window: Experiment 1's machine (../switching_baseline)
+# plus these.
+
+tesseract:                           # the package's tesseract-short-beam profile
+  merge_errors: true                 # (tesseract-decoder src/tesseract_sinter_compat.pybind.h:468-474)
+  detector_order_seed: 2384753       # the profile's order seed (same lines)
+union_find_failures: 100             # the failures union-find alone is expected to make in each setting

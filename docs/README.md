@@ -68,6 +68,7 @@ Each guide adds one kind of thing to the machine.
 - [How to share a pool among patches](how-to/share_a_pool_among_patches.md)
 - [How to decode a window with an ensemble](how-to/decode_a_window_with_an_ensemble.md)
 - [How to batch a pool's decodes](how-to/batch_a_pools_decodes.md)
+- [How to sweep a machine over a grid](how-to/sweep_a_machine_over_a_grid.md)
 - [How to build each switching pattern](how-to/build_each_switching_pattern.md)
 
 ## Reference

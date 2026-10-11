@@ -1,0 +1,16 @@
+# The switching experiment: Toshio et al.'s two tiers (2510.25222) on the
+# weak decoder baseline, at d = 3 and 5 and p = 0.008.
+
+physical_error_probability: 0.008
+round_period_microseconds: 1.0             # the paper's tau_gen
+strong_decode_microseconds_per_round: 10.0  # tau_strong_dec = 10 tau_gen (2510.25222 lines 1109-1114)
+escalation_link:                            # T_strong_comm = 10 tau_gen, 10 us (2510.25222 lines 1109-1114)
+  clock: 250MHz                             # the room clock
+  latency: 10us
+  source: T_strong_comm, 2510.25222 lines 1109-1114
+threshold: 20dB                             # the keep threshold of 2510.25222 Sec. IV
+cluster_gap:
+  walk: 12us
+stop:
+  cluster_gap_shots: 50
+  redo_window_shots: 2000

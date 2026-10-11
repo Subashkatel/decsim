@@ -12,6 +12,7 @@ import dataclasses
 
 import pytest
 
+import decsim.decoders.settings as decoder_settings
 import decsim.parameters.assignments as assignments_module
 import decsim.parameters.fields as fields
 import decsim.parameters.tree as tree
@@ -137,6 +138,17 @@ def test_a_time_for_cycles_counts_on_the_parts_clock_or_the_machines():
 
     engine = assigned.weak_decoder.engine
     assert engine.release_cycles_per_job == clock.cycles_for(20_000)
+
+
+def test_a_record_built_with_its_clock_counts_a_time_on_that_clock():
+    """25 ns on a 100 MHz part is 3 cycles, with no machine clock to fall on."""
+    clock = tree.Assignment("clock", "100MHz", ORIGIN)
+    release = tree.Assignment("release_per_job", "25ns", ORIGIN)
+
+    built = tree.built(decoder_settings.EngineSettings, [release, clock])
+
+    engine = built.settings
+    assert engine.release_cycles_per_job == 3
 
 
 def test_a_type_assignment_swaps_the_part_and_its_parameters_follow():

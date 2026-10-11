@@ -11,6 +11,7 @@ import pathlib
 import pytest
 
 import decsim.parameters.fields as fields
+import decsim.topology.constants as constants_module
 import decsim.topology.legacy as legacy
 import decsim.topology.machine_file as machine_file
 import tests.experiments.run_files as run_files
@@ -55,7 +56,7 @@ fiber:
 def _constants(tmp_path: pathlib.Path, text: str = CONSTANTS):
     path = tmp_path / "constants.yaml"
     path.write_text(text)
-    return machine_file.read_constants(path)
+    return constants_module.read(path)
 
 
 @pytest.mark.parametrize("name", list(regression.SHAPES))
@@ -132,9 +133,3 @@ def test_a_record_with_no_type_is_refused(tmp_path):
 
     with pytest.raises(fields.ParameterError, match="names its type"):
         machine_file.loads(untyped, constants)
-
-
-def test_yaml_1_2_reads_off_as_a_word_and_5e_4_as_a_number():
-    document = machine_file._parsed("a: off\nb: 5e-4\nc: 0123\n")
-
-    assert document == {"a": "off", "b": 0.0005, "c": 123}

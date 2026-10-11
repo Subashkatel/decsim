@@ -7,7 +7,8 @@
 params prints every settable path of one task's machine (the first, or
 the --only one; a graph's paths for a task built from a graph) with its
 value as it would be written, its record's default where the run file
-moved it, and the assignment that set it.
+moved it, and the assignment that set it; then each constants file the
+run read, every value with its source.
 --match keeps the paths a pattern reaches, `*` and `**` as `--set`
 takes them. This is gem5's `--list-sim-objects`/config.ini and
 OMNeT++'s `-q params` for decsim's settings tree.
@@ -28,6 +29,7 @@ import decsim.parameters.fields as fields
 import decsim.parameters.kinds as kinds
 import decsim.parameters.tree as tree
 import decsim.parameters.units as units
+import decsim.topology.constants as constants_module
 
 _NO_ORIGIN = ""
 _RUN_FILE_ONLY = "run file only"
@@ -64,6 +66,8 @@ def params(argv: list) -> None:
             origin = _RUN_FILE_ONLY
         line = _setting_line(setting, origin)
         print(line)
+    for constants in study.constants:
+        _print_constants(constants, parsed.match)
 
 
 def info(argv: list) -> None:
@@ -140,6 +144,26 @@ def _is_matched(pattern: Optional[str], setting: tree.Setting) -> bool:
         return True
     segments = setting.path.split(".")
     return tree.matches(pattern, segments)
+
+
+def _print_constants(constants: Any, pattern: Optional[str]) -> None:
+    """A constants file's names as --set writes them, values and sources."""
+    print(f"# {constants.origin}: constants.name = value  (source)")
+    for name, value in constants.values.items():
+        path = f"{constants_module.PREFIX}.{name}"
+        segments = path.split(".")
+        if pattern is not None and not tree.matches(pattern, segments):
+            continue
+        source = constants.sources.get(name, _NO_ORIGIN)
+        line = _setting_line_of(path, value, source)
+        print(line)
+
+
+def _setting_line_of(path: str, written: Any, origin: str) -> str:
+    line = f"{path} = {written}"
+    if origin:
+        line = f"{line}  ({origin})"
+    return line
 
 
 def _setting_line(setting: tree.Setting, origin: str) -> str:

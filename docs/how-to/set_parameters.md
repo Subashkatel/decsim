@@ -83,3 +83,16 @@ lowered fields are refused by name (`MachineSettings.set_in_the_run_file`,
 `decsim params` marks them `(run file only)`, and a wildcard passes
 them by. [A maker row](plug_in_a_workload_maker.md) makes such a
 workload settable.
+
+## 6. Set a constant
+
+A run built from a constants file takes `constants.<name>` as a path,
+and `decsim params` lists those names after the machine's:
+
+```bash
+decsim run run.py --set constants.escalation.threshold.threshold=25dB
+```
+
+A `--set` to a value the run file sweeps is refused, since every cell
+would run it while its name said its own. [How to sweep a machine over a
+grid](sweep_a_machine_over_a_grid.md) writes such a run.

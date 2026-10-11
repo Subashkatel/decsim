@@ -200,6 +200,15 @@ def test_a_chains_id_holds_its_workload_lowered():
     assert lowered_task.strong_id() == task.strong_id()
 
 
+def test_the_machine_id_is_the_same_for_two_metadata_of_one_machine():
+    machine = machines.weak_baseline(3, 0.002, 1.0)
+    first = collect.Task("first", machine, {"label": "a"})
+    second = collect.Task("second", machine, {"label": "b"})
+
+    assert first.machine_id() == second.machine_id()
+    assert first.strong_id() != second.strong_id()
+
+
 def test_a_distance_in_force_makes_the_memory_again_at_that_distance():
     base = machines.weak_baseline(3, 0.002, 1.0)
     at_five = machines.weak_baseline(5, 0.002, 1.0)

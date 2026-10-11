@@ -200,7 +200,12 @@ percent of what it asks. It writes `jobs.json`, each job's pieces;
 ends, however its jobs ended. It prints the walltime and one line per
 job, its cores, estimated use and pieces, then
 submits them all; `--dry-run` writes and prints them and submits
-nothing. A job asks for `--memory-mb` megabytes (16384) and logs to
+nothing. A job asks for `--memory-mb` megabytes; without the flag it
+asks its cores times the largest `peak_memory_mb` the seconds file
+gives, times `--memory-margin` (1.25), or 16384 when a task has none.
+`decsim estimates results/first_sweep > seconds_per_shot.csv` writes
+the file from a folded run: each task's `sim_wall_seconds_per_shot`
+and the largest peak resident memory its pieces recorded. A job logs to
 `logs/<array id>_<i>.log`. A task that stops on failures is refused,
 since its work is unknown before launch; run it without `--slurm`. If a
 job dies or runs out of time, submit the same command again: it packs

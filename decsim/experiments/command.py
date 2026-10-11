@@ -11,13 +11,14 @@ runs, so `decsim trace` never loads Stim. The console script and
     decsim run <run file> --seed S [--only NAME] [--out DIR] [--log ...]
         [--trace]
     decsim run <run file> --slurm [--cores C] [--hours H] [--memory-mb M]
-        [--out DIR] [--dry-run]
+        [--memory-margin F] [--out DIR] [--dry-run]
     decsim run --fold --out DIR
     decsim trace follow <file> --round k:n | --window k:n
     decsim params <run file> [--only NAME] [--match PATTERN]
     decsim info <record name>
     decsim describe <run file> [--only NAME]
     decsim check <run file> [--only NAME]
+    decsim estimates <run dir>
 
 Every run form takes --set PATH=VALUE, repeated, to set any parameter
 of every task's machine (decsim/parameters; `decsim params` lists the
@@ -98,7 +99,12 @@ def _launch_on_slurm(parsed) -> None:
     """Every task recorded, its pieces packed into Slurm jobs, then a fold."""
     import decsim.experiments.plan_command as plan_command
 
-    job = plan_command.JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
+    memory_mb = parsed.memory_mb
+    if memory_mb is None:
+        memory_mb = plan_command.measured_memory_mb(
+            parsed.run_file, parsed.cores, parsed.memory_margin
+        )
+    job = plan_command.JobShape(parsed.cores, parsed.hours, memory_mb)
     plan_command.launch(
         parsed.run_file, parsed.out, job, dry_run=parsed.dry_run
     )
@@ -234,7 +240,18 @@ def _run_parser():
         "--hours", type=int, default=24, help="a job's longest walltime"
     )
     parser.add_argument(
-        "--memory-mb", type=int, default=16384, help="a job's memory"
+        "--memory-mb",
+        type=int,
+        default=None,
+        help="a job's memory; by default its cores times the largest "
+        "peak_memory_mb in seconds_per_shot.csv, times --memory-margin, "
+        "or 16384 without one",
+    )
+    parser.add_argument(
+        "--memory-margin",
+        type=float,
+        default=1.25,
+        help="what a job asks over its workers' measured peaks",
     )
     parser.add_argument(
         "--dry-run",
@@ -336,6 +353,13 @@ def _describe(argv: list) -> None:
     describe_command.describe(argv)
 
 
+def _estimates(argv: list) -> None:
+    """What --slurm sizes its jobs by, read off a folded run."""
+    import decsim.experiments.estimates_command as estimates_command
+
+    estimates_command.estimates(argv)
+
+
 def _check(argv: list) -> None:
     """Every task's machine built once, before any job runs it."""
     import decsim.experiments.check_command as check_command
@@ -371,4 +395,5 @@ _RUN_BY_VERB = {
     "info": _info,
     "describe": _describe,
     "check": _check,
+    "estimates": _estimates,
 }

@@ -13,7 +13,6 @@ port.
 import dataclasses
 import functools
 import operator
-from collections.abc import Callable
 from typing import Any, Optional
 
 import decsim.config as config
@@ -522,7 +521,9 @@ class DecodeRequester:
         reader_count = len(primary_jobs)
         if reader_count == 1:
             return False
-        shared = _SharedInputHold(first.input_hold, reader_count)
+        shared = round_retention_module.SharedInputHold(
+            first.input_hold, reader_count
+        )
         for job in primary_jobs:
             job.input_hold = shared.release
         return False
@@ -581,7 +582,7 @@ class DecodeRequester:
             # the speculative strong decode started with the weak job (Toshio
             # 2510.25222 lines 598-601) is its edge's target's to serve
             edge = self.edges.entering(job.request_key.pool)
-            edge.enqueue_target(job, submission.send_input)
+            edge.enqueue_target(job, None)
             return
         job.window.t_queued = self.builder.engine.now
         on_decoded = self.verdict.accept_revision
@@ -600,27 +601,6 @@ class DecodeRequester:
                 job.input_hold()
                 job.input_hold = None
         return True
-
-
-class _SharedInputHold:
-    """One store hold released when the last job that reads it has landed.
-
-    The forced-class solves of one window read the same rounds, so
-    the weak syndrome buffer keeps them until every one of them has its input,
-    the lifetime a zero-copy send owes its source (the kernel's dmaengine
-    client rule that a mapping lives until the transfer completes).
-    """
-
-    def __init__(self, release: Callable[[], None], reader_count: int) -> None:
-        self.hold_release = release
-        self.readers_left = reader_count
-
-    def release(self) -> None:
-        """One reader has its input; the rounds go when the last one does."""
-        self.readers_left -= 1
-        if self.readers_left > 0:
-            return
-        self.hold_release()
 
 
 @dataclasses.dataclass(frozen=True)

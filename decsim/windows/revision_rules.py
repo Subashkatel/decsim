@@ -66,8 +66,10 @@ class BestStatus:
 
     A succeeded result ranks first, then the statuses in
     BackendDecodeStatus order, then a result with no correction; among
-    equals, the latest. A later revision replaces nothing until the
-    window is final.
+    equals, the latest. Only a revision over the latest's commit region
+    competes: an absorbing strong window's answer covers windows the
+    first revision never decoded. A later revision replaces nothing
+    until the window is final.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -88,6 +90,8 @@ class BestStatus:
         best = latest
         best_rank = status_rank(latest.result)
         for revision in reversed(earlier):
+            if revision.commit_region != latest.commit_region:
+                continue
             rank = status_rank(revision.result)
             if rank < best_rank:
                 best = revision

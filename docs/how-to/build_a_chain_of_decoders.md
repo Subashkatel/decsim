@@ -75,6 +75,14 @@ source's job instead of after the verdict. On an edge past the entry,
 that is when the source pool's job is queued. The verdict then selects
 the running decode or cancels it.
 
+A confidence of two solves, `complementary_gap`, on an edge past the
+entry has its source pool decode each window it is asked for once per
+logical class. The two solves read one input and may run on two units
+at once. The verdict reads the gap between their weights, and the
+lighter solve is the answer (Toshio et al. 2510.25222 Sec. II C). The
+source pool's decoder must find the lightest correction inside a fixed
+class; a union-find pool is refused, and `cluster_gap` is its signal.
+
 ## 3. Set and read it
 
 ```
@@ -90,8 +98,7 @@ statistics.
 ## What a chain does not do yet
 
 An edge that does not leave the entry pool redoes the region its
-source pool decoded, on the same faces and the same error model, and
-decides on one solve. A strong window that absorbs weak windows
-(`DoubleWindow`) and a two-solve confidence on such an edge are
-refused with "not implemented yet (stage 5)". The timelines a chain
-follows are worked by hand in `tests/machine/test_chains.py`.
+source pool decoded, on the same faces and the same error model. A
+strong window that absorbs weak windows (`DoubleWindow`) on such an
+edge is refused with "not implemented yet (stage 5)". The timelines a
+chain follows are worked by hand in `tests/machine/test_chains.py`.

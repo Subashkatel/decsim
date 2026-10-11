@@ -229,8 +229,9 @@ def with_escalation(
     part name_switching decides on the source pool's results; both sit
     at site. An escalated window's rounds come from the source pool's
     store over the hop source_to_name (topology/graph_layout.py). An
-    edge that does not leave the entry pool takes the redo window and a
-    confidence of one solve (stage 5 lifts that).
+    edge that does not leave the entry pool takes the redo window; a
+    confidence of two solves there has its source pool solve each
+    escalated window once per logical class.
     """
     store_name = f"{name}_buffer"
     switching_name = f"{name}_switching"

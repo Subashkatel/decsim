@@ -20,7 +20,7 @@ import tests.escalation.declared_fabric as fabric
 STATUS = decoding_records.BackendDecodeStatus
 
 
-def _revision(status, is_first=False, corrected=True):
+def _revision(status, is_first=False, corrected=True, commit_region=()):
     observables = None
     if corrected:
         observables = (0,)
@@ -30,7 +30,9 @@ def _revision(status, is_first=False, corrected=True):
         logical_observables=observables,
         decode_status=status,
     )
-    return window_commits.Revision(None, None, result, None, is_first)
+    return window_commits.Revision(
+        None, None, result, None, is_first, commit_region
+    )
 
 
 class _Edge:
@@ -46,6 +48,21 @@ class _Edge:
     def abandon_strong_request(self, window_key: tuple) -> None:
         """Note the run-out."""
         self.asked.append(("abandon", window_key))
+
+
+def test_best_status_never_takes_a_revision_that_covers_less():
+    """A double window's answer covers the windows it absorbed.
+
+    The first revision decoded rounds 4-6 alone; picking it would leave
+    rounds 7-12 with no correction.
+    """
+    rule = revision_rules.BestStatus()
+    first = _revision(STATUS.SUCCEEDED, is_first=True, commit_region=(4, 6))
+    latest = _revision(STATUS.NONCONVERGED, commit_region=(4, 12))
+
+    chosen = rule.final_revision((first,), latest)
+
+    assert chosen is latest
 
 
 def test_latest_takes_the_latest_revision():

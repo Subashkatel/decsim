@@ -163,6 +163,84 @@ def test_an_abandoned_middle_result_closes_its_attempt_when_dropped():
     assert requests.by_window == {}
 
 
+def _companion_of(lead, sequence):
+    """The lead's solve in the other logical class, reading its input."""
+    request_key = _request_key(sequence)
+    return decoding_records.DecodeJob(
+        operation_id=1,
+        window_id=0,
+        round_count=9,
+        strong_decode_for=(1, 0),
+        request_key=request_key,
+        input_key=lead.request_key,
+        forced_logical_class=1,
+    )
+
+
+def test_a_selection_waits_for_each_forced_class_solve_of_its_attempt():
+    """One selection names the attempt; both of its solves reach it."""
+    requests = strong_requests_module.StrongRequests()
+    lead_key = _request_key(7)
+    lead = _strong_job(lead_key)
+    companion = _companion_of(lead, 8)
+    requests.admit_strong(lead, now=0)
+    requests.admit_strong(companion, now=0)
+    requests.begin_selection((1, 0), lead_key)
+    requests.select((1, 0), lead_key)
+    requests.finish_service(lead)
+    requests.finish_service(companion)
+    lead_completion = _completion(lead)
+    companion_completion = _completion(companion)
+
+    takes_lead = requests.complete(lead_completion)
+    still_waiting = requests.destination_may_consume(
+        (1, 0), window_records.STRONG_POOL_ID
+    )
+    takes_companion = requests.complete(companion_completion)
+
+    assert takes_lead
+    assert still_waiting
+    assert takes_companion
+    assert requests.by_window == {}
+
+
+def test_a_companion_admitted_after_its_selection_is_owed_too():
+    """A held attempt is selected before its jobs are built."""
+    requests = strong_requests_module.StrongRequests()
+    lead_key = _request_key(7)
+    lead = _strong_job(lead_key)
+    companion = _companion_of(lead, 8)
+    requests.begin_selection((1, 0), lead_key)
+    requests.select((1, 0), lead_key)
+    requests.admit_strong(lead, now=0)
+    requests.admit_strong(companion, now=0)
+    requests.finish_service(lead)
+    requests.finish_service(companion)
+    lead_completion = _completion(lead)
+    companion_completion = _completion(companion)
+    requests.complete(lead_completion)
+
+    takes_companion = requests.complete(companion_completion)
+
+    assert takes_companion
+    assert requests.by_window == {}
+
+
+def test_a_cancel_takes_every_solve_of_the_attempt():
+    requests = strong_requests_module.StrongRequests()
+    lead_key = _request_key(7)
+    lead = _strong_job(lead_key)
+    companion = _companion_of(lead, 8)
+    requests.admit_strong(lead, now=0)
+    requests.admit_strong(companion, now=0)
+
+    taken = requests.take_live((1, 0), window_records.STRONG_POOL_ID)
+
+    taken_jobs = [live.request_job for live in taken]
+    assert taken_jobs == [lead, companion]
+    assert requests.by_window == {}
+
+
 def _chain_requests():
     """The ledger of a chain whose strong pool escalates on to deep."""
     deep = window_records.PoolId("deep")

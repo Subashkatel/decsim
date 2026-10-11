@@ -57,6 +57,8 @@ class Revision:
 
     is_first is the window pool's decode, which commits the window; a
     later revision replaces what the earlier ones committed.
+    commit_region is the (first, last) round the decode committed: the
+    window's own, or a wider region a strong window absorbed.
     """
 
     window: window_records.Window
@@ -64,6 +66,7 @@ class Revision:
     result: decoding_records.DecodeResult
     request_key: window_records.DecoderRequestKey
     is_first: bool
+    commit_region: tuple = ()
 
 
 class WindowCommitter:
@@ -416,7 +419,10 @@ class WindowVerdict:
         operation = self.tracker.operation_by_id[window.operation_id]
         request_key = job.request_key
         is_first = request_key.pool == self.window_pool
-        return Revision(window, operation, result, request_key, is_first)
+        commit_region = _commit_region_of(job, window)
+        return Revision(
+            window, operation, result, request_key, is_first, commit_region
+        )
 
     def _window_of(
         self, job: decoding_records.DecodeJob
@@ -473,6 +479,16 @@ def _final_result(revision: Revision) -> decoding_records.DecodeResult:
     if revision.is_first:
         return revision.result
     return _with_the_crossing_commit(revision.window, revision.result)
+
+
+def _commit_region_of(
+    job: decoding_records.DecodeJob, window: window_records.Window
+) -> tuple:
+    """The rounds the job committed: its own window's, else the planner's."""
+    decoded = job.window
+    if decoded is None:
+        decoded = window
+    return (decoded.commit_lo, decoded.commit_hi)
 
 
 def _with_the_crossing_commit(

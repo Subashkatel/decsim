@@ -330,13 +330,16 @@ class DecoderManager:
     def accept_selection(
         self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
-        """The selection landed: the request's result may reach the window."""
+        """The selection landed: the attempt's results may reach the window.
+
+        Each one finished before the selection waits in its unit, one per
+        forced class.
+        """
         if not self.strong_requests.select(window_key, request_key):
             return
-        completion = self.service.take_strong_output(window_key)
-        if completion is None:
-            return
-        self.outcomes.complete_strong(completion)
+        waiting = self._take_strong_outputs(window_key)
+        for completion in waiting:
+            self.outcomes.complete_strong(completion)
 
     def charge_soft_output(
         self, job: decoding_records.DecodeJob, ticks: int
@@ -372,7 +375,12 @@ class DecoderManager:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """A forced-class solve whose window is answered by the other one."""
+        """A forced-class solve whose window is answered by the other one.
+
+        A strong solve ended its request when it was delivered.
+        """
+        if job.kind is decoding_records.DecodeJobKind.STRONG_REDECODE:
+            return
         self.outcomes.close_companion_request(job, result)
         self.read_result(job)
 
@@ -390,6 +398,10 @@ class DecoderManager:
             return
         if job.unit is None:
             return
+        # a strong decode gave its unit back at its end; its result
+        # waits in the unit's output slot (_strong_decode_done)
+        if job.kind is not decoding_records.DecodeJobKind.WINDOW:
+            return
         self.service.free(job)
         self.dispatcher.run()
 
@@ -403,21 +415,14 @@ class DecoderManager:
         cancel ends one request and passes no verdict on the
         destination, so the cancelled request can be replaced.
         """
-        completion = self.service.take_strong_output(key)
-        if completion is not None:
-            self.outcomes.report_request(
-                completion.request_job,
-                completion.result,
-                decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
-                completion.decode_output_ticks,
-            )
-        live = self.strong_requests.take_live(key, self.pool_id)
-        if live is None:
-            if completion is not None:
-                self.strong_requests.counts.cancelled += 1
+        discarded = self._discard_strong_outputs(key)
+        taken = self.strong_requests.take_live(key, self.pool_id)
+        if not taken:
+            self.strong_requests.counts.cancelled += discarded
             return
-        self._cancel_live_strong(live)
-        self.strong_requests.counts.cancelled += 1
+        for live in taken:
+            self._cancel_live_strong(live)
+            self.strong_requests.counts.cancelled += 1
         self.dispatcher.run()  # returned credits may admit a waiting head
 
     def abandon_strong(self, key: tuple) -> None:
@@ -428,17 +433,30 @@ class DecoderManager:
         (decode_outcomes.complete_strong). One already done and waiting
         in its unit is dropped now.
         """
+        discarded = self._discard_strong_outputs(key)
+        self.strong_requests.counts.abandoned += discarded
+        self.strong_requests.abandon(key, self.pool_id)
+
+    def _take_strong_outputs(self, key: tuple) -> list:
+        """Every finished result the units hold for the destination."""
+        waiting = []
         completion = self.service.take_strong_output(key)
-        if completion is None:
-            self.strong_requests.abandon(key, self.pool_id)
-            return
-        self.outcomes.report_request(
-            completion.request_job,
-            completion.result,
-            decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
-            completion.decode_output_ticks,
-        )
-        self.strong_requests.counts.abandoned += 1
+        while completion is not None:
+            waiting.append(completion)
+            completion = self.service.take_strong_output(key)
+        return waiting
+
+    def _discard_strong_outputs(self, key: tuple) -> int:
+        """Drop the results the units hold for the destination; how many."""
+        waiting = self._take_strong_outputs(key)
+        for completion in waiting:
+            self.outcomes.report_request(
+                completion.request_job,
+                completion.result,
+                decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
+                completion.decode_output_ticks,
+            )
+        return len(waiting)
 
     # ------------------------------------------------------------ settling
 

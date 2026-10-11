@@ -133,6 +133,23 @@ class Layout:
                 return plan
         raise KeyError(name)
 
+    def entry_edge_stores(self) -> tuple:
+        """The store the entry pool reads and the entry edge's target's.
+
+        The retention calls them weak and strong; either is None when
+        the run has none. A legacy strong-only run's one store is its
+        strong store.
+        """
+        entry = self.entry_pool
+        if entry.store == STRONG_STORE:
+            return (None, STRONG_STORE)
+        if not self.edges:
+            return (entry.store, None)
+        entry_edge = self.edges[0]
+        hops = entry_edge.hops
+        target = self.pool(hops.target)
+        return (entry.store, target.store)
+
     def target_by_source(self) -> dict:
         """The pool each source pool escalates to."""
         targets = {}

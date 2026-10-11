@@ -122,7 +122,6 @@ class Machine:
             built_models = built_window_models.BuiltWindowModels()
         if layout is None:
             layout = layout_module.legacy_layout(settings)
-        _refuse_a_chain(layout)
         engine = engine_module.Engine()
         switching_parts = escalation_build.build_switching(
             layout, engine, online_threshold, settings.clock
@@ -224,6 +223,9 @@ class Machine:
         """
         root_seed = _root_seed(seed)
         edges = escalation_build.escalate_edges_of(switching_parts)
+        weak_name, strong_name = layout.entry_edge_stores()
+        weak_store = readout.store_named(weak_name)
+        strong_store = readout.store_named(strong_name)
         qpu.connect(
             readout_receiver=readout.controller,
             runtime=control.execution_runtime,
@@ -236,11 +238,11 @@ class Machine:
         )
         input_fold = decoders.decoder_manager.input_fold()
         windows.connect(
-            weak_store=readout.weak_syndrome_buffer,
-            strong_store=readout.strong_syndrome_buffer,
+            weak_store=weak_store,
+            strong_store=strong_store,
             store_output=readout.primary_output,
             primary_decoder=decoders.primary_decoder,
-            strong_decoder=decoders.strong_decoder,
+            target_decoders=decoders.target_decoders,
             decode_queue=decoders.decoder_manager,
             edges=edges,
             input_fold=input_fold,
@@ -330,17 +332,6 @@ def build_links(
 ) -> ports.Link:
     """The link fabric, on the run's links card."""
     return fabric.LinkFabric(settings.links, engine)
-
-
-def _refuse_a_chain(layout: layout_module.Layout) -> None:
-    """One escalate edge runs today; a chain of them waits for stage 4g."""
-    edge_count = len(layout.edges)
-    if edge_count <= 1:
-        return
-    raise NotImplementedError(
-        f"a machine of {edge_count} escalate edges is not implemented yet "
-        "(stage 4g); a machine of one edge runs today"
-    )
 
 
 def _seed_roots(

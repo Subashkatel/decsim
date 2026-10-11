@@ -137,7 +137,31 @@ def _boundary_routes(pools: tuple, pool_by_id: dict, edges: tuple) -> dict:
         routes[edge.target, edge.source] = route_records.BoundaryRoute(
             edge.reverse, name_bits
         )
+    _join_the_unjoined(pools, routes)
     return routes
+
+
+def _join_the_unjoined(pools: tuple, routes: dict) -> None:
+    """A boundary between two pools no edge joins takes a hop of its own.
+
+    In a chain the deep pool's boundary reaches the entry pool's windows
+    directly, named by the pools' parts (route_records.hop_between).
+    """
+    for sender in pools:
+        _join_from(sender, pools, routes)
+
+
+def _join_from(
+    sender: route_records.PoolHops, pools: tuple, routes: dict
+) -> None:
+    """The sender's own hop to each pool it has no route to yet."""
+    for receiver in pools:
+        pair = (sender.pool, receiver.pool)
+        if pair in routes:
+            continue
+        path = route_records.hop_between(sender.pool.word, receiver.pool.word)
+        name_bits = _name_bits(sender.site, receiver.site)
+        routes[pair] = route_records.BoundaryRoute(path, name_bits)
 
 
 def _incoming_edge(

@@ -10,6 +10,8 @@ reaches the weak pool of any of them.
     strong_baseline    the strong decoder alone, its hops a cycle each
     with_strong_tier   a machine that escalates its weak decoder's
                        windows to a strong tier on the host
+    with_escalation    a machine whose pool escalates on to one more
+                       pool, a chain grown one edge at a time
     memory_workload    one memory shot of Stim's rotated surface code
 """
 
@@ -211,6 +213,44 @@ def with_strong_tier(
     if fabric is None:
         return wired
     return dataclasses.replace(wired, fabric=fabric)
+
+
+def with_escalation(
+    machine: graph.Machine,
+    source: str,
+    name: str,
+    pool: decoder_settings.DecoderPoolSettings,
+    switching: escalation_settings.SwitchingSettings,
+    site: str = fabrics.HOST,
+) -> graph.Machine:
+    """The machine whose source pool escalates on to a pool named name.
+
+    The new pool reads a store of its own, name_buffer, and the switching
+    part name_switching decides on the source pool's results; both sit
+    at site. An escalated window's rounds come from the source pool's
+    store over the hop source_to_name (topology/graph_layout.py). An
+    edge that does not leave the entry pool takes the redo window and a
+    confidence of one solve (stage 5 lifts that).
+    """
+    store_name = f"{name}_buffer"
+    switching_name = f"{name}_switching"
+    store = syndrome_buffer_module.SyndromeBufferSettings()
+    parts = (
+        graph.Part(store_name, store, site),
+        graph.Part(name, pool, site),
+        graph.Part(switching_name, switching),
+    )
+    wires = (
+        graph.Wire(f"{CONTROLLER}.rounds", f"{store_name}.rounds"),
+        graph.Wire(f"{store_name}.reads", f"{name}.rounds"),
+        graph.Wire(f"{name}.corrections", f"{FRAME}.corrections"),
+        graph.Wire(f"{source}.escalate", f"{switching_name}.results"),
+        graph.Wire(f"{switching_name}.redecode", f"{name}.escalated"),
+    )
+    grown = machine
+    for part in parts:
+        grown = grown.with_part(part)
+    return grown.with_wires(*wires)
 
 
 def memory_workload(

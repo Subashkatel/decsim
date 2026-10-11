@@ -90,6 +90,14 @@ class OperationResults:
         if is_final:
             self.retention.release_potential_strong(window.key)
 
+    def note_window_final(self, window: window_records.Window) -> None:
+        """A later revision finalized the window: each edge's read ends.
+
+        A chain keeps the window's rounds in each pool's store until the
+        pool's own verdict; the final revision ends what is left.
+        """
+        self.retention.release_potential_strong(window.key)
+
     # ---- delivery
 
     def deliver_if_final(self, operation: program_records.Operation) -> None:

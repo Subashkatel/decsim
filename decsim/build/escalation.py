@@ -12,6 +12,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Optional
 
 import decsim.build.layout as layout_module
+import decsim.confidence.no_signal as no_signal
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_strong_windows
@@ -78,6 +79,7 @@ class Switching:
         signal = settings.confidence.build(
             source_settings.algorithm, threshold_nats
         )
+        _refuse_a_threshold_with_no_gap(settings, signal)
         threshold = _threshold_source(settings, online_threshold)
         policy = settings.build_policy(threshold)
         regions = strong_regions.StrongRegions()
@@ -239,6 +241,27 @@ def _threshold_source(
     if online_threshold is not None:
         return online_threshold
     return settings.threshold.build()
+
+
+def _refuse_a_threshold_with_no_gap(
+    settings: escalation_settings.SwitchingSettings,
+    signal: ports.ConfidenceSignal,
+) -> None:
+    """A verdict that reads the threshold needs a gap to read.
+
+    Under confidence none it would escalate every window, a run that
+    looks like a threshold study and is not one.
+    """
+    verdict = settings.verdict
+    if not verdict.reads_threshold:
+        return
+    if signal.source != no_signal.NO_SIGNAL_SOURCE:
+        return
+    raise ValueError(
+        f"switching.verdict {verdict.name} reads a confidence gap, and "
+        "confidence none gives none; name a status, always or never "
+        "verdict, or a confidence row"
+    )
 
 
 def _refuse_past_the_entry(part: Switching) -> None:

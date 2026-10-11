@@ -290,10 +290,11 @@ class DoubleWindow(StrongWindowPorts):
             resolved_region.restart_read_keys,
         )
         operation = self.regions.operation(weak_job.operation_id)
+        label = escalated_label(self, weak_job)
         held = _HeldDoubleWindow(
             key=key,
             weak_job=weak_job,
-            label=weak_job.strong_label,
+            label=label,
             resolved_region=resolved_region,
             strong_window=strong_window,
             strong_model=strong_model,
@@ -565,6 +566,19 @@ def strong_job_payloads(
     )
 
 
+def escalated_label(
+    shape: StrongWindowPorts, source_job: decoding_records.DecodeJob
+) -> str:
+    """The log label of the source job's window decoded on the edge's target.
+
+    The target's name, then the window: strong(mem1 W0), or deep(mem1 W0)
+    for a window a chain escalates again.
+    """
+    operation = shape.regions.operation(source_job.operation_id)
+    target = shape.edge.target
+    return f"{target.word}({operation.name} W{source_job.window_id})"
+
+
 def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
     """The faces a row pins, as StrongAssignment names them."""
     if pinned_source_key is None:
@@ -603,10 +617,11 @@ def _held_redo(
         weak_job.operation_id, weak_job.window_id, target
     )
     operation = shape.regions.operation(weak_job.operation_id)
+    label = escalated_label(shape, weak_job)
     return _HeldStrongRedo(
         key=key,
         weak_job=weak_job,
-        label=weak_job.strong_label,
+        label=label,
         read_keys=read_keys,
         strong_window=strong_window,
         model=model,
@@ -721,12 +736,13 @@ def _strong_redecode_job(
     """The strong job every row submits, its input held until it lands."""
     key = (weak_job.operation_id, weak_job.window_id)
     payload_round_count = decoding_records.distinct_round_count(payloads)
+    label = escalated_label(shape, weak_job)
     job = decoding_records.DecodeJob(
         operation_id=key[0],
         window_id=key[1],
         round_count=payload_round_count,
         ready_time=shape.engine.now,
-        label=weak_job.strong_label,
+        label=label,
         kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
         spatial_nodes=weak_job.spatial_nodes,
         code=weak_job.code,

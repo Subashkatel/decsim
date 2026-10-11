@@ -113,6 +113,15 @@ class Decoders:
         return entry.unit
 
     @property
+    def target_decoders(self) -> tuple:
+        """The unit of each pool an edge leads to, in graph order."""
+        units = []
+        for pool in self.pools[1:]:
+            if pool.unit is not None:
+                units.append(pool.unit)
+        return tuple(units)
+
+    @property
     def strong_decoder_manager(
         self,
     ) -> Optional[decoder_manager_module.DecoderManager]:

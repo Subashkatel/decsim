@@ -31,10 +31,10 @@ class WindowModels:
 
     # a circuit-less source names one that answers every model with None
     provider = ports.Port(ports.WindowModelSource, optional=True)
-    # the decoders a model is built for: the tier that decodes the plan's
-    # windows, and the strong tier on a run that may escalate
+    # the decoder of the pool that decodes the plan's windows; a model
+    # is also built for each pool a window may escalate to
+    # (escalates_to)
     decoder = ports.Port(ports.Decoder)
-    strong_decoder = ports.Port(ports.Decoder, optional=True)
 
     def __init__(
         self, built_models: built_window_models.BuiltWindowModels
@@ -43,14 +43,21 @@ class WindowModels:
         # the model each planned or grown window was laid with; the
         # models object builds them, so it is where they live
         self.model_by_window: dict = {}
+        # the decoder of each pool an escalate edge leads to, in graph
+        # order
+        self.target_decoders: list = []
+
+    def escalates_to(self, decoder: ports.Decoder) -> None:
+        """A window may be decoded again by this decoder: models serve it."""
+        self.target_decoders.append(decoder)
 
     def requirement(self) -> fault_models.DecoderFaultModelRequirement:
         """What a model must offer every decoder that may decode it."""
         requirement = self.decoder.fault_model_requirement
-        if self.strong_decoder is None:
-            return requirement
-        strong_needs = self.strong_decoder.fault_model_requirement
-        return requirement.joined(strong_needs)
+        for target_decoder in self.target_decoders:
+            target_needs = target_decoder.fault_model_requirement
+            requirement = requirement.joined(target_needs)
+        return requirement
 
     def models_for_operation(
         self,

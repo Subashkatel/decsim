@@ -45,7 +45,6 @@ def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
         operation_id=1,
         window_id=2,
         round_count=6,
-        strong_label="strong(mem1 W2)",
         window=window,
     )
 

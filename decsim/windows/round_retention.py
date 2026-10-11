@@ -550,6 +550,9 @@ class RoundRetention:
             )
         for store in self._strong_context_stores():
             store.release_hold(absorbed)
+        # an absorbed window is never decoded, so no edge past the entry
+        # re-decodes it either
+        self.release_potential_strong(key)
 
     def require_rounds_retained(
         self, label: str, payloads: list, first_round: int, last_round: int

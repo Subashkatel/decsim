@@ -266,7 +266,12 @@ class ReferenceFabric:
 
 @dataclasses.dataclass(frozen=True)
 class PathLinks:
-    """A link per path, by the path's name; any other route, the base's."""
+    """A link per path, by the path's name; any other route, the base's.
+
+    A graph's own hop takes the link of the legacy path whose role it
+    carries (Route.reference), so a chain's entry pool reads its store
+    on the link the weak tier's read rides.
+    """
 
     qpu_to_controller: Optional[ports.LinkCard] = None
     controller_to_weak_buffer: Optional[ports.LinkCard] = None
@@ -283,10 +288,13 @@ class PathLinks:
     base: ports.FabricRule = ReferenceFabric()
 
     def link_for(self, route: Route) -> Optional[ports.LinkCard]:
-        """This path's link, else the base's; a graph's own hop, the base's."""
-        if route.path not in transfer_records.LEGACY_PATHS:
+        """This path's link, or its reference's, else the base's."""
+        path = route.path
+        if path not in transfer_records.LEGACY_PATHS:
+            path = route.reference
+        if path is None:
             return self.base.link_for(route)
-        link = getattr(self, route.path)
+        link = getattr(self, path)
         if link is not None:
             return link
         return self.base.link_for(route)

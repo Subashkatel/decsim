@@ -86,6 +86,20 @@ def escalate_only(window_ids) -> callable:
 
 
 def switching_machine(
+    *, online_threshold=None, **settings_changes
+) -> machine_module.Machine:
+    """One d=3 memory operation, weak-primary switching on declared ticks.
+
+    online_threshold is the calibrator an online threshold row decides
+    on; settings_changes are switching_settings'.
+    """
+    settings = switching_settings(**settings_changes)
+    return machine_module.Machine.build(
+        settings, 0, online_threshold=online_threshold
+    )
+
+
+def switching_settings(
     *,
     rounds: int,
     escalated_windows,
@@ -99,15 +113,13 @@ def switching_machine(
     scheme=None,
     weak_syndrome_buffer=None,
     decision_cycles: int = 0,
-    online_threshold=None,
-) -> machine_module.Machine:
-    """One d=3 memory operation, weak-primary switching on declared ticks.
+) -> machine_settings.MachineSettings:
+    """The settings of switching_machine.
 
     switching replaces the declared switching slot when given (a table
-    row of its own, say), and online_threshold is the calibrator an
-    online threshold row decides on; scheme replaces the lookahead
-    sliding windows with a caller's own windowing scheme; decision_cycles
-    is the window side's decision, on the declared clock.
+    row of its own, say); scheme replaces the lookahead sliding windows
+    with a caller's own windowing scheme; decision_cycles is the window
+    side's decision, on the declared clock.
     """
     is_escalated = escalate_only(escalated_windows)
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
@@ -180,12 +192,10 @@ def switching_machine(
         pauli_frame=pauli_frame,
         observation=observation,
     )
-    if weak_syndrome_buffer is not None:
-        settings = dataclasses.replace(
-            settings, weak_syndrome_buffer=weak_syndrome_buffer
-        )
-    return machine_module.Machine.build(
-        settings, 0, online_threshold=online_threshold
+    if weak_syndrome_buffer is None:
+        return settings
+    return dataclasses.replace(
+        settings, weak_syndrome_buffer=weak_syndrome_buffer
     )
 
 

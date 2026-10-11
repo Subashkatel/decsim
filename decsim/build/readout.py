@@ -118,6 +118,14 @@ class Readout:
                 return parts
         return None
 
+    def store_named(
+        self, name: Optional[str]
+    ) -> Optional[ports.SyndromeBuffer]:
+        """The store of this name; None for no name or a store not built."""
+        if name is None:
+            return None
+        return self._legacy_part(name, "store")
+
     @property
     def primary_output(self) -> Optional[round_output.SyndromeBufferOutput]:
         """The entry store's outgoing end; None with no store."""

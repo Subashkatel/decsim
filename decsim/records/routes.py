@@ -36,6 +36,11 @@ ANSWER_ROUTE_NAMES = (DIRECT, THROUGH_WEAK_CHIP)
 CHIP_COMMIT_CYCLES = 1
 
 
+def hop_between(sender: str, receiver: str) -> transfer_records.LinkPath:
+    """The hop of a graph's own from one part to another, by their names."""
+    return f"{sender}_to_{receiver}"
+
+
 @dataclasses.dataclass(frozen=True)
 class AnswerRoute:
     """The hops an answer takes to the frame, and where it is joined.

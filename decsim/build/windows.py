@@ -147,7 +147,7 @@ class Windows:
         strong_store: Optional[ports.SyndromeBuffer],
         store_output: Optional[ports.SyndromeBufferOutput],
         primary_decoder: Optional[ports.Decoder],
-        strong_decoder: Optional[ports.Decoder],
+        target_decoders: tuple,
         decode_queue: ports.DecodeQueue,
         edges: escalate_edges.EscalateEdges,
         input_fold: ports.DecoderInputFold,
@@ -158,7 +158,8 @@ class Windows:
     ) -> None:
         """Read from the stores, decode on the managers, commit to the frame."""
         self.models.decoder = primary_decoder
-        self.models.strong_decoder = strong_decoder
+        for target_decoder in target_decoders:
+            self.models.escalates_to(target_decoder)
         self.retention.weak_store = weak_store
         self.retention.strong_store = strong_store
         self.retention.detection_events = detection_events

@@ -74,6 +74,9 @@ class _Fixture:
         plan = types.SimpleNamespace(
             windows_by_key=self.windows,
             window_count_of=lambda _operation_id: 2,
+            window_indices_of=self._window_indices_of,
+            window_at=self.windows.__getitem__,
+            windowed_operation_ids=self._windowed_operation_ids,
             windows_of=self._windows_of,
             total_windows=2,
             round_count_of=lambda _operation_id: 6,
@@ -110,6 +113,12 @@ class _Fixture:
     def _windows_of(self, _operation_id) -> list:
         windows = self.windows.values()
         return list(windows)
+
+    def _window_indices_of(self, _operation_id) -> list:
+        return [0, 1]
+
+    def _windowed_operation_ids(self) -> list:
+        return [1]
 
     def commit(
         self, key, bits, is_final=True, tier=window_records.WEAK_POOL_ID

@@ -126,6 +126,52 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     assert dict(dependent.boundary_in) == {4: [0, 1, 0]}
 
 
+class _ReadingInteraction:
+    """An interaction that reads the plan it is handed and targets none."""
+
+    def __init__(self) -> None:
+        self.keys = None
+        self.read = None
+
+    def boundary_targets(self, _source, windows) -> list:
+        self.keys = list(windows)
+        self.read = windows[(1, 1)]
+        return []
+
+
+def test_an_interaction_picking_targets_reads_any_planned_window():
+    """The plan is handed whole, each window as a WindowInfo when read."""
+    source = window_records.Window(
+        operation_id=1,
+        window_index=0,
+        commit_lo=1,
+        commit_hi=3,
+        buffer_hi=5,
+        round_count=5,
+    )
+    later = window_records.Window(
+        operation_id=1,
+        window_index=1,
+        commit_lo=4,
+        commit_hi=6,
+        buffer_hi=8,
+        round_count=8,
+        deps=[(1, 0)],
+    )
+    windows = {(1, 0): source, (1, 1): later}
+    interaction = _ReadingInteraction()
+    courier = window_boundaries.BoundaryCourier(_ROUTES)
+    courier.planner = types.SimpleNamespace(windows_by_key=windows)
+    courier.interaction = interaction
+    operation = program_records.Operation(
+        id=1, name="memory", qubits=(0,), patches=(0,)
+    )
+    key = window_records.DecoderRequestKey(1, 0, window_records.WEAK_POOL_ID, 0)
+    courier.send(source, operation, {}, source_request_key=key)
+    assert interaction.keys == [(1, 0), (1, 1)]
+    assert interaction.read == window_records.WindowInfo.from_window(later)
+
+
 def _retention_of(round_count: int) -> round_retention.RoundRetention:
     """The retention of operation 1, round_count rounds, then operation 2."""
     retention = round_retention.RoundRetention(

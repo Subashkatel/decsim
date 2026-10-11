@@ -519,11 +519,10 @@ class StimDevice(seeding.AtomicRunSeedConsumer):
         key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
         binding = self._shots.source_binding_by_key[key]
-        detector_key = circuit_builds.frozen(detector_rounds)
         slicer_key = (
             binding.circuit_text,
             round_count,
-            detector_key,
+            binding.detector_key,
             requirement,
         )
         slicer = _STRONG_SLICERS.held(slicer_key)
@@ -541,26 +540,42 @@ class StimDevice(seeding.AtomicRunSeedConsumer):
     def _bind_source(
         self, key, circuit: stim.Circuit, source_round_count: int
     ) -> dict:
-        """Bind one finite circuit, duration and detector chronology per key."""
-        detector_rounds_override = self._shots.detector_rounds_override.get(key)
-        resolved = detector_chronology.resolve_detector_rounds(
-            circuit, detector_rounds_override, source_round_count
-        )
-        circuit_text = str(circuit)
+        """Bind one finite circuit, duration and detector chronology per key.
+
+        The chronology is resolved once, at the binding. A bound key comes
+        back once per strong window, so its circuit is compared by text
+        only when it is not the very circuit bound.
+        """
         binding = self._shots.source_binding_by_key.get(key)
         if binding is None:
-            detector_rounds = dict(resolved)
-            self._shots.source_binding_by_key[key] = _SourceBinding(
-                circuit_text, source_round_count, detector_rounds
-            )
-            return detector_rounds
-        if binding.circuit_text != circuit_text:
-            raise ValueError("circuit differs from the bound finite source")
+            binding = self._new_binding(key, circuit, source_round_count)
+            self._shots.source_binding_by_key[key] = binding
+            return binding.detector_rounds
+        if binding.circuit is not circuit:
+            _check_the_bound_text(binding, circuit)
         if binding.round_count != source_round_count:
             raise ValueError(
                 "source duration differs from the bound finite source"
             )
         return binding.detector_rounds
+
+    def _new_binding(
+        self, key, circuit: stim.Circuit, source_round_count: int
+    ) -> "_SourceBinding":
+        detector_rounds_override = self._shots.detector_rounds_override.get(key)
+        resolved = detector_chronology.resolve_detector_rounds(
+            circuit, detector_rounds_override, source_round_count
+        )
+        detector_rounds = dict(resolved)
+        circuit_text = str(circuit)
+        detector_key = circuit_builds.digest(detector_rounds)
+        return _SourceBinding(
+            circuit,
+            circuit_text,
+            source_round_count,
+            detector_rounds,
+            detector_key,
+        )
 
 
 # (circuit text, round count, detector rounds, requirement) -> slicer, in
@@ -895,9 +910,13 @@ class _SampledShot:
 class _SourceBinding:
     """The finite circuit one stream identity is bound to."""
 
+    # the circuit as bound, so the same circuit back needs no text check
+    circuit: stim.Circuit
     circuit_text: str
     round_count: int
     detector_rounds: dict
+    # the detector rounds as a slicer key, made once
+    detector_key: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -906,6 +925,15 @@ class _StreamModel:
 
     round_count: int
     slicer: window_slicer.WindowSlicer
+
+
+def _check_the_bound_text(
+    binding: "_SourceBinding", circuit: stim.Circuit
+) -> None:
+    """Refuse a circuit whose text is not the bound one's."""
+    circuit_text = str(circuit)
+    if binding.circuit_text != circuit_text:
+        raise ValueError("circuit differs from the bound finite source")
 
 
 def _check_finite_stream_length(

@@ -20,3 +20,12 @@ def test_a_mapping_is_one_key_whatever_its_order():
     first = circuit_builds.frozen({1: 2, 3: 4})
     second = circuit_builds.frozen({3: 4, 1: 2})
     assert first == second
+
+
+def test_a_digest_is_one_key_whatever_the_order_and_differs_by_content():
+    first = circuit_builds.digest({1: 2, 3: 4})
+    second = circuit_builds.digest({3: 4, 1: 2})
+    other = circuit_builds.digest({1: 2, 3: 5})
+    assert first == second
+    assert first != other
+    assert circuit_builds.digest(None) is None

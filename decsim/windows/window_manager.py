@@ -78,6 +78,9 @@ class WindowManager:
     ):
         self.engine = engine
         self.feedback_boundary_mode = feedback_boundary_mode
+        # operation id -> position of its first window neither queued nor
+        # committed; both hold until a withdrawal moves it back
+        self.first_open_by_operation: dict = {}
 
     def start(self) -> None:
         """Give every window the plan laid its first boundary.
@@ -344,8 +347,17 @@ class WindowManager:
     # ---- readiness: a window with its data and no owed boundary is requested
 
     def check_windows_for_operation(self, operation_id: int) -> None:
-        """Request every complete window of the operation, in index order."""
-        windows = self.planner.windows_of(operation_id)
+        """Request every complete window of the operation, in index order.
+
+        The windows before its first open one are passed by, as a request
+        leaves a queued or committed window alone, and the walk ends where
+        no window from there on has its first round, as a request neither
+        stamps nor submits a window before its first round. Windows need
+        not start in index order (a Tan seam starts before the core ahead
+        of it), so the end is read off the planner's start floors. A long
+        run costs its open windows a round rather than all of them.
+        """
+        windows = self._windows_from_the_first_open(operation_id)
         self.requester.request_ready_windows(windows)
 
     def check_window(self, key: tuple) -> None:
@@ -472,6 +484,42 @@ class WindowManager:
     ) -> None:
         """Note the stream round a protected segment's result waits for."""
         self.results.bind_required_stream_end(operation_id, required_stream_end)
+
+    def _windows_from_the_first_open(self, operation_id: int) -> list:
+        """The operation's windows from its first open one to the last begun."""
+        indices = self.planner.window_indices_of(operation_id)
+        first_open = self._first_open_after_withdrawals(operation_id, indices)
+        while first_open < len(indices):
+            window_index = indices[first_open]
+            window = self.planner.window_at((operation_id, window_index))
+            if not window.queued and not window.committed:
+                break
+            first_open += 1
+        self.first_open_by_operation[operation_id] = first_open
+        floors = self.planner.start_floors_of(operation_id)
+        arrived = self.tracker.rounds_arrived(operation_id)
+        windows = []
+        for position in range(first_open, len(indices)):
+            if floors[position] > arrived:
+                break
+            window_index = indices[position]
+            window = self.planner.window_at((operation_id, window_index))
+            windows.append(window)
+        return windows
+
+    def _first_open_after_withdrawals(
+        self, operation_id: int, indices: list
+    ) -> int:
+        """The cursor, back at the earliest window withdrawn since."""
+        first_open = self.first_open_by_operation.get(operation_id, 0)
+        withdrawn = self.requester.withdrawn_keys
+        for key in list(withdrawn):
+            if key[0] != operation_id:
+                continue
+            withdrawn.discard(key)
+            position = indices.index(key[1])
+            first_open = min(first_open, position)
+        return first_open
 
 
 def _representative_patch(operation: program_records.Operation):

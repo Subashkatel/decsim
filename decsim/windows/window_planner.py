@@ -181,6 +181,9 @@ class WindowPlanner:
         self.planned_operations = planned_operations
         self.growth_by_stream: dict = {}
         self.trace = _TraceSources()
+        # operation id -> per window position, the least start round of
+        # that window and every later one; see start_floors_of
+        self.start_floors_by_operation: dict = {}
 
     def start(self) -> None:
         """Build the model of every window the plan laid.
@@ -253,6 +256,7 @@ class WindowPlanner:
         window = self.plan.windows[key]
         window.buffer_lo = buffer_lo
         window.round_count = window.buffer_hi - window.buffer_lo + 1
+        self._lower_the_floors_to(key, window.start_round)
         if model is not None:
             self.models.model_by_window[key] = model
         return window
@@ -312,6 +316,30 @@ class WindowPlanner:
     ) -> list:
         """The operation's window indices in order; none when unplanned."""
         return self.plan.op_windows.get(operation_id, [])
+
+    def windowed_operation_ids(self) -> list:
+        """Every operation with windows planned, streams included."""
+        return list(self.plan.op_windows)
+
+    def start_floors_of(self, operation_id: Any) -> list:  # an opaque identity
+        """Per window position, the least start round from it to the last.
+
+        Once a position's floor passes the rounds arrived, no window from
+        it on has begun. Windows need not start in index order (a Tan
+        seam starts before the core ahead of it). The floors grow as a
+        stream plans windows, and a reslice that moves a start earlier
+        lowers them; one that moves it later leaves a floor low, which
+        only lets a reader look further.
+        """
+        floors = self.start_floors_by_operation.setdefault(operation_id, [])
+        indices = self.window_indices_of(operation_id)
+        while len(floors) < len(indices):
+            window_index = indices[len(floors)]
+            window = self.plan.windows[(operation_id, window_index)]
+            before = len(floors) - 1
+            floors.append(window.start_round)
+            _lower_the_floors(floors, before, window.start_round)
+        return floors
 
     def window_count_of(self, operation_id: Any) -> int:  # an opaque identity
         """How many windows the operation has."""
@@ -603,6 +631,24 @@ class WindowPlanner:
         growth.next_commit_lo = geometry.commit_hi + 1
         self.trace.window_planned.fire(window)
         return window
+
+    def _lower_the_floors_to(self, key: tuple, start_round: int) -> None:
+        """A window's start moved: the floors up to it lowered to it."""
+        operation_id, window_index = key
+        floors = self.start_floors_by_operation.get(operation_id)
+        if not floors:
+            return
+        indices = self.window_indices_of(operation_id)
+        position = indices.index(window_index)
+        if position < len(floors):
+            _lower_the_floors(floors, position, start_round)
+
+
+def _lower_the_floors(floors: list, position: int, start_round: int) -> None:
+    """The floors at the position and before it, lowered to the start."""
+    while position >= 0 and floors[position] > start_round:
+        floors[position] = start_round
+        position -= 1
 
 
 def _model_key(

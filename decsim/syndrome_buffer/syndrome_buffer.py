@@ -105,7 +105,7 @@ class SyndromeBuffer:
     ) -> None:
         self.settings = settings
         self.engine = engine
-        self.round_by_key: dict = {}
+        self.round_by_key = _StoredRounds()
         self.holds = round_holds.RoundHolds()
         # operation id -> True while it may receive rounds, False once
         # closed; a closed identity never reopens
@@ -163,7 +163,7 @@ class SyndromeBuffer:
         held_bits = round_records.stated_bits(packet_bits)
         stored = _StoredRound(packet, held_bits)
         stored.publication_tick = publication_tick
-        self.round_by_key[round_key] = stored
+        self.round_by_key.store(round_key, stored)
         self.statistics.stored.add()
         self._count_held()
         self.trace.round_stored.fire(round_key, packet)
@@ -202,7 +202,7 @@ class SyndromeBuffer:
     @property
     def occupied_bits(self) -> int:
         """The bits stored now; a round that states no size holds none."""
-        return self._stored_bits_of(self.round_by_key)
+        return self.round_by_key.held_bits
 
     def retained_fragments(self, round_key: tuple) -> Optional[tuple]:
         """The stored round's fragments, or None before and after storage."""
@@ -492,7 +492,7 @@ class SyndromeBuffer:
         self.statistics.bits.set(self.occupied_bits)
 
     def _free_round(self, round_key) -> None:
-        self.round_by_key.pop(round_key)
+        self.round_by_key.release(round_key)
         self._count_held()
         self.trace.round_released.fire(round_key)
         if self.detection_events is not None:
@@ -512,6 +512,27 @@ class _TraceSources:
     hold_transferred: trace_source.TraceSource = trace_source.new_source()
     hold_released: trace_source.TraceSource = trace_source.new_source()
     access_served: trace_source.TraceSource = trace_source.new_source()
+
+
+class _StoredRounds(dict):
+    """The stored rounds by key, with the bits they hold in all.
+
+    A round enters by store and leaves by release, which keep the total,
+    so the store's occupancy is read without a pass over its rounds.
+    """
+
+    # the bits of the rounds stored now; each store starts from none
+    held_bits = 0
+
+    def store(self, round_key: tuple, stored: "_StoredRound") -> None:
+        """One round in, its bits onto the total."""
+        self[round_key] = stored
+        self.held_bits += stored.held_bits
+
+    def release(self, round_key: tuple) -> None:
+        """One round out, its bits off the total."""
+        stored = self.pop(round_key)
+        self.held_bits -= stored.held_bits
 
 
 class _StoredRound:

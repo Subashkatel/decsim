@@ -13,6 +13,7 @@ once the count is held, as the Relay-BP row keeps its compiled models
 (decoders/relay_belief_propagation/window_decoder.py).
 """
 
+import hashlib
 from typing import Any, Optional
 
 
@@ -42,3 +43,19 @@ def frozen(mapping: Optional[dict]) -> Optional[tuple]:
         return None
     items = mapping.items()
     return tuple(sorted(items))
+
+
+def digest(mapping: Optional[dict]) -> Optional[str]:
+    """A large mapping as a key: the SHA-256 of its items in order.
+
+    A tuple does not keep its hash, so a key holding a whole circuit's
+    detector rounds is hashed again on every look-up; a string keeps
+    its hash, and is made once.
+    """
+    items = frozen(mapping)
+    if items is None:
+        return None
+    text = repr(items)
+    encoded = text.encode()
+    hashed = hashlib.sha256(encoded)
+    return hashed.hexdigest()

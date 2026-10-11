@@ -8,9 +8,16 @@ al. 2209.08552, section I.B; qLDPC's SlidingWindowDecoder, whose
 windows). An owned column hands off its whole detector effect, so a
 window before or after in time can intersect it with its own rows (Tan
 et al. 2209.09219).
+
+The catalog is laid out once as compressed columns (CatalogArrays), the
+layout of qLDPC's DetectorErrorModelArrays and of scipy's csc_matrix,
+and a window is placed with array operations on its columns' entries: a
+Python pass over a strong region's columns was a third of a switching
+d11 shot (stage7_plan.md).
 """
 
 import dataclasses
+import itertools
 from collections.abc import Container, Sequence
 from typing import Optional
 
@@ -34,6 +41,43 @@ class WindowPlacementContext:
     first_commit_round: int
     last_commit_round: int
     is_last: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class CatalogArrays:
+    """One catalog and its faults' rounds as compressed columns.
+
+    Fault f's detectors are detector_ids[detector_pointer[f]:
+    detector_pointer[f + 1]] in the catalog's order, and entry_rounds
+    holds the round of each of those detectors; its observables are the
+    same slice of observable_ids by observable_pointer.
+    """
+
+    detector_pointer: numpy.ndarray
+    detector_ids: numpy.ndarray
+    entry_rounds: numpy.ndarray
+    observable_pointer: numpy.ndarray
+    observable_ids: numpy.ndarray
+    priors: numpy.ndarray
+
+
+def catalog_arrays(
+    catalog: fault_model_contracts.FaultCatalog,
+    fault_rounds: tuple[tuple[int, ...], ...],
+) -> CatalogArrays:
+    """The catalog laid out once, with each fault's rounds beside it."""
+    detector_pointer, detector_ids = _compressed(catalog.detector_sets)
+    _round_pointer, entry_rounds = _compressed(fault_rounds)
+    observable_pointer, observable_ids = _compressed(catalog.observable_sets)
+    priors = numpy.asarray(catalog.priors, dtype=float)
+    return CatalogArrays(
+        detector_pointer=detector_pointer,
+        detector_ids=detector_ids,
+        entry_rounds=entry_rounds,
+        observable_pointer=observable_pointer,
+        observable_ids=observable_ids,
+        priors=priors,
+    )
 
 
 def parse_window_entry(
@@ -89,7 +133,7 @@ def checked_fault_exclusion_ranges(
 
 
 def faults_touching_excluded_rounds(
-    fault_rounds: tuple[tuple[int, ...], ...],
+    arrays: CatalogArrays,
     fault_exclusion_ranges: tuple[tuple[int, int], ...],
     candidate_faults: list[int],
 ) -> set[int]:
@@ -98,22 +142,21 @@ def faults_touching_excluded_rounds(
     Such a fault is owned by nobody: the window that sees it decodes it
     and never commits it, on either ownership path.
     """
-    if not fault_exclusion_ranges:
-        return set()
-    unowned = set()
-    for fault_index in candidate_faults:
-        if _touches_excluded_round(
-            fault_rounds[fault_index], fault_exclusion_ranges
-        ):
-            unowned.add(fault_index)
-    return unowned
+    faults = numpy.asarray(candidate_faults, dtype=numpy.int64)
+    entries = _column_entries(arrays.detector_pointer, faults)
+    touching = _columns_touching(
+        arrays.entry_rounds, entries, fault_exclusion_ranges, len(faults)
+    )
+    touching_faults = faults[touching]
+    found = touching_faults.tolist()
+    return set(found)
 
 
 def placed_faults_for_window(
     *,
     catalog: fault_model_contracts.FaultCatalog,
     context: WindowPlacementContext,
-    fault_rounds: tuple[tuple[int, ...], ...],
+    arrays: CatalogArrays,
     candidate_faults: list[int],
     committed_elsewhere: set[int],
     explicitly_owned_faults: Optional[set[int]],
@@ -122,26 +165,41 @@ def placed_faults_for_window(
 ) -> fault_model_contracts.PlacedFaultModel:
     """One window's columns from one catalog.
 
-    `fault_rounds` lists each catalog fault's rounds and
-    `candidate_faults` the faults that touch this window's rounds; both
-    are indexed once by the slicer so a window costs its own size.
+    `arrays` is the catalog laid out once and `candidate_faults` the
+    faults that touch this window's rounds; the slicer indexes both
+    once, so a window costs its own size.
     """
     prior_faults = _prior_faults(committed_elsewhere, explicitly_prior_faults)
     columns = _fault_columns_for_window(candidate_faults, prior_faults)
-    unowned_faults = faults_touching_excluded_rounds(
-        fault_rounds, fault_exclusion_ranges, candidate_faults
+    column_faults = numpy.asarray(columns, dtype=numpy.int64)
+    entries = _column_entries(arrays.detector_pointer, column_faults)
+    unowned = _columns_touching(
+        arrays.entry_rounds, entries, fault_exclusion_ranges, len(columns)
     )
-    arrays = _build_window_arrays(
-        context=context,
-        columns=columns,
-        detector_sets=catalog.detector_sets,
-        observable_sets=catalog.observable_sets,
-        fault_rounds=fault_rounds,
-        committed_elsewhere=committed_elsewhere,
-        unowned_faults=unowned_faults,
-        explicitly_owned_faults=explicitly_owned_faults,
+    owners = _Owners(committed_elsewhere, explicitly_owned_faults, unowned)
+    owned = _owned_columns(context, arrays, column_faults, entries, owners)
+    owned_columns = numpy.flatnonzero(owned)
+    owned_faults = column_faults[owned_columns]
+    owned_fault_list = owned_faults.tolist()
+    if explicitly_owned_faults is None:
+        committed_elsewhere.update(owned_fault_list)
+    # The whole detector effect travels with the handoff; the receiving
+    # window keeps the part that lands on its own rows.
+    boundary_flips = _boundary_flips(
+        owned_columns, owned_fault_list, catalog.detector_sets
     )
-    return _placed_model(catalog, columns, arrays)
+    check = _check_matrix(context, arrays, entries, len(columns))
+    observables = _observable_matrix(context, arrays, column_faults)
+    priors = arrays.priors[column_faults]
+    return fault_model_contracts.PlacedFaultModel(
+        representation=catalog.representation,
+        check=check,
+        priors=priors,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=tuple(columns),
+        boundary_flips=boundary_flips,
+    )
 
 
 def local_link_projection(
@@ -178,13 +236,22 @@ def local_link_projection(
     return local_link
 
 
-# The check matrix, the observable matrix, the owned mask, the handoff map.
-_WindowArrays = tuple[
-    scipy.sparse.csc_matrix,
-    scipy.sparse.csc_matrix,
-    numpy.ndarray,
-    dict[int, tuple[int, ...]],
-]
+@dataclasses.dataclass(frozen=True)
+class _Entries:
+    """A window's columns' flat entries: where each sits, and its column."""
+
+    positions: numpy.ndarray
+    columns: numpy.ndarray
+
+
+@dataclasses.dataclass(frozen=True)
+class _Owners:
+    """What decides a window's ownership besides its commit rounds."""
+
+    committed_elsewhere: set
+    explicitly_owned_faults: Optional[set]
+    # the window's columns that touch an excluded round
+    unowned: numpy.ndarray
 
 
 def _prior_faults(
@@ -208,147 +275,136 @@ def _fault_columns_for_window(
     ]
 
 
-def _fault_owned_by_window(
-    fault_index: int,
-    fault_rounds: tuple,
-    committed_elsewhere: set,
-    unowned_faults: set,
-    explicitly_owned_faults: Optional[set],
+def _owned_columns(
     context: WindowPlacementContext,
-) -> bool:
-    """Whether this window commits the fault.
+    arrays: CatalogArrays,
+    column_faults: numpy.ndarray,
+    entries: _Entries,
+    owners: _Owners,
+) -> numpy.ndarray:
+    """Which of the window's columns it commits.
 
     Precedence: an excluded fault is never owned; an explicit owner set
     decides next; a fault committed elsewhere is not owned; the terminal
     window owns the rest; any other window owns what touches its commit
     rounds.
     """
-    if fault_index in unowned_faults:
-        return False
-    if explicitly_owned_faults is not None:
-        return fault_index in explicitly_owned_faults
-    if fault_index in committed_elsewhere:
-        return False
+    may_own = ~owners.unowned
+    if owners.explicitly_owned_faults is not None:
+        named = _array_of(owners.explicitly_owned_faults)
+        is_named = numpy.isin(column_faults, named)
+        return may_own & is_named
+    committed = _array_of(owners.committed_elsewhere)
+    is_committed = numpy.isin(column_faults, committed)
+    may_own &= ~is_committed
     if context.is_last:
-        return True
-    return any(
-        context.first_commit_round <= round_index <= context.last_commit_round
-        for round_index in fault_rounds[fault_index]
+        return may_own
+    commit_rounds = ((context.first_commit_round, context.last_commit_round),)
+    column_count = len(column_faults)
+    in_commit = _columns_touching(
+        arrays.entry_rounds, entries, commit_rounds, column_count
     )
+    return may_own & in_commit
 
 
-def _build_window_arrays(
-    *,
-    context: WindowPlacementContext,
-    columns: list,
-    detector_sets: tuple,
-    observable_sets: tuple,
-    fault_rounds: tuple,
-    committed_elsewhere: set,
-    unowned_faults: set,
-    explicitly_owned_faults: Optional[set],
-) -> _WindowArrays:
-    """The check and observable matrices, the owned mask, the handoff map.
-
-    Entries are collected as (row, column) pairs and assembled once, the
-    way qLDPC builds its DetectorErrorModelArrays.
-    """
-    check = _check_matrix(context, columns, detector_sets)
-    observables = _observable_matrix(context, columns, observable_sets)
-    owned = numpy.zeros(len(columns), dtype=bool)
-    boundary_flips: dict = {}
-    for column_index, fault_index in enumerate(columns):
-        owns_fault = _fault_owned_by_window(
-            fault_index,
-            fault_rounds,
-            committed_elsewhere,
-            unowned_faults,
-            explicitly_owned_faults,
-            context,
-        )
-        if not owns_fault:
-            continue
-        owned[column_index] = True
-        if explicitly_owned_faults is None:
-            committed_elsewhere.add(fault_index)
-        # The whole detector effect travels with the handoff; the receiving
-        # window keeps the part that lands on its own rows.
-        boundary_flips[column_index] = tuple(detector_sets[fault_index])
-    return check, observables, owned, boundary_flips
+def _boundary_flips(
+    owned_columns: numpy.ndarray, owned_faults: list, detector_sets: tuple
+) -> dict:
+    """Each owned column's every detector, keyed by its column."""
+    columns = owned_columns.tolist()
+    pairs = zip(columns, owned_faults, strict=True)
+    return {column: detector_sets[fault] for column, fault in pairs}
 
 
 def _check_matrix(
-    context: WindowPlacementContext, columns: list, detector_sets: tuple
+    context: WindowPlacementContext,
+    arrays: CatalogArrays,
+    entries: _Entries,
+    column_count: int,
 ) -> scipy.sparse.csc_matrix:
-    """Rows by columns, a one where a column flips one of the window's rows."""
-    rows: list = []
-    entry_columns: list = []
-    for column_index, fault_index in enumerate(columns):
-        local_rows = _local_rows(
-            detector_sets[fault_index], context.row_by_detector
-        )
-        rows.extend(local_rows)
-        column_entries = [column_index] * len(local_rows)
-        entry_columns.extend(column_entries)
+    """Rows by columns, a one where a column flips one of the window's rows.
+
+    The rows are sorted, so each entry's detector finds its row by
+    binary search, and an entry whose detector is no row is dropped.
+    """
+    window_rows = numpy.asarray(context.rows, dtype=numpy.int64)
+    row_count = len(window_rows)
+    detectors = arrays.detector_ids[entries.positions]
+    places = numpy.searchsorted(window_rows, detectors)
+    inside = places < row_count
+    kept_places = places[inside]
+    kept_detectors = detectors[inside]
+    found = window_rows[kept_places] == kept_detectors
+    rows = kept_places[found]
+    entry_columns = entries.columns[inside]
+    columns = entry_columns[found]
     ones = numpy.ones(len(rows), dtype=numpy.uint8)
-    return scipy.sparse.csc_matrix(
-        (ones, (rows, entry_columns)),
-        shape=(len(context.rows), len(columns)),
-    )
-
-
-def _local_rows(detectors: tuple, row_by_detector: dict) -> list[int]:
-    """The window rows of the detectors that lie inside the window."""
-    return [
-        row_by_detector[detector_id]
-        for detector_id in detectors
-        if detector_id in row_by_detector
-    ]
+    shape = (row_count, column_count)
+    return scipy.sparse.csc_matrix((ones, (rows, columns)), shape=shape)
 
 
 def _observable_matrix(
-    context: WindowPlacementContext, columns: list, observable_sets: tuple
+    context: WindowPlacementContext,
+    arrays: CatalogArrays,
+    column_faults: numpy.ndarray,
 ) -> scipy.sparse.csc_matrix:
     """Observables by columns; every flip counts, local rows or not."""
-    rows: list = []
-    entry_columns: list = []
-    for column_index, fault_index in enumerate(columns):
-        for observable_id in observable_sets[fault_index]:
-            rows.append(observable_id)
-            entry_columns.append(column_index)
+    entries = _column_entries(arrays.observable_pointer, column_faults)
+    rows = arrays.observable_ids[entries.positions]
     ones = numpy.ones(len(rows), dtype=numpy.uint8)
-    return scipy.sparse.csc_matrix(
-        (ones, (rows, entry_columns)),
-        shape=(context.observable_count, len(columns)),
-    )
+    shape = (context.observable_count, len(column_faults))
+    return scipy.sparse.csc_matrix((ones, (rows, entries.columns)), shape=shape)
 
 
-def _touches_excluded_round(
-    rounds: tuple, fault_exclusion_ranges: tuple
-) -> bool:
-    for first_excluded, last_excluded in fault_exclusion_ranges:
-        if any(
-            first_excluded <= round_index <= last_excluded
-            for round_index in rounds
-        ):
-            return True
-    return False
+def _column_entries(
+    pointer: numpy.ndarray, column_faults: numpy.ndarray
+) -> _Entries:
+    """Every entry of the columns' faults, column by column, in order."""
+    next_faults = column_faults + 1
+    starts = pointer[column_faults]
+    ends = pointer[next_faults]
+    counts = ends - starts
+    column_numbers = numpy.arange(len(column_faults))
+    columns = numpy.repeat(column_numbers, counts)
+    first_positions = numpy.cumsum(counts) - counts
+    total = counts.sum()
+    offsets = numpy.arange(total)
+    column_firsts = numpy.repeat(first_positions, counts)
+    column_starts = numpy.repeat(starts, counts)
+    within = offsets - column_firsts
+    positions = column_starts + within
+    return _Entries(positions=positions, columns=columns)
 
 
-def _placed_model(
-    catalog: fault_model_contracts.FaultCatalog,
-    columns: list,
-    arrays: _WindowArrays,
-) -> fault_model_contracts.PlacedFaultModel:
-    check, observables, owned, boundary_flips = arrays
-    column_priors = [catalog.priors[fault_index] for fault_index in columns]
-    priors = numpy.asarray(column_priors, dtype=float)
-    return fault_model_contracts.PlacedFaultModel(
-        representation=catalog.representation,
-        check=check,
-        priors=priors,
-        observables=observables,
-        owned=owned,
-        source_fault_ids=tuple(columns),
-        boundary_flips=boundary_flips,
-    )
+def _columns_touching(
+    entry_rounds: numpy.ndarray,
+    entries: _Entries,
+    round_ranges: tuple[tuple[int, int], ...],
+    column_count: int,
+) -> numpy.ndarray:
+    """Whether each column has an entry inside any of the round ranges."""
+    touching = numpy.zeros(column_count, dtype=bool)
+    rounds = entry_rounds[entries.positions]
+    for first_round, last_round in round_ranges:
+        after_first = rounds >= first_round
+        before_last = rounds <= last_round
+        inside = after_first & before_last
+        touched_columns = entries.columns[inside]
+        touching[touched_columns] = True
+    return touching
+
+
+def _compressed(sets: tuple) -> tuple:
+    """A tuple of tuples as a pointer and its flat entries, in order."""
+    sizes = map(len, sets)
+    lengths = numpy.fromiter(sizes, dtype=numpy.int64, count=len(sets))
+    ends = numpy.cumsum(lengths)
+    first = numpy.zeros(1, dtype=numpy.int64)
+    pointer = numpy.concatenate((first, ends))
+    flat = itertools.chain.from_iterable(sets)
+    entries = numpy.fromiter(flat, dtype=numpy.int64)
+    return pointer, entries
+
+
+def _array_of(faults: set) -> numpy.ndarray:
+    return numpy.fromiter(faults, dtype=numpy.int64, count=len(faults))

@@ -68,7 +68,10 @@ def observe(
     decoder_managers = _decoder_managers(decoders)
     log = _connect_log(observation, engine)
     links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
-    round_events = _connect_round_events(engine, qpu, control, readout)
+    keeps_records = not observation.folds_windows
+    round_events = _connect_round_events(
+        engine, qpu, control, readout, keeps_records
+    )
     window_ledger = _connect_window_ledger(window_manager)
     result_ledger = _connect_result_ledger(window_manager)
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
@@ -77,7 +80,7 @@ def observe(
     )
     controller_counters = _connect_controller_counters(control.idle_rounds)
     command_events = _connect_command_events(qpu.device)
-    stages = _connect_stage_records(decoders)
+    stages = _connect_stage_records(decoders, keeps_records)
     referee_audit = _connect_referee_audit(decoders)
     sampled_shots = _connect_sampled_shots(qpu.syndrome_source)
     window_outcomes = _window_outcomes(observation)
@@ -108,7 +111,7 @@ def observe(
         qpu.device.trace.round_emitted.connect(
             region_of_interest.round_read_out
         )
-    frame_corrections = _frame_corrections(control.pauli_frame)
+    frame_corrections = _frame_corrections(control.pauli_frame, keeps_records)
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
@@ -374,6 +377,7 @@ def _connect_window_trace(
     sources.window_data_complete.connect(trace_writer.window_ready)
     sources.solve_held.connect(trace_writer.solve_held)
     sources.window_committed.connect(trace_writer.window_committed)
+    sources.window_final.connect(trace_writer.window_final)
     sources.window_absorbed.connect(trace_writer.window_absorbed)
     for manager in decoder_managers:
         manager.outcomes.trace.verdict_given.connect(trace_writer.verdict_given)
@@ -437,14 +441,14 @@ def _connect_runtime_stamps(
 
 
 def _connect_round_events(
-    engine: engine_module.Engine, qpu, control, readout
+    engine: engine_module.Engine, qpu, control, readout, keeps_records: bool
 ) -> round_events_module.RoundEventRecorder:
     """The recorder hears every round event, output and strong landing.
 
     A written store's receiving end is on the readout's path; a landed
     store's is heard after the outputs, with its stores.
     """
-    round_events = round_events_module.RoundEventRecorder(engine)
+    round_events = _round_event_recorder(engine, keeps_records)
     components = [
         qpu.device,
         readout.assembler,
@@ -473,9 +477,20 @@ def _connect_round_events(
     return round_events
 
 
-def _connect_stage_records(decoders) -> stage_records_module.StageLedger:
+def _round_event_recorder(
+    engine: engine_module.Engine, keeps_records: bool
+) -> round_events_module.RoundEventRecorder:
+    """The run's recorder, or a stream's, which keeps no row."""
+    if keeps_records:
+        return round_events_module.RoundEventRecorder(engine)
+    return round_events_module.FoldingRoundEventRecorder(engine)
+
+
+def _connect_stage_records(
+    decoders, keeps_records: bool
+) -> stage_records_module.StageLedger:
     """The run's stage history, heard from every decoder row."""
-    stages = stage_records_module.StageLedger()
+    stages = stage_records_module.StageLedger(keeps_records)
     decoder_rows = _decoder_rows(decoders)
     for decoder in decoder_rows:
         decoder.stage_recorded.connect(stages.stage_recorded)
@@ -523,10 +538,10 @@ def _connect_window_outcomes(
 
 
 def _frame_corrections(
-    pauli_frame,
+    pauli_frame, keeps_records: bool
 ) -> frame_corrections_module.FrameCorrections:
     """The frame's landed corrections."""
-    corrections = frame_corrections_module.FrameCorrections()
+    corrections = frame_corrections_module.FrameCorrections(keeps_records)
     if pauli_frame is None:
         return corrections
     pauli_frame.trace.correction_committed.connect(

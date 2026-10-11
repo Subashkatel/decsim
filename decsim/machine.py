@@ -403,7 +403,8 @@ def _observe(
     seed: Optional[int],
 ) -> observation_module.Observation:
     """Connect the run's listeners, before the workload is loaded."""
-    traffic_ledger = link_traffic.TrafficLedger(settings.links)
+    keeps_records = not settings.observation.folds_windows
+    traffic_ledger = link_traffic.TrafficLedger(settings.links, keeps_records)
     name = _process_name(settings, seed)
     return wiring.observe(
         settings.observation,

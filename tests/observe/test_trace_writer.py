@@ -77,6 +77,17 @@ def traced(tmp_path_factory):
     return machine, result, document
 
 
+def test_every_window_the_frame_took_is_marked_final_once(traced):
+    """An escalated window's strong answer finalizes it with no commit."""
+    machine, _result, document = traced
+    instants = _by_phase(document, "i")
+
+    finals = _rows_with(instants, "name", "window final")
+
+    committed = machine.observation.frame_corrections.committed
+    assert len(finals) == len(committed)
+
+
 def _log_sha(machine) -> str:
     text = "\n".join(machine.observation.log.lines)
     encoded = text.encode()

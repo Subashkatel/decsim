@@ -131,8 +131,14 @@ class TrafficLedger:
     channels by alias.
     """
 
-    def __init__(self, fabric_settings: link_settings.FabricSettings) -> None:
+    def __init__(
+        self,
+        fabric_settings: link_settings.FabricSettings,
+        keeps_records: bool = True,
+    ) -> None:
         self._settings = fabric_settings
+        # a stream keeps the counters only (observation.folds_windows)
+        self.keeps_records = keeps_records
         self._alias_by_channel: dict[str, str] = {}
         self._counters_by_binding: dict[tuple, TrafficCounters] = {}
         self._counters_by_channel: dict[str, TrafficCounters] = {}
@@ -159,7 +165,12 @@ class TrafficLedger:
         self._counters_by_channel[record.channel] = (
             channel_counters.plus_transfer(transfer)
         )
-        self._records.append(record)
+        if self.keeps_records:
+            self._records.append(record)
+
+    def transfer_row(self, record: transfer_records.TransferRecord) -> dict:
+        """One transfer as its row in traffic_json_value's transfers."""
+        return _transfer_json(record, self._alias_by_channel)
 
     def snapshot(self) -> FabricSnapshot:
         """A frozen view: the wiring, every counter, every transfer."""

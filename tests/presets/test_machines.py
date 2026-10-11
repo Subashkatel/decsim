@@ -15,10 +15,12 @@ import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
 import decsim.topology.legacy as legacy
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
+import tests.topology.test_graph_layout as layout_tests
 
 # one fridge cycle at 250 MHz, in ticks
 ONE_FRIDGE_CYCLE_TICKS = 4000
@@ -168,3 +170,30 @@ def test_a_part_changed_by_name_reaches_the_record():
     settings = legacy.resolved(two_units)
     expected = dataclasses.replace(machines.WEAK_BASELINE_POOL, unit_count=2)
     assert settings.weak_decoder == expected
+
+
+def test_an_escalation_grows_a_chain_one_pool_and_edge_at_a_time():
+    """The strong pool escalates on to a deep pool, a third, on the host."""
+    two_pools = _weak_base_switching()
+    deep_switching = layout_tests.DEEP_SWITCHING_SLOT
+
+    chain = machines.with_escalation(
+        two_pools,
+        machines.STRONG_POOL,
+        "deep",
+        machines.STRONG_BASELINE_POOL,
+        deep_switching,
+    )
+
+    settings = graph_layout.entry_settings(chain)
+    facts = settings.task_facts()
+    layout = graph_layout.layout_of(chain, facts)
+    edges = [(edge.name, edge.carried_from) for edge in layout.edges]
+    deep = chain.part("deep")
+    assert chain.unbound_ports() == []
+    assert not legacy.holds(chain)
+    assert deep.placed == fabrics.HOST
+    assert edges == [
+        ("switching", "weak_buffer"),
+        ("deep_switching", "strong_buffer"),
+    ]

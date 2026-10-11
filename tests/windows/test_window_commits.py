@@ -46,6 +46,7 @@ class _RecordingResults:
         self.committed = []
         self.delivered = []
         self.released = []
+        self.finalized = []
 
     def install_window_contribution(self, window, logical_observables):
         self.contributions.append((window.key, logical_observables))
@@ -55,6 +56,9 @@ class _RecordingResults:
 
     def note_window_committed(self, window, is_final):
         self.committed.append((window.key, is_final))
+
+    def note_window_final(self, window):
+        self.finalized.append(window.key)
 
     def deliver_if_final(self, operation):
         self.delivered.append(operation.id)

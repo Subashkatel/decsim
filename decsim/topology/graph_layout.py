@@ -13,8 +13,14 @@ order the switching parts are written.
 
 The entry pool reads the store the controller writes; an edge's target
 reads its own store, which takes an escalated window's rounds from the
-entry store (stage 4 carries them from there alone). A store no pool
-reads is not built.
+store its source pool reads. Two pools no edge joins trade boundaries
+on a hop of their own. A store no pool reads is not built.
+
+The entry pool, its edge and that edge's target draw their seeds at the
+roots the legacy slots give them, and every other part at its own name:
+a pool added past the entry moves no other part's seed, so a chain
+whose deep pool is never asked runs as its two-pool machine, shot for
+shot.
 
 entry_settings gives the graph's entry edge as a MachineSettings record,
 read by the reports that name a weak and a strong tier and by the build
@@ -69,6 +75,15 @@ _REFERENCE_BY_ROLE = {
     ("forward", None): transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
     ("reverse", None): transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
 }
+# the seed roots the legacy slots give the entry pool and its edge's target
+_ENTRY_SEED_ROOTS = (
+    layout_module.PRIMARY_UNIT_SEED,
+    layout_module.PRIMARY_MANAGER_SEED,
+)
+_ENTRY_TARGET_SEED_ROOTS = (
+    layout_module.STRONG_NAMES.unit_seed,
+    layout_module.STRONG_NAMES.manager_seed,
+)
 # the part that writes the stores, as a hop into a store names it
 CONTROLLER_LABEL = "controller assembler"
 _POOL_KIND = "decoder_pool"
@@ -126,7 +141,8 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
     edges = []
     for edge in shape.edges:
         carried_from = shape.store_by_pool[edge.source.name]
-        edge_plan = _edge_plan(edge, carried_from.name, task_facts)
+        policy_seed = _policy_seed(shape, edge)
+        edge_plan = _edge_plan(edge, carried_from.name, policy_seed, task_facts)
         edges.append(edge_plan)
     return layout_module.Layout(tuple(pools), tuple(stores), tuple(edges))
 
@@ -309,7 +325,7 @@ def _site(part: graph.Part) -> str:
 
 
 def _hop(source_name: str, target_name: str) -> str:
-    return f"{source_name}_to_{target_name}"
+    return route_records.hop_between(source_name, target_name)
 
 
 def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
@@ -338,12 +354,13 @@ def _pool_plan(
 ) -> layout_module.PoolPlan:
     """A pool under its part's name: its seat, queue, seeds and hops."""
     name = pool.name
+    unit_seed, manager_seed = _seed_roots(shape, pool)
     names = layout_module.PoolNames(
         seat=name,
         queue=name,
         statistics_path=name,
-        unit_seed=name,
-        manager_seed=f"{name}_manager",
+        unit_seed=unit_seed,
+        manager_seed=manager_seed,
     )
     pool_id = window_records.PoolId(name)
     site = _site(pool)
@@ -354,6 +371,22 @@ def _pool_plan(
     )
     store = shape.store_by_pool[name]
     return layout_module.PoolPlan(hops, pool.settings, names, store.name)
+
+
+def _seed_roots(shape: _Shape, pool: graph.Part) -> tuple:
+    """A pool's unit and manager seed roots: its legacy slot's, else its own."""
+    if pool.name == shape.entry.name:
+        return _ENTRY_SEED_ROOTS
+    if pool.name == shape.edges[0].target.name:
+        return _ENTRY_TARGET_SEED_ROOTS
+    return (pool.name, f"{pool.name}_manager")
+
+
+def _policy_seed(shape: _Shape, edge: _Edge) -> str:
+    """An edge's policy seed root: the legacy edge's for the entry edge."""
+    if edge is shape.edges[0]:
+        return layout_module.LEGACY_POLICY_SEED
+    return f"{edge.part.name}_policy"
 
 
 def _store_plan(shape: _Shape, pool: graph.Part) -> layout_module.StorePlan:
@@ -404,7 +437,7 @@ def _escalation_hop(
 
 
 def _edge_plan(
-    edge: _Edge, carried_from: str, task_facts: dict
+    edge: _Edge, carried_from: str, policy_seed: str, task_facts: dict
 ) -> layout_module.EdgePlan:
     """A switching part's edge, its threshold read at the task's facts."""
     settings = edge.part.settings
@@ -423,7 +456,7 @@ def _edge_plan(
     )
     name = edge.part.name
     return layout_module.EdgePlan(
-        name, at_task, hops, carried_from, f"{name}_policy"
+        name, at_task, hops, carried_from, policy_seed
     )
 
 
@@ -467,6 +500,8 @@ def _own_routes(shape: _Shape) -> tuple:
     for edge in shape.edges:
         edge_routes = _edge_routes(edge)
         routes.extend(edge_routes)
+    unjoined_routes = _unjoined_routes(shape)
+    routes.extend(unjoined_routes)
     return tuple(routes)
 
 
@@ -518,6 +553,47 @@ def _edge_routes(edge: _Edge) -> tuple:
         ("reverse", None),
     )
     return (forward, reverse)
+
+
+def _unjoined_routes(shape: _Shape) -> list:
+    """A boundary hop between each two pools no edge joins.
+
+    It is priced as an edge's: forward to a pool laid out later, reverse
+    to one laid out earlier.
+    """
+    joined = set()
+    for edge in shape.edges:
+        joined.add((edge.source.name, edge.target.name))
+        joined.add((edge.target.name, edge.source.name))
+    routes = []
+    for sender_index, sender in enumerate(shape.pools):
+        sender_site = _site(sender)
+        receivers = _unjoined_receivers(shape, sender, joined)
+        for receiver_index, receiver in receivers:
+            role = _boundary_role(sender_index, receiver_index)
+            ends = (sender.name, receiver.name)
+            receiver_site = _site(receiver)
+            sites = (sender_site, receiver_site)
+            route = _route(ends, sites, role)
+            routes.append(route)
+    return routes
+
+
+def _unjoined_receivers(shape: _Shape, sender: graph.Part, joined: set) -> list:
+    """The other pools no edge joins to sender, with their build index."""
+    receivers = []
+    for index, receiver in enumerate(shape.pools):
+        pair = (sender.name, receiver.name)
+        if receiver.name == sender.name or pair in joined:
+            continue
+        receivers.append((index, receiver))
+    return receivers
+
+
+def _boundary_role(sender_index: int, receiver_index: int) -> tuple:
+    if receiver_index > sender_index:
+        return ("forward", None)
+    return ("reverse", None)
 
 
 def _route(ends: tuple, sites: tuple, role: tuple) -> fabrics.Route:

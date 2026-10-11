@@ -273,6 +273,7 @@ class WindowCommitter:
             )
         # nothing of the operation waits on the window any more
         window.published_request_key = request_key
+        self.results.note_window_final(window)
         self.results.release_committed_segments(operation.id)
         self.results.deliver_if_final(operation)
 

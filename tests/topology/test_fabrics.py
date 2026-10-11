@@ -196,6 +196,28 @@ def test_a_wires_own_link_wins_over_the_rule():
     assert channel.name == "qpu_to_controller"
 
 
+def test_a_graphs_own_hop_takes_the_link_of_the_path_whose_role_it_carries():
+    rule = fabrics.PathLinks(weak_buffer_to_weak_decoder=ONE_FRIDGE_CYCLE)
+    read = fabrics.Route(
+        "weak_buffer_to_weak",
+        fabrics.FRIDGE,
+        fabrics.FRIDGE,
+        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
+    )
+    answer = fabrics.Route(
+        "weak_to_pauli_frame",
+        fabrics.FRIDGE,
+        fabrics.FRIDGE,
+        transfer_records.WEAK_DECODER_TO_FRAME,
+    )
+
+    read_link = rule.link_for(read)
+    answer_link = rule.link_for(answer)
+
+    assert read_link is ONE_FRIDGE_CYCLE
+    assert answer_link is None
+
+
 def test_a_route_inside_the_fridge_takes_the_base_rules_link():
     rule = fabrics.FridgeHostFabric(
         cable=ROCE_V2_CPU_LEG, host_local=HOST_POLL, base=WEAK_BASE

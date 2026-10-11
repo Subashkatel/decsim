@@ -12,13 +12,13 @@ import dataclasses
 
 import pytest
 
+import decsim.build.layout as layout_module
 import decsim.confidence.cluster as cluster
 import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
-import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -53,19 +53,19 @@ DEEP_SWITCHING_SLOT = escalation_settings.SwitchingSettings(
 )
 
 
-def _two_pools() -> graph.Machine:
-    weak_base = machines.weak_baseline(3, 0.001, 1.0)
-    switching = shape_tests.switching_slot(declared_run.DOUBLE_WINDOW)
-    return machines.with_strong_tier(weak_base, MIDDLE_POOL, switching)
-
-
 def chain_machine(
     deep_switching: escalation_settings.SwitchingSettings = (
         DEEP_SWITCHING_SLOT
     ),
+    entry_window: escalation_settings.StrongWindowSettings = (
+        declared_run.DOUBLE_WINDOW
+    ),
 ) -> graph.Machine:
-    """The strong pool escalating on to a deep pool on the host."""
-    two_pools = _two_pools()
+    """The strong pool escalating on to a deep pool on the host.
+
+    The entry edge lays its windows out by entry_window.
+    """
+    two_pools = _two_pools(entry_window)
     store = syndrome_buffer.SyndromeBufferSettings()
     parts = (
         graph.Part(DEEP_STORE, store, fabrics.HOST),
@@ -92,6 +92,16 @@ def laid_out(machine: graph.Machine):
     return graph_layout.layout_of(machine, facts)
 
 
+def _two_pools(
+    entry_window: escalation_settings.StrongWindowSettings = (
+        declared_run.DOUBLE_WINDOW
+    ),
+) -> graph.Machine:
+    weak_base = machines.weak_baseline(3, 0.001, 1.0)
+    switching = shape_tests.switching_slot(entry_window)
+    return machines.with_strong_tier(weak_base, MIDDLE_POOL, switching)
+
+
 def test_a_chain_is_a_new_shape():
     chain = chain_machine()
 
@@ -116,6 +126,23 @@ def test_a_chains_pools_go_by_their_parts_entry_first():
     ]
     assert stores == ["weak_buffer", "strong_buffer", DEEP_STORE]
     assert edges == ["switching", DEEP_SWITCHING]
+
+
+def test_a_chain_seeds_its_entry_edge_as_the_two_pool_machine_does():
+    """A pool added past the entry moves no other part's seed."""
+    chain_graph = chain_machine()
+    chain = laid_out(chain_graph)
+    two_pool_machine = _two_pools()
+    two_pool_settings = legacy.resolved(two_pool_machine)
+    two_pools = layout_module.legacy_layout(two_pool_settings)
+
+    chain_pools = _pool_seeds(chain)
+    chain_edges = _policy_seeds(chain)
+    two_pool_pools = _pool_seeds(two_pools)
+    two_pool_edges = _policy_seeds(two_pools)
+
+    assert chain_pools == [*two_pool_pools, (DEEP_POOL, "deep_manager")]
+    assert chain_edges == [*two_pool_edges, f"{DEEP_SWITCHING}_policy"]
 
 
 def test_each_hop_is_named_by_the_parts_at_its_ends():
@@ -218,9 +245,11 @@ def test_a_chain_read_back_from_its_file_keeps_its_id():
     assert again.strong_id() == first.strong_id()
 
 
-def test_a_chain_waits_for_stage_4g_to_run():
-    chain = chain_machine()
-    task = collect.Task("chain", chain)
+def _pool_seeds(layout) -> list:
+    return [
+        (plan.names.unit_seed, plan.names.manager_seed) for plan in layout.pools
+    ]
 
-    with pytest.raises(NotImplementedError, match=r"stage 4g"):
-        machine_module.Machine.build(task.machine, 0, layout=task.layout)
+
+def _policy_seeds(layout) -> list:
+    return [plan.policy_seed for plan in layout.edges]

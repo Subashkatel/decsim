@@ -485,9 +485,6 @@ class DecodeJob:
     ready_time: int = 0
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
-    strong_label: Optional[str] = (
-        None  # manager-owned label for a speculative strong decode
-    )
     spatial_nodes: Optional[int] = (
         None  # decoding-graph nodes per round (latency models)
     )

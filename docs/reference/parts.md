@@ -107,6 +107,10 @@ None charges the weak row's own timing: its loop's cycle count on the unit that 
 | --- | --- | --- |
 | `walk_microseconds` | `Optional[float]` | `None` |
 
+### `NoSignal.Settings`
+
+`decsim/confidence/no_signal.py`. The none row, which takes no setting.
+
 ## decsim/controller
 
 ### `IgnoreSettings`

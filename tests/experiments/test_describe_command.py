@@ -5,6 +5,7 @@ reads back as the task's graph, and each path line is the task's own
 card, so the printout is never the only record of what ran.
 """
 
+import json
 import pathlib
 
 import pytest
@@ -81,3 +82,23 @@ def test_describe_writes_a_task_built_from_settings_as_a_graph(
 
     assert "weak_buffer:" in text
     assert "qpu_to_controller" in text
+
+
+def test_describe_json_holds_the_graph_and_paths_the_text_prints(
+    tmp_path, capsys
+):
+    run_file = _graph_run_file(tmp_path)
+    text = _described(run_file, capsys)
+    graph_text, _, _ = text.partition("# its paths")
+    settings = run_files.minimal_machine()
+    workload = {"workload": settings.workload}
+    from_text = machine_file.loads(graph_text, python_parts=workload)
+
+    json_text = _described(run_file, capsys, "--json")
+    described = json.loads(json_text)
+
+    graph_json = json.dumps(described["graph"])
+    from_json = machine_file.loads(graph_json, python_parts=workload)
+    assert from_json == from_text
+    assert len(described["paths"]) == len(transfer_records.LEGACY_PATHS)
+    assert set(described["paths"]["qpu_to_controller"]) == {"latency", "rate"}

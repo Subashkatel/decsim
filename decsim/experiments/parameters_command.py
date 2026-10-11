@@ -2,7 +2,7 @@
 
     decsim params <run file> [--only NAME] [--set PATH=VALUE ...]
         [--match PATTERN]
-    decsim info <record name>
+    decsim info [<record name>]
 
 params prints every settable path of one task's machine (the first, or
 the --only one; a graph's paths for a task built from a graph) with its
@@ -15,7 +15,9 @@ OMNeT++'s `-q params` for decsim's settings tree.
 
 info prints one record's parameters, their units and defaults, and for
 each part the records its slot takes, so a researcher swaps a part
-(`path.type=NAME`) without reading the code.
+(`path.type=NAME`) without reading the code. With no name it prints
+every slot a machine has, from MachineSettings down, and the records
+each takes, as sst-info lists every element it can load.
 """
 
 import argparse
@@ -29,6 +31,7 @@ import decsim.parameters.fields as fields
 import decsim.parameters.kinds as kinds
 import decsim.parameters.tree as tree
 import decsim.parameters.units as units
+import decsim.settings as machine_settings
 import decsim.topology.constants as constants_module
 
 _NO_ORIGIN = ""
@@ -73,8 +76,16 @@ def params(argv: list) -> None:
 def info(argv: list) -> None:
     """Print one record's parameters, and the records each part takes."""
     parser = argparse.ArgumentParser(prog="decsim info")
-    parser.add_argument("record", help="a record's name, e.g. union_find")
+    parser.add_argument(
+        "record",
+        nargs="?",
+        default=None,
+        help="a record's name, e.g. union_find; none lists every slot",
+    )
     parsed = parser.parse_args(argv)
+    if parsed.record is None:
+        _print_every_slot()
+        return
     record_class = _record_class_named(parsed.record)
     name = kinds.written_name(record_class)
     print(f"{name}: {record_class.__module__}.{record_class.__qualname__}")
@@ -82,6 +93,25 @@ def info(argv: list) -> None:
     for parameter in parameters.values():
         line = _parameter_line(parameter)
         print(line)
+
+
+def every_slot() -> dict:
+    """(record class, field name): the records that slot takes.
+
+    Every slot reached from MachineSettings through the records its
+    slots take, each record read once.
+    """
+    slots = {}
+    waiting = [machine_settings.MachineSettings]
+    seen = set()
+    while waiting:
+        record_class = waiting.pop()
+        if record_class in seen:
+            continue
+        seen.add(record_class)
+        offered = _add_slots_of(record_class, slots)
+        waiting.extend(offered)
+    return slots
 
 
 def settings_root(task: Any) -> Any:
@@ -178,6 +208,33 @@ def _setting_line(setting: tree.Setting, origin: str) -> str:
     return line
 
 
+def _add_slots_of(record_class: type, slots: dict) -> list:
+    """Each record slot of the class into slots; every record offered."""
+    every_offered = []
+    parameters = fields.parameters_of(record_class)
+    for parameter in parameters.values():
+        if parameter.kind != fields.RECORD:
+            continue
+        offered = kinds.records_for(parameter.hint)
+        slots[(record_class, parameter.name)] = offered
+        every_offered.extend(offered)
+    return every_offered
+
+
+def _print_every_slot() -> None:
+    """Each slot as record.field, and the names of the records it takes."""
+    print("# slot: the records it takes; `decsim info NAME` prints one")
+    lines = []
+    slots = every_slot()
+    for (record_class, field_name), offered in slots.items():
+        owner = kinds.written_name(record_class)
+        names = [kinds.written_name(record) for record in offered]
+        listed = ", ".join(sorted(names))
+        lines.append(f"{owner}.{field_name}: {listed}")
+    for line in sorted(lines):
+        print(line)
+
+
 def _parameter_line(parameter: fields.Parameter) -> str:
     if parameter.kind == fields.RECORD:
         offered = kinds.records_for(parameter.hint)
@@ -208,7 +265,8 @@ def _record_class_named(name: str) -> type:
     """The record a name stands for, a settings record first.
 
     A run's state is a dataclass too (decsim.machine.Machine), so of two
-    records of one name the one named ...Settings is meant.
+    records of one name the one named ...Settings is meant. A name decsim
+    does not define is read as an import path (mylab.parts.X.Settings).
     """
     every_class = kinds.every_record_class()
     named = kinds.records_named(name, every_class)
@@ -222,9 +280,18 @@ def _record_class_named(name: str) -> type:
         return matches[0]
     if matches:
         _refuse_an_ambiguous_name(name, matches)
+    if "." in name:
+        return _imported_or_refusal(name)
     names = kinds.every_name(every_class)
     near = units.did_you_mean(name, names)
     raise refusal.RefusalError(f"decsim defines no record {name}.{near}")
+
+
+def _imported_or_refusal(name: str) -> type:
+    try:
+        return kinds.imported_class(name, "decsim info")
+    except fields.ParameterError as refused:
+        raise refusal.RefusalError(str(refused)) from None
 
 
 def _refuse_an_ambiguous_name(name: str, matches: list) -> None:

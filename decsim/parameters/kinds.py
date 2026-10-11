@@ -117,6 +117,40 @@ def import_path(record_class: type) -> str:
     return f"{record_class.__module__}.{record_class.__qualname__}"
 
 
+def unique_name(record_class: type) -> str:
+    """The first of a record's names no other record has, else its path.
+
+    A record decsim does not define has no short name here, so it is
+    written by its import path, which reads back to it.
+    """
+    offered = every_record_class()
+    for name in names_of(record_class):
+        matches = records_named(name, offered)
+        if matches == [record_class]:
+            return name
+    return import_path(record_class)
+
+
+def imported_class(name: str, where: str) -> type:
+    """The class an import path names, a class nested in one too.
+
+    The longest prefix that imports is the module, and the rest are its
+    attributes, so mylab.parts.NeuralDecoder.Settings is the Settings
+    class nested in NeuralDecoder.
+    """
+    segments = name.split(".")
+    module, attributes = _longest_module(segments, where)
+    value = module
+    for attribute in attributes:
+        value = getattr(value, attribute, None)
+    if not inspect.isclass(value):
+        written = ".".join(attributes)
+        raise fields.ParameterError(
+            f"{where}: {module.__name__} defines no class {written}"
+        )
+    return value
+
+
 @functools.cache
 def every_record_class() -> tuple:
     """Every settings record class decsim defines, nested ones included.
@@ -283,18 +317,7 @@ def _own_members(base: type) -> set:
 
 def _imported(name: str, hint: Any, path: str) -> type:
     """A record class written by its import path, if the slot takes it."""
-    module_name, _, class_name = name.rpartition(".")
-    try:
-        module = importlib.import_module(module_name)
-    except ImportError as missing:
-        raise fields.ParameterError(
-            f"{path}: cannot import {module_name}: {missing}"
-        ) from None
-    record_class = getattr(module, class_name, None)
-    if record_class is None:
-        raise fields.ParameterError(
-            f"{path}: {module_name} defines no {class_name}"
-        )
+    record_class = imported_class(name, path)
     if admits(hint, record_class):
         return record_class
     offered = records_for(hint)
@@ -302,6 +325,32 @@ def _imported(name: str, hint: Any, path: str) -> type:
     raise fields.ParameterError(
         f"{path}: {name} is not a record this slot takes; it takes {listed}"
     )
+
+
+def _longest_module(segments: list, where: str) -> tuple:
+    """The module the longest importable prefix names, and the rest."""
+    longest = len(segments) - 1
+    for end in range(longest, 0, -1):
+        module_name = ".".join(segments[:end])
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as missing:
+            _reraise_unless_absent(missing, module_name)
+            continue
+        return module, segments[end:]
+    written = ".".join(segments)
+    raise fields.ParameterError(f"{where}: no module of {written} imports")
+
+
+def _reraise_unless_absent(
+    missing: ModuleNotFoundError, module_name: str
+) -> None:
+    """A module that exists but imports one that does not is an error."""
+    absent = missing.name or ""
+    prefix = f"{absent}."
+    if module_name == absent or module_name.startswith(prefix):
+        return
+    raise missing
 
 
 def _refuse_an_ambiguous_name(name: str, matches: list, path: str) -> None:

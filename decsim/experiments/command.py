@@ -17,6 +17,7 @@ runs, so `decsim trace` never loads Stim. The console script and
     decsim params <run file> [--only NAME] [--match PATTERN]
     decsim info <record name>
     decsim describe <run file> [--only NAME]
+    decsim check <run file> [--only NAME]
 
 Every run form takes --set PATH=VALUE, repeated, to set any parameter
 of every task's machine (decsim/parameters; `decsim params` lists the
@@ -335,6 +336,13 @@ def _describe(argv: list) -> None:
     describe_command.describe(argv)
 
 
+def _check(argv: list) -> None:
+    """Every task's machine built once, before any job runs it."""
+    import decsim.experiments.check_command as check_command
+
+    check_command.check(argv)
+
+
 def _report_the_refusal(refused: refusal.RefusalError) -> None:
     """One sentence and exit 1, gem5's fatal (src/base/logging.hh)."""
     print(f"decsim: {refused}", file=sys.stderr)
@@ -362,4 +370,5 @@ _RUN_BY_VERB = {
     "params": _params,
     "info": _info,
     "describe": _describe,
+    "check": _check,
 }

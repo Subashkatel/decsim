@@ -41,28 +41,42 @@ decsim refuses is refused by its path, before any shot runs.
 ## 3. Swap a part
 
 ```bash
+decsim info
 decsim info DecoderPool
 decsim run run.py --set weak_decoder.algorithm.type=union_find \
     --set weak_decoder.algorithm.timing.type=HostMeasuredTime
 decsim run run.py --set "links.weak_decoder_to_strong_decoder.channel.capacity={type: Capacity, input: 100Gbps, source: my estimate}"
 ```
 
-`decsim info NAME` lists a record's parameters and, for each part, the
-records its slot takes. A part keeps the old record's fields of the
+`decsim info` lists every slot a machine has, as `record.field`, with
+the records it takes; `decsim info NAME` lists one record's parameters
+and, for each part, the records its slot takes. NAME may be an import
+path, `decsim info mylab.parts.NeuralDecoder.Settings`. A part keeps the old record's fields of the
 same name and takes the assignments that reach the rest; a required
 one left unset is refused. A record of your own is written by its
 import path, `weak_decoder.algorithm.type=mylab.decoders.NeuralSettings`,
 and is taken if the slot's type admits it. `type=none` empties an
 optional slot.
 
-## 4. Run it on Slurm
+## 4. Check every task before a job
+
+```bash
+decsim check experiments/switching/run.py
+```
+
+`check` builds every task's machine once, as a run builds it, and runs
+no shot. A task whose build refuses a setting is printed with the
+reason, the rest are still built, and the command exits 1. Run it with
+the same `--set` flags as the run.
+
+## 5. Run it on Slurm
 
 The flags are carried in the environment variable DECSIM_SET, `;`
 between assignments, which you can also set yourself; the flags come
 after it and win. `--slurm` writes it into `run.sbatch`, so every job
 builds the tasks the plan holds, and each run's `run.json` records it.
 
-## 5. Know what stays in the run file
+## 6. Know what stays in the run file
 
 A changed value is a new machine, so its task has a new id. The run
 file still names the task, so a name such as `cluster_gap_d3` keeps
@@ -84,7 +98,7 @@ lowered fields are refused by name (`MachineSettings.set_in_the_run_file`,
 them by. [A maker row](plug_in_a_workload_maker.md) makes such a
 workload settable.
 
-## 6. Set a constant
+## 7. Set a constant
 
 A run built from a constants file takes `constants.<name>` as a path,
 and `decsim params` lists those names after the machine's:

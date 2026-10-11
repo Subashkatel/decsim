@@ -34,6 +34,19 @@ class PluginDecoderSettings:
         """Never called here: the slot reads only its shape."""
 
 
+class PluginDecoder:
+    """A lab's decoder whose settings record is nested in it."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The nested record, the docs' own convention."""
+
+        name: str = "nested_plugin"
+
+        def build(self) -> ports.Decoder:
+            """Never called here: the slot reads only its shape."""
+
+
 def _slot_hint(record_class: type, field_name: str):
     hints = typing.get_type_hints(record_class)
     return hints[field_name]
@@ -102,3 +115,25 @@ def test_a_record_the_slot_does_not_take_is_refused_by_its_import_path():
 
     with pytest.raises(fields.ParameterError, match="not a record this slot"):
         kinds.record_class_named(path, hint, "windows.scheme")
+
+
+def test_an_import_path_reaches_a_record_nested_in_a_class():
+    hint = _slot_hint(decoder_settings.DecoderPoolSettings, "algorithm")
+    path = f"{__name__}.PluginDecoder.Settings"
+
+    record_class = kinds.record_class_named(path, hint, "pool.algorithm")
+
+    assert record_class is PluginDecoder.Settings
+
+
+def test_an_import_path_no_prefix_of_which_imports_is_refused():
+    with pytest.raises(fields.ParameterError, match="no module of"):
+        kinds.imported_class("no_such_lab.parts.Decoder", "a test")
+
+
+def test_a_record_outside_decsim_is_written_by_its_import_path():
+    written = kinds.unique_name(PluginDecoder.Settings)
+    by_row = kinds.unique_name(union_find.UnionFindDecoder.Settings)
+
+    assert written == f"{__name__}.PluginDecoder.Settings"
+    assert by_row == "union_find"

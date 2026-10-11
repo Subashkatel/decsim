@@ -133,6 +133,10 @@ class _Fixture:
         self.resolved = []
         self.verdicts = {}
         self.verdict_ticks = []
+        # the source results that reached the verdict, and those late
+        # past a deadline (escalation/deadlines.py)
+        self.noted = []
+        self.unavailable = set()
         self.policy = types.SimpleNamespace(
             verdict_for_weak_result=self._verdict_for
         )
@@ -156,6 +160,8 @@ class _Fixture:
             escalate=self.escalated.append,
             submit_if_commit_releases=self.after_weak.append,
             cancel_strong_request=self.kept.append,
+            note_source_result=self.noted.append,
+            result_is_unavailable=self._is_unavailable,
             rules=rules,
         )
         edge = (self.escalation,)
@@ -193,6 +199,9 @@ class _Fixture:
         if self.verdicts[job.request_key]:
             return decoding_records.Verdict.ESCALATE
         return decoding_records.Verdict.KEEP
+
+    def _is_unavailable(self, job) -> bool:
+        return job.request_key in self.unavailable
 
     def _resolve(self, job, _result, verdict) -> None:
         self.resolved.append((job.request_key, verdict))
@@ -251,6 +260,25 @@ def test_a_kept_result_releases_held_strong_windows_at_its_verdict():
     fixture.engine.run()
     assert fixture.frame.commits == [(14, (4, 1), (1, 0))]
     assert released_ticks == [10]
+
+
+def test_a_source_result_late_past_its_deadline_escalates_unasked():
+    """A late result is no answer: the edge's verdict row is not asked.
+
+    DART-Q (Bhave et al. 2605.09142 Sec. III-C) treats a late output as
+    unavailable, so the edge escalates a result its row would keep.
+    """
+    fixture = _Fixture()
+    job = fixture.job(window_records.WEAK_POOL_ID, 0)
+    fixture.unavailable.add(job.request_key)
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
+
+    fixture.verdict.accept_revision(job, result)
+
+    assert fixture.noted == [job]
+    assert fixture.verdict_ticks == []
+    assert fixture.escalated == [job]
+    assert fixture.courier.handed == [((4, 1), False)]
 
 
 def test_a_window_awaiting_strong_commits_provisionally_and_is_not_final():

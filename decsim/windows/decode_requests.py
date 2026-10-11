@@ -451,6 +451,9 @@ class DecodeRequester:
         submissions = list(deciding.primary_submissions)
         job = deciding.job
         edge = self._primary_edge()
+        if edge is not None:
+            # the queue is read before the job joins it (deadlines.py)
+            edge.arm_deadline(job)
         if edge is not None and edge.policy.decodes_both_at_once(job.window):
             speculative = edge.parallel_strong_submission(job)
             started = _speculative_submissions(speculative)

@@ -21,6 +21,7 @@ import dataclasses
 import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
+import decsim.escalation.deadlines as deadlines
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
@@ -127,13 +128,15 @@ def chain_graph(
     deep_speculates: bool = False,
     entry_speculates: bool = False,
     deep_confidence=None,
+    deep_deadline=None,
 ) -> graph.Machine:
     """The declared chain: each pool escalates the windows it doubts.
 
     The entry edge lays its strong windows out by entry_window; the deep
     edge redoes the strong revision. Each edge that speculates starts
     its target's decode with its source's job. deep_confidence replaces
-    the deep edge's declared one-solve signal.
+    the deep edge's declared one-solve signal, and deep_deadline gives
+    the deep edge a deadline.
     """
     settings = fabric.switching_settings(
         rounds=rounds,
@@ -149,7 +152,12 @@ def chain_graph(
         strong_microseconds, is_doubted
     )
     with_doubts = base.with_settings("strong", algorithm=strong_algorithm)
-    chain = _with_a_deep_pool(with_doubts, deep_speculates, deep_confidence)
+    deep_changes = {"run_both_at_once": deep_speculates}
+    if deep_confidence is not None:
+        deep_changes["confidence"] = deep_confidence
+    if deep_deadline is not None:
+        deep_changes["deadline"] = deep_deadline
+    chain = _with_a_deep_pool(with_doubts, deep_changes)
     card_fabric = DeclaredHops(settings.links)
     return dataclasses.replace(chain, fabric=card_fabric)
 
@@ -339,6 +347,36 @@ def test_a_deep_decode_beside_two_strong_solves_waits_for_their_join():
     assert released_start == _ticks(111.0)
 
 
+def test_a_late_strong_result_is_answered_by_the_deep_rescue():
+    """The deep edge's deadline runs from the strong job's arrival.
+
+    The strong job arrives at 33 us, so its deadline is 43 us. The
+    rescue starts then: the rounds held in the strong store ride
+    strong_to_deep (3 us) and the deep input (6 us), so the deep decode
+    runs 52-102 us. The strong result at 69 us would be kept, but it is
+    late, so the deep edge escalates and selects the rescue. The answer
+    lands at 106 us over deep_to_frame (4 us) and commits at 107 us;
+    W1's boundary leaves at 102 us, crosses deep_to_weak (4 us) and W1's
+    input (5 us), so W1 starts at 111 us.
+    """
+    deadline = deadlines.Deadline.Settings(slack_microseconds=10.0)
+    declared = chain_graph({0}, set(), deep_deadline=deadline)
+    machine = chain_built(declared)
+    machine.run()
+
+    first = _first_record(machine)
+    rescue = _log_tick(machine, "strong(mem1 W0): deadline trigger")
+    deep_start = _log_tick(machine, "START DECODE deep(mem1 W0)")
+    released_start = _log_tick(machine, "START DECODE mem1 W1")
+
+    assert rescue == _ticks(43.0)
+    assert deep_start == _ticks(52.0)
+    assert first.tier == DEEP_POOL
+    assert first.accepted_ticks == _ticks(106.0)
+    assert first.committed_ticks == _ticks(107.0)
+    assert released_start == _ticks(111.0)
+
+
 def test_every_store_of_a_chain_settles_empty():
     """Every hold the three stores placed ends with the last commit."""
     machine = chain_run({0, 1, 2}, {0, 2})
@@ -382,21 +420,17 @@ def test_a_deep_redo_decodes_the_strong_revision_on_its_own_terms():
     assert deep_job.detector_error_model is strong_job.detector_error_model
 
 
-def _with_a_deep_pool(
-    machine: graph.Machine, speculates: bool, confidence
-) -> graph.Machine:
-    """The strong pool escalating on to a deep pool on the host."""
+def _with_a_deep_pool(machine: graph.Machine, changes: dict) -> graph.Machine:
+    """The strong pool escalating on to a deep pool on the host.
+
+    changes are the deep edge's switching fields that differ from the
+    declared ones.
+    """
     deep_algorithm = decoders.PresetLatencyDecoder.Settings(DEEP_MICROSECONDS)
     deep_pool = decoder_settings.DecoderPoolSettings(
         algorithm=deep_algorithm, engine=declared_run.DECLARED_ENGINE
     )
-    deep_switching = declared_run.declared_switching(
-        run_both_at_once=speculates
-    )
-    if confidence is not None:
-        deep_switching = dataclasses.replace(
-            deep_switching, confidence=confidence
-        )
+    deep_switching = declared_run.declared_switching(**changes)
     return machines.with_escalation(
         machine, machines.STRONG_POOL, DEEP_POOL, deep_pool, deep_switching
     )

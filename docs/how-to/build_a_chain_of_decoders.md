@@ -83,7 +83,44 @@ lighter solve is the answer (Toshio et al. 2510.25222 Sec. II C). The
 source pool's decoder must find the lightest correction inside a fixed
 class; a union-find pool is refused, and `cluster_gap` is its signal.
 
-## 3. Set and read it
+## 3. Give an edge a deadline
+
+`deadline` on an edge gives each of its source pool's jobs a deadline
+and a rescue (`decsim/escalation/deadlines.py`). It follows DART-Q
+(Bhave, Choudhury and Basu 2605.09142):
+
+- The deadline is the job's arrival at the source pool plus
+  `slack_microseconds`, the paper's slack budget.
+- A result that reaches the verdict after it is a miss. By default it
+  is unavailable, as the paper treats a late output, so the edge
+  escalates it. `late_source_result: revision` lets it meet the
+  verdict instead.
+- The `trigger` starts the rescue, the target's decode before the
+  verdict; the verdict selects or cancels it as it would a decode
+  started with `run_both_at_once`.
+  - `slack(threshold_microseconds=s)` starts it when the slack left
+    reaches s, the default 0 being the deadline itself.
+  - `backlog(queued_jobs=k)` starts it at arrival when the source
+    pool already holds k waiting jobs.
+  - The paper's third trigger, a decoder that hit its iteration cap,
+    is the `status` verdict on a pool whose decoder has one.
+
+```
+decsim run run.py --only uf_relay_osd \
+    --set switching.deadline.type=deadline \
+    --set switching.deadline.slack=10us \
+    --set switching.deadline.trigger.type=backlog
+```
+
+`<edge>.deadline` counts `rescues` and `misses`. The paper finds a
+rescue helps only while its trigger stays selective (its Table I).
+A deadline is refused beside `run_both_at_once`, which starts the
+target with every job, and beside an absorbing strong window, which
+starts it late. Not built: earliest-deadline-first queues, a cutoff in
+microseconds, and a rescue into the source pool's own queue. The
+timelines are worked by hand in `tests/escalation/test_deadlines.py`.
+
+## 4. Set and read it
 
 ```
 decsim run run.py --only uf_relay_osd --set deep.unit_count=2
@@ -100,5 +137,7 @@ statistics.
 An edge that does not leave the entry pool redoes the region its
 source pool decoded, on the same faces and the same error model. A
 strong window that absorbs weak windows (`DoubleWindow`) on such an
-edge is refused with "not implemented yet (stage 5)". The timelines a
+edge is refused with "not implemented yet (stage 5)": Toshio et al.
+define it over a sliding weak chain's neighbouring windows, which a pool
+past the entry does not decode. The timelines a
 chain follows are worked by hand in `tests/machine/test_chains.py`.

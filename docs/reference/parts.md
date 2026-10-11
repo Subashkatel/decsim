@@ -389,6 +389,43 @@ formed_at lists the seats, each once; every path a round takes to a decoder cros
 
 ## decsim/escalation
 
+### `TriggerSettings`
+
+`decsim/escalation/deadlines.py`. A rescue trigger row's settings record (this module).
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `rescue_delay(self, slack_ticks: int, queued_jobs: int)` | `Optional[int]` |
+
+### `SlackTrigger.Settings`
+
+`decsim/escalation/deadlines.py`. The slack row: the slack left at which the rescue starts.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `threshold_microseconds` | `float` | `0.0` |
+
+### `BacklogTrigger.Settings`
+
+`decsim/escalation/deadlines.py`. The backlog row: the waiting jobs at which the rescue starts.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `queued_jobs` | `int` | `1` |
+
+### `Deadline.Settings`
+
+`decsim/escalation/deadlines.py`. An edge's deadline: the slack budget, the trigger, a late result.
+
+slack_microseconds is DART-Q's Delta, which it requires positive (Sec. III-A, Eq. 1). late_source_result names one of LATE_SOURCE_RESULTS.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `slack_microseconds` | `float` | required |
+| `trigger` | `TriggerSettings` | `SlackTrigger.Settings()` |
+| `late_source_result` | `str` | `'unavailable'` |
+
 ### `ThresholdSettings`
 
 `decsim/escalation/settings.py`. A threshold row's settings record: decibels in, nats out.
@@ -439,6 +476,20 @@ cancels_on_keep says whether a keep cancels the target's decode.
 | `cancels_on_keep` | `bool` |
 | `build(self)` | `ports.CancelRule` |
 
+### `DeadlineSettings`
+
+`decsim/escalation/settings.py`. An edge's deadline record (deadlines.py).
+
+slack_microseconds is the budget from the source job's arrival.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `slack_microseconds` | `float` |
+| `trigger` | `deadlines.TriggerSettings` |
+| `late_source_result` | `str` |
+| `build(self, engine: engine_module.Engine)` | `deadlines.Deadline` |
+
 ### `StrongWindowSettings`
 
 `decsim/escalation/settings.py`. A strong window row's settings record (strong_window_shapes.py).
@@ -461,6 +512,8 @@ Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier repo
 
 verdict is the row that keeps or escalates each weak result (verdicts.py), the gap against the threshold by default. replace_rule says which revision the frame takes, and cancel_rule what a keep does to the strong decode already asked for (windows/revision_rules.py).
 
+deadline, None by default, gives each source job a deadline and a trigger that starts the target decode before the verdict, and makes a late source result unavailable (deadlines.py, after DART-Q, Bhave et al. 2605.09142). It starts the target early, so it contradicts run_both_at_once, which starts it with every source job, and an absorbing strong window, which starts it late.
+
 strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a strong answer reaches the frame. direct, the default: the strong host joins the weak crossing commit, which rides up with the selection, and sends the answer on strong_decoder_to_frame (Toshio 2510.25222 Fig. 1). through_weak_chip: the answer goes down on strong_decoder_to_weak_decoder, the weak chip joins it in one cycle of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892 Table I, the Pauli frame update). A run with no switching sends a strong answer direct.
 
 | Field | Type | Default |
@@ -476,6 +529,7 @@ strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a
 | `verdict` | `VerdictSettings` | `config.added_field(GAP_THRESHOLD)` |
 | `replace_rule` | `ReplaceRuleSettings` | `config.added_field(LATEST_REVISION)` |
 | `cancel_rule` | `CancelRuleSettings` | `config.added_field(CANCEL_DOWNSTREAM)` |
+| `deadline` | `Optional[DeadlineSettings]` | `config.added_field(None)` |
 
 ### `RedoWindow.Settings`
 

@@ -341,6 +341,8 @@ class WindowVerdict:
         if is_first:
             window = self._window_of(job)
             self.committer.note_decode_finished(window)
+        if edge is not None:
+            edge.note_source_result(job)
         self._price_the_threshold(job, result, edge)
 
     def _price_the_threshold(
@@ -444,9 +446,15 @@ def _verdict_for(
     result: decoding_records.DecodeResult,
     edge: Optional[ports.EscalateEdge],
 ) -> decoding_records.Verdict:
-    """The edge's verdict; a revision no edge leaves is kept."""
+    """The edge's verdict; a revision no edge leaves is kept.
+
+    A source result that missed its deadline is no answer, so the edge's
+    target gives one (escalation/deadlines.py).
+    """
     if edge is None:
         return decoding_records.Verdict.KEEP
+    if edge.result_is_unavailable(job):
+        return decoding_records.Verdict.ESCALATE
     return edge.policy.verdict_for_weak_result(job, result)
 
 

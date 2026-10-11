@@ -76,9 +76,7 @@ class RoundTransmitter:
     def _send_window_input(self, packed: round_records.PackedRound) -> None:
         self._fire("CWB_SENT", packed)
         publish = functools.partial(self._publish, packed)
-        self._send(
-            transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, publish
-        )
+        self._send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, packed, publish)
 
     def _publish(self, packed: round_records.PackedRound) -> None:
         """The weak syndrome buffer's receiver takes the landing.
@@ -110,9 +108,7 @@ class RoundTransmitter:
         weak decoder and frees the slot.
         """
         landed = functools.partial(self._write_feedback_memory, packed)
-        self._send(
-            transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER, packed, landed
-        )
+        self._send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, packed, landed)
 
     def _write_feedback_memory(self, packed: round_records.PackedRound) -> None:
         deliver = functools.partial(self._deliver_feedback_memory, packed)

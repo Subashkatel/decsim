@@ -132,7 +132,7 @@ def sender_with(
     landing_path = None
     receiver = weak_receiver
     if publishes_from_strong_store:
-        landing_path = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+        landing_path = transfer_records.CONTROLLER_TO_STRONG_BUFFER
         receiver = strong_receiver
     sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
     sender.link = links

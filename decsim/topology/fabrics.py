@@ -34,9 +34,10 @@ import decsim.config as config
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.ports as ports
+import decsim.records.routes as route_records
 
-FRIDGE = "fridge"
-HOST = "host"
+FRIDGE = route_records.FRIDGE
+HOST = route_records.HOST
 # the name a card built from a graph goes by; a label, no part of an id
 PROFILE_NAME = "a graph's fabric"
 # Each path of today's card, by the MachineSettings slots at its ends.

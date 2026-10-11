@@ -121,7 +121,7 @@ class InstructionOutput:
         def output_ready():
             self._fire(event_kind, operation_id, payload)
             self.link.send(
-                transfer_records.LinkPath.CONTROLLER_TO_QPU,
+                transfer_records.CONTROLLER_TO_QPU,
                 None,
                 self.engine.now,
                 attribution,

@@ -243,17 +243,17 @@ class FabricSettings:
 
     def path_settings(self, path: transfer_records.LinkPath) -> PathSettings:
         """The setting of one path."""
-        return getattr(self, path.value)
+        return getattr(self, path)
 
     def path_bindings(self) -> tuple:
         """Every semantic path's channel bindings, including readout routes."""
         bindings = []
-        for path in transfer_records.LinkPath:
+        for path in transfer_records.LEGACY_PATHS:
             settings = self.path_settings(path)
             bindings.append((path, settings))
         for route in self.readout_routes:
             bindings.append(
-                (transfer_records.LinkPath.QPU_TO_CONTROLLER, route.settings)
+                (transfer_records.QPU_TO_CONTROLLER, route.settings)
             )
         return tuple(bindings)
 

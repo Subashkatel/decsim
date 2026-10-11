@@ -4,8 +4,8 @@ A boundary is the residual defects at a window's commit edge. The record
 that leaves is the courier's, so it both sends it and handles its
 landing (OMNeT++ refuses a module that sends a message it does not own,
 src/sim/csimplemodule.cc:333-334). It rides the hop between the side
-whose decode committed it and the side whose decode reads it
-(_BOUNDARY_ROUTES).
+whose decode committed it and the side whose decode reads it, by the
+route its run generated (build/routes.py).
 Every send bumps the source's version and each delivery's version, and a
 receiver accepts only the latest, so a late delivery is harmless. A held
 boundary waits for a final result. A strong window whose face is pinned
@@ -21,6 +21,7 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
+import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.window_interactions as window_interactions
@@ -38,8 +39,10 @@ class HeldBoundary:
 class BoundaryCourier:
     """Delivers committed boundaries, versioned, held until final.
 
-    window_tier is the tier that decodes the planner's windows, so every
-    hand-on lands on its side; a pinned face lands on the strong side.
+    routes says which hop a boundary takes between two pools. Every
+    hand-on lands on routes.window_pool, the pool that decodes the
+    planner's windows; a pinned face lands on the pool of the strong
+    request it pins.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
@@ -53,8 +56,8 @@ class BoundaryCourier:
     # whether it was the last boundary a shipped window owed
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self, window_tier: window_records.PoolId) -> None:
-        self.window_tier = window_tier
+    def __init__(self, routes: route_records.Routes) -> None:
+        self.routes = routes
         self.record_by_window: dict = {}
 
     # ---- what the committer asks
@@ -280,8 +283,8 @@ class BoundaryCourier:
         seam_bits = self.interaction.boundary_payload_bits(
             boundary, destination_info, source_info
         )
-        source_tier = record.committed_request_key.pool
-        route = _boundary_route(source_tier, window_records.STRONG_POOL_ID)
+        source_pool = record.committed_request_key.pool
+        route = self.routes.boundary(source_pool, request_key.pool)
         payload_bits = _wire_bits(seam_bits, route)
         delivered = functools.partial(self._pin_delivered, destination)
         self.transfers.send_boundary(
@@ -432,7 +435,8 @@ class BoundaryCourier:
             delivery_version,
         )
         seam_bits = self._boundary_bits(boundary, window.key, dependent_key)
-        route = _boundary_route(source_request_key.pool, self.window_tier)
+        window_pool = self.routes.window_pool
+        route = self.routes.boundary(source_request_key.pool, window_pool)
         payload_bits = _wire_bits(seam_bits, route)
         self.transfers.send_boundary(
             route.path, attribution, payload_bits, receive
@@ -576,62 +580,10 @@ class _BoundaryRecord:
         self.held: Optional[HeldBoundary] = None
 
 
-def _boundary_route(
-    source_tier: window_records.PoolId,
-    destination_tier: window_records.PoolId,
-) -> "_BoundaryRoute":
-    return _BOUNDARY_ROUTES[source_tier, destination_tier]
-
-
 def _wire_bits(
-    seam_bits: Optional[int], route: "_BoundaryRoute"
+    seam_bits: Optional[int], route: route_records.BoundaryRoute
 ) -> Optional[int]:
     """The seam behind the route's name, None when the seam is unknown."""
     if seam_bits is None:
         return None
     return seam_bits + route.name_bits
-
-
-@dataclasses.dataclass(frozen=True)
-class _BoundaryRoute:
-    """The hop a boundary takes, and the bits of the name it carries."""
-
-    path: transfer_records.LinkPath
-    name_bits: int
-
-
-# Two weak units meet on the chip, a link per graph edge (Helios
-# 2301.08419 lines 764-769). A boundary between the chip and the host
-# crosses the cable on the hop the escalation or the strong answer takes
-# (decoders/decoder_output.py): no paper prices this message (Toshio
-# 2510.25222 lines 1965-1966 count the syndrome data and the decoding
-# output alone), so the cable leg is decsim's choice. It names the
-# request that committed it, as every message across the wall does while
-# other requests are open (records/windows.py REQUEST_KEY_WIRE_BITS).
-# Two strong decodes meet in the host's own memory, the read the strong
-# window's input takes, which crosses no wire that needs a name.
-_BOUNDARY_ROUTES = {
-    (window_records.WEAK_POOL_ID, window_records.WEAK_POOL_ID): (
-        _BoundaryRoute(
-            path=transfer_records.LinkPath.DECODER_TO_DECODER, name_bits=0
-        )
-    ),
-    (window_records.WEAK_POOL_ID, window_records.STRONG_POOL_ID): (
-        _BoundaryRoute(
-            path=transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
-            name_bits=window_records.REQUEST_KEY_WIRE_BITS,
-        )
-    ),
-    (window_records.STRONG_POOL_ID, window_records.WEAK_POOL_ID): (
-        _BoundaryRoute(
-            path=transfer_records.LinkPath.STRONG_DECODER_TO_WEAK_DECODER,
-            name_bits=window_records.REQUEST_KEY_WIRE_BITS,
-        )
-    ),
-    (window_records.STRONG_POOL_ID, window_records.STRONG_POOL_ID): (
-        _BoundaryRoute(
-            path=transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
-            name_bits=0,
-        )
-    ),
-}

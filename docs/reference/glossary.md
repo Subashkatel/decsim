@@ -218,8 +218,9 @@ is a field of a part in `decsim/build/` or a pool inside one.
 
 ## The link paths
 
-Every hop is booked under one path name, the `LinkPath` values in
-`decsim/records/transfers.py`.
+Every hop is booked under one path name. A graph names a hop by the
+parts at its ends; a legacy machine's twelve hops are the `LEGACY_PATHS`
+names in `decsim/records/transfers.py`, below.
 
 | decsim | The hop |
 | --- | --- |

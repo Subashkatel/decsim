@@ -202,7 +202,7 @@ class TrafficLedger:
         for record in snapshot.transfers:
             transfer_json = _transfer_json(record, self._alias_by_channel)
             transfers.append(transfer_json)
-        path_order = [path.value for path in transfer_records.LinkPath]
+        path_order = [path for path in transfer_records.LEGACY_PATHS]
         return {
             "schema_version": 2,
             "path_order": path_order,
@@ -268,7 +268,7 @@ class TrafficLedger:
         assert semantic_sum == channel_snapshot.counters, (
             "a channel's counters are the sum of its paths' counters"
         )
-        member_paths = [path.value for path in channel_snapshot.member_paths]
+        member_paths = list(channel_snapshot.member_paths)
         physical_counters = channel_snapshot.counters.to_json_value()
         semantic_counters = semantic_sum.to_json_value()
         channel_json = {
@@ -296,7 +296,7 @@ def _semantic_edge_json(
     binding = (path_snapshot.path, path_snapshot.physical_alias)
     setup = setup_by_binding[binding]
     return {
-        "path": path_snapshot.path.value,
+        "path": path_snapshot.path,
         "physical_alias": path_snapshot.physical_alias,
         "counters": path_snapshot.counters.to_json_value(),
         "setup_ticks": setup["setup_ticks"],
@@ -314,7 +314,7 @@ def _transfer_json(
         patch_json = identity_records.stable_identity_json(patch_id)
         patch_ids.append(patch_json)
     return {
-        "path": record.path.value,
+        "path": record.path,
         "physical_alias": alias_by_channel[record.channel],
         "attribution": {
             "operation_id": identity_records.stable_identity_json(

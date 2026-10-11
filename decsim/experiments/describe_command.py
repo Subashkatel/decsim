@@ -40,9 +40,9 @@ def describe(argv: list) -> None:
     print(f"# {task.name}, as a graph")
     print(text)
     print("# its paths, as the run prices them: latency, rate")
-    for path in transfer_records.LinkPath:
+    for path in transfer_records.LEGACY_PATHS:
         path_settings = task.machine.links.path_settings(path)
-        line = path_line(path.value, path_settings)
+        line = path_line(path, path_settings)
         print(line)
 
 

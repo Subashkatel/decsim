@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+import decsim.build.routes as routes_build
 import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.engine as engine_module
@@ -19,6 +20,9 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
+
+# the legacy pools, no edge, the planner's windows on the weak pool
+_ROUTES = routes_build.legacy_routes(window_records.WEAK_POOL_ID, None)
 
 
 class _RecordingCourier:
@@ -137,7 +141,9 @@ class _Fixture:
         )
         self.transfers = _Transfers(self.engine, 4)
         self.frame = _Frame(self.engine, frame_ticks)
-        decoder_output = decoder_output_module.DecoderOutput(self.engine)
+        decoder_output = decoder_output_module.DecoderOutput(
+            self.engine, _ROUTES
+        )
         decoder_output.transfers = self.transfers
         decoder_output.frame = self.frame
         committer = window_commits.WindowCommitter(self.engine)
@@ -191,7 +197,7 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     assert fixture.window.t_done == 10
     assert fixture.courier.handed == [((4, 1), True)]
     (path, key, tier, payload_bits) = fixture.transfers.sent[0]
-    assert path is transfer_records.LinkPath.WEAK_DECODER_TO_FRAME
+    assert path == transfer_records.WEAK_DECODER_TO_FRAME
     assert (key, tier, payload_bits) == (
         (4, 1),
         window_records.WEAK_POOL_ID,
@@ -261,7 +267,7 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     )
     fixture.engine.run()
     (path, _key, tier, _bits) = fixture.transfers.sent[0]
-    assert path is transfer_records.LinkPath.STRONG_DECODER_TO_FRAME
+    assert path == transfer_records.STRONG_DECODER_TO_FRAME
     assert tier == window_records.STRONG_POOL_ID
     assert fixture.frame.commits == [(24, (4, 1), (0, 1))]
     assert fixture.results.replaced == [((4, 1), (0, 1))]
@@ -319,7 +325,9 @@ def test_the_frame_receives_the_strong_result_with_the_crossing_commit():
 
 def test_a_frameless_run_commits_at_the_delivery():
     fixture = _Fixture()
-    decoder_output = decoder_output_module.DecoderOutput(fixture.engine)
+    decoder_output = decoder_output_module.DecoderOutput(
+        fixture.engine, _ROUTES
+    )
     decoder_output.transfers = fixture.transfers
     committed = []
     window = fixture.window

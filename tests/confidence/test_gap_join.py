@@ -28,7 +28,7 @@ import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
 
-WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+WEAK_INPUT_PATH = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
 # a window identity the run never requests, so its solve is never joined
 UNJOINED_WINDOW_ID = 999
 

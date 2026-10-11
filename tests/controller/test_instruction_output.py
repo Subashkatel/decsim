@@ -45,7 +45,7 @@ def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     output.link = link
     output.trace.output_event.connect(recorder.output)
     to_qpu = link.expected_delay_ticks(
-        transfer_records.LinkPath.CONTROLLER_TO_QPU, None, 0
+        transfer_records.CONTROLLER_TO_QPU, None, 0
     )
     result = program_records.Decision(2, releases_operation=False)
     delivered = []

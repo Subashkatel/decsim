@@ -109,8 +109,8 @@ class WindowCommitter:
         What the weak decode committed of the faults behind the window
         joins the result before it leaves, so the frame and the
         prediction receive the same bits. The answer's route prices
-        where that join happens (decoders/decoder_output.py
-        STRONG_ANSWER_ROUTES). A boundary held for the window leaves
+        where that join happens (records/routes.py
+        ANSWER_ROUTE_NAMES). A boundary held for the window leaves
         now, from the decoder that computed it, as a final weak result's
         does (commit_or_publish), and not after the answer reaches the
         frame.

@@ -23,6 +23,7 @@ from collections.abc import Iterator, Mapping
 from typing import Optional
 
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.compiled_libraries as compiled_libraries
 import decsim.engine as engine_module
@@ -655,11 +656,9 @@ def _plan(task: collect.Task) -> plan_build.Plan:
     """The plan the build derives from the task, before it wires."""
     settings = task.machine
     engine = engine_module.Engine()
-    switching = escalation_build.build_switching(
-        settings.switching,
-        settings.weak_decoder,
-        engine,
-        task.online_threshold,
+    layout = layout_module.legacy_layout(settings)
+    switching_parts = escalation_build.build_switching(
+        layout, engine, task.online_threshold
     )
     return plan_build.build_plan(
         settings.qpu,
@@ -669,7 +668,7 @@ def _plan(task: collect.Task) -> plan_build.Plan:
         settings.detection_events,
         settings.switching,
         settings.decoder_manager.bulk_strong,
-        switching,
+        switching_parts,
     )
 
 

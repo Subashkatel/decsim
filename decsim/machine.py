@@ -86,9 +86,17 @@ class Machine:
     readout: readout_part.Readout
     windows: windows_part.Windows
     decoders: decoders_part.Decoders
-    # None on a run whose switching slot is empty
-    switching: Optional[escalation_build.Switching]
+    # one per escalate edge, in graph order; none on a run with no edge
+    switching_parts: tuple
     observation: observation_module.Observation
+    layout: layout_module.Layout
+
+    @property
+    def switching(self) -> Optional[escalation_build.Switching]:
+        """The entry edge's switching part; None on a run with no edge."""
+        if not self.switching_parts:
+            return None
+        return self.switching_parts[0]
 
     @classmethod
     def build(
@@ -97,6 +105,7 @@ class Machine:
         seed: Optional[int] = 0,
         built_models: Optional[built_window_models.BuiltWindowModels] = None,
         online_threshold: Optional[ports.ThresholdSource] = None,
+        layout: Optional[layout_module.Layout] = None,
     ) -> "Machine":
         """Build every part from the run's settings, then assemble them.
 
@@ -105,18 +114,18 @@ class Machine:
         model cache the shots of one unit share (collect.run_unit), and
         online_threshold the task's calibrator when its threshold
         learns across shots (collect.Task); both are task state, never
-        settings.
+        settings. layout is a new-shape graph's (collect.Task); None
+        lays out the settings' slots under their own names.
         """
         settings = settings.at_task()
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
+        if layout is None:
+            layout = layout_module.legacy_layout(settings)
+        _refuse_a_chain(layout)
         engine = engine_module.Engine()
-        switching = escalation_build.build_switching(
-            settings.switching,
-            settings.weak_decoder,
-            engine,
-            online_threshold,
-            settings.clock,
+        switching_parts = escalation_build.build_switching(
+            layout, engine, online_threshold, settings.clock
         )
         plan = plan_build.build_plan(
             settings.qpu,
@@ -126,20 +135,16 @@ class Machine:
             settings.detection_events,
             settings.switching,
             settings.decoder_manager.bulk_strong,
-            switching,
+            switching_parts,
         )
-        layout = layout_module.legacy_layout(settings)
-        window_tier = settings.window_tier
-        window_decoder = settings.decoder_settings_for(window_tier.word)
-        escalates = settings.switching is not None
+        formation_paths = layout.formation_paths()
         detection_events = readout_part.build_detection_events(
             settings.detection_events,
             settings.clock,
             plan.device,
-            window_tier,
-            escalates,
+            formation_paths,
         )
-        signal_by_pool = escalation_build.signal_by_pool(switching)
+        signal_by_pool = escalation_build.signal_by_pool(switching_parts)
         pools = decoders_part.build_pool_units(
             layout, settings.clock, detection_events, signal_by_pool
         )
@@ -165,10 +170,7 @@ class Machine:
         windows = windows_part.Windows.build(
             settings.windows,
             settings.workload,
-            settings.switching,
-            window_decoder,
-            settings.strong_decoder,
-            window_tier,
+            layout,
             settings.clock,
             engine,
             plan,
@@ -193,7 +195,8 @@ class Machine:
             readout,
             windows,
             decoders,
-            switching,
+            layout,
+            switching_parts,
             seed,
         )
 
@@ -209,7 +212,8 @@ class Machine:
         readout: readout_part.Readout,
         windows: windows_part.Windows,
         decoders: decoders_part.Decoders,
-        switching: Optional[escalation_build.Switching] = None,
+        layout: layout_module.Layout,
+        switching_parts: tuple = (),
         seed: Optional[int] = 0,
     ) -> "Machine":
         """Connect the parts, start them, seed them, and load the program.
@@ -219,7 +223,7 @@ class Machine:
         src/sim/sim_object.hh lines 194 and 280).
         """
         root_seed = _root_seed(seed)
-        edges = escalation_build.escalate_edges_of(switching)
+        edges = escalation_build.escalate_edges_of(switching_parts)
         qpu.connect(
             readout_receiver=readout.controller,
             runtime=control.execution_runtime,
@@ -251,20 +255,23 @@ class Machine:
             windows=windows.window_manager,
             decode_queue=decoders.decoder_manager,
         )
-        if switching is not None:
-            switching.connect(plan, readout, windows, decoders)
+        for part in switching_parts:
+            part.connect(plan, readout, windows, decoders)
         # the managers hear their rows before the planner compiles a
         # model, and the sender asks the wired window side where it reads
         decoders.start()
         windows.start()
-        # the window side's one stochastic owner is the switching policy
-        parts = (qpu, control, readout, decoders)
-        seed_roots = _seed_roots(plan, links, parts, switching)
+        # the window side's stochastic owners are the edges' policies
+        parts = (qpu, control, readout, decoders, *switching_parts)
+        seed_roots = _seed_roots(plan, links, parts)
         seeding.bind_run_seed(root_seed, seed_roots)
         run_statistics = statistics_registry.Registry(engine)
         decoders.attach_statistics(run_statistics)
-        statistics_parts = (control, readout, switching)
+        statistics_parts = (control, readout, *switching_parts)
         _attach_statistics(run_statistics, statistics_parts)
+        entry_switching = None
+        if switching_parts:
+            entry_switching = switching_parts[0]
         observation = _observe(
             settings,
             engine,
@@ -275,7 +282,7 @@ class Machine:
             readout=readout,
             windows=windows,
             decoders=decoders,
-            switching=switching,
+            switching=entry_switching,
             seed=seed,
         )
         program_build.load_program(plan, control, windows)
@@ -289,8 +296,9 @@ class Machine:
             readout=readout,
             windows=windows,
             decoders=decoders,
-            switching=switching,
+            switching_parts=switching_parts,
             observation=observation,
+            layout=layout,
         )
 
     def start(self) -> None:
@@ -307,8 +315,8 @@ class Machine:
         self.start()
         self.engine.run()
         self.observation.statistics.finish()
-        if self.switching is not None:
-            self.switching.check_settled()
+        for part in self.switching_parts:
+            part.check_settled()
         self.windows.check_settled()
         self.decoders.check_settled()
         self.readout.check_settled()
@@ -322,19 +330,24 @@ def build_links(
     return fabric.LinkFabric(settings.links, engine)
 
 
+def _refuse_a_chain(layout: layout_module.Layout) -> None:
+    """One escalate edge runs today; a chain of them waits for stage 4g."""
+    edge_count = len(layout.edges)
+    if edge_count <= 1:
+        return
+    raise NotImplementedError(
+        f"a machine of {edge_count} escalate edges is not implemented yet "
+        "(stage 4g); a machine of one edge runs today"
+    )
+
+
 def _seed_roots(
-    plan: plan_build.Plan,
-    links: ports.Link,
-    parts: tuple,
-    switching: Optional[escalation_build.Switching],
+    plan: plan_build.Plan, links: ports.Link, parts: tuple
 ) -> tuple:
     """The seed path of every stochastic owner; the names are results.
 
     The seeding sorts the roots by path, so the order here moves nothing.
     """
-    escalation_policy = None
-    if switching is not None:
-        escalation_policy = switching.policy
     owners = [
         ("code", plan.code),
         ("scheme", plan.scheme),
@@ -348,7 +361,6 @@ def _seed_roots(
     for part in parts:
         part_roots = part.seed_roots()
         owners.extend(part_roots)
-    owners.append(("escalation_policy", escalation_policy))
     roots = []
     for name, owner in owners:
         path = (seed_records.RunSeedPathSegment("field", name),)

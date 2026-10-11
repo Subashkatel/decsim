@@ -58,7 +58,7 @@ def test_the_switching_machine_escalates_union_find_to_relay_belief():
 
     threshold = settings.switching.threshold
     assert machine.unbound_ports() == []
-    assert machines.ESCALATION in machine.wires
+    assert set(machines.ESCALATION_WIRES) <= set(machine.wires)
     assert settings.weak_decoder == experiment_one.weak_decoder()
     assert settings.strong_decoder == experiment_one.strong_decoder_pool()
     assert threshold.threshold_decibels == 20.0

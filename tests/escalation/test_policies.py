@@ -17,6 +17,7 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -546,9 +547,14 @@ def _switching_policy(threshold_decibels: float):
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    machine = machine_settings.MachineSettings(
+        weak_decoder=weak, strong_decoder=weak, switching=settings
+    )
+    layout = layout_module.legacy_layout(machine)
     engine = engine_module.Engine()
-    switching = escalation_build.Switching.build(settings, weak, engine)
-    return switching.policy
+    switching_parts = escalation_build.build_switching(layout, engine)
+    entry_switching = switching_parts[0]
+    return entry_switching.policy
 
 
 def test_a_weak_result_with_no_soft_output_escalates_its_window():

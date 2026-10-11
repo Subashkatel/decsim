@@ -57,18 +57,16 @@ distance 3: one record for each part of the machine.
 ## Step 2. Compile what the parts are built for
 
 Some things are built from the settings before any part exists, because
-more than one part is built for them: the switching part, the plan (the
-windows, the circuit and the round clock), the detection event
-formation, the layout (each pool, the store it reads, whether it reads
-it in place, and each escalate edge), and the decoder units.
+more than one part is built for them: the layout (each pool, the store
+it reads, whether it reads it in place, and each escalate edge), a
+switching part per edge, the plan (the windows, the circuit and the
+round clock), the detection event formation, and the decoder units.
 
 ```python
 engine = engine_module.Engine()
-switching = escalation_build.build_switching(
-    settings.switching,
-    settings.weak_decoder,
-    engine,
-    machine_clock=settings.clock,
+layout = layout_module.legacy_layout(settings)
+switching_parts = escalation_build.build_switching(
+    layout, engine, machine_clock=settings.clock
 )
 plan = plan_build.build_plan(
     settings.qpu,
@@ -78,24 +76,21 @@ plan = plan_build.build_plan(
     settings.detection_events,
     settings.switching,
     settings.decoder_manager.bulk_strong,
-    switching,
+    switching_parts,
 )
-window_tier = settings.window_tier
-window_decoder = settings.decoder_settings_for(window_tier.word)
-escalates = settings.switching is not None
+formation_paths = layout.formation_paths()
 detection_events = readout_part.build_detection_events(
     settings.detection_events,
     settings.clock,
     plan.device,
-    window_tier,
-    escalates,
+    formation_paths,
 )
-layout = layout_module.legacy_layout(settings)
-signal_by_pool = escalation_build.signal_by_pool(switching)
+signal_by_pool = escalation_build.signal_by_pool(switching_parts)
 pools = decoders_part.build_pool_units(
     layout, settings.clock, detection_events, signal_by_pool
 )
-policy_type = type(switching.policy)
+entry_switching = switching_parts[0]
+policy_type = type(entry_switching.policy)
 print(policy_type.__name__, plan.round_ticks)
 ```
 
@@ -136,10 +131,7 @@ window_models = built_window_models.BuiltWindowModels()
 windows = windows_part.Windows.build(
     settings.windows,
     settings.workload,
-    settings.switching,
-    window_decoder,
-    settings.strong_decoder,
-    window_tier,
+    layout,
     settings.clock,
     engine,
     plan,
@@ -197,7 +189,8 @@ machine = machine_module.Machine.assemble(
     readout,
     windows,
     decoders,
-    switching,
+    layout,
+    switching_parts,
 )
 window_manager = windows.window_manager
 is_sender_wired = readout.syndrome_round_sender.windows is window_manager

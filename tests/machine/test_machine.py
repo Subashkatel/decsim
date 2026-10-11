@@ -382,11 +382,9 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     distance_three = two_tiers.tasks[0]
     settings = distance_three.machine
     engine = engine_module.Engine()
-    switching = escalation_build.build_switching(
-        settings.switching,
-        settings.weak_decoder,
-        engine,
-        machine_clock=settings.clock,
+    layout = layout_module.legacy_layout(settings)
+    switching_parts = escalation_build.build_switching(
+        layout, engine, machine_clock=settings.clock
     )
     plan = plan_build.build_plan(
         settings.qpu,
@@ -396,20 +394,16 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings.detection_events,
         settings.switching,
         settings.decoder_manager.bulk_strong,
-        switching,
+        switching_parts,
     )
-    window_tier = settings.window_tier
-    window_decoder = settings.decoder_settings_for(window_tier.word)
-    escalates = settings.switching is not None
+    formation_paths = layout.formation_paths()
     detection_events = readout_part.build_detection_events(
         settings.detection_events,
         settings.clock,
         plan.device,
-        window_tier,
-        escalates,
+        formation_paths,
     )
-    layout = layout_module.legacy_layout(settings)
-    signal_by_pool = escalation_build.signal_by_pool(switching)
+    signal_by_pool = escalation_build.signal_by_pool(switching_parts)
     pools = decoders_part.build_pool_units(
         layout, settings.clock, detection_events, signal_by_pool
     )
@@ -436,10 +430,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     windows = windows_part.Windows.build(
         settings.windows,
         settings.workload,
-        settings.switching,
-        window_decoder,
-        settings.strong_decoder,
-        window_tier,
+        layout,
         settings.clock,
         engine,
         plan,
@@ -457,7 +448,8 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     arrivals = readout.memory_arrivals
     unbound = "MemoryRoundArrivals.windows was read before it was bound"
 
-    assert isinstance(switching.policy, escalation_policies.Switching)
+    entry_switching = switching_parts[0]
+    assert isinstance(entry_switching.policy, escalation_policies.Switching)
     assert plan.round_ticks == 1_000_000
     assert readout.controller.assembler is readout.assembler
     with pytest.raises(RuntimeError, match=unbound):
@@ -473,7 +465,8 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         readout,
         windows,
         decoders,
-        switching,
+        layout,
+        switching_parts,
     )
     result = machine.run()
     whole_machine = machine_module.Machine.build(settings, 0)

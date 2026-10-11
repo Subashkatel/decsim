@@ -2101,9 +2101,11 @@ def test_the_strong_decodes_held_in_units_are_the_units_own_residents(
     build = machine_module.Machine.build
 
     def build_and_sample(
-        settings, seed, built_models=None, online_threshold=None
+        settings, seed, built_models=None, online_threshold=None, layout=None
     ):
-        machine = build(settings, seed, built_models, online_threshold)
+        machine = build(
+            settings, seed, built_models, online_threshold, layout=layout
+        )
         sampler = StrongResidentsWaitingOnCompute(machine)
         machine.engine.action_done.connect(sampler.sample)
         samplers.append(sampler)
@@ -2366,9 +2368,11 @@ def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
     build = machine_module.Machine.build
 
     def build_and_listen(
-        settings, seed, built_models=None, online_threshold=None
+        settings, seed, built_models=None, online_threshold=None, layout=None
     ):
-        machine = build(settings, seed, built_models, online_threshold)
+        machine = build(
+            settings, seed, built_models, online_threshold, layout=layout
+        )
         device = machine.qpu.device
         device.trace.round_emitted.connect(heard.round_read_out)
         window_manager = machine.windows.window_manager

@@ -89,8 +89,19 @@ def test_a_wire_from_an_input_is_refused():
 def test_a_wire_between_two_signals_is_refused():
     machine = _weak_graph()
 
-    with pytest.raises(graph.GraphError, match="'windows output'"):
+    with pytest.raises(graph.GraphError, match="'escalations output'"):
         _with_wires(machine, ("weak.escalate", "frame.corrections"))
+
+
+def test_a_pools_escalations_reach_a_switching_part_never_a_pool():
+    """The edge's verdict sits between the pools; a direct wire is refused."""
+    settings = run_files.switching_machine()
+    machine = legacy.graph_of(settings)
+    wires = [wire for wire in machine.wires if "switching." not in wire.target]
+    without_edge = dataclasses.replace(machine, wires=tuple(wires))
+
+    with pytest.raises(graph.GraphError, match="do not pair"):
+        _with_wires(without_edge, ("weak.escalate", "strong.escalated"))
 
 
 def test_a_port_taking_one_wire_refuses_a_second():
@@ -122,7 +133,7 @@ def test_two_parts_of_one_name_are_refused():
         dataclasses.replace(machine, parts=parts)
 
 
-def test_a_part_of_no_kind_is_held_and_its_ports_wait_for_stage_four():
+def test_a_part_of_no_kind_is_held_and_its_ports_wait_for_stage_five():
     machine = _weak_graph()
     clock_part = graph.Part("spare_clock", machine.clock)
     parts = (*machine.parts, clock_part)

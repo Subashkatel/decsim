@@ -27,7 +27,10 @@ INPUT = "input"
 # the signals a wire carries, from the QPU around the loop to its pulses
 MEASUREMENTS = "measurements"
 ROUNDS = "rounds"
-WINDOWS = "windows"
+# a pool's windows its edge's verdict escalates, and the re-decodes the
+# edge asks of its target pool
+ESCALATIONS = "escalations"
+REDECODES = "redecodes"
 CORRECTIONS = "corrections"
 DECISIONS = "decisions"
 COMMANDS = "commands"
@@ -75,8 +78,10 @@ class PartKind:
 
 # The parts on the readout's path, each port in the order a round meets
 # it. The controller sends rounds to every store, and the frame takes
-# corrections from every pool; a pool escalates to and takes escalations
-# from another pool only in a run that switches.
+# corrections from every pool. A pool's results reach a switching part,
+# an escalate edge, whose verdict sends a window it escalates on to the
+# re-decode of the pool it targets; a pool takes at most one edge in and
+# one out, so the pools form a tree from the pool that decodes first.
 _QPU_PORTS = (
     Port("readout", OUTPUT, MEASUREMENTS),
     Port("pulses", INPUT, COMMANDS),
@@ -94,8 +99,14 @@ _SYNDROME_BUFFER_PORTS = (
 _DECODER_POOL_PORTS = (
     Port("rounds", INPUT, ROUNDS),
     Port("corrections", OUTPUT, CORRECTIONS, is_required=False),
-    Port("escalate", OUTPUT, WINDOWS, is_required=False),
-    Port("escalated", INPUT, WINDOWS, is_required=False),
+    Port("escalate", OUTPUT, ESCALATIONS, is_required=False),
+    Port("escalated", INPUT, REDECODES, is_required=False),
+)
+# A switching record set on a run with no second pool escalates
+# nowhere, so its ports are not required.
+_SWITCHING_PORTS = (
+    Port("results", INPUT, ESCALATIONS, is_required=False),
+    Port("redecode", OUTPUT, REDECODES, is_required=False),
 )
 # A frame with no decoder to correct it holds the frame of a run that
 # decodes nothing, and a pool with no frame to correct decodes for its
@@ -122,7 +133,7 @@ KINDS = (
     PartKind("detection_events", ("detection_events",)),
     PartKind("windows", ("windows",)),
     PartKind("decoder_manager", ("decoder_manager",)),
-    PartKind("switching", ("switching",)),
+    PartKind("switching", ("switching",), _SWITCHING_PORTS),
     PartKind("workload", ("workload",)),
     PartKind("magic_state_factory", ("magic_state_factory",)),
 )

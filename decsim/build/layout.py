@@ -90,12 +90,16 @@ class StorePlan:
 class EdgePlan:
     """One escalate edge: its switching settings and its hops.
 
-    name is the path its statistics sit at.
+    name is the path its statistics sit at; carried_from the store an
+    escalated window's missing rounds are carried from; policy_seed the
+    root its verdict's seed hashes.
     """
 
     name: str
     settings: escalation_settings.SwitchingSettings
     hops: route_records.EdgeHops
+    carried_from: str
+    policy_seed: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -150,6 +154,24 @@ class Layout:
             tuple(pool_hops), tuple(edge_hops), entry.pool
         )
 
+    def formation_paths(self) -> tuple:
+        """The seats a round passes from the controller to each pool.
+
+        The entry pool reads the store the controller writes; an edge's
+        target reads its own store, which takes an escalated window's
+        rounds from the store the edge carries them from.
+        """
+        entry = self.entry_pool
+        entry_path = (CONTROLLER_SEAT, entry.store, entry.names.seat)
+        paths = [entry_path]
+        for edge in self.edges:
+            hops = edge.hops
+            target = self.pool(hops.target)
+            seat = target.names.seat
+            path = (CONTROLLER_SEAT, edge.carried_from, target.store, seat)
+            paths.append(path)
+        return tuple(paths)
+
 
 # A legacy machine's names, by slot. The pool that decodes the windows
 # is always the primary one, its manager's pool "default", even when
@@ -167,8 +189,12 @@ STRONG_NAMES = PoolNames(
     unit_seed=STRONG_SEAT,
     manager_seed="strong_decoder_manager",
 )
-# the edge's statistics path, the switching settings' own
+# the edge's statistics path, the switching settings' own, and the
+# root its verdict's seed hashes
 LEGACY_EDGE_NAME = "switching"
+LEGACY_POLICY_SEED = "escalation_policy"
+# where every round's path to a decoder starts
+CONTROLLER_SEAT = "controller"
 # how each legacy store takes its rounds, by the names its log and
 # copies use: the weak store written by the controller, the strong one
 # landed, from the controller or carried up with an escalation
@@ -224,7 +250,9 @@ def legacy_layout(settings: Any) -> Layout:
         )
         stores.append(strong_store)
         hops = routes_build.legacy_edge(switching.strong_answer_route)
-        edge = EdgePlan(LEGACY_EDGE_NAME, switching, hops)
+        edge = EdgePlan(
+            LEGACY_EDGE_NAME, switching, hops, WEAK_STORE, LEGACY_POLICY_SEED
+        )
         edges.append(edge)
     return Layout(tuple(pools), tuple(stores), tuple(edges))
 

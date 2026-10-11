@@ -77,12 +77,18 @@ def test_two_decoders_without_switching_are_refused():
         machine_settings.MachineSettings(weak_decoder=pool, strong_decoder=pool)
 
 
-@pytest.mark.parametrize("empty_slot", ["weak_decoder", "strong_decoder"])
-def test_switching_with_an_empty_decoder_slot_still_stops(empty_slot):
-    """No weak tier stops the build; no strong tier, the first escalation."""
+@pytest.mark.parametrize(
+    "empty_slot, stop",
+    [("weak_decoder", KeyError), ("strong_decoder", AttributeError)],
+)
+def test_switching_with_an_empty_decoder_slot_still_stops(empty_slot, stop):
+    """No weak tier stops the build; no strong tier, the first escalation.
+
+    With no weak tier the edge's source has no pool.
+    """
     settings = shape_tests.gate_switching()
     one_decoder = dataclasses.replace(settings, **{empty_slot: None})
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(stop):
         machine = machine_module.Machine.build(one_decoder, 0)
         machine.run()

@@ -9,11 +9,13 @@ and the escalation ports stay unbound.
 import dataclasses
 
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.settings as machine_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -51,16 +53,28 @@ def _weak() -> decoder_settings.DecoderPoolSettings:
     return decoder_settings.DecoderPoolSettings(algorithm=matching)
 
 
+def _built(
+    settings: escalation_settings.SwitchingSettings,
+    engine: engine_module.Engine,
+) -> escalation_build.Switching:
+    """The switching part of the one edge a weak and a strong pool make."""
+    weak = _weak()
+    machine = machine_settings.MachineSettings(
+        weak_decoder=weak, strong_decoder=weak, switching=settings
+    )
+    layout = layout_module.legacy_layout(machine)
+    switching_parts = escalation_build.build_switching(layout, engine)
+    return switching_parts[0]
+
+
 def test_every_machine_builds_its_own_policy_from_one_settings_record():
     """One settings record builds a machine per shot, each its own policy."""
     settings = _switching()
-    weak = _weak()
-
     first_engine = engine_module.Engine()
     second_engine = engine_module.Engine()
 
-    first = escalation_build.Switching.build(settings, weak, first_engine)
-    second = escalation_build.Switching.build(settings, weak, second_engine)
+    first = _built(settings, first_engine)
+    second = _built(settings, second_engine)
 
     assert first.policy is not second.policy
     assert first.strong_redecode is not second.strong_redecode
@@ -71,7 +85,6 @@ def test_a_switching_record_builds_the_policy_its_run_binds():
     settings = _switching(_OwnPolicySwitching)
     engine = engine_module.Engine()
 
-    weak = _weak()
-    switching = escalation_build.Switching.build(settings, weak, engine)
+    switching = _built(settings, engine)
 
     assert isinstance(switching.policy, _OwnPolicy)

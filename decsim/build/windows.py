@@ -9,14 +9,13 @@ boundary to the next window.
 import dataclasses
 from typing import Optional
 
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
-import decsim.build.routes as routes_build
 import decsim.confidence.gap_join as gap_join_module
 import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
-import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
 import decsim.links.window_transfers as window_transfers_module
 import decsim.ports as ports
@@ -65,10 +64,7 @@ class Windows:
         cls,
         windows_settings: window_settings.WindowSettings,
         workload: workload_settings.WorkloadSettings,
-        switching_settings: Optional[escalation_settings.SwitchingSettings],
-        window_decoder: Optional[decoder_settings.DecoderPoolSettings],
-        strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
-        window_tier: window_records.PoolId,
+        layout: layout_module.Layout,
         machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         plan: plan_build.Plan,
@@ -77,8 +73,9 @@ class Windows:
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
-        built_models is the window error model cache the shot reads and
-        fills.
+        The entry pool decodes the planner's windows and the entry edge's
+        target re-decodes them (layout). built_models is the window
+        error model cache the shot reads and fills.
         """
         run_plan = plan.run_plan
         models = window_planner_module.WindowModels(built_models)
@@ -88,15 +85,18 @@ class Windows:
             plan.planned_operations,
         )
         tracker = round_tracker_module.RoundTracker()
-        is_switching = switching_settings is not None
+        entry = layout.entry_pool
+        window_tier = entry.pool
+        is_switching = bool(layout.edges)
         retention = _retention(plan, window_tier, is_switching)
         window_transfers = window_transfers_module.WindowTransfers(engine)
-        routes = routes_build.legacy_routes(window_tier, switching_settings)
+        routes = layout.routes()
         decoder_output = _decoder_output(
-            switching_settings, routes, machine_clock, engine
+            layout.edges, routes, machine_clock, engine
         )
-        copies_the_window_fold = _copies_the_boundary_fold(window_decoder)
-        copies_the_strong_fold = _copies_the_boundary_fold(strong_decoder)
+        redo_pool = _entry_target(layout)
+        copies_the_window_fold = _copies_the_boundary_fold(entry.settings)
+        copies_the_strong_fold = _copies_the_boundary_fold(redo_pool)
         gate = decode_requests.WindowInputGate(
             copies_the_window_fold, copies_the_strong_fold
         )
@@ -271,22 +271,38 @@ def _gap_join(
     return gap_join_module.WindowGapJoin(engine)
 
 
+def _entry_target(
+    layout: layout_module.Layout,
+) -> Optional[decoder_settings.DecoderPoolSettings]:
+    """The settings of the pool the entry edge escalates to; None for none."""
+    if not layout.edges:
+        return None
+    entry_edge = layout.edges[0]
+    hops = entry_edge.hops
+    target = layout.pool(hops.target)
+    return target.settings
+
+
 def _decoder_output(
-    switching: Optional[escalation_settings.SwitchingSettings],
+    edges: tuple,
     routes: route_records.Routes,
     machine_clock: Optional[config.Clock],
     engine: engine_module.Engine,
 ) -> decoder_output_module.DecoderOutput:
     """The decoder side's sends, each answer on its generated route.
 
-    A route that commits on the weak chip counts its cycles on the
-    switching clock, so a run with no clock for it is refused.
+    A route that commits on the source chip counts its cycles on the
+    entry edge's switching clock, so a run with no clock for it is
+    refused.
     """
-    if switching is None:
+    if not edges:
         return decoder_output_module.DecoderOutput(engine, routes)
+    entry_edge = edges[0]
+    switching = entry_edge.settings
+    hops = entry_edge.hops
     clocked_switching = config.with_machine_clock(switching, machine_clock)
     route_name = switching.strong_answer_route
-    route = routes.answer(window_records.STRONG_POOL_ID)
+    route = routes.answer(hops.target)
     if route.commit_cycles > 0 and clocked_switching.clock is None:
         raise ValueError(
             f"switching.strong_answer_route {route_name!r} commits on the "

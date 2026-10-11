@@ -49,7 +49,7 @@ class LinkFabric:
         ] = {}
         self._readout_by_footprint: dict[tuple, _PathBinding] = {}
         self._send_count = 0
-        for path in transfer_records.LEGACY_PATHS:
+        for path in fabric_settings.path_names():
             path_settings = fabric_settings.path_settings(path)
             channel = self._channel_for(path_settings.channel, engine)
             self._binding_by_path[path] = _PathBinding(path_settings, channel)

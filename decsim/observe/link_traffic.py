@@ -202,7 +202,8 @@ class TrafficLedger:
         for record in snapshot.transfers:
             transfer_json = _transfer_json(record, self._alias_by_channel)
             transfers.append(transfer_json)
-        path_order = [path for path in transfer_records.LEGACY_PATHS]
+        path_names = self._settings.path_names()
+        path_order = list(path_names)
         return {
             "schema_version": 2,
             "path_order": path_order,

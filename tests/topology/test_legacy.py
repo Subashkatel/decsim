@@ -5,7 +5,8 @@ regression machine, written as a graph, resolves to the record it was
 written from, with the same task id; so does every preset machine
 (decsim/presets), written back from its record; a graph written by
 hand resolves to the record its parts hold; a graph today's builder
-cannot build is refused as not built yet, never as not allowed.
+cannot hold is a new shape when it has more pools or edges than they
+hold, and is refused as not built yet otherwise, never as not allowed.
 """
 
 import dataclasses
@@ -38,7 +39,7 @@ HOST_POLL = fabrics.TimedLink(0.0)
 ROCE_V2_CPU = fabrics.FridgeHostFabric(
     cable=ROCE_V2_CPU_LEG, host_local=HOST_POLL
 )
-STAGE_FOUR = "not implemented yet"
+STAGE_FIVE = "not implemented yet"
 PRESETS = (
     "weak_baseline",
     "strong_baseline",
@@ -220,7 +221,8 @@ def _extra_tier(written: graph.Machine, name: str) -> tuple:
     return parts, wires
 
 
-def test_three_pools_wait_for_stage_four():
+def test_three_pools_are_a_new_shape_the_slots_do_not_hold():
+    """graph_layout.py lays such a graph out; the slots refuse it."""
     written = _weak_graph()
     second_parts, second_wires = _extra_tier(written, "second")
     third_parts, third_wires = _extra_tier(written, "third")
@@ -229,11 +231,12 @@ def test_three_pools_wait_for_stage_four():
 
     grown = _with(written, parts, wires)
 
+    assert not legacy.holds(grown)
     with pytest.raises(legacy.ShapeError, match="3 parts of kind decoder"):
         legacy.resolved(grown)
 
 
-def test_two_pools_with_no_escalation_wait_for_stage_four():
+def test_two_pools_with_no_escalation_wait_for_stage_five():
     written = _weak_graph()
     parts, wires = _extra_tier(written, "second")
 
@@ -243,7 +246,7 @@ def test_two_pools_with_no_escalation_wait_for_stage_four():
         legacy.resolved(grown)
 
 
-def test_a_store_feeding_a_store_waits_for_stage_four():
+def test_a_store_feeding_a_store_waits_for_stage_five():
     written = _weak_graph()
     store = written.part("weak_buffer")
     without_read = [
@@ -262,7 +265,7 @@ def test_a_store_feeding_a_store_waits_for_stage_four():
         legacy.resolved(grown)
 
 
-def test_a_controller_feeding_a_pool_waits_for_stage_four():
+def test_a_controller_feeding_a_pool_waits_for_stage_five():
     written = _weak_graph()
     without_read = [
         wire for wire in written.wires if wire.target != "weak.rounds"
@@ -274,17 +277,17 @@ def test_a_controller_feeding_a_pool_waits_for_stage_four():
         legacy.resolved(rewired)
 
 
-def test_a_part_of_no_kind_waits_for_stage_four():
+def test_a_part_of_no_kind_waits_for_stage_five():
     written = _weak_graph()
     spare = graph.Part("spare_clock", written.clock)
 
     grown = _with(written, (spare,), ())
 
-    with pytest.raises(legacy.ShapeError, match=STAGE_FOUR):
+    with pytest.raises(legacy.ShapeError, match=STAGE_FIVE):
         legacy.resolved(grown)
 
 
-def test_two_window_schemes_wait_for_stage_four():
+def test_two_window_schemes_wait_for_stage_five():
     written = _weak_graph()
     windows = written.part("windows")
     second = graph.Part("second_windows", windows.settings)

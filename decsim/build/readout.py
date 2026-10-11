@@ -24,7 +24,6 @@ import decsim.links.settings as link_settings
 import decsim.links.window_transfers as window_transfers
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
-import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
@@ -265,18 +264,17 @@ def build_detection_events(
     detection_event_settings: event_settings.DetectionEventSettings,
     machine_clock: Optional[config.Clock],
     device: ports.SyndromeSource,
-    window_tier: window_records.PoolId,
-    escalates: bool,
+    paths: tuple,
 ) -> ports.DetectionEventPlacement:
     """Where this machine forms its detection events, as one component.
 
-    Every path a round takes to a decoder crosses exactly one seat of
+    paths is each path a round takes to a decoder, as seats
+    (Layout.formation_paths). Every one crosses exactly one seat of
     detection_events.formed_at: with none it would decode raw outcomes,
     with two it would form events of events. A source that does not
     answer DetectionEventFormer forms nothing.
     """
     formed_at = detection_event_settings.formed_at
-    paths = _paths_of_the_run(window_tier, escalates)
     for path in paths:
         _check_one_seat_on(path, formed_at)
     source = None
@@ -406,17 +404,6 @@ def _check_readout_cost_is_priced(
                 "a separate controller readout cost requires a "
                 "qpu_to_controller card whose latency excludes that cost"
             )
-
-
-def _paths_of_the_run(
-    window_tier: window_records.PoolId, escalates: bool
-) -> tuple:
-    """The paths this run's rounds take to a decoder, the primary first."""
-    if window_tier == window_records.STRONG_POOL_ID:
-        return (event_settings.STRONG_PATH,)
-    if escalates:
-        return (event_settings.WEAK_PATH, event_settings.ESCALATION_PATH)
-    return (event_settings.WEAK_PATH,)
 
 
 def _check_one_seat_on(path: tuple, formed_at: tuple) -> None:

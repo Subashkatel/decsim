@@ -113,7 +113,7 @@ def test_a_strong_tier_adds_the_strong_side_and_the_escalation_wire():
     settings = legacy.resolved(machine)
 
     assert machine.unbound_ports() == []
-    assert machines.ESCALATION in machine.wires
+    assert set(machines.ESCALATION_WIRES) <= set(machine.wires)
     assert strong_pool.placed == fabrics.HOST
     assert strong_store.placed == fabrics.HOST
     assert settings.weak_decoder == machines.WEAK_BASELINE_POOL

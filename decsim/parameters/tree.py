@@ -15,15 +15,15 @@ apply in order, a later one winning where two set one value, as ns-3's
 command line wins over its defaults (manual, Attributes). Each record
 an assignment reaches is built again, so decsim's own checks run, and a
 refusal names the path. Any value a run file wrote can be set again,
-but for the paths the root names in SET_IN_THE_RUN_FILE: the run file
-built other values from them (the workload's circuit from the
-distance), so a pattern naming one is refused, and `*` and `**` pass
-them by.
+but for the paths the root's set_in_the_run_file() names: a workload
+made in the run file at a distance fixes the distance and its lowered
+fields (decsim/settings.py), so a pattern naming one is refused, and
+`*` and `**` pass them by. A workload maker row fixes nothing: it is
+made again at the task (decsim/producers.py).
 
 A root class may hold parts by name: each field NAMED_PARTS lists holds
-parts, each with a name, settings (a record), settings_hint(), the type
-a record swapped in must meet, and run_file_fields(), its record's
-fields set in the run file only (decsim/topology/graph.py). A part's
+parts, each with a name, settings (a record) and settings_hint(), the
+type a record swapped in must meet (decsim/topology/graph.py). A part's
 record sits at the part's name, uf.unit_count rather than
 parts[3].settings.unit_count, so name.type swaps the record, and the
 part's other fields sit beside the record's (uf.placed), as an OMNeT++
@@ -44,8 +44,8 @@ import decsim.parameters.units as units
 TYPE = "type"
 ANY_DEPTH = "**"
 WILDCARD = "*"
-# the root's class attribute naming the paths set in the run file only
-RUN_FILE_PATHS = "SET_IN_THE_RUN_FILE"
+# the root's method naming the paths set in the run file only
+RUN_FILE_PATHS = "set_in_the_run_file"
 # the root's class attribute naming the fields that hold parts by name
 NAMED_PARTS = "NAMED_PARTS"
 # a named part's own fields that are not parameters beside its record's
@@ -133,16 +133,11 @@ def is_set_in_the_run_file(root: Any, path: str) -> bool:
 
 
 def every_run_file_path(root: Any) -> tuple:
-    """The paths the root sets in the run file only, its named parts' too."""
-    root_paths = getattr(root, RUN_FILE_PATHS, ())
-    paths = list(root_paths)
-    root_class = type(root)
-    named = getattr(root_class, NAMED_PARTS, ())
-    for field in named:
-        parts = getattr(root, field)
-        part_paths = _run_file_paths_of_parts(parts)
-        paths.extend(part_paths)
-    return tuple(paths)
+    """The paths the root sets in the run file only; none for a record."""
+    named = getattr(root, RUN_FILE_PATHS, None)
+    if named is None:
+        return ()
+    return named()
 
 
 def path_text(segments: Sequence[str]) -> str:
@@ -240,11 +235,11 @@ class _Walk:
                 continue
             path = path_text(segments)
             raise fields.ParameterError(
-                f"{path} is set in the run file, which built the "
-                "workload's circuit with it; an assignment would leave the "
-                "circuit behind. Change it there (e.g. the run file's "
-                "distances); stage 6 builds the circuit from the "
-                "parameters, and then it is set by path"
+                f"{path} is set in the run file: the workload was made "
+                "there, or read from files, at this value, and an "
+                "assignment would leave its circuit behind. Change it in "
+                "the run file, or give the workload a maker row made at "
+                "the task (workload.type=memory, decsim/producers.py)"
             )
 
     def _clock(
@@ -449,15 +444,6 @@ class _Walk:
         assignment = self.last_for(segments)
         _refuse_a_missing_value(assignment, path)
         return parameter.value_of(assignment.written, machine_clock, path)
-
-
-def _run_file_paths_of_parts(parts: tuple) -> list:
-    """Each part's run-file fields, at the part's name."""
-    paths = []
-    for part in parts:
-        run_file_fields = part.run_file_fields()
-        paths.extend(f"{part.name}.{field}" for field in run_file_fields)
-    return paths
 
 
 def _kept_unless_changed(new_parts: list, parts: tuple) -> tuple:

@@ -68,9 +68,18 @@ A changed value is a new machine, so its task has a new id. The run
 file still names the task, so a name such as `cluster_gap_d3` keeps
 saying what the run file built.
 
-The distance and the workload are set in the run file:
-`MachineSettings` lists them (`decsim/settings.py`), since the run file
-built the workload's circuit from them and an assignment would leave
-the circuit behind. `decsim params` marks them `(run file only)`, and a
-wildcard passes them by. Change them through the run file's own axes,
-such as its distances.
+The distance follows the workload. A workload made at the task, the
+`memory` row every preset base holds, is made again at the distance
+you set, and its own fields are paths:
+
+```bash
+decsim run run.py --set qpu.distance=7 --set workload.physical_error_probability=0.004
+```
+
+A workload lowered in the run file, or a live memory read from
+fragments, was made at one distance, so then `qpu.distance` and the
+lowered fields are refused by name (`MachineSettings.set_in_the_run_file`,
+`decsim/settings.py`): an assignment would leave the circuit behind.
+`decsim params` marks them `(run file only)`, and a wildcard passes
+them by. [A maker row](plug_in_a_workload_maker.md) makes such a
+workload settable.

@@ -143,13 +143,16 @@ def test_a_part_of_no_kind_is_held_and_its_ports_wait_for_stage_five():
         _with_wires(held, ("spare_clock.ticks", "weak.rounds"))
 
 
-def test_a_qpus_distance_is_set_in_the_run_file_and_a_pools_nothing():
+def test_a_lowered_workload_fixes_a_qpus_distance_and_a_pools_nothing():
     machine = _weak_graph()
+    workload = machine.part("workload")
     qpu = machine.part("qpu")
     pool = machine.part("weak")
 
-    assert qpu.run_file_fields() == ("distance",)
-    assert pool.run_file_fields() == ()
+    assert qpu.run_file_fields(workload.settings) == ("distance",)
+    assert pool.run_file_fields(workload.settings) == ()
+    paths = machine.set_in_the_run_file()
+    assert paths[0] == "qpu.distance"
 
 
 def test_a_part_of_a_known_name_takes_its_namesakes_place():

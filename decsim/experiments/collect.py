@@ -45,6 +45,7 @@ import decsim.settings as machine_settings
 import decsim.topology.graph as topology_graph
 import decsim.topology.graph_layout as graph_layout
 import decsim.topology.legacy as legacy
+import decsim.topology.part_kinds as part_kinds
 import decsim.windows.built_window_models as built_window_models
 
 # The key a record's class is written under beside its fields. No field
@@ -110,9 +111,10 @@ class Task:
     dataclasses.replace keeps it, and its layout is laid out again. A
     graph today's slots hold runs as, and is identified by, the
     MachineSettings it resolves to (topology/legacy.py). A graph
-    of a new shape is identified by itself, under GRAPH_ID_KEY; it runs
-    on its layout (topology/graph_layout.py), and machine is its entry
-    edge's record, which the reports read.
+    of a new shape is identified by itself, under GRAPH_ID_KEY, with its
+    workload as machine holds it, lowered; it runs on its layout
+    (topology/graph_layout.py), and machine is its entry edge's record,
+    which the reports read.
     """
 
     name: str
@@ -159,7 +161,9 @@ class Task:
         if self.layout is None:
             value["settings"] = json_value(self.machine, keep_labels=False)
         else:
-            value[GRAPH_ID_KEY] = json_value(self.graph, keep_labels=False)
+            workload = self.machine.workload
+            graph = _with_workload(self.graph, workload)
+            value[GRAPH_ID_KEY] = json_value(graph, keep_labels=False)
         text = json.dumps(value, sort_keys=True)
         encoded = text.encode("utf8")
         digest = hashlib.sha256(encoded)
@@ -317,6 +321,23 @@ def _settings_of(
     if legacy.holds(machine):
         return legacy.resolved(machine)
     return graph_layout.entry_settings(machine)
+
+
+def _with_workload(
+    graph: topology_graph.Machine, workload: object
+) -> topology_graph.Machine:
+    """The graph with its workload part's record replaced: a lowered maker.
+
+    A graph with no workload part runs the default, and is kept.
+    """
+    held = part_kinds.workload_of(graph.parts)
+    parts = []
+    for part in graph.parts:
+        kept = part
+        if part.settings is held:
+            kept = dataclasses.replace(part, settings=workload)
+        parts.append(kept)
+    return dataclasses.replace(graph, parts=tuple(parts))
 
 
 def _task_calibrator(

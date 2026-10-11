@@ -12,7 +12,7 @@ gross code by default.
 """
 
 import dataclasses
-from typing import Optional
+from typing import ClassVar, Optional
 
 
 @dataclasses.dataclass(frozen=True)
@@ -21,7 +21,16 @@ class SurfaceCodeModel:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The surface card has no keys beyond the qpu's distance."""
+        """The surface card has no keys beyond the qpu's distance.
+
+        stim_memory_tasks are the Stim generator's tasks whose circuit is
+        this card's code (src/stim/gen/gen_surface_code.cc).
+        """
+
+        stim_memory_tasks: ClassVar[tuple] = (
+            "surface_code:rotated_memory_z",
+            "surface_code:rotated_memory_x",
+        )
 
         def build(
             self,
@@ -115,8 +124,11 @@ class BivariateBicycleCodeModel:
 
         qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The
         defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines
-        180-184); its distance is twelve when the run names none.
+        180-184); its distance is twelve when the run names none. Stim
+        generates no circuit of it, so stim_memory_tasks is empty.
         """
+
+        stim_memory_tasks: ClassVar[tuple] = ()
 
         qubit_count: int = 144
         logical_qubit_count: int = 12

@@ -88,7 +88,8 @@ def chain_machine(
 
 def laid_out(machine: graph.Machine):
     """The machine's layout, from its entry edge's facts."""
-    settings = graph_layout.entry_settings(machine)
+    entry = graph_layout.entry_settings(machine)
+    settings = entry.at_task()
     facts = settings.task_facts()
     return graph_layout.layout_of(machine, facts)
 

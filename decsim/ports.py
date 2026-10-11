@@ -2307,6 +2307,23 @@ class LayoutModel(Protocol):
         """The resources the operation holds while it runs."""
 
 
+class WorkloadMakerSettings(Protocol):
+    """A workload maker's row: its parameters, made into a workload at a task.
+
+    The workload slot takes a workload lowered in Python or a maker row
+    (decsim/producers.py), lowered when the task is made against
+    the qpu the task has. fixes_the_distance says the workload was made
+    at a distance of its own (from files, say), so the qpu's distance is
+    not set by path.
+    """
+
+    name: str
+    fixes_the_distance: bool
+
+    def lowered_for(self, qpu: object) -> object:
+        """The workload made for this qpu, lowered for the machine."""
+
+
 # ------------------------------ what a listener reads off what it hears
 
 

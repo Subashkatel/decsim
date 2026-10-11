@@ -57,6 +57,39 @@ decoded after some rounds, then read out). `memory_workload` in
 `decsim/presets/machines.py` is `memory_circuit` on the rotated surface
 code, running.
 
+## Or give the workload a maker row, set by path
+
+A workload lowered in the run file was made at the distance the run
+file gave its maker, so the distance is not set by path
+([set parameters](set_parameters.md)). A maker row holds the maker's
+parameters instead and is made when each task is made, at the task's
+qpu (`decsim/producers.py`):
+
+| Row | Makes | Its parameters |
+|---|---|---|
+| `memory` | Stim's memory at the qpu's distance (`memory_circuit`, `memory_patches`), or patches with no circuit (`memory_without_circuit`) | `physical_error_probability`; `rounds` or `rounds_per_distance`; `code_task`, a Stim task of the qpu's card or `none`; `patches`; `noise`, Stim's four channels apart (`StimNoise`); `decoded` |
+| `live_memory` | a live memory over a fragments folder (`live_memory`) | `fragments`, `decode_after_rounds`, `patch`, `feedback_boundary_mode`; the fragments fix the distance |
+
+Every preset base holds a `memory` row, so on them:
+
+```bash
+decsim run run.py --set qpu.distance=7 --set workload.rounds_per_distance=none --set workload.rounds=200
+```
+
+In Python, a row is a part like any other:
+
+```python
+memory = producers.MemorySettings(0.001, rounds=100, patches=2)
+machine = base.with_part(graph.Part("workload", memory))
+```
+
+A task's id is that of the workload the row lowers to, so a row and
+the same workload lowered in Python are one task. A row of your own is
+a record with `name`, `fixes_the_distance` and `lowered_for(qpu)`,
+which returns `WorkloadSettings.running` of your maker's workload
+(`ports.WorkloadMakerSettings`); it is written by its import path,
+`workload.type=mylab.makers.SurgerySettings`.
+
 ## Or read the two outputs from files
 
 A maker that runs elsewhere writes its two outputs to disk, and

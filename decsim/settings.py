@@ -9,7 +9,7 @@ part's record is defined by the package that owns it.
 """
 
 import dataclasses
-from typing import ClassVar, Optional, Union
+from typing import Optional, Union
 
 import decsim.config as config
 import decsim.controller.policies as idle_policies
@@ -46,23 +46,14 @@ class MachineSettings:
     by default, sends each window to one of several entry pools; only a
     graph of its own shape holds more than one (windows/routers.py).
 
-    SET_IN_THE_RUN_FILE names the paths the run file built the
-    workload's circuit from or lowered it to: an assignment by path
-    (decsim/parameters/tree.py) would leave the circuit behind, a
-    distance-5 machine running a distance-3 circuit, so they are set in
-    the run file.
+    workload is a workload lowered in Python or a maker row
+    (decsim/producers.py), which at_task lowers against the qpu, so the
+    task's id and every shot see the lowered workload. A workload made
+    at a distance of its own fixes the qpu's: set_in_the_run_file names
+    the paths an assignment by path (decsim/parameters/tree.py) may not
+    change, since it would leave the circuit behind, a distance-5
+    machine running a distance-3 circuit.
     """
-
-    SET_IN_THE_RUN_FILE: ClassVar[tuple] = (
-        "qpu.distance",
-        "workload.operations",
-        "workload.decode_operations",
-        "workload.dynamic_streams",
-        "workload.protected_regions",
-        "workload.physical_circuits",
-        "workload.rounds_policy",
-        "workload.workload_record",
-    )
 
     clock: Optional[config.Clock] = None
     qpu: qpu_settings.QpuSettings = qpu_settings.QpuSettings()
@@ -92,9 +83,9 @@ class MachineSettings:
     )
     switching: Optional[escalation_settings.SwitchingSettings] = None
     pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
-    workload: workload_settings.WorkloadSettings = (
-        workload_settings.WorkloadSettings()
-    )
+    workload: Union[
+        workload_settings.WorkloadSettings, ports.WorkloadMakerSettings
+    ] = workload_settings.WorkloadSettings()
     magic_state_factory: qpu_settings.FactorySettings = (
         magic_state_factories.InfiniteFactory.Settings()
     )
@@ -151,20 +142,48 @@ class MachineSettings:
         }
 
     def at_task(self) -> "MachineSettings":
-        """The settings with the threshold their task's facts give.
+        """The settings with their workload lowered and their threshold read.
 
-        A calibration table's row is read here, once per task; reading
+        A maker row is lowered against the qpu, then a calibration
+        table's row is read at the task's facts, once per task; reading
         settings already read returns them unchanged.
         """
-        switching = self.switching
+        settings = self._with_workload_lowered()
+        switching = settings.switching
         if switching is None:
-            return self
-        facts = self.task_facts()
+            return settings
+        facts = settings.task_facts()
         threshold = switching.threshold.at_task(facts)
         if threshold is switching.threshold:
-            return self
+            return settings
         resolved = dataclasses.replace(switching, threshold=threshold)
-        return dataclasses.replace(self, switching=resolved)
+        return dataclasses.replace(settings, switching=resolved)
+
+    def set_in_the_run_file(self) -> tuple:
+        """The paths the workload fixes, which an assignment may not set."""
+        return set_in_the_run_file_with(self.workload)
+
+    def _with_workload_lowered(self) -> "MachineSettings":
+        workload = self.workload.lowered_for(self.qpu)
+        if workload is self.workload:
+            return self
+        return dataclasses.replace(self, workload=workload)
+
+
+def set_in_the_run_file_with(workload: object) -> tuple:
+    """The machine paths a workload fixes: the distance, its lowered fields.
+
+    A workload made at a distance of its own fixes qpu.distance; a
+    lowered one fixes its lowered fields too. A maker row that follows
+    the qpu fixes nothing.
+    """
+    paths = []
+    if workload.fixes_the_distance:
+        paths.append("qpu.distance")
+    lowered_fields = getattr(workload, "fields_set_in_the_run_file", ())
+    for field in lowered_fields:
+        paths.append(f"workload.{field}")
+    return tuple(paths)
 
 
 def _check_decode_slots(settings: MachineSettings) -> None:

@@ -116,7 +116,7 @@ def test_an_edge_past_the_entry_refuses_an_absorbing_window():
     layout = layout_tests.laid_out(chain)
     engine = engine_module.Engine()
 
-    with pytest.raises(NotImplementedError, match=r"stage 5"):
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
         escalation_build.build_switching(layout, engine)
 
 

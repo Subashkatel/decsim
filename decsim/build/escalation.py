@@ -23,6 +23,7 @@ import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
+import decsim.refusals as refusals
 import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
@@ -228,7 +229,7 @@ def build_switching(
     The task's calibrator, online_threshold, decides on the entry edge,
     the one whose threshold the task learns. An edge past the entry
     takes no region that absorbs its source windows yet, nor does one
-    beside a router (stage 5).
+    beside a router: neither is implemented yet.
     """
     parts = []
     threshold = online_threshold
@@ -395,13 +396,14 @@ def _refuse_absorbing_beside_a_router(
         return
     raise NotImplementedError(
         f"escalate edge {edge.name!r}: strong_window {shape.name} beside a "
-        "router is not implemented yet (stage 5): it absorbs neighbouring "
-        "windows the router may have sent to another entry pool"
+        "router is not implemented yet: it absorbs neighbouring windows "
+        f"the router may have sent to another entry pool; {refusals.REFUSALS}"
     )
 
 
 def _refuse(edge: layout_module.EdgePlan, what: str, reason: str) -> None:
     raise NotImplementedError(
         f"escalate edge {edge.name!r}: {what} on an edge that does not "
-        f"leave the entry pool is not implemented yet (stage 5): {reason}"
+        f"leave the entry pool is not implemented yet: {reason}; "
+        f"{refusals.REFUSALS}"
     )

@@ -248,7 +248,7 @@ def test_a_router_makes_each_pool_it_feeds_an_entry_pool():
 
 
 def test_an_edge_from_an_entry_pool_past_the_first_is_refused():
-    """Only the first entry pool escalates yet (stage 5)."""
+    """Only the first entry pool escalates yet."""
     routed = _routed_chain()
     switching = graph.Part("routed_switching", DEEP_SWITCHING_SLOT)
     without_deep_edge = routed.without_part(DEEP_SWITCHING)

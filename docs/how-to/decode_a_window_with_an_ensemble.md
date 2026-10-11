@@ -41,7 +41,7 @@ reaches the pooling row but not inside the list.
 A member's likelihood is its whole selected error set's, priced on the
 window model as the sum of log((1 - p) / p) over its faults. Pricing
 needs every member in one fault representation; members of two are
-refused, not implemented yet (stage 5), unless they vote. With no member
+refused, not implemented yet ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)), unless they vote. With no member
 converged, `first_converged` answers best-effort, with the most likely
 member and its status.
 

@@ -37,6 +37,7 @@ import dataclasses
 from typing import Any, Protocol
 
 import decsim.records.decoding as decoding_records
+import decsim.refusals as refusals
 
 _CRITICAL_TIER = 0
 _MULTI_PATCH_TIER = 1
@@ -311,8 +312,8 @@ def _refuse_a_stream(operation: Any) -> None:
     raise NotImplementedError(
         f"operation {operation.name!r} is a segment of stream "
         f"{operation.stream_id!r}: a VQD scheduler over a stream's windows "
-        "is not implemented yet (stage 5); its critical point is a "
-        "segment's end, which the scheduler does not read"
+        "is not implemented yet; its critical point is a segment's end, "
+        f"which the scheduler does not read; {refusals.REFUSALS}"
     )
 
 

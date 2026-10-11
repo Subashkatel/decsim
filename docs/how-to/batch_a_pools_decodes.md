@@ -72,7 +72,7 @@ batches on one GPU.
 
 - `decoder_manager.bulk_strong` is the timing-only batch, kept as it
   was: members get empty results. It is refused beside a batching row.
-- Refused, not implemented yet (stage 5): a batching row with
+- Refused, not implemented yet ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)): a batching row with
   `run_both_at_once`; with an absorbing strong window
   (`double_window`); over a strong backend row (`measured_table`,
   `dispatch_steps`), whose device prices one region per submit and

@@ -140,7 +140,7 @@ statistics.
 An edge that does not leave the entry pool redoes the region its
 source pool decoded, on the same faces and the same error model. A
 strong window that absorbs weak windows (`DoubleWindow`) on such an
-edge is refused with "not implemented yet (stage 5)": Toshio et al.
+edge is refused, not implemented yet ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)): Toshio et al.
 define it over a sliding weak chain's neighbouring windows, which a pool
 past the entry does not decode. The timelines a
 chain follows are worked by hand in `tests/machine/test_chains.py`.

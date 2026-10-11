@@ -54,7 +54,7 @@ ESCALATION_WIRES = (
     graph.Wire("weak.escalate", "switching.results"),
     graph.Wire("switching.redecode", "strong.escalated"),
 )
-_NOT_BUILT = "not implemented yet (stage 5)"
+_NOT_BUILT = "not implemented yet as a legacy machine"
 _ESCALATE = "escalate"
 _READS = "reads"
 _REDECODE = "redecode"

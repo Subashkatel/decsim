@@ -56,4 +56,4 @@ only the timing (`tests/windows/test_routers.py`).
 
 An escalate edge may leave only the first entry pool, and an absorbing
 strong window (`double_window`) is refused beside a router; both say
-"not implemented yet (stage 5)".
+"not implemented yet" ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)).

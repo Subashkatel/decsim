@@ -77,7 +77,7 @@ def test_a_stale_result_is_refused_once_a_newer_request_owns_the_window():
     old_key = _request_key(7)
     old_job = _strong_job(old_key)
     requests.admit_strong(old_job, now=0)
-    requests.take_live((1, 0))
+    requests.take_live((1, 0), window_records.STRONG_POOL_ID)
     new_key = _request_key(9)
     new_job = _strong_job(new_key)
     requests.admit_strong(new_job, now=1)
@@ -130,10 +130,10 @@ def test_a_windows_attempt_holds_its_forced_class_requests():
     )
     requests.admit(first, now=0)
     requests.admit(second, now=0)
-    record = requests.by_window[(1, 0)]
+    (record,) = requests.by_window.values()
     assert record.open_weak_requests == {first_key, second_key}
-    requests.resolve_weak((1, 0))
-    assert (1, 0) not in requests.by_window
+    requests.resolve_weak((1, 0), window_records.WEAK_POOL_ID)
+    assert not requests.by_window
 
 
 def test_a_merged_batch_splits_into_one_empty_completion_per_member():
@@ -198,7 +198,7 @@ def test_a_batch_left_with_one_member_still_splits_into_an_empty_result():
         operation_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
-    requests.take_live((1, 0))
+    requests.take_live((1, 0), window_records.STRONG_POOL_ID)
     result = decoding_records.DecodeResult(-1, 0)
     (delivery,) = requests.deliveries_for(batch, result, now=40)
     assert delivery.request_job is second

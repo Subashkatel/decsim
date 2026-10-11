@@ -64,7 +64,10 @@ buffers a decoder reads, and whether it reads them in place.
 ```python
 engine = engine_module.Engine()
 switching = escalation_build.build_switching(
-    settings.switching, settings.weak_decoder, engine
+    settings.switching,
+    settings.weak_decoder,
+    engine,
+    machine_clock=settings.clock,
 )
 plan = plan_build.build_plan(
     settings.qpu,

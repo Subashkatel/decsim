@@ -478,7 +478,7 @@ class DoubleWindow(StrongWindowPorts):
         restart = self.planner.window_at(restart_key)
         # its absorbed dependency is gone; no speculative strong decode in the
         # double window
-        self.requester.request_if_ready(restart, None)
+        self.requester.request_if_ready(restart)
         self.retention.release_restart_reads(restart_key)
 
     def _reslice_restart_window(

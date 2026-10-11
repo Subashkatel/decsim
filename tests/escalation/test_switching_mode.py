@@ -414,7 +414,7 @@ def test_the_speculative_decode_waits_for_the_context_it_reads():
     assert held < submitted
     assert submitted == last_context_round
     assert started > submitted
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
@@ -524,7 +524,7 @@ def test_a_held_speculative_decode_is_cancelled_by_a_confident_result():
         machine, "cancelled while held for its input"
     )
     assert len(cancelled) == 3
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
@@ -600,7 +600,7 @@ def test_a_pinned_speculative_decode_is_planned_at_its_weak_jobs_release():
 
     assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
     assert counts.needed == 3
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():

@@ -1,6 +1,9 @@
-"""The strong re-decode: the window side of the strong tier.
+"""The strong re-decode: the window side of one escalate edge.
 
-When the policy escalates a weak result, StrongRedecode asks the shape
+One StrongRedecode serves each edge, from its source pool to its target
+pool, with its own policy, verdict costs, shape and held windows; a
+legacy machine has one, from the weak pool to the strong one. When the
+policy escalates a source result, StrongRedecode asks the shape
 for the strong window's job, sends the window's selection over
 weak_decoder_to_strong_decoder, tells the decoder side to await the
 result, and submits the job now or when the conditions the shape
@@ -26,15 +29,26 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
+import decsim.records.routes as route_records
 import decsim.records.windows as window_records
 import decsim.statistics.kinds as statistic_kinds
 import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
+import decsim.windows.window_commits as window_commits
 
 
 class StrongRedecode:
-    """Drives each escalated window's strong re-decode."""
+    """Drives each window this edge escalates through its target's decode.
 
+    hops names the edge: its source, the pool whose results meet its
+    verdict; its target, the pool that re-decodes the windows it
+    escalates; and the forward hop its selections and regions ride.
+    costs is the verdict's own clock and cycles
+    (windows/window_commits.py).
+    """
+
+    # the rule that keeps or escalates a source result
+    policy = ports.Port(ports.EscalationPolicy)
     shape = ports.Port(strong_window_shapes.StrongWindowShape)
     # the ledger of held strong windows and what releases each
     pending = ports.Port(pending_strong_windows.PendingStrongWindows)
@@ -44,9 +58,12 @@ class StrongRedecode:
     # and the escalated region leave by the decoder output, and the strong
     # syndrome buffer sends the strong input
     decoder_output = ports.Port(ports.DecoderOutput)
+    # the store a held window's missing rounds are read out of
+    carried_from = ports.Port(ports.SyndromeBuffer)
     # the strong syndrome buffer's receiving end, where the region lands
     strong_receiver = ports.Port(ports.SyndromeRoundReceiver)
     strong_output = ports.Port(ports.SyndromeBufferOutput)
+    # the target pool's manager
     decode_queue = ports.Port(ports.DecodeQueue)
     # the strong job's return path
     verdict = ports.Port(ports.WindowVerdict)
@@ -79,8 +96,15 @@ class StrongRedecode:
     )
     statistics = statistics_registry.unrecorded(STATISTICS)
 
-    def __init__(self, engine: engine_module.Engine) -> None:
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        hops: route_records.EdgeHops,
+        costs: window_commits.VerdictCosts,
+    ) -> None:
         self.engine = engine
+        self.hops = hops
+        self.costs = costs
         self.selections = _StrongSelections()
         # the rounds sent up and not landed yet, so a wake-up while a
         # region crosses does not carry them twice
@@ -88,6 +112,16 @@ class StrongRedecode:
         # trace sources: the wait a held strong window sits in, from the
         # hold to the condition that ends it
         self.trace = _TraceSources()
+
+    @property
+    def source(self) -> window_records.PoolId:
+        """The pool whose results meet this edge's verdict."""
+        return self.hops.source
+
+    @property
+    def target(self) -> window_records.PoolId:
+        """The pool that re-decodes the windows this edge escalates."""
+        return self.hops.target
 
     # ---- the two entries
 
@@ -284,7 +318,9 @@ class StrongRedecode:
         self.strong_receiver.reserve_region(region)
         self.carried_round_keys.update(missing)
         landed = functools.partial(self._region_landed, region)
-        self.decoder_output.send_region(region, landed)
+        self.decoder_output.send_region(
+            self.hops.forward, self.carried_from, region, landed
+        )
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"strong request {assignment.request_key}: rounds "
@@ -316,7 +352,7 @@ class StrongRedecode:
             strong_job, selection_arrival_ticks
         )
         self.decode_queue.enqueue(
-            strong_job, send_input, self.verdict.accept_strong_result
+            strong_job, send_input, self.verdict.accept_revision
         )
 
     def _strong_input_send(
@@ -371,7 +407,7 @@ class StrongRedecode:
             on_selection_delivered,
         )
         expected_delay_ticks = self.decoder_output.send_selection(
-            weak_job, strong_request_key, delivered
+            self.hops.forward, weak_job, strong_request_key, delivered
         )
         return self.engine.now + expected_delay_ticks
 

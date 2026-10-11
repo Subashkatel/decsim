@@ -15,6 +15,7 @@ import dataclasses
 
 import pytest
 
+import decsim.build.routes as routes_build
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_module
 import decsim.escalation.strong_redecode as strong_redecode_module
@@ -23,6 +24,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.statistics.registry as statistics_registry
+import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
 
 WINDOW_KEY = (1, 2)
@@ -120,11 +122,13 @@ class _DecoderOutput:
         self.selections = []
         self.regions = []
 
-    def send_selection(self, weak_job, strong_request_key, on_delivered):
+    def send_selection(self, path, weak_job, strong_request_key, on_delivered):
+        del path
         self.selections.append((weak_job, strong_request_key, on_delivered))
         return 30
 
-    def send_region(self, region, on_delivered):
+    def send_region(self, path, store, region, on_delivered):
+        del path, store
         self.regions.append((region, on_delivered))
         return 30
 
@@ -213,10 +217,15 @@ def _redecode(shape, receiver_row=_StrongReceiver):
     strong_output = _StrongOutput()
     queue = _DecodeQueue()
     verdict = _Verdict()
-    redecode = strong_redecode_module.StrongRedecode(engine)
+    hops = routes_build.legacy_edge("direct")
+    costs = window_commits.VerdictCosts()
+    redecode = strong_redecode_module.StrongRedecode(engine, hops, costs)
     redecode.shape = shape
     redecode.pending = pending_module.PendingStrongWindows()
     redecode.retention = _Retention()
+    # the store the carried rounds are read out of; the stand-in
+    # decoder output reads nothing from it
+    redecode.carried_from = object()
     redecode.decoder_output = decoder_output
     redecode.strong_receiver = receiver_row()
     redecode.strong_output = strong_output
@@ -231,7 +240,7 @@ class _Verdict:
     def __init__(self) -> None:
         self.results = []
 
-    def accept_strong_result(self, job, result) -> None:
+    def accept_revision(self, job, result) -> None:
         """One strong decode finished."""
         self.results.append((job, result))
 
@@ -254,7 +263,7 @@ def test_a_job_built_now_is_queued_behind_its_selection():
     assert _call_names(queue) == ["enqueue", "await"]
     _kind, queued, _send_input, return_path = queue.calls[0]
     assert queued is strong_job
-    assert return_path == verdict.accept_strong_result
+    assert return_path == verdict.accept_revision
     assert queue.calls[1] == ("await", WINDOW_KEY, strong_job.request_key)
 
 

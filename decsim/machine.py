@@ -112,7 +112,11 @@ class Machine:
             built_models = built_window_models.BuiltWindowModels()
         engine = engine_module.Engine()
         switching = escalation_build.build_switching(
-            settings.switching, settings.weak_decoder, engine, online_threshold
+            settings.switching,
+            settings.weak_decoder,
+            engine,
+            online_threshold,
+            settings.clock,
         )
         plan = plan_build.build_plan(
             settings.qpu,
@@ -221,6 +225,7 @@ class Machine:
         src/sim/sim_object.hh lines 194 and 280).
         """
         root_seed = _root_seed(seed)
+        edges = escalation_build.escalate_edges_of(switching)
         qpu.connect(
             readout_receiver=readout.controller,
             runtime=control.execution_runtime,
@@ -239,7 +244,7 @@ class Machine:
             primary_decoder=decoders.primary_decoder,
             strong_decoder=decoders.strong_decoder,
             decode_queue=decoders.decoder_manager,
-            strong_decode_queue=decoders.strong_decoder_manager,
+            edges=edges,
             input_fold=input_fold,
             frame=control.pauli_frame,
             conditional_release=control.conditional_release,

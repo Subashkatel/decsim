@@ -766,11 +766,7 @@ class WindowJobBuilder(Protocol):
 class WindowRequests(Protocol):
     """The submission side, as a strong window shape steers it."""
 
-    def request_if_ready(
-        self,
-        window: window_records.Window,
-        strong_redecode: Optional["StrongRedecode"],
-    ) -> None:
+    def request_if_ready(self, window: window_records.Window) -> None:
         """If the window has its data, submit it through the policy."""
 
     def withdraw(self, window: window_records.Window) -> None:
@@ -814,39 +810,51 @@ class BoundaryCourier(Protocol):
 
 
 @runtime_checkable
-class StrongRedecode(Protocol):
-    """The strong tier's window side, as the weak windows see it.
+class EscalateEdge(Protocol):
+    """One escalate edge's window side, as the windows see it.
 
-    The requester asks it for the speculative strong decode that starts
-    beside a weak one (Toshio et al. 2510.25222 lines 598-601); the
-    committer, the verdict and the window manager ask it to escalate,
-    release and cancel. A kept weak result halts the strong request it
-    made unnecessary, held here or on the strong side's manager (lines
-    606-614).
+    It carries a source pool's decodes of a window to its target pool.
+    The verdict reads its policy and costs and asks it to escalate or
+    cancel; the requester asks it for the speculative decode that starts
+    beside a source job (Toshio et al. 2510.25222 lines 598-601); the
+    committer and the window manager tell it of every commit and stored
+    round. A kept result halts the request it made unnecessary, held
+    here or on the target's manager (lines 606-614).
     """
+
+    # the pool whose results meet this edge's verdict, and the pool that
+    # decodes the windows it escalates
+    source: window_records.PoolId
+    target: window_records.PoolId
+    # the rule that keeps or escalates a source result
+    policy: "EscalationPolicy"
+    # the verdict's clock and cycles (windows/window_commits.py)
+    costs: Any
+    # the target pool's manager
+    decode_queue: "DecodeQueue"
 
     def parallel_strong_submission(
         self, weak_job: decoding_records.DecodeJob
     ) -> Optional[decoding_records.Submission]:
-        """The speculative strong decode started beside the weak job.
+        """The speculative target decode started beside the source job.
 
-        None when the weak job's window owes a boundary or the strong job
-        is held.
+        None when the source job's window owes a boundary or the target
+        job is held.
         """
 
     def released_submission(
         self, window_key: tuple
     ) -> Optional[decoding_records.Submission]:
-        """The weak job's last boundary arrived: its speculative decode."""
+        """The source job's last boundary arrived: its speculative decode."""
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
-        """Ask the strong tier to re-decode the weak job's window."""
+        """Ask the target pool to re-decode the source job's window."""
 
     def submit_if_commit_releases(self, window_key: tuple) -> None:
-        """A weak window committed: a strong window waiting on it leaves."""
+        """A window committed: a target window waiting on it leaves."""
 
     def cancel_strong_request(self, window_key: tuple) -> None:
-        """A kept weak result: its strong request ends, held or submitted."""
+        """A kept source result: its target request ends, held or submitted."""
 
     def submit_if_stored_data_releases(
         self,
@@ -860,23 +868,16 @@ class WindowVerdict(Protocol):
     """The window side, as a finished decode returns its result to it.
 
     The side that owns the window publishes and finalizes every
-    correction, primary or strong, so the decision and its outcome stay
-    in one place.
+    revision, the first decode or one along an escalate edge, so the
+    decision and its outcome stay in one place.
     """
 
-    def accept_result(
+    def accept_revision(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """The window's answer: apply the threshold, publish or escalate."""
-
-    def accept_strong_result(
-        self,
-        job: decoding_records.DecodeJob,
-        result: decoding_records.DecodeResult,
-    ) -> None:
-        """A strong decode finished: publish it, then finalize the window."""
+        """A decode of the window finished: its verdict, or its commit."""
 
 
 # ----------------------------------- the decoder manager schedules a decode
@@ -939,6 +940,7 @@ class DecoderOutput(Protocol):
 
     def send_selection(
         self,
+        path: transfer_records.LinkPath,
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
@@ -947,10 +949,12 @@ class DecoderOutput(Protocol):
 
     def send_region(
         self,
+        path: transfer_records.LinkPath,
+        store: SyndromeBuffer,
         region: round_records.EscalatedRegion,
         on_delivered: Callable[[], None],
     ) -> int:
-        """Read a strong window's rounds out of the weak store, send them up.
+        """Read a target window's rounds out of store, send them on path.
 
         The delay expected: the store's read, then the link.
         """
@@ -1841,10 +1845,8 @@ class EscalationPolicy(Protocol):
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""
 
-    def tiers_for_ready_window(
-        self, window: window_records.Window
-    ) -> tuple[window_records.PoolId, ...]:
-        """The tiers that decode the complete window now, primary first.
+    def decodes_both_at_once(self, window: window_records.Window) -> bool:
+        """Whether the target decodes the complete window beside its source.
 
         Asked once per window, when its rounds are complete and its
         decision cycles have passed (windows/decode_requests.py).

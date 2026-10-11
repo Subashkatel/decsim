@@ -9,8 +9,8 @@ BoundaryCourier (boundaries between windows), the LogicalLedger (who
 committed which rounds) and the OperationResults (each operation's
 result). This is the shape of gem5's cache, whose BaseCache owns its
 MSHR queue, write buffer and tags and implements the ports
-(src/mem/cache/base.hh). The strong tier is the StrongRedecode's
-(decsim/escalation), on the same components.
+(src/mem/cache/base.hh). Each escalate edge's target is that edge's
+StrongRedecode's (decsim/escalation), on the same components.
 """
 
 import dataclasses
@@ -26,6 +26,7 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
@@ -43,6 +44,8 @@ class WindowTraceSources:
     solve_held when one of a window's several solves waits for the
     others, window_committed when its correction is the frame's, and
     window_absorbed when a strong window takes it over instead.
+    edge_traces holds each escalate edge's own sources, in graph order:
+    a strong window held for its conditions, and its leaving.
     """
 
     window_planned: trace_source.TraceSource
@@ -52,6 +55,7 @@ class WindowTraceSources:
     window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
     # the silent source on a run whose confidence reads one solve
     solve_held: Union[trace_source.TraceSource, trace_source.SilentSource]
+    edge_traces: tuple = ()
 
 
 class WindowManager:
@@ -63,8 +67,8 @@ class WindowManager:
     requester = ports.Port(decode_requests.DecodeRequester)
     courier = ports.Port(window_boundaries.BoundaryCourier)
     results = ports.Port(operation_results.OperationResults)
-    # the strong tier's window side; None when the run never escalates
-    strong_redecode = ports.Port(ports.StrongRedecode, optional=True)
+    # the run's escalate edges; none when the run never escalates
+    edges = ports.Port(escalate_edges.EscalateEdges)
     window_interaction = ports.Port(window_interactions.WindowInteraction)
 
     def __init__(
@@ -324,8 +328,8 @@ class WindowManager:
 
     def _wake_strong_tier(self, operation_id) -> None:
         """A round is stored: a terminal strong window may have its tail."""
-        if self.strong_redecode is not None:
-            self.strong_redecode.submit_if_stored_data_releases(operation_id)
+        for edge in self.edges.edges:
+            edge.submit_if_stored_data_releases(operation_id)
 
     def _wake_windows(self, operation: program_records.Operation) -> None:
         self.check_windows_for_operation(operation.id)
@@ -341,17 +345,17 @@ class WindowManager:
     def check_windows_for_operation(self, operation_id: int) -> None:
         """Request every complete window of the operation, in index order."""
         windows = self.planner.windows_of(operation_id)
-        self.requester.request_ready_windows(windows, self.strong_redecode)
+        self.requester.request_ready_windows(windows)
 
     def check_window(self, key: tuple) -> None:
         """Request the window if it has its data."""
         window = self.planner.windows_by_key[key]
-        self.requester.request_if_ready(window, self.strong_redecode)
+        self.requester.request_if_ready(window)
 
     def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
         """A boundary landed: release the waiting decode, or request it."""
         if is_unblocked:
-            self.requester.release_window(key, self.strong_redecode)
+            self.requester.release_window(key)
         self.check_window(key)
 
     def check_settled(self) -> None:
@@ -398,23 +402,30 @@ class WindowManager:
 
         A run that never escalates absorbs no window and a run whose
         confidence reads one solve holds none, so each reports the
-        silent source instead.
+        silent source instead. Only the edge from the window pool may
+        absorb windows (escalation/strong_window_shapes.py DoubleWindow).
         """
         absorbed = trace_source.SILENT
-        if self.strong_redecode is not None:
-            absorbed = self.strong_redecode.shape.window_absorbed
+        primary_tier = self.retention.primary_tier
+        edge = self.edges.leaving(primary_tier)
+        if edge is not None:
+            absorbed = edge.shape.window_absorbed
         held = trace_source.SILENT
         gap_join = self.requester.gap_join
         if gap_join is not None:
             held = gap_join.trace.solve_held
         builder = self.requester.builder
         committer = self.requester.verdict.committer
+        edge_traces = []
+        for each_edge in self.edges.edges:
+            edge_traces.append(each_edge.trace)
         return WindowTraceSources(
             window_planned=self.planner.trace.window_planned,
             window_data_complete=builder.trace.window_data_complete,
             window_committed=committer.trace.window_committed,
             window_absorbed=absorbed,
             solve_held=held,
+            edge_traces=tuple(edge_traces),
         )
 
     def planned_windows(self) -> dict:

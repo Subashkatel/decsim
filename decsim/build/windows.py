@@ -25,6 +25,7 @@ import decsim.records.windows as window_records
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
@@ -104,7 +105,7 @@ class Windows:
         results = operation_results.OperationResults()
         courier = window_boundaries.BoundaryCourier(routes)
         committer = window_commits.WindowCommitter(engine)
-        verdict = _verdict(switching_settings, machine_clock, engine)
+        verdict = window_commits.WindowVerdict(engine, window_tier)
         clocked_windows = config.with_machine_clock(
             windows_settings, machine_clock
         )
@@ -148,7 +149,7 @@ class Windows:
         primary_decoder: Optional[ports.Decoder],
         strong_decoder: Optional[ports.Decoder],
         decode_queue: ports.DecodeQueue,
-        strong_decode_queue: Optional[ports.DecodeQueue],
+        edges: escalate_edges.EscalateEdges,
         input_fold: ports.DecoderInputFold,
         frame: Optional[ports.Frame],
         conditional_release: ports.ReleaseReceiver,
@@ -164,9 +165,11 @@ class Windows:
         self.gate.input_fold = input_fold
         self.requester.store_output = store_output
         self.requester.decode_queue = decode_queue
-        self.requester.strong_decode_queue = strong_decode_queue
+        self.requester.edges = edges
         self.verdict.decode_queue = decode_queue
-        self.decoder_output.weak_store = weak_store
+        self.verdict.edges = edges
+        self.committer.edges = edges
+        self.window_manager.edges = edges
         self.decoder_output.frame = frame
         self.results.conditional_release = conditional_release
         self.results.factory = factory
@@ -266,26 +269,6 @@ def _gap_join(
     if not is_switching:
         return None
     return gap_join_module.WindowGapJoin(engine)
-
-
-def _verdict(
-    switching: Optional[escalation_settings.SwitchingSettings],
-    machine_clock: Optional[config.Clock],
-    engine: engine_module.Engine,
-) -> window_commits.WindowVerdict:
-    """Whether a decoded window is kept, priced on the switching clock.
-
-    A run with no switching keeps every result at once.
-    """
-    if switching is None:
-        return window_commits.WindowVerdict(engine)
-    clocked_switching = config.with_machine_clock(switching, machine_clock)
-    return window_commits.WindowVerdict(
-        engine,
-        clock=clocked_switching.clock,
-        threshold_cycles=clocked_switching.threshold_cycles,
-        switch_cycles=clocked_switching.switch_cycles,
-    )
 
 
 def _decoder_output(

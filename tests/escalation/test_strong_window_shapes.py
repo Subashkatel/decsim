@@ -251,7 +251,7 @@ def test_the_double_window_leaves_once_its_far_boundary_is_determined():
     assert len(submitted_lines) == 1
     assert submitted_lines[0].startswith("[ 87.000 us]")
     assert restart_lines[0].startswith("[ 87.000 us]")
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_a_region_at_a_back_to_back_seam_waits_for_its_own_weak_commit():
@@ -281,7 +281,7 @@ def _recorded_waits(machine) -> dict:
     def held(_request_key, window_key, waits_for, _rounds) -> None:
         waits[window_key] = waits_for
 
-    redecode = machine.windows.window_manager.strong_redecode
+    redecode = machine.windows.window_manager.edges.edges[0]
     redecode.trace.strong_window_held.connect(held)
     return waits
 
@@ -425,7 +425,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
     ) in resliced[0]
     withdrawn_restart = _log_index(machine, "WITHDRAW memory W6")
     assert withdrawn_restart < machine.observation.log.lines.index(resliced[0])
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
@@ -536,7 +536,7 @@ def test_the_double_window_lands_in_the_declared_backlog_regime():
         "restart window (1, 4) re-sliced across strong window edge 12"
         in (resliced[0])
     )
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 # ---- a shape row added from outside decsim
@@ -582,7 +582,7 @@ def test_a_shape_row_added_from_outside_runs_by_its_record():
         rounds=9, escalated_windows={2}, strong_window=recording_row
     )
     machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is RecordingRedoWindow
     assert shape.planned_windows == [2]
     # the row pins its past face on W1, the neighbour that committed
@@ -637,7 +637,7 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
         rounds=9, escalated_windows={0}, strong_window=recording_row
     )
     machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is RecordingDoubleWindow
     assert shape.planned_windows == [0]
     assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
@@ -651,7 +651,7 @@ def test_the_shipped_components_fill_the_shapes_six_window_side_ports():
     the root binds there answer the whole port.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows=set())
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert isinstance(shape.planner, ports.WindowPlan)
     assert isinstance(shape.retention, ports.WindowRetention)
     assert isinstance(shape.builder, ports.WindowJobBuilder)
@@ -923,7 +923,7 @@ def test_the_redo_window_rows_pinned_faces_cross_the_wire():
     """
     machine = _gate_machine(declared_run.REDO_WINDOW)
     result = machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is strong_window_shapes.RedoWindow
     strong_windows = _strong_window_keys(machine)
     pinned = _pinned_boundary_transfers(result)
@@ -1097,11 +1097,11 @@ def test_the_gate_card_on_the_double_window_runs_through():
     """
     machine = _gate_machine(declared_run.DOUBLE_WINDOW)
     result = machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is strong_window_shapes.DoubleWindow
     statuses = _run_statuses(result)
     assert statuses == [(1, "logical_observables")]
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_a_re_reading_restart_window_owns_the_faults_the_far_pin_carries():

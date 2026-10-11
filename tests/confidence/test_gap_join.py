@@ -302,7 +302,7 @@ class _RecordingVerdict:
         self.engine = engine
         self.answers = []
 
-    def accept_result(self, job, result):
+    def accept_revision(self, job, result):
         """The window's answer, stamped with the tick it arrived."""
         self.answers.append((job, result, self.engine.now))
 

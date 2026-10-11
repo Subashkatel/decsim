@@ -387,15 +387,9 @@ def _connect_window_trace(
     sources.window_absorbed.connect(trace_writer.window_absorbed)
     for manager in decoder_managers:
         manager.outcomes.trace.verdict_given.connect(trace_writer.verdict_given)
-    strong_redecode = window_manager.strong_redecode
-    if strong_redecode is None:
-        return
-    strong_redecode.trace.strong_window_held.connect(
-        trace_writer.strong_window_held
-    )
-    strong_redecode.trace.strong_window_left.connect(
-        trace_writer.strong_window_left
-    )
+    for edge_trace in sources.edge_traces:
+        edge_trace.strong_window_held.connect(trace_writer.strong_window_held)
+        edge_trace.strong_window_left.connect(trace_writer.strong_window_left)
 
 
 def _decode_records(

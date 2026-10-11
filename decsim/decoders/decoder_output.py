@@ -49,9 +49,8 @@ class DecoderOutput:
     transfers = ports.Port(ports.WindowTransfers)
     # a run with no frame commits its corrections nowhere
     frame = ports.Port(ports.Frame, optional=True)
-    # the store an escalated region's rounds are read out of, and the
-    # fabric asked what their move will pay once that read is done
-    weak_store = ports.Port(ports.SyndromeBuffer)
+    # the fabric asked what an escalated region's move will pay once
+    # its read is done
     link = ports.Port(ports.Link)
 
     def __init__(
@@ -104,21 +103,22 @@ class DecoderOutput:
 
     def send_selection(
         self,
+        path: transfer_records.LinkPath,
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
     ) -> int:
-        """Send one window's escalation to the strong decoder.
+        """Send one window's escalation on its edge's forward hop.
 
-        The send is in the weak job's name for the strong request it
+        The send is in the source job's name for the target request it
         selects; returns the delay the link expects. A selection is the
         request's name (records/windows.py REQUEST_KEY_WIRE_BITS), and
-        the weak crossing commit when the strong host joins it, so a
+        the source's crossing commit when the target joins it, so a
         bounded hop serializes those bits and its header.
         """
         payload_bits = self._selection_bits(weak_job, strong_request_key)
         return self.transfers.send_for_job(
-            transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
+            path,
             weak_job,
             payload_bits=payload_bits,
             request_key=strong_request_key,
@@ -127,42 +127,33 @@ class DecoderOutput:
 
     def send_region(
         self,
+        path: transfer_records.LinkPath,
+        store: ports.SyndromeBuffer,
         region: round_records.EscalatedRegion,
         on_delivered: Callable[[], None],
     ) -> int:
-        """Read a strong window's rounds, then send them to the strong store.
+        """Read a target window's rounds out of store, then send them on path.
 
-        The rounds leave the weak syndrome buffer here, so that store
-        prices the read once (book_read) and the send starts at its end.
-        The send carries the request's name and the rounds
+        The rounds leave the store the edge carries them from here, so
+        that store prices the read once (book_read) and the send starts
+        at its end. The send carries the request's name and the rounds
         (EscalatedRegion.message_bits); returns the read's time plus the
         link's estimate (links/channel.py expected_delay_ticks).
         """
         round_keys = region.round_keys
-        read_tick = self.weak_store.book_read(round_keys)
+        read_tick = store.book_read(round_keys)
+        send = functools.partial(
+            self.transfers.send_region, path, region, on_delivered
+        )
         if read_tick == self.engine.now:
-            return self._send_region(region, on_delivered)
-        send = functools.partial(self._send_region, region, on_delivered)
+            return send()
         read_delay = read_tick - self.engine.now
         self.engine.schedule(read_delay, send, label="syndrome buffer read")
         message_bits = region.message_bits()
         link_delay = self.link.expected_delay_ticks(
-            transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
-            message_bits,
-            read_tick,
+            path, message_bits, read_tick
         )
         return read_delay + link_delay
-
-    def _send_region(
-        self,
-        region: round_records.EscalatedRegion,
-        on_delivered: Callable[[], None],
-    ) -> int:
-        return self.transfers.send_region(
-            transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
-            region,
-            on_delivered,
-        )
 
     def _selection_bits(
         self,

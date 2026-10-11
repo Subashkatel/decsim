@@ -23,6 +23,35 @@ def _no_assignments_left_behind(monkeypatch):
     monkeypatch.setenv(assignments.ENVIRONMENT_VARIABLE, "")
 
 
+SWEEP_RUN_FILE = """
+import pathlib
+
+import decsim
+import decsim.presets.machines as machines
+import decsim.topology.constants as constants_module
+
+HERE = pathlib.Path(__file__)
+constants = constants_module.load(HERE.with_name("constants.yaml"))
+
+
+def machine(distance):
+    rate = constants.memory.probability
+    return machines.weak_baseline(distance, rate, 1.0)
+
+
+sweep = decsim.Sweep(
+    "rates",
+    machine,
+    {"distance": [3]},
+    "d{distance}",
+    stop=decsim.CollectionSettings(max_shots=10),
+    constants=constants,
+)
+experiment = sweep.experiment()
+"""
+CONSTANTS = "memory:\n  probability: 0.002  # a chosen rate\n"
+
+
 def _printed_lines(capsys) -> list:
     printed = capsys.readouterr()
     return printed.out.splitlines()
@@ -108,3 +137,32 @@ def test_params_prints_a_graph_tasks_paths_by_part_name(tmp_path, capsys):
     lines = _printed_lines(capsys)
     assert "weak.unit_count = 1" in lines
     assert "qpu.distance = 3  [none]  (run file only)" in lines
+
+
+def test_params_lists_each_constant_with_its_source(tmp_path, capsys):
+    run_file = _sweep_run_file(tmp_path)
+
+    command.main(["params", str(run_file), "--match", "constants.**"])
+
+    lines = _printed_lines(capsys)
+    assert lines[-1] == "constants.memory.probability = 0.002  (a chosen rate)"
+
+
+def test_params_lists_a_set_constant_with_its_setter(tmp_path, capsys):
+    run_file = _sweep_run_file(tmp_path)
+    setting = "constants.memory.probability=0.004"
+
+    command.main(["params", str(run_file), "--set", setting])
+
+    lines = _printed_lines(capsys)
+    variable = assignments.ENVIRONMENT_VARIABLE
+    expected = f"constants.memory.probability = 0.004  ({variable} {setting})"
+    assert lines[-1] == expected
+
+
+def _sweep_run_file(tmp_path):
+    constants = tmp_path / "constants.yaml"
+    constants.write_text(CONSTANTS)
+    run_file = tmp_path / "sweep_run.py"
+    run_file.write_text(SWEEP_RUN_FILE)
+    return run_file

@@ -42,6 +42,9 @@ the [reference](../reference/README.md) pages.
 - [How to batch a pool's decodes](batch_a_pools_decodes.md): the
   re-decodes waiting for a unit decoded as one batch, priced by the sum
   or the slowest of its members.
+- [How to sweep a machine over a grid](sweep_a_machine_over_a_grid.md):
+  constants.yaml for the numbers, config.py for the machine, run.py for
+  the grid, and every number set from the command line.
 - [How to build each switching pattern](build_each_switching_pattern.md):
   every pattern's setting, source and guide on one page, and what is
   still refused.

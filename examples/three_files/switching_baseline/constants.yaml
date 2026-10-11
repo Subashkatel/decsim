@@ -1,0 +1,96 @@
+# Experiment 1's constants: every number its machine reads, the unit in
+# the value and the source beside it. A section holds one part's
+# parameters as `decsim info` names them; a time on a clocked part is
+# rounded up to whole cycles of its clock. Override one without editing:
+#   decsim run run.py --set constants.union_find.algorithm.weight_step=0.2
+
+rounds_per_shot: 100                 # a shot's QEC rounds
+qpu:
+  round_period: 1us                  # one QEC round a microsecond
+
+clocks:
+  chip: 250MHz                       # the control chip's clock (2605.04892 line 1063)
+  union_find: 100MHz                 # Helios's synthesis target (2406.08491 line 1230)
+
+controller:
+  readout_to_bits: 0 cycles          # sits in the readout hop (2605.04892 lines 1053-1055)
+  packing_per_round: 29ns            # the syndrome aggregator packs a round (2603.16203 lines 894-895)
+  decision_to_pulse: 8 cycles        # QubiC's pipeline, decision to pulse trigger (2404.15260 lines 173-191), an estimate
+
+detection_events:
+  latency: 20ns                      # pipelined in registers (2605.04892 lines 1273-1275)
+  per_round: 1 cycle
+
+windows:
+  decision: 20ns                     # a root controller issues a decode request (2603.16203 lines 897-899)
+  terminal_policy: lookahead         # both machines lay out the same last window
+
+frame:
+  write: 4ns                         # one frame update (2605.04892 Table I, lines 1051 and 1063)
+
+union_find:
+  algorithm:
+    weight_step: 0.1                 # fails as often as mwpf's weighted union-find at d = 5 to 9 (2508.04969)
+  cycle_count:
+    delay: 3 cycles                  # MAXIMUM_DELAY, Helios_single_FPGA_core.v:76 (yale-paragon/Helios_scalable_QEC 2dda998)
+    cycles_per_edge: 0.0             # a processing element per vertex (2301.08419 lines 764-767)
+    setup: 0 cycles                  # the graph sits in registers (2301.08419 lines 912-913)
+    setup_per_vertex: 0 cycles
+    setup_per_edge: 0 cycles
+  engine:
+    fetch_per_job: 1 cycle           # the header that starts a decode (control_node_single_FPGA.v lines 131-142)
+    fetch_per_round: 1 cycle         # Helios loads a round a cycle (lines 170-182)
+    release_per_job: 25ns            # the correction leaves in one message (2603.16203 line 902)
+    release_per_round: 0 cycles
+  pool:
+    copies_boundary_fold: false      # the boundary folds into the unit's own copy (2301.08419 lines 632-640)
+
+relay_bp:                            # Relay-BP-5's surface-code keys (Mueller et al. 2506.01779 lines 307, 332, 343)
+  algorithm:
+    gamma0: 0.35
+    gamma_interval: [-0.254, 0.985]
+    relay_set_count: 600
+    converged_solution_count: 5
+    device: a100                     # measured on a whole A100-SXM4-80GB (measured_table/measurements.py, Slurm job 14676845)
+    partition: whole
+    bases: together
+  engine:                            # the measured time holds the copies to and from the device
+    fetch_per_job: 0 cycles
+    fetch_per_round: 0 cycles
+    release_per_job: 0 cycles
+    release_per_round: 0 cycles
+
+escalation:
+  confidence:
+    walk: 1us                        # the cluster gap's walk on the weak unit, a chosen value (2602.03336 lines 17-19)
+  threshold:
+    threshold: 20dB                  # a chosen cluster-gap threshold, not a calibrated one
+  edge:
+    threshold_cycles: 1 cycle        # one compare, an estimate
+    switch: 1 cycle                  # one state change, an estimate
+
+fiber_loop:                          # the leaf-to-root fiber network in the fridge rack (2603.16203)
+  source: Experiment 1's leaf-to-root fiber loop (2603.16203)
+  up:
+    latency: 157ns                   # a round goes up (2603.16203 lines 895-897)
+    bits_per_cycle: 38.79            # four lanes of 38.79 bits a cycle (lines 971-975)
+    lane_count: 4
+  read:
+    latency: 1 cycle                 # the decoder reads its whole frame in a cycle (lines 668-670), an estimate
+    excludes_receiver_processing: false
+  down:
+    latency: 164ns                   # the correction comes back, 155 + 9 ns (lines 903-904)
+    bits_per_cycle: 38.79
+    lane_count: 4
+    excludes_receiver_processing: false
+
+observation:
+  record_switching_windows: true
+  backlog_trace: true
+
+stop:
+  max_failures: 100
+  max_shots: 5_000_000
+  min_shots: 0
+  switching_piece_rounds: 5_000      # about 50 shots: d = 13, p = 0.005 is estimated at up to 600 s a shot
+  weak_alone_piece_rounds: 200_000   # weak-alone shots took 0.17 to 0.41 s

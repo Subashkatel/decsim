@@ -16,7 +16,7 @@ import pathlib
 import sys
 import types
 from collections.abc import Sequence
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
@@ -40,12 +40,15 @@ class Experiment:
     """A named set of tasks under one collection plan.
 
     A task's name is its folder, so two tasks of one name are refused, as
-    is a task no collection stops.
+    is a task no collection stops. constants are the constants files its
+    tasks were built from (topology/constants.py), which `decsim params`
+    lists with each value's source.
     """
 
     name: str
     tasks: Sequence[collect.Task]
     collection: Optional[collection_module.CollectionSettings] = None
+    constants: Sequence[Any] = ()
 
     def __post_init__(self) -> None:
         collect.check_folder_name(self.name, "experiment")
@@ -75,7 +78,7 @@ class Experiment:
     def only(self, *names: str) -> "Experiment":
         """The experiment cut to its tasks of these names, in this order."""
         tasks = [self.task_named(name) for name in names]
-        return Experiment(self.name, tasks, self.collection)
+        return Experiment(self.name, tasks, self.collection, self.constants)
 
     def with_max_shots(self, shot_count: int) -> "Experiment":
         """Every task stopped at its first shot_count shots.
@@ -92,7 +95,7 @@ class Experiment:
             )
             capped_task = dataclasses.replace(task, collection=capped)
             tasks.append(capped_task)
-        return Experiment(self.name, tasks, self.collection)
+        return Experiment(self.name, tasks, self.collection, self.constants)
 
     def _refuse_a_task_without_a_collection(self, task: collect.Task) -> None:
         if self.collection_of(task) is not None:

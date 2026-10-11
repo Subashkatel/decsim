@@ -47,6 +47,7 @@ import decsim.parameters.fields as fields
 import decsim.parameters.kinds as kinds
 import decsim.parameters.tree as tree
 import decsim.parameters.units as units
+import decsim.topology.constants as constants_module
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 
@@ -59,61 +60,12 @@ LINK = "link"
 ARROW = "->"
 # a constant read in a value: ${section.name}
 CONSTANT = re.compile(r"\$\{([A-Za-z0-9_.]+)\}")
-# a constants file's line: its key, and its value's comment as a source
-_SOURCE_LINE = re.compile(r"^(\s*)([A-Za-z0-9_]+):\s*([^#]*?)\s*#\s*(.*)$")
-_KEY_LINE = re.compile(r"^(\s*)([A-Za-z0-9_]+):")
-# YAML 1.1's implicit booleans and numbers, which 1.2's replace
-_YAML_1_1_TAGS = (
-    "tag:yaml.org,2002:bool",
-    "tag:yaml.org,2002:int",
-    "tag:yaml.org,2002:float",
-)
-# YAML 1.2's core schema: (tag name, pattern, first characters)
-_YAML_1_2_RESOLVERS = (
-    ("bool", r"^(?:true|True|TRUE|false|False|FALSE)$", "tTfF"),
-    ("int", r"^[-+]?[0-9][0-9_]*$", "-+0123456789"),
-    (
-        "float",
-        r"^(?:[-+]?(?:\.[0-9]+|[0-9][0-9_]*(?:\.[0-9_]*)?)(?:[eE][-+]?[0-9]+)?"
-        r"|[-+]?\.(?:inf|Inf|INF)"
-        r"|\.(?:nan|NaN|NAN))$",
-        "-+0123456789.",
-    ),
-)
 _DEFAULT_FABRIC = fabrics.ReferenceFabric()
 _DEFAULT_OBSERVATION = observe_settings.ObservationSettings()
 
 
 class PythonOnlyError(fields.ParameterError):
     """A value a file cannot write: an object set in Python."""
-
-
-@dataclasses.dataclass
-class Constants:
-    """Named values, each with its source, and the names read so far."""
-
-    values: dict
-    sources: dict
-    origin: str
-    read: set = dataclasses.field(default_factory=set)
-
-    def value(self, name: str, where: str) -> Any:
-        """The constant of this name, recorded as read."""
-        if name not in self.values:
-            near = units.did_you_mean(name, list(self.values))
-            raise fields.ParameterError(
-                f"{where}: no constant {name!r} in {self.origin}.{near}"
-            )
-        self.read.add(name)
-        return self.values[name]
-
-    def refuse_the_unread(self) -> None:
-        """A constant no value read is refused, by name."""
-        unread = [name for name in self.values if name not in self.read]
-        if unread:
-            raise fields.ParameterError(
-                f"{self.origin}: constants no value reads: {unread}"
-            )
 
 
 def load(
@@ -126,7 +78,7 @@ def load(
     text = path.read_text()
     constants = None
     if constants_path is not None:
-        constants = read_constants(constants_path)
+        constants = constants_module.read(constants_path)
     machine = loads(text, constants, python_parts, str(path))
     if constants is not None:
         constants.refuse_the_unread()
@@ -135,7 +87,7 @@ def load(
 
 def loads(
     text: str,
-    constants: Optional[Constants] = None,
+    constants: Optional[constants_module.Constants] = None,
     python_parts: Optional[Mapping] = None,
     origin: str = "a machine file",
 ) -> graph.Machine:
@@ -144,10 +96,10 @@ def loads(
     python_parts gives, by name, the records the text leaves to Python;
     a part both give is refused.
     """
-    document = _parsed(text)
+    document = constants_module.parsed(text)
     resolved = _with_constants(document, constants, origin)
     clock_text = resolved.get("clock")
-    clock = _clock(clock_text, origin)
+    clock = clock_of(clock_text, origin)
     part_documents = resolved.get("parts", {})
     given = python_parts or {}
     parts = _parts(part_documents, given, clock, origin)
@@ -184,17 +136,6 @@ def dumps(machine: graph.Machine) -> str:
     return yaml.safe_dump(document, sort_keys=False, width=79)
 
 
-def read_constants(path: pathlib.Path) -> Constants:
-    """A constants file: its values by dotted name, and their sources."""
-    path = pathlib.Path(path)
-    text = path.read_text()
-    document = _parsed(text)
-    values = {}
-    _flatten(document, "", values)
-    sources = _sources(text)
-    return Constants(values, sources, str(path))
-
-
 def record_of(document: Mapping, clock: Any, where: str) -> Any:
     """The record a document writes: its type, then each field by path.
 
@@ -204,11 +145,39 @@ def record_of(document: Mapping, clock: Any, where: str) -> Any:
     if TYPE not in document:
         raise fields.ParameterError(f"{where}: a record names its type")
     record_class = _record_class(document[TYPE], where)
+    return record(record_class, document, machine_clock=clock, where=where)
+
+
+def record(
+    record_class: type,
+    *sections: Mapping,
+    machine_clock: Any = None,
+    where: str = "a record made in Python",
+    **parameters: Any,
+) -> Any:
+    """A record of this class, its parameters written as a file writes them.
+
+    Each section is a mapping, such as a constants section
+    (topology/constants.py), and the keywords come after them: a key is
+    a parameter, its unit in its value (fetch_per_round="1 cycle"), and
+    a nested mapping a slot's record (algorithm={"type": ...}). A later
+    key wins. A time on a part with no clock of its own counts cycles
+    of machine_clock. A key that is no parameter is refused, with the
+    near ones.
+    """
     assignments = []
-    _add_assignments(document, "", where, assignments)
-    applied = tree.built(record_class, assignments, clock)
+    for section in (*sections, parameters):
+        _add_assignments(section, "", where, assignments)
+    applied = tree.built(record_class, assignments, machine_clock)
     _refuse_the_unmatched(assignments, applied, where)
     return applied.settings
+
+
+def clock_of(written: Any, where: str = "a clock") -> Any:
+    """The clock a frequency's text writes, 250MHz; None for none."""
+    if written is None:
+        return None
+    return _CLOCK.value_of(written, None, f"{where}: clock")
 
 
 def record_document(record: Any) -> dict:
@@ -228,45 +197,13 @@ def unique_name(record_class: type) -> str:
     return kinds.import_path(record_class)
 
 
-def _parsed(text: str) -> Any:
-    return yaml.load(text, Loader=_Yaml12Loader)
-
-
-class _Yaml12Loader(yaml.SafeLoader):
-    """PyYAML's safe loader with YAML 1.2's booleans and numbers."""
-
-
-def _yaml_1_2_resolvers() -> dict:
-    """The safe loader's implicit resolvers, 1.1's scalars swapped for 1.2's."""
-    resolvers = {}
-    for first, pairs in yaml.SafeLoader.yaml_implicit_resolvers.items():
-        kept = [pair for pair in pairs if pair[0] not in _YAML_1_1_TAGS]
-        resolvers[first] = kept
-    for tag_name, pattern, firsts in _YAML_1_2_RESOLVERS:
-        tag = f"tag:yaml.org,2002:{tag_name}"
-        expression = re.compile(pattern)
-        for first in firsts:
-            pairs = resolvers.setdefault(first, [])
-            pairs.append((tag, expression))
-    return resolvers
-
-
-def _decimal_integer(loader: yaml.SafeLoader, node: yaml.Node) -> int:
-    """A YAML 1.2 integer: decimal, so 0123 is 123, not 1.1's octal 83."""
-    text = loader.construct_scalar(node)
-    digits = text.replace("_", "")
-    return int(digits, 10)
-
-
-_Yaml12Loader.yaml_implicit_resolvers = _yaml_1_2_resolvers()
-_Yaml12Loader.add_constructor("tag:yaml.org,2002:int", _decimal_integer)
 # the machine's clock field, which writes and reads a frequency
 _MACHINE_PARAMETERS = fields.parameters_of(graph.Machine)
 _CLOCK = _MACHINE_PARAMETERS[fields.CLOCK]
 
 
 def _with_constants(
-    value: Any, constants: Optional[Constants], where: str
+    value: Any, constants: Optional[constants_module.Constants], where: str
 ) -> Any:
     """The document with every ${name} read from the constants."""
     if isinstance(value, Mapping):
@@ -279,7 +216,9 @@ def _with_constants(
 
 
 def _mapping_with_constants(
-    mapping: Mapping, constants: Optional[Constants], where: str
+    mapping: Mapping,
+    constants: Optional[constants_module.Constants],
+    where: str,
 ) -> dict:
     substituted = {}
     for key, item in mapping.items():
@@ -287,7 +226,9 @@ def _mapping_with_constants(
     return substituted
 
 
-def _substituted(text: str, constants: Optional[Constants], where: str) -> Any:
+def _substituted(
+    text: str, constants: Optional[constants_module.Constants], where: str
+) -> Any:
     """A whole ${name} is the constant's value; within a text, its text."""
     found = CONSTANT.findall(text)
     if not found:
@@ -308,19 +249,13 @@ def _substituted(text: str, constants: Optional[Constants], where: str) -> Any:
 class _ConstantText:
     """A ${name} within a text, replaced by the constant's own text."""
 
-    constants: Constants
+    constants: constants_module.Constants
     where: str
 
     def __call__(self, found: re.Match) -> str:
         name = found.group(1)
         value = self.constants.value(name, self.where)
         return str(value)
-
-
-def _clock(written: Any, origin: str) -> Any:
-    if written is None:
-        return None
-    return _CLOCK.value_of(written, None, f"{origin}: clock")
 
 
 def _parts(
@@ -524,40 +459,3 @@ def _plain_document(value: Any) -> Any:
     if isinstance(value, pathlib.Path):
         return str(value)
     return value
-
-
-def _flatten(document: Mapping, prefix: str, values: dict) -> None:
-    for key, value in document.items():
-        name = f"{prefix}{key}"
-        if isinstance(value, Mapping):
-            _flatten(value, f"{name}.", values)
-            continue
-        values[name] = value
-
-
-def _sources(text: str) -> dict:
-    """Each dotted key's comment, from the lines that carry one.
-
-    A key's section is the keys above it that are indented less.
-    """
-    sources = {}
-    sections = []
-    for line in text.splitlines():
-        keyed = _KEY_LINE.match(line)
-        if keyed is None:
-            continue
-        indent_text, key = keyed.groups()
-        indent = len(indent_text)
-        sections = [pair for pair in sections if pair[0] < indent]
-        sections.append((indent, key))
-        sourced = _SOURCE_LINE.match(line)
-        _add_source(sources, sections, sourced)
-    return sources
-
-
-def _add_source(sources: dict, sections: list, sourced: Any) -> None:
-    if sourced is None:
-        return
-    names = [key for _, key in sections]
-    dotted = ".".join(names)
-    sources[dotted] = sourced.group(4)

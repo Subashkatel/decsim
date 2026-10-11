@@ -156,18 +156,23 @@ class Task:
         and is left out, as sinter leaves circuit_path out of its strong id
         (sinter/_data/_task.py:157, 167-204).
         """
+        value = self._identity()
+        value["metadata"] = json_value(self.metadata)
+        return _digest(value)
+
+    def machine_id(self) -> str:
+        """sha256 of the machine alone: two tasks that run alike share it."""
+        value = self._identity()
+        return _digest(value)
+
+    def _identity(self) -> dict:
+        """The machine's json value, under the key the ids have always used."""
         # The key stays "settings", so every recorded id stays valid.
-        value = {"metadata": json_value(self.metadata)}
         if self.layout is None:
-            value["settings"] = json_value(self.machine, keep_labels=False)
-        else:
-            workload = self.machine.workload
-            graph = _with_workload(self.graph, workload)
-            value[GRAPH_ID_KEY] = json_value(graph, keep_labels=False)
-        text = json.dumps(value, sort_keys=True)
-        encoded = text.encode("utf8")
-        digest = hashlib.sha256(encoded)
-        return digest.hexdigest()
+            return {"settings": json_value(self.machine, keep_labels=False)}
+        workload = self.machine.workload
+        graph = _with_workload(self.graph, workload)
+        return {GRAPH_ID_KEY: json_value(graph, keep_labels=False)}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -640,3 +645,11 @@ def _json_number(
     if isinstance(value, (bool, int, float)):
         return value
     return str(value)
+
+
+def _digest(value: dict) -> str:
+    """sha256 of the value's json text, its keys sorted."""
+    text = json.dumps(value, sort_keys=True)
+    encoded = text.encode("utf8")
+    digest = hashlib.sha256(encoded)
+    return digest.hexdigest()

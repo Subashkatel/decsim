@@ -1,0 +1,18 @@
+# The data-movement study: Toshio et al.'s linear decoder (2510.25222)
+# on priced cards, at d = 3, 5 and 7 and p = 0.003.
+
+physical_error_probability: 0.003
+round_period_microseconds: 1.0              # the paper's tau_gen
+weak_decode_microseconds_per_round: 0.4     # tau_weak_dec = 0.4 tau_gen, one swept value (2510.25222 lines 1125-1126)
+strong_decode_microseconds_per_round: 10.0  # tau_strong_dec = 10 tau_gen (lines 1109-1114)
+weak_link:                                  # T_weak_comm = tau_gen, 1 us (lines 1109-1114)
+  clock: 250MHz                             # the fridge clock
+  latency: 1us
+  source: T_weak_comm, 2510.25222 lines 1109-1114
+strong_link:                                # T_strong_comm = 10 tau_gen, 10 us (lines 1109-1114)
+  clock: 250MHz                             # the room clock
+  latency: 10us
+  source: T_strong_comm, 2510.25222 lines 1109-1114
+threshold: 20dB                             # the keep threshold of 2510.25222 Sec. IV
+stop:
+  max_shots: 100

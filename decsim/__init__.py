@@ -7,7 +7,7 @@ experiments layer over it is decsim.experiments, whose command is
 `decsim`; decsim.experiments.collect runs the shots of a sweep's tasks.
 
 A run file reaches the names it builds an experiment from at the root:
-decsim.Experiment, Task, grid, CollectionSettings, MachineSettings and
+decsim.Experiment, Task, grid, Sweep, CollectionSettings, MachineSettings and
 Machine. Each loads its module on first use (PEP 562 module
 __getattr__), so `import decsim.config` and the command line start
 without the machine's imports.
@@ -22,6 +22,7 @@ _MODULE_OF = {
     "CollectionSettings": "decsim.experiments.collection",
     "MachineSettings": "decsim.settings",
     "Machine": "decsim.machine",
+    "Sweep": "decsim.experiments.sweeps",
 }
 __all__ = tuple(_MODULE_OF)
 

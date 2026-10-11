@@ -401,6 +401,8 @@ class _Walk:
         """
         values = _shared_values(record_class, old)
         parameters = fields.parameters_of(record_class)
+        own_clock = self._assigned_clock(parameters, segments)
+        clock = own_clock or machine_clock
         for parameter in parameters.values():
             if parameter.field in values:
                 continue
@@ -408,9 +410,7 @@ class _Walk:
             is_required = parameter.default is fields.REQUIRED
             if not is_required and not self._is_reached(parameter, child):
                 continue
-            values[parameter.field] = self._required(
-                parameter, child, machine_clock
-            )
+            values[parameter.field] = self._required(parameter, child, clock)
         path = path_text(segments)
         try:
             return record_class(**values)
@@ -418,6 +418,25 @@ class _Walk:
             raise fields.ParameterError(
                 f"{path}: decsim refused it: {refused}"
             ) from None
+
+    def _assigned_clock(
+        self, parameters: dict, segments: tuple
+    ) -> Optional[config.Clock]:
+        """The clock an assignment gives a record built here, or None.
+
+        A time on the record counts cycles of its own clock, so a record
+        built with its clock and a time assigned together reads the
+        clock first.
+        """
+        parameter = parameters.get(fields.CLOCK)
+        if parameter is None:
+            return None
+        child = (*segments, fields.CLOCK)
+        assignment = self.last_for(child)
+        if assignment is None:
+            return None
+        path = path_text(child)
+        return parameter.value_of(assignment.written, None, path)
 
     def _is_reached(self, parameter: fields.Parameter, segments: tuple) -> bool:
         """Whether an assignment reaches a field: its type, or its value."""

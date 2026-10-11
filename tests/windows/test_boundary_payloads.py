@@ -239,8 +239,14 @@ def _pinned_run(strong_window, distance: int, seed: int = 0):
     switching = dataclasses.replace(
         settings.switching, strong_window=strong_window
     )
+    # the windows before the redo window's row, which the row under test
+    # takes the place of
+    default_windows = window_settings.WindowSettings()
+    plain_windows = dataclasses.replace(
+        settings.windows, boundary_policy=default_windows.boundary_policy
+    )
     windows = window_settings.switching_windows(
-        settings.windows, switching.strong_window
+        plain_windows, switching.strong_window
     )
     settings = dataclasses.replace(
         settings, switching=switching, windows=windows

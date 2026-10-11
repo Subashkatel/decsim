@@ -422,6 +422,26 @@ class DecoderManager:
         self.strong_requests.counts.cancelled += 1
         self.dispatcher.run()  # returned credits may admit a waiting head
 
+    def abandon_strong(self, key: tuple) -> None:
+        """Let an unneeded strong re-decode run to its end, then drop it.
+
+        The request runs out where it is, as a decode already launched
+        cannot be recalled; its result is dropped when its decode ends
+        (decode_outcomes.complete_strong). One already done and waiting
+        in its unit is dropped now.
+        """
+        completion = self.service.take_strong_output(key)
+        if completion is None:
+            self.strong_requests.abandon(key, self.pool_id)
+            return
+        self.outcomes.report_request(
+            completion.request_job,
+            completion.result,
+            decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
+            completion.decode_output_ticks,
+        )
+        self.strong_requests.counts.abandoned += 1
+
     # ------------------------------------------------------------ settling
 
     def check_decode_work_settled(self) -> None:

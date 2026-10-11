@@ -34,6 +34,7 @@ import decsim.records.windows as window_records
 import decsim.statistics.kinds as statistic_kinds
 import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
+import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 
 
@@ -101,10 +102,12 @@ class StrongRedecode:
         engine: engine_module.Engine,
         hops: route_records.EdgeHops,
         costs: window_commits.VerdictCosts,
+        rules: revision_rules.EdgeRules = revision_rules.DEFAULT_RULES,
     ) -> None:
         self.engine = engine
         self.hops = hops
         self.costs = costs
+        self.rules = rules
         self.selections = _StrongSelections()
         # the rounds sent up and not landed yet, so a wake-up while a
         # region crosses does not carry them twice
@@ -225,6 +228,18 @@ class StrongRedecode:
         if held is not None:
             self._drop_held(window_key, held)
         self.decode_queue.cancel_strong(window_key)
+
+    def abandon_strong_request(self, window_key: tuple) -> None:
+        """A kept weak result: a held request ends, a submitted one runs out.
+
+        A held request was never sent, so it is dropped as a cancel drops
+        it; one the strong side holds runs to its end there, and its
+        result is dropped (revision_rules.NoCancel).
+        """
+        held = self.pending.held_for(window_key)
+        if held is not None:
+            self._drop_held(window_key, held)
+        self.decode_queue.abandon_strong(window_key)
 
     def _drop_held(self, window_key: tuple, held) -> None:
         self.statistics.held_cancelled.add()

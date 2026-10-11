@@ -13,8 +13,15 @@ import decsim.config as config
 import decsim.engine as engine_module
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
 import decsim.records.routes as route_records
+import decsim.windows.revision_rules as revision_rules
+
+# the verdict and rules of an edge whose settings name none: today's
+GAP_THRESHOLD = verdicts.GapThreshold.Settings()
+LATEST_REVISION = revision_rules.LatestRevision.Settings()
+CANCEL_DOWNSTREAM = revision_rules.CancelDownstream.Settings()
 
 
 class ThresholdSettings(Protocol):
@@ -38,6 +45,47 @@ class ThresholdSettings(Protocol):
 
     def build(self) -> ports.ThresholdSource:
         """A fresh source of this record."""
+
+
+class VerdictSettings(Protocol):
+    """A verdict row's settings record (verdicts.py).
+
+    reads_threshold says whether the verdict decides on the edge's
+    threshold.
+    """
+
+    name: str
+    reads_threshold: bool
+
+    def build(self) -> ports.EscalationVerdict:
+        """A fresh verdict."""
+
+
+class ReplaceRuleSettings(Protocol):
+    """A replace rule's settings record (windows/revision_rules.py).
+
+    replaces_provisionally says whether a later revision replaces the
+    prediction before the window is final.
+    """
+
+    name: str
+    replaces_provisionally: bool
+
+    def build(self) -> ports.ReplaceRule:
+        """A fresh rule."""
+
+
+class CancelRuleSettings(Protocol):
+    """A cancel rule's settings record (windows/revision_rules.py).
+
+    cancels_on_keep says whether a keep cancels the target's decode.
+    """
+
+    name: str
+    cancels_on_keep: bool
+
+    def build(self) -> ports.CancelRule:
+        """A fresh rule."""
 
 
 class StrongWindowSettings(Protocol):
@@ -75,6 +123,12 @@ class SwitchingSettings:
     machine's clock. The complementary gap's two solves are two jobs of
     the weak pool, so its unit_count decides whether they overlap.
 
+    verdict is the row that keeps or escalates each weak result
+    (verdicts.py), the gap against the threshold by default.
+    replace_rule says which revision the frame takes, and cancel_rule
+    what a keep does to the strong decode already asked for
+    (windows/revision_rules.py).
+
     strong_answer_route names one of records/routes.py
     ANSWER_ROUTE_NAMES, the way a strong answer reaches the frame.
     direct, the default: the strong host joins the weak crossing
@@ -97,6 +151,9 @@ class SwitchingSettings:
         strong_window_shapes.RedoWindow.Settings()
     )
     strong_answer_route: str = "direct"
+    verdict: VerdictSettings = config.added_field(GAP_THRESHOLD)
+    replace_rule: ReplaceRuleSettings = config.added_field(LATEST_REVISION)
+    cancel_rule: CancelRuleSettings = config.added_field(CANCEL_DOWNSTREAM)
 
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)
@@ -112,4 +169,11 @@ class SwitchingSettings:
         self, threshold: ports.ThresholdSource
     ) -> ports.EscalationPolicy:
         """The policy that gives each weak result its verdict."""
-        return escalation_policies.Switching(threshold, self.run_both_at_once)
+        verdict = self.verdict
+        built_verdict = verdict.build()
+        return escalation_policies.Switching(
+            threshold,
+            self.run_both_at_once,
+            built_verdict,
+            verdict.reads_threshold,
+        )

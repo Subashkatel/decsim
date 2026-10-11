@@ -67,7 +67,7 @@ class Controller:
             )
 
         self.link.send(
-            transfer_records.LinkPath.QPU_TO_CONTROLLER,
+            transfer_records.QPU_TO_CONTROLLER,
             readout.size_bits,
             self.engine.now,
             attribution,

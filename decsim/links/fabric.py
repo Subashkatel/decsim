@@ -49,7 +49,7 @@ class LinkFabric:
         ] = {}
         self._readout_by_footprint: dict[tuple, _PathBinding] = {}
         self._send_count = 0
-        for path in transfer_records.LinkPath:
+        for path in transfer_records.LEGACY_PATHS:
             path_settings = fabric_settings.path_settings(path)
             channel = self._channel_for(path_settings.channel, engine)
             self._binding_by_path[path] = _PathBinding(path_settings, channel)
@@ -73,7 +73,7 @@ class LinkFabric:
         A routed readout is priced by its footprint, which an estimate lacks, so
         asking for one is a caller's bug.
         """
-        is_readout = path is transfer_records.LinkPath.QPU_TO_CONTROLLER
+        is_readout = path == transfer_records.QPU_TO_CONTROLLER
         if is_readout and self._readout_by_footprint:
             raise RuntimeError("a routed readout delay requires a footprint")
         binding = self._binding_by_path[path]
@@ -143,7 +143,7 @@ class LinkFabric:
         matches. Channel names, rather than footprint names, own contention.
         """
         default = self._binding_by_path[path]
-        if path is not transfer_records.LinkPath.QPU_TO_CONTROLLER:
+        if path != transfer_records.QPU_TO_CONTROLLER:
             return default
         return self._readout_by_footprint.get(attribution.patch_ids, default)
 
@@ -212,7 +212,7 @@ def _select_payload(
     if payload_bits is not None:
         if path_settings.actual_payload_source is None:
             raise RuntimeError(
-                f"{path.value} does not declare an actual payload source"
+                f"{path} does not declare an actual payload source"
             )
         return (
             payload_bits,

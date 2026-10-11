@@ -57,7 +57,7 @@ def test_the_decision_reaches_the_controller_one_crossing_later():
     unit.instruction_output = controller
     unit.link = link
     crossing_ticks = link.expected_delay_ticks(
-        transfer_records.LinkPath.FRAME_TO_CONTROLLER, None, 0
+        transfer_records.FRAME_TO_CONTROLLER, None, 0
     )
     release = program_records.Decision(2, releases_operation=True)
     deliver = object()
@@ -86,7 +86,7 @@ def test_the_crossing_is_billed_to_the_frame_to_controller_path():
     engine.run()
 
     (record,) = delivered
-    assert record.path == transfer_records.LinkPath.FRAME_TO_CONTROLLER
+    assert record.path == transfer_records.FRAME_TO_CONTROLLER
     assert record.attribution.operation_id == 7
 
 

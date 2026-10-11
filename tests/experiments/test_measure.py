@@ -1640,7 +1640,7 @@ def seam_only_fabric():
     is 0.5 us, and every other hop is free, so a window's outgoing
     boundary is the only thing a link charges for in the whole run.
     """
-    hops = {path.value: 0 for path in transfer_records.LinkPath}
+    hops = {path: 0 for path in transfer_records.LEGACY_PATHS}
     hops["decoder_to_decoder"] = 125
     return fridge_hops(hops)
 
@@ -2413,8 +2413,8 @@ def instant_machine() -> machine_settings.MachineSettings:
     """The one-tier machine with every cost zero: hops, unit and frame."""
     base = one_tier_machine(0.0)
     hop_cycles = {}
-    for path in transfer_records.LinkPath:
-        hop_cycles[path.value] = 0
+    for path in transfer_records.LEGACY_PATHS:
+        hop_cycles[path] = 0
     links = fridge_hops(hop_cycles)
     algorithm = charged(0.0)
     pool = run_files.decoder_pool(algorithm, FRIDGE_CLOCK)

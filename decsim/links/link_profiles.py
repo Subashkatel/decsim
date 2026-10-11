@@ -25,7 +25,7 @@ import decsim.links.settings as settings
 RESULT_PAYLOAD_SOURCE = "DecodeResult.logical_observables bits"
 # A strong answer crosses the wall while other requests are open, so it
 # carries the name of the request it answers in front of those bits
-# (decoders/decoder_output.py ANSWER_NAME_BITS_BY_PATH).
+# (build/routes.py names a hop across the wall).
 STRONG_RESULT_PAYLOAD_SOURCE = (
     "DecodeResult.logical_observables bits behind the request's name"
 )

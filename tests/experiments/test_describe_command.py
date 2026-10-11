@@ -61,7 +61,7 @@ def test_describe_prints_the_graph_and_every_path(tmp_path, capsys):
     path_lines = lines[1:]
     pool = read.part("weak")
     assert pool.settings == settings.weak_decoder
-    assert len(path_lines) == len(transfer_records.LinkPath)
+    assert len(path_lines) == len(transfer_records.LEGACY_PATHS)
 
 
 def test_describe_shows_a_graph_path_set_on_the_command_line(tmp_path, capsys):

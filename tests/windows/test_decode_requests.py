@@ -154,7 +154,7 @@ class _Fixture:
         transfers.retention = self.retention
         store_output = round_output.SyndromeBufferOutput(
             self.engine,
-            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+            transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
             "weak syndrome buffer",
         )
         store_output.transfers = transfers

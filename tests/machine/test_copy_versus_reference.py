@@ -45,7 +45,7 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+WEAK_INPUT_PATH = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
 # the seats each placement named here forms at
 SEATS = {
     "controller": ("controller",),

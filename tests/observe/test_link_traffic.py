@@ -14,7 +14,6 @@ import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
-PATH = transfer_records.LinkPath
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(
     FREE_CHANNEL, None, "test payload", excludes_receiver_processing=False
@@ -62,8 +61,8 @@ def every_path_free():
     that one and leaves the rest on the shared free channel.
     """
     names = []
-    for path in transfer_records.LinkPath:
-        names.append(path.value)
+    for path in transfer_records.LEGACY_PATHS:
+        names.append(path)
     return dict.fromkeys(names, FREE_PATH)
 
 
@@ -139,9 +138,9 @@ def test_counters_reconcile_with_the_transfer_list():
     first_round = round_attribution(1)
     second_round = round_attribution(2)
     third_round = round_attribution(3)
-    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, first_round)
-    run.send(PATH.CONTROLLER_TO_WEAK_BUFFER, 4, 0, second_round)
-    run.send(PATH.QPU_TO_CONTROLLER, None, 0, third_round)
+    run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, first_round)
+    run.send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, 4, 0, second_round)
+    run.send(transfer_records.QPU_TO_CONTROLLER, None, 0, third_round)
     run.engine.run()
     snapshot = run.ledger.snapshot()
     counters_by_path = {path.path: path.counters for path in snapshot.paths}
@@ -162,8 +161,10 @@ def test_counters_reconcile_with_the_transfer_list():
         propagation_ticks=900,
         queue_wait_ticks=0,
     )
-    on_qpu_path = counters_by_path[PATH.QPU_TO_CONTROLLER]
-    on_weak_buffer_path = counters_by_path[PATH.CONTROLLER_TO_WEAK_BUFFER]
+    on_qpu_path = counters_by_path[transfer_records.QPU_TO_CONTROLLER]
+    on_weak_buffer_path = counters_by_path[
+        transfer_records.CONTROLLER_TO_WEAK_BUFFER
+    ]
     assert on_qpu_path.plus(on_weak_buffer_path) == shared_channel.counters
 
 
@@ -178,9 +179,9 @@ def test_readout_bindings_reconcile_once_per_shared_channel() -> None:
     right = transfer_records.TransferAttribution.for_round(
         OPERATION_ID, (2,), 2
     )
-    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, joint_attribution)
-    run.send(PATH.QPU_TO_CONTROLLER, 3, 0, left)
-    run.send(PATH.QPU_TO_CONTROLLER, 5, 0, right)
+    run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, joint_attribution)
+    run.send(transfer_records.QPU_TO_CONTROLLER, 3, 0, left)
+    run.send(transfer_records.QPU_TO_CONTROLLER, 5, 0, right)
     run.engine.run()
 
     report = run.ledger.traffic_json_value()
@@ -211,12 +212,15 @@ def test_the_transfers_are_listed_in_request_order_whatever_delivered_first():
     run = Run(qpu_to_controller=slow, controller_to_weak_buffer=fast)
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, first_round)
-    run.send(PATH.CONTROLLER_TO_WEAK_BUFFER, 8, 1, second_round)
+    run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, first_round)
+    run.send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, 8, 1, second_round)
     run.engine.run()
     snapshot = run.ledger.snapshot()
     paths = [record.path for record in snapshot.transfers]
-    assert paths == [PATH.QPU_TO_CONTROLLER, PATH.CONTROLLER_TO_WEAK_BUFFER]
+    assert paths == [
+        transfer_records.QPU_TO_CONTROLLER,
+        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
+    ]
 
 
 def test_channels_are_aliased_in_the_order_the_paths_first_meet_them():
@@ -258,7 +262,7 @@ def test_a_window_reading_into_the_next_operation_names_each_ones_rounds():
         relation=relation,
         round_keys=((1, 4), (1, 5), (1, 6), (2, 1), (2, 2), (2, 3)),
     )
-    run.send(PATH.WEAK_BUFFER_TO_WEAK_DECODER, 4, 0, attribution)
+    run.send(transfer_records.WEAK_BUFFER_TO_WEAK_DECODER, 4, 0, attribution)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     transfer = report["transfers"][0]
@@ -276,8 +280,12 @@ def test_a_paths_header_bits_and_setup_wait_are_its_transfers_sums():
     run = Run(strong_buffer_to_strong_decoder=bounded)
     first_window = requested_window(3)
     second_window = requested_window(4)
-    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, first_window)
-    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, second_window)
+    run.send(
+        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, first_window
+    )
+    run.send(
+        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, second_window
+    )
     run.engine.run()
     report = run.ledger.traffic_json_value()
     semantic_edge = edge_of(report, "strong_buffer_to_strong_decoder")
@@ -296,9 +304,9 @@ def test_the_ledger_sums_the_queue_wait_per_transfer_and_per_channel():
     first_round = round_attribution(1)
     second_round = round_attribution(2)
     third_round = round_attribution(3)
-    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, first_round)
-    run.send(PATH.CONTROLLER_TO_WEAK_BUFFER, 8, 0, second_round)
-    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, third_round)
+    run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, first_round)
+    run.send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, 8, 0, second_round)
+    run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, third_round)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     transfers = report["transfers"]

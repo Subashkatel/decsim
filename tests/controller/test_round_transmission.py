@@ -42,7 +42,7 @@ CWB_TICKS = config.microseconds_to_ticks(0.25)
 WBD_TICKS = config.microseconds_to_ticks(5.0)
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(7)
-WBD_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+WBD_PATH = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
 ROUND_BITS = 64
 # a pure-delay controller_to_weak_buffer, so a window round publishes
 # one fixed store hop after it is sent
@@ -177,7 +177,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     transfers.link = links
     store_output = round_output.SyndromeBufferOutput(
         engine,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
     )
     store_output.transfers = transfers

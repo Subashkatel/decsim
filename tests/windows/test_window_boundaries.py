@@ -12,6 +12,7 @@ import types
 
 import pytest
 
+import decsim.build.routes as routes_build
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
@@ -23,6 +24,13 @@ import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.round_retention as round_retention
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
+
+# the legacy pools joined by their edge, so a strong window can pin a
+# face; the planner's windows on the weak pool
+_EDGE = routes_build.legacy_edge("direct")
+_ROUTES = routes_build.generated(
+    routes_build.LEGACY_POOL_HOPS, (_EDGE,), window_records.WEAK_POOL_ID
+)
 
 
 class _EagerPolicy:
@@ -80,7 +88,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     )
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
-    courier = window_boundaries.BoundaryCourier(window_records.WEAK_POOL_ID)
+    courier = window_boundaries.BoundaryCourier(_ROUTES)
     courier.planner = planner
     courier.transfers = transfers
     courier.retention = _retention_of(20)
@@ -219,7 +227,7 @@ def _pinned_courier():
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
     recording = _RecordingTransfers(transfers)
-    courier = window_boundaries.BoundaryCourier(window_records.WEAK_POOL_ID)
+    courier = window_boundaries.BoundaryCourier(_ROUTES)
     courier.planner = planner
     courier.transfers = recording
     courier.retention = _retention_of(6)
@@ -338,8 +346,8 @@ def test_a_weak_commit_reaches_a_strong_window_over_the_cable():
     pin_ticks = courier.windows.ticks[1] - pinned_ticks
     cable_ticks = _reference_latency_ticks("weak_decoder_to_strong_decoder")
     assert pin_ticks >= cable_ticks
-    assert hand_on_path is transfer_records.LinkPath.DECODER_TO_DECODER
-    assert pin_path is transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
+    assert hand_on_path is transfer_records.DECODER_TO_DECODER
+    assert pin_path is transfer_records.WEAK_DECODER_TO_STRONG_DECODER
 
 
 def test_a_strong_commit_reaches_the_weak_window_after_it_over_the_cable():
@@ -361,7 +369,7 @@ def test_a_strong_commit_reaches_the_weak_window_after_it_over_the_cable():
     path, _attribution, payload_bits = recording.boundary_sends[0]
     cable_ticks = _reference_latency_ticks("strong_decoder_to_weak_decoder")
     assert courier.windows.ticks[0] >= cable_ticks
-    assert path is transfer_records.LinkPath.STRONG_DECODER_TO_WEAK_DECODER
+    assert path == transfer_records.STRONG_DECODER_TO_WEAK_DECODER
     assert payload_bits == 8 + window_records.REQUEST_KEY_WIRE_BITS
 
 
@@ -392,7 +400,7 @@ def test_a_strong_commit_reaches_a_strong_window_in_the_hosts_memory():
     )
     engine.run()
     path, _attribution, payload_bits = recording.boundary_sends[1]
-    assert path is transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
+    assert path == transfer_records.STRONG_BUFFER_TO_STRONG_DECODER
     assert payload_bits == 8
 
 

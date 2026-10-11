@@ -228,7 +228,7 @@ class TraceWriter:
     ) -> None:
         """One move, from the wire's send to the receiver's delivery."""
         transfer = record.transfer
-        thread = record.path.value
+        thread = record.path
         attribution = record.attribution
         args = {
             "bits": transfer.payload_bits,

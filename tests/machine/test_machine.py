@@ -2407,7 +2407,7 @@ def test_every_measured_bit_crosses_the_link_exactly_once(recorded_memory):
     circuit, measurements, _detectors, _observables = recorded_memory
     machine, _result = replayed_run(circuit, measurements, 0)
     traffic = machine.observation.traffic.snapshot()
-    upward = transfer_records.LinkPath.QPU_TO_CONTROLLER
+    upward = transfer_records.QPU_TO_CONTROLLER
 
     bits_by_round = bits_by_round_on(traffic.transfers, upward)
 
@@ -2656,9 +2656,9 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     they formed, eight per round.
     """
     machine = base_run(machines.weak_baseline)
-    store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
-    readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
-    room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+    store_hop = transfer_records.CONTROLLER_TO_WEAK_BUFFER
+    readout_hop = transfer_records.QPU_TO_CONTROLLER
+    room_hop = transfer_records.CONTROLLER_TO_STRONG_BUFFER
 
     events = BASE_ROUND_COUNT * CHECK_COUNT
     outcomes = events + DATA_QUBIT_COUNT
@@ -2677,9 +2677,9 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     sees none of them.
     """
     machine = base_run(machines.strong_baseline)
-    store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
-    readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
-    room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+    store_hop = transfer_records.CONTROLLER_TO_WEAK_BUFFER
+    readout_hop = transfer_records.QPU_TO_CONTROLLER
+    room_hop = transfer_records.CONTROLLER_TO_STRONG_BUFFER
 
     events = BASE_ROUND_COUNT * CHECK_COUNT
     outcomes = events + DATA_QUBIT_COUNT
@@ -3876,14 +3876,12 @@ def _zero_delay_links(
     links: link_settings.FabricSettings,
 ) -> link_settings.FabricSettings:
     paths_by_name = {}
-    for path in transfer_records.LinkPath:
+    for path in transfer_records.LEGACY_PATHS:
         settings = links.path_settings(path)
         channel = dataclasses.replace(
             settings.channel, propagation_latency_ticks=0, capacity=None
         )
-        paths_by_name[path.value] = dataclasses.replace(
-            settings, channel=channel
-        )
+        paths_by_name[path] = dataclasses.replace(settings, channel=channel)
     return dataclasses.replace(links, **paths_by_name)
 
 

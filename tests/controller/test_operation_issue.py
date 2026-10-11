@@ -91,7 +91,7 @@ def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
     issuer.issue_operation(operation, on_started)
     issued_before_the_pulse = list(qpu.issued)
     to_qpu = issuer.output.link.expected_delay_ticks(
-        transfer_records.LinkPath.CONTROLLER_TO_QPU, None, PULSE_TICKS
+        transfer_records.CONTROLLER_TO_QPU, None, PULSE_TICKS
     )
     engine.run()
 

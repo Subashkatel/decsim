@@ -16,8 +16,8 @@ import statistics
 from typing import Any, Optional, Union
 
 import decsim.build.decoders as decoders_part
+import decsim.build.routes as routes_build
 import decsim.config as config_module
-import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
@@ -29,6 +29,7 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
+import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
@@ -169,11 +170,9 @@ STRONG_POOL_PATH = decoders_part.STRONG_PATH
 # which store's output link carries a tier's window in, keyed by the tier
 # whose decode the frame committed rather than by the row's name
 INPUT_LINK_BY_TIER = {
-    window_records.WEAK_POOL_ID: (
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
-    ),
+    window_records.WEAK_POOL_ID: (transfer_records.WEAK_BUFFER_TO_WEAK_DECODER),
     window_records.STRONG_POOL_ID: (
-        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
+        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER
     ),
 }
 
@@ -471,16 +470,17 @@ def link_delay_by_window(transfers: list) -> dict:
     return delay
 
 
-def answer_send_ticks(transfers: list) -> dict:
+def answer_send_ticks(transfers: list, answer_hops: dict) -> dict:
     """The tick each window's answer first left for the frame, by window.
 
-    An answer rides every hop of its route (decoders/decoder_output.py
-    ANSWER_NAME_BITS_BY_PATH names them all), so its way home starts at
-    the earliest of those sends, whichever route it took.
+    An answer rides every hop of its route (records/routes.py
+    Routes.name_bits_by_answer_hop names them all), so its way home
+    starts at the earliest of those sends, whichever route it took. A
+    boundary may share a hop with an answer, and is no answer.
     """
     send = {}
     for row in transfers:
-        if row["path"] not in decoder_output.ANSWER_NAME_BITS_BY_PATH:
+        if row["path"] not in answer_hops or _is_boundary(row):
             continue
         attribution = row["attribution"]
         operation_id = identity_records.stable_identity_from_json(
@@ -776,6 +776,7 @@ def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     observation_settings: observe_settings.ObservationSettings,
+    routes: route_records.Routes,
 ) -> tuple:
     """Every recorded point's microsecond samples, and each window's tier.
 
@@ -788,7 +789,8 @@ def collect_samples(
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
-    answer_send = answer_send_ticks(transfers)
+    answer_hops = routes.name_bits_by_answer_hop
+    answer_send = answer_send_ticks(transfers, answer_hops)
     input_hop = input_hop_by_request(transfers)
     qpu_send = qpu_send_ticks(transfers)
     samples = {}
@@ -815,7 +817,7 @@ def collect_samples(
         decode = _committed_decode(stages, frame_record)
         first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
         input_link = INPUT_LINK_BY_TIER[decode.tier]
-        input_path = input_link.value
+        input_path = input_link
         stage_us = _stage_microseconds(stages, frame_record)
         window_samples = window_points_us(
             window,
@@ -1074,8 +1076,11 @@ def _measurement(
     owner_rounds = rounds_by_owner.values()
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
+    routes = routes_build.legacy_routes(
+        settings.window_tier, settings.switching
+    )
     samples, window_tiers = collect_samples(
-        observation, result, settings.observation
+        observation, result, settings.observation, routes
     )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)

@@ -25,10 +25,10 @@ import decsim.topology.fabrics as fabrics
 
 # the four hops a strong-node card prices as a cable or chassis crossing
 STRONG_NODE_CROSSINGS = (
-    transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER,
-    transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
-    transfer_records.LinkPath.STRONG_DECODER_TO_FRAME,
-    transfer_records.LinkPath.STRONG_DECODER_TO_WEAK_DECODER,
+    transfer_records.CONTROLLER_TO_STRONG_BUFFER,
+    transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
+    transfer_records.STRONG_DECODER_TO_FRAME,
+    transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
 )
 # The hops the measured RoCE v2 rows reprice: the write into the strong
 # syndrome buffer, the escalation, the strong window's input, and the
@@ -77,36 +77,36 @@ DISTANCE_5_GEOMETRY = dict(
 
 def latencies_of(profile):
     latencies = {}
-    for path in transfer_records.LinkPath:
+    for path in transfer_records.LEGACY_PATHS:
         path_settings = profile.path_settings(path)
         channel = path_settings.channel
-        latencies[path.value] = channel.propagation_latency_ticks
+        latencies[path] = channel.propagation_latency_ticks
     return latencies
 
 
 def capacities_of(profile):
     capacities = {}
-    for path in transfer_records.LinkPath:
+    for path in transfer_records.LEGACY_PATHS:
         path_settings = profile.path_settings(path)
         capacity = path_settings.channel.capacity
         rate = capacity.input_bits_per_microsecond
-        capacities[path.value] = rate
+        capacities[path] = rate
     return capacities
 
 
 def sources_of(profile):
     """The configuration source of each path's channel, by path name."""
     sources = {}
-    for path in transfer_records.LinkPath:
+    for path in transfer_records.LEGACY_PATHS:
         path_settings = profile.path_settings(path)
-        sources[path.value] = path_settings.channel.configuration_source
+        sources[path] = path_settings.channel.configuration_source
     return sources
 
 
 def payload_sources_of(profile) -> list:
     """Every payload source string one card states, path by path."""
     sources = []
-    for path in transfer_records.LinkPath:
+    for path in transfer_records.LEGACY_PATHS:
         path_settings = profile.path_settings(path)
         _add_payload_sources(path_settings, sources)
     return sources
@@ -126,11 +126,11 @@ def names_by_class() -> dict:
 def paths_outside_the_strong_side(profile) -> dict:
     """What every hop but the five strong-side ones is priced at."""
     priced = {}
-    for path in transfer_records.LinkPath:
-        if path.value in STRONG_SIDE_PATHS:
+    for path in transfer_records.LEGACY_PATHS:
+        if path in STRONG_SIDE_PATHS:
             continue
         path_settings = profile.path_settings(path)
-        priced[path.value] = _priced(path_settings)
+        priced[path] = _priced(path_settings)
     return priced
 
 

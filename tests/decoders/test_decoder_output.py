@@ -15,6 +15,7 @@ import numpy
 import pytest
 import scipy.sparse
 
+import decsim.build.routes as routes_build
 import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.engine as engine_module
@@ -22,6 +23,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
@@ -120,6 +122,14 @@ def _operation(patch_count: int) -> program_records.Operation:
     return program_records.Operation(4, "logical", (0,), patches=patches)
 
 
+def _routes(answer_route: str = "direct") -> route_records.Routes:
+    """The legacy pools joined by their edge, its answers on answer_route."""
+    edge = routes_build.legacy_edge(answer_route)
+    return routes_build.generated(
+        routes_build.LEGACY_POOL_HOPS, (edge,), window_records.WEAK_POOL_ID
+    )
+
+
 def _request_key(tier) -> window_records.DecoderRequestKey:
     return window_records.DecoderRequestKey(4, 1, tier, 0)
 
@@ -128,7 +138,8 @@ def _published_bits(tier, logical_observables: tuple) -> int:
     """The bits one answer of that tier puts on its output link."""
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
-    output = decoder_output_module.DecoderOutput(engine)
+    routes = _routes()
+    output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
     result = decoding_records.DecodeResult(
         4, 1, logical_observables=logical_observables
@@ -149,7 +160,8 @@ def test_each_tier_publishes_over_its_own_output_link():
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
-    output = decoder_output_module.DecoderOutput(engine)
+    routes = _routes()
+    output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
     output.frame = frame
     window = _window()
@@ -162,8 +174,8 @@ def test_each_tier_publishes_over_its_own_output_link():
     engine.run()
     sends = [(path, bits) for path, _key, _tier, bits in transfers.sent]
     assert sends == [
-        (transfer_records.LinkPath.WEAK_DECODER_TO_FRAME, 1),
-        (transfer_records.LinkPath.STRONG_DECODER_TO_FRAME, 64 + 1),
+        (transfer_records.WEAK_DECODER_TO_FRAME, 1),
+        (transfer_records.STRONG_DECODER_TO_FRAME, 64 + 1),
     ]
 
 
@@ -190,9 +202,8 @@ def test_a_strong_answer_through_the_weak_chip_commits_there_then_goes_home():
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
     clock = config.Clock(4)
-    output = decoder_output_module.DecoderOutput(
-        engine, strong_answer_route="through_weak_chip", clock=clock
-    )
+    routes = _routes("through_weak_chip")
+    output = decoder_output_module.DecoderOutput(engine, routes, clock=clock)
     output.transfers = transfers
     output.frame = frame
     committed = []
@@ -204,10 +215,14 @@ def test_a_strong_answer_through_the_weak_chip_commits_there_then_goes_home():
     operation = _operation(1)
     output.publish(window, operation, result, strong_key, on_committed)
     engine.run()
-    paths = transfer_records.LinkPath
     assert transfers.sent == [
-        (paths.STRONG_DECODER_TO_WEAK_DECODER, (4, 1), strong, 64 + 1),
-        (paths.WEAK_DECODER_TO_FRAME, (4, 1), strong, 1),
+        (
+            transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
+            (4, 1),
+            strong,
+            64 + 1,
+        ),
+        (transfer_records.WEAK_DECODER_TO_FRAME, (4, 1), strong, 1),
     ]
     assert transfers.sent_ticks == [0, 8]
     assert frame.commits == [(12, (4, 1), (1,))]
@@ -218,14 +233,13 @@ def _selection_bits(route: str, weak_job) -> int:
     """The bits one selection puts on the escalation hop under a route."""
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
-    output = decoder_output_module.DecoderOutput(
-        engine, strong_answer_route=route
-    )
+    routes = _routes(route)
+    output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
     strong_key = _request_key(window_records.STRONG_POOL_ID)
     output.send_selection(weak_job, strong_key, _ignore)
     ((path, _label, _tier, payload_bits),) = transfers.sent
-    assert path is transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER
+    assert path == transfer_records.WEAK_DECODER_TO_STRONG_DECODER
     return payload_bits
 
 
@@ -315,7 +329,8 @@ def test_the_frames_write_gates_the_commit_and_a_frameless_run_does_not():
     engine = engine_module.Engine()
     transfers = _Transfers(engine, 4)
     frame = _Frame(engine, 3)
-    output = decoder_output_module.DecoderOutput(engine)
+    routes = _routes()
+    output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
     output.frame = frame
     committed = []
@@ -328,7 +343,8 @@ def test_the_frames_write_gates_the_commit_and_a_frameless_run_does_not():
     engine.run()
     assert frame.commits == [(4, (4, 1), (1,))]
     assert committed == [7]
-    frameless = decoder_output_module.DecoderOutput(engine)
+    routes = _routes()
+    frameless = decoder_output_module.DecoderOutput(engine, routes)
     frameless.transfers = transfers
     later = []
     on_later = functools.partial(_note, later, engine)
@@ -370,7 +386,8 @@ def test_an_escalated_region_leaves_when_its_weak_store_read_ends(read_ticks):
     engine = engine_module.Engine()
     engine.now = 100
     transfers = _RegionTransfers(engine)
-    output = decoder_output_module.DecoderOutput(engine)
+    routes = _routes()
+    output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
     output.weak_store = _WeakStore(engine, read_ticks)
     output.link = _Link()
@@ -388,7 +405,8 @@ def test_a_region_that_waits_on_its_read_is_priced_as_its_message():
     """The link is asked about the name and the rounds, from the read's end."""
     engine = engine_module.Engine()
     engine.now = 100
-    output = decoder_output_module.DecoderOutput(engine)
+    routes = _routes()
+    output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = _RegionTransfers(engine)
     output.weak_store = _WeakStore(engine, 30)
     output.link = _Link()

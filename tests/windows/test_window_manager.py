@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+import decsim.build.routes as routes_build
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
@@ -35,6 +36,9 @@ import tests.declared_run as declared_run
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
+
+# the legacy pools, no edge, the planner's windows on the weak pool
+_ROUTES = routes_build.legacy_routes(window_records.WEAK_POOL_ID, None)
 
 
 def _weak_run():
@@ -118,7 +122,7 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     )
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
-    courier = window_boundaries.BoundaryCourier(window_records.WEAK_POOL_ID)
+    courier = window_boundaries.BoundaryCourier(_ROUTES)
     courier.planner = manager.planner
     courier.interaction = manager.window_interaction
     manager.courier = courier

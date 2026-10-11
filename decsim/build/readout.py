@@ -311,7 +311,7 @@ def _weak_store(
     store = store_settings.build(engine)
     output = round_output.SyndromeBufferOutput(
         engine,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
         slot.reads_in_place,
         "weak_decoder",
@@ -329,7 +329,7 @@ def _strong_store(
     store = slot.settings.build(engine)
     output = round_output.SyndromeBufferOutput(
         engine,
-        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
+        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER,
         "strong syndrome buffer",
         slot.reads_in_place,
         "strong_decoder",
@@ -351,7 +351,7 @@ def _landing_path(
     """
     if weak_store_slot is not None or strong_store_slot is None:
         return None
-    return transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+    return transfer_records.CONTROLLER_TO_STRONG_BUFFER
 
 
 def _check_strong_store_charges_nothing(slot: Optional[StoreSlot]) -> None:

@@ -164,7 +164,7 @@ class DataMovement:
         if transfer.payload_bits is not None:
             bits += transfer.payload_bits
         rounds = len(record.attribution.round_keys)
-        path = record.path.value
+        path = record.path
         memory_class = memory_class_of_link_path(path)
         self._add(self.moves, path, bits, rounds, memory_class)
 

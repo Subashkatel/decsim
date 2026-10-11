@@ -75,11 +75,32 @@ def switching_windows(
 
     A strong recovery reads past the last window's commit, so the tail is
     lookahead. The boundary row is the record the strong window gives
-    (ports.StrongWindowBoundaries).
+    (ports.StrongWindowBoundaries); a row the windows set themselves,
+    off the default, that differs from it is refused rather than
+    overwritten.
     """
     boundary_policy = strong_window.boundary_policy
+    _refuse_a_conflicting_boundary_row(windows, boundary_policy)
     return dataclasses.replace(
         windows, terminal_policy="lookahead", boundary_policy=boundary_policy
+    )
+
+
+def _refuse_a_conflicting_boundary_row(
+    windows: WindowSettings, boundary_policy: ports.BoundaryPolicySettings
+) -> None:
+    """The windows' own boundary row is the default or the strong window's."""
+    default_windows = WindowSettings()
+    set_row = windows.boundary_policy
+    if set_row == default_windows.boundary_policy:
+        return
+    if set_row == boundary_policy:
+        return
+    raise ValueError(
+        f"windows.boundary_policy {set_row} conflicts with the strong "
+        f"window, which ships boundaries by {boundary_policy}; leave "
+        "windows.boundary_policy at its default or set the strong "
+        "window's"
     )
 
 

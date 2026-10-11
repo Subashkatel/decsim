@@ -7,25 +7,32 @@ it builds no job; the window side plans and submits the strong
 re-decode, and the decoder manager owns the units and cancellation.
 """
 
+from typing import Optional
+
+import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
 
 class Switching:
-    """Weak decoder first; escalate to a strong decoder on low confidence.
+    """Weak decoder first; escalate to a strong decoder on the verdict.
 
-    A result without a soft output escalates. run_both_at_once starts a
-    speculative strong decode with the weak job and cancels it on
-    confidence (Step 1); otherwise the strong re-decode starts at the
-    verdict, after the weak_decoder_to_strong_decoder hop. check_plan
-    refuses, once at build, a run shape the escalation cannot serve.
+    verdict keeps or escalates each weak result (verdicts.py), by
+    default on its gap against the threshold, where a result without a
+    soft output escalates. run_both_at_once starts a speculative strong
+    decode with the weak job and cancels it on a keep (Step 1);
+    otherwise the strong re-decode starts at the verdict, after the
+    weak_decoder_to_strong_decoder hop. check_plan refuses, once at
+    build, a run shape the escalation cannot serve.
     """
 
     def __init__(
         self,
         threshold: ports.ThresholdSource,
         run_both_at_once: bool = False,
+        verdict: Optional[ports.EscalationVerdict] = None,
+        reads_threshold: bool = True,
     ) -> None:
         if run_both_at_once and threshold.audits_by_escalating:
             raise ValueError(
@@ -33,8 +40,17 @@ class Switching:
                 "run_both_at_once: the strong decoder already runs "
                 "for every window, so there is nothing to audit"
             )
+        if not reads_threshold and threshold.audits_by_escalating:
+            raise ValueError(
+                "online threshold calibration learns from the windows the "
+                "gap escalates, and switching.verdict reads no threshold; "
+                "use a fixed threshold or the gap_threshold verdict"
+            )
+        if verdict is None:
+            verdict = verdicts.GapThreshold()
         self.threshold = threshold
         self.run_both_at_once = run_both_at_once
+        self.verdict = verdict
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
@@ -63,18 +79,12 @@ class Switching:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> decoding_records.Verdict:
-        """Keep a confident weak result; otherwise escalate its window.
+        """The verdict row's decision on one weak result.
 
         The decision is made exactly once per window, since an online
         source learns from every call.
         """
-        soft_output = result.soft_output
-        if soft_output is None:
-            return decoding_records.Verdict.ESCALATE
-        if self.threshold.decide_keep(job, result):
-            # a kept result cancels the speculative strong decode
-            return decoding_records.Verdict.KEEP
-        return decoding_records.Verdict.ESCALATE
+        return self.verdict.decide(job, result, self.threshold)
 
     def learn_from_strong_result(
         self, window_key: tuple, result: decoding_records.DecodeResult

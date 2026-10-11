@@ -86,6 +86,8 @@ class WindowCommitter:
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
         self.trace = _TraceSources()
+        # each window's revisions while it is not final, oldest first
+        self.revisions_by_window: dict = {}
 
     def commit_revision(
         self,
@@ -95,23 +97,33 @@ class WindowCommitter:
     ) -> None:
         """Commit the first revision, or replace the window's with a later one.
 
-        A later final revision goes home and finalizes the window; a
-        later provisional one replaces the prediction and waits for the
-        next edge's answer.
+        A later revision follows the replace rule of the edge it came
+        over (revision_rules.py): a final one sends home the revision
+        the rule picks, which finalizes the window; a provisional one
+        replaces the prediction or waits, as the rule says.
         """
         window = revision.window
-        operation = revision.operation
-        result = revision.result
-        request_key = revision.request_key
+        earlier = self._kept_revisions(revision, is_final)
         if revision.is_first:
             self.commit_or_publish(
-                window, operation, result, request_key, is_final, on_result_read
+                window,
+                revision.operation,
+                revision.result,
+                revision.request_key,
+                is_final,
+                on_result_read,
             )
             return
-        if is_final:
-            self.publish_strong(window, operation, result, request_key)
+        edge = self.edges.entering(revision.request_key.pool)
+        replace_rule = edge.rules.replace
+        if not is_final:
+            replace_rule.on_provisional(self, revision)
             return
-        self.replace_provisionally(window, result)
+        chosen = replace_rule.final_revision(earlier, revision)
+        result = _final_result(chosen)
+        self.publish_strong(
+            window, revision.operation, result, revision.request_key
+        )
 
     def commit_or_publish(
         self,
@@ -164,10 +176,10 @@ class WindowCommitter:
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
     ) -> None:
-        """Send the strong result home; it finalizes the window on landing.
+        """Send the final result home; it finalizes the window on landing.
 
-        What the weak decode committed of the faults behind the window
-        joins the result before it leaves, so the frame and the
+        The result carries what the weak decode committed of the faults
+        behind the window (_final_result), so the frame and the
         prediction receive the same bits. The answer's route prices
         where that join happens (records/routes.py
         ANSWER_ROUTE_NAMES). A boundary held for the window leaves
@@ -175,7 +187,6 @@ class WindowCommitter:
         does (commit_or_publish), and not after the answer reaches the
         frame.
         """
-        result = _with_the_crossing_commit(window, result)
         self.courier.ship_held(window, result, request_key)
         finish = functools.partial(
             self.finish_strong, window, operation, result, request_key
@@ -264,6 +275,14 @@ class WindowCommitter:
         window.published_request_key = request_key
         self.results.release_committed_segments(operation.id)
         self.results.deliver_if_final(operation)
+
+    def _kept_revisions(self, revision: Revision, is_final: bool) -> tuple:
+        """The window's earlier revisions; this one kept unless it is final."""
+        window_key = revision.window.key
+        earlier = self.revisions_by_window.pop(window_key, ())
+        if not is_final:
+            self.revisions_by_window[window_key] = (*earlier, revision)
+        return earlier
 
     def _release_held_strong_windows(self, window_key: tuple) -> None:
         """The weak boundary is handed on: a strong window held on it leaves."""
@@ -380,7 +399,8 @@ class WindowVerdict:
         if not is_final:
             edge.escalate(job)
         elif edge is not None:
-            edge.cancel_strong_request(revision.window.key)
+            cancel_rule = edge.rules.cancel
+            cancel_rule.on_keep(edge, revision.window.key)
         queue = self._queue_of(job.request_key.pool)
         queue.resolve_weak_request(job, result, verdict)
         read_result = functools.partial(queue.read_result, job)
@@ -440,6 +460,18 @@ def _value_of(member: Optional[enum.Enum]) -> Optional[str]:
     if member is None:
         return None
     return member.value
+
+
+def _final_result(revision: Revision) -> decoding_records.DecodeResult:
+    """A revision's result as the frame takes it.
+
+    A later revision's decode owns only its region, so the weak commit
+    of the faults behind the window joins it; the first revision's
+    result holds that commit already.
+    """
+    if revision.is_first:
+        return revision.result
+    return _with_the_crossing_commit(revision.window, revision.result)
 
 
 def _with_the_crossing_commit(

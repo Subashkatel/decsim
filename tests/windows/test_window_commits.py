@@ -19,6 +19,7 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
 
@@ -149,6 +150,7 @@ class _Fixture:
             escalate=self.escalated.append,
             submit_if_commit_releases=self.after_weak.append,
             cancel_strong_request=self.kept.append,
+            rules=revision_rules.DEFAULT_RULES,
         )
         edge = (self.escalation,)
         edges = escalate_edges.EscalateEdges(edge)

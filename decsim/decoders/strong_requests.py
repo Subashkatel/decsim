@@ -74,11 +74,13 @@ class StrongCounts:
     """The run's tally of strong results.
 
     needed counts every strong result asked for; cancelled counts each
-    one cancelled.
+    one cancelled; abandoned each one let run out and dropped at its end
+    (revision_rules.NoCancel).
     """
 
     needed: int = 0
     cancelled: int = 0
+    abandoned: int = 0
 
 
 class StrongPhase(enum.Enum):
@@ -131,6 +133,8 @@ class StrongRequests:
             target_by_source = LEGACY_TARGET_BY_SOURCE
         self.target_by_source = target_by_source
         self.by_window: dict[tuple, WindowRequests] = {}
+        # the live requests let run out, whose results are dropped
+        self.abandoned_request_keys: set = set()
         self.counts = StrongCounts()
         kinds = decoding_records.DecodeJobKind
         self.admit_by_job_kind = {
@@ -277,6 +281,27 @@ class StrongRequests:
         record.live = None
         self._drop_if_empty(key)
         return live
+
+    def abandon(self, window_key: tuple, pool: window_records.PoolId) -> None:
+        """The destination's live request on pool runs out, unwanted.
+
+        Its decode goes on, and its result is dropped when it ends
+        (drop_abandoned).
+        """
+        live = self.live(window_key, pool)
+        if live is None:
+            return
+        request_key = live.request_job.request_key
+        self.abandoned_request_keys.add(request_key)
+
+    def drop_abandoned(self, completion: StrongCompletion) -> bool:
+        """Whether a finished result is an abandoned request's, dropped now."""
+        request_key = completion.request_job.request_key
+        if request_key not in self.abandoned_request_keys:
+            return False
+        self.abandoned_request_keys.discard(request_key)
+        self.counts.abandoned += 1
+        return True
 
     def has_survivors(self, service_job: decoding_records.DecodeJob) -> bool:
         """Whether any request the decode serves is still live."""

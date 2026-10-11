@@ -27,6 +27,7 @@ import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.escalation.verdicts as verdicts
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -612,3 +613,12 @@ def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
         policy.verdict_for_weak_result(job, well_above)
         is decoding_records.Verdict.KEEP
     )
+
+
+def test_an_online_source_under_a_verdict_that_reads_no_threshold_is_refused():
+    """It learns from the windows the gap escalates; status escalates none."""
+    online = _always_auditing_online_threshold(threshold=2.0)
+    status = verdicts.Status()
+
+    with pytest.raises(ValueError, match="reads no threshold"):
+        policies.Switching(online, False, status, reads_threshold=False)

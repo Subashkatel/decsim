@@ -832,6 +832,9 @@ class EscalateEdge(Protocol):
     costs: Any
     # the target pool's manager
     decode_queue: "DecodeQueue"
+    # which of a window's revisions the frame takes, and what a keep
+    # does to the target's decode (windows/revision_rules.py EdgeRules)
+    rules: Any
 
     def parallel_strong_submission(
         self, weak_job: decoding_records.DecodeJob
@@ -855,6 +858,12 @@ class EscalateEdge(Protocol):
 
     def cancel_strong_request(self, window_key: tuple) -> None:
         """A kept source result: its target request ends, held or submitted."""
+
+    def abandon_strong_request(self, window_key: tuple) -> None:
+        """A kept source result: a held request ends, a submitted one runs out.
+
+        The submitted request's result is dropped when its decode ends.
+        """
 
     def submit_if_stored_data_releases(
         self,
@@ -1060,6 +1069,13 @@ class DecodeQueue(Protocol):
 
         Queued, crossing, running, or done and waiting; nothing when none
         is live or done.
+        """
+
+    def abandon_strong(self, window_key: tuple) -> None:
+        """A kept weak result: the window's strong request runs out.
+
+        Its decode runs to its end, and its result is dropped then; one
+        done and waiting is dropped now.
         """
 
     def close_companion_request(
@@ -1873,6 +1889,43 @@ class EscalationPolicy(Protocol):
         decode ends several escalations and is told once, under its
         first window's key.
         """
+
+
+class EscalationVerdict(Protocol):
+    """A verdict row: keep a source result or escalate its window.
+
+    escalation/verdicts.py holds the rows; the policy asks its row once
+    per source result, with the edge's threshold.
+    """
+
+    def decide(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold: "ThresholdSource",
+    ) -> decoding_records.Verdict:
+        """Keep the result as final, or escalate its window."""
+
+
+class ReplaceRule(Protocol):
+    """Which of a window's revisions the frame takes.
+
+    windows/revision_rules.py holds the rows; the committer asks the
+    rule of the edge a later revision came over.
+    """
+
+    def final_revision(self, earlier: tuple, latest: Any) -> Any:
+        """The revision the frame takes, of the earlier ones and the latest."""
+
+    def on_provisional(self, committer: Any, revision: Any) -> None:
+        """A later revision that escalates again: replace, or keep waiting."""
+
+
+class CancelRule(Protocol):
+    """What a keep does to the target's decode of the window."""
+
+    def on_keep(self, edge: EscalateEdge, window_key: tuple) -> None:
+        """End, or let run out, the edge's target decode of the window."""
 
 
 @runtime_checkable

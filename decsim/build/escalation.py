@@ -21,6 +21,7 @@ import decsim.escalation.strong_regions as strong_regions
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 
 if TYPE_CHECKING:
@@ -83,8 +84,9 @@ class Switching:
         shape = settings.strong_window.build(engine)
         pending = pending_strong_windows.PendingStrongWindows()
         costs = _verdict_costs(settings, machine_clock)
+        rules = _edge_rules(settings)
         strong_redecode = strong_redecode_module.StrongRedecode(
-            engine, hops, costs
+            engine, hops, costs, rules
         )
         return cls(
             edge=edge,
@@ -210,6 +212,17 @@ def _verdict_costs(
         threshold_cycles=clocked.threshold_cycles,
         switch_cycles=clocked.switch_cycles,
     )
+
+
+def _edge_rules(
+    settings: escalation_settings.SwitchingSettings,
+) -> revision_rules.EdgeRules:
+    """The edge's replace rule and cancel rule, built from its settings."""
+    replace_rule = settings.replace_rule
+    cancel_rule = settings.cancel_rule
+    replace = replace_rule.build()
+    cancel = cancel_rule.build()
+    return revision_rules.EdgeRules(replace, cancel)
 
 
 def _threshold_source(

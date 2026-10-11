@@ -399,6 +399,42 @@ The facts at_task and for_task read are MachineSettings.task_facts, keyed by thr
 | `for_task(self, facts: Mapping)` | `Optional[ports.ThresholdSource]` |
 | `build(self)` | `ports.ThresholdSource` |
 
+### `VerdictSettings`
+
+`decsim/escalation/settings.py`. A verdict row's settings record (verdicts.py).
+
+reads_threshold says whether the verdict decides on the edge's threshold.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `reads_threshold` | `bool` |
+| `build(self)` | `ports.EscalationVerdict` |
+
+### `ReplaceRuleSettings`
+
+`decsim/escalation/settings.py`. A replace rule's settings record (windows/revision_rules.py).
+
+replaces_provisionally says whether a later revision replaces the prediction before the window is final.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `replaces_provisionally` | `bool` |
+| `build(self)` | `ports.ReplaceRule` |
+
+### `CancelRuleSettings`
+
+`decsim/escalation/settings.py`. A cancel rule's settings record (windows/revision_rules.py).
+
+cancels_on_keep says whether a keep cancels the target's decode.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `cancels_on_keep` | `bool` |
+| `build(self)` | `ports.CancelRule` |
+
 ### `StrongWindowSettings`
 
 `decsim/escalation/settings.py`. A strong window row's settings record (strong_window_shapes.py).
@@ -419,6 +455,8 @@ restart_reread_buffer_regions is the double window's re-read width.
 
 Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier reports (decsim/confidence/), and the build refuses a weak decoder that cannot produce its evidence. threshold is a threshold row (threshold_sources.py); a weak result whose gap is at or above it is kept (the paper uses 20 dB). run_both_at_once is Step 1, the strong decoder started with the weak one and cancelled on confidence; False is the same section's on-demand variant (lines 631-640). strong_window is the shape the strong tier re-decodes (strong_window_shapes.py): redo_window, the default, or double_window, Sec. III C. clock, threshold_cycles and switch_cycles price the verdict's threshold and switch logic; clock None is the machine's clock. The complementary gap's two solves are two jobs of the weak pool, so its unit_count decides whether they overlap.
 
+verdict is the row that keeps or escalates each weak result (verdicts.py), the gap against the threshold by default. replace_rule says which revision the frame takes, and cancel_rule what a keep does to the strong decode already asked for (windows/revision_rules.py).
+
 strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a strong answer reaches the frame. direct, the default: the strong host joins the weak crossing commit, which rides up with the selection, and sends the answer on strong_decoder_to_frame (Toshio 2510.25222 Fig. 1). through_weak_chip: the answer goes down on strong_decoder_to_weak_decoder, the weak chip joins it in one cycle of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892 Table I, the Pauli frame update). A run with no switching sends a strong answer direct.
 
 | Field | Type | Default |
@@ -431,6 +469,9 @@ strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a
 | `run_both_at_once` | `bool` | `False` |
 | `strong_window` | `StrongWindowSettings` | `strong_window_shapes.RedoWindow.Settings()` |
 | `strong_answer_route` | `str` | `'direct'` |
+| `verdict` | `VerdictSettings` | `config.added_field(GAP_THRESHOLD)` |
+| `replace_rule` | `ReplaceRuleSettings` | `config.added_field(LATEST_REVISION)` |
+| `cancel_rule` | `CancelRuleSettings` | `config.added_field(CANCEL_DOWNSTREAM)` |
 
 ### `RedoWindow.Settings`
 
@@ -482,6 +523,22 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | `adjust_factor` | `float` | `2.0` |
 | `min_escalation_rate` | `float` | `1e-05` |
 | `max_escalation_rate` | `float` | `0.3` |
+
+### `GapThreshold.Settings`
+
+`decsim/escalation/verdicts.py`. The gap row, which reads the edge's confidence and threshold.
+
+### `Status.Settings`
+
+`decsim/escalation/verdicts.py`. The status row, which takes no setting.
+
+### `Always.Settings`
+
+`decsim/escalation/verdicts.py`. The always row, which takes no setting.
+
+### `Never.Settings`
+
+`decsim/escalation/verdicts.py`. The never row, which takes no setting.
 
 ## decsim/frontends
 
@@ -889,6 +946,22 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 ### `Held.Settings`
 
 `decsim/windows/boundary_policies.py`. The held row, which takes no setting.
+
+### `LatestRevision.Settings`
+
+`decsim/windows/revision_rules.py`. The latest row, which takes no setting.
+
+### `BestStatus.Settings`
+
+`decsim/windows/revision_rules.py`. The best-status row, which takes no setting.
+
+### `CancelDownstream.Settings`
+
+`decsim/windows/revision_rules.py`. The cancelling row, which takes no setting.
+
+### `NoCancel.Settings`
+
+`decsim/windows/revision_rules.py`. The row that never cancels, which takes no setting.
 
 ### `SchemeSettings`
 

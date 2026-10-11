@@ -121,7 +121,16 @@ class DecodeOutcomes:
         sender keeps a packet until the far side accepts it (gem5
         port.hh:244-255).
         """
-        if not self.manager.strong_requests.complete(completion):
+        strong_requests = self.manager.strong_requests
+        if strong_requests.drop_abandoned(completion):
+            self.trace.request_ended.fire(
+                completion.request_job,
+                completion.result,
+                decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
+                completion.decode_output_ticks,
+            )
+            return
+        if not strong_requests.complete(completion):
             self._hold_at_the_unit(completion)
             return
         request_job = completion.request_job

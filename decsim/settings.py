@@ -112,18 +112,18 @@ class MachineSettings:
         return self.strong_decoder
 
     @property
-    def window_tier(self) -> window_records.DecoderTier:
+    def window_tier(self) -> window_records.PoolId:
         """The tier that decodes the windows: weak if set, else strong."""
         if self.weak_decoder is None and self.strong_decoder is not None:
-            return window_records.DecoderTier.STRONG
-        return window_records.DecoderTier.WEAK
+            return window_records.STRONG_POOL_ID
+        return window_records.WEAK_POOL_ID
 
     @property
     def escalation_kind(self) -> str:
         """The word a trace names these slots' run by."""
         if self.switching is not None:
             return "switching"
-        if self.window_tier is window_records.DecoderTier.STRONG:
+        if self.window_tier == window_records.STRONG_POOL_ID:
             return "strong_only"
         return "weak_baseline"
 

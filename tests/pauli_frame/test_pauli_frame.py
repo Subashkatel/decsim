@@ -10,7 +10,6 @@ is charged from the frame clock's next edge, gem5's clockEdge
 """
 
 import dataclasses
-import enum
 
 import pytest
 
@@ -21,6 +20,7 @@ import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.presets.machines as machines
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
 import decsim.topology.legacy as legacy
@@ -28,14 +28,9 @@ import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
 
 
-class Tier(enum.Enum):
-    WEAK = "weak"
-    STRONG = "strong"
-
-
 @dataclasses.dataclass(frozen=True)
 class RequestKey:
-    tier: Tier
+    pool: window_records.PoolId
     run_sequence: int
 
 
@@ -57,7 +52,13 @@ def frame_with_commit_ticks(commit_ticks):
     return engine, frame
 
 
-def commit(frame, window_key, observables, tier=Tier.WEAK, on_committed=None):
+def commit(
+    frame,
+    window_key,
+    observables,
+    tier=window_records.WEAK_POOL_ID,
+    on_committed=None,
+):
     request_key = RequestKey(tier, run_sequence=window_key[1])
     if on_committed is None:
         on_committed = do_nothing
@@ -116,9 +117,9 @@ def test_a_snapshot_does_not_change_when_the_frame_does():
 
 def test_a_second_correction_for_a_window_is_refused():
     engine, frame = frame_with_commit_ticks(0)
-    commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)
+    commit(frame, ("stream", 0), (1,), tier=window_records.WEAK_POOL_ID)
     with pytest.raises(RuntimeError, match="already has a weak correction"):
-        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
+        commit(frame, ("stream", 0), (0,), tier=window_records.STRONG_POOL_ID)
     assert frame.frame_for_stream("stream") == (1,)
 
 
@@ -153,7 +154,7 @@ def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
 
     commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
     with pytest.raises(RuntimeError, match="already has a weak correction"):
-        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
+        commit(frame, ("stream", 0), (0,), tier=window_records.STRONG_POOL_ID)
     engine.run()
     assert continued == [4]
     snapshot = frame.snapshot()

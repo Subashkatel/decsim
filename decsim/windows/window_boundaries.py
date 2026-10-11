@@ -53,7 +53,7 @@ class BoundaryCourier:
     # whether it was the last boundary a shipped window owed
     windows = ports.Port(ports.WindowInput)
 
-    def __init__(self, window_tier: window_records.DecoderTier) -> None:
+    def __init__(self, window_tier: window_records.PoolId) -> None:
         self.window_tier = window_tier
         self.record_by_window: dict = {}
 
@@ -280,8 +280,8 @@ class BoundaryCourier:
         seam_bits = self.interaction.boundary_payload_bits(
             boundary, destination_info, source_info
         )
-        source_tier = record.committed_request_key.tier
-        route = _boundary_route(source_tier, window_records.DecoderTier.STRONG)
+        source_tier = record.committed_request_key.pool
+        route = _boundary_route(source_tier, window_records.STRONG_POOL_ID)
         payload_bits = _wire_bits(seam_bits, route)
         delivered = functools.partial(self._pin_delivered, destination)
         self.transfers.send_boundary(
@@ -432,7 +432,7 @@ class BoundaryCourier:
             delivery_version,
         )
         seam_bits = self._boundary_bits(boundary, window.key, dependent_key)
-        route = _boundary_route(source_request_key.tier, self.window_tier)
+        route = _boundary_route(source_request_key.pool, self.window_tier)
         payload_bits = _wire_bits(seam_bits, route)
         self.transfers.send_boundary(
             route.path, attribution, payload_bits, receive
@@ -577,8 +577,8 @@ class _BoundaryRecord:
 
 
 def _boundary_route(
-    source_tier: window_records.DecoderTier,
-    destination_tier: window_records.DecoderTier,
+    source_tier: window_records.PoolId,
+    destination_tier: window_records.PoolId,
 ) -> "_BoundaryRoute":
     return _BOUNDARY_ROUTES[source_tier, destination_tier]
 
@@ -611,24 +611,24 @@ class _BoundaryRoute:
 # Two strong decodes meet in the host's own memory, the read the strong
 # window's input takes, which crosses no wire that needs a name.
 _BOUNDARY_ROUTES = {
-    (window_records.DecoderTier.WEAK, window_records.DecoderTier.WEAK): (
+    (window_records.WEAK_POOL_ID, window_records.WEAK_POOL_ID): (
         _BoundaryRoute(
             path=transfer_records.LinkPath.DECODER_TO_DECODER, name_bits=0
         )
     ),
-    (window_records.DecoderTier.WEAK, window_records.DecoderTier.STRONG): (
+    (window_records.WEAK_POOL_ID, window_records.STRONG_POOL_ID): (
         _BoundaryRoute(
             path=transfer_records.LinkPath.WEAK_DECODER_TO_STRONG_DECODER,
             name_bits=window_records.REQUEST_KEY_WIRE_BITS,
         )
     ),
-    (window_records.DecoderTier.STRONG, window_records.DecoderTier.WEAK): (
+    (window_records.STRONG_POOL_ID, window_records.WEAK_POOL_ID): (
         _BoundaryRoute(
             path=transfer_records.LinkPath.STRONG_DECODER_TO_WEAK_DECODER,
             name_bits=window_records.REQUEST_KEY_WIRE_BITS,
         )
     ),
-    (window_records.DecoderTier.STRONG, window_records.DecoderTier.STRONG): (
+    (window_records.STRONG_POOL_ID, window_records.STRONG_POOL_ID): (
         _BoundaryRoute(
             path=transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER,
             name_bits=0,

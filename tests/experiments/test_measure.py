@@ -2001,9 +2001,9 @@ def lindley_waits_us(requests, stages) -> list:
 
 def strong_requests_by_arrival(requests) -> list:
     """The strong decode requests, in the order they became ready."""
-    strong = window_records.DecoderTier.STRONG
+    strong = window_records.STRONG_POOL_ID
     strong_requests = [
-        request for request in requests if request.request_key.tier is strong
+        request for request in requests if request.request_key.pool == strong
     ]
     return sorted(strong_requests, key=ready_ticks_of)
 
@@ -2078,8 +2078,8 @@ def _strong_residents_waiting(unit) -> int:
 
 def _is_strong_and_waiting(resident) -> bool:
     """A strong decode landed and not started."""
-    strong = window_records.DecoderTier.STRONG
-    if resident.request_key.tier is not strong:
+    strong = window_records.STRONG_POOL_ID
+    if resident.request_key.pool != strong:
         return False
     if resident.service_started:
         return False
@@ -2612,8 +2612,8 @@ def test_the_sample_digest_names_the_draw_and_not_the_decoder():
     assert matching.sample_digest != next_seed.sample_digest
 
 
-WEAK = window_records.DecoderTier.WEAK
-STRONG = window_records.DecoderTier.STRONG
+WEAK = window_records.WEAK_POOL_ID
+STRONG = window_records.STRONG_POOL_ID
 # more windows than any escalation shot here plans, so a set of every
 # index names every window of a tier
 EVERY_WINDOW = range(64)
@@ -2642,7 +2642,7 @@ def crashing_decodes(monkeypatch, crashing: set) -> dict:
     syndromes = {}
 
     def answer(self, job, backend, model, faults, syndrome):
-        key = (job.request_key.tier, job.request_key.window_id)
+        key = (job.request_key.pool, job.request_key.window_id)
         syndromes[key] = syndrome.tolist()
         answers = dict.fromkeys(crashing, no_correction_answer)
         chosen = answers.get(key, real_answer)

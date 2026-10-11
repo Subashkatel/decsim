@@ -60,7 +60,7 @@ class RoundRetention:
         self,
         *,
         is_strong_context_retained: bool,
-        primary_tier: window_records.DecoderTier,
+        primary_tier: window_records.PoolId,
         strong_side_seat: Optional[str] = None,
     ) -> None:
         self.is_strong_context_retained = is_strong_context_retained
@@ -79,7 +79,7 @@ class RoundRetention:
         The weak syndrome buffer, or the strong one for a strong-primary
         plan.
         """
-        if self.primary_tier is window_records.DecoderTier.STRONG:
+        if self.primary_tier == window_records.STRONG_POOL_ID:
             return self.strong_store
         return self.weak_store
 

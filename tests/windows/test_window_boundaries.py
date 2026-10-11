@@ -80,7 +80,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     )
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
-    courier = window_boundaries.BoundaryCourier(window_records.DecoderTier.WEAK)
+    courier = window_boundaries.BoundaryCourier(window_records.WEAK_POOL_ID)
     courier.planner = planner
     courier.transfers = transfers
     courier.retention = _retention_of(20)
@@ -89,9 +89,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     courier.windows = types.SimpleNamespace(
         accept_boundary=on_boundary_received
     )
-    key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
-    )
+    key = window_records.DecoderRequestKey(1, 0, window_records.WEAK_POOL_ID, 0)
     boundary_v1 = {4: [1, 0, 0]}
     boundary_v2 = {4: [0, 1, 0]}
 
@@ -124,7 +122,7 @@ def _retention_of(round_count: int) -> round_retention.RoundRetention:
     """The retention of operation 1, round_count rounds, then operation 2."""
     retention = round_retention.RoundRetention(
         is_strong_context_retained=False,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
     )
     retention.tracker = types.SimpleNamespace(
         effective_round_count_for_window=lambda _operation_id, _window: (
@@ -221,7 +219,7 @@ def _pinned_courier():
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
     recording = _RecordingTransfers(transfers)
-    courier = window_boundaries.BoundaryCourier(window_records.DecoderTier.WEAK)
+    courier = window_boundaries.BoundaryCourier(window_records.WEAK_POOL_ID)
     courier.planner = planner
     courier.transfers = recording
     courier.retention = _retention_of(6)
@@ -275,7 +273,7 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     """
     engine, operation, source, courier, recording = _pinned_courier()
     request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     # detectors 24 and 26 sit on round 4 positions 0 and 2; detector 17
     # sits on round 3, which is not a row of the strong window
@@ -285,7 +283,7 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
     strong_window = _strong_window_of_the_pin()
     model = _strong_model()
     strong_request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 3
+        1, 1, window_records.STRONG_POOL_ID, 3
     )
     courier.pin_strong_face(
         (1, 0), strong_window, model, operation, strong_request_key
@@ -322,14 +320,14 @@ def test_a_weak_commit_reaches_a_strong_window_over_the_cable():
     """
     engine, operation, source, courier, recording = _pinned_courier()
     weak_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     residual = window_records.DependencyResidual(detector_ids=(24,))
     courier.send(source, operation, residual, source_request_key=weak_key)
     engine.run()
     pinned_ticks = engine.now
     strong_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 3
+        1, 1, window_records.STRONG_POOL_ID, 3
     )
     strong_window = _strong_window_of_the_pin()
     model = _strong_model()
@@ -355,7 +353,7 @@ def test_a_strong_commit_reaches_the_weak_window_after_it_over_the_cable():
     """
     engine, operation, source, courier, recording = _pinned_courier()
     strong_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 2
+        1, 0, window_records.STRONG_POOL_ID, 2
     )
     residual = window_records.DependencyResidual(detector_ids=(24,))
     courier.send(source, operation, residual, source_request_key=strong_key)
@@ -379,13 +377,13 @@ def test_a_strong_commit_reaches_a_strong_window_in_the_hosts_memory():
     # message by its seam
     courier.planner.models.model_by_window[(1, 1)] = _strong_model()
     strong_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 2
+        1, 0, window_records.STRONG_POOL_ID, 2
     )
     residual = window_records.DependencyResidual(detector_ids=(24,))
     courier.send(source, operation, residual, source_request_key=strong_key)
     engine.run()
     next_strong_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 3
+        1, 1, window_records.STRONG_POOL_ID, 3
     )
     strong_window = _strong_window_of_the_pin()
     model = _strong_model()
@@ -410,7 +408,7 @@ def test_a_face_pinned_on_its_own_window_folds_only_the_crossing_commit():
     engine, operation, _source, courier, _recording = _pinned_courier()
     weak_window = courier.planner.windows_by_key[(1, 1)]
     request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 0
+        1, 1, window_records.WEAK_POOL_ID, 0
     )
     # the whole commit flips detectors on rounds 4, 5 and 6; of those,
     # detector 24 comes of a fault that also flips detector 17 on round
@@ -425,7 +423,7 @@ def test_a_face_pinned_on_its_own_window_folds_only_the_crossing_commit():
     strong_window = _strong_window_of_the_pin()
     model = _strong_model()
     strong_request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 3
+        1, 1, window_records.STRONG_POOL_ID, 3
     )
     courier.pin_strong_face(
         (1, 1), strong_window, model, operation, strong_request_key
@@ -440,7 +438,7 @@ def test_a_face_pinned_on_a_window_that_has_not_committed_is_refused():
     strong_window = _strong_window_of_the_pin()
     model = _strong_model()
     strong_request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 3
+        1, 1, window_records.STRONG_POOL_ID, 3
     )
     with pytest.raises(RuntimeError, match="which has not committed"):
         courier.pin_strong_face(

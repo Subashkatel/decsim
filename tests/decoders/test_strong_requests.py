@@ -13,7 +13,7 @@ import decsim.records.windows as window_records
 
 def _request_key(sequence):
     return window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, sequence
+        1, 0, window_records.STRONG_POOL_ID, sequence
     )
 
 
@@ -117,10 +117,10 @@ def test_a_windows_attempt_holds_its_forced_class_requests():
     """
     requests = strong_requests_module.StrongRequests()
     first_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     second_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 1
+        1, 0, window_records.WEAK_POOL_ID, 1
     )
     first = decoding_records.DecodeJob(
         operation_id=1, window_id=0, round_count=3, request_key=first_key
@@ -140,7 +140,7 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     requests = strong_requests_module.StrongRequests()
     first_key = _request_key(1)
     second_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 2
+        1, 1, window_records.STRONG_POOL_ID, 2
     )
     first = _strong_job(first_key, window_key=(1, 0))
     second = decoding_records.DecodeJob(

@@ -240,7 +240,7 @@ def gaps_by_window(requests, weak_tier) -> dict:
     """
     gaps = {}
     for record in requests:
-        if record.request_key.tier is not weak_tier:
+        if record.request_key.pool != weak_tier:
             continue
         if record.soft_output is None:
             continue
@@ -275,14 +275,14 @@ def test_gap_records_decide_the_selected_tier(seed):
         settings.observation, record_switching_windows=True
     )
     settings = dataclasses.replace(settings, observation=observation)
-    weak_tier = window_records.DecoderTier.WEAK
-    strong_tier = window_records.DecoderTier.STRONG
+    weak_tier = window_records.WEAK_POOL_ID
+    strong_tier = window_records.STRONG_POOL_ID
     completed, _result = run_shot(settings, seed)
     requests = completed.observation.decode_records.requests
     gap_by_window = gaps_by_window(requests, weak_tier)
     windows = completed.observation.windows.windows
     selected_tiers = {
-        key: window.published_request_key.tier
+        key: window.published_request_key.pool
         for key, window in windows.items()
     }
     expected_tiers = {

@@ -110,7 +110,7 @@ def request_key_for(window_id):
     return window_records.DecoderRequestKey(
         operation_id=OPERATION_ID,
         window_id=window_id,
-        tier=window_records.DecoderTier.STRONG,
+        pool=window_records.STRONG_POOL_ID,
         run_sequence=0,
     )
 

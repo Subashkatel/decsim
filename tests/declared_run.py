@@ -343,7 +343,7 @@ class EndedRequests:
         """The requests of one tier, in the order they ended."""
         requests = []
         for ended in self.ended:
-            if ended.job.request_key.tier is tier:
+            if ended.job.request_key.pool == tier:
                 requests.append(ended)
         return requests
 

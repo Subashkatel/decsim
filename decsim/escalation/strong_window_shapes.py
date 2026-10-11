@@ -266,7 +266,7 @@ class DoubleWindow(StrongWindowPorts):
         strong_request_key = self.builder.new_request_key(
             weak_job.operation_id,
             weak_job.window_id,
-            window_records.DecoderTier.STRONG,
+            window_records.STRONG_POOL_ID,
         )
         strong_request_created_ticks = self.engine.now
         near_source_key = self.regions.double_window_near_face(key)
@@ -596,7 +596,7 @@ def _held_redo(
     request_key = shape.builder.new_request_key(
         weak_job.operation_id,
         weak_job.window_id,
-        window_records.DecoderTier.STRONG,
+        window_records.STRONG_POOL_ID,
     )
     operation = shape.regions.operation(weak_job.operation_id)
     return _HeldStrongRedo(

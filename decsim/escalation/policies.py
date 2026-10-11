@@ -58,10 +58,10 @@ class Switching:
         del window
         if self.run_both_at_once:
             return (
-                window_records.DecoderTier.WEAK,
-                window_records.DecoderTier.STRONG,
+                window_records.WEAK_POOL_ID,
+                window_records.STRONG_POOL_ID,
             )
-        return (window_records.DecoderTier.WEAK,)
+        return (window_records.WEAK_POOL_ID,)
 
     def verdict_for_weak_result(
         self,

@@ -84,7 +84,7 @@ def request_text(
         return ""
     return (
         f"{request_key.operation_id}:{request_key.window_id}:"
-        f"{request_key.tier.value}:{request_key.run_sequence}"
+        f"{request_key.pool.word}:{request_key.run_sequence}"
     )
 
 

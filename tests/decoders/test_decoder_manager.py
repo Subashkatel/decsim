@@ -122,7 +122,7 @@ def _window_job():
         fragment_index=0,
     )
     request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     return decoding_records.DecodeJob(
         operation_id=1,
@@ -183,7 +183,7 @@ def test_a_withdrawn_window_leaves_the_queue_and_the_ledger():
     waiting.window_id = 1
     waiting.label = "waiting"
     waiting.request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 1
+        1, 1, window_records.WEAK_POOL_ID, 1
     )
     manager.enqueue(waiting, None, on_decoded)
     assert manager.queue.waiting == []  # both took a slot of the one unit
@@ -227,7 +227,7 @@ def test_a_withdrawn_windows_claim_goes_back_to_its_tier():
     waiting.window_id = 1
     waiting.label = "waiting"
     waiting.request_key = window_records.DecoderRequestKey(
-        2, 1, window_records.DecoderTier.WEAK, 1
+        2, 1, window_records.WEAK_POOL_ID, 1
     )
     manager.enqueue(waiting, None, on_decoded)
     at_the_prediction = formation_stage.cycles_for(waiting)

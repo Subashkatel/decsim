@@ -49,7 +49,7 @@ def _job(index, gate=None):
         fragment_index=0,
     )
     request_key = window_records.DecoderRequestKey(
-        1, index, window_records.DecoderTier.WEAK, index
+        1, index, window_records.WEAK_POOL_ID, index
     )
     window = window_records.Window(
         operation_id=1,
@@ -321,7 +321,7 @@ def test_a_withdrawn_sender_and_its_joined_reader_leave_no_landing():
     reader = _job(1)
     reader.input_key = sender.request_key
     reader.request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 2
+        1, 1, window_records.WEAK_POOL_ID, 2
     )
     manager.enqueue(reader, None, on_decoded)
     (unit,) = manager.pool.units

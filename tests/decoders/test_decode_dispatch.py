@@ -65,7 +65,7 @@ def _job(index, label, deps_remaining, gate=None, input_key=None, window=None):
         window = _window(index, deps_remaining)
     window_id = window.window_index
     request_key = window_records.DecoderRequestKey(
-        1, window_id, window_records.DecoderTier.WEAK, index
+        1, window_id, window_records.WEAK_POOL_ID, index
     )
     return decoding_records.DecodeJob(
         operation_id=1,

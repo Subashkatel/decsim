@@ -395,7 +395,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         switching,
     )
     window_tier = settings.window_tier
-    window_decoder = settings.decoder_settings_for(window_tier.value)
+    window_decoder = settings.decoder_settings_for(window_tier.word)
     escalates = settings.switching is not None
     detection_events = readout_part.build_detection_events(
         settings.detection_events,
@@ -454,14 +454,14 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     decoders = decoders_part.Decoders.build(
         settings.decoder_manager, settings.clock, engine, pool
     )
-    sender = readout.syndrome_round_sender
-    unbound = "SyndromeRoundSender.windows was read before it was bound"
+    arrivals = readout.memory_arrivals
+    unbound = "MemoryRoundArrivals.windows was read before it was bound"
 
     assert isinstance(switching.policy, escalation_policies.Switching)
     assert plan.round_ticks == 1_000_000
     assert readout.controller.assembler is readout.assembler
     with pytest.raises(RuntimeError, match=unbound):
-        assert sender.windows is None
+        assert arrivals.windows is None
 
     machine = machine_module.Machine.assemble(
         settings,
@@ -480,7 +480,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     whole = whole_machine.run()
 
     requester = windows.window_manager.requester
-    assert sender.windows is windows.window_manager
+    assert arrivals.windows is windows.window_manager
     assert requester.decode_queue is decoders.decoder_manager
     assert result.terminal_status == "complete"
     assert result.fully_done_ticks == 289_904_000
@@ -2716,7 +2716,7 @@ def test_a_strong_primary_run_reads_its_windows_on_the_strong_tier():
     machine = machine_module.Machine.build(settings, 0)
     machine.run()
     tiers = {tier for _window, tier in declared_run.frame_tiers(machine)}
-    assert settings.window_tier is window_records.DecoderTier.STRONG
+    assert settings.window_tier == window_records.STRONG_POOL_ID
     assert tiers == {"strong"}
 
 
@@ -3758,8 +3758,8 @@ def _assert_direct_strong_path(run: _Run) -> None:
     assert run.result.decode_work_settled
     assert run.result.event_queue_empty
     requests = run.machine.observation.decode_records.requests
-    tiers = {request.request_key.tier for request in requests}
-    assert tiers == {window_records.DecoderTier.STRONG}
+    tiers = {request.request_key.pool for request in requests}
+    assert tiers == {window_records.STRONG_POOL_ID}
     paths = _transfer_paths(run)
     forbidden = {
         "controller_to_weak_buffer",

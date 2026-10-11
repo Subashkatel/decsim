@@ -108,7 +108,7 @@ def request_relation_for(window_id):
     request_key = window_records.DecoderRequestKey(
         operation_id=1,
         window_id=window_id,
-        tier=window_records.DecoderTier.WEAK,
+        pool=window_records.WEAK_POOL_ID,
         run_sequence=window_id,
     )
     return transfer_records.RequestTransferRelation(request_key)

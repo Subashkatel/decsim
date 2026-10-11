@@ -376,10 +376,15 @@ class _Walk:
         segments: tuple,
         machine_clock: Optional[config.Clock],
     ) -> Any:
-        """The slot's record as its assigned type chooses it, or none."""
+        """The slot's record as its assigned type chooses it, or none.
+
+        none empties an optional slot; in a slot that must hold a record
+        it is a record's name, as the confidence row none is.
+        """
         path = path_text(segments)
         self.origins[f"{path}.{TYPE}"] = choice.origin
-        if choice.written in (None, units.NONE):
+        empties = choice.written == units.NONE and parameter.is_optional
+        if choice.written is None or empties:
             return parameter.value_of(None, None, path)
         name = str(choice.written)
         record_class = kinds.record_class_named(name, parameter.hint, path)

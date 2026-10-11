@@ -50,7 +50,7 @@ import decsim.trace_source as trace_source
 BURST_CHANNELS = ("gate", "idle", "measurement", "reset")
 
 
-class StimDevice(seeding._AtomicRunSeedConsumer):
+class StimDevice(seeding.AtomicRunSeedConsumer):
     """Streams one sampled Stim shot as raw measurement packets, by round.
 
     The maps are keyed by stream identity with one-based rounds.
@@ -88,7 +88,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         measurement_rounds: Optional[dict] = None,
     ) -> None:
         self._seed = validated_seed(seed)
-        seeding._AtomicRunSeedConsumer.__init__(self, self._seed)
+        seeding.AtomicRunSeedConsumer.__init__(self, self._seed)
         detector_rounds_override = _rounds_by_key(detector_rounds)
         terminal_ids = _detector_ids_by_key(terminal_detector_ids)
         measurement_rounds_override = _rounds_by_key(measurement_rounds)

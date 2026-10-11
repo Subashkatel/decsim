@@ -56,7 +56,8 @@ same name and takes the assignments that reach the rest; a required
 one left unset is refused. A record of your own is written by its
 import path, `weak_decoder.algorithm.type=mylab.decoders.NeuralSettings`,
 and is taken if the slot's type admits it. `type=none` empties an
-optional slot.
+optional slot; in a slot that must hold a record it names the record
+called `none`, as `switching.confidence.type=none` does.
 
 ## 4. Check every task before a job
 

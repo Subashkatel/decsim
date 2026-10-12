@@ -36,8 +36,8 @@ CONSTANTS_PATH = HERE.with_name("constants.yaml")
 constants = constants_module.load(CONSTANTS_PATH)
 # the weak decoder that computes each signal (lines 1393-1397); union-find
 # is charged the host's measured time, which offline decoding does not read
-# SD6 at each memory's p: the paper's LERs are SD6's, not Stim's four
-# channels' (notes/switching_apples_to_apples.md)
+# Deltakit's SD6 at each memory's p (Gidney et al. 2108.10457, Table 2);
+# the paper names only a uniform circuit-level noise model (line 1682)
 SD6 = deltakit.SD6Noise()
 HOST_TIME = cycle_count.HostMeasuredTime()
 WEAK_ALGORITHMS = {

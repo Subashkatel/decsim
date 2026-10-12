@@ -34,15 +34,6 @@ SD6 is the standard depolarising model of Gidney et al. 2108.10457
 - each measurement is preceded by a flip of p;
 - each qubit idle in a time step gets DEPOLARIZE1(p).
 
-SD6's gate set measures and resets in separate steps, so its
-surface code cycle takes 8 time steps (2108.10457, Table 2's caption).
-Stim's generated memory instead uses one combined step, MR, and takes
-7. `SD6Noise` therefore splits each MR into a measurement and, one time
-step later, a reset before it adds the noise. On Stim's rotated memories
-the 8-step cycle reproduces the MWPM logical error rates of Toshio et al.
-2510.25222's Fig. 15a. The 7-step cycle gives fewer errors.
-`SD6Noise(measure_and_reset_apart=False)` keeps the 7-step cycle.
-
 SD6 needs the `deltakit` extra. `SD6Noise(probability=0.003)` fixes
 its p whatever the memory's.
 

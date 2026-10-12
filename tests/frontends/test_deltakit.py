@@ -549,25 +549,6 @@ def test_sd6_leaves_stims_generator_without_noise():
     assert channels == workload_settings.NO_GENERATOR_NOISE
 
 
-def test_measured_then_reset_splits_each_mr_and_keeps_the_record():
-    generated = stim.Circuit.generated(Z_MEMORY, rounds=4, distance=3)
-
-    split = deltakit.measured_then_reset(generated)
-
-    flattened = split.flattened()
-    generated_flattened = generated.flattened()
-    names = [instruction.name for instruction in flattened]
-    generated_names = [instruction.name for instruction in generated_flattened]
-    assert "MR" not in names
-    assert names.count("M") == generated_names.count("MR") + 1
-    assert names.count("TICK") == generated_names.count("TICK") + 4
-    assert split.num_measurements == generated.num_measurements
-    assert split.num_detectors == generated.num_detectors
-    # stim refuses a detector that is not deterministic without noise
-    model = split.detector_error_model()
-    assert model.num_errors == 0
-
-
 @needs_explorer
 def test_sd6_noise_keeps_stims_qubits_detectors_and_observables():
     generated = stim.Circuit.generated(Z_MEMORY, rounds=3, distance=3)
@@ -617,24 +598,6 @@ def test_sd6_time_boundaries_lose_the_data_flip_and_readout_flip():
     noisy_model = noisy.detector_error_model(decompose_errors=True)
     noiseless_model = noiseless.detector_error_model(decompose_errors=True)
     assert noisy_model != noiseless_model
-
-
-@needs_explorer
-def test_sd6_measures_and_resets_apart_unless_told_not_to():
-    apart = deltakit.SD6Noise()
-    together = deltakit.SD6Noise(measure_and_reset_apart=False)
-
-    apart_circuit = workload_settings.memory_circuit(
-        Z_MEMORY, 3, 3, 0.001, apart
-    )
-    together_circuit = workload_settings.memory_circuit(
-        Z_MEMORY, 3, 3, 0.001, together
-    )
-
-    apart_text = str(apart_circuit)
-    together_text = str(together_circuit)
-    assert "MR" not in apart_text
-    assert "MR" in together_text
 
 
 @needs_explorer

@@ -24,12 +24,6 @@ TEMPLATE_REPEAT_COUNT = TEMPLATE_ROUND_COUNT - 2
 # meaning, but stim draws their noise in target order. Explorer's CSSStage
 # keeps resets in a frozenset of gates hashed by class identity, so their
 # order changes between processes.
-# Each measure-and-reset's measurement and reset (measured_then_reset).
-MEASURE_THEN_RESET = {
-    "MR": ("M", "R"),
-    "MRX": ("MX", "RX"),
-    "MRY": ("MY", "RY"),
-}
 ORDER_FREE_INSTRUCTIONS = frozenset(
     {"R", "RX", "RY", "X_ERROR", "Y_ERROR", "Z_ERROR", "DEPOLARIZE1"}
 )
@@ -169,18 +163,9 @@ class SD6Noise:
     GateLayer a layer of its own as memory_circuit's device keeps them;
     the circuit keeps Stim's qubit numbers. probability None is the
     memory's p.
-
-    SD6's gates measure and reset apart (Init_Z and M_Z, Table 1), so its
-    surface code cycle takes 8 time steps (Table 2's caption), where
-    Stim's generated memory measures and resets in one, MR, and takes 7.
-    measure_and_reset_apart True makes each MR a measurement and, one
-    time step later, a reset, before the noise is added; on Stim's
-    rotated memories it gives Toshio et al. 2510.25222's Fig. 15
-    MWPM logical error rates, and the 7-step cycle fewer errors.
     """
 
     probability: Optional[float] = None
-    measure_and_reset_apart: bool = True
     name = "sd6"
 
     def generator_noise(
@@ -203,8 +188,6 @@ class SD6Noise:
         rate = probability
         if self.probability is not None:
             rate = self.probability
-        if self.measure_and_reset_apart:
-            circuit = measured_then_reset(circuit)
         qubit_by_index = _deltakit_qubits(circuit)
         text = str(circuit)
         forked = deltakit_stim.Circuit(text)
@@ -227,38 +210,6 @@ class SD6Noise:
         exported_text = str(exported)
         noisy_circuit = stim.Circuit(exported_text)
         return _sorted_order_free_targets(noisy_circuit)
-
-
-def measured_then_reset(circuit: stim.Circuit) -> stim.Circuit:
-    """The circuit with each MR a measurement, a TICK, then a reset.
-
-    MRX and MRY likewise; the measurement keeps the MR's arguments, so
-    the measurement record and every detector stay as they were.
-    """
-    split = stim.Circuit()
-    for instruction in circuit:
-        if isinstance(instruction, stim.CircuitRepeatBlock):
-            body = instruction.body_copy()
-            split_body = measured_then_reset(body)
-            count = instruction.repeat_count
-            block = stim.CircuitRepeatBlock(count, split_body)
-            split.append(block)
-            continue
-        names = MEASURE_THEN_RESET.get(instruction.name)
-        if names is None:
-            split.append(instruction)
-            continue
-        measurement_name, reset_name = names
-        targets = instruction.targets_copy()
-        arguments = instruction.gate_args_copy()
-        measurement = stim.CircuitInstruction(
-            measurement_name, targets, arguments
-        )
-        reset = stim.CircuitInstruction(reset_name, targets)
-        split.append(measurement)
-        split.append("TICK")
-        split.append(reset)
-    return split
 
 
 def _memory_code(

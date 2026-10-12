@@ -162,16 +162,16 @@ print(is_shared_assembler)
 True
 ```
 
-The wires to other parts are not made yet. The syndrome round sender
-tells the window manager of each stored round, and the window manager
-is in another part, so its port is still empty:
+The wires to other parts are not made yet. The window manager's
+requester asks for each window's decode, and the decoder manager that
+takes the request is in another part, so its port is still empty:
 
 ```python
-readout.syndrome_round_sender.windows
+windows.window_manager.requester.decode_queue
 ```
 
 ```text
-RuntimeError: SyndromeRoundSender.windows was read before it was bound
+RuntimeError: DecodeRequester.decode_queue was read before it was bound
 ```
 
 A component a run does not need is `None`. This run escalates, so its
@@ -195,15 +195,12 @@ machine = machine_module.Machine.assemble(
     switching_parts,
 )
 window_manager = windows.window_manager
-is_sender_wired = readout.syndrome_round_sender.windows is window_manager
-print(is_sender_wired)
 decode_queue = window_manager.requester.decode_queue
 is_requester_wired = decode_queue is decoders.decoder_manager
 print(is_requester_wired)
 ```
 
 ```text
-True
 True
 ```
 

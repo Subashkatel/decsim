@@ -8,7 +8,6 @@ the sanitized build starts the sanitizer runtime, which ends the process.
 """
 
 import importlib
-import importlib.util
 import os
 import pathlib
 import pkgutil
@@ -18,6 +17,7 @@ import sys
 import pytest
 
 import decsim
+import decsim.parameters.kinds as kinds
 
 # Each name the root exports, and the module a run file reads it from.
 ROOT_EXPORTS = (
@@ -50,19 +50,12 @@ def import_failure(module_name):
     return None
 
 
-def is_python_module(module_name):
-    """Whether the module comes from a Python source file."""
-    specification = importlib.util.find_spec(module_name)
-    origin = specification.origin
-    return origin.endswith(".py")
-
-
 def import_failures() -> list:
     """(module, error) for every decsim source module that fails to import."""
     failures = []
     walked = pkgutil.walk_packages(decsim.__path__, prefix="decsim.")
     for info in walked:
-        if not is_python_module(info.name):
+        if not kinds.is_python_module(info.name):
             continue
         failure = import_failure(info.name)
         if failure is not None:

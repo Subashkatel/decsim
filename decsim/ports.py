@@ -2329,6 +2329,24 @@ class LayoutModel(Protocol):
         """The resources the operation holds while it runs."""
 
 
+class IdlePolicySettings(Protocol):
+    """An idle policy's row: the record that builds the policy.
+
+    The idle_policy slot takes decsim's rows or any record that builds a
+    policy, so a policy written outside decsim is a part of its kind.
+    """
+
+    def build(self) -> IdlePolicy:
+        """A fresh policy for one run."""
+
+
+class MagicStateFactorySettings(Protocol):
+    """A factory's row: the record that builds the factory."""
+
+    def build(self, engine: Any, round_ticks: int) -> MagicStateFactory:
+        """A fresh factory on the engine, paced on the round."""
+
+
 class WorkloadMakerSettings(Protocol):
     """A workload maker's row: its parameters, made into a workload at a task.
 

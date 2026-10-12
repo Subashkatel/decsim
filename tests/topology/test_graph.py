@@ -11,13 +11,11 @@ import dataclasses
 import pytest
 
 import decsim.topology.graph as graph
-import decsim.topology.slotted as slotted
 import tests.experiments.run_files as run_files
 
 
 def _weak_graph() -> graph.Machine:
-    machine = run_files.minimal_machine()
-    return slotted.graph_of(machine)
+    return run_files.minimal_machine()
 
 
 def _with_wires(machine: graph.Machine, *ends) -> graph.Machine:
@@ -33,9 +31,7 @@ def test_a_weak_machine_wires_every_required_port():
 
 
 def test_a_switching_machine_wires_every_required_port():
-    settings = run_files.switching_machine()
-
-    machine = slotted.graph_of(settings)
+    machine = run_files.switching_machine()
 
     assert machine.unbound_ports() == []
 
@@ -95,8 +91,7 @@ def test_a_wire_between_two_signals_is_refused():
 
 def test_a_pools_escalations_reach_a_switching_part_never_a_pool():
     """The edge's verdict sits between the pools; a direct wire is refused."""
-    settings = run_files.switching_machine()
-    machine = slotted.graph_of(settings)
+    machine = run_files.switching_machine()
     wires = [wire for wire in machine.wires if "switching." not in wire.target]
     without_edge = dataclasses.replace(machine, wires=tuple(wires))
 
@@ -188,6 +183,18 @@ def test_a_parts_fields_change_and_its_placement_stays():
     pool = changed.part("weak")
     assert pool.settings.unit_count == 3
     assert pool.placed == "fridge"
+
+
+def test_a_record_swapped_in_keeps_its_parts_site():
+    machine = run_files.switching_machine()
+    strong = machine.part("strong")
+    two_units = dataclasses.replace(strong.settings, unit_count=2)
+
+    changed = machine.with_record("strong", two_units)
+
+    changed_strong = changed.part("strong")
+    assert changed_strong.settings == two_units
+    assert changed_strong.placed == "host"
 
 
 def test_added_wires_follow_the_machines_own():

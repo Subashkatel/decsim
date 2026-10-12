@@ -33,7 +33,6 @@ import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 
@@ -78,19 +77,12 @@ def strong_only() -> graph.Machine:
     """The strong decoder alone, in the weak decoder's place.
 
     Every window goes to the strong decoder, whose hops are one host
-    cycle each. The controller still writes the weak store, which no
-    decoder reads.
+    cycle each.
     """
     base = _weak_base()
-    store = syndrome_buffer.SyndromeBufferSettings()
-    strong_store = graph.Part(machines.STRONG_STORE, store, fabrics.HOST)
-    strong_pool = graph.Part(machines.STRONG_POOL, strong_decoder, fabrics.HOST)
-    without_weak_pool = base.without_part(machines.WEAK_POOL)
-    with_store = without_weak_pool.with_part(strong_store)
-    with_pool = with_store.with_part(strong_pool)
-    wired = with_pool.with_wires(*machines.STRONG_TIER_WIRES)
+    alone = machines.strong_alone(base, strong_decoder)
     fabric = link_cards.strong_side(base.fabric)
-    return dataclasses.replace(wired, fabric=fabric)
+    return dataclasses.replace(alone, fabric=fabric)
 
 
 def switching(
@@ -110,8 +102,7 @@ def switching(
         run_both_at_once=run_both_at_once,
         strong_window=strong_window,
     )
-    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    weak_tier = base.with_part(weak_pool)
+    weak_tier = base.with_record(machines.WEAK_POOL, weak_decoder)
     fabric = link_cards.strong_side(base.fabric)
     return machines.with_strong_tier(
         weak_tier, strong_decoder, switching_slot, fabric
@@ -131,16 +122,11 @@ def buffer_and_link(
     weak_syndrome_buffer = ported_syndrome_buffer.PortedSyndromeBufferSettings(
         cycles_per_access=cycles_per_access
     )
-    weak_store = graph.Part(
-        machines.WEAK_STORE, weak_syndrome_buffer, fabrics.FRIDGE
-    )
     link = fabrics.TimedLink(
         link_microseconds, excludes_receiver_processing=True
     )
-    fabric = fabrics.PathLinks(
-        weak_buffer_to_weak_decoder=link, base=base.fabric
-    )
-    with_store = base.with_part(weak_store)
+    fabric = fabrics.RoleLinks(read_written=link, base=base.fabric)
+    with_store = base.with_record(machines.WEAK_STORE, weak_syndrome_buffer)
     return dataclasses.replace(with_store, fabric=fabric)
 
 

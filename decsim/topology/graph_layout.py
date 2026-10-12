@@ -1,11 +1,11 @@
-"""A graph of a new shape, laid out as pools, stores and escalate edges.
+"""A graph laid out as pools, stores and escalate edges.
 
-A graph of more pools or edges than MachineSettings' slots hold
-(slotted.holds) is built from its own parts. Each pool, store and edge
-goes by its part's name, and each hop by the parts at its ends,
-<source part>_to_<target part>: the wire's own link prices it, else the
-machine's fabric rule, on the payload rule of the slotted hop with the
-same role (_REFERENCE_BY_ROLE). The pools form a tree: one pool decodes
+Every machine is built from its graph's own parts. Each pool, store
+and edge goes by its part's name, and each hop by the parts at its
+ends, <source part>_to_<target part>, with its role
+(records/routes.py HopRole): the wire's own link prices it, else the
+machine's fabric rule, on the reference card's payload rule for its
+role. The pools form a tree: one pool decodes
 the planner's windows, the entry, and every other pool is the target of
 one switching part, an escalate edge, whose results come from another
 pool. They are laid out entry first, then each edge's target in the
@@ -15,20 +15,15 @@ The entry pool reads the store the controller writes; an edge's target
 reads its own store, which takes an escalated window's rounds from the
 store its source pool reads. A router between the entry store and
 several pools makes each of them an entry pool: they share that store,
-each over a hop of its own, and the first wired is the entry the
-slotted names go to (windows/routers.py). Two pools no edge joins trade
-boundaries on a hop of their own. A store no pool reads is not built.
+each over a hop of its own, and the first wired is the entry
+(windows/routers.py). Two pools no edge joins trade boundaries on a hop
+of their own. A store no pool reads is not built, and a machine with no
+pool decodes nothing on one idle pool.
 
-The entry pool, its edge and that edge's target draw their seeds at the
-roots their slots give them, and every other part at its own name:
-a pool added past the entry moves no other part's seed, so a chain
-whose deep pool is never asked runs as its two-pool machine, shot for
-shot.
-
-entry_settings gives the graph's entry edge as a MachineSettings record,
-read by the reports that name a weak and a strong tier and by the build
-for the parts every machine holds once; the graph's id is its own
-(experiments/collect.py Task).
+The entry pool, its edge and that edge's target draw their seeds at
+roots kept by role, and every other part at its own name: a pool added
+past the entry moves no other part's seed, so a chain whose deep pool
+is never asked runs as its two-pool machine, shot for shot.
 """
 
 import dataclasses
@@ -39,103 +34,62 @@ import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.refusals as refusals
-import decsim.settings as machine_settings
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
-import decsim.topology.slotted as slotted
 
 # the hops every machine rides between its parts that are held once,
-# by the kinds at their ends
-SHARED_PATHS = {
-    ("qpu", "controller"): transfer_records.QPU_TO_CONTROLLER,
-    ("controller", "qpu"): transfer_records.CONTROLLER_TO_QPU,
-    ("pauli_frame", "controller"): transfer_records.FRAME_TO_CONTROLLER,
+# by the kinds at their ends, each with its role
+SHARED_HOPS = {
+    ("qpu", "controller"): (
+        transfer_records.QPU_TO_CONTROLLER,
+        route_records.HopRole(route_records.READOUT),
+    ),
+    ("controller", "qpu"): (
+        transfer_records.CONTROLLER_TO_QPU,
+        route_records.HopRole(route_records.COMMAND),
+    ),
+    ("pauli_frame", "controller"): (
+        transfer_records.FRAME_TO_CONTROLLER,
+        route_records.HopRole(route_records.DECISION),
+    ),
 }
-# The slotted hop whose payload rule each role's hop carries, by the
-# site or the intake it leaves from: a fridge pool's answer is the weak
-# tier's, a host pool's the strong tier's, and two decodes on the host
-# meet in its memory, as the slotted strong pool's do.
-_REFERENCE_BY_ROLE = {
-    (
-        "write",
-        receiver_module.WRITTEN,
-    ): transfer_records.CONTROLLER_TO_WEAK_BUFFER,
-    ("write", receiver_module.LANDED): (
-        transfer_records.CONTROLLER_TO_STRONG_BUFFER
-    ),
-    ("read", receiver_module.WRITTEN): (
-        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
-    ),
-    ("read", receiver_module.LANDED): (
-        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER
-    ),
-    ("answer", fabrics.FRIDGE): transfer_records.WEAK_DECODER_TO_FRAME,
-    ("answer", fabrics.HOST): transfer_records.STRONG_DECODER_TO_FRAME,
-    ("same_pool", fabrics.FRIDGE): transfer_records.DECODER_TO_DECODER,
-    ("same_pool", fabrics.HOST): (
-        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER
-    ),
-    ("forward", None): transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
-    ("reverse", None): transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
-}
-# the seed roots the slots give the entry pool and its edge's target
-_ENTRY_SEED_ROOTS = (
-    layout_module.PRIMARY_UNIT_SEED,
-    layout_module.PRIMARY_MANAGER_SEED,
-)
-_ENTRY_TARGET_SEED_ROOTS = (
-    layout_module.STRONG_NAMES.unit_seed,
-    layout_module.STRONG_NAMES.manager_seed,
-)
+# The seed roots of the entry pool, its edge and that edge's target, by
+# role. The strings are the ones every recorded shot hashed, so a shot
+# draws as it always has; every other part draws at its own name.
+ENTRY_UNIT_SEED = "primary_decoder"
+ENTRY_MANAGER_SEED = "decoder_manager"
+ENTRY_TARGET_UNIT_SEED = "strong_decoder"
+ENTRY_TARGET_MANAGER_SEED = "strong_decoder_manager"
+ENTRY_EDGE_POLICY_SEED = "escalation_policy"
+_ENTRY_SEED_ROOTS = (ENTRY_UNIT_SEED, ENTRY_MANAGER_SEED)
+_ENTRY_TARGET_SEED_ROOTS = (ENTRY_TARGET_UNIT_SEED, ENTRY_TARGET_MANAGER_SEED)
+# the pool and the store a machine that decodes nothing names, though
+# neither decodes nor holds a round
+IDLE_POOL = "idle"
+IDLE_STORE = "idle_buffer"
 # the part that writes the stores, as a hop into a store names it
 CONTROLLER_LABEL = "controller assembler"
+_FORWARD = route_records.HopRole(route_records.FORWARD)
+_REVERSE = route_records.HopRole(route_records.REVERSE)
 _POOL_KIND = "decoder_pool"
 _STORE_KIND = "syndrome_buffer"
 _SWITCHING_KIND = "switching"
 _ROUTER_KIND = "router"
 
 
-def entry_settings(machine: graph.Machine) -> machine_settings.MachineSettings:
-    """The graph's entry edge as a MachineSettings record, every hop priced.
+def layout_of(machine: graph.Machine) -> layout_module.Layout:
+    """The graph's pools, stores and edges, each under its part's name.
 
-    Its weak tier is the entry pool, its strong tier the entry edge's
-    target, its switching the entry edge's; its card prices every hop
-    of the graph, the slotted twelve and the graph's own.
+    machine is at its task (graph.Machine.at_task), each edge's
+    threshold read; the card prices every hop.
     """
     shape = _shape(machine)
     card = _card(shape)
-    singles = _single_records(machine)
-    entry = shape.entry
-    entry_store = shape.entry_store()
-    tiers = {
-        "weak_decoder": entry.settings,
-        "weak_syndrome_buffer": entry_store.settings,
-    }
-    if shape.edges:
-        entry_edge = shape.edges[0]
-        target = entry_edge.target
-        target_store = shape.store_by_pool[target.name]
-        tiers["strong_decoder"] = target.settings
-        tiers["strong_syndrome_buffer"] = target_store.settings
-        tiers["switching"] = entry_edge.part.settings
-    return machine_settings.MachineSettings(
-        clock=machine.clock,
-        links=card,
-        observation=machine.observation,
-        **singles,
-        **tiers,
-    )
-
-
-def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
-    """The graph's pools, stores and edges, each under its part's name.
-
-    task_facts are the task's facts each edge's threshold reads
-    (MachineSettings.task_facts).
-    """
-    shape = _shape(machine)
     frame_name = _frame_name(machine)
+    if not shape.pools:
+        idle = _idle_pool(frame_name)
+        return layout_module.Layout((idle,), (), (), card)
     pools = []
     stores = []
     for pool in shape.pools:
@@ -150,7 +104,7 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
     for edge in shape.edges:
         carried_from = shape.store_by_pool[edge.source.name]
         policy_seed = _policy_seed(shape, edge)
-        edge_plan = _edge_plan(edge, carried_from.name, policy_seed, task_facts)
+        edge_plan = _edge_plan(edge, carried_from.name, policy_seed)
         edges.append(edge_plan)
     router = shape.router_settings()
     entry_count = len(shape.entries)
@@ -158,6 +112,7 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
         tuple(pools),
         tuple(stores),
         tuple(edges),
+        card,
         router=router,
         entry_count=entry_count,
     )
@@ -208,13 +163,15 @@ class _Shape:
 def _shape(machine: graph.Machine) -> _Shape:
     """The graph's pools from its entry, its edges, each pool's store."""
     _refuse_unbound_ports(machine)
-    pools = _parts_of_kind(machine, _POOL_KIND)
-    switching_parts = _parts_of_kind(machine, _SWITCHING_KIND)
+    pools = machine.parts_of(_POOL_KIND)
+    switching_parts = machine.parts_of(_SWITCHING_KIND)
     edges = []
     for part in switching_parts:
         edge = _edge(machine, part)
         edges.append(edge)
     router = _router(machine)
+    if not pools:
+        return _Shape(machine, (), (), {}, ())
     entries = _entry_pools(machine, pools, edges, router)
     ordered_pools, ordered_edges = _from_the_entries(entries, pools, edges)
     _refuse_an_edge_from_a_later_entry(entries, ordered_edges)
@@ -232,16 +189,6 @@ def _refuse_unbound_ports(machine: graph.Machine) -> None:
         raise graph.GraphError(f"required ports with no wire: {unbound}")
 
 
-def _parts_of_kind(machine: graph.Machine, kind_name: str) -> list:
-    """The parts of one kind, in the order the graph writes them."""
-    found = []
-    for part in machine.parts:
-        kind = part.kind
-        if kind is not None and kind.name == kind_name:
-            found.append(part)
-    return found
-
-
 def _edge(machine: graph.Machine, part: graph.Part) -> _Edge:
     """A switching part, from the pool its results port hears."""
     results = f"{part.name}.results"
@@ -254,13 +201,25 @@ def _edge(machine: graph.Machine, part: graph.Part) -> _Edge:
             f"{results} hears no pool: an escalate edge decides on the "
             "results of the pool whose escalate port is wired to it"
         )
-    target = slotted.redecode_target(machine, part.name)
+    target = _redecode_target(machine, part.name)
     return _Edge(part, source, target)
+
+
+def _redecode_target(machine: graph.Machine, switching_name: str) -> graph.Part:
+    """The pool a switching part's re-decodes reach; refused when none."""
+    written = f"{switching_name}.redecode"
+    for wire in machine.wires:
+        if wire.source == written:
+            return _part_at(machine, wire.target)
+    raise graph.GraphError(
+        f"{written} reaches no pool: an escalate edge re-decodes on the "
+        "pool its redecode port is wired to"
+    )
 
 
 def _router(machine: graph.Machine) -> Optional[graph.Part]:
     """The machine's router; None for none, and at most one."""
-    routers = _parts_of_kind(machine, _ROUTER_KIND)
+    routers = machine.parts_of(_ROUTER_KIND)
     if not routers:
         return None
     if len(routers) > 1:
@@ -403,25 +362,11 @@ def _part_at(machine: graph.Machine, written: str) -> graph.Part:
 
 def _frame_name(machine: graph.Machine) -> str:
     """The frame's part name; "frame" for a machine with none."""
-    frames = _parts_of_kind(machine, "pauli_frame")
+    frames = machine.parts_of("pauli_frame")
     if not frames:
         return "frame"
     frame = frames[0]
     return frame.name
-
-
-def _single_records(machine: graph.Machine) -> dict:
-    """The record of every part held once, by its MachineSettings slot."""
-    records = {}
-    for part in machine.parts:
-        kind = part.kind
-        if kind is None:
-            continue
-        if kind.name in (_POOL_KIND, _STORE_KIND, _SWITCHING_KIND):
-            continue
-        slot = kind.slots[0]
-        records[slot] = part.settings
-    return records
 
 
 def _site(part: graph.Part) -> str:
@@ -439,9 +384,8 @@ def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
     """How a pool's store takes its rounds.
 
     The controller writes the entry store, unless the first entry pool
-    sits on the host, which reads a store the rounds land in, as a
-    slotted strong-only run's does; an edge's target store takes its
-    rounds as they land.
+    sits on the host, which reads a store the rounds land in; an edge's
+    target store takes its rounds as they land.
     """
     if pool not in shape.entries:
         return receiver_module.LANDED
@@ -452,7 +396,7 @@ def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
 
 
 def _controller_name(machine: graph.Machine) -> str:
-    controllers = _parts_of_kind(machine, "controller")
+    controllers = machine.parts_of("controller")
     controller = controllers[0]
     return controller.name
 
@@ -481,6 +425,24 @@ def _pool_plan(
     return layout_module.PoolPlan(hops, pool.settings, names, store.name)
 
 
+def _idle_pool(frame_name: str) -> layout_module.PoolPlan:
+    """The one idle pool of a machine that decodes nothing, and no store."""
+    names = layout_module.PoolNames(
+        seat=IDLE_POOL,
+        queue=IDLE_POOL,
+        statistics_path=IDLE_POOL,
+        unit_seed=ENTRY_UNIT_SEED,
+        manager_seed=ENTRY_MANAGER_SEED,
+    )
+    pool_id = window_records.PoolId(IDLE_POOL)
+    answer = _hop(IDLE_POOL, frame_name)
+    same_pool = _hop(IDLE_POOL, IDLE_POOL)
+    hops = route_records.PoolHops(
+        pool=pool_id, site=fabrics.FRIDGE, answer=answer, same_pool=same_pool
+    )
+    return layout_module.PoolPlan(hops, None, names, IDLE_STORE)
+
+
 def _seed_roots(shape: _Shape, pool: graph.Part) -> tuple:
     """A pool's unit and manager seed roots: its slot's, else its own."""
     if pool.name == shape.entry.name:
@@ -491,9 +453,9 @@ def _seed_roots(shape: _Shape, pool: graph.Part) -> tuple:
 
 
 def _policy_seed(shape: _Shape, edge: _Edge) -> str:
-    """An edge's policy seed root: the slotted edge's for the entry edge."""
+    """An edge's policy seed root: the entry edge's by role, else its own."""
     if edge is shape.edges[0]:
-        return layout_module.SLOTTED_POLICY_SEED
+        return ENTRY_EDGE_POLICY_SEED
     return f"{edge.part.name}_policy"
 
 
@@ -563,12 +525,10 @@ def _escalation_hop(
 
 
 def _edge_plan(
-    edge: _Edge, carried_from: str, policy_seed: str, task_facts: dict
+    edge: _Edge, carried_from: str, policy_seed: str
 ) -> layout_module.EdgePlan:
-    """A switching part's edge, its threshold read at the task's facts."""
+    """A switching part's edge."""
     settings = edge.part.settings
-    threshold = settings.threshold.at_task(task_facts)
-    at_task = dataclasses.replace(settings, threshold=threshold)
     source = window_records.PoolId(edge.source.name)
     target = window_records.PoolId(edge.target.name)
     forward = _hop(edge.source.name, edge.target.name)
@@ -582,36 +542,45 @@ def _edge_plan(
     )
     name = edge.part.name
     return layout_module.EdgePlan(
-        name, at_task, hops, carried_from, policy_seed
+        name, settings, hops, carried_from, policy_seed
     )
 
 
 def _card(shape: _Shape) -> Any:
-    """Every hop the graph rides, priced: the slotted twelve, then its own."""
+    """Every hop the graph rides, priced: the shared hops, then its own."""
     machine = shape.machine
-    sites = _shared_sites(machine)
-    slotted_routes = fabrics.slotted_routes(sites)
+    shared_routes = _shared_routes(machine)
     own_routes = _own_routes(shape)
-    routes = (*slotted_routes, *own_routes)
+    routes = (*shared_routes, *own_routes)
     wire_links = _wire_links(shape)
-    return fabrics.card(machine.fabric, routes, wire_links, machine.clock)
+    return fabrics.card(
+        machine.fabric,
+        routes,
+        wire_links,
+        machine.clock,
+        machine.readout_routes,
+    )
 
 
-def _shared_sites(machine: graph.Machine) -> dict:
-    """The site of each part held once, by its slot, where it says one.
+def _shared_routes(machine: graph.Machine) -> tuple:
+    """The readout, the command and the decision, at their parts' sites.
 
-    The slotted twelve's pool and store ends sit where the reference
-    card puts them: a new-shape graph rides none of those hops.
+    A part held once sits in the fridge unless it says otherwise; a
+    machine with no frame still decides on the controller's chip.
     """
-    sites = {}
+    site_by_kind = {}
     for part in machine.parts:
         kind = part.kind
-        if kind is None or part.placed is None:
+        if kind is None:
             continue
-        if kind.name in (_POOL_KIND, _STORE_KIND, _SWITCHING_KIND):
-            continue
-        sites[kind.slots[0]] = part.placed
-    return sites
+        site_by_kind[kind.name] = _site(part)
+    routes = []
+    for (source_kind, target_kind), (path, role) in SHARED_HOPS.items():
+        source_site = site_by_kind.get(source_kind, fabrics.FRIDGE)
+        target_site = site_by_kind.get(target_kind, fabrics.FRIDGE)
+        route = fabrics.Route(path, source_site, target_site, role)
+        routes.append(route)
+    return tuple(routes)
 
 
 def _own_routes(shape: _Shape) -> tuple:
@@ -639,28 +608,22 @@ def _pool_routes(
     intake_shape = _intake_shape(shape, pool)
     pool_site = _site(pool)
     store_site = _site(store)
-    read = _route(
-        (store.name, pool.name),
-        (store_site, pool_site),
-        ("read", intake_shape),
-    )
+    read_role = route_records.HopRole(route_records.READ, intake_shape)
+    answer_role = route_records.HopRole(route_records.ANSWER, pool_site)
+    same_pool_role = route_records.HopRole(route_records.SAME_POOL, pool_site)
+    read = _route((store.name, pool.name), (store_site, pool_site), read_role)
     answer = _route(
-        (pool.name, frame_name),
-        (pool_site, fabrics.FRIDGE),
-        ("answer", pool_site),
+        (pool.name, frame_name), (pool_site, fabrics.FRIDGE), answer_role
     )
     same_pool = _route(
-        (pool.name, pool.name),
-        (pool_site, pool_site),
-        ("same_pool", pool_site),
+        (pool.name, pool.name), (pool_site, pool_site), same_pool_role
     )
     if pool in shape.entries[1:]:
         # the entry store is written once, on the first entry's route
         return (read, answer, same_pool)
+    write_role = route_records.HopRole(route_records.WRITE, intake_shape)
     write = _route(
-        (controller_name, store.name),
-        (fabrics.FRIDGE, store_site),
-        ("write", intake_shape),
+        (controller_name, store.name), (fabrics.FRIDGE, store_site), write_role
     )
     return (write, read, answer, same_pool)
 
@@ -674,12 +637,12 @@ def _edge_routes(edge: _Edge) -> tuple:
     forward = _route(
         (source_name, target_name),
         (source_site, target_site),
-        ("forward", None),
+        _FORWARD,
     )
     reverse = _route(
         (target_name, source_name),
         (target_site, source_site),
-        ("reverse", None),
+        _REVERSE,
     )
     return (forward, reverse)
 
@@ -719,19 +682,22 @@ def _unjoined_receivers(shape: _Shape, sender: graph.Part, joined: set) -> list:
     return receivers
 
 
-def _boundary_role(sender_index: int, receiver_index: int) -> tuple:
+def _boundary_role(
+    sender_index: int, receiver_index: int
+) -> route_records.HopRole:
     if receiver_index > sender_index:
-        return ("forward", None)
-    return ("reverse", None)
+        return _FORWARD
+    return _REVERSE
 
 
-def _route(ends: tuple, sites: tuple, role: tuple) -> fabrics.Route:
-    """The hop between two parts, at their sites, on its role's payload."""
+def _route(
+    ends: tuple, sites: tuple, role: route_records.HopRole
+) -> fabrics.Route:
+    """The hop between two parts, at their sites, with its role."""
     source_name, target_name = ends
     source_site, target_site = sites
     path = _hop(source_name, target_name)
-    reference = _REFERENCE_BY_ROLE[role]
-    return fabrics.Route(path, source_site, target_site, reference)
+    return fabrics.Route(path, source_site, target_site, role)
 
 
 def _wire_links(shape: _Shape) -> dict:
@@ -769,7 +735,8 @@ def _wire_hop(
 ) -> str:
     """The hop a wire prices: a shared hop by its kinds, else by its parts."""
     ends = (source.kind.name, target.kind.name)
-    shared = SHARED_PATHS.get(ends)
+    shared = SHARED_HOPS.get(ends)
     if shared is not None:
-        return shared
+        path, _role = shared
+        return path
     return _hop(source_name, target_name)

@@ -66,6 +66,18 @@ def admits(hint: Any, record_class: type) -> bool:
     return any(_member_admits(member, record_class) for member in members)
 
 
+def names(hint: Any, record_class: type) -> bool:
+    """Whether a slot of this type names this class, past any Protocol."""
+    unwrapped = fields.record_hint(hint)
+    members = _union_members(unwrapped)
+    for member in members:
+        if _is_protocol(member):
+            continue
+        if _member_admits(member, record_class):
+            return True
+    return False
+
+
 def records_named(name: str, record_classes: Sequence) -> list:
     """The record classes of those given that a short name stands for."""
     return [

@@ -5,8 +5,9 @@ it does not own (omnetpp src/sim/csimplemodule.cc:333-334,
 omnetpp-6.1.0), and gem5 bills a transfer to the port it left by rather
 than to whoever arranged it (packet.hh:424-431).
 decsim has no runtime check for it, so the rule is read out of the tree:
-a component module that names a slotted hop (records/transfers.py
-SLOTTED_PATHS) must be one of that hop's two ends.
+a component module that names a hop (records/transfers.py, the hops
+between the parts every machine holds once) must be one of that hop's
+two ends.
 """
 
 import ast
@@ -20,25 +21,8 @@ DECSIM_ROOT = PACKAGE_ROOT / "decsim"
 # each hop's two ends, as the packages that own them
 ENDS_OF_PATH = {
     "QPU_TO_CONTROLLER": ("qpu", "controller"),
-    "CONTROLLER_TO_WEAK_BUFFER": ("controller", "syndrome_buffer"),
-    "WEAK_BUFFER_TO_WEAK_DECODER": ("syndrome_buffer", "decoders"),
-    # a boundary is a window-side record and both its ends hold one
-    # (decisions.md D12), so the window side is an end of every hop a
-    # boundary rides (build/routes.py generates its route)
-    "WEAK_DECODER_TO_STRONG_DECODER": ("decoders", "windows"),
-    "STRONG_BUFFER_TO_STRONG_DECODER": (
-        "syndrome_buffer",
-        "decoders",
-        "windows",
-    ),
-    "WEAK_DECODER_TO_FRAME": ("decoders", "pauli_frame"),
-    "DECODER_TO_DECODER": ("windows",),
-    "STRONG_DECODER_TO_FRAME": ("decoders", "pauli_frame"),
     "FRAME_TO_CONTROLLER": ("pauli_frame", "controller"),
     "CONTROLLER_TO_QPU": ("controller", "qpu"),
-    "CONTROLLER_TO_STRONG_BUFFER": ("controller", "syndrome_buffer"),
-    # the strong answer to the weak chip's commit step, both decoder ends
-    "STRONG_DECODER_TO_WEAK_DECODER": ("decoders", "windows"),
 }
 
 # A boundary's send names no path: the courier picks one from the two
@@ -47,7 +31,17 @@ ENDS_OF_PATH = {
 # window side's at both decoders.
 BOUNDARY_ROUTE = "BOUNDARY_ROUTE"
 BOUNDARY_SEND = "send_boundary"
-ENDS_OF_SEND = {**ENDS_OF_PATH, BOUNDARY_ROUTE: ("windows",)}
+# The controller's write into the written store is the layout's hop
+# (build/layout.py Layout.controller_write_hop), which the transmitter
+# holds as write_path; a send on it is read as that hop, from the
+# controller to a store.
+WRITE_PATH = "WRITE_PATH"
+WRITE_PATH_ATTRIBUTE = "write_path"
+ENDS_OF_SEND = {
+    **ENDS_OF_PATH,
+    BOUNDARY_ROUTE: ("windows",),
+    WRITE_PATH: ("controller", "syndrome_buffer"),
+}
 
 # the components on the reaction path; the root wires the paths onto the
 # ports (build, machine), the fabric carries them (links) and the
@@ -66,7 +60,7 @@ COMPONENT_PACKAGES = (
 
 
 def _named_paths(path: pathlib.Path) -> list:
-    """Every slotted hop this module names, with its line."""
+    """Every hop this module names by its constant, with its line."""
     text = path.read_text()
     tree = ast.parse(text)
     named = []
@@ -106,19 +100,23 @@ def test_the_table_of_ends_covers_every_hop():
     """A new hop joins the table, so the law never silently shrinks."""
     text = (DECSIM_ROOT / "records" / "transfers.py").read_text()
     tree = ast.parse(text)
-    members = _slotted_paths(tree)
+    members = _named_hops(tree)
     assert sorted(members) == sorted(ENDS_OF_PATH)
 
 
-def _slotted_paths(tree: ast.Module) -> list:
-    """The names SLOTTED_PATHS lists, in its order."""
+def _named_hops(tree: ast.Module) -> list:
+    """The names the module gives a hop: each text constant it assigns."""
     members = []
     for statement in tree.body:
         if not isinstance(statement, ast.Assign):
             continue
-        if _assigned_names(statement) != ["SLOTTED_PATHS"]:
+        value = statement.value
+        if not isinstance(value, ast.Constant):
             continue
-        members = [element.id for element in statement.value.elts]
+        if not isinstance(value.value, str):
+            continue
+        names = _assigned_names(statement)
+        members.extend(names)
     return members
 
 
@@ -141,7 +139,7 @@ def _assigned_names(statement: ast.Assign) -> list:
 DELIVERY_CALLBACKS = {
     ("controller/controller.py", "QPU_TO_CONTROLLER"): ("at_controller",),
     ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): ("delivered",),
-    ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
+    ("controller/round_transmission.py", WRITE_PATH): (
         "_publish",
         "_write_feedback_memory",
     ),
@@ -208,7 +206,7 @@ class _DeliverySite:
     def __init__(self, module, package: str, named: tuple, callback):
         self.module = module
         self.package = package
-        # (the slotted hop, the line the send stands on)
+        # (the hop constant, the line the send stands on)
         self.path_name, self.lineno = named
         self.callback = callback
 
@@ -288,10 +286,12 @@ def _registered_callback(node):
 
 
 def _path_argument(node: ast.Call):
-    """The slotted hop this call names, BOUNDARY_ROUTE, or None."""
+    """The hop this call names, BOUNDARY_ROUTE, WRITE_PATH, or None."""
     if _is_boundary_send(node):
         return BOUNDARY_ROUTE
     for argument in node.args:
+        if _is_write_path(argument):
+            return WRITE_PATH
         member = _link_path_member(argument)
         if member is not None:
             return member
@@ -306,8 +306,18 @@ def _is_boundary_send(node: ast.Call) -> bool:
     return called.attr == BOUNDARY_SEND
 
 
+def _is_write_path(argument) -> bool:
+    """Whether the expression reads the transmitter's own write hop."""
+    if not isinstance(argument, ast.Attribute):
+        return False
+    inner = argument.value
+    if not isinstance(inner, ast.Name) or inner.id != "self":
+        return False
+    return argument.attr == WRITE_PATH_ATTRIBUTE
+
+
 def _link_path_member(argument):
-    """The name of a slotted hop the expression reads, or None."""
+    """The hop constant the expression reads, or None."""
     if not isinstance(argument, ast.Attribute):
         return None
     inner = argument.value

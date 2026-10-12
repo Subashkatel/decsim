@@ -6,25 +6,39 @@ qldpc/decoders/sinter.py); a strong result replaces the weak
 prediction; a window awaiting strong is not final.
 """
 
+import dataclasses
 import types
 
 import pytest
 
-import decsim.build.routes as routes_build
 import decsim.config as config
 import decsim.decoders.decoder_output as decoder_output_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
+import tests.experiments.run_files as run_files
 
-# the slotted pools, no edge, the planner's windows on the weak pool
-_ROUTES = routes_build.slotted_routes(window_records.WEAK_POOL_ID, None)
+
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
+# the two pools, each answering the frame direct; the planner's windows
+# on the weak pool
+_ROUTES = REFERENCE_LAYOUT.routes()
 
 
 class _RecordingCourier:
@@ -179,7 +193,9 @@ class _Fixture:
         committer.results = self.results
         committer.edges = edges
         self.committer = committer
-        self.verdict = window_commits.WindowVerdict(self.engine)
+        self.verdict = window_commits.WindowVerdict(
+            self.engine, window_records.WEAK_POOL_ID
+        )
         self.verdict.planner = planner
         self.verdict.tracker = tracker
         self.verdict.edges = edges
@@ -221,7 +237,7 @@ def test_the_boundary_leaves_at_decode_done_before_the_frame_commit():
     assert fixture.window.t_done == 10
     assert fixture.courier.handed == [((4, 1), True)]
     (path, key, tier, payload_bits) = fixture.transfers.sent[0]
-    assert path == transfer_records.WEAK_DECODER_TO_FRAME
+    assert path == "weak_to_frame"
     assert (key, tier, payload_bits) == (
         (4, 1),
         window_records.WEAK_POOL_ID,
@@ -310,7 +326,7 @@ def test_a_strong_result_replaces_the_weak_prediction_and_ships_the_held():
     )
     fixture.engine.run()
     (path, _key, tier, _bits) = fixture.transfers.sent[0]
-    assert path == transfer_records.STRONG_DECODER_TO_FRAME
+    assert path == "strong_to_frame"
     assert tier == window_records.STRONG_POOL_ID
     assert fixture.frame.commits == [(24, (4, 1), (0, 1))]
     assert fixture.results.replaced == [((4, 1), (0, 1))]

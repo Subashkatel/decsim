@@ -1,6 +1,6 @@
 """Assignments written as text: `path=value`, from a flag or the environment.
 
-`decsim run run.py --set weak_decoder.unit_count=3` writes one; the
+`decsim run run.py --set weak.unit_count=3` writes one; the
 environment variable DECSIM_SET writes several, separated by `;`, and
 they come before every --set, so a flag wins (ns-3's precedence: the
 command line over the environment over the run file, manual,
@@ -67,8 +67,7 @@ def parse(text: str, origin: str) -> list:
     """One `path=value` text as its assignments: one, or a part's several."""
     if "=" not in text:
         raise fields.ParameterError(
-            f"{origin}: {text!r} is not path=value, e.g. "
-            "weak_decoder.unit_count=3"
+            f"{origin}: {text!r} is not path=value, e.g. weak.unit_count=3"
         )
     written_path, _, written_value = text.partition("=")
     path = written_path.strip()
@@ -160,6 +159,5 @@ def _refuse_an_empty(
     if path and value_text:
         return
     raise fields.ParameterError(
-        f"{origin}: {text!r} needs a path and a value, e.g. "
-        "weak_decoder.unit_count=3"
+        f"{origin}: {text!r} needs a path and a value, e.g. weak.unit_count=3"
     )

@@ -95,10 +95,9 @@ class RoundRetention:
     def primary_store(self) -> ports.RetainedRounds:
         """The store the primary tier reads.
 
-        The weak syndrome buffer, or the strong one for a strong-primary
-        plan.
+        The weak syndrome buffer, or the strong one for a run with none.
         """
-        if self.primary_tier == window_records.STRONG_POOL_ID:
+        if self.weak_store is None:
             return self.strong_store
         return self.weak_store
 

@@ -8,10 +8,14 @@ provisions the link carrying it must move together when it changes, and
 not one release apart.
 """
 
+import dataclasses
+
 import decsim.presets.link_cards as link_cards
 import decsim.records.windows as window_records
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.window_interactions as window_interactions
+import tests.escalation.declared_fabric as declared_fabric
 
 COMMIT_ROUNDS = 5
 BUFFER_ROUNDS = 5
@@ -51,9 +55,14 @@ def _planned_region_round_count() -> int:
 
 
 def _provisioned_region_round_count() -> float:
-    """The rounds the bandwidth card provisions the strong input for."""
-    profile = link_cards.bandwidth_limited_card(**GEOMETRY)
-    path = profile.strong_buffer_to_strong_decoder
+    """The rounds the bandwidth fabric provisions the strong input for."""
+    fabric = link_cards.bandwidth_limited_fabric(**GEOMETRY)
+    declared = declared_fabric.switching_graph(rounds=6, escalated_windows=())
+    graph = dataclasses.replace(declared, fabric=fabric)
+    at_task = graph.at_task()
+    layout = graph_layout.layout_of(at_task)
+    card = layout.card
+    path = card.path_settings("strong_buffer_to_strong")
     bits = path.default_payload.input_bits
     return bits / SYNDROME_BITS_PER_ROUND
 

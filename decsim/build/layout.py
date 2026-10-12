@@ -4,9 +4,7 @@ The build loops over these, entry first, then each edge's target in
 graph order, so a machine of any number of pools builds through one
 code path. Each record carries the names its components go by: the
 word its results write, its statistics path, its seed names, its log
-labels and its hops. A slotted machine's records keep the names its
-slots have always given (slotted_layout), so its results, seeds and
-statistics are unchanged; a graph's other parts go by their own names.
+labels and its hops (topology/graph_layout.py names them by part).
 
 The order is part of a run's results: the entry store is built first,
 since a store's tick-end listener runs in the order the stores were
@@ -18,14 +16,16 @@ import dataclasses
 from typing import Any, Optional
 
 import decsim.build.routes as routes_build
-import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
-import decsim.records.log_sources as log_sources
+import decsim.links.settings as link_settings
 import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
+
+# where every round's path to a decoder starts
+CONTROLLER_SEAT = "controller"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -127,12 +127,14 @@ class Layout:
     The entry pool decodes the planner's windows and reads the entry
     store, the one the controller writes. router, None for most
     machines, sends each window to one of entry_count entry pools, the
-    first pools laid out (windows/routers.py).
+    first pools laid out (windows/routers.py). card prices every hop the
+    machine rides.
     """
 
     pools: tuple
     stores: tuple
     edges: tuple
+    card: link_settings.FabricSettings
     router: Optional[Any] = None
     entry_count: int = 1
 
@@ -160,22 +162,40 @@ class Layout:
                 return plan
         raise KeyError(name)
 
-    def entry_edge_stores(self) -> tuple:
-        """The store the entry pool reads and the entry edge's target's.
+    def tier_pools(self) -> tuple:
+        """The weak tier's pool and the strong tier's, either None if absent.
 
-        The retention calls them weak and strong; either is None when
-        the run has none. A slotted strong-only run's one store is its
-        strong store.
+        The weak tier is the entry pool and the strong one its entry
+        edge's target, whatever their parts are named. An entry pool whose
+        rounds land in its store, as a host pool's do, is a strong tier
+        with no weak one. A run with no store has neither. The retention
+        and the reports read the two tiers off this one rule.
         """
+        if not self.stores:
+            return (None, None)
         entry = self.entry_pool
-        if entry.store == STRONG_STORE:
-            return (None, STRONG_STORE)
+        entry_store = self.store(entry.store)
+        if entry_store.intake.shape == receiver_module.LANDED:
+            return (None, entry.pool)
         if not self.edges:
-            return (entry.store, None)
+            return (entry.pool, None)
         entry_edge = self.edges[0]
-        hops = entry_edge.hops
-        target = self.pool(hops.target)
-        return (entry.store, target.store)
+        return (entry.pool, entry_edge.hops.target)
+
+    def entry_edge_stores(self) -> tuple:
+        """The stores the weak and the strong tier read, None for none.
+
+        The retention calls them weak and strong (tier_pools); the strong
+        store counts its arrivals as it stores them.
+        """
+        stores = []
+        for pool in self.tier_pools():
+            if pool is None:
+                stores.append(None)
+            else:
+                pool_plan = self.pool(pool)
+                stores.append(pool_plan.store)
+        return tuple(stores)
 
     def input_hop_by_pool(self) -> dict:
         """The hop each pool's input rides: its store's read hop.
@@ -193,6 +213,42 @@ class Layout:
             for reader in store.other_readers:
                 hops[reader.pool] = reader.read_hop
         return hops
+
+    def landed_seats(self) -> tuple:
+        """Each store a round lands in, and each pool that reads one."""
+        seats = []
+        for store in self.stores:
+            if store.intake.shape == receiver_module.LANDED:
+                seats.append(store.name)
+        landed = set(seats)
+        for plan in self.pools:
+            if plan.store in landed:
+                seats.append(plan.names.seat)
+        return tuple(seats)
+
+    def controller_write_hop(self) -> Optional[str]:
+        """The hop the controller writes the written store over, if one is."""
+        for store in self.stores:
+            intake = store.intake
+            if intake.shape == receiver_module.WRITTEN:
+                return intake.controller_write.path_name
+        return None
+
+    def entry_switching(
+        self,
+    ) -> Optional[escalation_settings.SwitchingSettings]:
+        """The entry edge's switching record, at the task; None for none."""
+        if not self.edges:
+            return None
+        entry_edge = self.edges[0]
+        return entry_edge.settings
+
+    def entry_escalation_hop(self) -> Optional[str]:
+        """The hop the entry edge escalates a window over; None for none."""
+        if not self.edges:
+            return None
+        entry_edge = self.edges[0]
+        return entry_edge.hops.forward
 
     def statistics_path_by_pool(self) -> dict:
         """The path each pool's statistics sit at."""
@@ -246,159 +302,3 @@ class Layout:
             path = (*stores, target.names.seat)
             paths.append(path)
         return tuple(paths)
-
-
-# A slotted machine's names, by slot. The pool that decodes the windows
-# is always the primary one, its manager's pool "default", even when
-# the strong tier is that pool (a strong-only run): its seeds and
-# statistics stay where a slotted run has them.
-WEAK_STORE = "weak_syndrome_buffer"
-STRONG_STORE = "strong_syndrome_buffer"
-PRIMARY_UNIT_SEED = "primary_decoder"
-PRIMARY_MANAGER_SEED = "decoder_manager"
-STRONG_SEAT = "strong_decoder"
-STRONG_NAMES = PoolNames(
-    seat=STRONG_SEAT,
-    queue=decode_queue.STRONG_POOL,
-    statistics_path=STRONG_SEAT,
-    unit_seed=STRONG_SEAT,
-    manager_seed="strong_decoder_manager",
-)
-# the edge's statistics path, the switching settings' own, and the
-# root its verdict's seed hashes
-SLOTTED_EDGE_NAME = "switching"
-SLOTTED_POLICY_SEED = "escalation_policy"
-# where every round's path to a decoder starts
-CONTROLLER_SEAT = "controller"
-# how each slotted store takes its rounds, by the names its log and
-# copies use: the weak store written by the controller, the strong one
-# landed, from the controller or carried up with an escalation
-CONTROLLER_TO_WEAK_STORE = receiver_module.Hop(
-    transfer_records.CONTROLLER_TO_WEAK_BUFFER, "controller assembler"
-)
-CONTROLLER_TO_STRONG_STORE = receiver_module.Hop(
-    transfer_records.CONTROLLER_TO_STRONG_BUFFER, "controller assembler"
-)
-ESCALATION_TO_STRONG_STORE = receiver_module.Hop(
-    transfer_records.WEAK_DECODER_TO_STRONG_DECODER, "weak syndrome buffer"
-)
-WEAK_STORE_INTAKE = receiver_module.StoreIntake(
-    name=log_sources.WEAK_BUFFER,
-    seat=WEAK_STORE,
-    shape=receiver_module.WRITTEN,
-    controller_write=CONTROLLER_TO_WEAK_STORE,
-)
-STRONG_STORE_INTAKE = receiver_module.StoreIntake(
-    name=log_sources.STRONG_BUFFER,
-    seat=STRONG_STORE,
-    shape=receiver_module.LANDED,
-    controller_write=CONTROLLER_TO_STRONG_STORE,
-    escalation=ESCALATION_TO_STRONG_STORE,
-)
-
-
-def slotted_layout(settings: Any) -> Layout:
-    """The layout of a MachineSettings record, every name its slot's.
-
-    settings is Any: build sits below the settings package, which
-    imports it.
-
-    The weak pool decodes the windows when it is set, else the strong
-    one; a switching run adds the strong pool and the edge to it. A run
-    with no decoder has one idle pool and no store.
-    """
-    window_tier = settings.window_tier
-    window_decoder = settings.decoder_settings_for(window_tier.word)
-    entry = _slotted_entry_pool(window_tier, window_decoder)
-    pools = [entry]
-    stores = []
-    if window_decoder is not None:
-        entry_store = _slotted_entry_store(settings, entry)
-        stores.append(entry_store)
-    edges = []
-    switching = settings.switching
-    if switching is not None:
-        strong = _slotted_strong_pool(settings.strong_decoder)
-        pools.append(strong)
-        strong_store = _slotted_store(
-            settings.strong_syndrome_buffer, STRONG_STORE, strong
-        )
-        stores.append(strong_store)
-        hops = routes_build.slotted_edge(switching.strong_answer_route)
-        edge = EdgePlan(
-            SLOTTED_EDGE_NAME, switching, hops, WEAK_STORE, SLOTTED_POLICY_SEED
-        )
-        edges.append(edge)
-    return Layout(tuple(pools), tuple(stores), tuple(edges))
-
-
-def _slotted_entry_pool(
-    window_tier: window_records.PoolId,
-    window_decoder: Optional[decoder_settings.DecoderPoolSettings],
-) -> PoolPlan:
-    """The pool of the window tier, under the primary names."""
-    seat = f"{window_tier.word}_decoder"
-    names = PoolNames(
-        seat=seat,
-        queue=decode_queue.DEFAULT_POOL,
-        statistics_path=seat,
-        unit_seed=PRIMARY_UNIT_SEED,
-        manager_seed=PRIMARY_MANAGER_SEED,
-    )
-    hops = routes_build.SLOTTED_WEAK_POOL_HOPS
-    store = WEAK_STORE
-    if window_tier == window_records.STRONG_POOL_ID:
-        hops = routes_build.SLOTTED_STRONG_POOL_HOPS
-        store = STRONG_STORE
-    return PoolPlan(hops, window_decoder, names, store)
-
-
-def _slotted_strong_pool(
-    strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
-) -> PoolPlan:
-    hops = routes_build.SLOTTED_STRONG_POOL_HOPS
-    return PoolPlan(hops, strong_decoder, STRONG_NAMES, STRONG_STORE)
-
-
-def _slotted_entry_store(settings, entry: PoolPlan) -> StorePlan:
-    """The store the window tier reads: the weak one, or the strong one."""
-    if entry.store == STRONG_STORE:
-        return _slotted_store(
-            settings.strong_syndrome_buffer, STRONG_STORE, entry
-        )
-    return _slotted_store(settings.weak_syndrome_buffer, WEAK_STORE, entry)
-
-
-def _slotted_store(store_settings, name: str, reader: PoolPlan) -> StorePlan:
-    """A slotted store, read by one pool, under its slot's names."""
-    reads_in_place = _reads_in_place(reader.settings)
-    if name == WEAK_STORE:
-        return StorePlan(
-            name=name,
-            settings=store_settings,
-            intake=WEAK_STORE_INTAKE,
-            label="weak syndrome buffer",
-            read_hop=transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
-            reader=reader.names.seat,
-            reads_in_place=reads_in_place,
-            takes_machine_clock=True,
-        )
-    return StorePlan(
-        name=name,
-        settings=store_settings,
-        intake=STRONG_STORE_INTAKE,
-        label="strong syndrome buffer",
-        read_hop=transfer_records.STRONG_BUFFER_TO_STRONG_DECODER,
-        reader=reader.names.seat,
-        reads_in_place=reads_in_place,
-        takes_machine_clock=False,
-    )
-
-
-def _reads_in_place(
-    pool_settings: Optional[decoder_settings.DecoderPoolSettings],
-) -> bool:
-    """Whether a pool's units read their rounds where the store keeps them."""
-    if pool_settings is None:
-        return False
-    return not pool_settings.copies_input

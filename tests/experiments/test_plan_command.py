@@ -295,7 +295,7 @@ def test_a_dry_run_exports_the_assignments_every_job_builds_its_tasks_by(
     written for the tasks it builds.
     """
     variable = assignments.ENVIRONMENT_VARIABLE
-    assigned = "weak_decoder.unit_count=2"
+    assigned = "weak.unit_count=2"
     parsed = assignments.parse(assigned, assignments.FLAG)
     with in_force.in_force(parsed):
         run_file = run_files.write_packed_run_file(

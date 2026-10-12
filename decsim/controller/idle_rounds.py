@@ -4,8 +4,9 @@ Syndrome extraction never stops, so a patch nobody operates on emits a
 round every cycle. A patch that holds an unsealed stream sends it as the
 stream's next round; for any other patch the idle policy decides how it
 travels and whether it is charged as decode work. An operation claims
-every round its patches emitted since the last claim, so the windows can
-prepend them. Idle rounds are decoder workload: the backlog bound counts
+every round its patches emitted since the last claim that no idle job
+charged, so the windows can prepend them and no round is decoded twice.
+Idle rounds are decoder workload: the backlog bound counts
 every generated syndrome bit (Terhal 1302.3428; Battistel et al.
 2303.00054).
 """
@@ -86,11 +87,13 @@ class IdleRoundAccounting:
         return self.streams.bind_at_start(command)
 
     def claim(self, operation: program_records.Operation) -> int:
-        """The idle cycles on the operation's patches since the last claim.
+        """The idle cycles on the operation's patches that no job decoded.
 
         A code cycle measures every check of every patch once (Litinski
         1808.02892), so patches idle through the same cycles count them once:
-        the longest run among the patches.
+        the longest run among the patches. A cycle the policy charged as a
+        decode job of its own is decoded already, so the operation's
+        windows do not read it again.
         """
         patches = operation.patches
         if not patches:
@@ -100,8 +103,10 @@ class IdleRoundAccounting:
             idle = self.idle_by_patch.get(patch)
             if idle is None:
                 continue
-            cycle_count = max(cycle_count, idle.unclaimed)
+            undecoded_count = idle.unclaimed - idle.charged
+            cycle_count = max(cycle_count, undecoded_count)
             idle.unclaimed = 0
+            idle.charged = 0
         return cycle_count
 
     def end_every_idle_period(self) -> None:
@@ -161,6 +166,8 @@ class IdleRoundAccounting:
         self, operation, patch, idle_round_count: int, round_index: int
     ) -> None:
         """One load-only decode job: the idle rounds plus the buffer rounds."""
+        idle = self._idle(patch)
+        idle.charged += idle_round_count
         patch_record = self.geometry_by_patch[patch]
         geometry = patch_record.code_geometry
         rounds = idle_round_count + geometry.buffer_round_count
@@ -184,12 +191,14 @@ class IdleRoundAccounting:
 class _PatchIdle:
     """One patch's idle rounds: since the last claim, since the last job.
 
+    charged counts the unclaimed rounds an idle job already decoded.
     operation, the one that left the patch idle, labels a job charged at
     the workload's end.
     """
 
     operation: Optional[program_records.Operation] = None
     unclaimed: int = 0
+    charged: int = 0
     uncharged: int = 0
     last_round_index: int = 0
 

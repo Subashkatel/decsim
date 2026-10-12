@@ -20,15 +20,19 @@ measure end to end as the sum of its stages (550 ns from the end of the
 readout pulse to the start of the feedback pulse).
 """
 
+import dataclasses
+
 import decsim.config as config
 import decsim.controller.instruction_output as instruction_output
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
-import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
 import tests.declared_run as declared_run
+import tests.experiments.run_files as run_files
 
 # a one-tick period, so the pulse cost is its cycles and every tick is
 # an edge; the edge law has its own test below
@@ -36,9 +40,21 @@ CLOCK = config.Clock(1)
 PULSE_TICKS = 17
 
 
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
+
+
 def test_a_result_return_pays_the_pulse_cost_and_the_crossing_to_the_qpu():
     engine = engine_module.Engine()
-    reference = link_profiles.logical_reference_profile()
+    reference = REFERENCE_LAYOUT.card
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
@@ -75,7 +91,7 @@ def test_the_pulse_cost_runs_from_the_controller_clocks_next_edge():
     cycles later, at 300.
     """
     engine = engine_module.Engine()
-    reference = link_profiles.logical_reference_profile()
+    reference = REFERENCE_LAYOUT.card
     link = fabric_module.LinkFabric(reference, engine)
     recorder = round_events.RoundEventRecorder(engine)
     slow_clock = config.Clock(100)

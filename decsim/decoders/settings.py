@@ -143,6 +143,7 @@ class DecoderPoolSettings:
         _check_flag("copies_boundary_fold", self.copies_boundary_fold)
         _check_flag("result_blocks_unit", self.result_blocks_unit)
         _check_word_has_a_memory(self)
+        _check_fold_has_a_memory(self)
 
 
 class SchedulerSettings(Protocol):
@@ -233,6 +234,22 @@ def _check_word_has_a_memory(pool: DecoderPoolSettings) -> None:
         "own memory, and a pool that reads its input in place "
         "(copies_input False) reads the rounds where the store keeps them, "
         "which the store prices; leave word_bits out, or copy the input"
+    )
+
+
+def _check_fold_has_a_memory(pool: DecoderPoolSettings) -> None:
+    """An in-place fold writes the unit's own memory, which in_place lacks.
+
+    Under input in_place the rounds stay where the store keeps them, and
+    the store holds the only copy, so a mask written there would change
+    the rounds every other reader reads (DecoderInputStaging.fold_in_place).
+    """
+    if pool.copies_input or pool.copies_boundary_fold:
+        return
+    raise ValueError(
+        "a decoder pool's boundary_fold in_place writes the mask into the "
+        "unit's own memory, and a pool that reads its input in place "
+        "(copies_input False) has none; fold into a copy, or copy the input"
     )
 
 

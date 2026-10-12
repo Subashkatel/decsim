@@ -18,11 +18,11 @@ import decsim.frontends.memory_stream as memory_stream
 import decsim.frontends.settings as workload_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame
+import decsim.presets.machines as machines
 import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
-import decsim.settings as machine_settings
-import decsim.windows.settings as window_settings
+import decsim.topology.graph as graph
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -45,10 +45,8 @@ class StreamRun:
     escalates: bool
 
 
-def stream_settings(
-    run: StreamRun, folds: bool
-) -> machine_settings.MachineSettings:
-    """The stream machine's settings; folds lets each window go."""
+def stream_graph(run: StreamRun, folds: bool) -> graph.Machine:
+    """The stream machine's graph; folds lets each window go."""
     program = memory_programs.memory_program(3, "Z", 0.01)
     workload = stream_workload(program, run.rounds)
     source = flip_stream_device.FlipStreamDevice.Settings()
@@ -64,16 +62,11 @@ def stream_settings(
         folds_windows=folds,
     )
     frame = pauli_frame.PauliFrameConfig()
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak,
-        pauli_frame=frame,
-        observation=observation,
-    )
+    machine = machines.base(workload, qpu, frame, observation=observation)
+    with_weak = machines.with_pool(machine, weak)
     if not run.escalates:
-        return settings
-    return switching(settings)
+        return with_weak
+    return switching(with_weak)
 
 
 def stream_workload(program, rounds: int) -> workload_settings.WorkloadSettings:
@@ -94,9 +87,7 @@ def matching_pool(latency: float) -> decoder_settings.DecoderPoolSettings:
     )
 
 
-def switching(
-    settings: machine_settings.MachineSettings,
-) -> machine_settings.MachineSettings:
+def switching(machine: graph.Machine) -> graph.Machine:
     """A strong tier redoing the windows whose gap is under 12 dB."""
     strong_window = strong_window_shapes.RedoWindow.Settings()
     confidence = complementary.ComplementaryGap.Settings()
@@ -107,10 +98,4 @@ def switching(
         confidence=confidence, threshold=threshold, strong_window=strong_window
     )
     strong = matching_pool(6.0)
-    windows = window_settings.switching_windows(settings.windows, strong_window)
-    return dataclasses.replace(
-        settings,
-        switching=switching_settings,
-        strong_decoder=strong,
-        windows=windows,
-    )
+    return machines.with_strong_tier(machine, strong, switching_settings)

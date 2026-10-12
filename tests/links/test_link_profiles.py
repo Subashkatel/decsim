@@ -8,6 +8,7 @@ its law; Caune et al. 2410.05202 (a 32-bit bus word) and Fruitwala et al.
 presets' cards are tested in tests/presets/test_link_cards.py.
 """
 
+import dataclasses
 import fractions
 import math
 import re
@@ -19,15 +20,18 @@ import decsim.engine
 import decsim.links.channel as channel_module
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine
+import decsim.presets.machines as machines
 import decsim.records.transfers as transfer_records
-import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 # the four hops a strong-node card prices as a cable or chassis crossing
 STRONG_NODE_CROSSINGS = (
-    transfer_records.CONTROLLER_TO_STRONG_BUFFER,
-    transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
-    transfer_records.STRONG_DECODER_TO_FRAME,
-    transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
+    "controller_to_strong_buffer",
+    "weak_to_strong",
+    "strong_to_frame",
+    "strong_to_weak",
 )
 INSTRUCTION_PATHS = (
     transfer_records.FRAME_TO_CONTROLLER,
@@ -35,18 +39,20 @@ INSTRUCTION_PATHS = (
 )
 
 
+def reference_card():
+    """The reference card of a weak pool escalating to one on the host."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    layout = graph_layout.layout_of(at_task)
+    return layout.card
+
+
 def channel_names_of(profile):
     names = []
-    for path in transfer_records.SLOTTED_PATHS:
-        path_settings = profile.path_settings(path)
-        names.append(path_settings.channel.name)
-    return names
-
-
-def path_names():
-    names = []
-    for path in transfer_records.SLOTTED_PATHS:
-        names.append(path)
+    for path in profile.paths:
+        names.append(path.settings.channel.name)
     return names
 
 
@@ -57,8 +63,9 @@ def test_a_reference_hop_delivers_its_latency_after_its_bits_serialize():
     the DataRate, and the receiver has it the channel delay later. A d=11
     round of 120 bits on the weak store's hop, rounded to the nearest tick.
     """
-    profile = link_profiles.logical_reference_profile()
-    weak_store = profile.controller_to_weak_buffer.channel
+    profile = reference_card()
+    weak_store_path = profile.path_settings("controller_to_weak_buffer")
+    weak_store = weak_store_path.channel
     engine = decsim.engine.Engine()
     channel = channel_module.Channel(weak_store, engine)
     framed = transfer_records.FramedPayload(120)
@@ -82,53 +89,43 @@ def test_the_reference_card_leaves_unbounded_only_the_parallel_hops():
     709-715) and each graph edge its own link (Helios 2301.08419 lines
     764-769), so those two hops carry no rate.
     """
-    profile = link_profiles.logical_reference_profile()
+    profile = reference_card()
     unbounded = _unbounded_paths(profile)
-    assert unbounded == ["qpu_to_controller", "decoder_to_decoder"]
-    assert profile.profile_name == "logical_reference"
-    assert profile.qpu_to_controller.excludes_receiver_processing is False
+    readout = profile.path_settings("qpu_to_controller")
+    assert unbounded == ["qpu_to_controller", "weak_to_weak"]
+    assert readout.excludes_receiver_processing is False
 
 
 def test_the_reference_card_prices_a_bus_word_and_an_instruction_word():
-    profile = link_profiles.logical_reference_profile()
-    assert profile.frame_to_controller.default_payload.input_bits == 32
-    assert profile.controller_to_qpu.default_payload.input_bits == 128
+    profile = reference_card()
+    decision = profile.path_settings("frame_to_controller")
+    command = profile.path_settings("controller_to_qpu")
+    assert decision.default_payload.input_bits == 32
+    assert command.default_payload.input_bits == 128
 
 
 def test_the_reference_card_prices_a_boundary_on_the_seam_it_updates():
-    profile = link_profiles.logical_reference_profile()
-    assert profile.decoder_to_decoder.default_payload is None
-    assert profile.decoder_to_decoder.actual_payload_source == (
+    profile = reference_card()
+    seam = profile.path_settings("weak_to_weak")
+    assert seam.default_payload is None
+    assert seam.actual_payload_source == (
         "DependencyResidual seam-layer detectors"
     )
 
 
 def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
-    profile = link_profiles.logical_reference_profile()
-    assert (
-        profile.qpu_to_controller.actual_payload_source
-        == "QPUReadout.size_bits"
-    )
-    assert profile.controller_to_weak_buffer.actual_payload_source == (
-        "PackedRound.wire_bits"
-    )
-    assert profile.controller_to_strong_buffer.actual_payload_source == (
-        "PackedRound.wire_bits"
-    )
-    assert profile.weak_buffer_to_weak_decoder.actual_payload_source == (
-        "DecodeJob.payload_bits()"
-    )
-    assert (
-        profile.weak_decoder_to_strong_decoder.actual_payload_source
-        == "EscalatedRegion.message_bits()"
-    )
-    assert profile.strong_buffer_to_strong_decoder.actual_payload_source == (
-        "DecodeJob.payload_bits()"
-    )
-    assert profile.weak_decoder_to_frame.actual_payload_source == (
-        "DecodeResult.logical_observables bits"
-    )
-    assert profile.strong_decoder_to_frame.actual_payload_source == (
+    profile = reference_card()
+    sources = {}
+    for path in profile.paths:
+        sources[path.name] = path.settings.actual_payload_source
+    assert sources["qpu_to_controller"] == "QPUReadout.size_bits"
+    assert sources["controller_to_weak_buffer"] == "PackedRound.wire_bits"
+    assert sources["controller_to_strong_buffer"] == "PackedRound.wire_bits"
+    assert sources["weak_buffer_to_weak"] == "DecodeJob.payload_bits()"
+    assert sources["weak_to_strong"] == "EscalatedRegion.message_bits()"
+    assert sources["strong_buffer_to_strong"] == "DecodeJob.payload_bits()"
+    assert sources["weak_to_frame"] == "DecodeResult.logical_observables bits"
+    assert sources["strong_to_frame"] == (
         "DecodeResult.logical_observables bits behind the request's name"
     )
 
@@ -136,10 +133,9 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
 def _unbounded_paths(profile) -> list:
     """The names of the paths whose channel carries no rate."""
     unbounded = []
-    for path in transfer_records.SLOTTED_PATHS:
-        path_settings = profile.path_settings(path)
-        if path_settings.channel.capacity is None:
-            unbounded.append(path)
+    for path in profile.paths:
+        if path.settings.channel.capacity is None:
+            unbounded.append(path.name)
     return unbounded
 
 
@@ -147,12 +143,13 @@ def test_every_hop_of_the_reaction_path_has_a_reference_card():
     """A null card is the reference numbers, so no hop is ever free.
 
     The traffic report lists one row per hop of the reaction path, and
-    each row is priced: walking SLOTTED_PATHS finds a card on every one, and
-    each card's channel carries the hop's own name.
+    each row is priced: walking the card's hops finds a card on every one,
+    and each card's channel carries the hop's own name.
     """
-    profile = link_profiles.logical_reference_profile()
+    profile = reference_card()
     names = channel_names_of(profile)
-    assert names == path_names()
+    path_names = profile.path_names()
+    assert names == list(path_names)
 
 
 def test_the_reference_weak_loop_is_yangs_control_electronics():
@@ -163,13 +160,14 @@ def test_the_reference_weak_loop_is_yangs_control_electronics():
     subtotal less the 8 ns backplane logic, which is the controller's
     own decision work and not a hop.
     """
-    profile = link_profiles.logical_reference_profile()
-    loop_paths = (
-        profile.qpu_to_controller,
-        profile.controller_to_weak_buffer,
-        profile.weak_decoder_to_frame,
-        profile.controller_to_qpu,
+    profile = reference_card()
+    loop_names = (
+        "qpu_to_controller",
+        "controller_to_weak_buffer",
+        "weak_to_frame",
+        "controller_to_qpu",
     )
+    loop_paths = [profile.path_settings(name) for name in loop_names]
     loop_ticks = sum(
         path_settings.channel.propagation_latency_ticks
         for path_settings in loop_paths
@@ -185,7 +183,7 @@ def test_the_reference_weak_loop_is_yangs_control_electronics():
 @pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)
 def test_every_hop_to_or_from_the_strong_node_is_one_chassis_crossing(path):
     """Caune 2410.05202 Fig. 1a F, the inter-chassis hop, at 260 ns."""
-    profile = link_profiles.logical_reference_profile()
+    profile = reference_card()
     path_settings = profile.path_settings(path)
     channel = path_settings.channel
     crossing_ticks = config.microseconds_to_ticks(0.26)
@@ -194,14 +192,26 @@ def test_every_hop_to_or_from_the_strong_node_is_one_chassis_crossing(path):
 
 
 def test_a_run_without_a_card_uses_the_reference_card():
-    default_settings = machine_settings.MachineSettings()
-    default_machine = machine.Machine.build(default_settings)
+    """Each hop written out as its reference path runs as the default."""
+    default_graph = machines.base()
+    default_machine = machine.Machine.build(default_graph)
     default_result = default_machine.run()
-    reference = link_profiles.logical_reference_profile()
-    explicit_settings = machine_settings.MachineSettings(links=reference)
-    explicit_machine = machine.Machine.build(explicit_settings)
+    explicit_fabric = _reference_paths_written_out(default_graph)
+    explicit_graph = dataclasses.replace(default_graph, fabric=explicit_fabric)
+    explicit_machine = machine.Machine.build(explicit_graph)
     explicit_result = explicit_machine.run()
     assert default_result == explicit_result
+
+
+def _reference_paths_written_out(graph) -> fabrics.RoleLinks:
+    """Each hop of the graph's card as its reference path, by its role."""
+    at_task = graph.at_task()
+    layout = graph_layout.layout_of(at_task)
+    links = {}
+    for path in layout.card.paths:
+        reference = link_profiles.reference_path(path.role, path.name)
+        links[path.role.key] = fabrics.FixedPath(reference)
+    return fabrics.RoleLinks(**links)
 
 
 # an arXiv identifier as the cards write it: four digits, a dot, four or
@@ -212,18 +222,16 @@ ARXIV = re.compile(r"\b\d{4}\.\d{4,5}\b")
 def sources_of(profile):
     """The configuration source of each path's channel, by path name."""
     sources = {}
-    for path in transfer_records.SLOTTED_PATHS:
-        path_settings = profile.path_settings(path)
-        sources[path] = path_settings.channel.configuration_source
+    for path in profile.paths:
+        sources[path.name] = path.settings.channel.configuration_source
     return sources
 
 
 def _capacity_sources(profile) -> list:
     """The source of each rate the card declares, in path order."""
     sources = []
-    for path in transfer_records.SLOTTED_PATHS:
-        path_settings = profile.path_settings(path)
-        capacity = path_settings.channel.capacity
+    for path in profile.paths:
+        capacity = path.settings.channel.capacity
         if capacity is not None:
             sources.append(capacity.source)
     return sources
@@ -245,7 +253,7 @@ def _cites_a_paper(source: str) -> bool:
 
 def test_every_reference_number_cites_a_paper():
     """Each latency and each rate on the card names its arXiv source."""
-    profile = link_profiles.logical_reference_profile()
+    profile = reference_card()
     sources_by_path = sources_of(profile)
     path_sources = sources_by_path.values()
     capacity_sources = _capacity_sources(profile)
@@ -260,7 +268,7 @@ def test_an_instruction_hop_moves_its_word_in_one_cycle(path):
 
     Each word crosses its hop whole, one per 250 MHz cycle, 4000 ticks.
     """
-    profile = link_profiles.logical_reference_profile()
+    profile = reference_card()
     path_settings = profile.path_settings(path)
     word_bits = path_settings.default_payload.input_bits
     capacity = path_settings.channel.capacity

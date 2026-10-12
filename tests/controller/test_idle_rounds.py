@@ -227,6 +227,24 @@ def test_the_charged_policy_costs_one_job_per_region_and_the_remainder():
     ]
 
 
+def test_the_charged_policy_leaves_no_idle_round_for_the_windows():
+    """Its jobs decoded every idle round, so no window reads one again.
+
+    The backlog bound counts each generated syndrome bit once against the
+    decoder's rate (Terhal 1302.3428 lines 3151-3159); the policy's own
+    jobs are that once.
+    """
+    charged = policies.SeparateDecodeJobs()
+    accounting, _qpu, demand = accounting_with(charged)
+    operation = accounting.operation_by_id[7]
+
+    emit_idle_rounds(accounting, 7, "patch-a", (1, 2, 3, 4, 5))
+    started(accounting, operation)
+
+    assert len(demand.demands) == 3
+    assert accounting.windows.prepended == []
+
+
 def test_the_workload_end_charges_every_patchs_remaining_idle_rounds():
     charged = policies.SeparateDecodeJobs()
     accounting, _qpu, demand = accounting_with(charged)

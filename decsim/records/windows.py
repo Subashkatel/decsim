@@ -24,10 +24,9 @@ class WindowProtocol(Enum):
 class PoolId:
     """The decoder pool a request is for, by the word results write for it.
 
-    A machine's pool is named by its part. A slotted machine's two pools
-    keep the words its results have always written, WEAK_POOL_ID for the
-    pool that decodes first and STRONG_POOL_ID for the one it escalates
-    to, so a slotted run's records are unchanged.
+    A machine's pool is named by its part. WEAK_POOL_ID and STRONG_POOL_ID
+    are the names the presets give the pool that decodes first and the
+    one it escalates to (presets/machines.py).
     """
 
     word: str
@@ -35,8 +34,6 @@ class PoolId:
 
 WEAK_POOL_ID = PoolId("weak")
 STRONG_POOL_ID = PoolId("strong")
-# the slotted pools, in the order reports list them
-SLOTTED_POOL_IDS = (WEAK_POOL_ID, STRONG_POOL_ID)
 
 
 # WindowSettings.terminal_policy names one of these: how a finite serial stream

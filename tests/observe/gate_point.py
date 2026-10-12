@@ -13,27 +13,25 @@ import json
 import decsim.build.decoders as decoders_part
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
-import decsim.topology.slotted as slotted
 
 SEED = 0
 # the log hash of the point; it moves when a log line changes text, and the
 # results the gate hashes do not move with it
-POINT_LOG_SHA256 = "42b473b3cb9c"
+POINT_LOG_SHA256 = "181e34788d3d"
 
 
-def settings(**observation_changes):
-    """Gate point 1's settings, with its observation section changed."""
+def point(**observation_changes):
+    """Gate point 1's graph, with its observation changed."""
     shipped = machines.weak_baseline(3, 0.003, 1.0)
     changes = {"log_component_io": True, **observation_changes}
     observation = dataclasses.replace(shipped.observation, **changes)
-    point = dataclasses.replace(shipped, observation=observation)
-    return slotted.resolved(point)
+    return dataclasses.replace(shipped, observation=observation)
 
 
 def run(**observation_changes):
     """One shot of gate point 1: its machine and its result."""
-    point = settings(**observation_changes)
-    machine = machine_module.Machine.build(point, SEED)
+    graph = point(**observation_changes)
+    machine = machine_module.Machine.build(graph, SEED)
     result = machine.run()
     return machine, result
 

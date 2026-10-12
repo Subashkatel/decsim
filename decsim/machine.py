@@ -1,4 +1,4 @@
-"""The machine: the parts of one run, built from its settings and connected.
+"""The machine: the parts of one run, built from its graph and connected.
 
 A run is six parts in decsim/build/, in the order a readout travels:
 the qpu, the readout path (the controller, the packing stage and the
@@ -27,12 +27,12 @@ what tools/check_uses_graph.py prints and check.sh enforces:
     5  confidence, escalation, frontends, sinter_adapters
     6  build, producers
     7  observe
-    8  settings
+    8  topology
     9  machine (this file)
     10 experiments
     11 __main__
 
-The twelve priced hops are the line where a call stops being local
+The priced hops are the line where a call stops being local
 (Waldo 1994, waldo1994.txt 302-304 and 852-855): a call across a hop
 has a card, a payload a record names, and a send at one end; a call
 inside a unit is never priced. A component above a hop never sees a
@@ -63,8 +63,9 @@ import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
-import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
+import decsim.topology.graph as topology_graph
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.routers as routers
 import decsim.windows.window_release as window_release
@@ -72,14 +73,14 @@ import decsim.windows.window_release as window_release
 
 @dataclasses.dataclass(frozen=True)
 class Machine:
-    """The wired parts of one run, built from its settings.
+    """The wired parts of one run, built from its graph.
 
     Build one per seed with Machine.build, then run it once; the parts
     stay readable afterwards for the measurements and the views that
     read them.
     """
 
-    settings: machine_settings.MachineSettings
+    graph: topology_graph.Machine
     engine: engine_module.Engine
     plan: plan_build.Plan
     links: ports.Link
@@ -103,93 +104,90 @@ class Machine:
     @classmethod
     def build(
         cls,
-        settings: machine_settings.MachineSettings,
+        graph: topology_graph.Machine,
         seed: Optional[int] = 0,
         built_models: Optional[built_window_models.BuiltWindowModels] = None,
         online_threshold: Optional[ports.ThresholdSource] = None,
         layout: Optional[layout_module.Layout] = None,
     ) -> "Machine":
-        """Build every part from the run's settings, then assemble them.
+        """Build every part from the run's graph, then assemble them.
 
         The seed is the run's root; every stochastic component derives
         its own from it and its path. built_models is the window error
         model cache the shots of one unit share (collect.run_unit), and
         online_threshold the task's calibrator when its threshold
         learns across shots (collect.Task); both are task state, never
-        settings. layout is a new-shape graph's (collect.Task); None
-        lays out the settings' slots under their own names.
+        settings. layout is the task's graph laid out (collect.Task);
+        None lays the graph out here.
         """
-        settings = settings.at_task()
+        graph = graph.at_task()
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
         if layout is None:
-            layout = layout_module.slotted_layout(settings)
+            layout = graph_layout.layout_of(graph)
+        clock = graph.clock
+        controller = graph.held("controller")
         engine = engine_module.Engine()
         switching_parts = escalation_build.build_switching(
-            layout, engine, online_threshold, settings.clock
+            layout, engine, online_threshold, clock
         )
-        batches_each_member = decoders_part.batches_each_member(layout)
-        plan = plan_build.build_plan(
-            settings.qpu,
-            settings.workload,
-            settings.windows,
-            settings.idle_policy,
-            settings.detection_events,
-            settings.switching,
-            settings.decoder_manager.bulk_strong,
-            switching_parts,
-            batches_each_member,
-        )
+        plan = plan_of(graph, layout, switching_parts)
         formation_paths = layout.formation_paths()
+        detection_event_settings = graph.held("detection_events")
         detection_events = readout_part.build_detection_events(
-            settings.detection_events,
-            settings.clock,
+            detection_event_settings,
+            clock,
             plan.device,
             formation_paths,
         )
         signal_by_pool = escalation_build.signal_by_pool(switching_parts)
         pools = decoders_part.build_pool_units(
-            layout, settings.clock, detection_events, signal_by_pool
+            layout, clock, detection_events, signal_by_pool
         )
-        links = build_links(settings, engine)
-        qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
+        links = fabric.LinkFabric(layout.card, engine)
+        factory = graph.held("magic_state_factory")
+        qpu = qpu_part.Qpu.build(factory, engine, plan)
+        frame = graph.held("pauli_frame")
         control = control_part.Control.build(
-            settings.controller,
-            settings.pauli_frame,
-            settings.clock,
+            controller,
+            frame,
+            clock,
             engine,
             plan,
             links,
         )
         readout = readout_part.Readout.build(
-            settings.controller,
-            settings.links,
-            layout.stores,
-            settings.clock,
+            controller,
+            layout.card,
+            layout,
+            clock,
             engine,
             detection_events,
             links,
         )
+        window_settings = graph.held("windows")
+        workload = graph.held("workload")
         windows = windows_part.Windows.build(
-            settings.windows,
-            settings.workload,
+            window_settings,
+            workload,
             layout,
-            settings.clock,
+            clock,
             engine,
             plan,
             links,
             built_models,
         )
         target_by_source = layout.target_by_source()
+        decoder_manager = graph.held("decoder_manager")
         decoders = decoders_part.Decoders.build(
-            settings.decoder_manager,
-            settings.clock,
+            decoder_manager,
+            clock,
             engine,
             pools,
             target_by_source,
         )
         return cls.assemble(
-            settings,
+            graph,
             engine,
             plan,
             links,
@@ -206,7 +204,7 @@ class Machine:
     @classmethod
     def assemble(
         cls,
-        settings: machine_settings.MachineSettings,
+        graph: topology_graph.Machine,
         engine: engine_module.Engine,
         plan: plan_build.Plan,
         links: ports.Link,
@@ -279,7 +277,7 @@ class Machine:
         parts = (qpu, control, readout, decoders, *switching_parts)
         seed_roots = _seed_roots(plan, links, parts)
         seeding.bind_run_seed(root_seed, seed_roots)
-        keeps_series = not settings.observation.folds_windows
+        keeps_series = not graph.observation.folds_windows
         run_statistics = statistics_registry.Registry(
             engine, keeps_series=keeps_series
         )
@@ -287,7 +285,8 @@ class Machine:
         statistics_parts = (control, readout, *switching_parts)
         _attach_statistics(run_statistics, statistics_parts)
         observation = _observe(
-            settings,
+            graph,
+            layout,
             engine,
             links,
             run_statistics,
@@ -299,12 +298,12 @@ class Machine:
             switching=entry_switching,
             seed=seed,
         )
-        if settings.observation.folds_windows:
+        if graph.observation.folds_windows:
             _connect_window_release(windows, control, readout, switching_parts)
         decoders.read_program(plan.planned_operations)
         program_build.load_program(plan, control, windows)
         return cls(
-            settings=settings,
+            graph=graph,
             engine=engine,
             plan=plan,
             links=links,
@@ -344,11 +343,33 @@ class Machine:
         return _capture_result(self)
 
 
-def build_links(
-    settings: machine_settings.MachineSettings, engine: engine_module.Engine
-) -> ports.Link:
-    """The link fabric, on the run's links card."""
-    return fabric.LinkFabric(settings.links, engine)
+def plan_of(
+    graph: topology_graph.Machine,
+    layout: layout_module.Layout,
+    switching_parts: tuple,
+) -> plan_build.Plan:
+    """The plan the build derives from the graph, before it wires."""
+    batches_each_member = decoders_part.batches_each_member(layout)
+    landed_seats = layout.landed_seats()
+    decoder_manager = graph.held("decoder_manager")
+    qpu = graph.held("qpu")
+    workload = graph.held("workload")
+    windows = graph.held("windows")
+    idle_policy = graph.held("idle_policy")
+    detection_events = graph.held("detection_events")
+    entry_switching = layout.entry_switching()
+    return plan_build.build_plan(
+        qpu,
+        workload,
+        windows,
+        idle_policy,
+        detection_events,
+        entry_switching,
+        decoder_manager.bulk_strong,
+        switching_parts,
+        batches_each_member,
+        landed_seats,
+    )
 
 
 def _seed_roots(
@@ -395,7 +416,8 @@ def _attach_statistics(
 
 
 def _observe(
-    settings: machine_settings.MachineSettings,
+    graph: topology_graph.Machine,
+    layout: layout_module.Layout,
     engine: engine_module.Engine,
     links: ports.Link,
     run_statistics: statistics_registry.Registry,
@@ -409,11 +431,11 @@ def _observe(
     seed: Optional[int],
 ) -> observation_module.Observation:
     """Connect the run's listeners, before the workload is loaded."""
-    keeps_records = not settings.observation.folds_windows
-    traffic_ledger = link_traffic.TrafficLedger(settings.links, keeps_records)
-    name = _process_name(settings, seed)
+    keeps_records = not graph.observation.folds_windows
+    traffic_ledger = link_traffic.TrafficLedger(layout.card, keeps_records)
+    name = _process_name(graph, layout, seed)
     return wiring.observe(
-        settings.observation,
+        graph.observation,
         engine,
         links=links,
         qpu=qpu,
@@ -425,6 +447,7 @@ def _observe(
         process_name=name,
         traffic_ledger=traffic_ledger,
         run_statistics=run_statistics,
+        links_card=layout.card,
     )
 
 
@@ -450,11 +473,19 @@ def _connect_window_release(
 
 
 def _process_name(
-    settings: machine_settings.MachineSettings, seed: Optional[int]
+    graph: topology_graph.Machine,
+    layout: layout_module.Layout,
+    seed: Optional[int],
 ) -> str:
-    """The machine the trace is of: its escalation, code distance and seed."""
-    kind = settings.escalation_kind
-    distance = settings.qpu.distance
+    """The machine the trace is of: its entry pool, code distance and seed.
+
+    A machine with an edge is named by the entry edge's switching part.
+    """
+    kind = layout.entry_pool.names.seat
+    if layout.edges:
+        kind = layout.edges[0].name
+    qpu = graph.held("qpu")
+    distance = qpu.distance
     return f"decsim {kind} d{distance} seed{seed}"
 
 

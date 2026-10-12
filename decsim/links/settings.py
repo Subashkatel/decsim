@@ -20,6 +20,7 @@ import decsim.config as config
 import decsim.engine
 import decsim.ports as ports
 import decsim.records.identity as identity_records
+import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 
 
@@ -124,6 +125,7 @@ class ChannelSettings:
         )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
+        _check_protocol_has_a_rate(self)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -197,54 +199,44 @@ class ReadoutRoute:
 
 @dataclasses.dataclass(frozen=True)
 class NamedPath:
-    """A hop beyond a slotted machine's twelve, by name: a graph's own wire.
+    """One hop of a card: its name, its setting, its role, its ends' sites.
 
     A graph's hop is named <source part>_to_<target part>
-    (topology/graph_layout.py).
+    (topology/graph_layout.py); role is what it carries
+    (records/routes.py HopRole), and the sites are where its ends sit,
+    the fridge or the host. The data-movement report classes the memory
+    a hop crosses by its role and its sites.
     """
 
     name: transfer_records.LinkPath
     settings: PathSettings
+    role: route_records.HopRole
+    source_site: str
+    target_site: str
 
 
 @dataclasses.dataclass(frozen=True)
 class FabricSettings:
-    """A fabric card: one path setting per hop.
+    """A fabric card: one path setting per hop the machine rides.
 
-    Every hop of the reaction path is priced, so a card names all twelve
-    a slotted machine rides, and hops holds each further hop a graph's
-    pools ride, by name. A card whose QPU-to-controller latency leaves
-    out the controller's readout processing says so, since the timing
-    card prices it apart. readout_routes picks a path by the complete
-    contributing footprint; unmatched footprints use qpu_to_controller.
-    Equal channel names share a setup engine and serializer, across
-    routed cards too.
+    paths holds each hop by name, in the order the graph lays them out
+    (topology/graph_layout.py). A card whose QPU-to-controller latency
+    leaves out the controller's readout processing says so, since the
+    timing card prices it apart. readout_routes picks a path by the
+    complete contributing footprint; unmatched footprints use
+    qpu_to_controller. Equal channel names share a setup engine and
+    serializer, across routed cards too.
     """
 
-    qpu_to_controller: PathSettings
-    controller_to_weak_buffer: PathSettings
-    weak_buffer_to_weak_decoder: PathSettings
-    weak_decoder_to_strong_decoder: PathSettings
-    strong_buffer_to_strong_decoder: PathSettings
-    weak_decoder_to_frame: PathSettings
-    decoder_to_decoder: PathSettings
-    strong_decoder_to_frame: PathSettings
-    frame_to_controller: PathSettings
-    controller_to_qpu: PathSettings
-    controller_to_strong_buffer: PathSettings
-    strong_decoder_to_weak_decoder: PathSettings
-    # the card's name for the run's description, a label: no part of a
-    # task's id
-    profile_name: str = dataclasses.field(compare=False)
+    paths: tuple[NamedPath, ...]
     readout_routes: tuple[ReadoutRoute, ...] = ()
-    hops: tuple[NamedPath, ...] = config.added_field(())
 
     def __post_init__(self) -> None:
         routes = tuple(self.readout_routes)
         object.__setattr__(self, "readout_routes", routes)
-        hops = tuple(self.hops)
-        object.__setattr__(self, "hops", hops)
-        _refuse_a_hop_named_twice(hops)
+        paths = tuple(self.paths)
+        object.__setattr__(self, "paths", paths)
+        _refuse_a_hop_named_twice(paths)
         footprints = [route.patch_ids for route in routes]
         if len(set(footprints)) != len(footprints):
             raise ValueError("readout routes must have distinct footprints")
@@ -259,26 +251,27 @@ class FabricSettings:
                     f"settings by two paths"
                 )
 
-    def path_settings(self, path: transfer_records.LinkPath) -> PathSettings:
+    def path(self, name: transfer_records.LinkPath) -> NamedPath:
+        """One hop of the card, by its name."""
+        for path in self.paths:
+            if path.name == name:
+                return path
+        raise KeyError(f"the card prices no hop {name!r}")
+
+    def path_settings(self, name: transfer_records.LinkPath) -> PathSettings:
         """The setting of one path."""
-        for hop in self.hops:
-            if hop.name == path:
-                return hop.settings
-        return getattr(self, path)
+        path = self.path(name)
+        return path.settings
 
     def path_names(self) -> tuple:
-        """Every path's name: the slotted twelve in report order, then hops."""
-        names = list(transfer_records.SLOTTED_PATHS)
-        for hop in self.hops:
-            names.append(hop.name)
-        return tuple(names)
+        """Every path's name, in the card's order."""
+        return tuple(path.name for path in self.paths)
 
     def path_bindings(self) -> tuple:
         """Every semantic path's channel bindings, including readout routes."""
         bindings = []
-        for path in self.path_names():
-            settings = self.path_settings(path)
-            bindings.append((path, settings))
+        for path in self.paths:
+            bindings.append((path.name, path.settings))
         for route in self.readout_routes:
             bindings.append(
                 (transfer_records.QPU_TO_CONTROLLER, route.settings)
@@ -291,6 +284,19 @@ def check_positive_count(name: str, value: object) -> None:
     if config.is_whole_count(value):
         return
     raise ValueError(f"{name} is {value!r}; it is a positive whole number")
+
+
+def _check_protocol_has_a_rate(channel: ChannelSettings) -> None:
+    """A packet protocol times each frame at the wire's rate."""
+    if channel.protocol is None:
+        return
+    if channel.capacity is not None:
+        return
+    raise ValueError(
+        f"channel {channel.name!r} has a packet protocol, which times each "
+        "frame at the wire's rate, and no capacity; give it a capacity or "
+        "leave the protocol out"
+    )
 
 
 def _as_whole_number(value, name: str) -> int:
@@ -335,8 +341,8 @@ def _require_finite_number(value, name: str) -> None:
 
 
 def _refuse_a_hop_named_twice(hops: tuple) -> None:
-    """Each hop's name is its own, and none is a slotted path's."""
-    taken = set(transfer_records.SLOTTED_PATHS)
+    """Each hop's name is its own."""
+    taken = set()
     for hop in hops:
         if hop.name in taken:
             raise ValueError(f"the card prices the hop {hop.name!r} twice")

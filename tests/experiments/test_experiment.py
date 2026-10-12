@@ -24,6 +24,7 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
 import decsim.frontends.settings as workload_settings
 import decsim.parameters.assignments as assignments
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import tests.experiments.run_files as run_files
 
@@ -59,15 +60,14 @@ def _online_task_at_distance_5(workload) -> collect.Task:
     confidence = complementary.ComplementaryGap.Settings()
     card = threshold_sources.OnlineThreshold.Settings(threshold_decibels=15.0)
     switching = escalation_settings.SwitchingSettings(confidence, card)
-    qpu = dataclasses.replace(machine.qpu, distance=5)
+    base_qpu = machine.held("qpu")
+    qpu = dataclasses.replace(base_qpu, distance=5)
     running = workload_settings.WorkloadSettings.running(workload)
-    machine = dataclasses.replace(
-        machine,
-        qpu=qpu,
-        workload=running,
-        strong_decoder=machine.weak_decoder,
-        switching=switching,
-    )
+    machine = machine.with_held("qpu", qpu)
+    machine = machine.with_held("workload", running)
+    weak_pool_part = machine.part(machines.WEAK_POOL)
+    weak_pool = weak_pool_part.settings
+    machine = machines.with_strong_tier(machine, weak_pool, switching)
     return collect.Task("online", machine)
 
 
@@ -337,17 +337,16 @@ def test_a_run_file_loaded_with_decsim_set_builds_every_task_with_it(
     variable = assignments.ENVIRONMENT_VARIABLE
     monkeypatch.setenv(variable, "")
     plain = experiment.load(run_file)
-    monkeypatch.setenv(variable, "weak_decoder.unit_count=2")
+    monkeypatch.setenv(variable, "weak.unit_count=2")
 
     assigned = experiment.load(run_file)
 
     for plain_task, assigned_task in zip(
         plain.tasks, assigned.tasks, strict=True
     ):
-        pool = dataclasses.replace(
-            plain_task.machine.weak_decoder, unit_count=2
+        expected = plain_task.machine.with_settings(
+            machines.WEAK_POOL, unit_count=2
         )
-        expected = dataclasses.replace(plain_task.machine, weak_decoder=pool)
         assert assigned_task.machine == expected
         assert assigned_task.strong_id() != plain_task.strong_id()
 
@@ -357,13 +356,11 @@ def test_an_assignment_no_task_reaches_is_refused_naming_the_run_file(
 ):
     run_file = run_files.write_run_file(tmp_path)
     variable = assignments.ENVIRONMENT_VARIABLE
-    monkeypatch.setenv(variable, "weak_decoder.unit_cont=2")
+    monkeypatch.setenv(variable, "weak.unit_cont=2")
 
     with pytest.raises(refusal.RefusalError) as refused:
         experiment.load(run_file)
 
     message = str(refused.value)
-    assert message.startswith(
-        f"{run_file}: {variable} weak_decoder.unit_cont=2"
-    )
-    assert "Did you mean weak_decoder.unit_count" in message
+    assert message.startswith(f"{run_file}: {variable} weak.unit_cont=2")
+    assert "Did you mean weak.unit_count" in message

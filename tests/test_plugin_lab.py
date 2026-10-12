@@ -28,9 +28,9 @@ import tests.plugin_lab.parts as parts
 DECODER_PATH = "tests.plugin_lab.parts.WeightedMatching.Settings"
 VERDICT_PATH = "tests.plugin_lab.parts.WeightCut.Settings"
 CUT = "switching.verdict.cut"
-# a graph of two pools runs as the MachineSettings it resolves to, so
-# its decoder's statistics are at the slot's path (record_statistics.md)
-DECODER_STATISTICS = "weak_decoder.algorithm"
+# a pool's decoder's statistics sit at its part's name
+# (record_statistics.md)
+DECODER_STATISTICS = "weak.algorithm"
 THRESHOLD = threshold_sources.FixedThreshold.Settings(20.0)
 RUN_FILE = """
 import decsim
@@ -86,8 +86,8 @@ def test_the_lab_parts_are_set_by_import_path_on_the_command_line():
     with in_force.in_force(parsed):
         task = collect.Task("lab", plain)
 
-    pool = task.graph.part(machines.WEAK_POOL)
-    edge = task.graph.part(machines.SWITCHING)
+    pool = task.machine.part(machines.WEAK_POOL)
+    edge = task.machine.part(machines.SWITCHING)
     assert pool.settings.algorithm == parts.WeightedMatching.Settings()
     assert edge.settings.verdict == parts.WeightCut.Settings(cut=2.5)
 

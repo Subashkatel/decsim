@@ -10,8 +10,6 @@ stream_segment only when it carries observables. The installs and
 queries here are fixed; the harness runs the random ones.
 """
 
-import dataclasses
-
 import pytest
 
 import decsim.decoders.decoder as decoder_module
@@ -137,11 +135,10 @@ def test_a_contribution_keeps_the_observables_its_decoder_returned(
     row = _ReusedObservables()
     results = []
 
-    def run_with_the_row(settings, seed=0, probes=()):
+    def run_with_the_row(graph, seed=0, probes=()):
         del probes
         algorithm = declared_run.OneDecoder(row)
-        weak = dataclasses.replace(settings.weak_decoder, algorithm=algorithm)
-        with_the_row = dataclasses.replace(settings, weak_decoder=weak)
+        with_the_row = graph.with_settings("weak", algorithm=algorithm)
         machine = machine_module.Machine.build(with_the_row, seed)
         result = machine.run()
         results.append(result)

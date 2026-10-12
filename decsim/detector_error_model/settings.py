@@ -11,45 +11,14 @@ from typing import Optional
 
 import decsim.config as config
 
-# The points on the path from the controller to a decoder where the
-# former may sit, in path order: the controller's assembler, the two
-# stores' receiving ends, and the two decoder units' input.
-SEATS = (
-    "controller",
-    "weak_syndrome_buffer",
-    "strong_syndrome_buffer",
-    "weak_decoder",
-    "strong_decoder",
-)
-# The seats inside a decoder unit: they form a job's rounds as they land
-# in the unit's memory, which was written the raw round.
-DECODER_SEATS = ("weak_decoder", "strong_decoder")
-# The paths a round takes from the controller to a decoder, as seats in
-# path order: to the weak decoder; from the weak syndrome buffer to the
-# strong decoder when a switching run escalates a region
-# (strong_syndrome_round_receiver.py, weak_decoder_to_strong_decoder);
-# and straight to the strong decoder when the strong tier decodes the
-# plan's windows (controller_to_strong_buffer).
-WEAK_PATH = ("controller", "weak_syndrome_buffer", "weak_decoder")
-ESCALATION_PATH = (
-    "controller",
-    "weak_syndrome_buffer",
-    "strong_syndrome_buffer",
-    "strong_decoder",
-)
-STRONG_PATH = ("controller", "strong_syndrome_buffer", "strong_decoder")
-# The seats past the weak syndrome buffer on the escalation path: the
-# rounds of an escalated region reach them from a store the weak side
-# already read, so they read the raw round before the region too.
-STRONG_SIDE_SEATS = ("strong_syndrome_buffer", "strong_decoder")
-
 
 @dataclasses.dataclass(frozen=True)
 class DetectionEventSettings:
     """How a round's detection events are formed.
 
-    formed_at lists the seats, each once; every path a round takes to a
-    decoder crosses exactly one (build/readout.py). One conversion costs
+    formed_at lists the seats, each once, by the part each is: the
+    controller, a store or a pool; every path a round takes to a pool
+    crosses exactly one (build/readout.py). One conversion costs
     latency_cycles, plus cycles_per_round for each further round a seat
     forms together, on the clock of the forming logic: a pipelined stage
     takes a round a cycle after its fixed latency (Yang et al. 2605.04892:
@@ -72,14 +41,18 @@ class DetectionEventSettings:
         )
         _check_seats(self.formed_at)
 
-    def strong_side_seat(self) -> Optional[str]:
-        """The seat past the weak syndrome buffer that forms; None for none.
+    def landed_seat(self, landed_seats: tuple) -> Optional[str]:
+        """The seat among landed_seats that forms; None for none.
 
-        Every path crosses exactly one forming seat (formed_at), so the
-        escalation path has at most one past the weak syndrome buffer.
+        landed_seats are the stores a round lands in and the pools that
+        read them (build/layout.py Layout.landed_seats): the rounds of an
+        escalated region reach them from a store another pool already
+        read, so they read the raw round before the region too. Every
+        path crosses exactly one forming seat (formed_at), so at most one
+        of them forms.
         """
         for seat in self.formed_at:
-            if seat in STRONG_SIDE_SEATS:
+            if seat in landed_seats:
                 return seat
         return None
 
@@ -92,13 +65,7 @@ class DetectionEventSettings:
 
 
 def _check_seats(formed_at: tuple) -> None:
-    """Every seat is one of SEATS, and none is named twice."""
-    for seat in formed_at:
-        if seat not in SEATS:
-            raise ValueError(
-                f"detection_events.formed_at names {seat!r}, which is not "
-                f"a seat; the seats are {list(SEATS)}"
-            )
+    """No seat is named twice; build/readout.py checks each one's path."""
     if len(set(formed_at)) != len(formed_at):
         raise ValueError(
             f"detection_events.formed_at names a seat twice: {list(formed_at)}"

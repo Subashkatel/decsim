@@ -32,7 +32,6 @@ import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -45,13 +44,11 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
-import decsim.topology.slotted as slotted
+import decsim.topology.graph as graph
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.schemes.sliding as sliding_scheme
-import decsim.windows.settings as window_settings
 import decsim.windows.window_boundaries as window_boundaries
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
@@ -60,39 +57,47 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 )
 
 # The gate's switching card: both clocks at 250 MHz, each hop one cycle
-# of its side's clock on an unbounded wire.
+# of its side's clock on an unbounded wire; the decision and the pulse
+# keep the reference card.
 FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
 ROOM_CLOCK = clocks.ROOM_CLOCK
-GATE_PATH_CLOCKS = {
-    "qpu_to_controller": FRIDGE_CLOCK,
-    "controller_to_weak_buffer": FRIDGE_CLOCK,
-    "controller_to_strong_buffer": ROOM_CLOCK,
-    "weak_buffer_to_weak_decoder": FRIDGE_CLOCK,
-    "weak_decoder_to_strong_decoder": ROOM_CLOCK,
-    "strong_buffer_to_strong_decoder": ROOM_CLOCK,
-    "decoder_to_decoder": FRIDGE_CLOCK,
-    "weak_decoder_to_frame": FRIDGE_CLOCK,
-    "strong_decoder_to_frame": ROOM_CLOCK,
-    "strong_decoder_to_weak_decoder": ROOM_CLOCK,
-}
+GATE_SOURCE = "the gate's switching card"
 GATE_PHYSICAL_ERROR_PROBABILITY = 0.008
 # the hops across the wall, where a boundary carries the request's name
 # ahead of its seam (windows/window_boundaries.py)
-NAMED_BOUNDARY_PATHS = (
-    "weak_decoder_to_strong_decoder",
-    "strong_decoder_to_weak_decoder",
-)
+NAMED_BOUNDARY_PATHS = ("weak_to_strong", "strong_to_weak")
 
 
-def one_cycle_path(links, path_name: str, clock, latency_cycles: int = 1):
-    """One path of the card on an unbounded wire of one lane."""
-    link = fabrics.ClockedLink(
-        clock=clock,
-        latency_cycles=latency_cycles,
-        source="the gate's switching card",
+def gate_link(clock, latency_cycles: int = 1) -> fabrics.ClockedLink:
+    """One hop of the card on an unbounded wire of one lane."""
+    return fabrics.ClockedLink(
+        clock=clock, latency_cycles=latency_cycles, source=GATE_SOURCE
     )
-    path = getattr(links, path_name)
-    return link.priced(path_name, path, None)
+
+
+def gate_fabric(**links) -> fabrics.RoleLinks:
+    """The reference card with each of the gate's hops one cycle.
+
+    links replace a role's link, by its key (records/routes.py
+    HopRole.key).
+    """
+    fridge_cycle = gate_link(FRIDGE_CLOCK)
+    room_cycle = gate_link(ROOM_CLOCK)
+    links_by_role = {
+        "readout": fridge_cycle,
+        "write_written": fridge_cycle,
+        "write_landed": room_cycle,
+        "read_written": fridge_cycle,
+        "read_landed": room_cycle,
+        "forward": room_cycle,
+        "reverse": room_cycle,
+        "same_pool_fridge": fridge_cycle,
+        "same_pool_host": room_cycle,
+        "answer_fridge": fridge_cycle,
+        "answer_host": room_cycle,
+        **links,
+    }
+    return fabrics.RoleLinks(**links_by_role)
 
 
 def gate_switching(
@@ -100,7 +105,7 @@ def gate_switching(
     rounds_per_shot=None,
     strong_window=declared_run.REDO_WINDOW,
     physical_error_probability: float = GATE_PHYSICAL_ERROR_PROBABILITY,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The gate's switching card, at p 0.008 unless given, 1 us rounds.
 
     PyMatching on the chip keeps a window whose complementary gap is at
@@ -114,9 +119,6 @@ def gate_switching(
     qpu = qpu_settings.QpuSettings(
         source=stim, round_period_microseconds=1.0, distance=distance
     )
-    links = gate_links()
-    plain_windows = window_settings.WindowSettings()
-    windows = window_settings.switching_windows(plain_windows, strong_window)
     weak_engine = decoder_settings.EngineSettings(
         clock=FRIDGE_CLOCK, release_cycles_per_job=10
     )
@@ -131,32 +133,31 @@ def gate_switching(
         distance, physical_error_probability, rounds_per_shot
     )
     observation = observe_settings.ObservationSettings(log_component_io=True)
+    card = gate_fabric()
+    machine = machines.base(
+        qpu,
+        pauli_frame,
+        workload,
+        clock=FRIDGE_CLOCK,
+        observation=observation,
+        fabric=card,
+    )
+    with_weak = machines.with_pool(machine, weak_decoder)
     strong_decoder = host_belief_matching()
     switching = switching_slot(strong_window)
-    return machine_settings.MachineSettings(
-        clock=FRIDGE_CLOCK,
-        qpu=qpu,
-        links=links,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
-        pauli_frame=pauli_frame,
-        workload=workload,
-        observation=observation,
-    )
+    return machines.with_strong_tier(with_weak, strong_decoder, switching)
 
 
 def weak_base_switching(
     distance: int,
     physical_error_probability: float,
     round_period_microseconds: float,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The weak base switching on the gate's slot, over one-cycle hops.
 
     The switching experiment's redo window task: real PyMatching on the
     weak base's chip unit escalates to belief matching on the host, the
-    strong side's five hops one room cycle each.
+    strong side's hops one room cycle each.
     """
     base = machines.weak_baseline(
         distance, physical_error_probability, round_period_microseconds
@@ -166,10 +167,9 @@ def weak_base_switching(
     strong_side = link_cards.strong_side(base.fabric)
     strong_decoder = host_belief_matching()
     switching = switching_slot(declared_run.REDO_WINDOW)
-    switching_machine = machines.with_strong_tier(
+    return machines.with_strong_tier(
         weak_base, strong_decoder, switching, strong_side
     )
-    return slotted.resolved(switching_machine)
 
 
 def host_belief_matching() -> decoder_settings.DecoderPoolSettings:
@@ -192,15 +192,6 @@ def switching_slot(strong_window) -> escalation_settings.SwitchingSettings:
     return escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, strong_window=strong_window
     )
-
-
-def gate_links():
-    """The reference card with each of the gate's hops one cycle."""
-    reference = link_profiles.logical_reference_profile()
-    cards = {}
-    for path_name, clock in GATE_PATH_CLOCKS.items():
-        cards[path_name] = one_cycle_path(reference, path_name, clock)
-    return dataclasses.replace(reference, **cards)
 
 
 def priced_pool(pool, microseconds: float, unit_count: int = 1):
@@ -235,17 +226,19 @@ def test_the_double_window_leaves_once_its_far_boundary_is_determined():
         round_microseconds=4.0,
     )
     machine.run()
-    carried_lines = fabric.log_lines_containing(
+    carried_lines = declared_run.log_lines_containing(
         machine, "rounds 4-12 of op 1 carried up with the escalation"
     )
-    submitted_lines = fabric.log_lines_containing(
+    submitted_lines = declared_run.log_lines_containing(
         machine, "far-side weak boundary determined -> strong window submitted"
     )
-    restart_lines = fabric.log_lines_containing(machine, "DECODE DONE mem1 W4")
+    restart_lines = declared_run.log_lines_containing(
+        machine, "DECODE DONE mem1 W4"
+    )
     # the restart window W4 decodes from 74 to 84 us and is determined
-    # then; its correction reaches the frame 2 us of weak_decoder_to_frame
+    # then; its correction reaches the frame 2 us of weak_to_frame
     # and 1 us of frame write later, which the strong region does not wait
-    # for, and the region lands 3 us of weak_decoder_to_strong_decoder
+    # for, and the region lands 3 us of weak_to_strong
     # after it left
     assert len(carried_lines) == 1
     assert carried_lines[0].startswith("[ 84.000 us]")
@@ -333,22 +326,20 @@ def _gate_double_window_machine(
     strong_window = strong_window_shapes.DoubleWindow.Settings(
         restart_reread_buffer_regions=reread_buffer_regions
     )
-    settings = gate_switching(strong_window=strong_window)
+    gate = gate_switching(strong_window=strong_window)
     scheme = sliding_scheme.SlidingWindowScheme.Settings(
         commit_rounds=commit_rounds, buffer_rounds=buffer_rounds
     )
-    windows = dataclasses.replace(settings.windows, scheme=scheme)
-    weak_decoder = priced_pool(
-        settings.weak_decoder, weak_microseconds, weak_units
-    )
-    strong_decoder = priced_pool(settings.strong_decoder, strong_microseconds)
-    settings = dataclasses.replace(
-        settings,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-    )
-    return machine_module.Machine.build(settings, 1)
+    windows = gate.held(machines.WINDOWS)
+    windows = dataclasses.replace(windows, scheme=scheme)
+    weak = gate.part(machines.WEAK_POOL)
+    weak_decoder = priced_pool(weak.settings, weak_microseconds, weak_units)
+    strong = gate.part(machines.STRONG_POOL)
+    strong_decoder = priced_pool(strong.settings, strong_microseconds)
+    gate = gate.with_held(machines.WINDOWS, windows)
+    gate = gate.with_record(machines.WEAK_POOL, weak_decoder)
+    gate = gate.with_record(machines.STRONG_POOL, strong_decoder)
+    return machine_module.Machine.build(gate, 1)
 
 
 def _run_statuses(result) -> list:
@@ -359,7 +350,7 @@ def _run_statuses(result) -> list:
 
 
 def _log_index(machine, needle: str) -> int:
-    lines = fabric.log_lines_containing(machine, needle)
+    lines = declared_run.log_lines_containing(machine, needle)
     assert lines, needle
     return machine.observation.log.lines.index(lines[0])
 
@@ -411,7 +402,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
     machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 1, 1)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
         ((1, 2), "weak"),
@@ -419,7 +410,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
         ((1, 6), "strong"),
         ((1, 9), "strong"),
     ]
-    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    resliced = declared_run.log_lines_containing(machine, "re-sliced")
     assert (
         "restart window (1, 6) re-sliced across strong window edge 18 "
         "(reads rounds 16-24; crossing faults owned by restart_window)"
@@ -434,13 +425,13 @@ def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
     machine = _gate_double_window_machine(4, 4, 40.0, 5.0, 1, 1)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
         ((1, 2), "strong"),
         ((1, 5), "strong"),
     ]
-    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    resliced = declared_run.log_lines_containing(machine, "re-sliced")
     assert (
         "restart window (1, 5) re-sliced across strong window edge 20 "
         "(reads rounds 17-28; crossing faults owned by restart_window)"
@@ -459,7 +450,7 @@ def test_the_re_read_rounds_survive_the_absorbed_windows_withdrawal():
     """
     machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 4, 1)
     result = machine.run()
-    absorbed_landings = fabric.log_lines_containing(
+    absorbed_landings = declared_run.log_lines_containing(
         machine, "memory W5 [commit 16-18] input landed"
     )
     restart_withdrawn = _log_index(machine, "WITHDRAW memory W6")
@@ -471,7 +462,7 @@ def test_the_re_read_rounds_survive_the_absorbed_windows_withdrawal():
     assert restart_withdrawn < restart_landed
     assert "9 rounds" in restart_landing
     assert _run_statuses(result) == [(1, "logical_observables")]
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
         ((1, 2), "weak"),
@@ -492,12 +483,12 @@ def test_width_zero_restarts_on_the_round_after_the_strong_region():
     machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2, 0)
     result = machine.run()
     assert _run_statuses(result) == [(1, "logical_observables")]
-    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    resliced = declared_run.log_lines_containing(machine, "re-sliced")
     assert (
         "restart window (1, 6) re-sliced across strong window edge 18 "
         "(reads rounds 19-24; crossing faults owned by restart_window)"
     ) in resliced[0]
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
         ((1, 2), "weak"),
@@ -527,12 +518,12 @@ def test_the_double_window_lands_in_the_declared_backlog_regime():
         strong_window=declared_run.DOUBLE_WINDOW,
     )
     machine.run()
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 4), "weak"),
         ((1, 1), "strong"),
     ]
-    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    resliced = declared_run.log_lines_containing(machine, "re-sliced")
     assert (
         "restart window (1, 4) re-sliced across strong window edge 12"
         in (resliced[0])
@@ -589,7 +580,7 @@ def test_a_shape_row_added_from_outside_runs_by_its_record():
     # the row pins its past face on W1, the neighbour that committed
     # the round before W2's commit region
     assert shape.assignments[0].folded_boundaries == ((1, 1),)
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
         ((1, 2), "strong"),
@@ -641,7 +632,7 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
     shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is RecordingDoubleWindow
     assert shape.planned_windows == [0]
-    assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
+    assert declared_run.frame_tiers(machine) == [((1, 0), "strong")]
 
 
 def test_the_shipped_components_fill_the_shapes_six_window_side_ports():
@@ -682,7 +673,7 @@ def test_a_pinned_strong_decode_starts_no_earlier_than_its_pin_lands():
     determined, and Bombin 2303.04846 lines 782-788 make the neighbour's
     correction part of the input task j reads, so a decode whose face is
     pinned may not begin before the message that carries the pin has
-    crossed to the host. Run on a card whose weak_decoder_to_strong_decoder
+    crossed to the host. Run on a card whose weak_to_strong
     latency is 400 room cycles, so a face pinned on a weak commit lands
     far from the rounds.
     """
@@ -718,18 +709,11 @@ def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
 
 def _slow_boundary_machine(strong_window) -> machine_module.Machine:
     """The gate's switching card with a long hop up to the host."""
-    settings = gate_switching(strong_window=strong_window)
-    slow_path = one_cycle_path(
-        settings.links,
-        "weak_decoder_to_strong_decoder",
-        ROOM_CLOCK,
-        latency_cycles=400,
-    )
-    links = dataclasses.replace(
-        settings.links, weak_decoder_to_strong_decoder=slow_path
-    )
-    settings = dataclasses.replace(settings, links=links)
-    return machine_module.Machine.build(settings, 0)
+    gate = gate_switching(strong_window=strong_window)
+    slow_link = gate_link(ROOM_CLOCK, latency_cycles=400)
+    slow_fabric = gate_fabric(forward=slow_link)
+    gate = dataclasses.replace(gate, fabric=slow_fabric)
+    return machine_module.Machine.build(gate, 0)
 
 
 def _gate_machine(strong_window) -> machine_module.Machine:
@@ -740,8 +724,8 @@ def _gate_machine(strong_window) -> machine_module.Machine:
     later escalates, so the two-solve case a raw-read row must not fold
     is on the run, and so is the seam a pinned row must carry.
     """
-    settings = gate_switching(strong_window=strong_window)
-    return machine_module.Machine.build(settings, 0)
+    gate = gate_switching(strong_window=strong_window)
+    return machine_module.Machine.build(gate, 0)
 
 
 def _masked_jobs(monkeypatch) -> list:
@@ -828,7 +812,7 @@ def test_the_redo_window_row_reads_its_commit_region_and_one_buffer():
     strong = _strong_job(requests, 1)
     assert (strong.window.start_round, strong.window.buffer_hi) == (4, 9)
     assert strong.round_count == 6
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "strong"),
         ((1, 2), "weak"),
@@ -956,7 +940,7 @@ def test_the_double_window_row_reads_exactly_the_rounds_it_commits():
     strong = _strong_job(requests, 1)
     assert (strong.window.start_round, strong.window.buffer_hi) == (4, 12)
     assert strong.round_count == 9
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 4), "weak"),
         ((1, 1), "strong"),
@@ -987,7 +971,7 @@ def test_the_double_window_row_pins_its_near_and_its_far_face():
     # W1's own dependency, and the window that restarts the chain past
     # the strong region 4-12, both weak commits on the chip
     assert sources == [0, 4]
-    assert paths == ["weak_decoder_to_strong_decoder"] * 2
+    assert paths == ["weak_to_strong"] * 2
 
 
 def _pin_sources(result) -> list:
@@ -1033,7 +1017,7 @@ def test_the_double_window_row_at_the_operations_end_has_no_far_pin():
     )
     requests = _heard_requests(machine)
     result = machine.run()
-    submitted = fabric.log_lines_containing(
+    submitted = declared_run.log_lines_containing(
         machine, "terminal data complete -> strong window submitted"
     )
     assert len(submitted) == 1
@@ -1119,7 +1103,7 @@ def test_a_re_reading_restart_window_owns_the_faults_the_far_pin_carries():
     """
     machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2, 1)
     result = machine.run()
-    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    resliced = declared_run.log_lines_containing(machine, "re-sliced")
     sources = _pin_sources_into(result, 3)
     assert _run_statuses(result) == [(1, "logical_observables")]
     assert (
@@ -1135,7 +1119,7 @@ def _strong_window_keys(machine) -> set:
     The operation's first window pins nothing, so it is not among them.
     """
     keys = set()
-    for window_key, tier in fabric.frame_tiers(machine):
+    for window_key, tier in declared_run.frame_tiers(machine):
         if tier != "strong":
             continue
         if window_key[1] == 0:

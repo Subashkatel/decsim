@@ -77,10 +77,6 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
-import decsim.settings as machine_settings
-import decsim.topology.fabrics as fabrics
-import decsim.topology.graph as topology_graph
-import decsim.topology.slotted as slotted
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
@@ -140,6 +136,22 @@ FULL_HISTORY_PAIR = {
 # how long the first unit waits for its release before it gives up
 RELEASE_WAIT_SECONDS = 20
 
+# The recorded links went by the slotted machine's names; a graph names
+# each hop by the parts at its ends. The strong side's hops, which no part
+# of the weak-only reference machine reaches, carried nothing.
+RECORDED_LINK_NAMES = {
+    "decoder_to_decoder": "weak_to_weak",
+    "weak_buffer_to_weak_decoder": "weak_buffer_to_weak",
+    "weak_decoder_to_frame": "weak_to_frame",
+}
+RECORDED_STRONG_SIDE_LINKS = (
+    "controller_to_strong_buffer",
+    "strong_buffer_to_strong_decoder",
+    "strong_decoder_to_frame",
+    "strong_decoder_to_weak_decoder",
+    "weak_decoder_to_strong_decoder",
+)
+
 # the ledger counters shot_links.csv carries per shot per link
 LINK_COUNTERS = (
     "transfers",
@@ -192,8 +204,8 @@ def test_a_chains_id_holds_its_workload_lowered():
     """A memory row and the workload it lowers to are one chain's id."""
     chain = layout_tests.chain_machine()
     task = collect.Task("chain", chain)
-    workload = topology_graph.Part("workload", task.machine.workload)
-    lowered = chain.with_part(workload)
+    workload = task.machine.held("workload")
+    lowered = chain.with_held("workload", workload)
 
     lowered_task = collect.Task("chain", lowered)
 
@@ -233,12 +245,15 @@ def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):
     sweep_path = DATA / "reference_sweep.csv"
     links_path = DATA / "reference_links.csv"
     sweep_before = _csv_rows(sweep_path)
-    links_before = _csv_rows(links_path)
+    recorded_links = _csv_rows(links_path)
+    links_before, strong_side = _recorded_links_by_hop_name(recorded_links)
+    strong_side_empty = [_carried_nothing(row) for row in strong_side]
     sweep_measured = _without_task_id(sweep_now)
     assert len(sweep_measured) == 1
     stable_now = _stable_columns(sweep_measured[0])
     assert stable_now == _stable_columns(sweep_before[0])
     assert _link_means(shot_links) == links_before
+    assert all(strong_side_empty)
 
 
 def test_a_full_history_task_reproduces_the_retired_direct_columns(
@@ -383,10 +398,10 @@ def test_two_tasks_whose_operations_differ_in_kind_are_two_tasks():
     merge = dataclasses.replace(memory, kind=program_records.OpKind.MERGE)
     memory_workload = workload_settings.WorkloadSettings(operations=[memory])
     merge_workload = workload_settings.WorkloadSettings(operations=[merge])
-    memory_settings = machine_settings.MachineSettings(workload=memory_workload)
-    merge_settings = machine_settings.MachineSettings(workload=merge_workload)
-    memory_task = collect.Task("memory", memory_settings, {"task": 1})
-    merge_task = collect.Task("merge", merge_settings, {"task": 1})
+    memory_machine = machines.base(memory_workload)
+    merge_machine = machines.base(merge_workload)
+    memory_task = collect.Task("memory", memory_machine, {"task": 1})
+    merge_task = collect.Task("merge", merge_machine, {"task": 1})
 
     assert memory_task.strong_id() != merge_task.strong_id()
 
@@ -401,10 +416,10 @@ def test_two_tasks_whose_round_policies_differ_in_count_are_two_tasks():
     five_workload = workload_settings.WorkloadSettings(
         rounds_policy=five_rounds
     )
-    three_settings = machine_settings.MachineSettings(workload=three_workload)
-    five_settings = machine_settings.MachineSettings(workload=five_workload)
-    three_task = collect.Task("three", three_settings, {"task": 1})
-    five_task = collect.Task("five", five_settings, {"task": 1})
+    three_machine = machines.base(three_workload)
+    five_machine = machines.base(five_workload)
+    three_task = collect.Task("three", three_machine, {"task": 1})
+    five_task = collect.Task("five", five_machine, {"task": 1})
 
     assert three_task.strong_id() != five_task.strong_id()
 
@@ -492,29 +507,24 @@ def test_a_tasks_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     record_path = tmp_path / "tasks" / task.name / "machine.json"
     record_text = record_path.read_text()
     record = json.loads(record_text)
-    links = record["settings"]["links"]
-    channel = links["qpu_to_controller"]["channel"]
-    assert links["profile_name"] == fabrics.PROFILE_NAME
-    assert channel["configuration_source"] == run_files.REFERENCE_SOURCE
+    fabric = record["settings"]["fabric"]
+    readout = fabric["readout"]
+    assert readout["source"] == run_files.REFERENCE_SOURCE
 
 
-def test_settings_that_differ_only_in_labels_are_one_task():
+def test_machines_that_differ_only_in_labels_are_one_task():
     """A label changes no id; a latency, which changes the run, does."""
     task = _reference_task()
-    links = task.machine.links
-    relabelled = dataclasses.replace(links, profile_name="other")
-    channel = links.qpu_to_controller.channel
-    slower_ticks = channel.propagation_latency_ticks + 1
-    slower_channel = dataclasses.replace(
-        channel, propagation_latency_ticks=slower_ticks
-    )
-    slower_path = dataclasses.replace(
-        links.qpu_to_controller, channel=slower_channel
-    )
-    slower = dataclasses.replace(links, qpu_to_controller=slower_path)
+    fabric = task.machine.fabric
+    readout = fabric.readout
+    relabelled_readout = dataclasses.replace(readout, source="other")
+    relabelled = dataclasses.replace(fabric, readout=relabelled_readout)
+    slower_cycles = readout.latency_cycles + 1
+    slower_readout = dataclasses.replace(readout, latency_cycles=slower_cycles)
+    slower = dataclasses.replace(fabric, readout=slower_readout)
 
-    relabelled_task = _task_with_links(task, relabelled)
-    slower_task = _task_with_links(task, slower)
+    relabelled_task = _task_with_fabric(task, relabelled)
+    slower_task = _task_with_fabric(task, slower)
 
     assert relabelled_task.strong_id() == task.strong_id()
     assert relabelled_task.machine == task.machine
@@ -760,8 +770,8 @@ def _memory_task(rounds: int) -> collect.Task:
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
     )
     workload = workload_settings.WorkloadSettings(operations=(operation,))
-    settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task("task", settings, {"task": 1})
+    machine = machines.base(workload)
+    return collect.Task("task", machine, {"task": 1})
 
 
 def _seed_after_the_release(release_path: pathlib.Path, shot) -> int:
@@ -801,8 +811,8 @@ def _slotted_rounds_task(round_count: int) -> collect.Task:
 
 def _rounds_task(rounds_policy) -> collect.Task:
     workload = workload_settings.WorkloadSettings(rounds_policy=rounds_policy)
-    settings = machine_settings.MachineSettings(workload=workload)
-    return collect.Task("task", settings, {"task": 1})
+    machine = machines.base(workload)
+    return collect.Task("task", machine, {"task": 1})
 
 
 def _device_task(round_count: int) -> collect.Task:
@@ -810,8 +820,8 @@ def _device_task(round_count: int) -> collect.Task:
     device = stim_device.StimDevice(measurement_rounds={1: {0: round_count}})
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(source=source)
-    settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task("task", settings, {"task": 1})
+    machine = machines.base(qpu)
+    return collect.Task("task", machine, {"task": 1})
 
 
 def _recorded_device_task(flip: int) -> collect.Task:
@@ -820,8 +830,8 @@ def _recorded_device_task(flip: int) -> collect.Task:
     device = stim_device.RecordedStimDevice(measurements, 0)
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(source=source)
-    settings = machine_settings.MachineSettings(qpu=qpu)
-    return collect.Task("task", settings, {"task": 1})
+    machine = machines.base(qpu)
+    return collect.Task("task", machine, {"task": 1})
 
 
 def _shots_by_seed(shots: list, commit_rounds_cell: str) -> dict:
@@ -887,9 +897,43 @@ def _shot_rows_without_wall_clock(task: collect.Task) -> list:
     return rows
 
 
-def _task_with_links(task: collect.Task, links) -> collect.Task:
-    settings = dataclasses.replace(task.machine, links=links)
-    return collect.Task(task.name, settings, task.metadata)
+def _task_with_fabric(task: collect.Task, fabric) -> collect.Task:
+    machine = dataclasses.replace(task.machine, fabric=fabric)
+    return collect.Task(task.name, machine, task.metadata)
+
+
+def _recorded_links_by_hop_name(recorded: list) -> tuple:
+    """The recorded link rows under their hops' names, in name order.
+
+    Returns them beside the strong side's rows, which no hop of the
+    weak-only machine takes.
+    """
+    renamed = []
+    strong_side = []
+    for row in recorded:
+        link = row["link"]
+        if link in RECORDED_STRONG_SIDE_LINKS:
+            strong_side.append(row)
+            continue
+        hop_name = RECORDED_LINK_NAMES.get(link, link)
+        renamed_row = dict(row, link=hop_name)
+        renamed.append(renamed_row)
+    renamed.sort(key=_link_of)
+    return renamed, strong_side
+
+
+def _link_of(row: dict) -> str:
+    return row["link"]
+
+
+def _carried_nothing(row: dict) -> bool:
+    """Whether every counter of a recorded link row is zero."""
+    for column, cell in row.items():
+        if column == "algorithm" or column == "link":
+            continue
+        if float(cell) != 0.0:
+            return False
+    return True
 
 
 class _CrashingRelayDecoder:
@@ -913,7 +957,7 @@ def test_a_task_reads_its_threshold_table_at_the_machine_assigned_to_it(
     """A table row is read after the assignments in force, never before.
 
     The table is keyed by the round period, which `--set` may change, so
-    the row read is the assigned period's (MachineSettings.at_task).
+    the row read is the assigned period's (graph.Machine.at_task).
     """
     table_path = tmp_path / "calibration.csv"
     table_path.write_text(
@@ -921,42 +965,28 @@ def test_a_task_reads_its_threshold_table_at_the_machine_assigned_to_it(
     )
     machine = run_files.switching_machine()
     table = threshold_sources.TableThreshold.Settings(table_path)
-    switching = dataclasses.replace(machine.switching, threshold=table)
-    tabled = dataclasses.replace(machine, switching=switching)
+    tabled = machine.with_settings(machines.SWITCHING, threshold=table)
     period = tree.Assignment("qpu.round_period", "2us", "--set")
 
     with in_force.in_force([period]):
         task = collect.Task("tabled", tabled)
 
-    threshold = task.machine.switching.threshold
-    assert task.machine.qpu.round_period_microseconds == 2.0
+    switching = task.machine.part(machines.SWITCHING)
+    threshold = switching.settings.threshold
+    qpu = task.machine.held("qpu")
+    assert qpu.round_period_microseconds == 2.0
     assert threshold.threshold_decibels == 23.5
 
 
-def test_a_task_built_from_a_graph_runs_as_its_settings_with_their_id():
-    settings = run_files.minimal_machine()
-    written = slotted.graph_of(settings)
-
-    from_graph = collect.Task("graph_task", written)
-    from_settings = collect.Task("graph_task", settings)
-
-    assert from_graph.machine == from_settings.machine
-    assert from_graph.strong_id() == from_settings.strong_id()
-    assert from_graph.graph == written
-    assert from_settings.graph is None
-
-
 def test_the_assignments_in_force_name_a_graph_tasks_paths():
-    settings = run_files.minimal_machine()
-    written = slotted.graph_of(settings)
+    machine = run_files.minimal_machine()
     assignment = tree.Assignment("weak.unit_count", 3, "a test")
 
     with in_force.in_force([assignment]):
-        task = collect.Task("graph_task", written)
+        task = collect.Task("graph_task", machine)
 
-    pool = task.graph.part("weak")
+    pool = task.machine.part("weak")
     assert pool.settings.unit_count == 3
-    assert task.machine.weak_decoder.unit_count == 3
 
 
 @dataclasses.dataclass(frozen=True)

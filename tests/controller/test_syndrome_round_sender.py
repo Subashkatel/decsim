@@ -27,21 +27,35 @@ left by). The crossing's own delay is the card's, on the reference
 profile.
 """
 
-import decsim.build.layout as layout_module
+import dataclasses
+
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
-import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
-import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 # every round this file sends carries one fragment of two bits
 BITS_PER_ROUND = 2
+
+
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
 
 
 def formed_at_the_controller():
@@ -120,11 +134,12 @@ def sender_with(
     weak_store = syndrome_buffer_module.SyndromeBuffer(settings, engine)
     weak_store.held_rounds = held
     transmitter = RecordingTransmitter(engine)
-    profile = link_profiles.logical_reference_profile()
+    profile = REFERENCE_LAYOUT.card
     links = fabric_module.LinkFabric(profile, engine)
     windows = RecordingWindows()
+    weak_store_plan = REFERENCE_LAYOUT.store("weak_buffer")
     weak_receiver = receiver_module.SyndromeRoundReceiver(
-        engine, layout_module.WEAK_STORE_INTAKE
+        engine, weak_store_plan.intake
     )
     weak_receiver.store = weak_store
     weak_receiver.windows = windows
@@ -132,7 +147,7 @@ def sender_with(
     landing_path = None
     receiver = weak_receiver
     if publishes_from_strong_store:
-        landing_path = transfer_records.CONTROLLER_TO_STRONG_BUFFER
+        landing_path = "controller_to_strong_buffer"
         receiver = strong_receiver
     sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
     sender.link = links

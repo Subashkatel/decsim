@@ -2,7 +2,7 @@
 
 The window side submits both
 forced-class jobs at one instant, both queue in the weak pool, each unit
-is fed from the weak syndrome buffer, and weak_decoder.units alone decides
+is fed from the weak syndrome buffer, and weak.unit_count alone decides
 whether the pair overlaps. The rule the data-movement study rests on is one
 copy per unit that reads the window: one unit moves the window's bits once and
 is busy for the sum of the two solves, two units move them twice and
@@ -20,15 +20,15 @@ import decsim.confidence.gap_join as gap_join_module
 import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.records.decoding as decoding_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import tests.declared_run as declared_run
-import tests.escalation.declared_fabric as fabric
 import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
 
-WEAK_INPUT_PATH = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
+# the weak store's read into the weak pool, named by the parts at its ends
+WEAK_INPUT_PATH = "weak_buffer_to_weak"
 # a window identity the run never requests, so its solve is never joined
 UNJOINED_WINDOW_ID = 999
 
@@ -42,38 +42,36 @@ def _switching_machine(
     patch_count: int = 1,
 ):
     """The gate's switching card at d=3, priced so its ticks are declared."""
-    settings = test_strong_window_shapes.gate_switching()
+    gate = test_strong_window_shapes.gate_switching()
+    weak = gate.part(machines.WEAK_POOL)
     weak_decoder = test_strong_window_shapes.priced_pool(
-        settings.weak_decoder, weak_microseconds, weak_units
+        weak.settings, weak_microseconds, weak_units
     )
     weak_decoder = dataclasses.replace(
         weak_decoder, result_blocks_unit=result_blocks_unit
     )
+    strong = gate.part(machines.STRONG_POOL)
     strong_decoder = test_strong_window_shapes.priced_pool(
-        settings.strong_decoder, 20.0
+        strong.settings, 20.0
     )
     confidence = complementary.ComplementaryGap.Settings(
         walk_microseconds=walk_microseconds
     )
-    switching = dataclasses.replace(settings.switching, confidence=confidence)
-    workload = settings.workload
+    workload = gate.held("workload")
     if patch_count > 1:
         workload = _memory_patches(patch_count)
     trace = "off"
     if trace_path is not None:
         trace = str(trace_path)
     observation = dataclasses.replace(
-        settings.observation, record_switching_windows=True, trace=trace
+        gate.observation, record_switching_windows=True, trace=trace
     )
-    settings = dataclasses.replace(
-        settings,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
-        workload=workload,
-        observation=observation,
-    )
-    return machine_module.Machine.build(settings, 0)
+    graph = gate.with_record(machines.WEAK_POOL, weak_decoder)
+    graph = graph.with_record(machines.STRONG_POOL, strong_decoder)
+    graph = graph.with_settings(machines.SWITCHING, confidence=confidence)
+    graph = graph.with_held("workload", workload)
+    graph = dataclasses.replace(graph, observation=observation)
+    return machine_module.Machine.build(graph, 0)
 
 
 def _memory_patches(patch_count: int):
@@ -98,7 +96,7 @@ def _weak_requests(machine) -> list:
 
 
 def _weak_decode_starts(machine) -> list:
-    starts = fabric.log_lines_containing(machine, "START DECODE mem")
+    starts = declared_run.log_lines_containing(machine, "START DECODE mem")
     weak_starts = []
     for line in starts:
         if "strong(" not in line:
@@ -135,7 +133,7 @@ def _weak_input_traffic(machine) -> tuple:
     """(transfers, bits) that moved into the weak units."""
     snapshot = machine.observation.traffic.snapshot()
     for path_snapshot in snapshot.paths:
-        if path_snapshot.path is WEAK_INPUT_PATH:
+        if path_snapshot.path == WEAK_INPUT_PATH:
             counters = path_snapshot.counters
             return counters.transfer_count, counters.known_payload_bits
     raise AssertionError("the weak input path is not on the fabric")
@@ -241,8 +239,8 @@ def test_the_first_solve_is_held_and_the_join_names_the_windows_gap():
     """The held half and the join are named in the run's log."""
     machine = _switching_machine(1)
     machine.run()
-    held = fabric.log_lines_containing(machine, "GAP HOLD")
-    joined = fabric.log_lines_containing(machine, "GAP JOIN")
+    held = declared_run.log_lines_containing(machine, "GAP HOLD")
+    joined = declared_run.log_lines_containing(machine, "GAP JOIN")
     windows = len(machine.observation.windows.windows)
     assert len(held) == windows
     assert len(joined) == windows

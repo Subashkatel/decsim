@@ -42,6 +42,11 @@ class CircuitSource:
 
 
 FORMER_CLOCK = config.Clock(4000)
+# every seat of a weak pool escalating to a strong one, each a part's
+# name: the controller, the two stores and the two pools
+SEATS = ("controller", "weak_buffer", "strong_buffer", "weak", "strong")
+# the seats inside a pool's units, which keep the width a round landed at
+DECODER_SEATS = frozenset({"weak", "strong"})
 
 
 def seated(formed_at, latency_cycles=0, cycles_per_round=0):
@@ -52,7 +57,7 @@ def seated(formed_at, latency_cycles=0, cycles_per_round=0):
         cycles_per_round=cycles_per_round,
     )
     source = CircuitSource()
-    return formation.SeatedFormation(source, settings)
+    return formation.SeatedFormation(source, settings, DECODER_SEATS)
 
 
 def rounds(*round_indices, operation_id=1) -> tuple:
@@ -82,10 +87,10 @@ def test_a_seat_not_in_the_list_hands_the_round_on_as_it_came():
     placement = seated(("controller",))
     raw = (fragment(1),)
 
-    leaving = placement.form_at("weak_syndrome_buffer", raw)
+    leaving = placement.form_at("weak_buffer", raw)
 
     assert leaving is raw
-    assert not placement.forms_at("weak_syndrome_buffer")
+    assert not placement.forms_at("weak_buffer")
 
 
 def test_a_timing_only_round_is_handed_on_as_it_is():
@@ -136,7 +141,7 @@ def stated(bits=None, size_bits=17, event_bits=12):
 
 def no_recipes_at(seat):
     settings = event_settings.DetectionEventSettings(formed_at=(seat,))
-    return formation.SeatedFormation(None, settings)
+    return formation.SeatedFormation(None, settings, DECODER_SEATS)
 
 
 def lookback_circuit(error_probability=0.0) -> tuple:
@@ -168,7 +173,7 @@ def lookback_seated(formed_at):
     )
     settings = event_settings.DetectionEventSettings(formed_at=formed_at)
     source = CircuitSource(table)
-    return formation.SeatedFormation(source, settings)
+    return formation.SeatedFormation(source, settings, DECODER_SEATS)
 
 
 def timing_only_round():
@@ -184,22 +189,22 @@ def timing_only_round():
 
 
 WIDTH_CASES = (
-    (seated(("controller",)), "weak_syndrome_buffer", rounds(1), 8),
-    (seated(("weak_syndrome_buffer",)), "weak_syndrome_buffer", rounds(1), 4),
-    (seated(("weak_decoder",)), "weak_decoder", rounds(1), 8),
+    (seated(("controller",)), "weak_buffer", rounds(1), 8),
+    (seated(("weak_buffer",)), "weak_buffer", rounds(1), 4),
+    (seated(("weak",)), "weak", rounds(1), 8),
     (
-        seated(("weak_syndrome_buffer",)),
-        "weak_syndrome_buffer",
+        seated(("weak_buffer",)),
+        "weak_buffer",
         (timing_only_round(),),
         8,
     ),
     (
-        no_recipes_at("weak_syndrome_buffer"),
-        "weak_syndrome_buffer",
+        no_recipes_at("weak_buffer"),
+        "weak_buffer",
         (stated(),),
         12,
     ),
-    (no_recipes_at("weak_decoder"), "weak_decoder", (stated(),), 17),
+    (no_recipes_at("weak"), "weak", (stated(),), 17),
 )
 
 
@@ -222,18 +227,14 @@ def test_the_width_a_seat_answers_is_the_width_it_forms_the_round_to(
 
 
 def test_asking_a_width_holds_nothing():
-    settings = event_settings.DetectionEventSettings(
-        formed_at=("weak_syndrome_buffer",)
-    )
+    settings = event_settings.DetectionEventSettings(formed_at=("weak_buffer",))
     source = CircuitSource()
-    placement = formation.SeatedFormation(source, settings)
+    placement = formation.SeatedFormation(source, settings, DECODER_SEATS)
     second_round = rounds(2)
 
-    placement.width_at("weak_syndrome_buffer", second_round)
+    placement.width_at("weak_buffer", second_round)
 
-    needed_rounds = placement.rounds_needed_before(
-        "weak_syndrome_buffer", 1, 2, 2
-    )
+    needed_rounds = placement.rounds_needed_before("weak_buffer", 1, 2, 2)
     assert needed_rounds == (1,)
 
 
@@ -250,20 +251,20 @@ def test_fake_bits_formed_are_the_first_of_the_random_bits():
 
 def test_each_seat_forms_from_the_packets_it_was_given():
     """The strong decoder never saw round 1, so it cannot form round 2."""
-    placement = seated(("weak_decoder", "strong_decoder"))
+    placement = seated(("weak", "strong"))
     first_two = rounds(1, 2)
     second = rounds(2)
-    placement.form_at("weak_decoder", first_two)
+    placement.form_at("weak", first_two)
 
     with pytest.raises(RuntimeError, match="a detector compares a round"):
-        placement.form_at("strong_decoder", second)
+        placement.form_at("strong", second)
 
 
 def test_a_seat_is_given_the_round_its_detector_reads_and_none_between():
     """Round 5's detector is rec[-1] XOR rec[-3], rounds 5 and 3."""
-    placement = lookback_seated(("strong_decoder",))
+    placement = lookback_seated(("strong",))
 
-    assert placement.rounds_needed_before("strong_decoder", 1, 5, 5) == (3,)
+    assert placement.rounds_needed_before("strong", 1, 5, 5) == (3,)
 
 
 def reach_growing_circuit(error_probability=0.0) -> tuple:
@@ -292,11 +293,11 @@ def reach_growing_circuit(error_probability=0.0) -> tuple:
 
 def test_a_seat_is_not_given_a_round_it_formed():
     """It formed round 2, so round 3's detectors read the packet it kept."""
-    placement = seated(("weak_decoder",))
+    placement = seated(("weak",))
     first_two = rounds(1, 2)
-    placement.form_at("weak_decoder", first_two)
+    placement.form_at("weak", first_two)
 
-    assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == ()
+    assert placement.rounds_needed_before("weak", 1, 3, 3) == ()
 
 
 def test_a_seat_is_not_given_a_round_it_was_given_raw_before():
@@ -305,47 +306,47 @@ def test_a_seat_is_not_given_a_round_it_was_given_raw_before():
     The seat keeps round 2's packet while round 4 is unformed there, so
     a read from round 4 brings nothing before it.
     """
-    placement = lookback_seated(("strong_decoder",))
+    placement = lookback_seated(("strong",))
     third = (fragment(3, bits=(0,)),)
     first_two = (fragment(1, bits=(0,)), fragment(2, bits=(0,)))
-    placement.form_at("strong_decoder", third, first_two)
+    placement.form_at("strong", third, first_two)
 
-    assert placement.rounds_needed_before("strong_decoder", 1, 4, 4) == ()
+    assert placement.rounds_needed_before("strong", 1, 4, 4) == ()
 
 
 def test_a_round_whose_detectors_read_only_itself_needs_nothing_before():
     """Round 2's detector compares against the reset: rec[-1] alone."""
-    placement = lookback_seated(("strong_decoder",))
+    placement = lookback_seated(("strong",))
 
-    assert placement.rounds_needed_before("strong_decoder", 1, 2, 2) == ()
+    assert placement.rounds_needed_before("strong", 1, 2, 2) == ()
 
 
 def test_a_seat_given_fewer_rounds_than_it_needs_refuses_the_round():
-    placement = lookback_seated(("strong_decoder",))
+    placement = lookback_seated(("strong",))
     fifth = (fragment(5, bits=(0,)),)
     fourth = (fragment(4, bits=(0,)),)
 
     with pytest.raises(RuntimeError, match="a detector compares a round"):
-        placement.form_at("strong_decoder", fifth, fourth)
+        placement.form_at("strong", fifth, fourth)
 
 
 def test_an_operations_first_round_needs_nothing_before_it():
     """It compares against the reset (LILLIPUT 2108.06569 lines 499-510)."""
-    placement = seated(("weak_decoder",))
+    placement = seated(("weak",))
 
-    assert placement.rounds_needed_before("weak_decoder", 1, 1, 1) == ()
+    assert placement.rounds_needed_before("weak", 1, 1, 1) == ()
 
 
 def test_a_seat_that_does_not_form_needs_nothing():
     placement = seated(("controller",))
 
-    assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == ()
+    assert placement.rounds_needed_before("weak", 1, 3, 3) == ()
 
 
 def test_a_source_with_no_recipes_needs_nothing_before_a_round():
-    placement = no_recipes_at("weak_decoder")
+    placement = no_recipes_at("weak")
 
-    assert placement.rounds_needed_before("weak_decoder", 1, 3, 3) == ()
+    assert placement.rounds_needed_before("weak", 1, 3, 3) == ()
 
 
 def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
@@ -355,7 +356,7 @@ def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
     syndrome a detector compares against; the seat holds that and no
     more.
     """
-    placement = seated(("weak_decoder",))
+    placement = seated(("weak",))
     reported = []
 
     def state_held(seat, operation_id, bits) -> None:
@@ -365,20 +366,20 @@ def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
     placement.trace.state_held.connect(state_held)
     first_three = rounds(1, 2, 3)
 
-    placement.form_at("weak_decoder", first_three)
+    placement.form_at("weak", first_three)
 
     assert reported == [8, 16, 16]
 
 
 def test_a_round_that_left_the_store_lets_its_seat_go_of_what_it_read():
     """Round 2 formed at another seat: no read forms it here after."""
-    placement = seated(("weak_decoder", "strong_decoder"))
+    placement = seated(("weak", "strong"))
     first = rounds(1)
-    placement.form_at("strong_decoder", first)
+    placement.form_at("strong", first)
 
     placement.retire_round((1, 2))
 
-    history = placement.history_by_seat["strong_decoder"]
+    history = placement.history_by_seat["strong"]
     assert history.former_by_operation[1].packets == {}
 
 
@@ -388,28 +389,28 @@ def test_a_seat_that_joins_late_knows_the_rounds_that_left_before_it():
     The strong seat forms round 3 from round 1 given raw, and round 2's
     read of round 1 was done already, so it holds nothing after.
     """
-    placement = _twice_read_seated(("strong_decoder",))
+    placement = _twice_read_seated(("strong",))
     placement.retire_round((1, 2))
     third = (fragment(3, bits=(0,)),)
     first = (fragment(1, bits=(0,)),)
 
-    placement.form_at("strong_decoder", third, first)
+    placement.form_at("strong", third, first)
 
-    history = placement.history_by_seat["strong_decoder"]
+    history = placement.history_by_seat["strong"]
     assert history.former_by_operation[1].packets == {}
 
 
 def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
     """Rounds retire out of order; the watermark closes over all three."""
-    placement = seated(("weak_decoder",))
+    placement = seated(("weak",))
     three_rounds = rounds(1, 2, 3)
-    placement.form_at("weak_decoder", three_rounds)
+    placement.form_at("weak", three_rounds)
 
     placement.retire_round((1, 1))
     placement.retire_round((1, 3))
     placement.retire_round((1, 2))
 
-    history = placement.history_by_seat["weak_decoder"]
+    history = placement.history_by_seat["weak"]
     done_rounds = history.memory.done_by_operation[1]
     assert history.memory.events_by_round == {}
     assert done_rounds.through == 3
@@ -418,11 +419,11 @@ def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
 
 def test_a_seat_still_holding_a_raw_round_at_the_end_is_named():
     """Round 1 waits for round 2, which never formed here nor left a store."""
-    placement = seated(("strong_decoder",))
+    placement = seated(("strong",))
     first = rounds(1)
-    placement.form_at("strong_decoder", first)
+    placement.form_at("strong", first)
 
-    with pytest.raises(RuntimeError, match="the strong_decoder seat still"):
+    with pytest.raises(RuntimeError, match="the strong seat still"):
         placement.check_settled()
 
 
@@ -457,11 +458,11 @@ def test_a_joint_round_is_formed_once_in_measurement_order():
 
 def test_forming_rounds_together_costs_the_latency_once_and_the_rate_after():
     """Yang 2605.04892 lines 1273-1275: a pipelined stage, 5 then 1 a round."""
-    placement = seated(("weak_decoder",), latency_cycles=5, cycles_per_round=1)
+    placement = seated(("weak",), latency_cycles=5, cycles_per_round=1)
 
-    assert placement.cycles_at("weak_decoder", 1) == 5
-    assert placement.cycles_at("weak_decoder", 4) == 8
-    assert placement.cycles_at("weak_decoder", 0) == 0
+    assert placement.cycles_at("weak", 1) == 5
+    assert placement.cycles_at("weak", 4) == 8
+    assert placement.cycles_at("weak", 0) == 0
     assert placement.cycles_at("controller", 4) == 0
 
 
@@ -511,7 +512,7 @@ FORMATION_CIRCUITS = {
 
 
 @pytest.mark.parametrize("circuit_name", sorted(FORMATION_CIRCUITS))
-@pytest.mark.parametrize("seat", event_settings.SEATS)
+@pytest.mark.parametrize("seat", SEATS)
 def test_every_seat_forms_stims_events_on_sampled_shots(seat, circuit_name):
     """Each round split into three shuffled fragments, at every seat.
 
@@ -546,7 +547,7 @@ def _formed_at(seat, table, measurements) -> list:
     rows = []
     for shot in measurements:
         source = CircuitSource(table)
-        placement = formation.SeatedFormation(source, settings)
+        placement = formation.SeatedFormation(source, settings, DECODER_SEATS)
         packets = detector_formation.split_measurements_into_packets(
             table, shot
         )
@@ -627,4 +628,4 @@ def _twice_read_seated(formed_at) -> formation.SeatedFormation:
     )
     settings = event_settings.DetectionEventSettings(formed_at=formed_at)
     source = CircuitSource(table)
-    return formation.SeatedFormation(source, settings)
+    return formation.SeatedFormation(source, settings, DECODER_SEATS)

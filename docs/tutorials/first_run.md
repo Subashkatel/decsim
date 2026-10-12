@@ -282,25 +282,25 @@ decsim trace follow \
 ```
 
 ```
-round 1:1 of task d3, decsim weak_baseline d3 seed0
+round 1:1 of task d3, decsim weak d3 seed0
 
-tick (us)  where                        what                                                                 dur (us)  transfer   bits
-0.000      weak syndrome buffer         hold registered                                                                reference
-1.000      QPU                          emitted round 1                                                                           8
-1.000      qpu_to_controller            move                                                                 0.004     move       8
-1.000      Controller                   controller intake copy                                                         copy       8
-1.004      Controller                   controller assembler copy                                                      copy       8
-1.004      Controller                   residence, unbounded, freed at packed                                0.000     copy       8
-1.004      controller_to_weak_buffer    move                                                                 0.004     move       4
-1.008      weak syndrome buffer         weak syndrome buffer copy                                                      copy       4
-1.008      weak syndrome buffer         residence, unbounded, data ready 1.008, freed at last hold released  5.004     copy       4
-6.008      Window planner               W0 ready
-6.008      weak_buffer_to_weak_decoder  move, with W0 rounds 1:1..6                                          0.004     move       44
-6.012      Decoder unit default#0       unit default#0 memory copy                                                     copy       44
-6.012      Decoder unit default#0       residence, unbounded, data ready 6.012, freed at decode done         1.064     copy       44
+tick (us)  where                      what                                                                 dur (us)  transfer   bits
+0.000      weak_buffer                hold registered                                                                reference
+1.000      QPU                        emitted round 1                                                                           8
+1.000      qpu_to_controller          move                                                                 0.004     move       8
+1.000      Controller                 controller intake copy                                                         copy       8
+1.004      Controller                 controller assembler copy                                                      copy       8
+1.004      Controller                 residence, unbounded, freed at packed                                0.000     copy       8
+1.004      controller_to_weak_buffer  move                                                                 0.004     move       4
+1.008      weak_buffer                residence, unbounded, data ready 1.008, freed at last hold released  5.004     copy       4
+1.008      Decoder unit weak_buffer   weak_buffer copy                                                               copy       4
+6.008      Window planner             W0 ready
+6.008      weak_buffer_to_weak        move, with W0 rounds 1:1..6                                          0.004     move       44
+6.012      Decoder unit weak#0        unit weak#0 memory copy                                                        copy       44
+6.012      Decoder unit weak#0        residence, unbounded, data ready 6.012, freed at decode done         1.064     copy       44
 
 copies 4, references 1 job and 1 hold, moves 3
-longest residence: 5.004 us in weak syndrome buffer (residence, unbounded, data ready 1.008, freed at last hold released)
+longest residence: 5.004 us in weak_buffer (residence, unbounded, data ready 1.008, freed at last hold released)
 longest queue wait: none
 ```
 

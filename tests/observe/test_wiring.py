@@ -28,8 +28,8 @@ import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records_module
 import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.wiring as wiring
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
-import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 import tests.declared_run as declared_run
@@ -173,7 +173,7 @@ def test_no_source_is_heard_twice_by_one_listener_class(monkeypatch):
         connect(source, listener)
 
     monkeypatch.setattr(trace_source.TraceSource, "connect", recording_connect)
-    point = gate_point.settings(**EVERY_KNOB)
+    point = gate_point.point(**EVERY_KNOB)
     machine = machine_module.Machine.build(point, gate_point.SEED)
 
     census = _walk(machine)
@@ -191,7 +191,7 @@ def test_every_source_has_a_listener_when_every_knob_is_on():
     or it is dead (rule 5); a new source added to a component without a
     connection in wiring.py fails this test by name.
     """
-    point = gate_point.settings(**EVERY_KNOB)
+    point = gate_point.point(**EVERY_KNOB)
     machine = machine_module.Machine.build(point, gate_point.SEED)
 
     census = _walk(machine)
@@ -202,8 +202,8 @@ def test_every_source_has_a_listener_when_every_knob_is_on():
 
 def test_every_listener_the_section_asks_for_is_built_and_heard():
     """A knob on builds its listener; a knob off leaves the field None."""
-    asked_point = gate_point.settings(**EVERY_KNOB)
-    silent_point = gate_point.settings()
+    asked_point = gate_point.point(**EVERY_KNOB)
+    silent_point = gate_point.point()
     asked = machine_module.Machine.build(asked_point, gate_point.SEED)
     silent = machine_module.Machine.build(silent_point, gate_point.SEED)
 
@@ -285,20 +285,20 @@ def _machine_on(decoder, **observation):
         algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
     )
     qpu = declared_run.declared_qpu()
-    links = declared_run.declared_profile()
+    fabric = declared_run.declared_fabric()
     controller = declared_run.declared_controller()
     pauli_frame = declared_run.declared_frame()
     watched = observe_settings.ObservationSettings(**observation)
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak_decoder,
-        links=links,
-        controller=controller,
-        pauli_frame=pauli_frame,
+    base = machines.base(
+        workload,
+        qpu,
+        controller,
+        pauli_frame,
         observation=watched,
+        fabric=fabric,
     )
-    return machine_module.Machine.build(settings, 0)
+    graph = machines.with_pool(base, weak_decoder)
+    return machine_module.Machine.build(graph, 0)
 
 
 def test_a_decoder_row_that_only_fills_the_port_reaches_the_observers():

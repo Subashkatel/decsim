@@ -8,13 +8,22 @@ import pytest
 
 import decsim.config as config
 import decsim.detector_error_model.settings as event_settings
+import decsim.topology.graph_layout as graph_layout
+import tests.escalation.declared_fabric as declared_fabric
 
 FRIDGE_CLOCK = config.Clock.from_megahertz(250.0)
 
 
+def _switching_layout():
+    """The declared weak-primary switching graph, laid out at its task."""
+    graph = declared_fabric.switching_graph(rounds=6, escalated_windows=())
+    at_task = graph.at_task()
+    return graph_layout.layout_of(at_task)
+
+
 def test_n_rounds_formed_together_cost_the_latency_once_then_the_rate():
     settings = event_settings.DetectionEventSettings(
-        formed_at=("weak_decoder",),
+        formed_at=("weak",),
         clock=FRIDGE_CLOCK,
         latency_cycles=5,
         cycles_per_round=1,
@@ -23,15 +32,6 @@ def test_n_rounds_formed_together_cost_the_latency_once_then_the_rate():
     assert settings.cycles_for(0) == 0
     assert settings.cycles_for(1) == 5
     assert settings.cycles_for(7) == 11
-
-
-def test_a_seat_off_the_path_is_refused_with_the_seats():
-    with pytest.raises(ValueError) as refusal:
-        event_settings.DetectionEventSettings(formed_at=("workstation",))
-
-    sentence = str(refusal.value)
-    assert "detection_events.formed_at names 'workstation'" in sentence
-    assert "strong_syndrome_buffer" in sentence
 
 
 def test_a_seat_named_twice_is_refused():
@@ -45,15 +45,17 @@ def test_a_seat_named_twice_is_refused():
     "formed_at, seat",
     [
         (("controller",), None),
-        (("weak_syndrome_buffer",), None),
-        (("weak_decoder", "strong_decoder"), "strong_decoder"),
-        (("weak_decoder", "strong_syndrome_buffer"), "strong_syndrome_buffer"),
+        (("weak_buffer",), None),
+        (("weak", "strong"), "strong"),
+        (("weak", "strong_buffer"), "strong_buffer"),
     ],
 )
 def test_the_seat_past_the_weak_buffer_that_forms_is_named(formed_at, seat):
+    layout = _switching_layout()
+    landed_seats = layout.landed_seats()
     settings = event_settings.DetectionEventSettings(formed_at=formed_at)
 
-    assert settings.strong_side_seat() == seat
+    assert settings.landed_seat(landed_seats) == seat
 
 
 @pytest.mark.parametrize("key", ["latency_cycles", "cycles_per_round"])

@@ -6,6 +6,8 @@ are the sum of its paths' counters (one counter stream, folded twice),
 and the order the transfers and channels are listed in.
 """
 
+import dataclasses
+
 import decsim.engine
 import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
@@ -13,6 +15,8 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.records.identity as identity_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(
@@ -54,16 +58,29 @@ def unbounded_path(name, latency_ticks):
     )
 
 
-def every_path_free():
-    """One free path per hop, keyed by the hop's name.
+def _switching_hops() -> tuple:
+    """Every hop of a weak pool escalating to a strong pool on the host."""
+    switching = run_files.switching_machine()
+    at_task = switching.at_task()
+    layout = graph_layout.layout_of(at_task)
+    return layout.card.paths
+
+
+SWITCHING_HOPS = _switching_hops()
+
+
+def card_with(readout_routes=(), **paths):
+    """A card of every switching hop, free unless the test wires it itself.
 
     A card names every hop, so a test that cares about one path wires
     that one and leaves the rest on the shared free channel.
     """
-    names = []
-    for path in transfer_records.SLOTTED_PATHS:
-        names.append(path)
-    return dict.fromkeys(names, FREE_PATH)
+    named = []
+    for hop in SWITCHING_HOPS:
+        path_settings = paths.get(hop.name, FREE_PATH)
+        wired = dataclasses.replace(hop, settings=path_settings)
+        named.append(wired)
+    return link_settings.FabricSettings(tuple(named), readout_routes)
 
 
 def edge_of(report, path_name):
@@ -78,9 +95,7 @@ class Run:
     """An engine, a ledger and a fabric wired to it, from one card."""
 
     def __init__(self, **paths):
-        wiring = every_path_free()
-        wiring.update(paths)
-        settings = link_settings.FabricSettings(profile_name="test", **wiring)
+        settings = card_with(**paths)
         self.engine = decsim.engine.Engine()
         self.ledger = link_traffic.TrafficLedger(settings)
         self.fabric = fabric_module.LinkFabric(settings, self.engine)
@@ -139,7 +154,7 @@ def test_counters_reconcile_with_the_transfer_list():
     second_round = round_attribution(2)
     third_round = round_attribution(3)
     run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, first_round)
-    run.send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, 4, 0, second_round)
+    run.send("controller_to_weak_buffer", 4, 0, second_round)
     run.send(transfer_records.QPU_TO_CONTROLLER, None, 0, third_round)
     run.engine.run()
     snapshot = run.ledger.snapshot()
@@ -162,9 +177,7 @@ def test_counters_reconcile_with_the_transfer_list():
         queue_wait_ticks=0,
     )
     on_qpu_path = counters_by_path[transfer_records.QPU_TO_CONTROLLER]
-    on_weak_buffer_path = counters_by_path[
-        transfer_records.CONTROLLER_TO_WEAK_BUFFER
-    ]
+    on_weak_buffer_path = counters_by_path["controller_to_weak_buffer"]
     assert on_qpu_path.plus(on_weak_buffer_path) == shared_channel.counters
 
 
@@ -213,13 +226,13 @@ def test_the_transfers_are_listed_in_request_order_whatever_delivered_first():
     first_round = round_attribution(1)
     second_round = round_attribution(2)
     run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, first_round)
-    run.send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, 8, 1, second_round)
+    run.send("controller_to_weak_buffer", 8, 1, second_round)
     run.engine.run()
     snapshot = run.ledger.snapshot()
     paths = [record.path for record in snapshot.transfers]
     assert paths == [
         transfer_records.QPU_TO_CONTROLLER,
-        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
+        "controller_to_weak_buffer",
     ]
 
 
@@ -228,15 +241,15 @@ def test_channels_are_aliased_in_the_order_the_paths_first_meet_them():
     own = unbounded_path("own", 0)
     run = Run(
         qpu_to_controller=shared,
-        weak_buffer_to_weak_decoder=own,
-        weak_decoder_to_strong_decoder=shared,
+        weak_buffer_to_weak=own,
+        weak_to_strong=shared,
     )
     report = run.ledger.traffic_json_value()
     readout = edge_of(report, "qpu_to_controller")
     weak_store = edge_of(report, "controller_to_weak_buffer")
-    weak_input = edge_of(report, "weak_buffer_to_weak_decoder")
-    escalation = edge_of(report, "weak_decoder_to_strong_decoder")
-    strong_input = edge_of(report, "strong_buffer_to_strong_decoder")
+    weak_input = edge_of(report, "weak_buffer_to_weak")
+    escalation = edge_of(report, "weak_to_strong")
+    strong_input = edge_of(report, "strong_buffer_to_strong")
     assert readout["physical_alias"] == "channel-0"
     assert weak_store["physical_alias"] == "channel-1"
     assert weak_input["physical_alias"] == "channel-2"
@@ -244,7 +257,7 @@ def test_channels_are_aliased_in_the_order_the_paths_first_meet_them():
     assert strong_input["physical_alias"] == "channel-1"
     assert report["physical_channels"][0]["member_paths"] == [
         "qpu_to_controller",
-        "weak_decoder_to_strong_decoder",
+        "weak_to_strong",
     ]
 
 
@@ -262,7 +275,7 @@ def test_a_window_reading_into_the_next_operation_names_each_ones_rounds():
         relation=relation,
         round_keys=((1, 4), (1, 5), (1, 6), (2, 1), (2, 2), (2, 3)),
     )
-    run.send(transfer_records.WEAK_BUFFER_TO_WEAK_DECODER, 4, 0, attribution)
+    run.send("weak_buffer_to_weak", 4, 0, attribution)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     transfer = report["transfers"][0]
@@ -277,18 +290,14 @@ def test_a_window_reading_into_the_next_operation_names_each_ones_rounds():
 def test_a_paths_header_bits_and_setup_wait_are_its_transfers_sums():
     # one setup engine: the second window waits out the first one's setup
     bounded = bounded_path("bounded", 1.0, 10, setup_ticks=50, header_bits=8)
-    run = Run(strong_buffer_to_strong_decoder=bounded)
+    run = Run(strong_buffer_to_strong=bounded)
     first_window = requested_window(3)
     second_window = requested_window(4)
-    run.send(
-        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, first_window
-    )
-    run.send(
-        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, second_window
-    )
+    run.send("strong_buffer_to_strong", 4, 100, first_window)
+    run.send("strong_buffer_to_strong", 4, 100, second_window)
     run.engine.run()
     report = run.ledger.traffic_json_value()
-    semantic_edge = edge_of(report, "strong_buffer_to_strong_decoder")
+    semantic_edge = edge_of(report, "strong_buffer_to_strong")
     channel = report["physical_channels"][1]
     header_bits = [row["header_bits"] for row in report["transfers"]]
     assert header_bits == [8, 8]
@@ -305,13 +314,13 @@ def test_the_ledger_sums_the_queue_wait_per_transfer_and_per_channel():
     second_round = round_attribution(2)
     third_round = round_attribution(3)
     run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, first_round)
-    run.send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, 8, 0, second_round)
+    run.send("controller_to_weak_buffer", 8, 0, second_round)
     run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, third_round)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     transfers = report["transfers"]
-    on_qpu_path = report["semantic_edges"][0]
-    on_weak_buffer_path = report["semantic_edges"][1]
+    on_qpu_path = edge_of(report, "qpu_to_controller")
+    on_weak_buffer_path = edge_of(report, "controller_to_weak_buffer")
     shared_channel = report["physical_channels"][0]
     assert transfers[0]["queue_wait_ticks"] == 0
     assert transfers[1]["queue_wait_ticks"] == 8000

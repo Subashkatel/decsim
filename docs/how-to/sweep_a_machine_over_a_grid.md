@@ -5,10 +5,8 @@
 An experiment is three files in one folder: `constants.yaml` holds the
 numbers and their sources, `config.py` builds the machine from them,
 and `run.py` sweeps it. The worked example is Experiment 1 in
-`examples/three_files/switching_baseline`, whose 60 tasks are the
-shipped run file's, name for name and id for id
-(`tests/test_three_files_example.py`). The other three folders in
-`examples/three_files` do the same for the other shipped experiments.
+`experiments/switching_baseline`, 60 tasks; every other folder in
+`experiments/` is written the same way.
 
 ## 1. Write the numbers in constants.yaml
 
@@ -32,14 +30,14 @@ Load the file, then read a value by attribute. A section is a mapping,
 so it splats into a record's parameters, and `record` converts the
 times on the part's clock:
 
-```python examples/three_files/switching_baseline/config.py
+```python experiments/switching_baseline/config.py
 HERE = pathlib.Path(__file__)
 CONSTANTS_PATH = HERE.with_name("constants.yaml")
 constants = constants_module.load(CONSTANTS_PATH)
 record = machine_file.record
 ```
 
-```python examples/three_files/switching_baseline/config.py
+```python experiments/switching_baseline/config.py
 def union_find_pool() -> decoder_settings.DecoderPoolSettings:
     """Union-find on Helios's cycle law, on an FPGA in the fridge rack."""
     settings = constants.union_find
@@ -61,12 +59,12 @@ physical_error_probability)`.
 
 ## 3. Sweep it in run.py
 
-```python examples/three_files/switching_baseline/run.py
+```python experiments/switching_baseline/run.py
 config = sweeps.load_beside(__file__, "config.py")
 constants = config.constants
 ```
 
-```python examples/three_files/switching_baseline/run.py
+```python experiments/switching_baseline/run.py
 sweep = decsim.Sweep(
     "switching_baseline",
     config.machine,
@@ -104,8 +102,9 @@ one of three things (`decsim/experiments/sweeps.py`):
 experiment's. A task's metadata is the cell's numbers and strings, as
 sinter's `json_metadata` holds a task's swept values
 (sinter/_data/_task.py). Write it yourself with a function of the cell,
-or of the cell and the task's settings, as Experiment 1 does so that its
-ids match the results already collected.
+or of the cell and the task (its graph, and its layout with the card
+that prices every hop), as Experiment 1 does to name its results'
+columns.
 
 ## 4. Run it, and change a number without editing a file
 

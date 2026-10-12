@@ -4,7 +4,9 @@ Sources: gem5 src/mem/ruby/network/garnet/NetworkInterface.cc:382-387
 (divCeil(size, bitWidth) flits); Xilinx SP011 v1.2 sections 2.1, 2.5
 and 5.2 (eight octets per 66-bit data block, a separator block for the
 last zero to seven); pcie-bench model/mem_bw.py:40-41 and
-model/pcie.py:220-240 (ceil(n / MPS) x 24 + n bytes for a write);
+model/pcie.py:220-240 (ceil(n / MPS) x 24 + n bytes for a write); the
+PCI Express Base Specification 3.0 section 2.2.1 (a TLP's Length counts
+doublewords);
 pcie-bench model/eth.py:29-41 (Ethernet's 38 bytes of overhead and
 46-byte minimum payload); Linux drivers/infiniband/sw/rxe rxe_hdr.h and
 rxe_req.c:423-430 (the RoCE v2 headers, the four-byte pad, the ICRC).
@@ -74,6 +76,15 @@ def test_a_pcie_write_is_24_bytes_on_every_tlp_of_at_most_mps_bytes():
     assert pcie.frames(64, 0) == (256,)
     assert pcie.frames(4800, 0) == (2240, 2240, 896)
     assert pcie.frames(0, 0) == (192,)
+
+
+def test_a_pcie_write_payload_is_padded_to_whole_doublewords():
+    """Five bytes are two DW: 8 bytes of data behind the 24 of overhead."""
+    pcie = framing(framings.PcieTlp, max_payload_bytes=256)
+
+    assert pcie.frames(40, 0) == ((24 + 8) * 8,)
+    assert pcie.frames(36, 0) == ((24 + 8) * 8,)
+    assert pcie.frames(2064, 0) == ((24 + 256) * 8, (24 + 4) * 8)
 
 
 def test_a_roce_v2_write_carries_its_extended_header_on_the_first_packet():

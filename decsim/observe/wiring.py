@@ -19,6 +19,7 @@ import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
+import decsim.links.settings as link_settings
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -58,6 +59,7 @@ def observe(
     process_name: str,
     traffic_ledger: link_traffic.TrafficLedger,
     run_statistics: statistics_registry.Registry,
+    links_card: link_settings.FabricSettings,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
@@ -91,8 +93,11 @@ def observe(
     decode_records = _decode_records(observation, keeps_records)
     _connect_decode_records(decoder_managers, decode_records)
     confidence = _connect_confidence(switching, decoder_managers, keeps_records)
-    trace_writer = _trace_writer(observation, engine, process_name)
-    data_movement = _data_movement(observation)
+    store_names = _store_names(readout)
+    trace_writer = _trace_writer(
+        observation, engine, process_name, links_card, store_names
+    )
+    data_movement = _data_movement(observation, links_card, store_names)
     if data_movement is not None:
         _connect_data_movement(
             data_movement, links, qpu, readout, windows, decoders
@@ -184,24 +189,39 @@ def _connect_command_events(qpu) -> command_events_module.CommandEvents:
     return events
 
 
+def _store_names(readout) -> tuple:
+    """The name each store narrates and reports its copies under."""
+    return tuple(parts.plan.intake.name for parts in readout.stores)
+
+
 def _trace_writer(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
     process_name: str,
+    links_card: link_settings.FabricSettings,
+    store_names: tuple,
 ) -> Optional[trace_writer_module.TraceWriter]:
     """The Chrome trace writer, only when the section asks for a trace."""
     if not observation.writes_trace:
         return None
-    return trace_writer_module.TraceWriter(engine, process_name)
+    threads = trace_writer_module.thread_order(links_card, store_names)
+    return trace_writer_module.TraceWriter(engine, process_name, threads)
 
 
 def _data_movement(
     observation: observe_settings.ObservationSettings,
+    links_card: link_settings.FabricSettings,
+    store_names: tuple,
 ) -> Optional[data_movement_module.DataMovement]:
     """The copy, reference and move counters, only when the section asks."""
     if not observation.data_movement:
         return None
-    return data_movement_module.DataMovement()
+    class_by_hop = {}
+    for path in links_card.paths:
+        class_by_hop[path.name] = data_movement_module.memory_class_of_hop(path)
+    store_name_set = frozenset(store_names)
+    classes = data_movement_module.MemoryClasses(class_by_hop, store_name_set)
+    return data_movement_module.DataMovement(classes)
 
 
 def _connect_data_movement(

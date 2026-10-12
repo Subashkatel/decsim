@@ -22,11 +22,11 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.layouts as layouts
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
-import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
 
@@ -76,7 +76,7 @@ def planning_view(qubits=(3, 5)):
     return program_records.OperationPlanningView.from_operation(operation)
 
 
-def settings_with(layout):
+def graph_with(layout):
     """One timing-only operation on the layout given."""
     operation = one_operation()
     workload = workload_settings.WorkloadSettings(operations=[operation])
@@ -86,9 +86,8 @@ def settings_with(layout):
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
-    return machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder
-    )
+    base = machines.base(workload, qpu)
+    return machines.with_pool(base, weak_decoder)
 
 
 def test_the_uniform_layout_claims_the_operations_qubits_exclusively():
@@ -117,8 +116,8 @@ def test_a_layout_written_outside_decsim_hears_every_hook_of_a_run():
     """A run asks the layout for its codes, then per operation and patch."""
     card = code_geometry.SurfaceCodeModel(distance=3)
     layout = RecordingLayout(card)
-    settings = settings_with(layout=layout)
-    machine = machine_module.Machine.build(settings)
+    graph = graph_with(layout=layout)
+    machine = machine_module.Machine.build(graph)
     machine.run()
 
     calls_by_name = _calls_by_name(layout.calls)
@@ -141,9 +140,9 @@ def test_a_layout_that_declares_two_codes_is_refused():
         return [card, other]
 
     layout.codes = two_codes
-    settings = settings_with(layout=layout)
+    graph = graph_with(layout=layout)
     with pytest.raises(ValueError, match="layout must declare exactly"):
-        machine_module.Machine.build(settings)
+        machine_module.Machine.build(graph)
 
 
 def test_an_operation_selector_that_returns_another_card_is_refused():
@@ -156,9 +155,9 @@ def test_an_operation_selector_that_returns_another_card_is_refused():
         return code_geometry.SurfaceCodeModel(distance=3)
 
     layout.code_for_operation = another_card
-    settings = settings_with(layout=layout)
+    graph = graph_with(layout=layout)
     with pytest.raises(ValueError, match="layout operation 4 selected a code"):
-        machine_module.Machine.build(settings)
+        machine_module.Machine.build(graph)
 
 
 def test_a_patch_selector_that_returns_another_card_is_refused():
@@ -170,6 +169,6 @@ def test_a_patch_selector_that_returns_another_card_is_refused():
         return code_geometry.SurfaceCodeModel(distance=3)
 
     layout.code_for_patch = another_card
-    settings = settings_with(layout=layout)
+    graph = graph_with(layout=layout)
     with pytest.raises(ValueError, match="layout patch 11 selected a code"):
-        machine_module.Machine.build(settings)
+        machine_module.Machine.build(graph)

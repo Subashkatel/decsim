@@ -6,14 +6,17 @@ a packet by (point-to-point-net-device.cc:243). Every number carries a
 source string on the record it sets, and a payload's source travels into
 the traffic report; paper locators are arXiv numbers and text lines. A
 graph's fabric (decsim/topology/fabrics.py) prices each hop it names
-and leaves the rest on this card; the shipped links and fabrics are in
-decsim/presets/link_cards.py.
+and leaves the rest on this card, by the hop's role; the shipped links
+and fabrics are in decsim/presets/link_cards.py.
 """
 
+import dataclasses
 from typing import Optional
 
 import decsim.config as config
 import decsim.links.settings as settings
+import decsim.records.routes as route_records
+import decsim.records.transfers as transfer_records
 
 # A decoder result reaches the frame as one bit per logical observable, the
 # logical-frame convention: Caune et al. 2410.05202 return one Boolean per
@@ -196,163 +199,146 @@ _OFF_BOARD_RATE_SOURCE = (
 )
 
 
-def logical_reference_profile() -> settings.FabricSettings:
-    """The default card: every hop from a system of decsim's scale.
+_WORD_RATE = settings.CapacitySettings(
+    _WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE
+)
+_INSTRUCTION_RATE = settings.CapacitySettings(
+    _INSTRUCTION_BITS_PER_MICROSECOND, _INSTRUCTION_RATE_SOURCE
+)
+_OFF_BOARD_RATE = settings.CapacitySettings(
+    _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
+)
+_BUS_WORD = settings.PayloadSettings(BUS_WORD_BITS, BUS_WORD_SOURCE)
+_INSTRUCTION_WORD = settings.PayloadSettings(
+    INSTRUCTION_WORD_BITS, INSTRUCTION_WORD_SOURCE
+)
 
-    A surface-code patch on one control rack, a decoder FPGA, and a strong
-    node one hop away. A hop is unbounded where its referent moves every bit
-    in parallel. The weak loop is Yang et al.'s closed loop (arXiv
-    2605.04892 Table I) hop for hop, the strong node is Caune et al.'s
-    inter-chassis hop away (arXiv 2410.05202 Fig. 1a), and the rates are the
-    referents' bus words and Backline's cable.
+
+def reference_path(
+    role: route_records.HopRole, name: transfer_records.LinkPath
+) -> settings.PathSettings:
+    """The reference card's path for a hop of this role, on its own channel.
+
+    A preset's latency is its referent's end-to-end number, so the
+    receiver's processing is inside it.
     """
-    word_rate = settings.CapacitySettings(
-        _WORD_BITS_PER_MICROSECOND, _WORD_RATE_SOURCE
+    row = _ROWS[role.key]
+    latency_ticks = config.microseconds_to_ticks(row.latency_microseconds)
+    channel = settings.ChannelSettings(
+        name, latency_ticks, row.capacity, row.latency_source
     )
-    instruction_rate = settings.CapacitySettings(
-        _INSTRUCTION_BITS_PER_MICROSECOND, _INSTRUCTION_RATE_SOURCE
+    return settings.PathSettings(
+        channel,
+        row.default_payload,
+        row.actual_payload_source,
+        excludes_receiver_processing=False,
     )
-    off_board_rate = settings.CapacitySettings(
-        _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
-    )
-    qpu_to_controller = _actual_path(
-        "qpu_to_controller",
+
+
+@dataclasses.dataclass(frozen=True)
+class _Row:
+    """One role's reference numbers: a latency, a rate, a payload rule.
+
+    actual_payload_source names the record whose bits the sender counts;
+    default_payload is a fixed word, for a hop that sends one.
+    """
+
+    latency_microseconds: float
+    latency_source: str
+    capacity: Optional[settings.CapacitySettings]
+    actual_payload_source: Optional[str] = None
+    default_payload: Optional[settings.PayloadSettings] = None
+
+
+# The reference card by role: one system of decsim's scale, a
+# surface-code patch on one control rack, a decoder FPGA, and a strong
+# node one hop away. A hop is unbounded where its referent moves every
+# bit in parallel. The weak loop is Yang et al.'s closed loop (arXiv
+# 2605.04892 Table I) hop for hop, the strong node is Caune et al.'s
+# inter-chassis hop away (arXiv 2410.05202 Fig. 1a), and the rates are
+# the referents' bus words and Backline's cable. A written store sits on
+# the decoder chip and a landed one on the strong node; a pool in the
+# fridge answers over the loop's second link and one on the host over
+# the inter-chassis hop, and two decodes on the host meet in its memory.
+_ROWS = {
+    route_records.READOUT: _Row(
         _READOUT_LATENCY_MICROSECONDS,
         _READOUT_SOURCE,
+        None,
         READOUT_PAYLOAD_SOURCE,
-    )
-    controller_to_weak_buffer = _actual_path(
-        "controller_to_weak_buffer",
+    ),
+    f"{route_records.WRITE}_written": _Row(
         WEAK_STORE_LATENCY_MICROSECONDS,
         WEAK_STORE_SOURCE,
+        _WORD_RATE,
         ROUND_PAYLOAD_SOURCE,
-        word_rate,
-    )
-    controller_to_strong_buffer = _actual_path(
-        "controller_to_strong_buffer",
+    ),
+    f"{route_records.WRITE}_landed": _Row(
         STRONG_STORE_LATENCY_MICROSECONDS,
         STRONG_STORE_SOURCE,
+        _OFF_BOARD_RATE,
         ROUND_PAYLOAD_SOURCE,
-        off_board_rate,
-    )
-    weak_buffer_to_weak_decoder = _actual_path(
-        "weak_buffer_to_weak_decoder",
+    ),
+    f"{route_records.READ}_written": _Row(
         _REFERENCE_CYCLE_MICROSECONDS,
         _ON_CHIP_SOURCE,
+        _WORD_RATE,
         DECODER_INPUT_PAYLOAD_SOURCE,
-        word_rate,
-    )
-    weak_decoder_to_strong_decoder = _actual_path(
-        "weak_decoder_to_strong_decoder",
+    ),
+    f"{route_records.READ}_landed": _Row(
+        _REFERENCE_CYCLE_MICROSECONDS,
+        _ON_CHIP_SOURCE,
+        _WORD_RATE,
+        DECODER_INPUT_PAYLOAD_SOURCE,
+    ),
+    route_records.FORWARD: _Row(
         STRONG_STORE_LATENCY_MICROSECONDS,
         STRONG_STORE_SOURCE,
+        _OFF_BOARD_RATE,
         ESCALATION_PAYLOAD_SOURCE,
-        off_board_rate,
-    )
-    strong_buffer_to_strong_decoder = _actual_path(
-        "strong_buffer_to_strong_decoder",
-        _REFERENCE_CYCLE_MICROSECONDS,
-        _ON_CHIP_SOURCE,
-        DECODER_INPUT_PAYLOAD_SOURCE,
-        word_rate,
-    )
-    weak_decoder_to_frame = _actual_path(
-        "weak_decoder_to_frame",
+    ),
+    f"{route_records.ANSWER}_{route_records.FRIDGE}": _Row(
         WEAK_STORE_LATENCY_MICROSECONDS,
         _WEAK_RESULT_SOURCE,
+        _WORD_RATE,
         RESULT_PAYLOAD_SOURCE,
-        word_rate,
-    )
-    decoder_to_decoder = _actual_path(
-        "decoder_to_decoder",
+    ),
+    f"{route_records.ANSWER}_{route_records.HOST}": _Row(
+        STRONG_STORE_LATENCY_MICROSECONDS,
+        STRONG_STORE_SOURCE,
+        _OFF_BOARD_RATE,
+        STRONG_RESULT_PAYLOAD_SOURCE,
+    ),
+    f"{route_records.SAME_POOL}_{route_records.FRIDGE}": _Row(
         _REFERENCE_CYCLE_MICROSECONDS,
         _BOUNDARY_SOURCE,
+        None,
         BOUNDARY_PAYLOAD_SOURCE,
-    )
-    strong_decoder_to_frame = _actual_path(
-        "strong_decoder_to_frame",
-        STRONG_STORE_LATENCY_MICROSECONDS,
-        STRONG_STORE_SOURCE,
-        STRONG_RESULT_PAYLOAD_SOURCE,
-        off_board_rate,
-    )
-    # the frame is in the controller beside the weak chip, so the strong
+    ),
+    f"{route_records.SAME_POOL}_{route_records.HOST}": _Row(
+        _REFERENCE_CYCLE_MICROSECONDS,
+        _ON_CHIP_SOURCE,
+        _WORD_RATE,
+        DECODER_INPUT_PAYLOAD_SOURCE,
+    ),
+    # the frame is in the controller beside the weak chip, so a strong
     # answer's hop to either is the one inter-chassis hop
-    strong_decoder_to_weak_decoder = _actual_path(
-        "strong_decoder_to_weak_decoder",
+    route_records.REVERSE: _Row(
         STRONG_STORE_LATENCY_MICROSECONDS,
         STRONG_STORE_SOURCE,
+        _OFF_BOARD_RATE,
         STRONG_RESULT_PAYLOAD_SOURCE,
-        off_board_rate,
-    )
-    frame_to_controller = _default_path(
-        "frame_to_controller",
+    ),
+    route_records.DECISION: _Row(
         0.0,
         _DECISION_SOURCE,
-        BUS_WORD_BITS,
-        BUS_WORD_SOURCE,
-        word_rate,
-    )
-    controller_to_qpu = _default_path(
-        "controller_to_qpu",
+        _WORD_RATE,
+        default_payload=_BUS_WORD,
+    ),
+    route_records.COMMAND: _Row(
         _PULSE_LATENCY_MICROSECONDS,
         _PULSE_SOURCE,
-        INSTRUCTION_WORD_BITS,
-        INSTRUCTION_WORD_SOURCE,
-        instruction_rate,
-    )
-    return settings.FabricSettings(
-        qpu_to_controller=qpu_to_controller,
-        controller_to_weak_buffer=controller_to_weak_buffer,
-        weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
-        weak_decoder_to_strong_decoder=weak_decoder_to_strong_decoder,
-        strong_buffer_to_strong_decoder=strong_buffer_to_strong_decoder,
-        weak_decoder_to_frame=weak_decoder_to_frame,
-        decoder_to_decoder=decoder_to_decoder,
-        strong_decoder_to_frame=strong_decoder_to_frame,
-        frame_to_controller=frame_to_controller,
-        controller_to_qpu=controller_to_qpu,
-        controller_to_strong_buffer=controller_to_strong_buffer,
-        strong_decoder_to_weak_decoder=strong_decoder_to_weak_decoder,
-        profile_name="logical_reference",
-    )
-
-
-def _channel(
-    name: str,
-    latency_microseconds: float,
-    source: str,
-    capacity: Optional[settings.CapacitySettings],
-) -> settings.ChannelSettings:
-    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
-    return settings.ChannelSettings(name, latency_ticks, capacity, source)
-
-
-def _actual_path(
-    name: str,
-    latency_microseconds: float,
-    source: str,
-    actual_payload_source: str,
-    capacity: Optional[settings.CapacitySettings] = None,
-) -> settings.PathSettings:
-    channel = _channel(name, latency_microseconds, source, capacity)
-    # a preset's latency is its referent's end-to-end number
-    return settings.PathSettings(
-        channel, None, actual_payload_source, excludes_receiver_processing=False
-    )
-
-
-def _default_path(
-    name: str,
-    latency_microseconds: float,
-    latency_source: str,
-    bits: int,
-    payload_source: str,
-    capacity: settings.CapacitySettings,
-) -> settings.PathSettings:
-    channel = _channel(name, latency_microseconds, latency_source, capacity)
-    payload = settings.PayloadSettings(bits, payload_source)
-    # a preset's latency is its referent's end-to-end number
-    return settings.PathSettings(
-        channel, payload, None, excludes_receiver_processing=False
-    )
+        _INSTRUCTION_RATE,
+        default_payload=_INSTRUCTION_WORD,
+    ),
+}

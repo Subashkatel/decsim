@@ -32,13 +32,13 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
 # one round of these test jobs: one fragment of two bits
@@ -134,7 +134,7 @@ def test_a_second_reader_of_one_input_is_one_copy_held_until_both_are_done():
     and one resident input.
     """
     four_rounds_bits = 4 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 0, four_rounds_bits)
+    memory = decoder_memory.DecoderMemory("weak", 0, four_rounds_bits)
     first = timing_only_job("class 0", 3)
     second = timing_only_job("class 1", 3)
     input_key = window_records.DecoderRequestKey(
@@ -181,7 +181,7 @@ def test_an_input_with_a_fragment_that_states_no_size_has_no_size():
 
 def test_a_bounded_memory_refuses_rounds_that_state_no_size():
     """A bound is measured against a size, as a bounded wire's is."""
-    memory = decoder_memory.DecoderMemory("default", 0, 64)
+    memory = decoder_memory.DecoderMemory("weak", 0, 64)
     job = unsized_job("w0", 3)
 
     with pytest.raises(RuntimeError, match="#0 memory holds 64 bits"):
@@ -189,7 +189,7 @@ def test_a_bounded_memory_refuses_rounds_that_state_no_size():
 
 
 def test_an_unbounded_memory_admits_unsized_rounds_holding_no_bits():
-    memory = decoder_memory.DecoderMemory("default", 0, None)
+    memory = decoder_memory.DecoderMemory("weak", 0, None)
     job = unsized_job("w0", 3)
 
     memory.deposit(job)
@@ -200,7 +200,7 @@ def test_an_unbounded_memory_admits_unsized_rounds_holding_no_bits():
 
 def test_a_deposited_job_occupies_its_bits_until_it_is_taken():
     four_rounds_bits = 4 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 0, four_rounds_bits)
+    memory = decoder_memory.DecoderMemory("weak", 0, four_rounds_bits)
     job = timing_only_job("w0", 3)
     window_bits = 3 * BITS_PER_ROUND
 
@@ -236,17 +236,16 @@ def _two_patch_memory_run(bits_per_unit, unit_count):
         unit_memory=unit_memory,
         engine=declared_run.DECLARED_ENGINE,
     )
-    return machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder
-    )
+    base = machines.base(workload, qpu)
+    return machines.with_pool(base, weak_decoder)
 
 
 def test_every_unit_has_its_own_memory_and_ends_the_run_empty():
     # a distance-3 patch reads out its d * d - 1 stabilizers a round
     stabilizer_bits_per_round = 8
     six_rounds_bits = 6 * stabilizer_bits_per_round
-    settings = _two_patch_memory_run(six_rounds_bits, unit_count=2)
-    machine = machine_module.Machine.build(settings)
+    graph = _two_patch_memory_run(six_rounds_bits, unit_count=2)
+    machine = machine_module.Machine.build(graph)
     deposits = declared_run.UnitMemoryDeposits()
     deposits.attach(machine)
     machine.run()
@@ -254,15 +253,15 @@ def test_every_unit_has_its_own_memory_and_ends_the_run_empty():
     names = [unit.name for unit in units]
     occupied = [unit.memory.occupied_bits for unit in units]
     admissions = [deposits.deposit_count(unit) for unit in units]
-    assert names == ["default#0", "default#1"]
+    assert names == ["weak#0", "weak#1"]
     assert occupied == [0, 0]
     assert sum(admissions) >= 2
 
 
 def test_a_unit_too_small_for_its_window_stops_the_run():
     stabilizer_bits_per_round = 8
-    settings = _two_patch_memory_run(stabilizer_bits_per_round, unit_count=1)
-    machine = machine_module.Machine.build(settings)
+    graph = _two_patch_memory_run(stabilizer_bits_per_round, unit_count=1)
+    machine = machine_module.Machine.build(graph)
     with pytest.raises(
         decoder_memory.DecoderMemoryCapacityError, match="the window needs 24"
     ):
@@ -292,14 +291,17 @@ def window_completion_ticks(
     decoder = decoders.PresetLatencyDecoder(compute_microseconds)
     scheduler = schedulers.FifoScheduler()
     pool_settings = decoder_pool.PoolSettings(
-        name="default", unit_count=1, capacity_bits=capacity_bits
+        name="weak", unit_count=1, capacity_bits=capacity_bits
     )
     manager = decoder_manager_module.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=window_records.WEAK_POOL_ID,
     )
-    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.strong_requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     manager.decoder = decoder
     transfer_ticks = config.microseconds_to_ticks(transfer_microseconds)
     send_input = landing_after(engine, transfer_ticks)
@@ -355,7 +357,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
     shared memory single-writer (2301.08419 lines 632-640).
     """
     four_rounds_bits = 4 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 0, four_rounds_bits)
+    memory = decoder_memory.DecoderMemory("weak", 0, four_rounds_bits)
     first = timing_only_job("class 0", 3)
     second = timing_only_job("class 1", 3)
     input_key = window_records.DecoderRequestKey(
@@ -374,7 +376,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
 def test_the_memory_rewrites_an_input_its_one_reader_owns():
     """One reader, one writer: the resident input becomes the new one."""
     four_rounds_bits = 4 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 0, four_rounds_bits)
+    memory = decoder_memory.DecoderMemory("weak", 0, four_rounds_bits)
     only = timing_only_job("class 0", 3)
     memory.deposit(only)
     rewritten = memory.rewrite(only, "the masked input")

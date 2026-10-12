@@ -23,9 +23,9 @@ import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.escalation.verdicts as verdicts
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
-import decsim.topology.graph_layout as graph_layout
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
 import tests.topology.test_graph_layout as layout_tests
@@ -36,15 +36,13 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     switching = declared_run.switching_run(escalates=True)
-    settings = switching.settings
     weak_memory = decoder_settings.UnitMemorySettings(bits=12)
     strong_memory = decoder_settings.UnitMemorySettings(bits=30)
-    weak = dataclasses.replace(settings.weak_decoder, unit_memory=weak_memory)
-    strong = dataclasses.replace(
-        settings.strong_decoder, unit_memory=strong_memory
+    weak_bounded = switching.graph.with_settings(
+        machines.WEAK_POOL, unit_memory=weak_memory
     )
-    bounded = dataclasses.replace(
-        settings, weak_decoder=weak, strong_decoder=strong
+    bounded = weak_bounded.with_settings(
+        machines.STRONG_POOL, unit_memory=strong_memory
     )
 
     machine = machine_module.Machine.build(bounded, 0)
@@ -64,26 +62,26 @@ def test_each_managers_statistics_are_kept_at_its_tiers_settings_path():
     the sum of their areas.
     """
     switching = declared_run.switching_run(escalates=True)
-    machine = machine_module.Machine.build(switching.settings, 0)
+    machine = machine_module.Machine.build(switching.graph, 0)
     machine.run()
 
     groups = machine.observation.statistics.groups
-    weak = groups["weak_decoder.queue"].queued
-    strong = groups["strong_decoder.queue"].queued
+    weak = groups["weak.queue"].queued
+    strong = groups["strong.queue"].queued
     over_pools = groups[decoder_build.MANAGERS_PATH].queued
 
-    decoder_paths = [path for path in sorted(groups) if "decode" in path]
-    assert decoder_paths == [
-        "decoder_manager",
-        "strong_decoder.decodes",
-        "strong_decoder.queue",
-        "strong_decoder.units",
-        "weak_decoder.decodes",
-        "weak_decoder.queue",
-        "weak_decoder.units",
+    # a pool's statistics sit under its part's name
+    pool_paths = [path for path in sorted(groups) if "." in path]
+    assert pool_paths == [
+        "strong.decodes",
+        "strong.queue",
+        "strong.units",
+        "weak.decodes",
+        "weak.queue",
+        "weak.units",
     ]
     assert over_pools.area == weak.area + strong.area
-    assert groups["strong_decoder.units"].busy_units.area > 0
+    assert groups["strong.units"].busy_units.area > 0
 
 
 def test_an_engine_that_names_no_clock_counts_on_the_machines():
@@ -96,10 +94,20 @@ def test_an_engine_that_names_no_clock_counts_on_the_machines():
     )
 
     unit = decoder_build.build_decoder_unit(
-        weak, "weak_decoder", machine_clock, None, None
+        weak, "weak", machine_clock, None, None
     )
 
     assert unit.timing.clock == machine_clock
+
+
+def test_a_pool_on_no_clock_at_all_is_refused():
+    """Neither the pool's engine nor the machine names a clock."""
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
+
+    refusal = "pool 'weak' has no clock: give the pool's engine a clock"
+    with pytest.raises(ValueError, match=refusal):
+        decoder_build.build_decoder_unit(weak, "weak", None, None, None)
 
 
 def test_a_manager_that_names_no_clock_dispatches_on_the_machines():
@@ -108,17 +116,13 @@ def test_a_manager_that_names_no_clock_dispatches_on_the_machines():
     No preset clock ticks at 300 MHz, so a manager on one fails here.
     """
     machine_clock = config.Clock.from_megahertz(300.0)
-    declared = declared_run.weak_only_run()
+    declared = declared_run.weak_only_graph(clock=machine_clock)
     manager_settings = decoder_settings.DecoderManagerSettings(
         dispatch_cycles=1
     )
-    settings = dataclasses.replace(
-        declared.settings,
-        clock=machine_clock,
-        decoder_manager=manager_settings,
-    )
+    dispatched = declared.with_held("decoder_manager", manager_settings)
 
-    machine = declared_run.run_machine(settings)
+    machine = declared_run.run_machine(dispatched)
 
     dispatch_cost = machine.decoders.decoder_manager.service.dispatch_cost
     assert dispatch_cost.clock == machine_clock
@@ -163,14 +167,11 @@ def test_each_managers_scheduler_is_seeded_on_its_own_path():
         scheduler=scheduler_settings
     )
     switching = declared_run.switching_run(escalates=True)
-    settings = dataclasses.replace(
-        switching.settings,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        decoder_manager=manager_settings,
-    )
+    graph = switching.graph.with_record(machines.WEAK_POOL, weak_decoder)
+    graph = graph.with_record(machines.STRONG_POOL, strong_decoder)
+    graph = graph.with_held("decoder_manager", manager_settings)
 
-    machine = machine_module.Machine.build(settings, 7)
+    machine = machine_module.Machine.build(graph, 7)
 
     chip_scheduler = machine.decoders.decoder_manager.queue.scheduler
     strong_manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
@@ -193,11 +194,9 @@ def test_a_weak_decoder_short_of_the_signals_evidence_is_named_by_its_record():
     signal_settings = cluster.ClusterGap.Settings()
     signal = signal_settings.build(matching, 4.6)
 
-    refusal = "weak_decoder PyMatchingDecoder.Settings cannot serve"
+    refusal = "weak PyMatchingDecoder.Settings cannot serve"
     with pytest.raises(ValueError, match=refusal):
-        decoder_build.build_decoder_unit(
-            tier, "weak_decoder", None, None, signal
-        )
+        decoder_build.build_decoder_unit(tier, "weak", None, None, signal)
 
 
 class _FormedBeforeEveryPool:
@@ -214,58 +213,58 @@ def test_the_consensus_row_needs_an_ensemble_on_the_source_pool():
     switching = declared_run.declared_switching(
         confidence=confidence, verdict=agreement
     )
-    settings = declared_fabric.switching_settings(
+    switching_graph = declared_fabric.switching_graph(
         rounds=6, escalated_windows=set(), switching=switching
     )
 
     with pytest.raises(ValueError, match="only the ensemble row"):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(switching_graph, 0)
 
 
 def test_a_pool_no_edge_escalates_to_may_not_batch():
     decode_each = batching.DecodeEach.Settings()
-    settings = declared_fabric.switching_settings(
+    switching_graph = declared_fabric.switching_graph(
         rounds=6, escalated_windows=set()
     )
-    weak = dataclasses.replace(settings.weak_decoder, batching=decode_each)
-    settings = dataclasses.replace(settings, weak_decoder=weak)
+    batching_weak = switching_graph.with_settings(
+        machines.WEAK_POOL, batching=decode_each
+    )
 
     with pytest.raises(ValueError, match="no edge escalates to"):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(batching_weak, 0)
 
 
 def test_a_pools_batching_beside_bulk_strong_is_refused():
     decode_each = batching.DecodeEach.Settings()
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
-    settings = declared_fabric.switching_settings(
+    switching_graph = declared_fabric.switching_graph(
         rounds=6, escalated_windows=set()
     )
-    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
-    settings = dataclasses.replace(
-        settings, strong_decoder=strong, decoder_manager=bulk
+    batching_strong = switching_graph.with_settings(
+        machines.STRONG_POOL, batching=decode_each
     )
+    bulk_batching = batching_strong.with_held("decoder_manager", bulk)
 
     with pytest.raises(ValueError, match="keep one"):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(bulk_batching, 0)
 
 
 def test_bulk_strong_merges_the_queue_of_every_pool_an_edge_leads_to():
     """The entry pool decodes the planner's windows, one job each."""
     chain = layout_tests.chain_machine()
-    settings = graph_layout.entry_settings(chain)
     layout = layout_tests.laid_out(chain)
     engine = engine_module.Engine()
     parts = escalation_build.build_switching(layout, engine)
     signals = escalation_build.signal_by_pool(parts)
     placement = _FormedBeforeEveryPool()
     pools = decoder_build.build_pool_units(
-        layout, settings.clock, placement, signals
+        layout, chain.clock, placement, signals
     )
     bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
     targets = layout.target_by_source()
 
     decoders = decoder_build.Decoders.build(
-        bulk, settings.clock, engine, pools, targets
+        bulk, chain.clock, engine, pools, targets
     )
 
     merges = [manager.queue.merges_strong for manager in decoders.managers]

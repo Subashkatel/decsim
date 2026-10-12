@@ -17,41 +17,13 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 # A hop between two parts, by its name. A graph names each hop by the
-# parts at its ends; a slotted machine's twelve hops keep the names below,
-# in report order, and a fabric card prices every one of them.
+# parts at its ends (records/routes.py hop_between); the three hops
+# between the parts every machine holds once keep the names below.
 LinkPath = str
 
 QPU_TO_CONTROLLER = "qpu_to_controller"  # a readout
-CONTROLLER_TO_WEAK_BUFFER = "controller_to_weak_buffer"  # a published round
-# a window, or a feedback-memory round
-WEAK_BUFFER_TO_WEAK_DECODER = "weak_buffer_to_weak_decoder"
-# an escalation, and a weak boundary a strong window pins
-WEAK_DECODER_TO_STRONG_DECODER = "weak_decoder_to_strong_decoder"
-# the strong window's input, and a strong boundary another strong
-# decode reads, both out of the host's own memory
-STRONG_BUFFER_TO_STRONG_DECODER = "strong_buffer_to_strong_decoder"
-WEAK_DECODER_TO_FRAME = "weak_decoder_to_frame"  # the weak correction
-DECODER_TO_DECODER = "decoder_to_decoder"  # a boundary between weak units
-STRONG_DECODER_TO_FRAME = "strong_decoder_to_frame"  # the strong correction
 FRAME_TO_CONTROLLER = "frame_to_controller"  # the conditional release
 CONTROLLER_TO_QPU = "controller_to_qpu"  # the instruction back
-CONTROLLER_TO_STRONG_BUFFER = "controller_to_strong_buffer"  # the room side
-# a strong answer to the chip, and a strong boundary to a weak window
-STRONG_DECODER_TO_WEAK_DECODER = "strong_decoder_to_weak_decoder"
-SLOTTED_PATHS = (
-    QPU_TO_CONTROLLER,
-    CONTROLLER_TO_WEAK_BUFFER,
-    WEAK_BUFFER_TO_WEAK_DECODER,
-    WEAK_DECODER_TO_STRONG_DECODER,
-    STRONG_BUFFER_TO_STRONG_DECODER,
-    WEAK_DECODER_TO_FRAME,
-    DECODER_TO_DECODER,
-    STRONG_DECODER_TO_FRAME,
-    FRAME_TO_CONTROLLER,
-    CONTROLLER_TO_QPU,
-    CONTROLLER_TO_STRONG_BUFFER,
-    STRONG_DECODER_TO_WEAK_DECODER,
-)
 
 
 @dataclass(frozen=True)

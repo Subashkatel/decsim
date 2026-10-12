@@ -23,6 +23,7 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import decsim.statistics.registry as statistics_registry
@@ -56,13 +57,16 @@ def _manager(engine, units, scheduler=None):
     if scheduler is None:
         scheduler = schedulers.FifoScheduler()
     decoder = decoders.PresetLatencyDecoder(SERVICE_MICROSECONDS)
-    pool_settings = decoder_pool.PoolSettings(name="default", unit_count=units)
+    pool_settings = decoder_pool.PoolSettings(name="weak", unit_count=units)
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=window_records.WEAK_POOL_ID,
     )
-    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.strong_requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     manager.decoder = decoder
     return manager
 
@@ -272,36 +276,22 @@ def test_a_bulk_strong_batch_holds_no_member_that_owes_a_boundary():
     boundary; they wait instead, and each of the eight strong requests
     starts owing nothing.
     """
-    base_machine = declared_fabric.switching_machine(
-        rounds=6, escalated_windows={0, 1}
-    )
-    base = base_machine.settings
-    boundary_path = base.links.strong_buffer_to_strong_decoder
-    slow_channel = dataclasses.replace(
-        boundary_path.channel, propagation_latency_ticks=100_000_000
-    )
-    slow_boundary = dataclasses.replace(boundary_path, channel=slow_channel)
-    links = dataclasses.replace(
-        base.links, strong_buffer_to_strong_decoder=slow_boundary
-    )
+    base = declared_fabric.switching_graph(rounds=6, escalated_windows={0, 1})
+    # the strong pool's boundary to its own next decode
+    slow_boundary = declared_run.declared_fabric(same_pool_host=100.0)
     operations = tuple(
         declared_run.memory_operation(patch) for patch in (1, 2, 3, 4)
     )
-    workload = dataclasses.replace(base.workload, operations=operations)
-    weak_decoder = dataclasses.replace(base.weak_decoder, unit_count=4)
-    strong_decoder = dataclasses.replace(base.strong_decoder, unit_count=4)
-    decoder_manager = dataclasses.replace(
-        base.decoder_manager, bulk_strong=True
-    )
-    settings = dataclasses.replace(
-        base,
-        workload=workload,
-        links=links,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        decoder_manager=decoder_manager,
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    base_workload = base.held("workload")
+    workload = dataclasses.replace(base_workload, operations=operations)
+    base_manager = base.held("decoder_manager")
+    decoder_manager = dataclasses.replace(base_manager, bulk_strong=True)
+    graph = dataclasses.replace(base, fabric=slow_boundary)
+    graph = graph.with_held("workload", workload)
+    graph = graph.with_settings(machines.WEAK_POOL, unit_count=4)
+    graph = graph.with_settings(machines.STRONG_POOL, unit_count=4)
+    graph = graph.with_held("decoder_manager", decoder_manager)
+    machine = machine_module.Machine.build(graph, 0)
     manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
     debts_at_start = []
 

@@ -56,9 +56,9 @@ GENERATED = (
     "run the tool again."
 )
 INTRODUCTION = (
-    "A machine is one `MachineSettings` (`decsim/settings.py`), a record "
-    "of records: each field holds the settings of one part, and a part's "
-    "record holds the records of the components it builds. A record with "
+    "A machine is a graph of named parts (`decsim/topology/graph.py`), "
+    "each part one settings record, and a part's record holds the "
+    "records of the components it builds. A record with "
     "a `build` method builds its component. A field with no default is "
     "required, and a field's unit is in its name."
 )

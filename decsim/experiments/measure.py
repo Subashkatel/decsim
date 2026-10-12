@@ -2,8 +2,8 @@
 
 measure_shot reads the run's listeners, its RunResult, and the code card
 and cadence its QPU ran, and no other component. Transfers are named by
-role, not by wire; the tier that decodes the plan's windows decides
-which wire carries each role (MachineSettings.window_tier).
+role, not by wire; the layout names the hop that carries each role
+(build/layout.py).
 """
 
 import collections
@@ -30,10 +30,9 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
-import decsim.records.routes as route_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
+import decsim.topology.graph as topology_graph
 
 # Latency points, in path order, in microseconds per window unless noted.
 # Every point is one span, and its comment names the two ticks it runs
@@ -108,7 +107,7 @@ POINTS = (
     # the verdict, or the committing decode's end when later -> its answer
     # leaving for the frame: a finished strong answer kept in its unit's
     # output slot (decoders/decoder_unit.py hold_output) until the
-    # verdict's selection has crossed weak_decoder_to_strong_decoder, the
+    # verdict's selection has crossed the escalation hop, the
     # wait a strong decode started with the weak one under
     # run_both_at_once has; zero for every other window
     "selection_wait",
@@ -371,11 +370,11 @@ def measure_shot(
     run_dir receives the log file and the Chrome trace when asked; None
     writes nothing. only_traced_shot writes a named trace path as it stands.
     """
-    settings = shot.task.machine
+    graph = shot.task.machine
     task_id = shot.task.strong_id()
     label = shot_label(task_id, shot.seed)
     observation = shot.machine.observation
-    if run_dir is not None and settings.observation.writes_log:
+    if run_dir is not None and graph.observation.writes_log:
         run_folder.write_log(observation, run_dir, label)
     if run_dir is not None:
         _write_trace(shot, run_dir, label, only_traced_shot)
@@ -385,7 +384,7 @@ def measure_shot(
     )
     layout = shot.machine.layout
     return _measurement(
-        settings,
+        graph,
         observation,
         shot.result,
         layout=layout,
@@ -475,16 +474,20 @@ def input_hop_by_request(transfers: list) -> dict:
     return index.input_hops()
 
 
-def controller_to_weak_buffer_delays_us(
-    transfers: list, observation_settings: observe_settings.ObservationSettings
+def controller_write_delays_us(
+    transfers: list,
+    write_hop: Optional[str],
+    observation_settings: observe_settings.ObservationSettings,
 ) -> list:
-    """Every recorded round's controller_to_weak_buffer delay, in us.
+    """Every recorded round's delay into the written store, in us.
 
-    A packed transfer is recorded by its first round.
+    write_hop is the controller's write into it (Layout.controller_write_hop),
+    None for a run with no written store. A packed transfer is recorded
+    by its first round.
     """
     delays = []
     for row in transfers:
-        if row["path"] != "controller_to_weak_buffer":
+        if row["path"] != write_hop:
             continue
         first_rounds = row["attribution"]["rounds_by_operation"][0]
         if not observation_settings.records_round(first_rounds["round_lo"]):
@@ -580,6 +583,7 @@ def window_points_us(
     qpu_send: dict,
     input_path: str,
     answer_send: dict,
+    escalation_path: Optional[str],
 ) -> dict:
     """The per-window latency points, in us, for one decoded window.
 
@@ -608,7 +612,7 @@ def window_points_us(
     committed = frame_record.committed_ticks
     handoff_ticks = link_delay.get((BOUNDARY_HOP, operation_id, window_id), 0)
     escalation_ticks = link_delay.get(
-        ("weak_decoder_to_strong_decoder", operation_id, window_id), 0
+        (escalation_path, operation_id, window_id), 0
     )
     accepted = frame_record.accepted_ticks
     output_sent = answer_send.get(window.key, accepted)
@@ -729,20 +733,23 @@ def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     observation_settings: observe_settings.ObservationSettings,
-    routes: route_records.Routes,
-    input_hops: dict,
+    layout: layout_module.Layout,
 ) -> tuple:
     """Every recorded point's microsecond samples, and each window's tier.
 
     Every point describes the decode the frame committed, named by the
-    frame record's tier and run ordinal; input_hops is the hop each
-    pool's input rides (Layout.input_hop_by_pool), keyed by the pool
-    whose decode the frame committed. Only the windows and rounds in
-    the measurement interval are sampled, but for the end-of-stream
-    reaction, which is the drain the interval leaves out. It stays whole
-    past the size
+    frame record's tier and run ordinal, and reads its hops off the
+    layout: the hop each pool's input rides, keyed by the pool whose
+    decode the frame committed, the entry edge's escalation, and the
+    controller's write. Only the windows and rounds in the measurement
+    interval are sampled, but for the end-of-stream reaction, which is
+    the drain the interval leaves out. It stays whole past the size
     prompt: one walk over the windows in key order, read top to bottom.
     """
+    routes = layout.routes()
+    input_hops = layout.input_hop_by_pool()
+    escalation_hop = layout.entry_escalation_hop()
+    write_hop = layout.controller_write_hop()
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
     answer_hops = routes.name_bits_by_answer_hop
@@ -753,8 +760,8 @@ def collect_samples(
     for name in POINTS:
         samples[name] = []
     window_tiers = []
-    samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(
-        transfers, observation_settings
+    samples["cwb_per_round"] = controller_write_delays_us(
+        transfers, write_hop, observation_settings
     )
     round_events = observation.round_events
     waits = round_stall_ticks(round_events.events)
@@ -771,7 +778,9 @@ def collect_samples(
     for window, frame_record in recorded_windows(
         observation, observation_settings
     ):
-        sample = window_sample(window, frame_record, stages, reads, input_hops)
+        sample = window_sample(
+            window, frame_record, stages, reads, input_hops, escalation_hop
+        )
         for name, value in sample.values.items():
             samples[name].append(value)
         window_tiers.append(sample.decode.tier.word)
@@ -811,6 +820,7 @@ def window_sample(
     stages: stage_records.StageLedger,
     reads: TransferReads,
     input_hops: dict,
+    escalation_hop: Optional[str],
 ) -> WindowSample:
     """One decoded window's values, as collect_samples reads every one.
 
@@ -832,6 +842,7 @@ def window_sample(
         reads.qpu_send,
         input_path,
         reads.answer_send,
+        escalation_hop,
     )
     return WindowSample(values, decode)
 
@@ -883,16 +894,20 @@ def committed_decode(
 
 def pool_measures(
     run_statistics: statistics_registry.Registry,
-    pool_paths: dict,
+    layout: layout_module.Layout,
     generation_ticks: int,
 ) -> "_PoolMeasures":
     """Each tier's queue peak, busy fraction and load over a span.
 
+    The tiers are the layout's (Layout.tier_pools), each read where its
+    pool keeps its statistics; a tier the run lacks reads zero.
     generation_ticks is the span the rounds were generated over
     (_generation_span_ticks); a stream keeps its two ends as it runs.
     """
-    weak_path = pool_paths.get(window_records.WEAK_POOL_ID)
-    strong_path = pool_paths.get(window_records.STRONG_POOL_ID)
+    weak_pool, strong_pool = layout.tier_pools()
+    pool_paths = layout.statistics_path_by_pool()
+    weak_path = pool_paths.get(weak_pool)
+    strong_path = pool_paths.get(strong_pool)
     weak = _pool_numbers(run_statistics, weak_path, generation_ticks)
     strong = _pool_numbers(run_statistics, strong_path, generation_ticks)
     return _PoolMeasures(
@@ -955,7 +970,7 @@ def end_of_stream_reaction_us(
 
 
 def reaction_growth_rate(
-    recorded: list, tier: window_records.PoolId
+    recorded: list, tier: Optional[window_records.PoolId]
 ) -> Optional[float]:
     """How fast a tier's reaction time grows along the shot, in us per us.
 
@@ -982,7 +997,7 @@ def reaction_growth_rate(
     arrivals_us = []
     reactions_us = []
     for window, frame_record in recorded:
-        if frame_record.tier != tier.word:
+        if window_records.PoolId(frame_record.tier) != tier:
             continue
         arrival_us = _arrival_microseconds(window)
         reaction_us = _reaction_microseconds(window, frame_record)
@@ -1044,14 +1059,13 @@ def chain_load(samples: dict, window_period_us: float) -> float:
 
 
 def active_decoder_kind(
-    settings: machine_settings.MachineSettings,
+    layout: layout_module.Layout,
 ) -> Optional[Union[str, float]]:
-    """The kind of the tier that decodes the plan's windows."""
-    tier = settings.window_tier.word
-    tier_settings = settings.decoder_settings_for(tier)
-    if tier_settings is None:
+    """The kind of the entry pool, which decodes the plan's windows."""
+    pool_settings = layout.entry_pool.settings
+    if pool_settings is None:
         return None
-    return tier_settings.algorithm.name
+    return pool_settings.algorithm.name
 
 
 def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
@@ -1103,7 +1117,7 @@ def parallel_processes_needed(
 
 
 def _measurement(
-    settings: machine_settings.MachineSettings,
+    graph: topology_graph.Machine,
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
@@ -1126,38 +1140,34 @@ def _measurement(
     owner_rounds = rounds_by_owner.values()
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
-    routes = layout.routes()
-    input_hops = layout.input_hop_by_pool()
     samples, window_tiers = collect_samples(
-        observation, result, settings.observation, routes, input_hops
+        observation, result, graph.observation, layout
     )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
-    recorded = recorded_windows(observation, settings.observation)
-    weak_growth = reaction_growth_rate(recorded, window_records.WEAK_POOL_ID)
-    strong_growth = reaction_growth_rate(
-        recorded, window_records.STRONG_POOL_ID
-    )
+    recorded = recorded_windows(observation, graph.observation)
+    weak_pool, strong_pool = layout.tier_pools()
+    weak_growth = reaction_growth_rate(recorded, weak_pool)
+    strong_growth = reaction_growth_rate(recorded, strong_pool)
     missed_windows, first_miss_us = deadline_misses(
-        recorded, settings.observation.reaction_deadline_microseconds
+        recorded, graph.observation.reaction_deadline_microseconds
     )
     throughput = _throughput_per_microsecond(observation, decoded_window_count)
     referee = _referee_counts(observation)
     commit_rounds = code.commit_rounds()
     window_period_us = commit_rounds * round_period_microseconds
     load = chain_load(samples, window_period_us)
-    algorithm = active_decoder_kind(settings)
+    algorithm = active_decoder_kind(layout)
     managers = observation.statistics.groups[decoders_part.MANAGERS_PATH]
     queued = managers.queued.peak
     round_period_ticks = config_module.microseconds_to_ticks(
         round_period_microseconds
     )
-    pool_paths = layout.statistics_path_by_pool()
-    pools = _pool_measures(observation, round_period_ticks, pool_paths)
-    strong = _strong_decodes(observation)
-    tiers = _tier_records(observation)
+    pools = _pool_measures(observation, round_period_ticks, layout)
+    strong = _strong_decodes(observation, strong_pool)
+    tiers = _tier_records(observation, weak_pool, strong_pool)
     backlog_peak = _backlog_peak_rounds(observation)
     processes = parallel_processes_needed(
         samples, code, round_period_microseconds
@@ -1170,7 +1180,7 @@ def _measurement(
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
-    confidence = _shot_confidence(settings, observation, seed, record_options)
+    confidence = _shot_confidence(layout, observation, seed, record_options)
     window_outcomes = _shot_window_outcomes(observation, owners)
     statistics = observation.statistics.rows()
     statistic_values = observation.statistics.value_counts()
@@ -1233,7 +1243,7 @@ def _measurement(
 
 
 def _shot_confidence(
-    settings: machine_settings.MachineSettings,
+    layout: layout_module.Layout,
     observation: observation_module.Observation,
     seed: int,
     record_options: collect.RecordOptions,
@@ -1244,7 +1254,8 @@ def _shot_confidence(
         return None
     windows = ledger.windows()
     is_sampled = record_options.samples_confidence_of(seed)
-    signal = settings.switching.confidence.name
+    switching = layout.entry_switching()
+    signal = switching.confidence.name
     sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 
@@ -1688,17 +1699,15 @@ def _referee_counts(
 def _pool_measures(
     observation: observation_module.Observation,
     round_period_ticks: int,
-    pool_paths: dict,
+    layout: layout_module.Layout,
 ) -> _PoolMeasures:
     """Each tier's queue peak, busy fraction and load, from its statistics.
 
-    pool_paths is where each pool keeps its statistics
-    (Layout.statistics_path_by_pool). The weak row reads the pool whose
-    results write weak, the strong row the one that writes strong (a
-    strong-only run's window pool); a tier the run lacks reads zero.
+    The weak row reads the layout's weak tier, the strong row its strong
+    one (a strong-only run's window pool); a tier the run lacks reads zero.
     """
     generation_ticks = _generation_span_ticks(observation, round_period_ticks)
-    return pool_measures(observation.statistics, pool_paths, generation_ticks)
+    return pool_measures(observation.statistics, layout, generation_ticks)
 
 
 def _pool_numbers(
@@ -1760,6 +1769,7 @@ def _generation_span_ticks(
 
 def _strong_decodes(
     observation: observation_module.Observation,
+    strong_pool: Optional[window_records.PoolId],
 ) -> _StrongDecodes:
     """The windows the strong tier committed, their rounds, their service.
 
@@ -1772,7 +1782,7 @@ def _strong_decodes(
     service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
         tier = window_records.PoolId(frame_record.tier)
-        if tier != window_records.STRONG_POOL_ID:
+        if tier != strong_pool:
             continue
         decode = committed_decode(stages, frame_record)
         windows += 1
@@ -1786,6 +1796,8 @@ def _strong_decodes(
 
 def _tier_records(
     observation: observation_module.Observation,
+    weak_pool: Optional[window_records.PoolId],
+    strong_pool: Optional[window_records.PoolId],
 ) -> _TierRecords:
     """Each tier's inputs, computes and waits off the switching records.
 
@@ -1798,10 +1810,13 @@ def _tier_records(
     if records is None:
         return _TierRecords()
     lives = _decode_lives(observation.stages)
-    weights = _weak_syndrome_weights(records.requests)
-    weak_computes = _weak_compute_microseconds(records.requests, lives)
-    strong_waits = _strong_wait_microseconds(records.requests, lives)
-    held_peak = _strong_held_in_units_peak(records.requests, lives)
+    requests = records.requests
+    weak_requests = _requests_of_pool(requests, lives, weak_pool)
+    strong_requests = _requests_of_pool(requests, lives, strong_pool)
+    weights = _weak_syndrome_weights(requests, weak_pool)
+    weak_computes = _weak_compute_microseconds(weak_requests, lives)
+    strong_waits = _strong_wait_microseconds(strong_requests, lives)
+    held_peak = _strong_held_in_units_peak(strong_requests, lives)
     weight_mean = _mean_or_zero(weights)
     weight_max = max(weights, default=0)
     compute_mean = _mean_or_zero(weak_computes)
@@ -1845,30 +1860,32 @@ def _decode_life(records: list) -> _DecodeLife:
     return _DecodeLife(dispatch, ready, compute_start, max(ends))
 
 
-def _weak_syndrome_weights(requests: list) -> list:
+def _weak_syndrome_weights(
+    requests: list, weak_pool: Optional[window_records.PoolId]
+) -> list:
     """The set bits of every weak request's landed input that has bits."""
     weights = []
     for request in requests:
-        is_weak = request.request_key.pool == window_records.WEAK_POOL_ID
+        is_weak = request.request_key.pool == weak_pool
         if is_weak and request.syndrome_weight is not None:
             weights.append(request.syndrome_weight)
     return weights
 
 
-def _weak_compute_microseconds(requests: list, lives: dict) -> list:
+def _weak_compute_microseconds(weak_requests: list, lives: dict) -> list:
     """Each weak decode's compute, first stage start to last stage end."""
     durations = []
-    for request in _requests_of_tier(requests, lives, "weak"):
+    for request in weak_requests:
         life = lives[request.request_key.run_sequence]
         duration = _span_microseconds(life.end, life.compute_start)
         durations.append(duration)
     return durations
 
 
-def _strong_wait_microseconds(requests: list, lives: dict) -> list:
+def _strong_wait_microseconds(strong_requests: list, lives: dict) -> list:
     """Each strong decode's queue wait plus its compute wait."""
     waits = []
-    for request in _requests_of_tier(requests, lives, "strong"):
+    for request in strong_requests:
         life = lives[request.request_key.run_sequence]
         queue_wait = life.dispatch - request.ready_ticks
         compute_wait = life.compute_start - life.ready
@@ -1878,7 +1895,7 @@ def _strong_wait_microseconds(requests: list, lives: dict) -> list:
     return waits
 
 
-def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
+def _strong_held_in_units_peak(strong_requests: list, lives: dict) -> int:
     """The most strong decodes held in unit memory at once, on compute.
 
     Held from the tick it may compute to its compute start, gem5's fuBusy
@@ -1887,7 +1904,7 @@ def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
     """
     change_by_tick = collections.defaultdict(int)
     held_decodes = set()
-    for request in _requests_of_tier(requests, lives, "strong"):
+    for request in strong_requests:
         run_sequence = request.request_key.run_sequence
         if run_sequence in held_decodes:
             continue
@@ -1903,12 +1920,14 @@ def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
     return peak
 
 
-def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
-    """The tier's requests whose decode ran at least one stage."""
+def _requests_of_pool(
+    requests: list, lives: dict, pool: Optional[window_records.PoolId]
+) -> list:
+    """The pool's requests whose decode ran at least one stage."""
     chosen = []
     for request in requests:
         key = request.request_key
-        if key.pool.word == tier and key.run_sequence in lives:
+        if key.pool == pool and key.run_sequence in lives:
             chosen.append(request)
     return chosen
 

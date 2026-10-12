@@ -9,8 +9,8 @@ import pytest
 
 import decsim.engine as engine_module
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.magic_state_factories as magic_state_factories
-import decsim.settings as machine_settings
 
 _INFINITE = magic_state_factories.InfiniteFactory
 _DISTILLATION = magic_state_factories.DistillationFactory
@@ -46,11 +46,9 @@ def test_every_factory_builds_and_takes_the_decode_queue_it_is_handed(
     What a factory sends through the port is
     tests/qpu/test_magic_state_factories.py's.
     """
-    settings = machine_settings.MachineSettings(
-        magic_state_factory=factory_settings
-    )
+    graph = machines.base(factory_settings)
 
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(graph, 0)
     result = machine.run()
 
     factory = machine.qpu.factory

@@ -19,7 +19,7 @@ class BacklogView:
     """
 
     ready_jobs: int  # jobs waiting across every queue
-    per_lane: tuple  # ((lane, queued_jobs), ...); "" = the entry pool's
+    per_lane: tuple  # ((pool, queued_jobs), ...), the entry pool first
     per_op_rounds: tuple  # ((operation_id, rounds_waiting), ...)
     per_patch_rounds: tuple  # ((patch, rounds_waiting), ...)
     total_rounds: int  # system-level depth
@@ -32,12 +32,12 @@ def backlog_view(
 ) -> BacklogView:
     """Snapshot the job queues and the per-op, per-patch, system backlog.
 
-    The queues are every pool's, the entry pool's manager first and each
-    other pool's lane by its queue's name.
+    The queues are every pool's, each lane by its pool's name: the entry
+    pool's first, then the others in name order.
     """
     entry_manager = decoder_managers[0]
     ready_jobs = len(entry_manager.queue.waiting)
-    per_lane = [("", ready_jobs)]
+    per_lane = [(entry_manager.pool.name, ready_jobs)]
     other_managers = decoder_managers[1:]
     waiting_by_pool = _waiting_by_pool(other_managers)
     pool_items = waiting_by_pool.items()

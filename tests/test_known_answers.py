@@ -40,7 +40,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
-import decsim.topology.slotted as slotted
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.schemes.parallel as parallel
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -55,15 +55,16 @@ UNREACHABLE_DECIBELS = 1e6
 REDO_WINDOW = strong_window_shapes.RedoWindow.Settings()
 DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
 # every hop a round's correction crosses before the instruction that acts
-# on it reaches the QPU, in the order it crosses them
-REACTION_PATH = (
-    "qpu_to_controller",
-    "controller_to_weak_buffer",
-    "weak_buffer_to_weak_decoder",
-    "weak_decoder_to_frame",
-    "frame_to_controller",
-    "controller_to_qpu",
-)
+# on it reaches the QPU, in the order it crosses them, each with its role
+# (records/routes.py HopRole.key), which on the weak base no other hop has
+REACTION_PATH = {
+    "qpu_to_controller": "readout",
+    "controller_to_weak_buffer": "write_written",
+    "weak_buffer_to_weak": "read_written",
+    "weak_to_frame": "answer_fridge",
+    "frame_to_controller": "decision",
+    "controller_to_qpu": "command",
+}
 FEEDBACK_ROUNDS = 6
 UNIT_COUNTS = (1, 2, 3, 4)
 
@@ -200,20 +201,24 @@ def with_latency_added(
     """The machine with one path's latency longer by microseconds.
 
     The path keeps the rest of its wire: on the weak base every hop of
-    the reaction path is an unbounded one with no setup or framing.
+    the reaction path is an unbounded one with no setup or framing. The
+    longer link is the path's role's, which no other hop of the weak
+    base has.
     """
-    settings = slotted.resolved(machine)
-    path = getattr(settings.links, path_name)
+    at_task = machine.at_task()
+    layout = graph_layout.layout_of(at_task)
+    path = layout.card.path_settings(path_name)
     latency_ticks = path.channel.propagation_latency_ticks
     latency = config.ticks_to_microseconds(latency_ticks)
     longer = latency + microseconds
     link = fabrics.TimedLink(longer, excludes_receiver_processing=True)
-    links_by_path = {path_name: link}
-    fabric = fabrics.PathLinks(base=machine.fabric, **links_by_path)
+    role = REACTION_PATH[path_name]
+    links_by_role = {role: link}
+    fabric = fabrics.RoleLinks(base=machine.fabric, **links_by_role)
     return dataclasses.replace(machine, fabric=fabric)
 
 
-@pytest.mark.parametrize("path_name", REACTION_PATH)
+@pytest.mark.parametrize("path_name", tuple(REACTION_PATH))
 def test_a_latency_added_on_the_reaction_path_adds_exactly_that(path_name):
     """One microsecond more on any hop of the reaction path is one more.
 

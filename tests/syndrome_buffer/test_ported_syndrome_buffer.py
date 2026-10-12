@@ -18,9 +18,9 @@ import random
 
 import pytest
 
-import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.presets.machines as machines
 import decsim.records.rounds as round_records
 import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
@@ -276,7 +276,7 @@ def test_a_declared_weak_run_on_a_ported_store_delays_the_decode_only():
     ported = declared_run.weak_only_run(weak_syndrome_buffer=settings)
     free_ticks = declared_run.reaction_ticks(free)
     ported_ticks = declared_run.reaction_ticks(ported)
-    ported_store = ported.readout.store_named(layout_module.WEAK_STORE)
+    ported_store = ported.readout.store_named(machines.WEAK_STORE)
 
     assert isinstance(ported_store, ported_syndrome_buffer.PortedSyndromeBuffer)
     assert ported_ticks[3] > free_ticks[3]

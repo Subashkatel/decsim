@@ -23,7 +23,6 @@ import json
 
 import pytest
 
-import decsim.build.layout as layout_module
 import decsim.confidence.cluster as cluster
 import decsim.config as decsim_config
 import decsim.decoders.union_find.cycle_count as cycle_count
@@ -31,6 +30,7 @@ import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
 import decsim.presets.clocks as clocks
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import tests.declared_run as declared_run
@@ -38,19 +38,29 @@ import tests.escalation.declared_fabric as fabric
 import tests.escalation.test_strong_window_shapes as shape_tests
 
 
-def switching_settings(threshold_decibels: float, rounds_per_shot=None):
+def switching_graph(threshold_decibels: float, rounds_per_shot=None):
     """The gate's switching card at d=3, p 0.008, on its own threshold."""
-    settings = shape_tests.gate_switching(rounds_per_shot=rounds_per_shot)
+    gate = shape_tests.gate_switching(rounds_per_shot=rounds_per_shot)
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=threshold_decibels
     )
-    switching = dataclasses.replace(settings.switching, threshold=threshold)
-    return dataclasses.replace(settings, switching=switching)
+    return with_switching(gate, threshold=threshold)
 
 
-def run_shot(settings, seed: int):
-    """One shot of the settings: its machine, run, and its result."""
-    machine = machine_module.Machine.build(settings, seed)
+def with_switching(graph, **changes):
+    """The graph with fields of its switching part's record changed."""
+    return graph.with_settings(machines.SWITCHING, **changes)
+
+
+def with_observation(graph, **changes):
+    """The graph with fields of what it records changed."""
+    observation = dataclasses.replace(graph.observation, **changes)
+    return dataclasses.replace(graph, observation=observation)
+
+
+def run_shot(graph, seed: int):
+    """One shot of the graph: its machine, run, and its result."""
+    machine = machine_module.Machine.build(graph, seed)
     result = machine.run()
     return machine, result
 
@@ -79,17 +89,17 @@ def test_every_window_commits_once_across_both_output_links_property():
     carries one selection per escalation and at most one region after
     it, so its transfers lie between one and two per escalation.
     """
-    settings = switching_settings(20.0)
+    gate = switching_graph(20.0)
     found_escalation = False
     for seed in range(6):
-        machine, result = run_shot(settings, seed)
+        machine, result = run_shot(gate, seed)
         transfers = transfers_by_path(result)
         windows = len(machine.observation.windows.windows)
-        escalations = transfers.get("strong_buffer_to_strong_decoder", 0)
-        escalation_hops = transfers.get("weak_decoder_to_strong_decoder", 0)
+        escalations = transfers.get("strong_buffer_to_strong", 0)
+        escalation_hops = transfers.get("weak_to_strong", 0)
         assert escalations <= escalation_hops <= 2 * escalations
-        assert transfers.get("strong_decoder_to_frame", 0) == escalations
-        kept = transfers["weak_decoder_to_frame"]
+        assert transfers.get("strong_to_frame", 0) == escalations
+        kept = transfers["weak_to_frame"]
         assert kept + escalations == windows
         found_escalation = found_escalation or escalations > 0
     assert found_escalation, (
@@ -98,12 +108,9 @@ def test_every_window_commits_once_across_both_output_links_property():
     )
 
 
-def through_weak_chip(settings):
-    """The settings with every strong answer joined on the weak chip."""
-    switching = dataclasses.replace(
-        settings.switching, strong_answer_route="through_weak_chip"
-    )
-    return dataclasses.replace(settings, switching=switching)
+def through_weak_chip(graph):
+    """The graph with every strong answer joined on the weak chip."""
+    return with_switching(graph, strong_answer_route="through_weak_chip")
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
@@ -113,24 +120,24 @@ def test_through_the_weak_chip_every_answer_reaches_the_frame_on_its_hop(
     """A strong answer goes down to the chip, and the chip sends it home.
 
     Every window, kept or escalated, reaches the frame on
-    weak_decoder_to_frame, and nothing rides strong_decoder_to_frame.
+    weak_to_frame, and nothing rides strong_to_frame.
     """
-    direct = switching_settings(20.0)
-    settings = through_weak_chip(direct)
-    machine, result = run_shot(settings, seed)
+    direct = switching_graph(20.0)
+    through = through_weak_chip(direct)
+    machine, result = run_shot(through, seed)
     transfers = transfers_by_path(result)
     windows = len(machine.observation.windows.windows)
-    escalations = transfers["strong_buffer_to_strong_decoder"]
+    escalations = transfers["strong_buffer_to_strong"]
     assert escalations > 0
-    assert transfers.get("strong_decoder_to_frame", 0) == 0
-    assert transfers["strong_decoder_to_weak_decoder"] == escalations
-    assert transfers["weak_decoder_to_frame"] == windows
+    assert transfers.get("strong_to_frame", 0) == 0
+    assert transfers["strong_to_weak"] == escalations
+    assert transfers["weak_to_frame"] == windows
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_both_strong_answer_routes_predict_the_same_shot_for_shot(seed):
     """The route moves where the join is priced, never what is joined."""
-    direct = switching_settings(20.0)
+    direct = switching_graph(20.0)
     through = through_weak_chip(direct)
     _machine, direct_result = run_shot(direct, seed)
     _twin, through_result = run_shot(through, seed)
@@ -146,7 +153,7 @@ def failures(result) -> list:
     return failed
 
 
-def never_escalating_settings():
+def never_escalating_graph():
     """The gate's card at 0 dB, its weak tier clocked and its gap free.
 
     Union-find on its cycle count prices every weak decode in whole
@@ -154,19 +161,16 @@ def never_escalating_settings():
     adds nothing to it, so a window costs what it costs the weak tier
     alone.
     """
-    settings = switching_settings(0.0)
+    gate = switching_graph(0.0)
     cycle_count_law = cycle_count.CycleCount(clock=clocks.FRIDGE_CLOCK)
     union_find_decoder = union_find.UnionFindDecoder.Settings(
         timing=cycle_count_law
     )
-    weak_decoder = dataclasses.replace(
-        settings.weak_decoder, algorithm=union_find_decoder
+    on_union_find = gate.with_settings(
+        machines.WEAK_POOL, algorithm=union_find_decoder
     )
     cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=0.0)
-    switching = dataclasses.replace(settings.switching, confidence=cluster_gap)
-    return dataclasses.replace(
-        settings, weak_decoder=weak_decoder, switching=switching
-    )
+    return with_switching(on_union_find, confidence=cluster_gap)
 
 
 def predictions(result) -> list:
@@ -203,33 +207,33 @@ def test_a_run_that_never_escalates_is_the_weak_tier_alone_shot_for_shot():
     one set of windows; the switching run makes its predictions and times
     every weak decode stage exactly as the twin does.
     """
-    settings = never_escalating_settings()
-    weak_only = dataclasses.replace(
-        settings, switching=None, strong_decoder=None
-    )
+    switching = never_escalating_graph()
+    without_switching = switching.without_part(machines.SWITCHING)
+    without_strong = without_switching.without_part(machines.STRONG_POOL)
+    weak_only = without_strong.without_part(machines.STRONG_STORE)
 
-    machine, result = run_shot(settings, 0)
+    machine, result = run_shot(switching, 0)
     twin, twin_result = run_shot(weak_only, 0)
 
     transfers = transfers_by_path(result)
     windows = len(machine.observation.windows.windows)
-    assert transfers.get("weak_decoder_to_strong_decoder", 0) == 0
-    assert transfers.get("strong_decoder_to_frame", 0) == 0
-    assert transfers["weak_decoder_to_frame"] == windows
+    assert transfers.get("weak_to_strong", 0) == 0
+    assert transfers.get("strong_to_frame", 0) == 0
+    assert transfers["weak_to_frame"] == windows
     assert predictions(result) == predictions(twin_result)
     assert weak_decode_stages(machine) == weak_decode_stages(twin)
 
 
 def test_unreachable_threshold_escalates_every_window():
-    settings = switching_settings(1e6)
-    machine, result = run_shot(settings, 0)
+    gate = switching_graph(1e6)
+    machine, result = run_shot(gate, 0)
     transfers = transfers_by_path(result)
     windows = len(machine.observation.windows.windows)
-    escalation_hops = transfers["weak_decoder_to_strong_decoder"]
+    escalation_hops = transfers["weak_to_strong"]
     assert windows <= escalation_hops <= 2 * windows
-    assert transfers["strong_buffer_to_strong_decoder"] == windows
-    assert transfers["strong_decoder_to_frame"] == windows
-    assert transfers.get("weak_decoder_to_frame", 0) == 0
+    assert transfers["strong_buffer_to_strong"] == windows
+    assert transfers["strong_to_frame"] == windows
+    assert transfers.get("weak_to_frame", 0) == 0
 
 
 def gaps_by_window(requests, weak_tier) -> dict:
@@ -270,15 +274,13 @@ def test_gap_records_decide_the_selected_tier(seed):
     ordinary_window either way; the selected request key names the tier
     that produced the committed result.)
     """
-    settings = switching_settings(20.0)
-    threshold_nats = settings.switching.threshold.threshold_nats
-    observation = dataclasses.replace(
-        settings.observation, record_switching_windows=True
-    )
-    settings = dataclasses.replace(settings, observation=observation)
+    gate = switching_graph(20.0)
+    switching = gate.part(machines.SWITCHING)
+    threshold_nats = switching.settings.threshold.threshold_nats
+    recording = with_observation(gate, record_switching_windows=True)
     weak_tier = window_records.WEAK_POOL_ID
     strong_tier = window_records.STRONG_POOL_ID
-    completed, _result = run_shot(settings, seed)
+    completed, _result = run_shot(recording, seed)
     requests = completed.observation.decode_records.requests
     gap_by_window = gaps_by_window(requests, weak_tier)
     windows = completed.observation.windows.windows
@@ -304,15 +306,15 @@ def test_the_serial_escalation_timeline_is_exact():
     Toshio arXiv:2510.25222 Sec. III A, serial variant, with the
     region assigned at the switch (Sec. III C, lines 1247 to 1250): the
     weak verdict at 30 us sends the selection and the window's six
-    rounds over weak_decoder_to_strong_decoder, 3 us; they land in the
+    rounds over weak_to_strong, 3 us; they land in the
     strong syndrome buffer at 33 us, the job is built and its input
-    crosses strong_buffer_to_strong_decoder, 6 us, so the strong decode
+    crosses strong_buffer_to_strong, 6 us, so the strong decode
     starts at 39 us. The strong decode ends at 69 us, and its answer
     lands on the frame 4 us later, at 73 us. The Held boundary keeps the
     next window's job in the queue until the boundary, which leaves the
     host when the strong decode ends, has crossed
-    strong_decoder_to_weak_decoder, 4 us, to 73 us; only then does the
-    job take a unit and its input cross weak_buffer_to_weak_decoder,
+    strong_to_weak, 4 us, to 73 us; only then does the
+    job take a unit and its input cross weak_buffer_to_weak,
     5 us, so it starts at 78 us.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
@@ -346,12 +348,13 @@ def test_through_the_weak_chip_the_frame_waits_a_hop_and_a_chip_cycle_more():
     Both strong answer hops are declared 4 us, so the answer lands on the
     chip when it would land on the frame; the commit edge, one 0.5 us
     cycle of the declared clock (Yang et al. 2605.04892 Table I prices
-    the frame update as one cycle), and weak_decoder_to_frame, 2 us, are
+    the frame update as one cycle), and weak_to_frame, 2 us, are
     what the route adds.
     """
     direct = fabric.switching_machine(rounds=9, escalated_windows={0, 1, 2})
     switching = declared_run.declared_switching(
-        strong_answer_route="through_weak_chip", clock=fabric.DECLARED_CLOCK
+        strong_answer_route="through_weak_chip",
+        clock=declared_run.DECLARED_CLOCK,
     )
     through = fabric.switching_machine(
         rounds=9, escalated_windows={0, 1, 2}, switching=switching
@@ -364,9 +367,9 @@ def test_through_the_weak_chip_the_frame_waits_a_hop_and_a_chip_cycle_more():
     through_record = through_snapshot.records[0]
     extra_ticks = through_record.accepted_ticks - direct_record.accepted_ticks
     weak_leg_ticks = decsim_config.microseconds_to_ticks(
-        fabric.DECLARED_MICROSECONDS["weak_decoder_to_frame"]
+        declared_run.DECLARED_HOP_MICROSECONDS["answer_fridge"]
     )
-    commit_edge_ticks = fabric.DECLARED_CLOCK.period_ticks
+    commit_edge_ticks = declared_run.DECLARED_CLOCK.period_ticks
 
     assert through_record.window_key == direct_record.window_key
     assert through_record.tier == "strong"
@@ -382,7 +385,7 @@ def test_the_speculative_decode_waits_for_the_context_it_reads():
     set T_comm^strong to ten times T_comm^weak (lines 1109-1114; Table I is a
     notation table and prices nothing), so in a model that prices transport Step
     1 means the strong decoder starts when its copy has arrived. The copy rides
-    weak_decoder_to_strong_decoder at readiness, 3 us on the declared card, so
+    weak_to_strong at readiness, 3 us on the declared card, so
     the first window's six context rounds are all still on the chip when the
     window becomes ready: the speculative decode is held, and it is submitted at
     the tick its last context round is stored in the strong syndrome buffer.
@@ -398,14 +401,14 @@ def test_the_speculative_decode_waits_for_the_context_it_reads():
         log_lines, "strong(mem1 W0): strong start deferred"
     )
     last_context_round = declared_run.log_tick(
-        log_lines, "strong syndrome buffer: received round 6 of op 1"
+        log_lines, "strong_buffer: received round 6 of op 1"
     )
     submitted = declared_run.log_tick(
         log_lines,
         "strong(mem1 W0): strong context stored in strong syndrome buffer",
     )
     started = declared_run.log_tick(log_lines, "START DECODE strong(mem1 W0)")
-    deferred_lines = fabric.log_lines_containing(
+    deferred_lines = declared_run.log_lines_containing(
         machine, "strong start deferred until the context rounds"
     )
     assert (
@@ -447,7 +450,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
     args = slice_row["args"]
     # the hold opens when the last context round leaves the QPU, 6 rounds
     # plus qpu_to_controller 2 plus readout_to_bits 3, and ends when
-    # the escalated region lands over weak_decoder_to_strong_decoder, 3
+    # the escalated region lands over weak_to_strong, 3
     expected_held = decsim_config.microseconds_to_ticks(15.0)
     expected_released = decsim_config.microseconds_to_ticks(18.0)
 
@@ -521,12 +524,12 @@ def test_a_held_speculative_decode_is_cancelled_by_a_confident_result():
         escalation_microseconds=40.0,
     )
     machine.run()
-    cancelled = fabric.log_lines_containing(
+    cancelled = declared_run.log_lines_containing(
         machine, "cancelled while held for its input"
     )
     assert len(cancelled) == 3
     assert not machine.windows.window_manager.edges.edges[0].has_pending()
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
         ((1, 2), "weak"),
@@ -549,12 +552,12 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
     )
     machine.run()
     counts = machine.decoders.decoder_manager.strong_requests.counts
-    tiers = fabric.frame_tiers(machine)
+    tiers = declared_run.frame_tiers(machine)
 
     assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
     assert counts.cancelled == 3
     assert counts.needed == 0
-    strong = machine.readout.store_parts(layout_module.STRONG_STORE)
+    strong = machine.readout.store_parts(machines.STRONG_STORE)
     strong.receiver.check_settled()
 
 
@@ -573,7 +576,7 @@ def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
     )
     machine.run()
     counts = machine.decoders.decoder_manager.strong_requests.counts
-    tiers = fabric.frame_tiers(machine)
+    tiers = declared_run.frame_tiers(machine)
 
     assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
     assert counts.needed == 3
@@ -598,7 +601,7 @@ def test_a_pinned_speculative_decode_is_planned_at_its_weak_jobs_release():
     )
     machine.run()
     counts = machine.decoders.decoder_manager.strong_requests.counts
-    tiers = fabric.frame_tiers(machine)
+    tiers = declared_run.frame_tiers(machine)
 
     assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
     assert counts.needed == 3
@@ -687,24 +690,16 @@ def _confidence_charges(machine) -> list:
 
 def _walk_card_machine(microseconds):
     """One d=3 shot of union-find's cluster gap, its walk priced."""
-    settings = switching_settings(20.0)
+    gate = switching_graph(20.0)
     host_time = cycle_count.HostMeasuredTime()
     union_find_decoder = union_find.UnionFindDecoder.Settings(timing=host_time)
-    weak_decoder = dataclasses.replace(
-        settings.weak_decoder, algorithm=union_find_decoder
+    on_union_find = gate.with_settings(
+        machines.WEAK_POOL, algorithm=union_find_decoder
     )
     cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=microseconds)
-    switching = dataclasses.replace(settings.switching, confidence=cluster_gap)
-    observation = dataclasses.replace(
-        settings.observation, record_switching_windows=True
-    )
-    settings = dataclasses.replace(
-        settings,
-        weak_decoder=weak_decoder,
-        switching=switching,
-        observation=observation,
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    walked = with_switching(on_union_find, confidence=cluster_gap)
+    recording = with_observation(walked, record_switching_windows=True)
+    machine = machine_module.Machine.build(recording, 0)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
     machine.run()
@@ -723,7 +718,7 @@ def test_a_priced_confidence_walk_charges_its_card_once_per_window():
     machine, decodes = _walk_card_machine(12.0)
     expected_ticks = decsim_config.microseconds_to_ticks(12.0)
     charged = _confidence_charges(machine)
-    weak_decodes = decodes.of_pool("default")
+    weak_decodes = decodes.of_pool(machines.WEAK_POOL)
     decode_count = len(weak_decodes)
     assert charged
     assert charged == [expected_ticks] * decode_count
@@ -769,12 +764,9 @@ def test_one_landed_input_is_one_residence_however_many_solves_read_it(
     per solve left the first one open to the end of the run.
     """
     trace_path = tmp_path / "gap.trace.json"
-    settings = switching_settings(0.0, rounds_per_shot=9)
-    observation = dataclasses.replace(
-        settings.observation, trace=str(trace_path)
-    )
-    settings = dataclasses.replace(settings, observation=observation)
-    machine, _result = run_shot(settings, 0)
+    gate = switching_graph(0.0, rounds_per_shot=9)
+    traced = with_observation(gate, trace=str(trace_path))
+    machine, _result = run_shot(traced, 0)
     machine.observation.trace_writer.write(str(trace_path))
     text = trace_path.read_text()
     document = json.loads(text)

@@ -16,8 +16,6 @@ us the slot frees with mem3 W0 and mem4 W0 waiting since 15 us; mem1
 W1 still owes its boundary, which lands at 30.5 us.
 """
 
-import dataclasses
-
 import pytest
 
 import decsim.config as config
@@ -155,7 +153,7 @@ def test_each_vqd_row_is_written_by_its_name():
 def test_fifo_decodes_the_critical_memory_last_of_the_four():
     """FIFO stages mem3 W0 at 30 us: mem4 W0 decodes 50-60 us.
 
-    Its answer rides weak_decoder_to_frame (2 us), lands at 62 us and
+    Its answer rides weak_to_frame (2 us), lands at 62 us and
     commits at 63 us; mem4 W1 lands at 102 us.
     """
     fifo = schedulers.FifoScheduler.Settings()
@@ -199,13 +197,12 @@ def _four_memories(rule) -> machine_module.Machine:
         blocked_by=4,
     )
     operations.append(fixup)
-    settings = declared_run.weak_only_settings(rounds=9, operations=operations)
+    graph = declared_run.weak_only_graph(rounds=9, operations=operations)
     manager = decoder_settings.DecoderManagerSettings(scheduler=rule)
     ignore_idle = idle_policies.IgnoreSettings()
-    settings = dataclasses.replace(
-        settings, decoder_manager=manager, idle_policy=ignore_idle
-    )
-    return declared_run.run_machine(settings)
+    graph = graph.with_held("decoder_manager", manager)
+    graph = graph.with_held("idle_policy", ignore_idle)
+    return declared_run.run_machine(graph)
 
 
 def _records_by_window(machine: machine_module.Machine) -> dict:

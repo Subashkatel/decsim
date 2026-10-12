@@ -36,6 +36,53 @@ ANSWER_ROUTE_NAMES = (DIRECT, THROUGH_WEAK_CHIP)
 CHIP_COMMIT_CYCLES = 1
 
 
+# What a hop carries. The reference card prices a hop by its role
+# (links/link_profiles.py reference_path), a fabric may pick its link by
+# it (topology/fabrics.py RoleLinks), and the data-movement report
+# classes the memory it crosses by it (observe/data_movement.py).
+READOUT = "readout"  # the QPU's measurements to the controller
+COMMAND = "command"  # the controller's instruction to the QPU
+DECISION = "decision"  # the frame's conditional release to the controller
+WRITE = "write"  # the controller's round into a store
+READ = "read"  # a store's rounds into the pool that reads it
+ANSWER = "answer"  # a pool's correction to the frame
+SAME_POOL = "same_pool"  # a boundary between two decodes of one pool
+FORWARD = "forward"  # an escalation, or a boundary to a later pool
+REVERSE = "reverse"  # an answer down an edge, or a boundary back
+HOP_KINDS = (
+    READOUT,
+    COMMAND,
+    DECISION,
+    WRITE,
+    READ,
+    ANSWER,
+    SAME_POOL,
+    FORWARD,
+    REVERSE,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class HopRole:
+    """What a hop carries, and the variant its price splits on.
+
+    kind is one of HOP_KINDS. variant is how a store takes its rounds,
+    written or landed, for a write or a read; the site of the pool, the
+    fridge or the host, for an answer or a same-pool hop; None for the
+    rest.
+    """
+
+    kind: str
+    variant: Optional[str] = None
+
+    @property
+    def key(self) -> str:
+        """The role as one word: its kind, then its variant if it has one."""
+        if self.variant is None:
+            return self.kind
+        return f"{self.kind}_{self.variant}"
+
+
 def hop_between(sender: str, receiver: str) -> transfer_records.LinkPath:
     """The hop of a graph's own from one part to another, by their names."""
     return f"{sender}_to_{receiver}"

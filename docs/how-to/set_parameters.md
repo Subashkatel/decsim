@@ -2,8 +2,9 @@
 
 # How to set any parameter without editing code
 
-Every field of a machine's settings is a parameter at a dotted path:
-the field names from the machine down (`decsim/parameters/tree.py`).
+Every field of a machine is a parameter at a dotted path: a part's
+name, then the field names down its record (`decsim/parameters/tree.py`);
+the hops' prices sit under `fabric`, by role.
 A unit leaves the field's name and is written with the value, so
 `fetch_cycles_per_round` is set as `fetch_per_round=8ns` or
 `fetch_per_round=2 cycles`, and converts exactly as decsim converts it
@@ -13,7 +14,7 @@ A unit leaves the field's name and is written with the value, so
 
 ```bash
 decsim params experiments/switching/run.py
-decsim params experiments/switching/run.py --match "weak_decoder.**"
+decsim params experiments/switching/run.py --match "weak.**"
 ```
 
 Each line is `path = value  [record default]  (set by)`, for the first
@@ -23,9 +24,9 @@ swap.
 ## 2. Set one value, or many
 
 ```bash
-decsim run experiments/switching/run.py --set weak_decoder.unit_count=3
+decsim run experiments/switching/run.py --set weak.unit_count=3
 decsim run experiments/switching/run.py --set "**.engine.clock=500MHz" \
-    --set "links.*.channel.propagation_latency=20ns"
+    --set "fabric.*.latency=20ns"
 ```
 
 `*` stands for one name and `**` for any number of them. The flags
@@ -43,18 +44,18 @@ decsim refuses is refused by its path, before any shot runs.
 ```bash
 decsim info
 decsim info DecoderPool
-decsim run run.py --set weak_decoder.algorithm.type=union_find \
-    --set weak_decoder.algorithm.timing.type=HostMeasuredTime
-decsim run run.py --set "links.weak_decoder_to_strong_decoder.channel.capacity={type: Capacity, input: 100Gbps, source: my estimate}"
+decsim run run.py --set weak.algorithm.type=union_find \
+    --set weak.algorithm.timing.type=HostMeasuredTime
+decsim run run.py --set fabric.forward.bits_per_cycle=400
 ```
 
-`decsim info` lists every slot a machine has, as `record.field`, with
-the records it takes; `decsim info NAME` lists one record's parameters
+`decsim info` lists every kind of part and every slot below one, as
+`record.field`, with the records it takes; `decsim info NAME` lists one record's parameters
 and, for each part, the records its slot takes. NAME may be an import
 path, `decsim info mylab.parts.NeuralDecoder.Settings`. A part keeps the old record's fields of the
 same name and takes the assignments that reach the rest; a required
 one left unset is refused. A record of your own is written by its
-import path, `weak_decoder.algorithm.type=mylab.decoders.NeuralSettings`,
+import path, `weak.algorithm.type=mylab.decoders.NeuralSettings`,
 and is taken if the slot's type admits it. `type=none` empties an
 optional slot; in a slot that must hold a record it names the record
 called `none`, as `switching.confidence.type=none` does.
@@ -93,8 +94,9 @@ decsim run run.py --set qpu.distance=7 --set workload.physical_error_probability
 
 A workload lowered in the run file, or a live memory read from
 fragments, was made at one distance, so then `qpu.distance` and the
-lowered fields are refused by name (`MachineSettings.set_in_the_run_file`,
-`decsim/settings.py`): an assignment would leave the circuit behind.
+lowered fields are refused by name (`Machine.set_in_the_run_file`,
+`decsim/topology/graph.py`): an assignment would leave the circuit
+behind.
 `decsim params` marks them `(run file only)`, and a wildcard passes
 them by. [A maker row](plug_in_a_workload_maker.md) makes such a
 workload settable.

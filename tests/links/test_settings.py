@@ -12,9 +12,9 @@ import fractions
 import pytest
 
 import decsim.experiments.collect as collect
-import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
-import decsim.records.transfers as transfer_records
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(
@@ -47,22 +47,29 @@ def actual_path(channel_settings, setup_ticks=0, header_bits=0):
     )
 
 
-def every_path_free():
-    """One free path per hop, keyed by the hop's name.
+def switching_card():
+    """The card of a weak pool escalating to a strong pool on the host."""
+    switching = run_files.switching_machine()
+    at_task = switching.at_task()
+    layout = graph_layout.layout_of(at_task)
+    return layout.card
+
+
+SWITCHING_CARD = switching_card()
+
+
+def card(readout_routes=(), **paths):
+    """Every switching hop, on the free path unless the test wires it.
 
     A card names every hop, so a test that cares about one path wires
     that one and leaves the rest on the shared free channel.
     """
-    names = []
-    for path in transfer_records.SLOTTED_PATHS:
-        names.append(path)
-    return dict.fromkeys(names, FREE_PATH)
-
-
-def card(**paths):
-    wiring = every_path_free()
-    wiring.update(paths)
-    return link_settings.FabricSettings(profile_name="test", **wiring)
+    named = []
+    for hop in SWITCHING_CARD.paths:
+        path_settings = paths.get(hop.name, FREE_PATH)
+        wired = dataclasses.replace(hop, settings=path_settings)
+        named.append(wired)
+    return link_settings.FabricSettings(tuple(named), readout_routes)
 
 
 def test_an_aggregate_rate_is_read_as_the_decimal_on_the_card():
@@ -128,7 +135,7 @@ def test_one_channel_name_with_two_settings_is_refused():
     on_five = actual_path(five_ticks)
     on_seven = actual_path(seven_ticks)
     with pytest.raises(ValueError, match="is declared with different settings"):
-        card(qpu_to_controller=on_five, weak_buffer_to_weak_decoder=on_seven)
+        card(qpu_to_controller=on_five, weak_buffer_to_weak=on_seven)
 
 
 def test_cards_built_from_the_same_numbers_compare_equal():
@@ -165,18 +172,20 @@ def test_readout_routes_share_the_same_channel_settings_contract() -> None:
 
 
 def test_a_hop_the_card_names_twice_is_refused():
-    reference = link_profiles.logical_reference_profile()
-    hop = link_settings.NamedPath("uf_to_relay", reference.decoder_to_decoder)
+    reference = SWITCHING_CARD
+    seam = reference.path("weak_to_weak")
+    hop = dataclasses.replace(seam, name="uf_to_relay")
 
     with pytest.raises(ValueError, match="prices the hop 'uf_to_relay' twice"):
-        dataclasses.replace(reference, hops=(hop, hop))
+        dataclasses.replace(reference, paths=(*reference.paths, hop, hop))
 
 
-def test_a_cards_hops_follow_the_slotted_twelve_by_name():
-    reference = link_profiles.logical_reference_profile()
-    hop = link_settings.NamedPath("uf_to_relay", reference.decoder_to_decoder)
+def test_a_cards_hops_keep_the_order_they_are_written_in():
+    reference = SWITCHING_CARD
+    seam = reference.path("weak_to_weak")
+    hop = dataclasses.replace(seam, name="uf_to_relay")
 
-    card = dataclasses.replace(reference, hops=(hop,))
+    card = dataclasses.replace(reference, paths=(*reference.paths, hop))
 
-    assert card.path_names() == (*transfer_records.SLOTTED_PATHS, "uf_to_relay")
-    assert card.path_settings("uf_to_relay") == reference.decoder_to_decoder
+    assert card.path_names() == (*reference.path_names(), "uf_to_relay")
+    assert card.path_settings("uf_to_relay") == seam.settings

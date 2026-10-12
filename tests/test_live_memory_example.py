@@ -304,7 +304,7 @@ def test_optional_producer_saves_reusable_physical_inputs(
 def test_prefix_requires_a_physical_measurement_round() -> None:
     """The QPU refuses a decode before the stream's first round."""
     program = memory_programs.memory_program()
-    settings = example.live_settings(
+    graph = example.live_machine(
         program,
         distance=3,
         round_period_microseconds=1.1,
@@ -314,7 +314,7 @@ def test_prefix_requires_a_physical_measurement_round() -> None:
         decoder_microseconds=0.1,
     )
 
-    machine = machine_module.Machine.build(settings, seed=81)
+    machine = machine_module.Machine.build(graph, seed=81)
 
     with pytest.raises(ValueError, match="zero-duration detector emitters"):
         machine.run()
@@ -322,7 +322,7 @@ def test_prefix_requires_a_physical_measurement_round() -> None:
 
 def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
     program = memory_programs.memory_program()
-    settings = example.live_settings(
+    graph = example.live_machine(
         program,
         distance=3,
         round_period_microseconds=1.1,
@@ -331,9 +331,10 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
         feedback_microseconds=4.0,
         decoder_microseconds=0.1,
     )
-    owner = settings.workload.dynamic_streams[0]
+    workload = graph.held("workload")
+    owner = workload.dynamic_streams[0]
     assert owner.patches == ("user-patch",)
-    machine = machine_module.Machine.build(settings, seed=81)
+    machine = machine_module.Machine.build(graph, seed=81)
     result = machine.run()
     source = machine.qpu.syndrome_source
     assert result.terminal_status == "complete"
@@ -353,7 +354,7 @@ def test_the_files_reader_runs_what_the_tool_builds_by_hand(
     workload = workload_files.read_workload(
         operations_path, fragments_path=fragments_path
     )
-    tool_settings = example.live_settings(
+    tool_graph = example.live_machine(
         program,
         distance=3,
         round_period_microseconds=1.1,
@@ -363,10 +364,10 @@ def test_the_files_reader_runs_what_the_tool_builds_by_hand(
         decoder_microseconds=0.1,
     )
     read_workload = workload_settings.WorkloadSettings.running(workload)
-    settings = dataclasses.replace(tool_settings, workload=read_workload)
-    machine = machine_module.Machine.build(settings, 17)
+    graph = tool_graph.with_held("workload", read_workload)
+    machine = machine_module.Machine.build(graph, 17)
     result = machine.run()
-    tool_machine = machine_module.Machine.build(tool_settings, 17)
+    tool_machine = machine_module.Machine.build(tool_graph, 17)
     tool_result = tool_machine.run()
     stream_id = producers.LIVE_STREAM_ID
     files_source = machine.qpu.syndrome_source

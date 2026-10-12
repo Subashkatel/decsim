@@ -34,8 +34,8 @@ import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.presets.clocks as clocks
 import decsim.records.transfers as transfer_records
-import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 import examples.two_tiers as two_tiers
 
 PATH_MTU_BYTES = 256
@@ -56,7 +56,7 @@ def reliable_settings(
     bit_error_rate,
     window_packets=16,
     buffer_frames=16,
-    ack_every_packets=66,
+    ack_every_packets=16,
     retry_count=7,
     credit_latency_cycles=2,
     timeout_cycles=200,
@@ -214,7 +214,9 @@ def test_a_message_taken_while_packets_are_out_restarts_the_timer():
     """
     seed = seed_losing((True, False, False, False, False))
     engine = decsim.engine.Engine()
-    settings = reliable_settings(BIT_ERROR_RATE, window_packets=1)
+    settings = reliable_settings(
+        BIT_ERROR_RATE, window_packets=1, ack_every_packets=1
+    )
     channel = seeded_channel(engine, settings, seed)
     delivered = []
     send_at(engine, channel, 0, 200, delivered)
@@ -432,30 +434,28 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
         assert reliable_deliveries == credit_deliveries
 
 
-def _off_board_escalation(protocol) -> machine_settings.MachineSettings:
+def _off_board_escalation(protocol) -> graph.Machine:
     """The two-tier machine with its strong node one chassis hop away.
 
     The escalation hop is the reference card's off-board one: 100 Gb/s,
     400 bits a cycle at 250 MHz, 65 cycles of latency.
     """
-    machine = two_tiers.tasks[0].machine
+    task = two_tiers.tasks[0]
+    machine = task.machine
     off_board = fabrics.ClockedLink(
         clock=clocks.ROOM_CLOCK,
         latency_cycles=65,
         bits_per_cycle=400.0,
         source="the reference card's off-board escalation hop",
     )
-    escalation = machine.links.weak_decoder_to_strong_decoder
-    priced = off_board.priced(
-        "weak_decoder_to_strong_decoder", escalation, None
-    )
+    escalation = task.layout.card.path_settings("weak_to_strong")
+    priced = off_board.priced("weak_to_strong", escalation, None)
     # a clocked link names no protocol, so the channel takes it here
     channel = dataclasses.replace(priced.channel, protocol=protocol)
     card = dataclasses.replace(priced, channel=channel)
-    links = dataclasses.replace(
-        machine.links, weak_decoder_to_strong_decoder=card
-    )
-    return dataclasses.replace(machine, links=links)
+    escalation_link = fabrics.FixedPath(card)
+    fabric = fabrics.RoleLinks(forward=escalation_link, base=machine.fabric)
+    return dataclasses.replace(machine, fabric=fabric)
 
 
 def test_a_reliable_link_at_no_errors_runs_as_its_credit_link_in_a_machine():
@@ -505,7 +505,10 @@ def test_every_message_arrives_once_in_order_under_loss_property():
         buffer_frames = generator.choice([1, 3, 16])
         engine = decsim.engine.Engine()
         settings = reliable_settings(
-            0.00003, window_packets=window, buffer_frames=buffer_frames
+            0.00003,
+            window_packets=window,
+            buffer_frames=buffer_frames,
+            ack_every_packets=window,
         )
         channel = seeded_channel(engine, settings, trace)
         delivered = []
@@ -516,6 +519,14 @@ def test_every_message_arrives_once_in_order_under_loss_property():
         deliveries = delivery_ticks_of(delivered)
         assert sequences == list(range(count))
         assert deliveries == sorted(deliveries)
+
+
+def test_a_window_smaller_than_the_acknowledgement_interval_is_refused():
+    """rxe_param.h keeps 128 unacknowledged PSNs against an ACK every 64."""
+    sentence = "window_packets 4 is smaller than its ack_every_packets 8"
+
+    with pytest.raises(ValueError, match=sentence):
+        reliable_settings(0.0, window_packets=4, ack_every_packets=8)
 
 
 def test_a_window_of_one_waits_for_each_acknowledgement():

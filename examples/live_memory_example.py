@@ -17,15 +17,15 @@ import decsim.experiments.collect as collect
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
-import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.circuits as circuit_records
-import decsim.settings as machine_settings
-import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -69,7 +69,7 @@ def main() -> None:
     program = _program(arguments, parameters)
     if arguments.prefix_round_count is None:
         arguments.prefix_round_count = parameters["distance"]
-    settings = live_settings(
+    supplied = live_machine(
         program,
         distance=parameters["distance"],
         round_period_microseconds=parameters["round_period_microseconds"],
@@ -78,18 +78,18 @@ def main() -> None:
         feedback_microseconds=arguments.feedback_microseconds,
         decoder_microseconds=arguments.decoder_microseconds,
     )
-    machine = machine_module.Machine.build(settings, arguments.seed)
+    machine = machine_module.Machine.build(supplied, arguments.seed)
     metadata = {}
     for name, path in METADATA_PATHS.items():
         metadata[path] = parameters[name]
-    task = collect.Task(TASK_NAME, settings, metadata)
+    task = collect.Task(TASK_NAME, supplied, metadata)
     task_ids = [task.strong_id()]
     started_utc = run_folder.start_run(arguments.output, None, task_ids)
     seeds = [(arguments.seed, 1)]
     run_folder.record_task(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
-    run_folder.write_shot(machine, settings, arguments.output, label, result)
+    run_folder.write_shot(machine, arguments.output, label, result)
     _write_execution(arguments.output, machine)
     selected_arguments = vars(arguments)
     argument_values = dict(selected_arguments)
@@ -101,7 +101,7 @@ def main() -> None:
     print(f"complete: {arguments.output}")
 
 
-def live_settings(
+def live_machine(
     program: circuit_records.RepeatedStimCircuit,
     *,
     distance: int,
@@ -110,7 +110,7 @@ def live_settings(
     patch: str,
     feedback_microseconds: float,
     decoder_microseconds: float,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """Use functional PyMatching with caller-declared service and link times.
 
     The workload is decsim.producers live_memory on the fragments, and
@@ -133,26 +133,14 @@ def live_settings(
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    # the frame's word feedback_microseconds after the decision, at the
-    # reference card's rate; every other hop the reference card's
-    reference = link_profiles.logical_reference_profile()
-    word_capacity = reference.frame_to_controller.channel.capacity
-    feedback = fabrics.TimedLink(
-        feedback_microseconds, word_capacity.input_bits_per_microsecond
-    )
-    fabric = fabrics.PathLinks(frame_to_controller=feedback)
-    routes = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
-    links = fabrics.card(fabric, routes, {}, None)
+    fabric = link_cards.feedback_fabric(feedback_microseconds)
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True
     )
-    return machine_settings.MachineSettings(
-        workload=lowered,
-        qpu=qpu,
-        weak_decoder=decoder,
-        links=links,
-        observation=observation,
+    machine = machines.base(
+        lowered, qpu, observation=observation, fabric=fabric
     )
+    return machines.with_pool(machine, decoder)
 
 
 def _arguments() -> argparse.Namespace:

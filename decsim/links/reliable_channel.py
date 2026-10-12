@@ -99,6 +99,7 @@ class ReliableChannel(channel_module.Channel, seeding._RandomSeedConsumer):
             link_settings.check_positive_count(
                 "ack_every_packets", self.ack_every_packets
             )
+            _check_window_reaches_an_ack_request(self)
             _check_timeout_cycles(self.retransmit_timeout_cycles)
             _check_retry_count(self.retry_count)
             bit_error_rate = _bit_error_rate(self.bit_error_rate)
@@ -528,6 +529,27 @@ def _require_roce_framing(framing: link_settings.FramingSettings) -> None:
         "packet of their own; it is RoCE's go-back-N and its "
         "acknowledgements are RoCE packets, so it runs on roce_v2 frames, "
         "and any other framing runs on the credit row"
+    )
+
+
+def _check_window_reaches_an_ack_request(settings) -> None:
+    """The window holds the packet that asks for the ACK which moves it.
+
+    Only an ACK moves the window, and within a message only every
+    ack_every_packets-th packet asks for one, so a smaller window fills
+    first and every turn waits out the retransmit timer. rxe's own limits
+    keep the window larger: RXE_MAX_UNACKED_PSNS 128 against
+    RXE_MAX_PKT_PER_ACK 64 (rxe_param.h).
+    """
+    if settings.window_packets >= settings.ack_every_packets:
+        return
+    raise ValueError(
+        f"a reliable protocol's window_packets {settings.window_packets} "
+        "is smaller than its ack_every_packets "
+        f"{settings.ack_every_packets}, so a long message fills the window "
+        "before any packet asks for an acknowledgement and waits out the "
+        "retransmit timer; give a window at least the acknowledgement "
+        "interval"
     )
 
 

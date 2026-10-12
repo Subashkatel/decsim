@@ -91,15 +91,17 @@ class StreamMeasures:
 
     def __init__(self, machine: machine_module.Machine) -> None:
         self.machine = machine
-        self.lets_go = machine.settings.observation.folds_windows
+        self.lets_go = machine.graph.observation.folds_windows
         routes = machine.layout.routes()
         self.transfers = transfer_index.TransferIndex(
             routes.name_bits_by_answer_hop
         )
         self.frame_records: dict = {}
-        observation_settings = machine.settings.observation
+        observation_settings = machine.graph.observation
         deadline_us = observation_settings.reaction_deadline_microseconds
         self.folds = _Folds(deadline_us)
+        # the weak and the strong tier's pools (Layout.tier_pools)
+        self.tier_pools = machine.layout.tier_pools()
         self._connect(machine)
 
     def transfer_delivered(
@@ -160,8 +162,9 @@ class StreamMeasures:
         values = folds.value_summaries()
         tiers = dict(folds.window_tiers)
         end_reaction = folds.end_of_stream_reaction()
-        weak_growth = folds.growth_rate(window_records.WEAK_POOL_ID)
-        strong_growth = folds.growth_rate(window_records.STRONG_POOL_ID)
+        weak_pool, strong_pool = self.tier_pools
+        weak_growth = folds.growth_rate(weak_pool)
+        strong_growth = folds.growth_rate(strong_pool)
         missed, first_miss = folds.deadline_misses()
         service_us = config_module.ticks_to_microseconds(
             folds.strong_service_ticks
@@ -244,13 +247,15 @@ class StreamMeasures:
         """A window the frame committed: its decode, then its latencies."""
         stages = self.machine.observation.stages
         decode = measure.committed_decode(stages, frame_record)
-        self.folds.fold_strong(decode)
+        _weak_pool, strong_pool = self.tier_pools
+        if decode.tier == strong_pool:
+            self.folds.fold_strong(decode)
         self.folds.note_commit(frame_record)
         if window.t_done is None:
             return
         send = measure.last_required_send_ticks(decode, self.transfers.qpu_send)
         self.folds.fold_decoded(frame_record, send)
-        observation_settings = self.machine.settings.observation
+        observation_settings = self.machine.graph.observation
         if not observation_settings.records_round(window.commit_lo):
             return
         sample = self._sample(window, frame_record)
@@ -270,9 +275,11 @@ class StreamMeasures:
             link_delay, input_hop, index.qpu_send, index.answer_send
         )
         stages = self.machine.observation.stages
-        input_hops = self.machine.layout.input_hop_by_pool()
+        layout = self.machine.layout
+        input_hops = layout.input_hop_by_pool()
+        escalation_hop = layout.entry_escalation_hop()
         return measure.window_sample(
-            window, frame_record, stages, reads, input_hops
+            window, frame_record, stages, reads, input_hops, escalation_hop
         )
 
     def _let_go(self, window: window_records.Window) -> None:
@@ -306,10 +313,9 @@ class StreamMeasures:
         device = machine.qpu.device
         round_period_ticks = device.clock.period_ticks
         generation_ticks = self.folds.generation_ticks(round_period_ticks)
-        pool_paths = machine.layout.statistics_path_by_pool()
         run_statistics = machine.observation.statistics
         return measure.pool_measures(
-            run_statistics, pool_paths, generation_ticks
+            run_statistics, machine.layout, generation_ticks
         )
 
 
@@ -369,8 +375,6 @@ class _Folds:
 
     def fold_strong(self, decode) -> None:
         """A committed decode of the strong tier: its rounds and service."""
-        if decode.tier != window_records.STRONG_POOL_ID:
-            return
         counts = self.counts
         counts.strong_windows += 1
         counts.strong_rounds += decode.round_count

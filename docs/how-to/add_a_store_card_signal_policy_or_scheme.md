@@ -41,12 +41,12 @@ same kind of job, with a page of its own:
 
 ## A weak syndrome buffer
 
-- **Part:** `weak_buffer` in the bases, the `weak_syndrome_buffer`
-  slot, typed `ports.SyndromeBufferSettings`.
+- **Part:** `weak_buffer` in the bases, a `syndrome_buffer` part,
+  typed `ports.SyndromeBufferSettings`.
 - **Record:** `bits` (the bound, None for none), `clock` (None is the
   machine's), `prices_read_bits` and `build(engine)`. Set
   `prices_read_bits` to `True` when your store prices a read's bits
-  itself; the build then refuses a rate on `weak_buffer_to_weak_decoder`,
+  itself; the build then refuses a rate on `weak_buffer_to_weak`,
   which would charge the same bits again.
 - **Component:** inherit `SyndromeBuffer`
   (`decsim/syndrome_buffer/syndrome_buffer.py`) and override
@@ -75,12 +75,13 @@ one link per hop; the presets' links and fabrics are in
 `decsim/presets/link_cards.py`, each number beside its source.
 
 - **Start** from a base's fabric and give the hops you have numbers for
-  their own links: `fabrics.PathLinks(path_name=link, base=base.fabric)`
-  keeps every other hop of the base you start from, and
-  `dataclasses.replace(machine, fabric=fabric)` puts it in the machine.
-  `fabrics.ReferenceFabric()` prices every hop on
-  `link_profiles.logical_reference_profile()`
-  (`decsim/links/link_profiles.py`), the card of a machine given none.
+  their own links by role: `fabrics.RoleLinks(answer_fridge=link,
+  base=base.fabric)` keeps every other hop of the base you start from,
+  and `dataclasses.replace(machine, fabric=fabric)` puts it in the
+  machine. A hop's role is what it carries (`decsim/records/routes.py`
+  `HopRole`). `fabrics.ReferenceFabric()` prices every hop on the
+  reference card's path for its role (`link_profiles.reference_path`,
+  `decsim/links/link_profiles.py`), the card of a machine given none.
   A base's fabric is that card with the base's own hops set to one
   cycle of their clock, so the two differ.
 - **A strong-side hop alone:** start the machine from
@@ -115,8 +116,8 @@ one link per hop; the presets' links and fabrics are in
 - **Write the paper's numbers in your run file**, each with its source
   in a comment (STYLE.md rule 2), not in decsim.
 - **Check the card** by pricing the paper's own transfer on it. The
-  card a graph runs on is `slotted.resolved(machine).links`
-  (`decsim/topology/slotted.py`); with
+  card a graph runs on is `graph_layout.layout_of(machine).card`
+  (`decsim/topology/graph_layout.py`); with
   `fabric = decsim.links.fabric.LinkFabric(card, engine)`,
   `fabric.expected_delay_ticks(path, bits, engine.now)` is what one send
   costs on an idle wire

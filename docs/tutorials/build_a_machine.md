@@ -29,7 +29,7 @@ loop holds:
 A part's `build` makes its components and wires them to one another.
 `Machine.assemble` wires the parts to each other.
 
-## Step 1. Read the settings
+## Step 1. Read the graph
 
 Run the blocks of every step in one Python session, from the top of the
 repository.
@@ -38,58 +38,51 @@ repository.
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
-import decsim.build.layout as layout_module
-import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
 import decsim.engine as engine_module
+import decsim.links.fabric as fabric
 import decsim.machine as machine_module
 import decsim.windows.built_window_models as built_window_models
 import examples.two_tiers as two_tiers
 
-settings = two_tiers.tasks[0].machine
+task = two_tiers.tasks[0]
+graph = task.machine
+layout = task.layout
+clock = graph.clock
 ```
 
-`settings` is the `MachineSettings` of the run file's first task, at
-distance 3: one record for each part of the machine.
+`graph` is the run file's first task at distance 3, its parts by name
+and the wires between them (`decsim/topology/graph.py`). `layout` is
+the graph laid out: each pool, the store it reads, whether it reads it
+in place, each escalate edge, and the card that prices every hop
+(`decsim/topology/graph_layout.py`). A part the machine holds once is
+read with `graph.held`, its record or its kind's default.
 
 ## Step 2. Compile what the parts are built for
 
-Some things are built from the settings before any part exists, because
-more than one part is built for them: the layout (each pool, the store
-it reads, whether it reads it in place, and each escalate edge), a
-switching part per edge, the plan (the windows, the circuit and the
-round clock), the detection event formation, and the decoder units.
+Some things are built before any part exists, because more than one
+part is built for them: a switching part per edge, the plan (the
+windows, the circuit and the round clock), the detection event
+formation, and the decoder units.
 
 ```python
 engine = engine_module.Engine()
-layout = layout_module.slotted_layout(settings)
 switching_parts = escalation_build.build_switching(
-    layout, engine, machine_clock=settings.clock
+    layout, engine, machine_clock=clock
 )
-batches_each_member = decoders_part.batches_each_member(layout)
-plan = plan_build.build_plan(
-    settings.qpu,
-    settings.workload,
-    settings.windows,
-    settings.idle_policy,
-    settings.detection_events,
-    settings.switching,
-    settings.decoder_manager.bulk_strong,
-    switching_parts,
-    batches_each_member,
-)
+plan = machine_module.plan_of(graph, layout, switching_parts)
 formation_paths = layout.formation_paths()
 detection_events = readout_part.build_detection_events(
-    settings.detection_events,
-    settings.clock,
+    graph.held("detection_events"),
+    clock,
     plan.device,
     formation_paths,
 )
 signal_by_pool = escalation_build.signal_by_pool(switching_parts)
 pools = decoders_part.build_pool_units(
-    layout, settings.clock, detection_events, signal_by_pool
+    layout, clock, detection_events, signal_by_pool
 )
 entry_switching = switching_parts[0]
 policy_type = type(entry_switching.policy)
@@ -102,7 +95,7 @@ It prints:
 Switching 1000000
 ```
 
-The policy is the switching record's, and one round is a million ticks,
+The policy is the switching part's, and one round is a million ticks,
 one microsecond.
 
 ## Step 3. Build each part
@@ -110,31 +103,33 @@ one microsecond.
 One call per part:
 
 ```python
-links = machine_module.build_links(settings, engine)
-qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
+links = fabric.LinkFabric(layout.card, engine)
+factory = graph.held("magic_state_factory")
+qpu = qpu_part.Qpu.build(factory, engine, plan)
+controller = graph.held("controller")
 control = control_part.Control.build(
-    settings.controller,
-    settings.pauli_frame,
-    settings.clock,
+    controller,
+    graph.held("pauli_frame"),
+    clock,
     engine,
     plan,
     links,
 )
 readout = readout_part.Readout.build(
-    settings.controller,
-    settings.links,
-    layout.stores,
-    settings.clock,
+    controller,
+    layout.card,
+    layout,
+    clock,
     engine,
     detection_events,
     links,
 )
 window_models = built_window_models.BuiltWindowModels()
 windows = windows_part.Windows.build(
-    settings.windows,
-    settings.workload,
+    graph.held("windows"),
+    graph.held("workload"),
     layout,
-    settings.clock,
+    clock,
     engine,
     plan,
     links,
@@ -142,8 +137,8 @@ windows = windows_part.Windows.build(
 )
 target_by_source = layout.target_by_source()
 decoders = decoders_part.Decoders.build(
-    settings.decoder_manager,
-    settings.clock,
+    graph.held("decoder_manager"),
+    clock,
     engine,
     pools,
     target_by_source,
@@ -174,15 +169,15 @@ windows.window_manager.requester.decode_queue
 RuntimeError: DecodeRequester.decode_queue was read before it was bound
 ```
 
-A component a run does not need is `None`. This run escalates, so its
-readout part has a strong syndrome buffer; a weak-only run's would be
-`None`.
+The readout part builds one store for each store the layout holds.
+This run escalates, so it holds two, the weak pool's and the strong
+pool's; a weak-only run's holds one.
 
 ## Step 4. Assemble
 
 ```python
 machine = machine_module.Machine.assemble(
-    settings,
+    graph,
     engine,
     plan,
     links,
@@ -223,7 +218,7 @@ False
 ```
 
 The run took 289.904 microseconds of machine time, and its one memory
-operation came out right. `Machine.build(settings, 0)` builds the same
+operation came out right. `Machine.build(graph, 0)` builds the same
 machine, and gives the same result.
 
 ## What you did

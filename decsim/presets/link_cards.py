@@ -13,6 +13,8 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.presets.clocks as clocks
+import decsim.records.routes as route_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 
@@ -26,27 +28,28 @@ ONE_ROOM_CYCLE = fabrics.ClockedLink(
 )
 # The weak base's hops: the weak chain, the decision and the pulse, each
 # one fridge cycle. The strong side keeps the reference card.
-WEAK_BASELINE_FABRIC = fabrics.PathLinks(
-    qpu_to_controller=ONE_FRIDGE_CYCLE,
-    controller_to_weak_buffer=ONE_FRIDGE_CYCLE,
-    weak_buffer_to_weak_decoder=ONE_FRIDGE_CYCLE,
-    decoder_to_decoder=ONE_FRIDGE_CYCLE,
-    weak_decoder_to_frame=ONE_FRIDGE_CYCLE,
-    frame_to_controller=ONE_FRIDGE_CYCLE,
-    controller_to_qpu=ONE_FRIDGE_CYCLE,
+WEAK_BASELINE_FABRIC = fabrics.RoleLinks(
+    readout=ONE_FRIDGE_CYCLE,
+    write_written=ONE_FRIDGE_CYCLE,
+    read_written=ONE_FRIDGE_CYCLE,
+    same_pool_fridge=ONE_FRIDGE_CYCLE,
+    answer_fridge=ONE_FRIDGE_CYCLE,
+    decision=ONE_FRIDGE_CYCLE,
+    command=ONE_FRIDGE_CYCLE,
 )
-# The strong base's hops: the readout, the weak store's write, the
-# decision and the pulse on the chip; the strong store's write and the
-# strong chain on the host, whose boundaries ride the host's own memory
-# read. The weak chain and the escalation keep the reference card.
-STRONG_BASELINE_FABRIC = fabrics.PathLinks(
-    qpu_to_controller=ONE_FRIDGE_CYCLE,
-    controller_to_weak_buffer=ONE_FRIDGE_CYCLE,
-    controller_to_strong_buffer=ONE_ROOM_CYCLE,
-    strong_buffer_to_strong_decoder=ONE_ROOM_CYCLE,
-    strong_decoder_to_frame=ONE_ROOM_CYCLE,
-    frame_to_controller=ONE_FRIDGE_CYCLE,
-    controller_to_qpu=ONE_FRIDGE_CYCLE,
+# The strong base's hops: the readout, the written store's write, the
+# decision and the pulse on the chip; the landed store's write and the
+# host pool's chain on the host, whose boundaries ride the host's own
+# memory. The fridge chain and the escalation keep the reference card.
+STRONG_BASELINE_FABRIC = fabrics.RoleLinks(
+    readout=ONE_FRIDGE_CYCLE,
+    write_written=ONE_FRIDGE_CYCLE,
+    write_landed=ONE_ROOM_CYCLE,
+    read_landed=ONE_ROOM_CYCLE,
+    same_pool_host=ONE_ROOM_CYCLE,
+    answer_host=ONE_ROOM_CYCLE,
+    decision=ONE_FRIDGE_CYCLE,
+    command=ONE_FRIDGE_CYCLE,
 )
 
 # Backline (Xanadu and AMD), arXiv 2609.09270, Sec. V-C and Table III.
@@ -141,35 +144,53 @@ NVQLINK_GPU_FABRIC = fabrics.FridgeHostFabric(
 )
 
 
+def feedback_fabric(feedback_microseconds: float) -> fabrics.RoleLinks:
+    """The frame's word feedback_microseconds after the decision.
+
+    The word rides at the reference card's rate, and every other hop
+    takes the reference card's path.
+    """
+    decision = route_records.HopRole(route_records.DECISION)
+    reference = link_profiles.reference_path(
+        decision, transfer_records.FRAME_TO_CONTROLLER
+    )
+    word_capacity = reference.channel.capacity
+    feedback = fabrics.TimedLink(
+        feedback_microseconds, word_capacity.input_bits_per_microsecond
+    )
+    return fabrics.RoleLinks(decision=feedback)
+
+
 def strong_side(
     base: ports.FabricRule,
     weak_to_strong: ports.LinkCard = ONE_ROOM_CYCLE,
-) -> fabrics.PathLinks:
-    """A base fabric with the strong side's five hops one room cycle.
+) -> fabrics.RoleLinks:
+    """A base fabric with the strong side's hops one room cycle.
 
     A run that switches on the weak base reaches the strong decoder over
     these hops, each an unbounded wire; weak_to_strong prices the
     escalation instead, where a study sets it; every other hop keeps
     the base's.
     """
-    return fabrics.PathLinks(
-        controller_to_strong_buffer=ONE_ROOM_CYCLE,
-        weak_decoder_to_strong_decoder=weak_to_strong,
-        strong_buffer_to_strong_decoder=ONE_ROOM_CYCLE,
-        strong_decoder_to_frame=ONE_ROOM_CYCLE,
-        strong_decoder_to_weak_decoder=ONE_ROOM_CYCLE,
+    return fabrics.RoleLinks(
+        write_landed=ONE_ROOM_CYCLE,
+        forward=weak_to_strong,
+        read_landed=ONE_ROOM_CYCLE,
+        same_pool_host=ONE_ROOM_CYCLE,
+        answer_host=ONE_ROOM_CYCLE,
+        reverse=ONE_ROOM_CYCLE,
         base=base,
     )
 
 
-def bandwidth_limited_card(
+def bandwidth_limited_fabric(
     *,
     syndrome_bits_per_round: int,
     round_microseconds: float,
     commit_rounds: int,
     buffer_rounds: int,
     capacity_scale: float = 1.0,
-) -> link_settings.FabricSettings:
+) -> fabrics.RoleLinks:
     """The reference card with finite rates from the run's own geometry.
 
     The latencies are the reference card's, so switching cards changes
@@ -179,7 +200,7 @@ def bandwidth_limited_card(
     utilization when reporting: a single-server queue at utilization one
     waits zero only under perfectly periodic arrivals (Little's law). The
     rates are an explicit per-link provisioning, as ns-3 declares a DataRate
-    per device. A graph takes it as fabrics.CardFabric(card).
+    per device. Each role's hop rides one channel of the role's name.
 
     Each rate is an exact fraction, so a nominal payload serializes in
     exactly its period: a float such as 8 / 1.1 is not the true rate, and
@@ -234,31 +255,30 @@ def bandwidth_limited_card(
     instruction_word_source = (
         link_profiles.INSTRUCTION_WORD_SOURCE + ", one per commit region"
     )
-    reference = link_profiles.logical_reference_profile()
-    provisioning = _Provisioning(capacity_scale, reference)
-    qpu_to_controller = provisioning.path(
-        "qpu_to_controller",
+    provisioning = _Provisioning(capacity_scale)
+    readout = provisioning.path(
+        route_records.READOUT,
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one syndrome round per round period",
         link_profiles.READOUT_PAYLOAD_SOURCE,
     )
-    controller_to_weak_buffer = provisioning.path(
-        "controller_to_weak_buffer",
+    write_written = provisioning.path(
+        f"{route_records.WRITE}_written",
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one packed round per round period",
         link_profiles.ROUND_PAYLOAD_SOURCE,
     )
-    controller_to_strong_buffer = provisioning.path(
-        "controller_to_strong_buffer",
+    write_landed = provisioning.path(
+        f"{route_records.WRITE}_landed",
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one packed round per round period",
         link_profiles.ROUND_PAYLOAD_SOURCE,
     )
-    weak_buffer_to_weak_decoder = provisioning.path(
-        "weak_buffer_to_weak_decoder",
+    read_written = provisioning.path(
+        f"{route_records.READ}_written",
         weak_window_bits,
         weak_window_bits_per_microsecond,
         "one weak window of rcom+rbuf rounds per commit region "
@@ -266,8 +286,8 @@ def bandwidth_limited_card(
         '"rcom = rbuf = d")',
         link_profiles.DECODER_INPUT_PAYLOAD_SOURCE,
     )
-    weak_decoder_to_strong_decoder = provisioning.path(
-        "weak_decoder_to_strong_decoder",
+    forward = provisioning.path(
+        route_records.FORWARD,
         region_message_bits,
         escalation_bits_per_microsecond,
         "one selection and one strong window of rcom+2rbuf rounds per "
@@ -276,8 +296,8 @@ def bandwidth_limited_card(
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
         link_profiles.ESCALATION_PAYLOAD_SOURCE,
     )
-    strong_buffer_to_strong_decoder = provisioning.path(
-        "strong_buffer_to_strong_decoder",
+    read_landed = provisioning.path(
+        f"{route_records.READ}_landed",
         strong_window_bits,
         strong_window_bits_per_microsecond,
         "one strong window of rcom+2rbuf rounds per commit region "
@@ -285,75 +305,81 @@ def bandwidth_limited_card(
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
         link_profiles.DECODER_INPUT_PAYLOAD_SOURCE,
     )
-    weak_decoder_to_frame = provisioning.path(
-        "weak_decoder_to_frame",
+    answer_fridge = provisioning.path(
+        f"{route_records.ANSWER}_{route_records.FRIDGE}",
         1,
         one_per_region,
         "one frame-update bit per logical observable per commit region",
         link_profiles.RESULT_PAYLOAD_SOURCE,
     )
-    decoder_to_decoder = provisioning.path(
-        "decoder_to_decoder",
+    same_pool_fridge = provisioning.path(
+        f"{route_records.SAME_POOL}_{route_records.FRIDGE}",
         syndrome_bits_per_round,
         boundary_bits_per_microsecond,
         "one dense seam layer per commit region",
         link_profiles.BOUNDARY_PAYLOAD_SOURCE,
     )
-    strong_decoder_to_frame = provisioning.path(
-        "strong_decoder_to_frame",
+    answer_host = provisioning.path(
+        f"{route_records.ANSWER}_{route_records.HOST}",
         strong_answer_bits,
         strong_answer_bits_per_microsecond,
         "one frame-update bit per logical observable per commit region, "
         "behind the request's name",
         link_profiles.STRONG_RESULT_PAYLOAD_SOURCE,
     )
-    strong_decoder_to_weak_decoder = provisioning.path(
-        "strong_decoder_to_weak_decoder",
+    reverse = provisioning.path(
+        route_records.REVERSE,
         strong_answer_bits,
         strong_answer_bits_per_microsecond,
         "one frame-update bit per logical observable per commit region, "
         "behind the request's name",
         link_profiles.STRONG_RESULT_PAYLOAD_SOURCE,
     )
-    frame_to_controller = provisioning.path(
-        "frame_to_controller",
+    decision = provisioning.path(
+        route_records.DECISION,
         bus_word_bits,
         bus_word_bits_per_microsecond,
         bus_word_source,
         None,
     )
-    controller_to_qpu = provisioning.path(
-        "controller_to_qpu",
+    command = provisioning.path(
+        route_records.COMMAND,
         instruction_word_bits,
         instruction_word_bits_per_microsecond,
         instruction_word_source,
         None,
     )
-    return link_settings.FabricSettings(
-        qpu_to_controller=qpu_to_controller,
-        controller_to_weak_buffer=controller_to_weak_buffer,
-        weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
-        weak_decoder_to_strong_decoder=weak_decoder_to_strong_decoder,
-        strong_buffer_to_strong_decoder=strong_buffer_to_strong_decoder,
-        weak_decoder_to_frame=weak_decoder_to_frame,
-        decoder_to_decoder=decoder_to_decoder,
-        strong_decoder_to_frame=strong_decoder_to_frame,
-        frame_to_controller=frame_to_controller,
-        controller_to_qpu=controller_to_qpu,
-        controller_to_strong_buffer=controller_to_strong_buffer,
-        strong_decoder_to_weak_decoder=strong_decoder_to_weak_decoder,
-        profile_name="bandwidth_limited",
-    )
+    path_by_role = {
+        "readout": readout,
+        "write_written": write_written,
+        "write_landed": write_landed,
+        "read_written": read_written,
+        "read_landed": read_landed,
+        "forward": forward,
+        "reverse": reverse,
+        "same_pool_fridge": same_pool_fridge,
+        # a host pool's own boundary is read out of the host's memory,
+        # on the landed read's channel
+        "same_pool_host": read_landed,
+        "answer_fridge": answer_fridge,
+        "answer_host": answer_host,
+        "decision": decision,
+        "command": command,
+    }
+    links = {
+        role: fabrics.FixedPath(path) for role, path in path_by_role.items()
+    }
+    return fabrics.RoleLinks(**links)
 
 
 class _Provisioning:
-    """The bounded card's paths: the reference latency at a scaled rate."""
+    """The bounded card's paths: the reference latency at a scaled rate.
 
-    def __init__(
-        self, capacity_scale: float, reference: link_settings.FabricSettings
-    ):
+    Each path is named by its role's key, its channel's name too.
+    """
+
+    def __init__(self, capacity_scale: float):
         self._capacity_scale = fractions.Fraction(str(capacity_scale))
-        self._reference = reference
 
     def path(
         self,
@@ -365,7 +391,8 @@ class _Provisioning:
     ) -> link_settings.PathSettings:
         rate = nominal_bits_per_microsecond * self._capacity_scale
         capacity = link_settings.CapacitySettings(rate, source)
-        reference_path = getattr(self._reference, name)
+        role = _ROLE_BY_KEY[name]
+        reference_path = link_profiles.reference_path(role, name)
         reference_channel = reference_path.channel
         latency_ticks = reference_channel.propagation_latency_ticks
         channel = link_settings.ChannelSettings(
@@ -378,3 +405,24 @@ class _Provisioning:
             default_payload=payload,
             actual_payload_source=actual_payload_source,
         )
+
+
+# every role by its key, for the bounded card's paths
+_ROLE_BY_KEY = {
+    role.key: role
+    for role in (
+        route_records.HopRole(route_records.READOUT),
+        route_records.HopRole(route_records.WRITE, "written"),
+        route_records.HopRole(route_records.WRITE, "landed"),
+        route_records.HopRole(route_records.READ, "written"),
+        route_records.HopRole(route_records.READ, "landed"),
+        route_records.HopRole(route_records.FORWARD),
+        route_records.HopRole(route_records.REVERSE),
+        route_records.HopRole(route_records.SAME_POOL, route_records.FRIDGE),
+        route_records.HopRole(route_records.SAME_POOL, route_records.HOST),
+        route_records.HopRole(route_records.ANSWER, route_records.FRIDGE),
+        route_records.HopRole(route_records.ANSWER, route_records.HOST),
+        route_records.HopRole(route_records.DECISION),
+        route_records.HopRole(route_records.COMMAND),
+    )
+}

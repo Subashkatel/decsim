@@ -1,7 +1,7 @@
 """The decoder bases and the strong tier, as the graphs they are.
 
-The referent is the record each graph resolves to (topology/slotted.py),
-the record a task keeps and is identified by: every port of a base is
+The referent is the layout each graph lays out to
+(topology/graph_layout.py), the one a task runs on: every port of a base is
 bound, each pool sits where its decoder runs, the weak base's hops are
 one 250 MHz fridge cycle (4 ns, 2605.04892 line 1063), and a strong tier
 adds the strong store and pool on the host, the escalation wire and the
@@ -10,13 +10,12 @@ strong window's shape (window_settings.switching_windows).
 
 import dataclasses
 
-import decsim.links.link_profiles as link_profiles
 import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
+import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.slotted as slotted
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
@@ -24,6 +23,15 @@ import tests.topology.test_graph_layout as layout_tests
 
 # one fridge cycle at 250 MHz, in ticks
 ONE_FRIDGE_CYCLE_TICKS = 4000
+
+
+def _layout(machine):
+    at_task = machine.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+def _wire_ends(machine) -> list:
+    return [(wire.source, wire.target) for wire in machine.wires]
 
 
 def _weak_base_switching(fabric=None):
@@ -38,23 +46,34 @@ def _weak_base_switching(fabric=None):
 def test_every_port_of_the_weak_base_is_bound():
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
 
-    settings = slotted.resolved(weak_base)
+    layout = _layout(weak_base)
 
+    pools = [plan.names.seat for plan in layout.pools]
     assert weak_base.unbound_ports() == []
-    assert settings.weak_decoder == machines.WEAK_BASELINE_POOL
-    assert settings.strong_decoder is None
-    assert settings.switching is None
+    assert pools == [machines.WEAK_POOL]
+    assert layout.entry_pool.settings == machines.WEAK_BASELINE_POOL
+    assert layout.entry_switching() is None
 
 
 def test_every_port_of_the_strong_base_is_bound():
     strong_base = machines.strong_baseline(3, 0.001, 1.0)
 
-    settings = slotted.resolved(strong_base)
+    layout = _layout(strong_base)
 
+    pools = [plan.names.seat for plan in layout.pools]
     assert strong_base.unbound_ports() == []
-    assert settings.weak_decoder is None
-    assert settings.strong_decoder == machines.STRONG_BASELINE_POOL
-    assert settings.switching is None
+    assert pools == [machines.STRONG_POOL]
+    assert layout.entry_pool.settings == machines.STRONG_BASELINE_POOL
+    assert layout.entry_switching() is None
+
+
+def test_the_strong_base_holds_its_own_store_alone():
+    strong_base = machines.strong_baseline(3, 0.001, 1.0)
+
+    stores = strong_base.parts_of("syndrome_buffer")
+
+    names = [store.name for store in stores]
+    assert names == [machines.STRONG_STORE]
 
 
 def test_the_weak_pool_sits_in_the_fridge_and_the_strong_pool_on_the_host():
@@ -76,36 +95,35 @@ def test_a_bases_shot_is_ten_rounds_a_unit_of_distance_on_the_fridge_clock():
     weak_base = machines.weak_baseline(5, 0.002, 1.0)
     fifty_rounds = machines.memory_workload(5, 0.002, 50)
 
-    resolved = slotted.resolved(weak_base)
-    settings = resolved.at_task()
+    at_task = weak_base.at_task()
 
-    assert settings.workload == fifty_rounds
-    assert settings.clock == clocks.FRIDGE_CLOCK
-    assert settings.qpu.distance == 5
+    qpu = at_task.held(machines.QPU)
+    assert at_task.held("workload") == fifty_rounds
+    assert at_task.clock == clocks.FRIDGE_CLOCK
+    assert qpu.distance == 5
 
 
 def test_the_weak_bases_chain_is_one_fridge_cycle_a_hop_on_unbounded_wires():
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
-    reference = link_profiles.logical_reference_profile()
 
-    settings = slotted.resolved(weak_base)
-    links = settings.links
+    layout = _layout(weak_base)
 
-    chain = (
-        links.qpu_to_controller,
-        links.controller_to_weak_buffer,
-        links.weak_buffer_to_weak_decoder,
-        links.weak_decoder_to_frame,
-        links.frame_to_controller,
-        links.controller_to_qpu,
-    )
+    card = layout.card
+    chain = [path.settings for path in card.paths]
     latencies = [path.channel.propagation_latency_ticks for path in chain]
     capacities = [path.channel.capacity for path in chain]
-    assert latencies == [ONE_FRIDGE_CYCLE_TICKS] * 6
-    assert capacities == [None] * 6
-    assert links.controller_to_strong_buffer == (
-        reference.controller_to_strong_buffer
-    )
+    names = card.path_names()
+    assert set(names) == {
+        "qpu_to_controller",
+        "controller_to_weak_buffer",
+        "weak_buffer_to_weak",
+        "weak_to_weak",
+        "weak_to_frame",
+        "frame_to_controller",
+        "controller_to_qpu",
+    }
+    assert latencies == [ONE_FRIDGE_CYCLE_TICKS] * 7
+    assert capacities == [None] * 7
 
 
 def test_a_strong_tier_adds_the_strong_side_and_the_escalation_wire():
@@ -113,15 +131,20 @@ def test_a_strong_tier_adds_the_strong_side_and_the_escalation_wire():
 
     strong_pool = machine.part(machines.STRONG_POOL)
     strong_store = machine.part(machines.STRONG_STORE)
-    settings = slotted.resolved(machine)
+    layout = _layout(machine)
 
+    strong_id = window_records.PoolId(machines.STRONG_POOL)
+    strong_plan = layout.pool(strong_id)
+    switching = layout.entry_switching()
+    ends = _wire_ends(machine)
     assert machine.unbound_ports() == []
-    assert set(machines.ESCALATION_WIRES) <= set(machine.wires)
+    assert ("weak.escalate", "switching.results") in ends
+    assert ("switching.redecode", "strong.escalated") in ends
     assert strong_pool.placed == fabrics.HOST
     assert strong_store.placed == fabrics.HOST
-    assert settings.weak_decoder == machines.WEAK_BASELINE_POOL
-    assert settings.strong_decoder == machines.STRONG_BASELINE_POOL
-    assert settings.switching.strong_window == declared_run.DOUBLE_WINDOW
+    assert layout.entry_pool.settings == machines.WEAK_BASELINE_POOL
+    assert strong_plan.settings == machines.STRONG_BASELINE_POOL
+    assert switching.strong_window == declared_run.DOUBLE_WINDOW
 
 
 def test_a_strong_tier_gives_the_windows_the_strong_windows_shape():
@@ -154,23 +177,23 @@ def test_a_strong_tier_on_the_strong_side_reaches_the_host_in_a_room_cycle():
     strong_side = link_cards.strong_side(weak_base.fabric)
     machine = _weak_base_switching(strong_side)
 
-    settings = slotted.resolved(machine)
-    links = settings.links
+    layout = _layout(machine)
 
-    escalation = links.weak_decoder_to_strong_decoder.channel
+    escalation_path = layout.card.path_settings("weak_to_strong")
+    escalation = escalation_path.channel
     room_cycle_ticks = clocks.ROOM_CLOCK.period_ticks
     assert escalation.propagation_latency_ticks == room_cycle_ticks
     assert escalation.capacity is None
 
 
-def test_a_part_changed_by_name_reaches_the_record():
+def test_a_part_changed_by_name_reaches_the_layout():
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
 
     two_units = weak_base.with_settings(machines.WEAK_POOL, unit_count=2)
 
-    settings = slotted.resolved(two_units)
+    layout = _layout(two_units)
     expected = dataclasses.replace(machines.WEAK_BASELINE_POOL, unit_count=2)
-    assert settings.weak_decoder == expected
+    assert layout.entry_pool.settings == expected
 
 
 def test_an_escalation_grows_a_chain_one_pool_and_edge_at_a_time():
@@ -186,14 +209,10 @@ def test_an_escalation_grows_a_chain_one_pool_and_edge_at_a_time():
         deep_switching,
     )
 
-    entry = graph_layout.entry_settings(chain)
-    settings = entry.at_task()
-    facts = settings.task_facts()
-    layout = graph_layout.layout_of(chain, facts)
+    layout = _layout(chain)
     edges = [(edge.name, edge.carried_from) for edge in layout.edges]
     deep = chain.part("deep")
     assert chain.unbound_ports() == []
-    assert not slotted.holds(chain)
     assert deep.placed == fabrics.HOST
     assert edges == [
         ("switching", "weak_buffer"),

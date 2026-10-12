@@ -18,39 +18,53 @@ import pytest
 import decsim.config as config
 import decsim.engine
 import decsim.links.channel as channel_module
-import decsim.links.link_profiles as link_profiles
 import decsim.presets.link_cards as link_cards
 import decsim.records.transfers as transfer_records
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 # the four hops a strong-node card prices as a cable or chassis crossing
 STRONG_NODE_CROSSINGS = (
-    transfer_records.CONTROLLER_TO_STRONG_BUFFER,
-    transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
-    transfer_records.STRONG_DECODER_TO_FRAME,
-    transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
+    "controller_to_strong_buffer",
+    "weak_to_strong",
+    "strong_to_frame",
+    "strong_to_weak",
 )
 # The hops the measured RoCE v2 rows reprice: the write into the strong
-# syndrome buffer, the escalation, the strong window's input, and the
-# reply to the frame or to the weak chip.
+# syndrome buffer, the escalation, the strong window's input, the strong
+# pool's hand-on to itself, and the reply to the frame or to the weak
+# chip.
 STRONG_SIDE_PATHS = (
     "controller_to_strong_buffer",
-    "weak_decoder_to_strong_decoder",
-    "strong_buffer_to_strong_decoder",
-    "strong_decoder_to_frame",
-    "strong_decoder_to_weak_decoder",
+    "weak_to_strong",
+    "strong_buffer_to_strong",
+    "strong_to_strong",
+    "strong_to_frame",
+    "strong_to_weak",
 )
-# every path of today's card, each end where the reference card puts it
-SLOTTED_ROUTES = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
-ROCE_V2_CPU_CARD = fabrics.card(
-    link_cards.ROCE_V2_CPU_FABRIC, SLOTTED_ROUTES, {}, None
-)
-ROCE_V2_GPU_CARD = fabrics.card(
-    link_cards.ROCE_V2_GPU_FABRIC, SLOTTED_ROUTES, {}, None
-)
-NVQLINK_GPU_CARD = fabrics.card(
-    link_cards.NVQLINK_GPU_FABRIC, SLOTTED_ROUTES, {}, None
-)
+
+
+def _routes() -> tuple:
+    """Every hop of a weak pool escalating to a strong pool on the host."""
+    switching = run_files.switching_machine()
+    at_task = switching.at_task()
+    layout = graph_layout.layout_of(at_task)
+    routes = []
+    for path in layout.card.paths:
+        route = fabrics.Route(
+            path.name, path.source_site, path.target_site, path.role
+        )
+        routes.append(route)
+    return tuple(routes)
+
+
+ROUTES = _routes()
+REFERENCE = fabrics.ReferenceFabric()
+REFERENCE_CARD = fabrics.card(REFERENCE, ROUTES, {}, None)
+ROCE_V2_CPU_CARD = fabrics.card(link_cards.ROCE_V2_CPU_FABRIC, ROUTES, {}, None)
+ROCE_V2_GPU_CARD = fabrics.card(link_cards.ROCE_V2_GPU_FABRIC, ROUTES, {}, None)
+NVQLINK_GPU_CARD = fabrics.card(link_cards.NVQLINK_GPU_FABRIC, ROUTES, {}, None)
 
 TESTS_FILE = pathlib.Path(__file__)
 TESTS_PATH = TESTS_FILE.resolve()
@@ -77,7 +91,7 @@ DISTANCE_5_GEOMETRY = dict(
 
 def latencies_of(profile):
     latencies = {}
-    for path in transfer_records.SLOTTED_PATHS:
+    for path in profile.path_names():
         path_settings = profile.path_settings(path)
         channel = path_settings.channel
         latencies[path] = channel.propagation_latency_ticks
@@ -86,7 +100,7 @@ def latencies_of(profile):
 
 def capacities_of(profile):
     capacities = {}
-    for path in transfer_records.SLOTTED_PATHS:
+    for path in profile.path_names():
         path_settings = profile.path_settings(path)
         capacity = path_settings.channel.capacity
         rate = capacity.input_bits_per_microsecond
@@ -97,7 +111,7 @@ def capacities_of(profile):
 def sources_of(profile):
     """The configuration source of each path's channel, by path name."""
     sources = {}
-    for path in transfer_records.SLOTTED_PATHS:
+    for path in profile.path_names():
         path_settings = profile.path_settings(path)
         sources[path] = path_settings.channel.configuration_source
     return sources
@@ -106,7 +120,7 @@ def sources_of(profile):
 def payload_sources_of(profile) -> list:
     """Every payload source string one card states, path by path."""
     sources = []
-    for path in transfer_records.SLOTTED_PATHS:
+    for path in profile.path_names():
         path_settings = profile.path_settings(path)
         _add_payload_sources(path_settings, sources)
     return sources
@@ -124,14 +138,20 @@ def names_by_class() -> dict:
 
 
 def paths_outside_the_strong_side(profile) -> dict:
-    """What every hop but the five strong-side ones is priced at."""
+    """What every hop but the six strong-side ones is priced at."""
     priced = {}
-    for path in transfer_records.SLOTTED_PATHS:
+    for path in profile.path_names():
         if path in STRONG_SIDE_PATHS:
             continue
         path_settings = profile.path_settings(path)
         priced[path] = _priced(path_settings)
     return priced
+
+
+def _bandwidth_card(**geometry):
+    """The bandwidth fabric's card over every hop of ROUTES."""
+    rule = link_cards.bandwidth_limited_fabric(**geometry)
+    return fabrics.card(rule, ROUTES, {}, None)
 
 
 def test_every_payload_source_that_names_a_field_names_a_real_one():
@@ -143,9 +163,8 @@ def test_every_payload_source_that_names_a_field_names_a_real_one():
     count says so in prose instead, and this law leaves prose alone.
     """
     declared = names_by_class()
-    reference = link_profiles.logical_reference_profile()
-    stated = payload_sources_of(reference)
-    bandwidth = link_cards.bandwidth_limited_card(**DISTANCE_5_GEOMETRY)
+    stated = payload_sources_of(REFERENCE_CARD)
+    bandwidth = _bandwidth_card(**DISTANCE_5_GEOMETRY)
     provisioned = payload_sources_of(bandwidth)
     stated.extend(provisioned)
     measured_on_the_cpu_path = payload_sources_of(ROCE_V2_CPU_CARD)
@@ -157,25 +176,26 @@ def test_every_payload_source_that_names_a_field_names_a_real_one():
 
 
 def test_the_bandwidth_card_provisions_each_path_for_one_commit_region():
-    profile = link_cards.bandwidth_limited_card(**DISTANCE_5_GEOMETRY)
+    profile = _bandwidth_card(**DISTANCE_5_GEOMETRY)
     assert capacities_of(profile) == {
         "qpu_to_controller": 24.0,
         "controller_to_weak_buffer": 24.0,
         "controller_to_strong_buffer": 24.0,
-        "weak_buffer_to_weak_decoder": 48.0,
+        "weak_buffer_to_weak": 48.0,
         # a selection with one crossing-commit bit and a region of 360
         # bits, each behind a 64-bit name
-        "weak_decoder_to_strong_decoder": fractions.Fraction("97.8"),
-        "strong_buffer_to_strong_decoder": 72.0,
-        "weak_decoder_to_frame": fractions.Fraction("0.2"),
-        "decoder_to_decoder": fractions.Fraction("4.8"),
+        "weak_to_strong": fractions.Fraction("97.8"),
+        "strong_buffer_to_strong": 72.0,
+        # the strong pool's hand-on rides its store's read
+        "strong_to_strong": 72.0,
+        "weak_to_frame": fractions.Fraction("0.2"),
+        "weak_to_weak": fractions.Fraction("4.8"),
         # one flip behind the same name, home or to the weak chip
-        "strong_decoder_to_frame": 13,
+        "strong_to_frame": 13,
         "frame_to_controller": fractions.Fraction("6.4"),
         "controller_to_qpu": fractions.Fraction("25.6"),
-        "strong_decoder_to_weak_decoder": 13,
+        "strong_to_weak": 13,
     }
-    assert profile.profile_name == "bandwidth_limited"
 
 
 def test_a_nominal_round_serializes_in_exactly_one_round_period():
@@ -184,14 +204,15 @@ def test_a_nominal_round_serializes_in_exactly_one_round_period():
     At 8 bits per 1.1 us a float rate falls below 80/11 bits per
     microsecond and the round would take one tick more than its period.
     """
-    profile = link_cards.bandwidth_limited_card(
+    profile = _bandwidth_card(
         syndrome_bits_per_round=8,
         round_microseconds=1.1,
         commit_rounds=3,
         buffer_rounds=3,
     )
     engine = decsim.engine.Engine()
-    readout = profile.qpu_to_controller.channel
+    readout_path = profile.path_settings("qpu_to_controller")
+    readout = readout_path.channel
     channel = channel_module.Channel(readout, engine)
     framed = transfer_records.FramedPayload(8)
     delivered = []
@@ -202,30 +223,26 @@ def test_a_nominal_round_serializes_in_exactly_one_round_period():
 
 
 def test_the_bandwidth_card_keeps_the_reference_latencies():
-    reference = link_profiles.logical_reference_profile()
-    bandwidth = link_cards.bandwidth_limited_card(**DISTANCE_5_GEOMETRY)
-    assert latencies_of(bandwidth) == latencies_of(reference)
+    bandwidth = _bandwidth_card(**DISTANCE_5_GEOMETRY)
+    assert latencies_of(bandwidth) == latencies_of(REFERENCE_CARD)
 
 
 def test_the_bandwidth_cards_default_payloads_are_one_regions_traffic():
-    profile = link_cards.bandwidth_limited_card(**DISTANCE_5_GEOMETRY)
-    assert profile.qpu_to_controller.default_payload.input_bits == 24
-    assert profile.weak_buffer_to_weak_decoder.default_payload.input_bits == 240
-    assert (
-        profile.strong_buffer_to_strong_decoder.default_payload.input_bits
-        == 360
-    )
-    assert (
-        profile.weak_decoder_to_strong_decoder.default_payload.input_bits
-        == 64 + 360
-    )
-    assert profile.decoder_to_decoder.default_payload.input_bits == 24
+    profile = _bandwidth_card(**DISTANCE_5_GEOMETRY)
+    readout = profile.path_settings("qpu_to_controller")
+    weak_read = profile.path_settings("weak_buffer_to_weak")
+    strong_read = profile.path_settings("strong_buffer_to_strong")
+    escalation = profile.path_settings("weak_to_strong")
+    boundary = profile.path_settings("weak_to_weak")
+    assert readout.default_payload.input_bits == 24
+    assert weak_read.default_payload.input_bits == 240
+    assert strong_read.default_payload.input_bits == 360
+    assert escalation.default_payload.input_bits == 64 + 360
+    assert boundary.default_payload.input_bits == 24
 
 
 def test_the_capacity_scale_multiplies_every_rate():
-    halved = link_cards.bandwidth_limited_card(
-        **DISTANCE_5_GEOMETRY, capacity_scale=0.5
-    )
+    halved = _bandwidth_card(**DISTANCE_5_GEOMETRY, capacity_scale=0.5)
     capacities = capacities_of(halved)
     assert capacities["qpu_to_controller"] == 12.0
     assert capacities["controller_to_qpu"] == fractions.Fraction("12.8")
@@ -233,7 +250,7 @@ def test_the_capacity_scale_multiplies_every_rate():
 
 def test_a_capacity_scale_of_zero_is_refused():
     with pytest.raises(ValueError, match="must be positive"):
-        link_cards.bandwidth_limited_card(
+        link_cards.bandwidth_limited_fabric(
             **DISTANCE_5_GEOMETRY, capacity_scale=0.0
         )
 
@@ -258,16 +275,16 @@ def test_an_echo_of_the_measured_payload_takes_the_measured_round_trip(
     memory, and the reply back, each its latency and its bits' time on
     its wire.
     """
-    out = profile.weak_decoder_to_strong_decoder
-    poll = profile.strong_buffer_to_strong_decoder
-    back = profile.strong_decoder_to_frame
+    out = profile.path_settings("weak_to_strong")
+    poll = profile.path_settings("strong_buffer_to_strong")
+    back = profile.path_settings("strong_to_frame")
     echo_ticks = (
         _crossing_ticks(out, echo_bits)
         + _crossing_ticks(poll, echo_bits)
         + _crossing_ticks(back, echo_bits)
     )
     measured_ticks = config.microseconds_to_ticks(round_trip_microseconds)
-    write = profile.controller_to_strong_buffer
+    write = profile.path_settings("controller_to_strong_buffer")
 
     assert echo_ticks == measured_ticks
     assert write.channel.propagation_latency_ticks == (
@@ -286,11 +303,16 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
     per microsecond; the poll reads the coprocessor's own memory, so it
     crosses no cable and is unbounded.
     """
-    write = profile.controller_to_strong_buffer.channel.capacity
-    escalation = profile.weak_decoder_to_strong_decoder.channel.capacity
-    reply = profile.strong_decoder_to_frame.channel.capacity
-    reply_to_chip = profile.strong_decoder_to_weak_decoder.channel.capacity
-    poll = profile.strong_buffer_to_strong_decoder.channel.capacity
+    write_path = profile.path_settings("controller_to_strong_buffer")
+    escalation_path = profile.path_settings("weak_to_strong")
+    reply_path = profile.path_settings("strong_to_frame")
+    reply_to_chip_path = profile.path_settings("strong_to_weak")
+    poll_path = profile.path_settings("strong_buffer_to_strong")
+    write = write_path.channel.capacity
+    escalation = escalation_path.channel.capacity
+    reply = reply_path.channel.capacity
+    reply_to_chip = reply_to_chip_path.channel.capacity
+    poll = poll_path.channel.capacity
     write_rate = write.input_bits_per_microsecond
     escalation_rate = escalation.input_bits_per_microsecond
     reply_rate = reply.input_bits_per_microsecond
@@ -302,15 +324,14 @@ def test_a_measured_rows_cable_legs_serialize_at_backlines_100_gbps(
 
 
 def test_the_measured_rows_keep_the_reference_card_off_the_strong_side():
-    """Only the five strong-side hops move: the rest is the default card."""
-    reference = link_profiles.logical_reference_profile()
-    unchanged = paths_outside_the_strong_side(reference)
+    """Only the six strong-side hops move: the rest is the default card."""
+    unchanged = paths_outside_the_strong_side(REFERENCE_CARD)
     assert paths_outside_the_strong_side(ROCE_V2_CPU_CARD) == unchanged
     assert paths_outside_the_strong_side(ROCE_V2_GPU_CARD) == unchanged
 
 
 def test_the_cpu_rows_strong_side_sources_cite_backline():
-    """Five hops read one measurement, and none of them is a choice now.
+    """Six hops read one measurement, and none of them is a choice now.
 
     On the reference card the weak-to-strong hop names no paper and says
     "repository weak-to-strong model choice"; on this row it is a leg of
@@ -320,55 +341,52 @@ def test_the_cpu_rows_strong_side_sources_cite_backline():
     cited = _named_where(sources, _cites_backline)
     assert cited == [
         "controller_to_strong_buffer",
-        "strong_buffer_to_strong_decoder",
-        "strong_decoder_to_frame",
-        "strong_decoder_to_weak_decoder",
-        "weak_decoder_to_strong_decoder",
+        "strong_buffer_to_strong",
+        "strong_to_frame",
+        "strong_to_strong",
+        "strong_to_weak",
+        "weak_to_strong",
     ]
     declared = _named_where(sources, _declares_a_choice)
     assert declared == []
 
 
 def test_the_gpu_rows_strong_side_sources_cite_backline():
-    """The same five hops, read from the GPU echo row."""
+    """The same six hops, read from the GPU echo row."""
     sources = sources_of(ROCE_V2_GPU_CARD)
     cited = _named_where(sources, _cites_backline)
     assert cited == [
         "controller_to_strong_buffer",
-        "strong_buffer_to_strong_decoder",
-        "strong_decoder_to_frame",
-        "strong_decoder_to_weak_decoder",
-        "weak_decoder_to_strong_decoder",
+        "strong_buffer_to_strong",
+        "strong_to_frame",
+        "strong_to_strong",
+        "strong_to_weak",
+        "weak_to_strong",
     ]
     declared = _named_where(sources, _declares_a_choice)
     assert declared == []
 
 
 def test_the_nvqlink_rows_strong_side_sources_cite_nvqlink():
-    """The five strong-side hops read one measurement, 2510.25213."""
+    """The six strong-side hops read one measurement, 2510.25213."""
     sources = sources_of(NVQLINK_GPU_CARD)
     cited = _named_where(sources, _cites_nvqlink)
     assert cited == [
         "controller_to_strong_buffer",
-        "strong_buffer_to_strong_decoder",
-        "strong_decoder_to_frame",
-        "strong_decoder_to_weak_decoder",
-        "weak_decoder_to_strong_decoder",
+        "strong_buffer_to_strong",
+        "strong_to_frame",
+        "strong_to_strong",
+        "strong_to_weak",
+        "weak_to_strong",
     ]
 
 
 def test_the_nvqlink_rows_strong_side_retransmits_nothing():
     """An unreliable connection by choice (2510.25213 lines 376-388)."""
     profile = NVQLINK_GPU_CARD
-    strong_side = (
-        profile.controller_to_strong_buffer,
-        profile.weak_decoder_to_strong_decoder,
-        profile.strong_buffer_to_strong_decoder,
-        profile.strong_decoder_to_frame,
-        profile.strong_decoder_to_weak_decoder,
-    )
+    strong_side = [profile.path_settings(name) for name in STRONG_SIDE_PATHS]
     protocols = [path.channel.protocol for path in strong_side]
-    assert protocols == [None] * 5
+    assert protocols == [None] * 6
 
 
 @pytest.mark.parametrize("path", STRONG_NODE_CROSSINGS)
@@ -381,12 +399,11 @@ def test_the_nvqlink_rows_cable_legs_serialize_at_100_gbps(path):
 
 
 def test_the_nvqlink_row_keeps_the_reference_card_off_the_strong_side():
-    reference = link_profiles.logical_reference_profile()
-    unchanged = paths_outside_the_strong_side(reference)
+    unchanged = paths_outside_the_strong_side(REFERENCE_CARD)
     assert paths_outside_the_strong_side(NVQLINK_GPU_CARD) == unchanged
 
 
-def test_the_strong_side_puts_its_five_hops_one_room_cycle_on_the_base():
+def test_the_strong_side_puts_its_six_hops_one_room_cycle_on_the_base():
     """The weak base's own hops stay; the strong side's are 4 ns, unbounded.
 
     One cycle of the 250 MHz room clock is 4000 ticks.
@@ -394,16 +411,18 @@ def test_the_strong_side_puts_its_five_hops_one_room_cycle_on_the_base():
     rule = link_cards.strong_side(link_cards.WEAK_BASELINE_FABRIC)
     weak_base_rule = link_cards.WEAK_BASELINE_FABRIC
 
-    card = fabrics.card(rule, SLOTTED_ROUTES, {}, None)
-    weak_base = fabrics.card(weak_base_rule, SLOTTED_ROUTES, {}, None)
+    card = fabrics.card(rule, ROUTES, {}, None)
+    weak_base = fabrics.card(weak_base_rule, ROUTES, {}, None)
 
-    strong_side = [getattr(card, name) for name in STRONG_SIDE_PATHS]
+    strong_side = [card.path_settings(name) for name in STRONG_SIDE_PATHS]
     latencies = [path.channel.propagation_latency_ticks for path in strong_side]
     capacities = [path.channel.capacity for path in strong_side]
-    assert latencies == [4000] * 5
-    assert capacities == [None] * 5
-    assert card.weak_decoder_to_frame == weak_base.weak_decoder_to_frame
-    assert card.qpu_to_controller == weak_base.qpu_to_controller
+    weak_answer = card.path_settings("weak_to_frame")
+    readout = card.path_settings("qpu_to_controller")
+    assert latencies == [4000] * 6
+    assert capacities == [None] * 6
+    assert weak_answer == weak_base.path_settings("weak_to_frame")
+    assert readout == weak_base.path_settings("qpu_to_controller")
 
 
 def test_the_strong_side_prices_the_escalation_where_a_study_sets_it():
@@ -412,10 +431,12 @@ def test_the_strong_side_prices_the_escalation_where_a_study_sets_it():
         link_cards.WEAK_BASELINE_FABRIC, ten_microseconds
     )
 
-    card = fabrics.card(rule, SLOTTED_ROUTES, {}, None)
+    card = fabrics.card(rule, ROUTES, {}, None)
 
-    escalation = card.weak_decoder_to_strong_decoder.channel
-    reply = card.strong_decoder_to_weak_decoder.channel
+    escalation_path = card.path_settings("weak_to_strong")
+    reply_path = card.path_settings("strong_to_weak")
+    escalation = escalation_path.channel
+    reply = reply_path.channel
     assert escalation.propagation_latency_ticks == 10_000_000
     assert reply.propagation_latency_ticks == 4000
 

@@ -18,8 +18,8 @@ LONG_RUN = stream_machines.StreamRun(900, 0.5, 1, True)
 
 
 def _built_and_run(folds: bool):
-    settings = stream_machines.stream_settings(LONG_RUN, folds)
-    machine = machine_module.Machine.build(settings, SEED)
+    graph = stream_machines.stream_graph(LONG_RUN, folds)
+    machine = machine_module.Machine.build(graph, SEED)
     result = machine.run()
     return machine, result
 

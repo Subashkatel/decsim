@@ -102,10 +102,9 @@ named parts (`decsim/topology/graph.py`), starting from the weak base:
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
     )
-    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    weak_tier = base.with_part(weak_pool)
-    weak_side = fabrics.PathLinks(
-        controller_to_weak_buffer=weak_communication, base=base.fabric
+    weak_tier = base.with_record(machines.WEAK_POOL, weak_decoder)
+    weak_side = fabrics.RoleLinks(
+        write_written=weak_communication, base=base.fabric
     )
     # the strong side's other hops one host cycle each
     fabric = link_cards.strong_side(weak_side, strong_communication)
@@ -114,15 +113,15 @@ named parts (`decsim/topology/graph.py`), starting from the weak base:
     )
 ```
 
-- `with_part` puts the weak decoder in the place of the base's part of
-  the same name, `weak`, in the fridge.
+- `with_record` puts the weak decoder in the base's part `weak`, which
+  stays in the fridge.
 - The machine's fabric prices every hop no wire prices itself.
-  `PathLinks` gives a hop its link by the hop's name and leaves the
-  rest to its `base`: one tau_gen on `controller_to_weak_buffer`, and
-  the weak base's one cycle on every other hop of the weak side.
-  `link_cards.strong_side` adds the strong side's hops at one host
-  cycle each, and ten tau_gen on `weak_decoder_to_strong_decoder`, the
-  hop an escalation crosses.
+  `RoleLinks` gives every hop of a role its link and leaves the rest to
+  its `base`: one tau_gen on the write into the weak store,
+  `controller_to_weak_buffer`, and the weak base's one cycle on every
+  other hop of the weak side. `link_cards.strong_side` adds the strong
+  side's hops at one host cycle each, and ten tau_gen on
+  `weak_to_strong`, the hop an escalation crosses.
 - `machines.with_strong_tier` adds the strong tier on the host: a
   second syndrome buffer and the strong decoder, the switching record,
   the wire from the weak decoder's escalation to the strong one, and
@@ -208,33 +207,33 @@ decsim trace follow \
 ```
 window 1:0 of task d3, decsim switching d3 seed1
 
-tick (us)  where                        what                                                          dur (us)  transfer  bits
-7.004      Window planner               W0 ready
-7.004      Window planner               queued, dispatched to default#0                               0.000
-7.004      Window planner               queued, dispatched to default#0                               0.000
-7.004      weak_buffer_to_weak_decoder  move, with W0 rounds 1:1..6                                   0.004     move      44
-7.008      Decoder unit default#0       unit default#0 memory copy                                              copy      44
-7.008      Decoder unit default#0       stage fetch                                                   1.200
-7.008      Decoder unit default#0       decode service                                                1.200
-7.008      Decoder unit default#0       residence, unbounded, data ready 7.008, freed at decode done  2.400     copy      44
-8.208      Window planner               solve held
-8.208      Decoder unit default#0       stage algorithm                                               0.000
-8.208      Decoder unit default#0       stage release                                                 0.000
-8.208      Decoder unit default#0       stage fetch                                                   1.200
-8.208      Decoder unit default#0       decode service                                                1.200
-9.408      Window planner               verdict
-9.408      decoder_to_decoder           move, with W0 rounds 1:1..6                                   0.004     move      8
-9.408      weak_decoder_to_frame        move, with W0 rounds 1:1..6                                   0.004     move      1
-9.408      Decoder unit default#0       stage algorithm                                               0.000
-9.408      Decoder unit default#0       stage release                                                 0.000
-9.412      Frame                        residence, unbounded, committed 9.416, freed at end of run    392.284   copy
-9.416      Window planner               W0 committed
-9.416      Window planner               window final
-9.416      Frame                        1:0 committed
+tick (us)  where                what                                                          dur (us)  transfer  bits
+7.004      Window planner       W0 ready
+7.004      Window planner       queued, dispatched to weak#0                                  0.000
+7.004      Window planner       queued, dispatched to weak#0                                  0.000
+7.004      weak_buffer_to_weak  move, with W0 rounds 1:1..6                                   0.004     move      44
+7.008      Decoder unit weak#0  unit weak#0 memory copy                                                 copy      44
+7.008      Decoder unit weak#0  stage fetch                                                   1.200
+7.008      Decoder unit weak#0  decode service                                                1.200
+7.008      Decoder unit weak#0  residence, unbounded, data ready 7.008, freed at decode done  2.400     copy      44
+8.208      Window planner       solve held
+8.208      Decoder unit weak#0  stage algorithm                                               0.000
+8.208      Decoder unit weak#0  stage release                                                 0.000
+8.208      Decoder unit weak#0  stage fetch                                                   1.200
+8.208      Decoder unit weak#0  decode service                                                1.200
+9.408      Window planner       verdict
+9.408      weak_to_weak         move, with W0 rounds 1:1..6                                   0.004     move      8
+9.408      weak_to_frame        move, with W0 rounds 1:1..6                                   0.004     move      1
+9.408      Decoder unit weak#0  stage algorithm                                               0.000
+9.408      Decoder unit weak#0  stage release                                                 0.000
+9.412      Frame                residence, unbounded, committed 9.416, freed at end of run    392.284   copy
+9.416      Window planner       W0 committed
+9.416      Window planner       window final
+9.416      Frame                1:0 committed
 
 copies 1, references 2 jobs and 0 holds, moves 3
 longest residence: 392.284 us in Frame (residence, unbounded, committed 9.416, freed at end of run)
-longest queue wait: 0.000 us in Window planner (queued, dispatched to default#0)
+longest queue wait: 0.000 us in Window planner (queued, dispatched to weak#0)
 ```
 
 Two things here are new since [Your first run](first_run.md).
@@ -249,8 +248,8 @@ be subtracted.
 
 Then, at 9.408, `verdict`. This window's confidence was at or above the
 threshold, so the weak answer was kept: the boundary went to the next
-window on `decoder_to_decoder`, the correction went to the Pauli frame
-on `weak_decoder_to_frame`, and the window committed at 9.416.
+window on `weak_to_weak`, the correction went to the Pauli frame
+on `weak_to_frame`, and the window committed at 9.416.
 `window final` at the same tick says its record is final: no later
 decode will change it.
 
@@ -272,44 +271,44 @@ decsim trace follow \
 ```
 window 1:3 of task d3, decsim switching d3 seed1
 
-tick (us)  where                            what                                                           dur (us)  transfer  bits
-16.004     Window planner                   W3 ready
-16.004     Window planner                   queued, dispatched to default#0                                0.000
-16.004     Window planner                   queued, dispatched to default#0                                0.000
-16.004     weak_buffer_to_weak_decoder      move, with W3 rounds 1:10..15                                  0.004     move      48
-16.008     Window planner                   masked view copy                                                         copy      48
-16.008     Decoder unit default#0           unit default#0 memory copy                                               copy      48
-16.008     Decoder unit default#0           stage fetch                                                    1.200
-16.008     Decoder unit default#0           decode service                                                 1.200
-16.008     Decoder unit default#0           residence, unbounded, data ready 16.008, freed at decode done  2.400     copy      48
-17.208     Window planner                   solve held
-17.208     Window planner                   masked view copy                                                         copy      48
-17.208     Decoder unit default#0           stage algorithm                                                0.000
-17.208     Decoder unit default#0           stage release                                                  0.000
-17.208     Decoder unit default#0           stage fetch                                                    1.200
-17.208     Decoder unit default#0           decode service                                                 1.200
-18.408     Window planner                   verdict
-18.408     Window planner                   W3 committed
-18.408     Strong tier                      W3 strong window held                                          10.000
-18.408     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  10.000    move      65
-18.408     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  10.000    move      112
-18.408     Decoder unit default#0           stage algorithm                                                0.000
-18.408     Decoder unit default#0           stage release                                                  0.000
-28.408     Window planner                   queued, dispatched to strong#0                                 10.000
-28.408     weak_decoder_to_strong_decoder   move, with W3 rounds 1:10..15                                  10.000    move      72
-38.408     strong_buffer_to_strong_decoder  move, with W3 rounds 1:10..15                                  0.004     move      48
-38.412     Window planner                   masked view copy                                                         copy      48
-38.412     Decoder unit strong#0            unit strong#0 memory copy                                                copy      48
-38.412     Decoder unit strong#0            stage fetch                                                    60.000
-38.412     Decoder unit strong#0            residence, unbounded, data ready 38.412, freed at decode done  60.000    copy      48
-38.412     Decoder unit strong#0            decode service                                                 60.000
-98.412     strong_decoder_to_frame          move, with W3 rounds 1:10..15                                  0.004     move      65
-98.412     strong_decoder_to_weak_decoder   move, with W3 rounds 1:10..15                                  0.004     move      72
-98.412     Decoder unit strong#0            stage algorithm                                                0.000
-98.412     Decoder unit strong#0            stage release                                                  0.000
-98.416     Frame                            residence, unbounded, committed 98.420, freed at end of run    303.280   copy
-98.420     Window planner                   window final
-98.420     Frame                            1:3 committed
+tick (us)  where                    what                                                           dur (us)  transfer  bits
+16.004     Window planner           W3 ready
+16.004     Window planner           queued, dispatched to weak#0                                   0.000
+16.004     Window planner           queued, dispatched to weak#0                                   0.000
+16.004     weak_buffer_to_weak      move, with W3 rounds 1:10..15                                  0.004     move      48
+16.008     Window planner           masked view copy                                                         copy      48
+16.008     Decoder unit weak#0      unit weak#0 memory copy                                                  copy      48
+16.008     Decoder unit weak#0      stage fetch                                                    1.200
+16.008     Decoder unit weak#0      decode service                                                 1.200
+16.008     Decoder unit weak#0      residence, unbounded, data ready 16.008, freed at decode done  2.400     copy      48
+17.208     Window planner           solve held
+17.208     Window planner           masked view copy                                                         copy      48
+17.208     Decoder unit weak#0      stage algorithm                                                0.000
+17.208     Decoder unit weak#0      stage release                                                  0.000
+17.208     Decoder unit weak#0      stage fetch                                                    1.200
+17.208     Decoder unit weak#0      decode service                                                 1.200
+18.408     Window planner           verdict
+18.408     Window planner           W3 committed
+18.408     Strong tier              W3 strong window held                                          10.000
+18.408     weak_to_strong           move, with W3 rounds 1:10..15                                  10.000    move      65
+18.408     weak_to_strong           move, with W3 rounds 1:10..15                                  10.000    move      112
+18.408     Decoder unit weak#0      stage algorithm                                                0.000
+18.408     Decoder unit weak#0      stage release                                                  0.000
+28.408     Window planner           queued, dispatched to strong#0                                 10.000
+28.408     weak_to_strong           move, with W3 rounds 1:10..15                                  10.000    move      72
+38.408     strong_buffer_to_strong  move, with W3 rounds 1:10..15                                  0.004     move      48
+38.412     Window planner           masked view copy                                                         copy      48
+38.412     Decoder unit strong#0    unit strong#0 memory copy                                                copy      48
+38.412     Decoder unit strong#0    stage fetch                                                    60.000
+38.412     Decoder unit strong#0    residence, unbounded, data ready 38.412, freed at decode done  60.000    copy      48
+38.412     Decoder unit strong#0    decode service                                                 60.000
+98.412     strong_to_frame          move, with W3 rounds 1:10..15                                  0.004     move      65
+98.412     strong_to_weak           move, with W3 rounds 1:10..15                                  0.004     move      72
+98.412     Decoder unit strong#0    stage algorithm                                                0.000
+98.412     Decoder unit strong#0    stage release                                                  0.000
+98.416     Frame                    residence, unbounded, committed 98.420, freed at end of run    303.280   copy
+98.420     Window planner           window final
+98.420     Frame                    1:3 committed
 
 copies 5, references 3 jobs and 0 holds, moves 7
 longest residence: 303.280 us in Frame (residence, unbounded, committed 98.420, freed at end of run)
@@ -328,7 +327,7 @@ eight things happen that did not happen for window 0.
 - **`W3 strong window held`, 10 microseconds.** The strong tier has the
   window but not its rounds yet, so the strong request waits for them
   to land.
-- **`weak_decoder_to_strong_decoder`, twice, 10 microseconds each.** The
+- **`weak_to_strong`, twice, 10 microseconds each.** The
   escalation crosses this hop as two transfers, and each takes the
   strong tier's T_comm, ten tau_gen. The first is the selection, 65
   bits: which window to decode again, the request's 64-bit name, and
@@ -343,7 +342,7 @@ eight things happen that did not happen for window 0.
 - **`queued, dispatched to strong#0`.** A third decode job, on the other
   pool's unit, queued at 28.408 when the rounds land in the strong
   syndrome buffer.
-- **`weak_decoder_to_strong_decoder` again at 28.408, 72 bits.** Window
+- **`weak_to_strong` again at 28.408, 72 bits.** Window
   2's committed boundary, shipped to the strong window: `redo_window`
   pins the strong window's past face on it, and the strong solve folds
   it in (`decsim/windows/window_boundaries.py`, `pin_strong_face`).
@@ -352,13 +351,13 @@ eight things happen that did not happen for window 0.
   of seam behind the request's 64-bit name. The job takes a unit only
   once that boundary lands, which is the 10 microseconds it waits in
   the queue.
-- **`strong_buffer_to_strong_decoder` at 38.408, 48 bits.** The strong
+- **`strong_buffer_to_strong` at 38.408, 48 bits.** The strong
   decoder's input comes from the strong syndrome buffer, where the
   escalation just put it, and not from the weak decoder.
 - **The strong decode costs 60 microseconds**, six rounds at ten tau_gen
   each, against 1.2 for each weak solve.
 - **The correction reaches the frame at 98.420**, on
-  `strong_decoder_to_frame`, and there is no `weak_decoder_to_frame` at
+  `strong_to_frame`, and there is no `weak_to_frame` at
   all. Only a final answer is published to the frame.
 
 `W3 committed` at 18.408 is worth reading carefully. The window
@@ -372,7 +371,7 @@ not absorb the windows it covers. A strong window absorbs a
 weak window when it decodes the same rounds again and replaces that
 window's answer, so the weak window never ships a boundary of its own.
 The held boundary ships when the strong decode ends, which is the
-`strong_decoder_to_weak_decoder` move at 98.412
+`strong_to_weak` move at 98.412
 (`decsim/windows/window_commits.py`, `publish_strong`): the strong
 decode computed it on the host, and the next window decodes on the
 chip. It leaves beside the answer, and does not wait for the answer to
@@ -390,17 +389,17 @@ decsim trace follow \
 ```
 window 1:4 of task d3, decsim switching d3 seed1
 
-tick (us)  where                            what                                                            dur (us)  transfer  bits
-19.004     Window planner                   W4 ready
-19.004     Window planner                   queued, dispatched to default#0                                 79.412
-19.004     Window planner                   queued, dispatched to default#0                                 79.412
-98.416     weak_buffer_to_weak_decoder      move, with W4 rounds 1:13..18                                   0.004     move      48
-98.420     Window planner                   masked view copy                                                          copy      48
-98.420     Decoder unit default#0           unit default#0 memory copy                                                copy      48
-98.420     Decoder unit default#0           stage fetch                                                     1.200
-98.420     Decoder unit default#0           decode service                                                  1.200
-98.420     Decoder unit default#0           residence, unbounded, data ready 98.420, freed at decode done   2.400     copy      48
-99.620     Window planner                   solve held
+tick (us)  where                    what                                                            dur (us)  transfer  bits
+19.004     Window planner           W4 ready
+19.004     Window planner           queued, dispatched to weak#0                                    79.412
+19.004     Window planner           queued, dispatched to weak#0                                    79.412
+98.416     weak_buffer_to_weak      move, with W4 rounds 1:13..18                                   0.004     move      48
+98.420     Window planner           masked view copy                                                          copy      48
+98.420     Decoder unit weak#0      unit weak#0 memory copy                                                   copy      48
+98.420     Decoder unit weak#0      stage fetch                                                     1.200
+98.420     Decoder unit weak#0      decode service                                                  1.200
+98.420     Decoder unit weak#0      residence, unbounded, data ready 98.420, freed at decode done   2.400     copy      48
+99.620     Window planner           solve held
 ```
 
 Window 4 has its rounds at 19.004, but it waits in the queue for 79.412

@@ -33,7 +33,8 @@ def test_an_argument_axis_makes_each_cells_machine():
     tasks = sweep.tasks()
 
     names = [task.name for task in tasks]
-    distances = [task.machine.qpu.distance for task in tasks]
+    qpus = [task.machine.held("qpu") for task in tasks]
+    distances = [qpu.distance for qpu in qpus]
     assert names == ["d3", "d5"]
     assert distances == [3, 5]
 
@@ -47,7 +48,7 @@ def test_a_path_axis_is_assigned_to_each_cells_machine():
     tasks = sweep.tasks()
 
     names = [task.name for task in tasks]
-    units = [task.machine.weak_decoder.unit_count for task in tasks]
+    units = [_weak_unit_count(task) for task in tasks]
     assert names == ["d3_units1", "d3_units2"]
     assert units == [1, 2]
 
@@ -156,7 +157,7 @@ def test_an_assignment_in_force_to_a_value_no_axis_names_is_kept():
     with in_force.in_force([units]):
         tasks = sweep.tasks()
 
-    counts = [task.machine.weak_decoder.unit_count for task in tasks]
+    counts = [_weak_unit_count(task) for task in tasks]
     assert counts == [2, 2]
 
 
@@ -209,15 +210,24 @@ def _constants(tmp_path: pathlib.Path) -> constants_module.Section:
 
 
 def _probability(task: collect.Task) -> float:
-    record = task.machine.workload.workload_record
+    workload = task.machine.held("workload")
+    record = workload.workload_record
     return record.physical_error_probability
 
 
-def _qpu_metadata(cell, settings) -> dict:
+def _weak_unit_count(task: collect.Task) -> int:
+    weak = task.machine.part(machines.WEAK_POOL)
+    return weak.settings.unit_count
+
+
+def _qpu_metadata(cell, task) -> dict:
     del cell
-    record = settings.workload.workload_record
+    workload = task.machine.held("workload")
+    record = workload.workload_record
     rate = record.physical_error_probability
-    return {"qpu.distance": settings.qpu.distance, "rate": rate}
+    qpu = task.machine.held("qpu")
+    distance = qpu.distance
+    return {"qpu.distance": distance, "rate": rate}
 
 
 def _stop_by_distance(cell) -> collection.CollectionSettings:

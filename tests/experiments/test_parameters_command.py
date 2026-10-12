@@ -76,13 +76,11 @@ def test_params_shows_a_set_value_its_record_default_and_its_setter(
 ):
     run_file = run_files.write_run_file(tmp_path)
 
-    command.main(
-        ["params", str(run_file), "--set", "weak_decoder.unit_count=4"]
-    )
+    command.main(["params", str(run_file), "--set", "weak.unit_count=4"])
 
     lines = _printed_lines(capsys)
     variable = assignments.ENVIRONMENT_VARIABLE
-    expected = f"weak_decoder.unit_count = 4  [1]  ({variable})"
+    expected = f"weak.unit_count = 4  [1]  ({variable})"
     assert expected in lines
 
 
@@ -92,7 +90,7 @@ def test_params_match_keeps_the_paths_its_pattern_reaches(tmp_path, capsys):
     command.main(["params", str(run_file), "--match", "**.engine.clock"])
 
     lines = _printed_lines(capsys)
-    assert lines[1:] == ["weak_decoder.engine.clock = 250MHz  [none]"]
+    assert lines[1:] == ["weak.engine.clock = 250MHz  [none]"]
 
 
 def test_info_with_no_name_lists_every_slot_and_the_records_it_takes(

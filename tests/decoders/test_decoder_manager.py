@@ -36,6 +36,7 @@ import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.escalation.deadlines as deadlines
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.formation as formation_records
 import decsim.records.rounds as round_records
@@ -116,14 +117,17 @@ class TwoRoundSource:
 def _manager(engine, row, formation=None, unit_count=1):
     scheduler = schedulers.FifoScheduler()
     pool_settings = decoder_pool.PoolSettings(
-        name="default", unit_count=unit_count, formation=formation
+        name="weak", unit_count=unit_count, formation=formation
     )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=window_records.WEAK_POOL_ID,
     )
-    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.strong_requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     manager.decoder = row
     return manager
 
@@ -316,14 +320,17 @@ def _blocking_manager(engine, row, *, blocks_unit: bool):
     """A one-unit manager whose default pool blocks, or does not."""
     scheduler = schedulers.FifoScheduler()
     pool_settings = decoder_pool.PoolSettings(
-        name="default", unit_count=1, blocks_unit=blocks_unit
+        name="weak", unit_count=1, blocks_unit=blocks_unit
     )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=window_records.WEAK_POOL_ID,
     )
-    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.strong_requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     manager.decoder = row
     return manager
 
@@ -498,14 +505,17 @@ def _staging_manager(engine, row, *, copies_input: bool):
     """A one-unit manager whose default pool copies its input, or does not."""
     scheduler = schedulers.FifoScheduler()
     pool_settings = decoder_pool.PoolSettings(
-        name="default", unit_count=1, copies_input=copies_input
+        name="weak", unit_count=1, copies_input=copies_input
     )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=window_records.WEAK_POOL_ID,
     )
-    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.strong_requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     manager.decoder = row
     return manager
 
@@ -630,28 +640,27 @@ def _rescued_memories(doubted: set) -> machine_module.Machine:
         slack_microseconds=10.0, late_source_result="revision"
     )
     switching = declared_run.declared_switching(deadline=deadline)
-    settings = declared_fabric.switching_settings(
+    graph = declared_fabric.switching_graph(
         rounds=6, escalated_windows=set(), switching=switching
     )
     operations = []
     for operation_id in range(1, 5):
         memory = declared_run.memory_operation(operation_id)
         operations.append(memory)
-    workload = dataclasses.replace(settings.workload, operations=operations)
+    graph_workload = graph.held("workload")
+    workload = dataclasses.replace(graph_workload, operations=operations)
     is_escalated = _of_operations(doubted)
-    weak_microseconds = declared_fabric.DECLARED_MICROSECONDS["weak"]
+    weak_microseconds = declared_run.DECLARED_MICROSECONDS["weak"]
     weak_row = declared_run.DeclaredConfidenceDecoder.Settings(
         weak_microseconds, is_escalated
     )
-    weak = dataclasses.replace(
-        settings.weak_decoder, algorithm=weak_row, unit_count=4
-    )
     decode_each = batching.DecodeEach.Settings()
-    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
-    settings = dataclasses.replace(
-        settings, workload=workload, weak_decoder=weak, strong_decoder=strong
+    graph = graph.with_held("workload", workload)
+    graph = graph.with_settings(
+        machines.WEAK_POOL, algorithm=weak_row, unit_count=4
     )
-    machine = machine_module.Machine.build(settings, 0)
+    graph = graph.with_settings(machines.STRONG_POOL, batching=decode_each)
+    machine = machine_module.Machine.build(graph, 0)
     machine.run()
     return machine
 

@@ -1,9 +1,9 @@
 """The transmitter: a stored round leaves on its route at the write.
 
-Every round rides controller_to_weak_buffer, whose sending end this is.
-A window-input round is published at the weak syndrome buffer. A
-feedback-memory round is written there too and then rides
-weak_buffer_to_weak_decoder, sent by the store's own outgoing port.
+Every round rides the controller's write into the written store, whose
+sending end this is. A window-input round is published at that store. A
+feedback-memory round is written there too and then rides the store's
+read hop, sent by the store's own outgoing port.
 
 The sender never waits for a round to land before sending the next, as
 DAQs stream every round (Yang et al. 2605.04892; Google 2408.13687;
@@ -14,6 +14,7 @@ packet at TransmitComplete. The FIFO channel keeps delivery order.
 
 import dataclasses
 import functools
+from typing import Optional
 
 import decsim.engine as engine_module
 import decsim.ports as ports
@@ -41,8 +42,14 @@ class RoundTransmitter:
     # its route frees a place for
     packing_line = ports.Port(ports.HeldRounds)
 
-    def __init__(self, engine: engine_module.Engine) -> None:
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        write_path: Optional[transfer_records.LinkPath],
+    ) -> None:
         self.engine = engine
+        # the hop the controller writes the written store over
+        self.write_path = write_path
         self.in_flight = 0
         self.trace = _TraceSources()
 
@@ -76,7 +83,7 @@ class RoundTransmitter:
     def _send_window_input(self, packed: round_records.PackedRound) -> None:
         self._fire("CWB_SENT", packed)
         publish = functools.partial(self._publish, packed)
-        self._send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, packed, publish)
+        self._send(self.write_path, packed, publish)
 
     def _publish(self, packed: round_records.PackedRound) -> None:
         """The weak syndrome buffer's receiver takes the landing.
@@ -104,11 +111,11 @@ class RoundTransmitter:
         """Send a feedback-memory round up to the store, which sends it on.
 
         It occupies a slot once written, as any round does, so it crosses
-        controller_to_weak_buffer first; the store's own port sends it to the
-        weak decoder and frees the slot.
+        the write hop first; the store's own port sends it to the decoder
+        and frees the slot.
         """
         landed = functools.partial(self._write_feedback_memory, packed)
-        self._send(transfer_records.CONTROLLER_TO_WEAK_BUFFER, packed, landed)
+        self._send(self.write_path, packed, landed)
 
     def _write_feedback_memory(self, packed: round_records.PackedRound) -> None:
         deliver = functools.partial(self._deliver_feedback_memory, packed)

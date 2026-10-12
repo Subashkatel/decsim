@@ -15,10 +15,9 @@ it, or the reference card's path where the rule picks none.
     FixedPath      a path written out whole, a packet protocol and all
 
     ReferenceFabric  the reference card on every route
-    PathLinks        a link by the route's path name, else a base rule
+    RoleLinks        a link by the route's role, else a base rule
     FridgeHostFabric a cable between the sites, a host link on the host,
                      else a base rule
-    CardFabric       today's card written out, a path per route
 
 A link times a transfer as its latency plus its bits over its rate,
 ns-3's point-to-point law (point-to-point-net-device.cc:243); the rule
@@ -35,59 +34,24 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.routes as route_records
-import decsim.records.transfers as transfer_records
 
 FRIDGE = route_records.FRIDGE
 HOST = route_records.HOST
-# the name a card built from a graph goes by; a label, no part of an id
-PROFILE_NAME = "a graph's fabric"
-# Each path of today's card, by the MachineSettings slots at its ends.
-# decoder_to_decoder carries a window's boundary to the next window on
-# the pool that decodes the windows.
-SLOTTED_ENDS = {
-    "qpu_to_controller": ("qpu", "controller"),
-    "controller_to_weak_buffer": ("controller", "weak_syndrome_buffer"),
-    "weak_buffer_to_weak_decoder": ("weak_syndrome_buffer", "weak_decoder"),
-    "weak_decoder_to_strong_decoder": ("weak_decoder", "strong_decoder"),
-    "strong_buffer_to_strong_decoder": (
-        "strong_syndrome_buffer",
-        "strong_decoder",
-    ),
-    "weak_decoder_to_frame": ("weak_decoder", "pauli_frame"),
-    "decoder_to_decoder": ("weak_decoder", "weak_decoder"),
-    "strong_decoder_to_frame": ("strong_decoder", "pauli_frame"),
-    "frame_to_controller": ("pauli_frame", "controller"),
-    "controller_to_qpu": ("controller", "qpu"),
-    "controller_to_strong_buffer": ("controller", "strong_syndrome_buffer"),
-    "strong_decoder_to_weak_decoder": ("strong_decoder", "weak_decoder"),
-}
-# Where each slot's part sits when its part says nothing: the controller,
-# the frame and the weak tier on the chip in the fridge, the strong tier
-# on the host, as the reference card prices them.
-SLOTTED_SITES = {
-    "qpu": FRIDGE,
-    "controller": FRIDGE,
-    "pauli_frame": FRIDGE,
-    "weak_syndrome_buffer": FRIDGE,
-    "weak_decoder": FRIDGE,
-    "strong_syndrome_buffer": HOST,
-    "strong_decoder": HOST,
-}
 
 
 @dataclasses.dataclass(frozen=True)
 class Route:
-    """One hop between two parts: its path's name and each end's site.
+    """One hop between two parts: its path's name, each end's site, its role.
 
-    reference names the reference card's path whose payload rule the hop
-    carries: a graph's own hop carries the rule of the slotted hop with
-    its role (topology/graph_layout.py); None is the path itself.
+    role is what the hop carries (records/routes.py HopRole): the
+    reference card prices the hop by it, and a fabric may pick its link
+    by it.
     """
 
     path: str
-    source_site: Optional[str]
-    target_site: Optional[str]
-    reference: Optional[str] = None
+    source_site: str
+    target_site: str
+    role: route_records.HopRole
 
 
 @dataclasses.dataclass(frozen=True)
@@ -265,36 +229,33 @@ class ReferenceFabric:
 
 
 @dataclasses.dataclass(frozen=True)
-class PathLinks:
-    """A link per path, by the path's name; any other route, the base's.
+class RoleLinks:
+    """A link per role (records/routes.py HopRole.key); any other, the base's.
 
-    A graph's own hop takes the link of the slotted path whose role it
-    carries (Route.reference), so a chain's entry pool reads its store
-    on the link the weak tier's read rides.
+    A write or a read is split by how its store takes its rounds, an
+    answer or a same-pool hop by the pool's site, so a base that prices
+    the weak chain on one clock and the strong side on another names
+    each by its role.
     """
 
-    qpu_to_controller: Optional[ports.LinkCard] = None
-    controller_to_weak_buffer: Optional[ports.LinkCard] = None
-    weak_buffer_to_weak_decoder: Optional[ports.LinkCard] = None
-    weak_decoder_to_strong_decoder: Optional[ports.LinkCard] = None
-    strong_buffer_to_strong_decoder: Optional[ports.LinkCard] = None
-    weak_decoder_to_frame: Optional[ports.LinkCard] = None
-    decoder_to_decoder: Optional[ports.LinkCard] = None
-    strong_decoder_to_frame: Optional[ports.LinkCard] = None
-    frame_to_controller: Optional[ports.LinkCard] = None
-    controller_to_qpu: Optional[ports.LinkCard] = None
-    controller_to_strong_buffer: Optional[ports.LinkCard] = None
-    strong_decoder_to_weak_decoder: Optional[ports.LinkCard] = None
+    readout: Optional[ports.LinkCard] = None
+    write_written: Optional[ports.LinkCard] = None
+    write_landed: Optional[ports.LinkCard] = None
+    read_written: Optional[ports.LinkCard] = None
+    read_landed: Optional[ports.LinkCard] = None
+    forward: Optional[ports.LinkCard] = None
+    reverse: Optional[ports.LinkCard] = None
+    same_pool_fridge: Optional[ports.LinkCard] = None
+    same_pool_host: Optional[ports.LinkCard] = None
+    answer_fridge: Optional[ports.LinkCard] = None
+    answer_host: Optional[ports.LinkCard] = None
+    decision: Optional[ports.LinkCard] = None
+    command: Optional[ports.LinkCard] = None
     base: ports.FabricRule = ReferenceFabric()
 
     def link_for(self, route: Route) -> Optional[ports.LinkCard]:
-        """This path's link, or its reference's, else the base's."""
-        path = route.path
-        if path not in transfer_records.SLOTTED_PATHS:
-            path = route.reference
-        if path is None:
-            return self.base.link_for(route)
-        link = getattr(self, path)
+        """This role's link, else the base's."""
+        link = getattr(self, route.role.key)
         if link is not None:
             return link
         return self.base.link_for(route)
@@ -323,99 +284,48 @@ class FridgeHostFabric:
         return self.base.link_for(route)
 
 
-@dataclasses.dataclass(frozen=True)
-class CardFabric:
-    """Today's card written out: each route takes the card's own path."""
-
-    card: link_settings.FabricSettings
-
-    def link_for(self, route: Route) -> Optional[ports.LinkCard]:
-        """The card's path for the route, as written; none for a new hop."""
-        if route.path not in self.card.path_names():
-            return None
-        path = self.card.path_settings(route.path)
-        return FixedPath(path)
-
-
 def card(
     rule: ports.FabricRule,
     routes: tuple,
     wire_links: dict,
     machine_clock: Optional[config.Clock],
+    readout_routes: tuple = (),
 ) -> link_settings.FabricSettings:
     """The card from a rule: each route's path, a wire's link first.
 
     wire_links holds the link a wire carries, by its route's path name;
     a route with no link of its own takes the rule's, and one the rule
-    gives none the reference path. A route off the slotted twelve is one
-    of the card's named hops.
+    gives none the reference path of its role. readout_routes ride
+    beside the readout's own path.
     """
-    reference = link_profiles.logical_reference_profile()
-    paths = {}
-    hops = []
+    paths = []
     for route in routes:
-        priced = _priced(route, rule, wire_links, reference, machine_clock)
-        if route.path in transfer_records.SLOTTED_PATHS:
-            paths[route.path] = priced
-            continue
-        hop = link_settings.NamedPath(route.path, priced)
-        hops.append(hop)
-    return dataclasses.replace(
-        reference, **paths, profile_name=PROFILE_NAME, hops=tuple(hops)
-    )
-
-
-def slotted_routes(sites: dict) -> tuple:
-    """Every path of today's card as a route, its ends at these sites.
-
-    sites maps a slot to its part's site; a slot it leaves out, or maps
-    to None, sits where SLOTTED_SITES puts it.
-    """
-    routes = []
-    for path, (source_slot, target_slot) in SLOTTED_ENDS.items():
-        source_site = _site(sites, source_slot)
-        target_site = _site(sites, target_slot)
-        route = Route(path, source_site, target_site)
-        routes.append(route)
-    return tuple(routes)
+        priced = _priced(route, rule, wire_links, machine_clock)
+        path = link_settings.NamedPath(
+            route.path,
+            priced,
+            route.role,
+            route.source_site,
+            route.target_site,
+        )
+        paths.append(path)
+    return link_settings.FabricSettings(tuple(paths), readout_routes)
 
 
 def _priced(
     route: Route,
     rule: ports.FabricRule,
     wire_links: dict,
-    reference: link_settings.FabricSettings,
     machine_clock: Optional[config.Clock],
 ) -> link_settings.PathSettings:
     """One route's path: its wire's link, else the rule's, else the reference.
 
-    A graph's own hop rides a channel of its own name, never the slotted
-    hop's whose payload rule it carries.
+    Every hop rides a channel of its own name.
     """
-    reference_name = route.reference
-    if reference_name is None:
-        reference_name = route.path
-    reference_path = reference.path_settings(reference_name)
-    if reference_name != route.path:
-        reference_path = _on_its_own_channel(reference_path, route.path)
+    reference_path = link_profiles.reference_path(route.role, route.path)
     link = wire_links.get(route.path)
     if link is None:
         link = rule.link_for(route)
     if link is None:
         return reference_path
     return link.priced(route.path, reference_path, machine_clock)
-
-
-def _on_its_own_channel(
-    path: link_settings.PathSettings, name: str
-) -> link_settings.PathSettings:
-    """The path on a channel of the same settings under another name."""
-    channel = dataclasses.replace(path.channel, name=name)
-    return dataclasses.replace(path, channel=channel)
-
-
-def _site(sites: dict, slot: str) -> Optional[str]:
-    site = sites.get(slot)
-    if site is None:
-        return SLOTTED_SITES.get(slot)
-    return site

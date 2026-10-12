@@ -25,7 +25,6 @@ ROOT_EXPORTS = (
     ("Task", "decsim.experiments.collect"),
     ("grid", "decsim.experiments.experiment"),
     ("CollectionSettings", "decsim.experiments.collection"),
-    ("MachineSettings", "decsim.settings"),
     ("Machine", "decsim.machine"),
 )
 

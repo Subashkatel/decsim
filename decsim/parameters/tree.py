@@ -1,9 +1,9 @@
 """Paths over a run's settings, and assignments applied along them.
 
 Every record in a machine's settings is a part with a path: the field
-names from the root, dotted (weak_decoder.engine), a tuple's records
+names from the root, dotted (weak.engine), a tuple's records
 indexed (levels[0]). A parameter's path is its part's path and its name
-(weak_decoder.engine.fetch_per_round, parameters/fields.py). A part's
+(weak.engine.fetch_per_round, parameters/fields.py). A part's
 type is a parameter too: path.type=name puts another record in the slot
 (parameters/kinds.py) and path.type=none empties an optional one, as
 OMNeT++ sets a `like` slot's typename from its ini file (simulation

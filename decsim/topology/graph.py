@@ -32,6 +32,7 @@ from typing import Any, ClassVar, Optional
 import decsim.config as config
 import decsim.observe.settings as observe_settings
 import decsim.ports as ports
+import decsim.records.program as program_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.part_kinds as part_kinds
 
@@ -58,7 +59,7 @@ class Part:
 
     @property
     def kind(self) -> Optional[part_kinds.PartKind]:
-        """The part's kind, from the slot that takes its record."""
+        """The part's kind, the one whose type takes its record."""
         record_class = type(self.settings)
         return part_kinds.kind_of(record_class)
 
@@ -70,7 +71,7 @@ class Part:
         kind = self.kind
         if kind is None:
             return type(self.settings)
-        return part_kinds.slot_hint(kind)
+        return kind.hint
 
     def run_file_fields(self, workload: object) -> tuple:
         """The record's fields the machine's workload fixes.
@@ -102,7 +103,15 @@ class Machine:
 
     clock is the clock every part that names none of its own counts its
     cycles on; fabric prices every route no wire's own link prices;
-    observation is what the run records beside its results.
+    readout_routes give a readout of a whole patch footprint its own path
+    (links/settings.py ReadoutRoute); observation is what the run records
+    beside its results.
+
+    A kind of part held once (part_kinds.KINDS) runs on its default when
+    the machine holds no part of it. The workload is a workload lowered
+    in Python or a maker row (decsim/producers.py), which at_task lowers
+    against the QPU, so the task's id and every shot see the lowered
+    workload.
     """
 
     # the fields whose parts parameters/tree.py addresses by name
@@ -112,6 +121,7 @@ class Machine:
     parts: tuple = ()
     wires: tuple = ()
     fabric: ports.FabricRule = fabrics.ReferenceFabric()
+    readout_routes: tuple = ()
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
     )
@@ -137,9 +147,80 @@ class Machine:
         names = [part.name for part in self.parts]
         raise GraphError(f"no part {name!r}; the parts are {names}")
 
+    def parts_of(self, kind_name: str) -> list:
+        """The parts of one kind, in the order the graph writes them."""
+        found = []
+        for part in self.parts:
+            kind = part.kind
+            if kind is not None and kind.name == kind_name:
+                found.append(part)
+        return found
+
+    def held(self, kind_name: str) -> Any:
+        """The record of the one part of a kind held once, else its default."""
+        found = self.parts_of(kind_name)
+        if len(found) > 1:
+            names = [part.name for part in found]
+            raise GraphError(
+                f"the parts {names} are each a {kind_name}, which a machine "
+                "holds once"
+            )
+        if found:
+            return found[0].settings
+        kind = part_kinds.kind_named(kind_name)
+        return kind.default
+
+    def task_facts(self) -> dict:
+        """The task's facts a threshold reads, None where none is stated.
+
+        The names are threshold_sources.TASK_FACTS; a window size of
+        None is the distance.
+        """
+        qpu = self.held(part_kinds.QPU)
+        workload = self.held(part_kinds.WORKLOAD)
+        workload_record = workload.workload_record
+        probability = None
+        if workload_record is not None:
+            probability = workload_record.physical_error_probability
+        windows = self.held("windows")
+        scheme = windows.scheme
+        return {
+            "distance": qpu.distance,
+            "physical_error_probability": probability,
+            "round_period_microseconds": qpu.round_period_microseconds,
+            "commit_rounds": scheme.commit_rounds,
+            "buffer_rounds": scheme.buffer_rounds,
+        }
+
+    def at_task(self) -> "Machine":
+        """The machine with its workload lowered and its thresholds read.
+
+        A maker row is lowered against the QPU, then each switching
+        part's calibration table row is read at the task's facts, so a
+        task's id covers the number it gives; a machine already at its
+        task is returned unchanged.
+        """
+        workload = self.held(part_kinds.WORKLOAD)
+        qpu = self.held(part_kinds.QPU)
+        lowered = workload.lowered_for(qpu)
+        machine = self
+        if lowered is not workload:
+            machine = self.with_held(part_kinds.WORKLOAD, lowered)
+        _refuse_a_route_on_a_patch_no_operation_has(machine)
+        facts = machine.task_facts()
+        for part in machine.parts_of(part_kinds.SWITCHING):
+            threshold = part.settings.threshold
+            read = threshold.at_task(facts)
+            if read is threshold:
+                continue
+            settings = dataclasses.replace(part.settings, threshold=read)
+            changed = dataclasses.replace(part, settings=settings)
+            machine = machine.with_part(changed)
+        return machine
+
     def set_in_the_run_file(self) -> tuple:
         """The paths the graph's workload fixes, each at its part's name."""
-        workload = part_kinds.workload_of(self.parts)
+        workload = self.held(part_kinds.WORKLOAD)
         paths = []
         for part in self.parts:
             run_file_fields = part.run_file_fields(workload)
@@ -167,12 +248,28 @@ class Machine:
         replaced = [_chosen(kept, part) for kept in self.parts]
         return dataclasses.replace(self, parts=tuple(replaced))
 
+    def with_held(self, kind_name: str, settings: Any) -> "Machine":
+        """The machine with its part of a kind held once given this record.
+
+        A machine with no such part gets one named for the kind.
+        """
+        found = self.parts_of(kind_name)
+        if not found:
+            part = Part(kind_name, settings)
+            return self.with_part(part)
+        return self.with_record(found[0].name, settings)
+
+    def with_record(self, name: str, settings: Any) -> "Machine":
+        """The machine with one part's record replaced, its site kept."""
+        part = self.part(name)
+        changed = dataclasses.replace(part, settings=settings)
+        return self.with_part(changed)
+
     def with_settings(self, name: str, **changes: Any) -> "Machine":
         """The machine with fields of one part's record changed."""
         part = self.part(name)
         settings = dataclasses.replace(part.settings, **changes)
-        changed = dataclasses.replace(part, settings=settings)
-        return self.with_part(changed)
+        return self.with_record(name, settings)
 
     def with_wires(self, *wires: Wire) -> "Machine":
         """The machine with these wires added."""
@@ -274,3 +371,45 @@ def _unwired_required(part: Part, wired: set) -> list:
         if port.is_required and written not in wired:
             unwired.append(written)
     return unwired
+
+
+def _refuse_a_route_on_a_patch_no_operation_has(machine: Machine) -> None:
+    """A readout route on a patch no operation reads out is never taken.
+
+    The fabric takes a route by a readout's whole footprint and
+    qpu_to_controller for every other (links/fabric.py), so such a route
+    would be ignored in silence. A footprint is an operation's patches,
+    one of them, or its qubits (qpu/syndrome_devices.py), so only a
+    patch no operation has is certain to match nothing.
+    """
+    routes = machine.readout_routes
+    workload = machine.held(part_kinds.WORKLOAD)
+    workload_record = workload.workload_record
+    if not routes or workload_record is None:
+        return
+    occupied = _patches_read_out(workload_record)
+    for route in routes:
+        _refuse_a_route_off_the_patches(route, occupied)
+
+
+def _refuse_a_route_off_the_patches(route: Any, occupied: set) -> None:
+    """A route that names a patch outside occupied, refused."""
+    unknown = [patch for patch in route.patch_ids if patch not in occupied]
+    if not unknown:
+        return
+    raise ValueError(
+        f"the readout route for patches {list(route.patch_ids)} "
+        f"names {unknown}, which no operation reads out, so it would "
+        "never be taken; the operations read out "
+        f"{sorted(occupied, key=repr)}"
+    )
+
+
+def _patches_read_out(workload_record: object) -> set:
+    """Every patch a readout's footprint can hold."""
+    patches = set()
+    for operation in workload_record.operations:
+        footprint = program_records.patches_of(operation)
+        patches.update(footprint)
+        patches.update(operation.qubits)
+    return patches

@@ -26,7 +26,6 @@ import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.settings as qpu_settings
-import decsim.topology.slotted as slotted
 import examples.deltakit_example as deltakit_example
 import examples.live_memory_example as live_memory_example
 import tests.qpu.memory_programs as memory_programs
@@ -94,10 +93,9 @@ def test_memory_patches_runs_one_memory_per_patch_at_once():
         physical_error_probability=0.001,
     )
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
-    base = slotted.resolved(weak_base)
     workload = workload_settings.WorkloadSettings.running(patches)
-    settings = dataclasses.replace(base, workload=workload)
-    machine = machine_module.Machine.build(settings, 0)
+    graph = weak_base.with_held("workload", workload)
+    machine = machine_module.Machine.build(graph, 0)
     result = machine.run()
     shots = machine.observation.sampled_shots.shots_by_operation
 
@@ -275,15 +273,15 @@ def test_a_live_memory_fixes_the_distance_and_a_memory_follows_it():
     assert lowered.fixes_the_distance
 
 
-def _run(settings, seed):
-    machine = machine_module.Machine.build(settings, seed)
+def _run(graph, seed):
+    machine = machine_module.Machine.build(graph, seed)
     result = machine.run()
     return machine, result
 
 
-def _with_workload(settings, workload):
+def _with_workload(graph, workload):
     running = workload_settings.WorkloadSettings.running(workload)
-    return dataclasses.replace(settings, workload=running)
+    return graph.with_held("workload", running)
 
 
 def _commands(machine) -> list:
@@ -304,16 +302,16 @@ def test_the_deltakit_memory_maker_runs_what_the_example_tool_runs():
     tool_workload = deltakit_example.memory_workload(
         circuit, rounds, 24, "memory-patch"
     )
-    tool_settings = deltakit_example.supplied_settings(
+    tool_graph = deltakit_example.supplied_machine(
         tool_workload,
         distance=3,
         round_count=24,
         period_microseconds=1.1,
         feedback_microseconds=4.0,
     )
-    made_settings = _with_workload(tool_settings, made)
-    machine, result = _run(made_settings, 0)
-    tool_machine, tool_result = _run(tool_settings, 0)
+    made_graph = _with_workload(tool_graph, made)
+    machine, result = _run(made_graph, 0)
+    tool_machine, tool_result = _run(tool_graph, 0)
 
     assert dataclasses.asdict(result) == dataclasses.asdict(tool_result)
     assert _commands(machine) == _commands(tool_machine)
@@ -329,7 +327,7 @@ def test_the_live_deltakit_memory_maker_runs_what_the_live_tool_runs():
         "rotated_surface", 3, "Z", 0.001, round_period_microseconds=1.1
     )
     stream_id = producers.LIVE_STREAM_ID
-    tool_settings = live_memory_example.live_settings(
+    tool_graph = live_memory_example.live_machine(
         program,
         distance=3,
         round_period_microseconds=1.1,
@@ -338,9 +336,9 @@ def test_the_live_deltakit_memory_maker_runs_what_the_live_tool_runs():
         feedback_microseconds=4.0,
         decoder_microseconds=0.1,
     )
-    made_settings = _with_workload(tool_settings, made)
-    machine, result = _run(made_settings, 17)
-    tool_machine, tool_result = _run(tool_settings, 17)
+    made_graph = _with_workload(tool_graph, made)
+    machine, result = _run(made_graph, 17)
+    tool_machine, tool_result = _run(tool_graph, 17)
     measurements = machine.qpu.syndrome_source.sampled_measurements(stream_id)
     tool_source = tool_machine.qpu.syndrome_source
     tool_measurements = tool_source.sampled_measurements(stream_id)

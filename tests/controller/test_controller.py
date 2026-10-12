@@ -12,6 +12,8 @@ the QPU is the QPU's own event, and the law for it is
 tests/qpu/test_cycle_clock.py.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.config as config
@@ -19,8 +21,10 @@ import decsim.controller.controller as controller_module
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
-import decsim.links.link_profiles as link_profiles
 import decsim.records.rounds as round_records
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 # a 1 GHz controller, so its period is 1000 ticks and the reference
 # card's 0.15 us crossing already lands on one of its edges
@@ -33,6 +37,18 @@ SLOW_CLOCK = config.Clock(1_000_000)
 SLOW_SETTINGS = controller_settings.ControllerSettings(
     clock=SLOW_CLOCK, readout_to_bits_cycles=3
 )
+
+
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
 
 
 class RecordingAssembler:
@@ -62,7 +78,7 @@ def controller_with(engine, links, assembler, settings=SETTINGS):
 
 def test_a_readout_landing_mid_cycle_is_charged_from_the_next_edge():
     engine = engine_module.Engine()
-    reference = link_profiles.logical_reference_profile()
+    reference = REFERENCE_LAYOUT.card
     links = fabric_module.LinkFabric(reference, engine)
     assembler = RecordingAssembler(engine)
     controller = controller_with(

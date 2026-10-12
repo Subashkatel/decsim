@@ -24,12 +24,12 @@ base = decsim.Task("base", machines.weak_baseline(3, 0.002, 1.0)).machine
 card = code_geometry.BivariateBicycleCodeModel.Settings()
 source = syndrome_devices.TimingOnlyDevice.Settings()
 qpu = dataclasses.replace(
-    base.qpu, code_card=card, distance=None, source=source
+    base.held("qpu"), code_card=card, distance=None, source=source
 )
 memory = producers.MemorySettings(
     0.002, rounds=24, code_task=None, decoded=False
 )
-machine = dataclasses.replace(base, qpu=qpu, workload=memory)
+machine = base.with_held("qpu", qpu).with_held("workload", memory)
 stop = decsim.CollectionSettings(max_shots=1)
 experiment = decsim.Experiment(
     "look_ahead", [decsim.Task("gross", machine, collection=stop)]

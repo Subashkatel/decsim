@@ -10,11 +10,11 @@ import types
 
 import pytest
 
-import decsim.build.routes as routes_build
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
@@ -22,7 +22,7 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.schemes.sandwich as sandwich_scheme
@@ -37,8 +37,16 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# the slotted pools, no edge, the planner's windows on the weak pool
-_ROUTES = routes_build.slotted_routes(window_records.WEAK_POOL_ID, None)
+
+def _weak_routes():
+    """The weak base's routes: one pool, the planner's windows on it."""
+    weak_base = machines.weak_baseline(3, 0.001, 1.0)
+    at_task = weak_base.at_task()
+    layout = graph_layout.layout_of(at_task)
+    return layout.routes()
+
+
+_ROUTES = _weak_routes()
 
 
 def _weak_run():
@@ -56,10 +64,9 @@ def _weak_run():
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=decoder, unit_count=1, engine=declared_run.DECLARED_ENGINE
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    base = machines.base(workload, qpu)
+    graph = machines.with_pool(base, weak_decoder)
+    machine = machine_module.Machine.build(graph, 0)
     machine.run()
     return machine
 
@@ -96,10 +103,9 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
         algorithm=decoder, unit_count=1, engine=declared_run.DECLARED_ENGINE
     )
     windows = window_settings.WindowSettings(terminal_policy=terminal_policy)
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder, windows=windows
-    )
-    return machine_module.Machine.build(settings, 0)
+    base = machines.base(workload, qpu, windows)
+    graph = machines.with_pool(base, weak_decoder)
+    return machine_module.Machine.build(graph, 0)
 
 
 def test_a_modelled_window_never_reads_the_next_operations_rounds():
@@ -227,13 +233,9 @@ def _tan_sandwich_run(unit_count):
     )
     scheme = sandwich_scheme.TanSandwichScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak_decoder,
-        windows=windows,
-    )
-    machine = machine_module.Machine.build(settings, 3)
+    base = machines.base(workload, qpu, windows)
+    graph = machines.with_pool(base, weak_decoder)
+    machine = machine_module.Machine.build(graph, 3)
     result = machine.run()
     return machine, result
 

@@ -15,6 +15,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.experiment as experiment
+import decsim.presets.machines as machines
 
 THIS_FILE = pathlib.Path(__file__)
 STUDY = THIS_FILE.parents[2] / "experiments" / "data_movement" / "run.py"
@@ -52,67 +53,81 @@ def block_tasks(block: str) -> list:
     return [task for task in study.tasks if task.name.startswith(prefix)]
 
 
-def block_settings(block: str):
-    """One block's settings, at its first task."""
+def block_task(block: str):
+    """One block's first task."""
     tasks = block_tasks(block)
-    first_task = tasks[0]
-    return first_task.machine
+    return tasks[0]
+
+
+def weak_pool(block: str) -> decoder_settings.DecoderPoolSettings:
+    """One block's weak pool, at its first task."""
+    task = block_task(block)
+    part = task.machine.part(machines.WEAK_POOL)
+    return part.settings
+
+
+def edge_names(block: str) -> list:
+    """The names of one block's escalate edges, at its first task."""
+    task = block_task(block)
+    return [edge.name for edge in task.layout.edges]
 
 
 def test_the_control_block_copies_at_both_settings():
     """The reference defaults: input copy, boundary_fold copy."""
-    settings = block_settings(CONTROL)
+    weak = weak_pool(CONTROL)
 
-    assert settings.weak_decoder.copies_input
-    assert settings.weak_decoder.copies_boundary_fold
+    assert weak.copies_input
+    assert weak.copies_boundary_fold
 
 
 def test_the_input_block_changes_the_input_and_nothing_else():
-    base = block_settings(CONTROL)
-    variant = block_settings(INPUT_IN_PLACE)
+    base = weak_pool(CONTROL)
+    variant = weak_pool(INPUT_IN_PLACE)
 
-    assert not variant.weak_decoder.copies_input
-    weak_fold = variant.weak_decoder.copies_boundary_fold
-    assert weak_fold == base.weak_decoder.copies_boundary_fold
-    assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
-    assert variant.escalation_kind == base.escalation_kind
+    assert not variant.copies_input
+    assert variant.copies_boundary_fold == base.copies_boundary_fold
+    assert variant.algorithm == base.algorithm
+    assert edge_names(INPUT_IN_PLACE) == edge_names(CONTROL)
 
 
 def test_the_fold_block_changes_the_fold_and_nothing_else():
-    base = block_settings(CONTROL)
-    variant = block_settings(FOLD_IN_PLACE)
+    base = weak_pool(CONTROL)
+    variant = weak_pool(FOLD_IN_PLACE)
 
-    assert not variant.weak_decoder.copies_boundary_fold
-    assert variant.weak_decoder.copies_input == base.weak_decoder.copies_input
-    assert variant.weak_decoder.algorithm == base.weak_decoder.algorithm
-    assert variant.escalation_kind == base.escalation_kind
+    assert not variant.copies_boundary_fold
+    assert variant.copies_input == base.copies_input
+    assert variant.algorithm == base.algorithm
+    assert edge_names(FOLD_IN_PLACE) == edge_names(CONTROL)
 
 
 def test_the_switching_block_opens_the_last_two_hops():
     """Hops 8 and 9 need a strong tier and its two links priced."""
-    variant = block_settings(SWITCHING)
-    fabric = variant.links
+    task = block_task(SWITCHING)
+    strong = task.machine.part(machines.STRONG_POOL)
+    paths = task.layout.card.path_names()
 
-    assert variant.escalation_kind == "switching"
-    assert variant.strong_decoder == STRONG_TOSHIO
-    assert variant.strong_decoder.copies_input
-    assert fabric.weak_decoder_to_strong_decoder is not None
-    assert fabric.strong_buffer_to_strong_decoder is not None
+    assert edge_names(SWITCHING) == [machines.SWITCHING]
+    assert strong.settings == STRONG_TOSHIO
+    assert strong.settings.copies_input
+    assert "weak_to_strong" in paths
+    assert "strong_buffer_to_strong" in paths
 
 
 @pytest.mark.parametrize("block", STUDY_BLOCKS)
 def test_every_study_block_counts_its_data_movement(block):
     """The counters are off by default, so the grid asks for them."""
-    settings = block_settings(block)
-    assert settings.observation.data_movement
-    assert settings.observation.trace == "chrome"
+    task = block_task(block)
+    observation = task.machine.observation
+    assert observation.data_movement
+    assert observation.trace == "chrome"
 
 
 def swept_distances(block: str) -> list:
     """Every code distance one block names."""
     distances = set()
     for task in block_tasks(block):
-        distances.add(task.machine.qpu.distance)
+        qpu = task.machine.held("qpu")
+        distances.add(qpu.distance)
     return sorted(distances)
 
 
@@ -121,11 +136,11 @@ def test_every_study_block_sweeps_the_same_distances_on_priced_cards(
     block,
 ):
     """A priced card decodes on no host clock, so the counts repeat."""
-    settings = block_settings(block)
+    pool = weak_pool(block)
     distances = swept_distances(block)
     weak = WEAK_TOSHIO_BY_BLOCK[block]
-    assert settings.weak_decoder.algorithm == weak.algorithm
-    assert settings.weak_decoder.engine == weak.engine
+    assert pool.algorithm == weak.algorithm
+    assert pool.engine == weak.engine
     assert distances == [3, 5, 7]
 
 

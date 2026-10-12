@@ -80,10 +80,10 @@ DOWNLINK = fabrics.ClockedLink(
 # tier's correction ride the fiber loop; the strong side, Backline's
 # cable. The fabric prices the machine's every hop, so a run that drops
 # the weak pool keeps Experiment 1's card.
-FABRIC = fabrics.PathLinks(
-    controller_to_weak_buffer=UPLINK,
-    weak_buffer_to_weak_decoder=FRAME_READ,
-    weak_decoder_to_frame=DOWNLINK,
+FABRIC = fabrics.RoleLinks(
+    write_written=UPLINK,
+    read_written=FRAME_READ,
+    answer_fridge=DOWNLINK,
     base=link_cards.ROCE_V2_CPU_FABRIC,
 )
 
@@ -126,31 +126,22 @@ def weak_alone(
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=clocks.FRIDGE_CLOCK
     )
-    readout_controller = controller()
-    event_forming = detection_events()
-    union_find_pool = weak_decoder()
-    parts = (
-        graph.Part(machines.QPU, qpu),
-        graph.Part(machines.CONTROLLER, readout_controller),
-        graph.Part("detection_events", event_forming),
-        graph.Part(machines.WINDOWS, windows),
-        graph.Part("decoder_manager", decoder_manager),
-        graph.Part("workload", workload),
-        graph.Part(machines.FRAME, pauli_frame),
-        graph.Part(machines.WEAK_STORE, weak_syndrome_buffer, fabrics.FRIDGE),
-        graph.Part(machines.WEAK_POOL, union_find_pool, fabrics.FRIDGE),
-    )
-    return graph.Machine(
+    controller_record = controller()
+    detection_event_record = detection_events()
+    machine = machines.base(
+        qpu,
+        controller_record,
+        detection_event_record,
+        windows,
+        decoder_manager,
+        workload,
+        pauli_frame,
         clock=clocks.FRIDGE_CLOCK,
-        parts=parts,
-        wires=(
-            *machines.LOOP_WIRES,
-            machines.WEAK_STORE_WRITE,
-            *machines.WEAK_TIER_WIRES,
-        ),
-        fabric=FABRIC,
         observation=observation,
+        fabric=FABRIC,
     )
+    weak_pool = weak_decoder()
+    return machines.with_pool(machine, weak_pool, store=weak_syndrome_buffer)
 
 
 def strong_alone(
@@ -158,19 +149,9 @@ def strong_alone(
     physical_error_probability: float,
     strong_pool: decoder_settings.DecoderPoolSettings,
 ) -> graph.Machine:
-    """The same machine with every window decoded by a strong pool.
-
-    The weak pool is gone; the controller still writes the weak store,
-    and the strong store and pool sit on the host.
-    """
+    """The same machine with every window decoded by a strong pool."""
     machine = weak_alone(distance, physical_error_probability)
-    without_weak = machine.without_part(machines.WEAK_POOL)
-    store = syndrome_buffer_module.SyndromeBufferSettings()
-    strong_store = graph.Part(machines.STRONG_STORE, store, fabrics.HOST)
-    strong = graph.Part(machines.STRONG_POOL, strong_pool, fabrics.HOST)
-    with_store = without_weak.with_part(strong_store)
-    with_pool = with_store.with_part(strong)
-    return with_pool.with_wires(*machines.STRONG_TIER_WIRES)
+    return machines.strong_alone(machine, strong_pool)
 
 
 def switching(

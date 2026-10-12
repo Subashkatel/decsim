@@ -280,19 +280,17 @@ part is handed it at `build`; every other wire that crosses from one
 part to another is in `Machine.assemble`, which connects the parts. One
 root object, `Machine`, compiles the plan, builds the parts and
 assembles them; no component builds or looks up another. A user builds
-a machine in Python: each part's settings record holds its components'
-records, and a pluggable component is chosen by the record passed for
-it (`StimDevice.Settings()` as the QPU's source,
+a machine in Python as a graph of named parts
+(`decsim/topology/graph.py`): each part's settings record holds its
+components' records, and a pluggable component is chosen by the record
+passed for it (`StimDevice.Settings()` as the QPU's source,
 `UnionFindDecoder.Settings()` as a pool's algorithm).
 
 A pool, a store and an escalate edge go by their parts' names. A
 component takes the names its layout record gives it (its word, seat,
 statistics path, seeds and hops, `decsim/build/layout.py`) and never
 names a tier: code loops over the pools, stores and edges, the entry
-first, and asks for one by its name. A slotted machine's records carry
-the names its slots have always given, from one table
-(`slotted_layout`), so its results, seeds and statistics stay as they
-were.
+first, and asks for one by its name.
 
 Adding a component means: write one class that implements the port,
 give it a settings record whose `build` makes it, each field with its

@@ -19,6 +19,8 @@ import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(
@@ -59,23 +61,34 @@ def default_path(name, bits):
     )
 
 
-def every_path_free():
-    """One free path per hop, keyed by the hop's name.
+def _switching_hops() -> tuple:
+    """Every hop of a weak pool escalating to a strong pool on the host."""
+    switching = run_files.switching_machine()
+    at_task = switching.at_task()
+    layout = graph_layout.layout_of(at_task)
+    return layout.card.paths
+
+
+SWITCHING_HOPS = _switching_hops()
+
+
+def card_with(readout_routes=(), **paths):
+    """A card of every switching hop, free unless the test wires it itself.
 
     A card names every hop, so a test that cares about one path wires
     that one and leaves the rest on the shared free channel.
     """
-    names = []
-    for path in transfer_records.SLOTTED_PATHS:
-        names.append(path)
-    return dict.fromkeys(names, FREE_PATH)
+    named = []
+    for hop in SWITCHING_HOPS:
+        path_settings = paths.get(hop.name, FREE_PATH)
+        wired = dataclasses.replace(hop, settings=path_settings)
+        named.append(wired)
+    return link_settings.FabricSettings(tuple(named), readout_routes)
 
 
 def fabric_with(engine, listener=None, **paths):
     """A fabric whose paths are free unless the test wires them itself."""
-    wiring = every_path_free()
-    wiring.update(paths)
-    settings = link_settings.FabricSettings(profile_name="test", **wiring)
+    settings = card_with(**paths)
     fabric = fabric_module.LinkFabric(settings, engine)
     if listener is not None:
         fabric.trace.transfer_delivered.connect(listener.on_transfer)
@@ -168,7 +181,7 @@ def test_two_paths_on_one_channel_share_its_queue():
     send_on(
         engine,
         fabric,
-        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
+        "controller_to_weak_buffer",
         4,
         0,
         second_round,
@@ -335,7 +348,7 @@ def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
     send_on(
         engine,
         fabric,
-        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
+        "controller_to_weak_buffer",
         8,
         0,
         second_round,
@@ -352,8 +365,8 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     shared = unbounded_path("shared", 0, setup_ticks=5)
     fabric = fabric_with(
         engine,
-        weak_buffer_to_weak_decoder=shared,
-        strong_buffer_to_strong_decoder=shared,
+        weak_buffer_to_weak=shared,
+        strong_buffer_to_strong=shared,
     )
     delivered = []
     weak_window = requested_window(1)
@@ -361,7 +374,7 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     send_on(
         engine,
         fabric,
-        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
+        "weak_buffer_to_weak",
         8,
         10,
         weak_window,
@@ -370,7 +383,7 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     send_on(
         engine,
         fabric,
-        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER,
+        "strong_buffer_to_strong",
         8,
         11,
         strong_window,
@@ -402,13 +415,13 @@ def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
         header_bits_per_transfer=header_bits,
         excludes_receiver_processing=False,
     )
-    fabric = fabric_with(engine, weak_decoder_to_strong_decoder=framed_path)
+    fabric = fabric_with(engine, weak_to_strong=framed_path)
     delivered = []
     region = operation_attribution()
     send_on(
         engine,
         fabric,
-        transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
+        "weak_to_strong",
         payload_bits,
         0,
         region,
@@ -456,7 +469,7 @@ def test_a_transfer_with_no_payload_size_still_stops_a_bounded_channel():
     attribution = round_attribution(1)
     with pytest.raises(TypeError, match="unsupported operand type"):
         fabric.send(
-            transfer_records.CONTROLLER_TO_WEAK_BUFFER,
+            "controller_to_weak_buffer",
             None,
             0,
             attribution,
@@ -480,12 +493,7 @@ def test_the_expected_delay_includes_the_paths_setup():
     engine = decsim.engine.Engine()
     with_setup = unbounded_path("store", 3, setup_ticks=5)
     fabric = fabric_with(engine, controller_to_strong_buffer=with_setup)
-    assert (
-        fabric.expected_delay_ticks(
-            transfer_records.CONTROLLER_TO_STRONG_BUFFER, 8, 0
-        )
-        == 8
-    )
+    assert fabric.expected_delay_ticks("controller_to_strong_buffer", 8, 0) == 8
 
 
 def test_the_fabric_fills_the_link_port():
@@ -533,9 +541,9 @@ def test_the_fabric_builds_one_channel_of_the_protocols_per_channel_name():
         shared.channel, protocol=counting_protocol
     )
     shared = dataclasses.replace(shared, channel=counting_channel)
-    wiring = every_path_free()
-    wiring.update(qpu_to_controller=shared, controller_to_weak_buffer=shared)
-    settings = link_settings.FabricSettings(profile_name="test", **wiring)
+    settings = card_with(
+        qpu_to_controller=shared, controller_to_weak_buffer=shared
+    )
     fabric = fabric_module.LinkFabric(settings, engine)
     delivered = []
     first_round = round_attribution(1)
@@ -552,7 +560,7 @@ def test_the_fabric_builds_one_channel_of_the_protocols_per_channel_name():
     send_on(
         engine,
         fabric,
-        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
+        "controller_to_weak_buffer",
         4,
         0,
         second_round,

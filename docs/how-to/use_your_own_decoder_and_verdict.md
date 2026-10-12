@@ -62,7 +62,7 @@ and differ between seeds.
 
 Declare them on the class, as [How to record statistics of your own
 part](record_statistics.md) says. A decoder's are recorded at its
-pool's algorithm, `weak_decoder.algorithm` on a machine of two pools;
+pool's algorithm, `weak.algorithm` on a machine of two pools;
 a verdict's at its edge's, `switching.verdict`.
 
 ## 5. Write the verdict

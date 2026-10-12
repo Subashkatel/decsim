@@ -22,9 +22,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from typing import Optional
 
-import decsim.build.decoders as decoders_build
 import decsim.build.escalation as escalation_build
-import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.compiled_libraries as compiled_libraries
 import decsim.engine as engine_module
@@ -37,7 +35,6 @@ import decsim.observe.settings as observe_settings
 import decsim.parameters.assignments as assignments
 import decsim.records.program as program_records
 import decsim.records.results as result_records
-import decsim.settings as machine_settings
 
 RESULTS_DIR = pathlib.Path("results")
 RUN_FILE = "run.json"
@@ -329,14 +326,13 @@ def task_record(
     Building runs the task's build, so a refused build stops here, before
     anything is written.
     """
-    settings = task.machine
     plan = _plan(task)
     record = {
         "id": task.strong_id(),
         "name": task.name,
         "metadata": collect.json_value(task.metadata),
         "seeds": seeds,
-        "settings": collect.json_value(settings),
+        "settings": collect.json_value(task.machine),
         "built": _built_values(plan),
     }
     record["rounds_per_shot"] = _rounds_per_shot(plan)
@@ -358,7 +354,8 @@ def write_task_record(
     task_dir.mkdir(parents=True, exist_ok=True)
     record_path = task_dir / RECORD_FILE
     write_json(record_path, record)
-    workload_record = task.machine.workload.workload_record
+    workload = task.machine.held("workload")
+    workload_record = workload.workload_record
     if workload_record is not None:
         inputs_dir = task_dir / INPUTS_FOLDER
         _write_inputs(inputs_dir, workload_record)
@@ -367,7 +364,6 @@ def write_task_record(
 
 def write_shot(
     machine: machine_module.Machine,
-    settings: machine_settings.MachineSettings,
     run_dir: pathlib.Path,
     label: str,
     result: result_records.RunResult,
@@ -378,7 +374,7 @@ def write_shot(
     asks for them. examples/deltakit_example.py and
     examples/live_memory_example.py write their shot through it too.
     """
-    observation = settings.observation
+    observation = machine.graph.observation
     if observation.writes_log:
         write_log(machine.observation, run_dir, label)
     if observation.writes_trace:
@@ -655,24 +651,12 @@ def _how_it_ran() -> dict:
 
 def _plan(task: collect.Task) -> plan_build.Plan:
     """The plan the build derives from the task, before it wires."""
-    settings = task.machine
     engine = engine_module.Engine()
-    layout = layout_module.slotted_layout(settings)
+    layout = task.layout
     switching_parts = escalation_build.build_switching(
         layout, engine, task.online_threshold
     )
-    batches_each_member = decoders_build.batches_each_member(layout)
-    return plan_build.build_plan(
-        settings.qpu,
-        settings.workload,
-        settings.windows,
-        settings.idle_policy,
-        settings.detection_events,
-        settings.switching,
-        settings.decoder_manager.bulk_strong,
-        switching_parts,
-        batches_each_member,
-    )
+    return machine_module.plan_of(task.machine, layout, switching_parts)
 
 
 def _built_values(plan: plan_build.Plan) -> dict:

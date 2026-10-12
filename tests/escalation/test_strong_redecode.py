@@ -15,13 +15,13 @@ import dataclasses
 
 import pytest
 
-import decsim.build.routes as routes_build
 import decsim.engine as engine_module
 import decsim.escalation.pending_strong_windows as pending_module
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_window_shapes as shapes
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import decsim.records.routes as route_records
 import decsim.records.windows as window_records
 import decsim.statistics.registry as statistics_registry
 import tests.declared_run as declared_run
@@ -29,6 +29,14 @@ import tests.declared_run as declared_run
 WINDOW_KEY = (1, 2)
 FAR_BOUNDARY_KEY = (1, 4)
 REGION_ROUND_KEYS = ((1, 4), (1, 5), (1, 6))
+# the edge from the weak pool to the strong one, each hop named by the
+# parts at its ends (topology/graph_layout.py)
+EDGE_HOPS = route_records.EdgeHops(
+    window_records.WEAK_POOL_ID,
+    window_records.STRONG_POOL_ID,
+    "weak_to_strong",
+    "strong_to_weak",
+)
 
 
 def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
@@ -222,8 +230,7 @@ def _redecode(shape, receiver_row=_StrongReceiver):
     strong_output = _StrongOutput()
     queue = _DecodeQueue()
     verdict = _Verdict()
-    hops = routes_build.slotted_edge("direct")
-    redecode = strong_redecode_module.StrongRedecode(engine, hops)
+    redecode = strong_redecode_module.StrongRedecode(engine, EDGE_HOPS)
     redecode.shape = shape
     redecode.pending = pending_module.PendingStrongWindows()
     redecode.retention = _Retention()

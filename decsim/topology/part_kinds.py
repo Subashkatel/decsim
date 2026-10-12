@@ -1,9 +1,10 @@
 """The kinds of part a machine holds, and the ports each kind declares.
 
-A part is a decsim settings record, and its kind is the slot of
-MachineSettings whose type takes the record (parameters/kinds.py
-admits). So a researcher's own record joins a kind by meeting the
-slot's type, never by a list of classes here (STYLE.md rule 10).
+A part is a decsim settings record, and its kind is the one whose
+record type takes it (parameters/kinds.py admits). So a researcher's
+own record joins a kind by meeting the kind's type, never by a list of
+classes here (STYLE.md rule 10). A kind a machine holds once has a
+default record, which a machine with no part of the kind runs on.
 
 A kind declares its ports by name, each with a direction and the signal
 it carries, as a gem5 SimObject declares each Port with a role
@@ -16,11 +17,21 @@ does (port_params.py:284-300).
 
 import dataclasses
 import functools
-import typing
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
+import decsim.controller.policies as idle_policies
+import decsim.controller.settings as controller_settings
+import decsim.decoders.settings as decoder_settings
+import decsim.detector_error_model.settings as detection_event_settings
+import decsim.escalation.settings as escalation_settings
+import decsim.frontends.settings as workload_settings
 import decsim.parameters.kinds as kinds
-import decsim.settings as settings
+import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.ports as ports
+import decsim.qpu.magic_state_factories as magic_state_factories
+import decsim.qpu.settings as qpu_settings
+import decsim.windows.routers as routers
+import decsim.windows.settings as window_settings
 
 OUTPUT = "output"
 INPUT = "input"
@@ -34,7 +45,9 @@ REDECODES = "redecodes"
 CORRECTIONS = "corrections"
 DECISIONS = "decisions"
 COMMANDS = "commands"
-_WORKLOAD_SLOT = "workload"
+WORKLOAD = "workload"
+QPU = "qpu"
+SWITCHING = "switching"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -59,11 +72,19 @@ class Port:
 
 @dataclasses.dataclass(frozen=True)
 class PartKind:
-    """A kind of part: the MachineSettings slots that take it, its ports."""
+    """A kind of part: the record type it takes, its ports, its default.
+
+    hint is the type a part's record must meet, and a record swapped in
+    by name is found among the records it takes (parameters/tree.py).
+    is_many says a machine may hold any number of the kind; one held
+    once runs on default when it holds none, and None is no such part.
+    """
 
     name: str
-    slots: tuple
+    hint: Any
     ports: tuple = ()
+    is_many: bool = False
+    default: Any = None
 
     def port(self, name: str) -> Optional[Port]:
         """The port of this name, None for none."""
@@ -88,9 +109,11 @@ _QPU_PORTS = (
     Port("readout", OUTPUT, MEASUREMENTS),
     Port("pulses", INPUT, COMMANDS),
 )
+# A controller whose rounds reach no store runs a machine with no pool,
+# which decodes nothing on one idle pool (graph_layout.py layout_of).
 _CONTROLLER_PORTS = (
     Port("readout", INPUT, MEASUREMENTS),
-    Port("rounds", OUTPUT, ROUNDS, is_many=True),
+    Port("rounds", OUTPUT, ROUNDS, is_many=True, is_required=False),
     Port("decisions", INPUT, DECISIONS, is_required=False),
     Port("pulses", OUTPUT, COMMANDS),
 )
@@ -124,77 +147,122 @@ _PAULI_FRAME_PORTS = (
     Port("decisions", OUTPUT, DECISIONS),
 )
 # The parts off the path hold no port: their records set how the parts
-# on it behave.
+# on it behave. The defaults are a timing-only run of distance-three
+# surface code patches with no frame.
+_DEFAULT_QPU = qpu_settings.QpuSettings()
+_DEFAULT_CONTROLLER = controller_settings.ControllerSettings()
+_DEFAULT_IDLE_POLICY = idle_policies.SeparateDecodeJobsSettings()
+_DEFAULT_DETECTION_EVENTS = detection_event_settings.DetectionEventSettings()
+_DEFAULT_WINDOWS = window_settings.WindowSettings()
+_DEFAULT_DECODER_MANAGER = decoder_settings.DecoderManagerSettings()
+_DEFAULT_WORKLOAD = workload_settings.WorkloadSettings()
+_DEFAULT_FACTORY = magic_state_factories.InfiniteFactory.Settings()
 KINDS = (
-    PartKind("qpu", ("qpu",), _QPU_PORTS),
-    PartKind("controller", ("controller",), _CONTROLLER_PORTS),
+    PartKind(
+        QPU,
+        qpu_settings.QpuSettings,
+        _QPU_PORTS,
+        default=_DEFAULT_QPU,
+    ),
+    PartKind(
+        "controller",
+        controller_settings.ControllerSettings,
+        _CONTROLLER_PORTS,
+        default=_DEFAULT_CONTROLLER,
+    ),
     PartKind(
         "syndrome_buffer",
-        ("weak_syndrome_buffer", "strong_syndrome_buffer"),
+        ports.SyndromeBufferSettings,
         _SYNDROME_BUFFER_PORTS,
+        is_many=True,
     ),
     PartKind(
-        "decoder_pool", ("weak_decoder", "strong_decoder"), _DECODER_POOL_PORTS
+        "decoder_pool",
+        decoder_settings.DecoderPoolSettings,
+        _DECODER_POOL_PORTS,
+        is_many=True,
     ),
-    PartKind("pauli_frame", ("pauli_frame",), _PAULI_FRAME_PORTS),
-    PartKind("idle_policy", ("idle_policy",)),
-    PartKind("detection_events", ("detection_events",)),
-    PartKind("windows", ("windows",)),
-    PartKind("decoder_manager", ("decoder_manager",)),
-    PartKind("switching", ("switching",), _SWITCHING_PORTS),
-    PartKind("router", ("router",), _ROUTER_PORTS),
-    PartKind("workload", ("workload",)),
-    PartKind("magic_state_factory", ("magic_state_factory",)),
+    PartKind(
+        "pauli_frame", pauli_frame_module.PauliFrameConfig, _PAULI_FRAME_PORTS
+    ),
+    PartKind(
+        "idle_policy",
+        Union[
+            idle_policies.IgnoreSettings,
+            idle_policies.SeparateDecodeJobsSettings,
+            ports.IdlePolicySettings,
+        ],
+        default=_DEFAULT_IDLE_POLICY,
+    ),
+    PartKind(
+        "detection_events",
+        detection_event_settings.DetectionEventSettings,
+        default=_DEFAULT_DETECTION_EVENTS,
+    ),
+    PartKind(
+        "windows",
+        window_settings.WindowSettings,
+        default=_DEFAULT_WINDOWS,
+    ),
+    PartKind(
+        "decoder_manager",
+        decoder_settings.DecoderManagerSettings,
+        default=_DEFAULT_DECODER_MANAGER,
+    ),
+    PartKind(
+        SWITCHING,
+        escalation_settings.SwitchingSettings,
+        _SWITCHING_PORTS,
+        is_many=True,
+    ),
+    PartKind("router", routers.Router.Settings, _ROUTER_PORTS),
+    PartKind(
+        WORKLOAD,
+        Union[workload_settings.WorkloadSettings, ports.WorkloadMakerSettings],
+        default=_DEFAULT_WORKLOAD,
+    ),
+    PartKind(
+        "magic_state_factory",
+        Union[qpu_settings.FactorySettings, ports.MagicStateFactorySettings],
+        default=_DEFAULT_FACTORY,
+    ),
 )
+_KIND_BY_NAME = {kind.name: kind for kind in KINDS}
+
+
+def kind_named(name: str) -> PartKind:
+    """The kind of this name."""
+    return _KIND_BY_NAME[name]
 
 
 @functools.cache
 def kind_of(record_class: type) -> Optional[PartKind]:
-    """The kind whose slot takes records of this class; None for none."""
+    """The kind whose type takes records of this class; None for none.
+
+    A kind that names the class takes it before one whose Protocol it
+    only fills, so a record with a build of the same shape as another
+    kind's port stays its own kind.
+    """
     for kind in KINDS:
-        hint = slot_hint(kind)
-        if kinds.admits(hint, record_class):
+        if kinds.names(kind.hint, record_class):
+            return kind
+    for kind in KINDS:
+        if kinds.admits(kind.hint, record_class):
             return kind
     return None
-
-
-def slot_hint(kind: PartKind) -> Any:
-    """The type of the kind's first slot, which every one of its slots meets.
-
-    A part's record swapped by name is found among the records this type
-    takes (parameters/tree.py).
-    """
-    hints = _machine_hints()
-    first_slot = kind.slots[0]
-    return hints[first_slot]
 
 
 def run_file_fields(kind: PartKind, workload: object) -> tuple:
     """The fields of the kind's record that the machine's workload fixes.
 
-    MachineSettings names them by slot (qpu.distance,
-    settings.set_in_the_run_file_with); a part of the kind names them by
-    its own name.
+    A workload made at a distance of its own fixes the QPU's distance,
+    since another would leave the circuit behind, a distance-5 machine
+    running a distance-3 circuit; a lowered one fixes its lowered
+    fields. A maker row that follows the QPU fixes nothing.
     """
-    found = []
-    paths = settings.set_in_the_run_file_with(workload)
-    for path in paths:
-        slot, _, field = path.partition(".")
-        if slot in kind.slots:
-            found.append(field)
-    return tuple(found)
-
-
-def workload_of(parts: tuple) -> object:
-    """The workload the parts run: the workload part's, else the default."""
-    for part in parts:
-        kind = part.kind
-        if kind is not None and _WORKLOAD_SLOT in kind.slots:
-            return part.settings
-    defaults = settings.MachineSettings()
-    return defaults.workload
-
-
-@functools.cache
-def _machine_hints() -> dict:
-    return typing.get_type_hints(settings.MachineSettings)
+    if kind.name == QPU and workload.fixes_the_distance:
+        return ("distance",)
+    if kind.name == WORKLOAD:
+        fields = getattr(workload, "fields_set_in_the_run_file", ())
+        return tuple(fields)
+    return ()

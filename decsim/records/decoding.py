@@ -7,7 +7,7 @@ escalation policy reads them with the result, and so does the frame's
 record of the correction it accepted, which closes the decode.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional, Union
@@ -83,6 +83,10 @@ class WindowConfidence:
 # stored at once before it ends. Every token also answers
 # holders_waited_for: the holds that end before it can. A bounded store
 # asks both while a round waits for room (syndrome_buffer.py).
+#
+# Every token also answers served_window_key: the window it serves, so
+# a stream that lets its final windows go lets their spent tokens go
+# too (round_holds.py).
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,10 @@ class WindowReads:
         operation_id = self.window_key[0]
         return (operation_id,)
 
+    def served_window_key(self) -> Optional[tuple]:
+        """The window whose decode the hold serves."""
+        return self.window_key
+
     def holders_waited_for(self) -> tuple:
         """None: its decode waits for rounds, not for another hold."""
         return ()
@@ -112,9 +120,14 @@ class WindowReads:
 
 @dataclass(frozen=True)
 class PotentialStrong:
-    """A hold: a window's rounds, kept in case its weak result escalates."""
+    """A hold: a window's rounds, kept in case its weak result escalates.
+
+    target is the pool of the edge the hold is for: a chain keeps one
+    in each edge's two stores (windows/round_retention.py).
+    """
 
     window_key: tuple
+    target: window_records.PoolId = window_records.STRONG_POOL_ID
 
     def referenced_operation_ids(self) -> tuple:
         """None: the rounds held are the held window's own."""
@@ -123,6 +136,10 @@ class PotentialStrong:
     def operation_ids_read_at_once(self) -> tuple:
         """None: the hold ends at a weak verdict that keeps the window."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window whose decode the hold serves."""
+        return self.window_key
 
     def holders_waited_for(self) -> tuple:
         """None: an absorbing strong window may end it unread."""
@@ -150,6 +167,10 @@ class PotentialRestart:
         """None: the hold ends when the window before it commits."""
         return ()
 
+    def served_window_key(self) -> Optional[tuple]:
+        """The window whose decode the hold serves."""
+        return self.window_key
+
     def holders_waited_for(self) -> tuple:
         """None: the window before it may be absorbed rather than read."""
         return ()
@@ -172,6 +193,10 @@ class LaterStreamReads:
     def operation_ids_read_at_once(self) -> tuple:
         """None: the hold moves on as the stream's windows register."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """None: it serves the stream's windows still to come."""
+        return None
 
     def holders_waited_for(self) -> tuple:
         """None: the hold moves on as the stream's windows register."""
@@ -198,6 +223,10 @@ class PendingStrong:
         """The request's operation: its job waits for every round stored."""
         return (self.request_key.operation_id,)
 
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
+
     def holders_waited_for(self) -> tuple:
         """The restart window's read, which ends before its weak commit."""
         if self.restart_key is None:
@@ -218,6 +247,10 @@ class StrongInputInFlight:
     def operation_ids_read_at_once(self) -> tuple:
         """None: its decode has started on rounds already stored."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """None: it ends when its rounds land in unit memory."""
@@ -244,6 +277,10 @@ class DecoderInputHold:
         """None: its decode has started on rounds already stored."""
         return ()
 
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
+
     def holders_waited_for(self) -> tuple:
         """The reads of the windows whose boundaries it waits for."""
         waited = []
@@ -266,6 +303,10 @@ class RephaseGuard:
     def operation_ids_read_at_once(self) -> tuple:
         """None: the hold ends when the strong plan lands."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """None: the hold ends when the strong plan lands."""
@@ -480,9 +521,6 @@ class DecodeJob:
     ready_time: int = 0
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
-    strong_label: Optional[str] = (
-        None  # manager-owned label for a speculative strong decode
-    )
     spatial_nodes: Optional[int] = (
         None  # decoding-graph nodes per round (latency models)
     )
@@ -498,6 +536,9 @@ class DecodeJob:
     strong_decode_for: Optional[tuple] = (
         None  # (operation_id, window_id) this strong job re-decodes
     )
+    # the windows whose committed boundary a target job folds at its
+    # faces; a redo of this job at the next edge pins the same faces
+    pinned_faces: tuple = ()
     cancelled: bool = False  # cancelled speculative decodes discard completion
     completed: bool = (
         False  # terminal flag; admission refuses reuse of a completed job
@@ -531,6 +572,10 @@ class DecodeJob:
     # read one number; None until then, and under controller-side
     # formation nothing ever asks (decoders/detection_events.py)
     detection_event_rounds: Optional[tuple] = None
+    # a merged strong batch's request jobs as the batch was formed, the
+    # ones cancelled since included: the inputs it holds and decodes
+    # (decode_queue.py); empty on every other job
+    batch_members: tuple = ()
 
     def payload_bits(self) -> Optional[int]:
         """The bits of the job's payloads and the rounds before them.
@@ -623,6 +668,10 @@ class DecoderStageRecord:
     # input held when the stage closed (last_round_by_operation); a
     # strong region reads past the window it answers for
     last_rounds_read: tuple = ()
+    # the (operation id, window id) of every request the decode serves:
+    # a merged batch's are its members' windows, which its own (-1, 0)
+    # does not name (observe/stage_records.py files it under each)
+    served_windows: tuple = ()
 
 
 class DecoderEvidence(Enum):
@@ -633,17 +682,21 @@ class DecoderEvidence(Enum):
     FORCED_CLASS_WEIGHT is the minimum weight inside a pinned logical
     class, honest only from a decoder that minimises weight inside it (Lee
     et al. 2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and radii a
-    cluster decode grew (Meister et al. 2405.07433 Algorithm 2).
+    cluster decode grew (Meister et al. 2405.07433 Algorithm 2); CONSENSUS
+    is the share of an ensemble's members that vote with its majority
+    (Shutty et al. 2401.12434 Sec. V).
     """
 
     FORCED_CLASS_WEIGHT = "forced_class_weight"
     CLUSTER_GROWTH = "cluster_growth"
+    CONSENSUS = "consensus"
 
 
 # The named capabilities follow the sets they are built from.
 NO_DECODER_EVIDENCE = frozenset()
 FORCED_CLASS_SOLVES = frozenset({DecoderEvidence.FORCED_CLASS_WEIGHT})
 CLUSTER_GROWTH_EVIDENCE = frozenset({DecoderEvidence.CLUSTER_GROWTH})
+CONSENSUS_EVIDENCE = frozenset({DecoderEvidence.CONSENSUS})
 
 
 class BackendDecodeStatus(Enum):
@@ -682,6 +735,8 @@ class WindowDecode:
     cluster_evidence: Optional[evidence_records.UnionFindHardEvidence] = None
     iterations: Optional[int] = None
     no_correction_reason: Optional[BackendFailureReason] = None
+    # the decoder's own named numbers, which DecodeResult.evidence carries
+    evidence: Optional[Mapping[str, float]] = None
 
 
 @dataclass(frozen=True)
@@ -738,6 +793,20 @@ class DecodeResult:
     # BackendFailureReason of a backend that produced no correction, whose
     # empty stand-in is the correction above; None when it produced one
     no_correction_reason: Optional[BackendFailureReason] = None
+    # every fault the decode selected, owned or not, in the columns of
+    # fault_representation: the error set an ensemble prices; None from
+    # a row that selects none
+    selected_faults: Optional[numpy.ndarray] = None
+    fault_representation: Optional[fault_models.FaultRepresentation] = None
+    # an ensemble's share of members voting with its majority; None from
+    # any other row
+    agreement: Optional[float] = None
+    # a decoding batch's answer for each member, by its request key
+    # (decoders/batching.py); None from any other decode
+    member_results: Optional[dict] = None
+    # a decoder's own named numbers, for a verdict of its own to read;
+    # decsim reads none of them. None from every shipped row
+    evidence: Optional[Mapping[str, float]] = None
 
 
 @dataclass(frozen=True)
@@ -779,7 +848,12 @@ class RunShape:
     Machine.build. is_absorbing_strong_window is the strong window row's
     declaration that its region replaces the weak windows it covers (the
     double window, Toshio et al. 2510.25222 Sec. III C). commit_round_count
-    and buffer_round_count size every window.
+    and buffer_round_count size every window. Each edge checks the run
+    with its own strong window row; leaves_the_entry_pool says whether
+    the edge decides on the entry pool's windows, whose boundaries the
+    boundary policy ships. is_bulk_strong says decoder_manager.bulk_strong
+    batches the strong re-decodes timing-only; batches_each_member that a
+    pool's batching row batches them and decodes each member.
     """
 
     # the ports.WindowingScheme and ports.BoundaryPolicy, opaque to the
@@ -794,3 +868,5 @@ class RunShape:
     is_bulk_strong: bool
     has_dynamic_streams: bool
     has_static_decode_plan: bool
+    leaves_the_entry_pool: bool = True
+    batches_each_member: bool = False

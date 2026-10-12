@@ -38,6 +38,7 @@ repository.
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
@@ -56,16 +57,18 @@ distance 3: one record for each part of the machine.
 ## Step 2. Compile what the parts are built for
 
 Some things are built from the settings before any part exists, because
-more than one part is built for them: the switching part, the plan (the
-windows, the circuit and the round clock), the detection event
-formation, the decoder units, and the store slots: which syndrome
-buffers a decoder reads, and whether it reads them in place.
+more than one part is built for them: the layout (each pool, the store
+it reads, whether it reads it in place, and each escalate edge), a
+switching part per edge, the plan (the windows, the circuit and the
+round clock), the detection event formation, and the decoder units.
 
 ```python
 engine = engine_module.Engine()
-switching = escalation_build.build_switching(
-    settings.switching, settings.weak_decoder, engine
+layout = layout_module.slotted_layout(settings)
+switching_parts = escalation_build.build_switching(
+    layout, engine, machine_clock=settings.clock
 )
+batches_each_member = decoders_part.batches_each_member(layout)
 plan = plan_build.build_plan(
     settings.qpu,
     settings.workload,
@@ -74,31 +77,22 @@ plan = plan_build.build_plan(
     settings.detection_events,
     settings.switching,
     settings.decoder_manager.bulk_strong,
-    switching,
+    switching_parts,
+    batches_each_member,
 )
-window_tier = settings.window_tier
-window_decoder = settings.decoder_settings_for(window_tier.value)
-escalates = settings.switching is not None
+formation_paths = layout.formation_paths()
 detection_events = readout_part.build_detection_events(
     settings.detection_events,
     settings.clock,
     plan.device,
-    window_tier,
-    escalates,
+    formation_paths,
 )
-pool = decoders_part.build_decoder_pool(
-    window_decoder,
-    settings.strong_decoder,
-    window_tier,
-    escalates,
-    settings.clock,
-    detection_events,
-    switching.confidence_signal,
+signal_by_pool = escalation_build.signal_by_pool(switching_parts)
+pools = decoders_part.build_pool_units(
+    layout, settings.clock, detection_events, signal_by_pool
 )
-weak_store_slot, strong_store_slot = machine_module.store_slots(
-    settings, window_tier, pool
-)
-policy_type = type(switching.policy)
+entry_switching = switching_parts[0]
+policy_type = type(entry_switching.policy)
 print(policy_type.__name__, plan.round_ticks)
 ```
 
@@ -129,8 +123,7 @@ control = control_part.Control.build(
 readout = readout_part.Readout.build(
     settings.controller,
     settings.links,
-    weak_store_slot,
-    strong_store_slot,
+    layout.stores,
     settings.clock,
     engine,
     detection_events,
@@ -140,18 +133,20 @@ window_models = built_window_models.BuiltWindowModels()
 windows = windows_part.Windows.build(
     settings.windows,
     settings.workload,
-    settings.switching,
-    window_decoder,
-    settings.strong_decoder,
-    window_tier,
+    layout,
     settings.clock,
     engine,
     plan,
     links,
     window_models,
 )
+target_by_source = layout.target_by_source()
 decoders = decoders_part.Decoders.build(
-    settings.decoder_manager, settings.clock, engine, pool
+    settings.decoder_manager,
+    settings.clock,
+    engine,
+    pools,
+    target_by_source,
 )
 ```
 
@@ -167,16 +162,16 @@ print(is_shared_assembler)
 True
 ```
 
-The wires to other parts are not made yet. The syndrome round sender
-tells the window manager of each stored round, and the window manager
-is in another part, so its port is still empty:
+The wires to other parts are not made yet. The window manager's
+requester asks for each window's decode, and the decoder manager that
+takes the request is in another part, so its port is still empty:
 
 ```python
-readout.syndrome_round_sender.windows
+windows.window_manager.requester.decode_queue
 ```
 
 ```text
-RuntimeError: SyndromeRoundSender.windows was read before it was bound
+RuntimeError: DecodeRequester.decode_queue was read before it was bound
 ```
 
 A component a run does not need is `None`. This run escalates, so its
@@ -196,18 +191,16 @@ machine = machine_module.Machine.assemble(
     readout,
     windows,
     decoders,
-    switching,
+    layout,
+    switching_parts,
 )
 window_manager = windows.window_manager
-is_sender_wired = readout.syndrome_round_sender.windows is window_manager
-print(is_sender_wired)
 decode_queue = window_manager.requester.decode_queue
 is_requester_wired = decode_queue is decoders.decoder_manager
 print(is_requester_wired)
 ```
 
 ```text
-True
 True
 ```
 

@@ -55,6 +55,9 @@ class DecoderBase(abc.ABC):
     # per evidence this row does not produce but a reader would expect
     # of it, the sentence the build's refusal quotes
     missing_evidence_reasons: dict = {}
+    # whether the device the row submits to prices each decode (a strong
+    # backend row), so neither the host clock nor a latency is its time
+    priced_by_its_backend = False
 
     @abc.abstractmethod
     def decode(
@@ -260,6 +263,7 @@ class WindowDecoderBase(DecoderBase):
         result.detection_events = syndrome
         result.iterations = answer.iterations
         result.no_correction_reason = answer.no_correction_reason
+        result.evidence = answer.evidence
         return result, finished_ns - started_ns
 
     def window_answer(
@@ -315,6 +319,23 @@ class WindowDecoderBase(DecoderBase):
 # compile key -> {model identity: (model reference, backend)}, the
 # backends every row of one kind and settings shares in this process
 _SHARED_BACKENDS: dict = {}
+
+
+def timed_decode(
+    decoder: DecoderBase, job: decoding_records.DecodeJob, now: int
+) -> tuple:
+    """(result, ticks): measured on the host clock, else the row's latency.
+
+    A decode run outside the row's own start, as an ensemble's members
+    and a batch's are, takes the time start would charge it.
+    """
+    if decoder.occupancy(job) is None:
+        result, elapsed_nanoseconds = decoder.decode_timed(job)
+        ticks = decoder.ticks_after_decode(result, elapsed_nanoseconds, now)
+        return result, ticks
+    result = decoder.decode(job)
+    ticks = decoder.latency(job)
+    return result, ticks
 
 
 def parity_product(
@@ -402,6 +423,8 @@ def result_from_selected_faults(
         boundary_data=boundary_data,
         decode_status=decode_status,
         crossing_commit=crossing_commit,
+        selected_faults=selected_faults,
+        fault_representation=placed_faults.representation,
     )
 
 

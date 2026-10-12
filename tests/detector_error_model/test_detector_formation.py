@@ -388,6 +388,17 @@ def test_a_fragment_reads_back_as_many_rounds_as_its_furthest_record():
     assert detector_formation.rounds_read_back(fragment, 2) == 2
 
 
+def test_every_record_counts_toward_the_measurements_read_back():
+    """An observable's and a controlled gate's records count, unlike rounds."""
+    observable = stim.Circuit("M 0\nOBSERVABLE_INCLUDE(0) rec[-3]")
+    controlled = stim.Circuit("CX rec[-5] 0\nM 0\nDETECTOR rec[-1]")
+    itself = stim.Circuit("M 0 1\nDETECTOR rec[-2] rec[-1]")
+
+    assert detector_formation.measurements_read_back(observable) == 2
+    assert detector_formation.measurements_read_back(controlled) == 5
+    assert detector_formation.measurements_read_back(itself) == 0
+
+
 def test_a_fragment_that_reads_only_itself_reaches_no_round_back():
     fragment = stim.Circuit("M 0 1\nDETECTOR rec[-2] rec[-1]")
 
@@ -843,3 +854,13 @@ def test_a_read_back_past_rounds_that_measure_nothing_is_refused():
         "further back every round and no stream can keep it; give the "
         "repeated round a measurement"
     )
+
+
+def test_a_copy_of_a_circuit_reads_the_same_table():
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", distance=3, rounds=3
+    )
+    copy = stim.Circuit(str(circuit))
+    first = detector_formation.build_formation_table(circuit, 3)
+    second = detector_formation.build_formation_table(copy, 3)
+    assert first is second

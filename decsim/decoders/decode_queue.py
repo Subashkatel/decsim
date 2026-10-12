@@ -3,13 +3,13 @@
 As gem5's instruction queue hands out ready work through one scheduling
 rule (src/cpu/o3/inst_queue.hh:160-178, scheduleReadyInsts), the
 scheduler's pop is that rule here (schedulers.py). Under
-DecoderManagerSettings.bulk_strong the strong pool alone is served as
-one merged batch: every queued strong job, timing-only, becomes one
-decode serving every member request. Toshio et al. 2510.25222 lines
-1253-1264 ask for bulk decoding of one escalation's own region; merging
-several escalated windows goes past that, as the cheapest strong tier a
-run can be priced against, the floor of the tuning the paper leaves open
-(lines 1259-1262).
+DecoderManagerSettings.bulk_strong the queue of each pool an escalate
+edge leads to is served as one merged batch: every queued strong job,
+timing-only, becomes one decode serving every member request. Toshio et
+al. 2510.25222 lines 1253-1264 ask for bulk decoding of one escalation's
+own region; merging several escalated windows goes past that, as the
+cheapest strong tier a run can be priced against, the floor of the
+tuning the paper leaves open (lines 1259-1262).
 """
 
 import dataclasses
@@ -20,6 +20,8 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
 
 if TYPE_CHECKING:
@@ -35,8 +37,20 @@ class WaitingJobs:
 
     Trace sources: job_enqueued(job) as a job joins the queue;
     job_withdrawn(job) as one leaves it unserved; depth_changed(tick,
-    depth) whenever the jobs waiting change.
+    depth) whenever the jobs waiting change. Its statistic is the jobs
+    waiting over time, DART-Q's backlog per decoder instance
+    (2605.09142 lines 1101-1109).
     """
+
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "queued",
+            statistic_kinds.Level,
+            "jobs in the queue, for a unit or a boundary",
+            "jobs",
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
 
     def __init__(
         self,
@@ -49,7 +63,8 @@ class WaitingJobs:
         self.scheduler = scheduler
         self.waiting: list = []
         self.manager = manager
-        # decoder_manager.bulk_strong on the strong pool's queue
+        # decoder_manager.bulk_strong on the queue of a pool an edge
+        # escalates to
         self.merges_strong = merges_strong
         self.trace = _TraceSources()
 
@@ -73,6 +88,7 @@ class WaitingJobs:
         """Report the depth now."""
         now = self.engine.now
         depth = len(self.waiting)
+        self.statistics.queued.set(depth)
         self.trace.depth_changed.fire(now, depth)
 
     def drain_in_scheduler_order(self) -> list:
@@ -136,7 +152,7 @@ class WaitingJobs:
         for _ in range(len(queue)):
             queued = self.scheduler.pop(queue)
             if strong_requests_module.is_merged_batch(queued):
-                members = self.manager.strong_requests.members_of(queued)
+                members = self.manager.strong_requests.reopen(queued)
                 jobs.extend(members)
             else:
                 jobs.append(queued)
@@ -151,10 +167,12 @@ def pool_tag_of(pool: str) -> str:
 
 
 def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
-    """One timing-only decode serving every member request.
+    """One decode serving every member request.
 
-    The batch is decoded like any strong job: its timing-only result is
-    split into one empty completion per member request at decode end.
+    The batch is decoded like any strong job. Timing-only, its result is
+    split into one empty completion per member request at decode end;
+    under a pool's decode_each row each member is decoded and gets its
+    own result (batching.py).
     """
     total_rounds = 0
     earliest_ready_time = jobs[0].ready_time
@@ -174,6 +192,7 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
         kind=decoding_records.DecodeJobKind.STRONG_BATCH,
         spatial_nodes=jobs[0].spatial_nodes,
         strong_decode_for=first_window_key,
+        batch_members=tuple(jobs),
     )
 
 

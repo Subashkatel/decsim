@@ -21,6 +21,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
 import tests.declared_run as declared_run
 
 # a one-tick period for the manager, so its dispatch cost is its cycles
@@ -48,7 +49,7 @@ def _job(index, gate=None):
         fragment_index=0,
     )
     request_key = window_records.DecoderRequestKey(
-        1, index, window_records.DecoderTier.WEAK, index
+        1, index, window_records.WEAK_POOL_ID, index
     )
     window = window_records.Window(
         operation_id=1,
@@ -245,6 +246,37 @@ def test_the_second_slots_transfer_overlaps_the_compute():
     }
 
 
+def test_each_decodes_waits_and_service_are_the_two_slot_laws_ticks():
+    """The same three windows, their lives split as gem5's O3 splits one.
+
+    w0 is dispatched at 0, lands at 1 and computes 1..3; w1 takes the
+    second slot at 0, lands at 1 and waits for the compute until 3; w2
+    waits in the queue until w0's slot frees at 3, lands at 4 and waits
+    for w1's compute until 5. Each decode computes 2 us.
+    """
+    engine = engine_module.Engine()
+    decoder = decoders.PresetLatencyDecoder(2.0)
+    manager = _manager(engine, decoder)
+    run_statistics = statistics_registry.Registry(engine)
+    manager.attach_statistics(run_statistics, "weak_decoder")
+    transfer_ticks = config.microseconds_to_ticks(1.0)
+    send_input = _send_after(engine, transfer_ticks)
+    on_decoded = _resolving(manager)
+    _enqueue_windows(manager, 3, send_input, on_decoded)
+    engine.run()
+
+    decodes = run_statistics.groups["weak_decoder.decodes"]
+    microsecond = config.microseconds_to_ticks(1.0)
+    queue_waits = decodes.queue_wait.value_counts()
+    compute_waits = decodes.compute_wait.value_counts()
+    services = decodes.service.value_counts()
+    assert queue_waits == {0: 2, 3 * microsecond: 1}
+    assert compute_waits == {0: 1, 2 * microsecond: 1, microsecond: 1}
+    assert services == {2 * microsecond: 3}
+    assert decodes.evicted.count == 0
+    assert decodes.aborted.count == 0
+
+
 def test_a_withdrawn_job_leaves_no_landing_on_its_unit():
     """A job withdrawn while its input is on the link takes back its landing.
 
@@ -289,7 +321,7 @@ def test_a_withdrawn_sender_and_its_joined_reader_leave_no_landing():
     reader = _job(1)
     reader.input_key = sender.request_key
     reader.request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 2
+        1, 1, window_records.WEAK_POOL_ID, 2
     )
     manager.enqueue(reader, None, on_decoded)
     (unit,) = manager.pool.units

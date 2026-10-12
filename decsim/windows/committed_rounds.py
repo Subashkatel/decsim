@@ -1,9 +1,10 @@
 """The logical ledger: which owner committed which rounds of a stream.
 
-A contribution is one owner (an ordinary window or a strong window) over
-an exact inclusive round extent. The contributions of one stream tile it
-without gap or overlap, which every read checks, and the observables of
-an interval are the XOR of the contributions that cover it. A strong
+A contribution is one owner (an ordinary window, a strong window, or the
+folded windows a stream let go) over an exact inclusive round extent.
+The contributions of one stream tile it without gap or overlap, which
+every read checks, and the observables of an interval are the XOR of
+the contributions that cover it. A strong
 result may replace an owner's prediction; a strong window may replace
 ordinary windows. tests/windows/test_committed_rounds.py checks the
 ledger against a per-round oracle.
@@ -132,6 +133,32 @@ class LogicalLedger:
         )
         self.install(replaced)
 
+    def fold_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        first_kept_round: int,
+        cut_rounds: tuple,
+    ) -> None:
+        """The stream's contributions before the round, folded by stretch.
+
+        A stream lets its final windows go (window_release.py), so the
+        contributions that end before the round become one per stretch
+        between the segment cuts: a "folded" owner, keyed (stream,
+        "folded", its first round), over the stretch's rounds folded so
+        far, with the XOR of their observables, or None when any is
+        timing-only. A read XORs what covers its interval and is None
+        when any of it is, so a read over folded rounds gives what it
+        gave before; a segment's first round starts a stretch, so a read
+        from it crosses no fold.
+        """
+        folding = self._ending_before(stream_id, first_kept_round)
+        stretches = []
+        for contribution in folding:
+            del self.contributions[contribution.owner_key]
+            _fold_into(stretches, contribution, cut_rounds)
+        for stretch in stretches:
+            self.contributions[stretch.owner_key] = stretch
+
     def _check_arity(
         self, contribution: decoding_records.LogicalContribution
     ) -> None:
@@ -151,6 +178,18 @@ class LogicalLedger:
                 f"observable length {observed_arity}; expected "
                 f"{expected_arity} for stream {stream_id!r}"
             )
+
+    def _ending_before(self, stream_id, round_index: int) -> list:
+        """The stream's contributions that end before the round, in order."""
+        ending = []
+        for key, contribution in self.contributions.items():
+            if key[0] != stream_id:
+                continue
+            if contribution.commit_hi >= round_index:
+                continue
+            ending.append(contribution)
+        ending.sort(key=_extent_order)
+        return ending
 
     def _covering(self, stream_id, commit_lo: int, commit_hi: int) -> list:
         """The stream's contributions touching the interval, in extent order."""
@@ -235,6 +274,64 @@ def _check_inside_interval(
         f"logical contribution {contribution.owner_key} crosses "
         f"strict interval boundary {commit_lo}-{commit_hi}"
     )
+
+
+def _fold_into(
+    stretches: list,
+    contribution: decoding_records.LogicalContribution,
+    cut_rounds: tuple,
+) -> None:
+    """The contribution joined to the last stretch, or one of its own.
+
+    A stretch ends on a cut, where a segment's rounds end; folded
+    contributions tile, so a gap is refused as a read refuses it.
+    """
+    if not stretches:
+        stretch = _stretch_of(contribution)
+        stretches.append(stretch)
+        return
+    previous = stretches[-1]
+    following_round = previous.commit_hi + 1
+    if contribution.commit_lo != following_round:
+        raise RuntimeError(
+            f"folding the logical ledger of stream {previous.owner_key[0]!r} "
+            f"found no contribution at round {following_round}"
+        )
+    if previous.commit_hi in cut_rounds:
+        stretch = _stretch_of(contribution)
+        stretches.append(stretch)
+        return
+    stretches[-1] = _joined(previous, contribution)
+
+
+def _stretch_of(
+    contribution: decoding_records.LogicalContribution,
+) -> decoding_records.LogicalContribution:
+    """The contribution as a folded stretch of its own."""
+    stream_id = contribution.owner_key[0]
+    owner_key = (stream_id, "folded", contribution.commit_lo)
+    return dataclasses.replace(
+        contribution, owner_key=owner_key, ownership_kind="folded"
+    )
+
+
+def _joined(
+    stretch: decoding_records.LogicalContribution,
+    contribution: decoding_records.LogicalContribution,
+) -> decoding_records.LogicalContribution:
+    """The stretch through the contribution's rounds, observables XORed."""
+    observables = None
+    if _is_functional(stretch) and _is_functional(contribution):
+        observables = _xor_of([stretch, contribution])
+    return dataclasses.replace(
+        stretch,
+        commit_hi=contribution.commit_hi,
+        logical_observables=observables,
+    )
+
+
+def _is_functional(contribution: decoding_records.LogicalContribution) -> bool:
+    return contribution.logical_observables is not None
 
 
 def _with_copied_observables(

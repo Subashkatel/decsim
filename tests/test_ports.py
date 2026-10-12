@@ -31,6 +31,7 @@ import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.ports as ports
 import decsim.qpu.code_geometry as code_geometry
+import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -58,6 +59,7 @@ SOURCE_ROWS = {
     "syndrome_bits": syndrome_devices.SyndromeBitDevice,
     "recorded_stim": stim_device.RecordedStimDevice,
     "streaming_stim": streaming_stim_device.StreamingStimDevice,
+    "flip_stream": flip_stream_device.FlipStreamDevice,
     "error_model_stim": stim_device.ErrorModelStimDevice,
 }
 # the decoders decsim ships whose record has defaults of its own;
@@ -251,15 +253,15 @@ def test_the_sender_port_declares_what_the_assembler_calls():
     assert _undeclared(called, ("SyndromeRoundSender",)) == {}
 
 
-def test_the_weak_receiver_port_declares_what_the_controller_calls():
-    """The controller holds the weak syndrome buffer's port only as this port.
+def test_the_store_receiver_port_declares_what_the_controller_calls():
+    """The controller holds a store's receiving end only as this port.
 
     Both of the controller's references to it: the transmitter's, which
     sends and hears the landing, and the sender's, which asks that end
     for room and reserves it before the round leaves.
     """
-    called = _called_on(("weak_receiver", "weak_receiver"), ("controller",))
-    assert _undeclared(called, ("WeakSyndromeRoundReceiver",)) == {}
+    called = _called_on(("receiver", "receiver"), ("controller",))
+    assert _undeclared(called, ("SyndromeRoundReceiver",)) == {}
 
 
 def test_the_code_card_port_declares_what_the_tree_calls_on_a_card():

@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+import decsim.build.routes as routes_build
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.settings as workload_settings
@@ -35,6 +36,9 @@ import tests.declared_run as declared_run
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
+
+# the slotted pools, no edge, the planner's windows on the weak pool
+_ROUTES = routes_build.slotted_routes(window_records.WEAK_POOL_ID, None)
 
 
 def _weak_run():
@@ -118,7 +122,7 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     )
     manager.planner = _stream_planner()
     manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
-    courier = window_boundaries.BoundaryCourier(window_records.DecoderTier.WEAK)
+    courier = window_boundaries.BoundaryCourier(_ROUTES)
     courier.planner = manager.planner
     courier.interaction = manager.window_interaction
     manager.courier = courier
@@ -240,6 +244,20 @@ def test_a_tan_seam_waits_in_its_slot_and_never_holds_the_only_unit():
     decode_ends = [window.t_done for window in windows]
     assert None not in decode_ends
     assert result.operation_results[0].logical_failure is False
+
+
+def test_a_seam_starting_before_the_core_ahead_of_it_is_stamped_first():
+    """The request walk reaches a window that starts out of index order.
+
+    Tan's seam (1, 2) reads from round 4 and the core (1, 1) before it
+    from round 6, so the seam's first round lands two rounds earlier.
+    """
+    machine, _result = _tan_sandwich_run(unit_count=1)
+    windows = machine.observation.windows.windows
+    seam = windows[(1, 2)]
+    core = windows[(1, 1)]
+    assert seam.start_round < core.start_round
+    assert seam.t_first_round < core.t_first_round
 
 
 def test_a_round_arriving_after_the_last_window_committed_is_refused():

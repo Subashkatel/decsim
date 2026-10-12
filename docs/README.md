@@ -60,6 +60,18 @@ Each guide adds one kind of thing to the machine.
 - [How to add a store, a link card, a signal, a policy or a scheme](how-to/add_a_store_card_signal_policy_or_scheme.md)
 - [How to add a component to a part](how-to/add_a_component_to_a_part.md)
 - [How to plug in a workload maker](how-to/plug_in_a_workload_maker.md)
+- [How to set any parameter without editing code](how-to/set_parameters.md)
+- [How to record statistics of your own part](how-to/record_statistics.md)
+- [How to write a machine as a graph](how-to/write_a_machine_as_a_graph.md)
+- [How to build a chain of decoders](how-to/build_a_chain_of_decoders.md)
+- [How to route windows to several pools](how-to/route_windows_to_several_pools.md)
+- [How to share a pool among patches](how-to/share_a_pool_among_patches.md)
+- [How to decode a window with an ensemble](how-to/decode_a_window_with_an_ensemble.md)
+- [How to batch a pool's decodes](how-to/batch_a_pools_decodes.md)
+- [How to use your own decoder and verdict](how-to/use_your_own_decoder_and_verdict.md)
+- [How to sweep a machine over a grid](how-to/sweep_a_machine_over_a_grid.md)
+- [How to build each switching pattern](how-to/build_each_switching_pattern.md)
+- [How to run a memory as a stream](how-to/run_a_memory_as_a_stream.md)
 
 ## Reference
 

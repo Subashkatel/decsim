@@ -2,9 +2,9 @@
 
 Four configurations on the same shots: union-find alone, Relay-BP-5
 alone, switching between them, and Tesseract alone as a reference
-outside switching. Each runs Experiment 1's machine, read from its run
-file (experiments/switching_baseline/run.py), so every latency is the
-one value that file holds. Switching keeps Relay-BP-5's answer, also
+outside switching. Each runs Experiment 1's machine
+(decsim/presets/experiment_one.py), so every latency is the one value
+that preset holds. Switching keeps Relay-BP-5's answer, also
 when it does not converge. Shots are drawn from the error model with
 the errors that fired (error_model_stim), and every window that
 delivers a shot's answer is written with its true label
@@ -34,15 +34,13 @@ decsim run experiments/switching_per_window/run.py --slurm --dry-run
 """
 
 import dataclasses
-import importlib.util
 import math
-import pathlib
 
 import decsim
-import decsim.decoders.settings as decoder_settings
 import decsim.decoders.tesseract.decoder as tesseract
+import decsim.presets.experiment_one as experiment_one
 import decsim.qpu.stim_device as stim_device
-import decsim.settings as machine_settings
+import decsim.topology.graph as graph
 
 NAME = "switching_per_window"
 DISTANCES = (5, 7, 9, 11)
@@ -71,34 +69,13 @@ UNION_FIND_EXPERIMENT_ONE = {
 }
 
 
-def switching_baseline():
-    """Experiment 1's run file, as a module: its machine and latencies.
-
-    It is read where it stands beside this file, as a run file reads a
-    threshold table beside it, so the two experiments share one machine.
-    """
-    this_file = pathlib.Path(__file__)
-    resolved_file = this_file.resolve()
-    experiments_dir = resolved_file.parents[1]
-    run_path = experiments_dir / "switching_baseline" / "run.py"
-    spec = importlib.util.spec_from_file_location(
-        "switching_baseline", run_path
+def configurations(distance: int, physical_error_probability: float) -> dict:
+    """The four machines of one setting, by configuration name."""
+    union_find_alone = experiment_one.weak_alone(
+        distance, physical_error_probability
     )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def configurations(
-    baseline, distance: int, physical_error_probability: float
-) -> dict:
-    """The four machines of one setting, by configuration name.
-
-    baseline is Experiment 1's run file, as switching_baseline gives it.
-    """
-    union_find_alone = baseline.weak_alone(distance, physical_error_probability)
-    switching = baseline.switching(distance, physical_error_probability)
-    relay_bp5 = baseline.strong_decoder_pool()
+    switching = experiment_one.switching(distance, physical_error_probability)
+    relay_bp5 = experiment_one.strong_decoder_pool()
     # the package's tesseract-short-beam profile, order seed included
     # (tesseract-decoder src/tesseract_sinter_compat.pybind.h:468-474);
     # it has no measured device time, so its unit is held for its own
@@ -107,35 +84,29 @@ def configurations(
         merge_errors=True, detector_order_seed=2384753
     )
     tesseract_pool = dataclasses.replace(relay_bp5, algorithm=short_beam)
+    relay_bp5_alone = experiment_one.strong_alone(
+        distance, physical_error_probability, relay_bp5
+    )
+    tesseract_alone = experiment_one.strong_alone(
+        distance, physical_error_probability, tesseract_pool
+    )
     machines = {
         "union_find_alone": union_find_alone,
         "switching": switching,
-        "relay_bp5_alone": strong_alone(union_find_alone, relay_bp5),
-        "tesseract_alone": strong_alone(union_find_alone, tesseract_pool),
+        "relay_bp5_alone": relay_bp5_alone,
+        "tesseract_alone": tesseract_alone,
     }
     return {name: with_labels(machine) for name, machine in machines.items()}
 
 
-def strong_alone(
-    union_find_alone: machine_settings.MachineSettings,
-    strong_decoder: decoder_settings.DecoderPoolSettings,
-) -> machine_settings.MachineSettings:
-    """The same machine with every window decoded by the strong decoder."""
-    return dataclasses.replace(
-        union_find_alone, weak_decoder=None, strong_decoder=strong_decoder
-    )
-
-
-def with_labels(
-    machine: machine_settings.MachineSettings,
-) -> machine_settings.MachineSettings:
+def with_labels(machine: graph.Machine) -> graph.Machine:
     """The machine drawing shots with their errors, writing window labels."""
     error_model_source = stim_device.ErrorModelStimDevice.Settings()
-    qpu = dataclasses.replace(machine.qpu, source=error_model_source)
+    labelled = machine.with_settings("qpu", source=error_model_source)
     observation = dataclasses.replace(
         machine.observation, record_window_outcomes=True
     )
-    return dataclasses.replace(machine, qpu=qpu, observation=observation)
+    return dataclasses.replace(labelled, observation=observation)
 
 
 def shot_count(distance: int, physical_error_probability: float) -> int:
@@ -152,7 +123,6 @@ def switching_per_window_tasks() -> list:
         physical_error_probability=PHYSICAL_ERROR_PROBABILITIES,
         distance=DISTANCES,
     )
-    baseline = switching_baseline()
     tasks = []
     for values in grid:
         probability = values["physical_error_probability"]
@@ -162,7 +132,7 @@ def switching_per_window_tasks() -> list:
             "qpu.distance": distance,
         }
         max_shots = shot_count(distance, probability)
-        machines = configurations(baseline, distance, probability)
+        machines = configurations(distance, probability)
         collection = decsim.CollectionSettings(max_shots=max_shots)
         for name, machine in machines.items():
             task_name = f"{name}_d{distance}_p{probability}"

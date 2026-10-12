@@ -52,12 +52,16 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
+import decsim.parameters.assignments as assignments
 
 RUN_SCRIPT = "run.sbatch"
 FOLD_SCRIPT = "fold.sbatch"
 JOBS_FILE = "jobs.json"
-# beside the run file: one row per task, its name and core seconds a shot
+# beside the run file: one row per task, its name and core seconds a
+# shot, and optionally its peak resident memory (decsim estimates)
 SECONDS_FILE = "seconds_per_shot.csv"
+# a job's memory when SECONDS_FILE gives no peak for every task
+DEFAULT_MEMORY_MB = 16384
 LOGS_FOLDER = "logs"
 # the fold reads every piece once and runs no shot
 FOLD_SHAPE = "--cpus-per-task=1 --mem=16G --time=12:00:00"
@@ -191,6 +195,26 @@ def launch(
     _submit(run_dir)
 
 
+def measured_memory_mb(
+    run_file: Union[str, pathlib.Path], cores: int, margin: float
+) -> int:
+    """A job's memory: cores times the largest measured peak, times margin.
+
+    A job's cores each run one worker at a time, so at most `cores`
+    peaks are held at once. The peaks are SECONDS_FILE's peak_memory_mb
+    column; without a peak for every row, DEFAULT_MEMORY_MB. No source
+    sets the margin: it is the room for a piece above the measured ones.
+    """
+    run_path = pathlib.Path(run_file)
+    seconds_path = run_path.parent / SECONDS_FILE
+    peaks = _measured_peaks(seconds_path)
+    if not peaks:
+        return DEFAULT_MEMORY_MB
+    largest = max(peaks)
+    budget = cores * largest * margin
+    return math.ceil(budget)
+
+
 def pack(planned: list, job: JobShape) -> list:
     """The jobs that run these pieces, the busiest first.
 
@@ -317,6 +341,22 @@ def _seconds_per_shot(run_path: pathlib.Path) -> dict:
             _refuse_a_bad_estimate(seconds_path, row["task"], seconds)
             seconds_by_task[row["task"]] = seconds
     return seconds_by_task
+
+
+def _measured_peaks(seconds_path: pathlib.Path) -> list:
+    """Every row's peak_memory_mb; empty unless every row has one."""
+    if not seconds_path.is_file():
+        return []
+    with seconds_path.open(newline="") as seconds_file:
+        reader = csv.DictReader(seconds_file)
+        rows = list(reader)
+    peaks = []
+    for row in rows:
+        peak = row.get("peak_memory_mb")
+        if not peak:
+            return []
+        peaks.append(float(peak))
+    return peaks
 
 
 def _refuse_a_bad_estimate(
@@ -521,7 +561,8 @@ def _run_lines(
 
     Every path is quoted, which bash and sbatch's own reading of an
     #SBATCH line both undo, and the job's array index is left for bash
-    to expand.
+    to expand. The assignments in force (DECSIM_SET, which --set
+    writes) are exported, so every job builds the tasks the plan holds.
     """
     shape = (
         f"--array={array} --cpus-per-task={job.cores} "
@@ -534,6 +575,11 @@ def _run_lines(
     command = f"{quoted} --job $SLURM_ARRAY_TASK_ID --processes {job.cores}"
     output = shlex.quote(f"--output={log}")
     lines = ["#!/bin/bash", f"#SBATCH {shape}", f"#SBATCH {output}"]
+    written = os.environ.get(assignments.ENVIRONMENT_VARIABLE)
+    if written:
+        quoted_assignments = shlex.quote(written)
+        variable = assignments.ENVIRONMENT_VARIABLE
+        lines.append(f"export {variable}={quoted_assignments}")
     lines.append(command)
     return "\n".join(lines) + "\n"
 

@@ -69,12 +69,16 @@ def unsized_fragment(round_index, fragment_index=0):
 
 
 def job_of(payloads, label="w0", window_id=7):
+    request_key = window_records.DecoderRequestKey(
+        41, window_id, window_records.WEAK_POOL_ID, 0
+    )
     return decoding_records.DecodeJob(
         operation_id=41,
         window_id=window_id,
         round_count=len(payloads),
         payloads=list(payloads),
         label=label,
+        request_key=request_key,
     )
 
 
@@ -134,7 +138,7 @@ def test_a_second_reader_of_one_input_is_one_copy_held_until_both_are_done():
     first = timing_only_job("class 0", 3)
     second = timing_only_job("class 1", 3)
     input_key = window_records.DecoderRequestKey(
-        41, 7, window_records.DecoderTier.WEAK, 0
+        41, 7, window_records.WEAK_POOL_ID, 0
     )
     first.request_key = input_key
     first.input_key = input_key
@@ -355,7 +359,7 @@ def test_the_memory_refuses_a_second_write_of_one_input():
     first = timing_only_job("class 0", 3)
     second = timing_only_job("class 1", 3)
     input_key = window_records.DecoderRequestKey(
-        41, 7, window_records.DecoderTier.WEAK, 0
+        41, 7, window_records.WEAK_POOL_ID, 0
     )
     first.request_key = input_key
     first.input_key = input_key

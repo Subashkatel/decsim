@@ -52,6 +52,9 @@ class StrongWindowPorts:
     requester = ports.Port(ports.WindowRequests)
     ledger = ports.Port(ports.LogicalLedger)
     courier = ports.Port(ports.BoundaryCourier)
+    # the edge whose windows this shape lays out: a request it opens is
+    # for the edge's target pool
+    edge = ports.Port(ports.EscalateEdge)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -151,15 +154,12 @@ class RedoWindow(StrongWindowPorts):
         self, weak_job: decoding_records.DecodeJob
     ) -> pending_strong_windows.StrongAssignment:
         """The near-pinned job, built now or held for its own rounds."""
-        key = (weak_job.operation_id, weak_job.window_id)
-        region = self.regions.redo_region(key)
-        pinned_source_key = self.regions.redo_pin_source(key)
-        folded_boundaries = _declared_faces(pinned_source_key)
+        region, folded_boundaries, model = _redo_of(self, weak_job)
         held = _held_redo(
             self,
             weak_job,
-            region.window,
-            region.context_read_keys,
+            region,
+            model,
             folded_boundaries,
         )
         return _assignment_of(self, held)
@@ -263,10 +263,9 @@ class DoubleWindow(StrongWindowPorts):
         release_conditions says which.
         """
         key = (weak_job.operation_id, weak_job.window_id)
+        target = self.edge.target
         strong_request_key = self.builder.new_request_key(
-            weak_job.operation_id,
-            weak_job.window_id,
-            window_records.DecoderTier.STRONG,
+            weak_job.operation_id, weak_job.window_id, target
         )
         strong_request_created_ticks = self.engine.now
         near_source_key = self.regions.double_window_near_face(key)
@@ -288,10 +287,11 @@ class DoubleWindow(StrongWindowPorts):
             resolved_region.restart_read_keys,
         )
         operation = self.regions.operation(weak_job.operation_id)
+        label = escalated_label(self, weak_job)
         held = _HeldDoubleWindow(
             key=key,
             weak_job=weak_job,
-            label=weak_job.strong_label,
+            label=label,
             resolved_region=resolved_region,
             strong_window=strong_window,
             strong_model=strong_model,
@@ -363,7 +363,7 @@ class DoubleWindow(StrongWindowPorts):
         crossing = self.rounds_to_carry(assignment)
         if crossing:
             return None
-        stored_through = self.regions.strong_rounds_stored(held.key[0])
+        stored_through = self.retention.landed_through(held.key[0])
         if stored_through < held.resolved_region.plan.context_hi:
             return None
         return self._build_strong_job(held)
@@ -478,7 +478,7 @@ class DoubleWindow(StrongWindowPorts):
         restart = self.planner.window_at(restart_key)
         # its absorbed dependency is gone; no speculative strong decode in the
         # double window
-        self.requester.request_if_ready(restart, None)
+        self.requester.request_if_ready(restart)
         self.retention.release_restart_reads(restart_key)
 
     def _reslice_restart_window(
@@ -520,7 +520,7 @@ class DoubleWindow(StrongWindowPorts):
         self.retention.require_rounds_retained(
             held.label, payloads, plan.context_lo, plan.context_hi
         )
-        return _strong_redecode_job(
+        job = _strong_redecode_job(
             self,
             held.weak_job,
             held.strong_window,
@@ -529,6 +529,8 @@ class DoubleWindow(StrongWindowPorts):
             held.strong_request_key,
             held.strong_request_created_ticks,
         )
+        job.pinned_faces = held.folded_boundaries
+        return job
 
 
 # a row that pins no face, the redo window at the operation's
@@ -557,7 +559,87 @@ def strong_job_payloads(
         shape.courier.pin_strong_face(
             source_key, strong_window, model, operation, request_key
         )
-    return shape.retention.strong_window_input(shape.builder, strong_window)
+    target = shape.edge.target
+    return shape.retention.strong_window_input(
+        shape.builder, strong_window, target
+    )
+
+
+def escalated_label(
+    shape: StrongWindowPorts, source_job: decoding_records.DecodeJob
+) -> str:
+    """The log label of the source job's window decoded on the edge's target.
+
+    The target's name, then the window: strong(mem1 W0), or deep(mem1 W0)
+    for a window a chain escalates again.
+    """
+    operation = shape.regions.operation(source_job.operation_id)
+    target = shape.edge.target
+    return f"{target.word}({operation.name} W{source_job.window_id})"
+
+
+def forced_class_companion(
+    shape: StrongWindowPorts,
+    lead: decoding_records.DecodeJob,
+    forced_logical_class: int,
+) -> decoding_records.DecodeJob:
+    """The lead's solve pinned to another logical class, on its rounds.
+
+    Its own request, so its transfer is priced and recorded on its own,
+    and the lead's request key as its input identity, so a unit that
+    holds the lead's rounds reads them (DecodeRequestBuilder's
+    build_forced_companion, for a target job).
+    """
+    request_key = shape.builder.new_request_key(
+        lead.operation_id, lead.window_id, lead.request_key.pool
+    )
+    label = f"{lead.label} class {forced_logical_class}"
+    payloads = list(lead.payloads)
+    job = decoding_records.DecodeJob(
+        operation_id=lead.operation_id,
+        window_id=lead.window_id,
+        round_count=lead.round_count,
+        ready_time=shape.engine.now,
+        label=label,
+        kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
+        spatial_nodes=lead.spatial_nodes,
+        code=lead.code,
+        detector_error_model=lead.detector_error_model,
+        payloads=payloads,
+        window=lead.window,
+        strong_decode_for=lead.strong_decode_for,
+        request_key=request_key,
+        input_key=lead.request_key,
+        request_created_ticks=lead.request_created_ticks,
+        gate=lead.gate,
+        forced_logical_class=forced_logical_class,
+    )
+    job.pinned_faces = lead.pinned_faces
+    return job
+
+
+def _redo_of(
+    shape: StrongWindowPorts, source_job: decoding_records.DecodeJob
+) -> tuple:
+    """The region a redo decodes again, the faces it pins, its model.
+
+    A window the entry pool decoded is redone over its commit region,
+    its past face pinned on its earlier neighbour. A revision a pool
+    past the entry made is redone over that revision's own region, on
+    the faces it was pinned on and with the error model it was decoded
+    on, so its seams hold what its neighbours were already given and
+    the same decoder at depth gives the same answer.
+    """
+    if source_job.kind is decoding_records.DecodeJobKind.STRONG_REDECODE:
+        region = shape.regions.revision_region(source_job.window)
+        model = source_job.detector_error_model
+        return region, source_job.pinned_faces, model
+    key = (source_job.operation_id, source_job.window_id)
+    region = shape.regions.redo_region(key)
+    pinned_source_key = shape.regions.redo_pin_source(key)
+    faces = _declared_faces(pinned_source_key)
+    model = shape.regions.redecode_model(key, region.window, faces)
+    return region, faces, model
 
 
 def _declared_faces(pinned_source_key: Optional[tuple]) -> tuple:
@@ -586,25 +668,24 @@ def _pinned_faces(
 def _held_redo(
     shape: StrongWindowPorts,
     weak_job: decoding_records.DecodeJob,
-    strong_window: window_records.Window,
-    read_keys: tuple,
+    region: strong_regions.RedoRegion,
+    model,
     folded_boundaries: tuple,
 ) -> "_HeldStrongRedo":
     """What a row keeps from its plan: its window, its reads, its faces."""
     key = (weak_job.operation_id, weak_job.window_id)
-    model = shape.regions.redecode_model(key, strong_window, folded_boundaries)
+    target = shape.edge.target
     request_key = shape.builder.new_request_key(
-        weak_job.operation_id,
-        weak_job.window_id,
-        window_records.DecoderTier.STRONG,
+        weak_job.operation_id, weak_job.window_id, target
     )
     operation = shape.regions.operation(weak_job.operation_id)
+    label = escalated_label(shape, weak_job)
     return _HeldStrongRedo(
         key=key,
         weak_job=weak_job,
-        label=weak_job.strong_label,
-        read_keys=read_keys,
-        strong_window=strong_window,
+        label=label,
+        read_keys=region.context_read_keys,
+        strong_window=region.window,
         model=model,
         operation=operation,
         request_key=request_key,
@@ -617,9 +698,7 @@ def _assignment_of(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> pending_strong_windows.StrongAssignment:
     """The job now, or the assignment held until its rounds are stored."""
-    crossing = shape.retention.context_rounds_in_flight(
-        held.key, held.read_keys
-    )
+    crossing = _rounds_not_stored(shape, held)
     if crossing:
         _log_hold(shape, held, crossing)
         return pending_strong_windows.StrongAssignment(
@@ -664,8 +743,11 @@ def _job_once_stored(
 def _rounds_not_stored(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> tuple:
-    """The rounds the row reads that the strong syndrome buffer lacks."""
-    return shape.retention.context_rounds_in_flight(held.key, held.read_keys)
+    """The rounds the row reads that its edge's landing store lacks."""
+    target = shape.edge.target
+    return shape.retention.context_rounds_in_flight(
+        held.key, held.read_keys, target
+    )
 
 
 def _log_hold(
@@ -693,7 +775,7 @@ def _strong_job_of(
         held.request_key,
         held.folded_boundaries,
     )
-    return _strong_redecode_job(
+    job = _strong_redecode_job(
         shape,
         held.weak_job,
         held.strong_window,
@@ -702,6 +784,8 @@ def _strong_job_of(
         held.request_key,
         held.request_created_ticks,
     )
+    job.pinned_faces = held.folded_boundaries
+    return job
 
 
 def _strong_redecode_job(
@@ -716,12 +800,13 @@ def _strong_redecode_job(
     """The strong job every row submits, its input held until it lands."""
     key = (weak_job.operation_id, weak_job.window_id)
     payload_round_count = decoding_records.distinct_round_count(payloads)
+    label = escalated_label(shape, weak_job)
     job = decoding_records.DecodeJob(
         operation_id=key[0],
         window_id=key[1],
         round_count=payload_round_count,
         ready_time=shape.engine.now,
-        label=weak_job.strong_label,
+        label=label,
         kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
         spatial_nodes=weak_job.spatial_nodes,
         code=weak_job.code,

@@ -33,7 +33,7 @@ _Status = decoding_records.BackendDecodeStatus
 _Reason = decoding_records.BackendFailureReason
 
 
-class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
+class RelayBeliefPropagationWindowDecoder(seeding.AtomicRunSeedConsumer):
     """Decode physical fault columns with one fixed-gamma Relay-BP profile.
 
     Inputs are original physical fault columns, not graph
@@ -45,7 +45,7 @@ class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
         self, settings: "relay_decoder.RelayBeliefPropagationDecoder.Settings"
     ) -> None:
         self.settings = settings
-        seeding._AtomicRunSeedConsumer.__init__(self, None)
+        seeding.AtomicRunSeedConsumer.__init__(self, None)
         self._effective_gamma_table_seed = None
         self._thread_state = threading.local()
 

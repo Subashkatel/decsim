@@ -15,6 +15,9 @@ hold_registered(holder, round_keys), hold_transferred(old_holder,
 new_holder), hold_released(holder), and access_served(direction,
 port_index, round_keys, arrival_tick, start_tick, completion_tick),
 which only the ported store fires.
+
+Statistics: the rounds and the bits held over time (gem5's packet
+store's occupancy), the rounds stored, and the reads asked of it.
 """
 
 import dataclasses
@@ -26,6 +29,8 @@ import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.round_holds as round_holds
 import decsim.trace_source as trace_source
 
@@ -69,6 +74,22 @@ class SyndromeBufferSettings:
 class SyndromeBuffer:
     """The store of finished rounds, kept until their last hold releases."""
 
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "rounds", statistic_kinds.Level, "rounds held", "rounds"
+        ),
+        statistics_registry.Statistic(
+            "bits", statistic_kinds.Level, "bits held", "bits"
+        ),
+        statistics_registry.Statistic(
+            "stored", statistic_kinds.Count, "rounds written", "rounds"
+        ),
+        statistics_registry.Statistic(
+            "reads", statistic_kinds.Count, "reads of a job's rounds", "reads"
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
+
     # a store built with no waiting line in front of it frees its slots
     # with nobody to tell
     held_rounds = ports.Port(ports.HeldRounds, optional=True)
@@ -84,7 +105,7 @@ class SyndromeBuffer:
     ) -> None:
         self.settings = settings
         self.engine = engine
-        self.round_by_key: dict = {}
+        self.round_by_key = _StoredRounds()
         self.holds = round_holds.RoundHolds()
         # operation id -> True while it may receive rounds, False once
         # closed; a closed identity never reopens
@@ -142,7 +163,9 @@ class SyndromeBuffer:
         held_bits = round_records.stated_bits(packet_bits)
         stored = _StoredRound(packet, held_bits)
         stored.publication_tick = publication_tick
-        self.round_by_key[round_key] = stored
+        self.round_by_key.store(round_key, stored)
+        self.statistics.stored.add()
+        self._count_held()
         self.trace.round_stored.fire(round_key, packet)
         if publication_tick is not None:
             self.trace.round_published.fire(round_key, publication_tick)
@@ -158,6 +181,7 @@ class SyndromeBuffer:
     def book_read(self, round_keys: tuple) -> int:
         """When a read of these rounds completes: read_cycles on its clock."""
         del round_keys
+        self.statistics.reads.add()
         return self._access_completion_tick(self.settings.read_cycles)
 
     def release_round(self, round_key: tuple) -> None:
@@ -178,7 +202,7 @@ class SyndromeBuffer:
     @property
     def occupied_bits(self) -> int:
         """The bits stored now; a round that states no size holds none."""
-        return self._stored_bits_of(self.round_by_key)
+        return self.round_by_key.held_bits
 
     def retained_fragments(self, round_key: tuple) -> Optional[tuple]:
         """The stored round's fragments, or None before and after storage."""
@@ -224,6 +248,14 @@ class SyndromeBuffer:
     ) -> bool:
         """True while any live hold refers to this operation."""
         return self.holds.references(operation_id)
+
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """A stream let its windows before the index go: their spent holds."""
+        self.holds.forget_released_before(stream_id, window_index)
 
     # ---- holds
 
@@ -462,8 +494,14 @@ class SyndromeBuffer:
                 kept_waiting.append(holder)
         return kept_waiting
 
+    def _count_held(self) -> None:
+        rounds = len(self.round_by_key)
+        self.statistics.rounds.set(rounds)
+        self.statistics.bits.set(self.occupied_bits)
+
     def _free_round(self, round_key) -> None:
-        self.round_by_key.pop(round_key)
+        self.round_by_key.release(round_key)
+        self._count_held()
         self.trace.round_released.fire(round_key)
         if self.detection_events is not None:
             self.detection_events.retire_round(round_key)
@@ -482,6 +520,27 @@ class _TraceSources:
     hold_transferred: trace_source.TraceSource = trace_source.new_source()
     hold_released: trace_source.TraceSource = trace_source.new_source()
     access_served: trace_source.TraceSource = trace_source.new_source()
+
+
+class _StoredRounds(dict):
+    """The stored rounds by key, with the bits they hold in all.
+
+    A round enters by store and leaves by release, which keep the total,
+    so the store's occupancy is read without a pass over its rounds.
+    """
+
+    # the bits of the rounds stored now; each store starts from none
+    held_bits = 0
+
+    def store(self, round_key: tuple, stored: "_StoredRound") -> None:
+        """One round in, its bits onto the total."""
+        self[round_key] = stored
+        self.held_bits += stored.held_bits
+
+    def release(self, round_key: tuple) -> None:
+        """One round out, its bits off the total."""
+        stored = self.pop(round_key)
+        self.held_bits -= stored.held_bits
 
 
 class _StoredRound:

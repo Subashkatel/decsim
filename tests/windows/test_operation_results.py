@@ -74,7 +74,11 @@ class _Fixture:
         plan = types.SimpleNamespace(
             windows_by_key=self.windows,
             window_count_of=lambda _operation_id: 2,
+            window_indices_of=self._window_indices_of,
+            window_at=self.windows.__getitem__,
+            windowed_operation_ids=self._windowed_operation_ids,
             windows_of=self._windows_of,
+            commit_extent_of=self._commit_extent_of,
             total_windows=2,
             round_count_of=lambda _operation_id: 6,
         )
@@ -87,8 +91,9 @@ class _Fixture:
         self.store = _Store()
         retention = types.SimpleNamespace(
             weak_store=self.store,
-            strong_store=None,
             release_hold_if_live=lambda _owner, _store: None,
+            release_potential_strong=lambda _key: None,
+            landing_stores=tuple,
         )
         self.release = _Release()
         self.completions = []
@@ -110,8 +115,22 @@ class _Fixture:
         windows = self.windows.values()
         return list(windows)
 
+    def _window_indices_of(self, _operation_id) -> list:
+        return [0, 1]
+
+    def _commit_extent_of(self, _operation_id) -> tuple:
+        windows = self.windows.values()
+        commit_los = [window.commit_lo for window in windows]
+        commit_his = [window.commit_hi for window in windows]
+        commit_lo = min(commit_los)
+        commit_hi = max(commit_his)
+        return commit_lo, commit_hi
+
+    def _windowed_operation_ids(self) -> list:
+        return [1]
+
     def commit(
-        self, key, bits, is_final=True, tier=window_records.DecoderTier.WEAK
+        self, key, bits, is_final=True, tier=window_records.WEAK_POOL_ID
     ):
         window = self.windows[key]
         window.committed = True
@@ -159,7 +178,7 @@ def test_a_window_awaiting_strong_holds_the_operation_result():
     window = fixture.windows[(1, 1)]
     fixture.results.replace_prediction((1, 1), (0, 0))
     window.published_request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.STRONG, 7
+        1, 1, window_records.STRONG_POOL_ID, 7
     )
     fixture.results.deliver_if_final(fixture.operation)
     assert fixture.release.released == [1]

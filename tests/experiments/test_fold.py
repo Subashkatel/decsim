@@ -638,13 +638,13 @@ import dataclasses
 
 import decsim
 import decsim.observe.settings as observe_settings
-import decsim.settings as machine_settings
+import decsim.presets.machines as machines
 import tests.escalation.test_strong_window_shapes as shape_tests
 
 switching = shape_tests.gate_switching()
 recording = observe_settings.ObservationSettings(record_switching_windows=True)
 switching = dataclasses.replace(switching, observation=recording)
-weak_alone = machine_settings.weak_decoder_baseline(3, 0.008, 1.0)
+weak_alone = machines.weak_baseline(3, 0.008, 1.0)
 tasks = [
     decsim.Task("switching", switching, {}),
     decsim.Task("weak_alone", weak_alone, {}),
@@ -720,6 +720,9 @@ FOLDED_FILES = (
     "sweep.csv",
     "shots.csv",
     "shot_links.csv",
+    "shot_stats.csv",
+    "stat_values.csv",
+    "stat_summary.csv",
     "window_samples.csv",
 )
 

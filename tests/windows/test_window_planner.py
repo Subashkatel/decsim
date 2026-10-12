@@ -403,3 +403,39 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
     planner.prepend_idle_rounds(7, 4)
     planner.prepend_idle_rounds(7, 0)
     assert window.batched_preceding_idle_round_count == 4
+
+
+def _window_reading_from(index: int, buffer_lo: int, commit_lo: int):
+    commit_hi = commit_lo + 2
+    buffer_hi = commit_lo + 4
+    round_count = buffer_hi - buffer_lo + 1
+    return window_records.Window(
+        operation_id=7,
+        window_index=index,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=buffer_hi,
+        round_count=round_count,
+        buffer_lo=buffer_lo,
+    )
+
+
+def test_the_start_floors_follow_out_of_order_starts_and_a_reslice():
+    """Each floor is the least start from its window on, kept by a reslice.
+
+    The third window starts before the second, as a Tan seam starts
+    before the core ahead of it, and a reslice that moves the last
+    window's read start back to round 2 lowers every floor above it.
+    """
+    plan = _empty_plan()
+    starts = ((1, 1), (6, 6), (4, 7), (9, 9))
+    for index, (buffer_lo, commit_lo) in enumerate(starts):
+        window = _window_reading_from(index, buffer_lo, commit_lo)
+        plan.windows[(7, index)] = window
+    plan.op_windows[7] = [0, 1, 2, 3]
+    planner = window_planner.WindowPlanner((), plan, ())
+    floors = planner.start_floors_of(7)
+    assert list(floors) == [1, 4, 4, 9]
+    planner.reslice_window((7, 3), 2, None)
+    floors = planner.start_floors_of(7)
+    assert list(floors) == [1, 2, 2, 2]

@@ -185,7 +185,7 @@ class TimingOnlyDevice(CircuitlessSource):
         return [readout]
 
 
-class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
+class SyndromeBitDevice(CircuitlessSource, seeding.AtomicRunSeedConsumer):
     """Emits seeded random bits shaped like the code card's syndrome.
 
     Each payload's generator is seeded by the substream of its stream, round
@@ -218,7 +218,7 @@ class SyndromeBitDevice(CircuitlessSource, seeding._AtomicRunSeedConsumer):
         CircuitlessSource.__init__(self, code)
         self.one_payload_per_patch = one_payload_per_patch
         self._seed = seed
-        seeding._AtomicRunSeedConsumer.__init__(self, seed)
+        seeding.AtomicRunSeedConsumer.__init__(self, seed)
 
     def run_seed_children(self) -> tuple[seed_records.RunSeedChild, ...]:
         """The code card, which shapes every payload."""

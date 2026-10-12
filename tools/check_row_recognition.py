@@ -37,6 +37,8 @@ INPUT_BOUNDARY = frozenset(
         "numbers.Integral",
         "numbers.Real",
         "pathlib.Path",
+        # a task's machine is its MachineSettings or a graph of parts
+        "topology_graph.Machine",
     }
 )
 
@@ -68,10 +70,14 @@ PORTS = frozenset(
 # Types decsim does not own, met at the edge of another library; an
 # enum member is written into json as its name, a number json cannot
 # hold as its exact text, an array as its values and a class given as a
-# setting as its module and qualified name (collect.json_value).
+# setting as its module and qualified name (collect.json_value). A
+# record's type hints are read as Python spells them, a union and an
+# optional's None, to list its parameters (decsim/parameters/fields.py).
 FOREIGN_TYPES = frozenset(
     {
         "type",
+        "types.NoneType",
+        "typing.Union",
         "enum.Enum",
         "numbers.Number",
         "numpy.generic",

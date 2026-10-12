@@ -19,6 +19,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.window_positions as window_positions
 
 
 class WindowModels:
@@ -31,10 +32,10 @@ class WindowModels:
 
     # a circuit-less source names one that answers every model with None
     provider = ports.Port(ports.WindowModelSource, optional=True)
-    # the decoders a model is built for: the tier that decodes the plan's
-    # windows, and the strong tier on a run that may escalate
+    # the decoder of the pool that decodes the plan's windows; a model
+    # is also built for each pool a window may escalate to
+    # (escalates_to)
     decoder = ports.Port(ports.Decoder)
-    strong_decoder = ports.Port(ports.Decoder, optional=True)
 
     def __init__(
         self, built_models: built_window_models.BuiltWindowModels
@@ -43,14 +44,21 @@ class WindowModels:
         # the model each planned or grown window was laid with; the
         # models object builds them, so it is where they live
         self.model_by_window: dict = {}
+        # the decoder of each pool an escalate edge leads to, in graph
+        # order
+        self.target_decoders: list = []
+
+    def escalates_to(self, decoder: ports.Decoder) -> None:
+        """A window may be decoded again by this decoder: models serve it."""
+        self.target_decoders.append(decoder)
 
     def requirement(self) -> fault_models.DecoderFaultModelRequirement:
         """What a model must offer every decoder that may decode it."""
         requirement = self.decoder.fault_model_requirement
-        if self.strong_decoder is None:
-            return requirement
-        strong_needs = self.strong_decoder.fault_model_requirement
-        return requirement.joined(strong_needs)
+        for target_decoder in self.target_decoders:
+            target_needs = target_decoder.fault_model_requirement
+            requirement = requirement.joined(target_needs)
+        return requirement
 
     def models_for_operation(
         self,
@@ -174,6 +182,9 @@ class WindowPlanner:
         self.planned_operations = planned_operations
         self.growth_by_stream: dict = {}
         self.trace = _TraceSources()
+        # operation id -> per window position, the least start round of
+        # that window and every later one; see start_floors_of
+        self.start_floors_by_operation: dict = {}
 
     def start(self) -> None:
         """Build the model of every window the plan laid.
@@ -203,7 +214,13 @@ class WindowPlanner:
 
     def window_at(self, key: tuple) -> window_records.Window:
         """The window at (operation id, index)."""
-        return self.plan.windows[key]
+        window = self.plan.windows.get(key)
+        if window is None:
+            raise KeyError(
+                f"window {key} is not planned, or a stream let it go once "
+                f"it was final (window_release.py)"
+            )
+        return window
 
     def later_windows(
         self,
@@ -246,6 +263,7 @@ class WindowPlanner:
         window = self.plan.windows[key]
         window.buffer_lo = buffer_lo
         window.round_count = window.buffer_hi - window.buffer_lo + 1
+        self._lower_the_floors_to(key, window.start_round)
         if model is not None:
             self.models.model_by_window[key] = model
         return window
@@ -306,16 +324,88 @@ class WindowPlanner:
         """The operation's window indices in order; none when unplanned."""
         return self.plan.op_windows.get(operation_id, [])
 
+    def windowed_operation_ids(self) -> list:
+        """Every operation with windows planned, streams included."""
+        return list(self.plan.op_windows)
+
+    def start_floors_of(self, operation_id: Any) -> list:  # an opaque identity
+        """Per window position, the least start round from it to the last.
+
+        Once a position's floor passes the rounds arrived, no window from
+        it on has begun. Windows need not start in index order (a Tan
+        seam starts before the core ahead of it). The floors grow as a
+        stream plans windows, and a reslice that moves a start earlier
+        lowers them; one that moves it later leaves a floor low, which
+        only lets a reader look further.
+        """
+        floors = self._floors(operation_id)
+        indices = self.window_indices_of(operation_id)
+        while len(floors) < len(indices):
+            window_index = indices[len(floors)]
+            window = self.plan.windows[(operation_id, window_index)]
+            before = len(floors) - 1
+            floors.append(window.start_round)
+            _lower_the_floors(floors, before, window.start_round)
+        return floors
+
     def window_count_of(self, operation_id: Any) -> int:  # an opaque identity
         """How many windows the operation has."""
         return self.plan.window_count[operation_id]
 
     def windows_of(self, operation_id: Any) -> list:  # an opaque identity
-        """The operation's windows, in index order."""
+        """The operation's windows still kept, in index order.
+
+        A stream that lets its final windows go keeps the later ones
+        only (window_release.py).
+        """
         windows = []
         for window_index in self.window_indices_of(operation_id):
             windows.append(self.plan.windows[(operation_id, window_index)])
         return windows
+
+    def commit_extent_of(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> tuple:
+        """The first and the last round the operation's windows commit.
+
+        A stream's windows tile it from round 1 (_StreamGrowth), so one
+        that let its first windows go still commits from round 1.
+        """
+        windows = self.windows_of(operation_id)
+        commit_los = [window.commit_lo for window in windows]
+        commit_his = [window.commit_hi for window in windows]
+        commit_lo = min(commit_los)
+        commit_hi = max(commit_his)
+        indices = self.window_indices_of(operation_id)
+        if len(windows) < len(indices):
+            commit_lo = 1
+        return commit_lo, commit_hi
+
+    def cut_rounds_of(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> tuple:
+        """The rounds a segment of the stream ends on, a window with it."""
+        growth = self.growth_by_stream[stream_id]
+        return tuple(growth.cut_rounds)
+
+    def let_go_before(self, stream_id: Any, window_index: int) -> None:
+        """Let the stream's windows before the index go, with their models.
+
+        They are final and measured (window_release.py). A stream lays
+        its windows in index order, so a window's index is its position;
+        the count of windows it has had stays.
+        """
+        indices = self.window_indices_of(stream_id)
+        for position in range(indices.first_kept, window_index):
+            index = indices[position]
+            key = (stream_id, index)
+            del self.plan.windows[key]
+            self.models.model_by_window.pop(key, None)
+        indices.let_go_before(window_index)
+        floors = self._floors(stream_id)
+        floors.let_go_before(window_index)
 
     def is_windowed(self, operation_id: Any) -> bool:  # an opaque identity
         """False for an operation decoded as one whole batch."""
@@ -377,7 +467,7 @@ class WindowPlanner:
         """Open a stream with agreeing physical and model limits, if finite."""
         stream_id = stream_operation.id
         self.plan.window_count[stream_id] = 0
-        self.plan.op_windows[stream_id] = []
+        self.plan.op_windows[stream_id] = window_positions.WindowPositions()
         self.plan.successors.setdefault(stream_id, [])
         self.plan.windowed_by_operation[stream_id] = True
         self.plan.batch_preceding_idle_rounds_by_operation[stream_id] = False
@@ -596,6 +686,34 @@ class WindowPlanner:
         growth.next_commit_lo = geometry.commit_hi + 1
         self.trace.window_planned.fire(window)
         return window
+
+    def _floors(self, operation_id) -> window_positions.WindowPositions:
+        """The operation's start floors, by window position."""
+        floors = self.start_floors_by_operation.get(operation_id)
+        if floors is None:
+            floors = window_positions.WindowPositions()
+            self.start_floors_by_operation[operation_id] = floors
+        return floors
+
+    def _lower_the_floors_to(self, key: tuple, start_round: int) -> None:
+        """A window's start moved: the floors up to it lowered to it."""
+        operation_id, window_index = key
+        floors = self.start_floors_by_operation.get(operation_id)
+        if not floors:
+            return
+        indices = self.window_indices_of(operation_id)
+        position = indices.index(window_index)
+        if position < len(floors):
+            _lower_the_floors(floors, position, start_round)
+
+
+def _lower_the_floors(
+    floors: window_positions.WindowPositions, position: int, start_round: int
+) -> None:
+    """The kept floors at the position and before it, lowered to the start."""
+    while position >= floors.first_kept and floors[position] > start_round:
+        floors[position] = start_round
+        position -= 1
 
 
 def _model_key(

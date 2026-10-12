@@ -1,14 +1,17 @@
 """`decsim run`: every task of one experiment, each until it stops.
 
 Each task's seeds run in order, a piece at a time, each piece saved the
-moment it ends. A task stops by its collection's rule on the
-contiguous prefix of its seeds, and no piece past the stop starts. Then
-the pieces are folded, one row per task. A saved piece is counted, not
-rerun, so a killed collect resumes; the same experiment reproduces the
-same rows (only the wall-clock column varies), with a pool too, as long
-as each task stops at the same piece. On Slurm each job runs the
-fixed pieces the launcher packed into it and one fold job folds them
-all.
+moment it ends. One pool lives for the whole run (unit_pool.py), and a
+piece starts whenever a worker frees, for the running task with the
+fewest pieces running, sinter's rule. A task stops by its collection's
+rule on the contiguous prefix of its seeds, and no piece past the stop
+starts. Then the pieces are folded, one row per task. A saved piece is
+counted, not rerun, so a killed collect resumes. The same experiment
+reproduces the same rows (only the wall-clock column varies) with a
+pool of any size, since the rule reads the prefix in seed order
+whatever order pieces end in; only a stop on the time cap depends on
+timing. On Slurm each job runs the fixed pieces the launcher packed
+into it and one fold job folds them all.
 """
 
 import copy
@@ -30,6 +33,7 @@ import decsim.experiments.pieces as pieces
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
+import decsim.experiments.unit_pool as unit_pool
 import decsim.machine as machine_module
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
@@ -41,7 +45,8 @@ class TaskCollection:
 
     tracker reads the prefix shot by shot off the saved shots.csv, as the
     report does, so the collector stops on the report's shot. pending holds
-    pieces handed out past the counted prefix, counted once all are saved,
+    pieces handed out past the counted prefix, in seed order, and finished
+    those of them saved; a piece is counted once every piece before it is,
     so the prefix stays contiguous whatever order a pool ends them in.
 
     An adaptive task's calibrator learns over its shots in order, so its
@@ -56,6 +61,9 @@ class TaskCollection:
     saved: dict
     next_seed: int = 0
     pending: list = dataclasses.field(default_factory=list)
+    finished: set = dataclasses.field(default_factory=set)
+    # new pieces handed out, so a pool takes the tasks in turn
+    handed_out: int = 0
     last_piece: Optional[tuple] = None
     tracker: collection_module.PrefixTracker = dataclasses.field(init=False)
 
@@ -79,29 +87,48 @@ class TaskCollection:
             unit = self._hand_out(run_dir, count)
             if unit is not None:
                 units.append(unit)
-                continue
-            if not units:
-                self.count_the_pending(run_dir)
         return units
 
-    def count_the_pending(self, run_dir: pathlib.Path) -> None:
-        """The pending pieces' shots onto the prefix, until it stops.
+    def takes_a_piece(self) -> bool:
+        """Whether the task runs on and may start a piece now.
 
-        A stopped task counts nothing more, so its line is said once.
+        An adaptive task's calibrator learns over its shots in order, so
+        it starts a piece only when none of its pieces runs.
         """
         if self.tracker.stop_kind is not None:
-            return
+            return False
+        if self._next_piece_count() == 0:
+            return False
+        if self.task.online_threshold is None:
+            return True
+        return self.running_count() == 0
+
+    def running_count(self) -> int:
+        """The pieces handed out and not yet saved."""
+        return len(self.pending) - len(self.finished)
+
+    def piece_ended(self, run_dir: pathlib.Path, piece: tuple) -> None:
+        """One piece saved; the prefix counted on as far as it now reaches."""
+        self.finished.add(piece)
+        self.count_the_finished(run_dir)
+
+    def count_the_finished(self, run_dir: pathlib.Path) -> None:
+        """The saved pieces at the head of the pending ones onto the prefix.
+
+        A piece still running holds back every piece after it. A stopped
+        task counts nothing more, so its line is said once.
+        """
         task_id = self.task.strong_id()
-        for first_seed, count in self.pending:
-            if self.tracker.stop_kind is not None:
-                break
+        while self._head_is_saved() and self.tracker.stop_kind is None:
+            piece = self.pending.pop(0)
+            self.finished.discard(piece)
+            first_seed, count = piece
             folder = pieces.piece_dir(run_dir, task_id, first_seed, count)
             shots_path = folder / "shots.csv"
             for row in fold.row_stream(shots_path):
                 self.tracker.add(row)
-        self.pending = []
-        if self.tracker.stop_kind is not None:
-            _say_the_task_stopped(self)
+            if self.tracker.stop_kind is not None:
+                _say_the_task_stopped(self)
 
     def rule(self) -> collection_module.TaskRule:
         """What the task's summary reads its prefix by."""
@@ -138,12 +165,20 @@ class TaskCollection:
         saved_count = self.saved.get(first_seed)
         if saved_count is not None:
             self._make_pending(first_seed, saved_count)
+            self.piece_ended(run_dir, (first_seed, saved_count))
             return None
         seeds_free = self._seeds_before_the_next_piece(first_seed)
         new_count = min(count, seeds_free)
         task = self.task_as_its_last_piece_left_it(run_dir)
         self._make_pending(first_seed, new_count)
+        self.handed_out += 1
         return collect.Unit(task, first_seed, new_count)
+
+    def _head_is_saved(self) -> bool:
+        """Whether the first pending piece has been saved."""
+        if not self.pending:
+            return False
+        return self.pending[0] in self.finished
 
     def _make_pending(self, first_seed: int, count: int) -> None:
         self.next_seed = first_seed + count
@@ -380,10 +415,9 @@ def _refuse_another_tree(run_dir: pathlib.Path) -> None:
 def _check_processes(processes) -> None:
     """The worker count is a whole number of at least one.
 
-    A share of the pool gives each task its part of the processes, so
-    zero gives no piece and the collect would finish having run nothing;
-    sinter
-    refuses the same count (sinter/_command/_main_collect.py:319-327).
+    A pool of zero processes never has room for a piece, so the collect
+    would finish having run nothing; sinter refuses the same count
+    (sinter/_command/_main_collect.py:319-327).
     """
     if isinstance(processes, int) and processes >= 1:
         return
@@ -606,8 +640,8 @@ def _refuse_a_task_that_runs_no_round(record: dict) -> None:
     raise refusal.RefusalError(
         f"the task {name} runs no QEC round: no operation of its workload "
         "runs a round that emits detector data, so its shots would decode "
-        "nothing; give it a workload, as decsim.settings.memory_workload "
-        "makes one"
+        "nothing; give it a workload, as "
+        "decsim.presets.machines.memory_workload makes one"
     )
 
 
@@ -723,41 +757,52 @@ def _collect_until_stopped(
     measure_shot,
     processes: int,
 ) -> None:
-    """Every task's pieces, a share of the pool at a time, until each stops.
+    """Every task's pieces on one pool until each stops.
 
-    Each share hands the pool about as many pieces as it has processes,
-    split among the tasks still running, so no task runs far past its
-    stop.
+    A piece starts the moment a worker frees, so no worker waits for the
+    slowest piece of a batch. It goes to the running task with the
+    fewest pieces running, then the fewest handed out, as sinter gives
+    an idle worker to the task with the fewest
+    (_collection_manager.py:406). A piece of a stopped task that was
+    already running is saved and left uncounted, as sinter keeps a
+    worker's flushed shots (_collection_manager.py:330-339).
     """
-    save = functools.partial(_save_the_piece, run_dir)
-    while True:
-        units = _next_share_of_the_pool(collections, run_dir, processes)
-        if not units:
+    with unit_pool.UnitPool(collect.run_unit, measure_shot, processes) as pool:
+        _fill_the_pool(pool, collections, run_dir)
+        while pool.running:
+            collection, unit, outcome = pool.next_ended()
+            ran_unit = collect.ran_as(unit, outcome)
+            _save_the_piece(run_dir, ran_unit, outcome)
+            piece = (unit.first_seed, unit.seeds)
+            collection.piece_ended(run_dir, piece)
+            _fill_the_pool(pool, collections, run_dir)
+
+
+def _fill_the_pool(
+    pool: unit_pool.UnitPool, collections: list, run_dir: pathlib.Path
+) -> None:
+    """Pieces started until the pool is full or no task takes one."""
+    while pool.has_room():
+        collection = _neediest(collections)
+        if collection is None:
             return
-        collect.run_units(
-            units, measure_shot, on_unit_done=save, processes=processes
-        )
-        for collection in collections:
-            collection.count_the_pending(run_dir)
+        units = collection.next_units(run_dir, 1)
+        for unit in units:
+            pool.submit(collection, unit)
 
 
-def _next_share_of_the_pool(
-    collections: list, run_dir: pathlib.Path, processes: int
-) -> list:
-    """The next pieces the pool runs: the running tasks' shares of it."""
-    running = []
-    for collection in collections:
-        if collection.tracker.stop_kind is None:
-            running.append(collection)
-    if not running:
-        return []
-    share = processes / len(running)
-    wanted = math.ceil(share)
-    units = []
-    for collection in running:
-        collection_units = collection.next_units(run_dir, wanted)
-        units.extend(collection_units)
-    return units
+def _neediest(collections: list) -> Optional[TaskCollection]:
+    """The task that takes a piece with the fewest running, then handed out."""
+    takers = [
+        collection for collection in collections if collection.takes_a_piece()
+    ]
+    if not takers:
+        return None
+    return min(takers, key=_need)
+
+
+def _need(collection: TaskCollection) -> tuple:
+    return collection.running_count(), collection.handed_out
 
 
 def _say_the_task_stopped(collection: TaskCollection) -> None:

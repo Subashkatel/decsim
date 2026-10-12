@@ -6,6 +6,7 @@ terminal data readout. Their assembled circuit is checked against Stim.
 
 import stim
 
+import decsim.frontends.memory_stream as memory_stream
 import decsim.records.circuits as circuit_records
 
 
@@ -16,21 +17,7 @@ def memory_program(
 ) -> circuit_records.RepeatedStimCircuit:
     """Extract ordinary Stim protection rounds without changing their gates."""
     circuit = memory_circuit(4, distance, basis, physical_error_probability)
-    repeated_indices = [
-        index
-        for index, instruction in enumerate(circuit)
-        if isinstance(instruction, stim.CircuitRepeatBlock)
-    ]
-    assert len(repeated_indices) == 1
-    repeat_index = repeated_indices[0]
-    block = circuit[repeat_index]
-    first = circuit[:repeat_index]
-    repeated = block.body_copy()
-    after_repeat = repeat_index + 1
-    readout = circuit[after_repeat:]
-    final = repeated + readout
-    single = first + readout
-    return circuit_records.RepeatedStimCircuit(first, repeated, final, single)
+    return memory_stream.repeated_memory(circuit)
 
 
 def memory_circuit(

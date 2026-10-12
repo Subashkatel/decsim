@@ -13,6 +13,8 @@ import threading
 from collections.abc import Iterable
 from typing import Optional, Protocol, runtime_checkable
 
+import numpy
+
 import decsim.records.seeds as seed_records
 
 _NAMESPACE = b"decsim.run-seed.v1"
@@ -105,13 +107,16 @@ class RunSeedComposite(Protocol):
         """The children, each with its path relative to this component."""
 
 
-class _AtomicRunSeedConsumer:
+class AtomicRunSeedConsumer:
     """Shared two-phase seed binding for stochastic runtime leaves.
 
-    A subclass installs its random state in _install_run_seed_state.
+    A subclass makes its random state from a seed in
+    _prepare_run_seed_state and installs it in _install_run_seed_state;
+    a draw holds _run_seed_lock and calls _begin_draw first.
+    GeneratorSeedConsumer below is one ready to inherit.
     """
 
-    def __init__(self, explicit_seed) -> None:
+    def __init__(self, explicit_seed: Optional[int]) -> None:
         self._explicit_seed = explicit_seed
         self._run_seed_lock = threading.Lock()
         self._pending_run_seed = None
@@ -127,7 +132,9 @@ class _AtomicRunSeedConsumer:
     def _install_run_seed_state(self, prepared_state) -> None:
         raise NotImplementedError
 
-    def reserve_run_seed(self, seed) -> seed_records.RunSeedReservation:
+    def reserve_run_seed(
+        self, seed: Optional[int]
+    ) -> seed_records.RunSeedReservation:
         """Prepare the state a commit installs, leaving the active one."""
         with self._run_seed_lock:
             self._refuse_second_binding(seed)
@@ -203,11 +210,39 @@ class _AtomicRunSeedConsumer:
         return self._entropy_seed()
 
 
-class _RandomSeedConsumer(_AtomicRunSeedConsumer):
+class GeneratorSeedConsumer(AtomicRunSeedConsumer):
+    """A component that draws from a numpy Generator the run seeds.
+
+    A researcher's decoder or verdict inherits it and draws from
+    generator(). A run gives it the seed derived from the root seed and
+    its path (derive_component_seed), so its draws repeat in every rerun
+    of a seed and differ between seeds; built alone it takes the seed it
+    is given, or the system's entropy. default_rng is the constructor
+    numpy recommends for a Generator (its docstring, Examples).
+    """
+
+    def __init__(self, seed: Optional[int] = None) -> None:
+        AtomicRunSeedConsumer.__init__(self, seed)
+        self._generator = numpy.random.default_rng(seed)
+
+    def generator(self) -> numpy.random.Generator:
+        """The generator to draw from; a draw marks the component used."""
+        with self._run_seed_lock:
+            self._begin_draw()
+            return self._generator
+
+    def _prepare_run_seed_state(self, effective_seed):
+        return numpy.random.default_rng(effective_seed)
+
+    def _install_run_seed_state(self, prepared_state) -> None:
+        self._generator = prepared_state
+
+
+class _RandomSeedConsumer(AtomicRunSeedConsumer):
     """Atomic run-seed ownership for a component drawing from random.Random."""
 
     def __init__(self, seed) -> None:
-        _AtomicRunSeedConsumer.__init__(self, seed)
+        AtomicRunSeedConsumer.__init__(self, seed)
         self._rng = random.Random(seed)
 
     def _prepare_run_seed_state(self, effective_seed):

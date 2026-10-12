@@ -10,11 +10,19 @@ from collections.abc import Mapping
 from typing import Optional, Protocol
 
 import decsim.config as config
-import decsim.decoders.decoder_output as decoder_output
 import decsim.engine as engine_module
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
+import decsim.records.routes as route_records
+import decsim.windows.revision_rules as revision_rules
+
+# the verdict and rules of an edge whose settings name none: today's
+GAP_THRESHOLD = verdicts.GapThreshold.Settings()
+LATEST_REVISION = revision_rules.LatestRevision.Settings()
+CANCEL_DOWNSTREAM = revision_rules.CancelDownstream.Settings()
 
 
 class ThresholdSettings(Protocol):
@@ -38,6 +46,64 @@ class ThresholdSettings(Protocol):
 
     def build(self) -> ports.ThresholdSource:
         """A fresh source of this record."""
+
+
+class VerdictSettings(Protocol):
+    """A verdict row's settings record (verdicts.py).
+
+    reads_threshold says whether the verdict decides on the edge's
+    threshold; reads_consensus whether it decides on an ensemble's
+    agreement, the consensus row's soft output.
+    """
+
+    name: str
+    reads_threshold: bool
+    reads_consensus: bool
+
+    def build(self) -> ports.EscalationVerdict:
+        """A fresh verdict."""
+
+
+class ReplaceRuleSettings(Protocol):
+    """A replace rule's settings record (windows/revision_rules.py).
+
+    replaces_provisionally says whether a later revision replaces the
+    prediction before the window is final.
+    """
+
+    name: str
+    replaces_provisionally: bool
+
+    def build(self) -> ports.ReplaceRule:
+        """A fresh rule."""
+
+
+class CancelRuleSettings(Protocol):
+    """A cancel rule's settings record (windows/revision_rules.py).
+
+    cancels_on_keep says whether a keep cancels the target's decode.
+    """
+
+    name: str
+    cancels_on_keep: bool
+
+    def build(self) -> ports.CancelRule:
+        """A fresh rule."""
+
+
+class DeadlineSettings(Protocol):
+    """An edge's deadline record (deadlines.py).
+
+    slack_microseconds is the budget from the source job's arrival.
+    """
+
+    name: str
+    slack_microseconds: float
+    trigger: deadlines.TriggerSettings
+    late_source_result: str
+
+    def build(self, engine: engine_module.Engine) -> deadlines.Deadline:
+        """A fresh deadline on the run's engine."""
 
 
 class StrongWindowSettings(Protocol):
@@ -75,11 +141,25 @@ class SwitchingSettings:
     machine's clock. The complementary gap's two solves are two jobs of
     the weak pool, so its unit_count decides whether they overlap.
 
-    strong_answer_route names a row of decoder_output.STRONG_ANSWER_ROUTES,
-    the way a strong answer reaches the frame. direct, the default: the
-    strong host joins the weak crossing commit, which rides up with the
-    selection, and sends the answer on strong_decoder_to_frame (Toshio
-    2510.25222 Fig. 1). through_weak_chip: the answer goes down on
+    verdict is the row that keeps or escalates each weak result
+    (verdicts.py), the gap against the threshold by default.
+    replace_rule says which revision the frame takes, and cancel_rule
+    what a keep does to the strong decode already asked for
+    (windows/revision_rules.py).
+
+    deadline, None by default, gives each source job a deadline and a
+    trigger that starts the target decode before the verdict, and makes
+    a late source result unavailable (deadlines.py, after DART-Q,
+    Bhave et al. 2605.09142). It starts the target early, so it
+    contradicts run_both_at_once, which starts it with every source
+    job, and an absorbing strong window, which starts it late.
+
+    strong_answer_route names one of records/routes.py
+    ANSWER_ROUTE_NAMES, the way a strong answer reaches the frame.
+    direct, the default: the strong host joins the weak crossing
+    commit, which rides up with the selection, and sends the answer on
+    strong_decoder_to_frame (Toshio 2510.25222 Fig. 1).
+    through_weak_chip: the answer goes down on
     strong_decoder_to_weak_decoder, the weak chip joins it in one cycle
     of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892
     Table I, the Pauli frame update). A run with no switching sends a
@@ -96,19 +176,49 @@ class SwitchingSettings:
         strong_window_shapes.RedoWindow.Settings()
     )
     strong_answer_route: str = "direct"
+    verdict: VerdictSettings = config.added_field(GAP_THRESHOLD)
+    replace_rule: ReplaceRuleSettings = config.added_field(LATEST_REVISION)
+    cancel_rule: CancelRuleSettings = config.added_field(CANCEL_DOWNSTREAM)
+    deadline: Optional[DeadlineSettings] = config.added_field(None)
 
     def __post_init__(self) -> None:
         config.check_cycles("threshold_cycles", self.threshold_cycles)
         config.check_cycles("switch_cycles", self.switch_cycles)
-        routes = decoder_output.STRONG_ANSWER_ROUTES
+        routes = route_records.ANSWER_ROUTE_NAMES
         if self.strong_answer_route not in routes:
             raise ValueError(
                 f"switching.strong_answer_route must be one of "
                 f"{tuple(routes)}, got {self.strong_answer_route!r}"
             )
+        if self.deadline is not None:
+            self._refuse_deadline_contradictions()
 
     def build_policy(
         self, threshold: ports.ThresholdSource
     ) -> ports.EscalationPolicy:
         """The policy that gives each weak result its verdict."""
-        return escalation_policies.Switching(threshold, self.run_both_at_once)
+        verdict = self.verdict
+        built_verdict = verdict.build()
+        return escalation_policies.Switching(
+            threshold,
+            self.run_both_at_once,
+            built_verdict,
+            verdict.reads_threshold,
+        )
+
+    def _refuse_deadline_contradictions(self) -> None:
+        """A deadline starts the target early; these start it otherwise."""
+        if self.run_both_at_once:
+            raise ValueError(
+                "switching.deadline starts the target decode when its "
+                "trigger fires; run_both_at_once starts it with every "
+                "source job (the two policies contradict; pick one)"
+            )
+        shape = self.strong_window
+        if shape.absorbs_weak_windows:
+            raise ValueError(
+                f"switching.deadline starts the target decode before the "
+                f"verdict; strong_window {shape.name} defers it until "
+                f"the far weak boundary exists (the two policies "
+                f"contradict; pick one)"
+            )

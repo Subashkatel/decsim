@@ -46,6 +46,7 @@ import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.parameters.assignments as assignments
 import decsim.producers as producers
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
@@ -114,6 +115,9 @@ EVERY_FILE = (
     "sweep.csv",
     "shots.csv",
     "shot_links.csv",
+    "shot_stats.csv",
+    "stat_values.csv",
+    "stat_summary.csv",
     "window_samples.csv",
 )
 
@@ -1052,7 +1056,7 @@ def test_a_task_stops_on_the_shot_its_rule_stops_on_inside_a_piece(
 
 
 def test_a_stopped_task_says_so_once(tmp_path, capsys):
-    """The collector counts every task after each share; one line a stop."""
+    """The collector counts a task as each piece ends; one line a stop."""
     task = run_files.first_task()
     task_id = task.strong_id()
     _write_a_saved_piece(tmp_path, task_id, 0, [True, False])
@@ -1065,7 +1069,7 @@ def test_a_stopped_task_says_so_once(tmp_path, capsys):
     collection.next_units(tmp_path, 1)
     capsys.readouterr()
 
-    collection.count_the_pending(tmp_path)
+    collection.count_the_finished(tmp_path)
 
     printed = capsys.readouterr()
     assert printed.err == ""
@@ -1141,8 +1145,8 @@ def test_a_task_whose_shot_runs_no_round_is_refused_before_its_record(
     assert str(refused.value) == (
         "the task empty runs no QEC round: no operation of its workload "
         "runs a round that emits detector data, so its shots would decode "
-        "nothing; give it a workload, as decsim.settings.memory_workload "
-        "makes one"
+        "nothing; give it a workload, as "
+        "decsim.presets.machines.memory_workload makes one"
     )
     assert not (out_dir / "tasks").exists()
 
@@ -1195,6 +1199,28 @@ def test_an_online_task_cut_and_resumed_is_the_uncut_task(tmp_path):
     assert cut_decisions == whole_decisions
     assert whole_trajectory[-1]["window_count"] == "20"
     assert cut_trajectory == whole_trajectory
+
+
+def test_a_pool_of_two_writes_the_shots_one_process_writes(tmp_path):
+    """Pieces end in any order on a pool; each task's prefix is the same.
+
+    Four tasks of one-shot pieces run until each stops, once on this
+    process and once on a pool of two that starts each piece as a worker
+    frees.
+    """
+    collection = {"max_shots": 4, "max_failures": 1, "piece_rounds": 15}
+    run_file = run_files.write_run_file(
+        tmp_path, axes=run_files.FOUR_TASK_AXES, collection=collection
+    )
+    study = experiment.load(run_file)
+    alone_dir = tmp_path / "alone"
+    pooled_dir = tmp_path / "pooled"
+
+    collect_command.collect_experiment(study, alone_dir, run_file)
+    collect_command.collect_experiment(study, pooled_dir, run_file, processes=2)
+
+    assert _shot_decisions(pooled_dir) == _shot_decisions(alone_dir)
+    assert _piece_names(pooled_dir) == _piece_names(alone_dir)
 
 
 def test_a_second_run_of_one_experiment_learns_from_the_start(tmp_path):
@@ -2367,3 +2393,19 @@ def _run_the_unit_and_note(ran_seeds: list, run_unit, unit, measure):
     end_seed = unit.first_seed + unit.seeds
     ran_seeds.extend(range(unit.first_seed, end_seed))
     return run_unit(unit, measure)
+
+
+def test_run_records_the_assignments_its_tasks_were_built_with(
+    tmp_path, monkeypatch
+):
+    run_file = run_files.write_run_file(tmp_path)
+    out_dir = tmp_path / "out"
+    variable = assignments.ENVIRONMENT_VARIABLE
+    monkeypatch.setenv(variable, "")
+    shots = ["--shots", "1"]
+    flags = ["--set", "weak_decoder.unit_count=2"]
+
+    command.main(["run", str(run_file), "--out", str(out_dir), *shots, *flags])
+
+    manifest = _manifest_of(out_dir)
+    assert manifest["assignments"] == "weak_decoder.unit_count=2"

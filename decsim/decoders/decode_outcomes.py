@@ -59,10 +59,18 @@ class DecodeOutcomes:
         result: decoding_records.DecodeResult,
         verdict: decoding_records.Verdict,
     ) -> None:
-        """The window side decided this weak request: close the attempt."""
-        key = (job.operation_id, job.window_id)
-        self.trace.verdict_given.fire(key, job.request_key, verdict)
-        self.manager.strong_requests.resolve_weak(key)
+        """The window side decided this request: close the attempt.
+
+        A revision along an escalate edge ended its request when it was
+        delivered (complete_strong); only its attempt on the next edge
+        closes here.
+        """
+        key = _destination_of(job)
+        request_key = job.request_key
+        self.trace.verdict_given.fire(key, request_key, verdict)
+        self.manager.strong_requests.resolve_weak(key, request_key.pool)
+        if job.strong_decode_for is not None:
+            return
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
         outcomes = decoding_records.RequestProcessingOutcome
         processing = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
@@ -85,21 +93,23 @@ class DecodeOutcomes:
         )
 
     def conclude_strong(
-        self,
-        job: decoding_records.DecodeJob,
-        result: decoding_records.DecodeResult,
-        deliveries: tuple,
+        self, job: decoding_records.DecodeJob, deliveries: tuple
     ) -> None:
         """The strong decode ended: teach the policy, deliver each completion.
 
         deliveries are the per-request completions taken before the
         job left its slot; each reaches its destination now or waits
-        in the output slot of the unit that produced it.
+        in the output slot of the unit that produced it. The policy
+        hears each request's own result under its window, so a batch's
+        members are audited one by one (OnlineThreshold keys its audits
+        by window).
         """
         self.manager.strong_requests.finish_service(job)
         policy = self.manager.escalation_policy
-        if policy is not None:
-            policy.learn_from_strong_result(job.strong_decode_for, result)
+        for held in deliveries:
+            if policy is not None:
+                window_key = held.request_job.strong_decode_for
+                policy.learn_from_strong_result(window_key, held.result)
         for held in deliveries:
             self.complete_strong(held)
 
@@ -113,7 +123,16 @@ class DecodeOutcomes:
         sender keeps a packet until the far side accepts it (gem5
         port.hh:244-255).
         """
-        if not self.manager.strong_requests.complete(completion):
+        strong_requests = self.manager.strong_requests
+        if strong_requests.drop_abandoned(completion):
+            self.trace.request_ended.fire(
+                completion.request_job,
+                completion.result,
+                decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
+                completion.decode_output_ticks,
+            )
+            return
+        if not strong_requests.complete(completion):
             self._hold_at_the_unit(completion)
             return
         request_job = completion.request_job
@@ -145,6 +164,13 @@ class DecodeOutcomes:
     ) -> None:
         """A request ended outside a conclusion: cancelled or withdrawn."""
         self.trace.request_ended.fire(job, result, outcome, decode_output_ticks)
+
+
+def _destination_of(job: decoding_records.DecodeJob) -> tuple:
+    """The window a job decodes for: its own, or the one it re-decodes."""
+    if job.strong_decode_for is not None:
+        return job.strong_decode_for
+    return (job.operation_id, job.window_id)
 
 
 @dataclasses.dataclass(frozen=True)

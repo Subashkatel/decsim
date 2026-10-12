@@ -1,6 +1,6 @@
 """The Chrome trace of gate point 1: its shape, its chains, its counts.
 
-The event model and its worked example (weak_decoder_baseline d 3
+The event model and its worked example (machines.weak_baseline d 3
 p 0.003 seed 0, the frozen
 suite's first strict point); the copy, reference and move counts are
 data_path.md's hop table. The trace never moves a tick: a run with it on
@@ -14,6 +14,7 @@ import json
 
 import pytest
 
+import decsim.build.decoders as decoders_part
 import decsim.decoders.decoders as decoders
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.experiments.collect as collect
@@ -74,6 +75,17 @@ def traced(tmp_path_factory):
     text = path.read_text()
     document = json.loads(text)
     return machine, result, document
+
+
+def test_every_window_the_frame_took_is_marked_final_once(traced):
+    """An escalated window's strong answer finalizes it with no commit."""
+    machine, _result, document = traced
+    instants = _by_phase(document, "i")
+
+    finals = _rows_with(instants, "name", "window final")
+
+    committed = machine.observation.frame_corrections.committed
+    assert len(finals) == len(committed)
 
 
 def _log_sha(machine) -> str:
@@ -159,10 +171,11 @@ def test_the_trace_moves_no_tick_and_narrates_the_same_log(tmp_path):
     assert plain_result.link_traffic == traced_result.link_traffic
     assert plain_result.operation_results == traced_result.operation_results
     assert plain_frame.records == traced_frame.records
-    assert (
-        plain.observation.queue_depth.samples
-        == traced.observation.queue_depth.samples
-    )
+    plain_groups = plain.observation.statistics.groups
+    traced_groups = traced.observation.statistics.groups
+    plain_queued = plain_groups[decoders_part.MANAGERS_PATH].queued
+    traced_queued = traced_groups[decoders_part.MANAGERS_PATH].queued
+    assert plain_queued.changes == traced_queued.changes
 
 
 def test_the_trace_is_not_a_reason_to_build_the_counters(tmp_path):

@@ -15,8 +15,8 @@ import decsim.observe.frame_corrections as frame_corrections_module
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
-import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.referee_audit as referee_audit_module
+import decsim.observe.region_of_interest as region_of_interest_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
@@ -25,11 +25,16 @@ import decsim.observe.stage_records as stage_records_module
 import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.window_outcomes as window_outcomes_module
+import decsim.statistics.registry as statistics_registry
 
 
 @dataclasses.dataclass(frozen=True)
 class Observation:
-    """What one run's listeners heard."""
+    """What one run's listeners heard, and what its parts measured.
+
+    statistics is the run's registry of the statistics each part
+    declares (decsim/statistics), read as rows or by part path.
+    """
 
     log: log_writers.LogWriter
     windows: window_ledger_module.WindowLedger
@@ -40,14 +45,17 @@ class Observation:
     data_movement: Optional[data_movement_module.DataMovement]
     decode_records: Optional[decode_records_module.DecodeRecordLedger]
     runtime_stamps: runtime_stamps_module.RuntimeStamps
-    queue_depth: queue_depth_module.QueueDepthLog
     controller_counters: controller_counters_module.ControllerCounters
     command_events: command_events_module.CommandEvents
     stages: stage_records_module.StageLedger
     decode_backlog: Optional[metrics.DecodeBacklog]
-    decoder_utilization: metrics.DecoderUtilization
+    statistics: statistics_registry.Registry
     round_events: round_events_module.RoundEventRecorder
     referee_audit: referee_audit_module.RefereeAudit
     sampled_shots: sampled_shots_module.SampledShots
     window_outcomes: Optional[window_outcomes_module.WindowOutcomes]
     confidence: Optional[decode_records_module.ConfidenceLedger]
+    # None unless the run leaves a warm-up out of its statistics
+    region_of_interest: Optional[region_of_interest_module.RegionOfInterest] = (
+        None
+    )

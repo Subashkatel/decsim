@@ -3,9 +3,9 @@
 Readiness is the arrivals read against the planner's geometry: the
 tracker builds a WindowReadiness and asks the scheme, as qLDPC's decode
 loop asks each planned window for its detectors
-(qldpc/decoders/sinter.py, CompiledSequentialWindowDecoder). The strong
-tier's readiness reads the strong syndrome buffer's stored-through
-round, counted here, never the weak one's. A stream's length (its source
+(qldpc/decoders/sinter.py, CompiledSequentialWindowDecoder). An edge's
+readiness reads its target store's stored-through round, counted here
+per store, never the entry store's arrivals. A stream's length (its source
 limit, sealed length and closed boundaries) lives here; its geometry is
 the planner's.
 """
@@ -93,14 +93,16 @@ class RoundTracker:
 
     def note_room_round(
         self,
+        store: ports.SyndromeBuffer,
         operation_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
-        """The strong syndrome buffer stored a round of the operation."""
+        """A store a region lands in stored a round of the operation."""
         if operation_id not in self.arrivals_by_operation:
             self.arrivals_by_operation[operation_id] = _Arrivals()
         arrivals = self.arrivals_by_operation[operation_id]
-        arrivals.strong_rounds = max(arrivals.strong_rounds, round_index)
+        stored_through = arrivals.stored_by_store.get(store, 0)
+        arrivals.stored_by_store[store] = max(stored_through, round_index)
 
     def operation(
         self,
@@ -123,12 +125,13 @@ class RoundTracker:
     def strong_rounds_arrived(
         self,
         operation_id: Any,  # an opaque identity
+        store: ports.SyndromeBuffer,
     ) -> int:
-        """The operation's round stored through the strong syndrome buffer."""
+        """The operation's highest round stored in that store."""
         arrivals = self.arrivals_by_operation.get(operation_id)
         if arrivals is None:
             return 0
-        return arrivals.strong_rounds
+        return arrivals.stored_by_store.get(store, 0)
 
     # ---- a stream's length
 
@@ -347,7 +350,8 @@ class _Arrivals:
         # published rounds above the first round still missing
         self.rounds_past_a_gap: set = set()
         self.memory_rounds = 0
-        self.strong_rounds = 0
+        # the highest round each store a region lands in has stored
+        self.stored_by_store: dict = {}
 
 
 class _StreamLength:

@@ -42,7 +42,8 @@ import decsim.decoders.detection_events as detection_events_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
-import decsim.trace_source as trace_source
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 
 if TYPE_CHECKING:
     import decsim.decoders.decoder_manager as decoder_manager_module
@@ -79,11 +80,27 @@ class PoolSettings:
 class DecoderPool:
     """The pool of one tier's decoder units.
 
-    It tracks which are free.
-
-    Trace sources: unit_busy(unit) when a job takes a unit's compute,
-    unit_freed(unit) when it goes back.
+    It tracks which are free. Its statistics are the units in the pool
+    and the units busy over time, whose area is the work the pool was
+    offered (Triage's utilization, 2605.04459 lines 1024-1031).
     """
+
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "units",
+            statistic_kinds.Count,
+            "units in the pool",
+            "units",
+            is_configuration=True,
+        ),
+        statistics_registry.Statistic(
+            "busy_units",
+            statistic_kinds.Level,
+            "units whose compute a job holds",
+            "units",
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
 
     def __init__(
         self,
@@ -102,7 +119,6 @@ class DecoderPool:
             self.units.append(unit)
         # the units whose compute is back in the pool, in return order
         self.free = list(self.units)
-        self.trace = _TraceSources()
 
     def offer(
         self,
@@ -143,12 +159,18 @@ class DecoderPool:
         """The job takes the unit's compute out of the pool."""
         self.free.remove(unit)
         unit.claim_compute(job)
-        self.trace.unit_busy.fire(unit)
+        self._count_busy_units()
 
     def release(self, unit: decoder_unit_module.DecoderUnit) -> None:
         """The unit's compute goes back to the pool."""
         self.free.append(unit)
-        self.trace.unit_freed.fire(unit)
+        self._count_busy_units()
+
+    def _count_busy_units(self) -> None:
+        unit_count = len(self.units)
+        free_count = len(self.free)
+        busy = unit_count - free_count
+        self.statistics.busy_units.set(busy)
 
     def _staging_offer(
         self,
@@ -296,11 +318,3 @@ def _free_unit_for(
     if unit_holding_input is not None:
         return unit_holding_input
     return free_with_room[0]
-
-
-@dataclasses.dataclass(frozen=True)
-class _TraceSources:
-    """Every event the decoder pool reports, as one member."""
-
-    unit_busy: trace_source.TraceSource = trace_source.new_source()
-    unit_freed: trace_source.TraceSource = trace_source.new_source()

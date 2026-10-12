@@ -17,6 +17,8 @@ import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.plan_command as plan_command
 import decsim.experiments.run_folder as run_folder
+import decsim.parameters.assignments as assignments
+import decsim.parameters.in_force as in_force
 import tests.experiments.run_files as run_files
 
 # four tasks of five shots, each estimated at 280 core seconds: a
@@ -200,6 +202,49 @@ def test_a_dry_run_writes_one_array_and_a_fold_behind_it(tmp_path, capsys):
     assert "  1      1   77%      10" in printed.out
 
 
+def write_peaks(seconds_path, peaks: list) -> None:
+    """The seconds file's rows again, each with the next peak."""
+    seconds_text = seconds_path.read_text()
+    lines = seconds_text.splitlines()
+    rows = ["task,core_seconds_per_shot,peak_memory_mb"]
+    for line, peak in zip(lines[1:], peaks, strict=True):
+        rows.append(f"{line},{peak}")
+    rows.append("")
+    text = "\n".join(rows)
+    seconds_path.write_text(text)
+
+
+def test_a_job_asks_its_cores_times_the_largest_measured_peak(tmp_path):
+    """Three cores, peaks up to 1200 MB, margin 1.25: 4500 MB a job."""
+    run_file = run_files.write_packed_run_file(
+        tmp_path, PIECE_SECONDS, **PACKED_TASKS
+    )
+    seconds_path = tmp_path / plan_command.SECONDS_FILE
+    write_peaks(seconds_path, [800, 1200, 900.5, 1000])
+    out_dir = tmp_path / "out"
+    slurm = ["--slurm", "--cores", "3", "--hours", "2", "--dry-run"]
+
+    command.main(["run", str(run_file), "--out", str(out_dir), *slurm])
+
+    run_script = out_dir / plan_command.RUN_SCRIPT
+    run_text = run_script.read_text()
+    assert "--cpus-per-task=3 --mem=4500M" in run_text
+
+
+def test_a_seconds_file_with_a_task_missing_its_peak_asks_the_default(
+    tmp_path,
+):
+    run_file = run_files.write_packed_run_file(
+        tmp_path, PIECE_SECONDS, **PACKED_TASKS
+    )
+    seconds_path = tmp_path / plan_command.SECONDS_FILE
+    write_peaks(seconds_path, [800, "", 900, 1000])
+
+    memory_mb = plan_command.measured_memory_mb(run_file, 3, 1.25)
+
+    assert memory_mb == plan_command.DEFAULT_MEMORY_MB
+
+
 def test_a_launch_with_no_seconds_file_is_refused_before_any_folder(
     tmp_path, capsys
 ):
@@ -239,3 +284,31 @@ def _core_seconds(packed: plan_command.PackedJob) -> list:
     return [
         sum(piece.estimated_seconds for piece in lane) for lane in packed.lanes
     ]
+
+
+def test_a_dry_run_exports_the_assignments_every_job_builds_its_tasks_by(
+    tmp_path, monkeypatch
+):
+    """Each array job loads the run file again, so it takes DECSIM_SET too.
+
+    The assignment changes every task's id, so the seconds file is
+    written for the tasks it builds.
+    """
+    variable = assignments.ENVIRONMENT_VARIABLE
+    assigned = "weak_decoder.unit_count=2"
+    parsed = assignments.parse(assigned, assignments.FLAG)
+    with in_force.in_force(parsed):
+        run_file = run_files.write_packed_run_file(
+            tmp_path, PIECE_SECONDS, **PACKED_TASKS
+        )
+    monkeypatch.setenv(variable, "")
+    out_dir = tmp_path / "run folder"
+    slurm = ["--slurm", "--cores", "1", "--hours", "2", "--dry-run"]
+    flags = ["--set", assigned]
+
+    command.main(["run", str(run_file), "--out", str(out_dir), *slurm, *flags])
+
+    run_script = out_dir / plan_command.RUN_SCRIPT
+    run_text = run_script.read_text()
+    run_lines = run_text.splitlines()
+    assert shlex.split(run_lines[3]) == ["export", f"{variable}={assigned}"]

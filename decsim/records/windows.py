@@ -1,7 +1,7 @@
 """One decoder window: its geometry, its plan, its boundaries, its state.
 
-A request is a window key plus the tier that serves it and a run-wide
-ordinal; DecoderTier and DecoderRequestKey live here because a window
+A request is a window key plus the pool that serves it and a run-wide
+ordinal; PoolId and DecoderRequestKey live here because a window
 records which request published its correction. The window is the
 window manager's live bookkeeping, so it and the plan records with live
 state are unfrozen.
@@ -20,11 +20,23 @@ class WindowProtocol(Enum):
     TAN_ZERO_SEAM_GRAPHLIKE = auto()
 
 
-class DecoderTier(Enum):
-    """Weak (first, fast) or strong (escalated, slow) decode."""
+@dataclass(frozen=True)
+class PoolId:
+    """The decoder pool a request is for, by the word results write for it.
 
-    WEAK = "weak"
-    STRONG = "strong"
+    A machine's pool is named by its part. A slotted machine's two pools
+    keep the words its results have always written, WEAK_POOL_ID for the
+    pool that decodes first and STRONG_POOL_ID for the one it escalates
+    to, so a slotted run's records are unchanged.
+    """
+
+    word: str
+
+
+WEAK_POOL_ID = PoolId("weak")
+STRONG_POOL_ID = PoolId("strong")
+# the slotted pools, in the order reports list them
+SLOTTED_POOL_IDS = (WEAK_POOL_ID, STRONG_POOL_ID)
 
 
 # WindowSettings.terminal_policy names one of these: how a finite serial stream
@@ -37,15 +49,15 @@ TERMINAL_POLICIES = ("flush", "lookahead")
 
 @dataclass(frozen=True)
 class DecoderRequestKey:
-    """Identity of one decode request: its window, its tier, its ordinal.
+    """Identity of one decode request: its window, its pool, its ordinal.
 
-    The run-wide ordinal keeps a retry of the same window and tier
+    The run-wide ordinal keeps a retry of the same window and pool
     distinct from the request it replaces.
     """
 
     operation_id: Any  # an opaque identity
     window_id: int
-    tier: DecoderTier
+    pool: PoolId
     run_sequence: int
 
 

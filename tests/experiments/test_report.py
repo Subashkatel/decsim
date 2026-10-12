@@ -5,18 +5,23 @@ only fields that add are recorded and every summary is derived from
 them). shot_data_movement.csv holds one row per shot per path off that
 shot's own counters, with the memory class the path crosses, so a
 folder folded from shards carries the rows one unsharded run would have
-written. latency_samples.csv holds one measured algorithm wall clock
-per decoded window, recorded only for a decoder named by a table row,
-each beside its window's inter-arrival, the deadline a decode must
-beat. The confidence files leave out an unscored shot, as sinter takes
-a discard out of every failure-conditioned count
-(sinter/_decoding/_decoding.py:120-128).
+written. shot_stats.csv holds one row per shot per part, statistic and
+field, the shot's registry rows as they are, and stat_values.csv each
+task's count of every value, added over its shots. latency_samples.csv
+holds
+one measured algorithm wall clock per decoded window, recorded only for
+a decoder named by a table row, each beside its window's inter-arrival,
+the deadline a decode must beat. The confidence files leave out an
+unscored shot, as sinter takes a discard out of every failure-conditioned
+count (sinter/_decoding/_decoding.py:120-128).
 """
 
 import collections
 import csv
 import math
 import types
+
+import pytest
 
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
@@ -58,6 +63,81 @@ def _column_sums(rows: list, columns: tuple) -> dict:
         for column in columns:
             sums[column] += row[column]
     return sums
+
+
+def test_a_shots_statistics_rows_are_its_registrys_rows():
+    measurements = measured_shots(2)
+    rows = report.shot_statistics_rows(measurements)
+
+    for measurement in measurements:
+        own_rows = [row for row in rows if row["seed"] == measurement.seed]
+        values = {
+            (row["path"], row["statistic"], row["field"]): row["value"]
+            for row in own_rows
+        }
+        recorded = {
+            (row.path, row.statistic, row.field): row.value
+            for row in measurement.statistics
+        }
+        assert len(own_rows) == len(measurement.statistics)
+        assert values == recorded
+        assert ("weak_decoder.units", "busy_units", "area") in values
+
+
+def test_a_tasks_value_counts_add_its_shots_counts():
+    measurements = measured_shots(2)
+    rows = report.statistic_value_rows(measurements)
+    added = collections.Counter()
+    for measurement in measurements:
+        for value_count in measurement.statistic_values:
+            key = (value_count.path, value_count.statistic, value_count.value)
+            added[key] += value_count.count
+
+    counted = {
+        (row["path"], row["statistic"], row["value"]): row["count"]
+        for row in rows
+    }
+
+    assert counted == dict(added)
+    assert ("weak_decoder.decodes", "service") in {key[:2] for key in counted}
+
+
+def _summary_values(rows: list, path: str, statistic: str) -> dict:
+    """One statistic's measures off stat_summary.csv rows."""
+    found = {}
+    for row in rows:
+        if (row["path"], row["statistic"]) == (path, statistic):
+            found[row["measure"]] = row["value"]
+    return found
+
+
+def test_the_summary_is_derived_from_the_shots_own_statistics(tmp_path):
+    """Means over the shots' added fields; a peak over every shot."""
+    measurements = measured_shots(2)
+    _rows, run_dir = run_files.folded_run(tmp_path, measurements)
+    summary_path = run_dir / "stat_summary.csv"
+    summary = report.read_rows(summary_path)
+    fields = collections.defaultdict(list)
+    for measurement in measurements:
+        for row in measurement.statistics:
+            fields[(row.path, row.statistic, row.field)].append(row.value)
+    service_count = sum(fields[("weak_decoder.decodes", "service", "count")])
+    service_total = sum(fields[("weak_decoder.decodes", "service", "total")])
+    busy_area = sum(fields[("weak_decoder.units", "busy_units", "area")])
+    busy_span = sum(fields[("weak_decoder.units", "busy_units", "span")])
+    busy_peak = max(fields[("weak_decoder.units", "busy_units", "peak")])
+
+    service = _summary_values(summary, "weak_decoder.decodes", "service")
+    busy = _summary_values(summary, "weak_decoder.units", "busy_units")
+    units = _summary_values(summary, "weak_decoder.units", "units")
+    assert service["count"] == service_count
+    service_mean = service_total / service_count
+    busy_mean = busy_area / busy_span
+    assert service["mean"] == pytest.approx(service_mean)
+    assert service["minimum"] <= service["p50"] <= service["maximum"]
+    assert busy["time_mean"] == pytest.approx(busy_mean)
+    assert busy["peak"] == busy_peak
+    assert units["per_shot"] == 1
 
 
 def test_a_shots_rows_add_up_to_that_shots_own_counters():

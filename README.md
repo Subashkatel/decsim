@@ -63,7 +63,7 @@ microsecond a window:
 ```python examples/priced_cards_example.py
 tasks = []
 for distance in DISTANCES:
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
@@ -71,8 +71,7 @@ for distance in DISTANCES:
     card = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=DECODE_MICROSECONDS
     )
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=card)
-    machine = dataclasses.replace(base, weak_decoder=weak_decoder)
+    machine = base.with_settings(machines.WEAK_POOL, algorithm=card)
     # the task's settings, named as the results' columns name them
     metadata = {
         "workload.arguments.physical_error_probability": (
@@ -134,4 +133,15 @@ describes, with the ruff the `dev` extra installs:
 ```bash
 python -m pip install -e ".[run,test,dev]" -c constraints.txt
 tools/check.sh
+```
+
+`tools/speed_check.py` times seven tasks of the shipped experiments in
+a base checkout and in this one, in turn on one node, and fails when a
+task's median warm seconds a shot here pass the base's by more than
+20%. Nodes of one type differ by that much, so it keeps no stored
+numbers; run it as one Slurm job (about half an hour):
+
+```bash
+git worktree add ../decsim_base main
+srun -c 2 python tools/speed_check.py ../decsim_base
 ```

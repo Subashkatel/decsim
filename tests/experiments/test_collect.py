@@ -60,7 +60,9 @@ import numpy
 import pytest
 import stim
 
+import decsim.config as config
 import decsim.decoders.relay_belief_propagation.window_decoder as relay_window
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
 import decsim.experiments.collect_command as run
 import decsim.experiments.measure as measure_shot
@@ -68,14 +70,21 @@ import decsim.experiments.report as sweep_report
 import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.parameters.in_force as in_force
+import decsim.parameters.tree as tree
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as topology_graph
+import decsim.topology.slotted as slotted
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
+import tests.topology.test_graph_layout as layout_tests
 
 THIS_FILE = pathlib.Path(__file__)
 DATA = THIS_FILE.parent / "data"
@@ -165,6 +174,52 @@ EXACT_NUMBERS = [
     (7, 7),
     (0.001, 0.001),
 ]
+
+
+def test_a_chain_task_copied_by_replace_keeps_its_graph_and_layout():
+    """A run caps a task's shots on a copy; the copy runs the same chain."""
+    chain = layout_tests.chain_machine()
+    task = collect.Task("chain", chain)
+    options = collect.RecordOptions()
+
+    copy = dataclasses.replace(task, record_options=options)
+
+    assert copy.layout == task.layout
+    assert copy.strong_id() == task.strong_id()
+
+
+def test_a_chains_id_holds_its_workload_lowered():
+    """A memory row and the workload it lowers to are one chain's id."""
+    chain = layout_tests.chain_machine()
+    task = collect.Task("chain", chain)
+    workload = topology_graph.Part("workload", task.machine.workload)
+    lowered = chain.with_part(workload)
+
+    lowered_task = collect.Task("chain", lowered)
+
+    assert lowered_task.strong_id() == task.strong_id()
+
+
+def test_the_machine_id_is_the_same_for_two_metadata_of_one_machine():
+    machine = machines.weak_baseline(3, 0.002, 1.0)
+    first = collect.Task("first", machine, {"label": "a"})
+    second = collect.Task("second", machine, {"label": "b"})
+
+    assert first.machine_id() == second.machine_id()
+    assert first.strong_id() != second.strong_id()
+
+
+def test_a_distance_in_force_makes_the_memory_again_at_that_distance():
+    base = machines.weak_baseline(3, 0.002, 1.0)
+    at_five = machines.weak_baseline(5, 0.002, 1.0)
+    distance = tree.Assignment("qpu.distance", 5, "a test")
+
+    with in_force.in_force([distance]):
+        assigned = collect.Task("memory", base)
+    built = collect.Task("memory", at_five)
+
+    assert assigned.machine == built.machine
+    assert assigned.strong_id() == built.strong_id()
 
 
 def test_reference_rows_equal_the_recorded_sweep_and_links(tmp_path):
@@ -439,7 +494,7 @@ def test_a_tasks_record_keeps_the_labels_its_id_leaves_out(tmp_path):
     record = json.loads(record_text)
     links = record["settings"]["links"]
     channel = links["qpu_to_controller"]["channel"]
-    assert links["profile_name"] == "logical_reference"
+    assert links["profile_name"] == fabrics.PROFILE_NAME
     assert channel["configuration_source"] == run_files.REFERENCE_SOURCE
 
 
@@ -850,3 +905,75 @@ class _CrashingRelayDecoder:
 
 def _crashing_relay_type():
     return _CrashingRelayDecoder
+
+
+def test_a_task_reads_its_threshold_table_at_the_machine_assigned_to_it(
+    tmp_path,
+):
+    """A table row is read after the assignments in force, never before.
+
+    The table is keyed by the round period, which `--set` may change, so
+    the row read is the assigned period's (MachineSettings.at_task).
+    """
+    table_path = tmp_path / "calibration.csv"
+    table_path.write_text(
+        "round_period_microseconds,gth_eq4_wilson\n1.1,19.0\n2.0,23.5\n"
+    )
+    machine = run_files.switching_machine()
+    table = threshold_sources.TableThreshold.Settings(table_path)
+    switching = dataclasses.replace(machine.switching, threshold=table)
+    tabled = dataclasses.replace(machine, switching=switching)
+    period = tree.Assignment("qpu.round_period", "2us", "--set")
+
+    with in_force.in_force([period]):
+        task = collect.Task("tabled", tabled)
+
+    threshold = task.machine.switching.threshold
+    assert task.machine.qpu.round_period_microseconds == 2.0
+    assert threshold.threshold_decibels == 23.5
+
+
+def test_a_task_built_from_a_graph_runs_as_its_settings_with_their_id():
+    settings = run_files.minimal_machine()
+    written = slotted.graph_of(settings)
+
+    from_graph = collect.Task("graph_task", written)
+    from_settings = collect.Task("graph_task", settings)
+
+    assert from_graph.machine == from_settings.machine
+    assert from_graph.strong_id() == from_settings.strong_id()
+    assert from_graph.graph == written
+    assert from_settings.graph is None
+
+
+def test_the_assignments_in_force_name_a_graph_tasks_paths():
+    settings = run_files.minimal_machine()
+    written = slotted.graph_of(settings)
+    assignment = tree.Assignment("weak.unit_count", 3, "a test")
+
+    with in_force.in_force([assignment]):
+        task = collect.Task("graph_task", written)
+
+    pool = task.graph.part("weak")
+    assert pool.settings.unit_count == 3
+    assert task.machine.weak_decoder.unit_count == 3
+
+
+@dataclasses.dataclass(frozen=True)
+class _GrownRecord:
+    """A record that gained a field after ids were recorded from it."""
+
+    kept: int = 1
+    grown: tuple = config.added_field(())
+
+
+def test_a_field_added_after_ids_were_recorded_is_left_out_at_its_default():
+    """So every id recorded before the field existed stays the same."""
+    record = _GrownRecord()
+    grown = _GrownRecord(grown=(2,))
+
+    at_default = collect.json_value(record, record_classes=False)
+    changed = collect.json_value(grown, record_classes=False)
+
+    assert at_default == {"kept": 1}
+    assert changed == {"kept": 1, "grown": [2]}

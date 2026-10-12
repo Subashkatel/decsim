@@ -131,8 +131,14 @@ class TrafficLedger:
     channels by alias.
     """
 
-    def __init__(self, fabric_settings: link_settings.FabricSettings) -> None:
+    def __init__(
+        self,
+        fabric_settings: link_settings.FabricSettings,
+        keeps_records: bool = True,
+    ) -> None:
         self._settings = fabric_settings
+        # a stream keeps the counters only (observation.folds_windows)
+        self.keeps_records = keeps_records
         self._alias_by_channel: dict[str, str] = {}
         self._counters_by_binding: dict[tuple, TrafficCounters] = {}
         self._counters_by_channel: dict[str, TrafficCounters] = {}
@@ -159,7 +165,12 @@ class TrafficLedger:
         self._counters_by_channel[record.channel] = (
             channel_counters.plus_transfer(transfer)
         )
-        self._records.append(record)
+        if self.keeps_records:
+            self._records.append(record)
+
+    def transfer_row(self, record: transfer_records.TransferRecord) -> dict:
+        """One transfer as its row in traffic_json_value's transfers."""
+        return _transfer_json(record, self._alias_by_channel)
 
     def snapshot(self) -> FabricSnapshot:
         """A frozen view: the wiring, every counter, every transfer."""
@@ -202,7 +213,8 @@ class TrafficLedger:
         for record in snapshot.transfers:
             transfer_json = _transfer_json(record, self._alias_by_channel)
             transfers.append(transfer_json)
-        path_order = [path.value for path in transfer_records.LinkPath]
+        path_names = self._settings.path_names()
+        path_order = list(path_names)
         return {
             "schema_version": 2,
             "path_order": path_order,
@@ -268,7 +280,7 @@ class TrafficLedger:
         assert semantic_sum == channel_snapshot.counters, (
             "a channel's counters are the sum of its paths' counters"
         )
-        member_paths = [path.value for path in channel_snapshot.member_paths]
+        member_paths = list(channel_snapshot.member_paths)
         physical_counters = channel_snapshot.counters.to_json_value()
         semantic_counters = semantic_sum.to_json_value()
         channel_json = {
@@ -296,7 +308,7 @@ def _semantic_edge_json(
     binding = (path_snapshot.path, path_snapshot.physical_alias)
     setup = setup_by_binding[binding]
     return {
-        "path": path_snapshot.path.value,
+        "path": path_snapshot.path,
         "physical_alias": path_snapshot.physical_alias,
         "counters": path_snapshot.counters.to_json_value(),
         "setup_ticks": setup["setup_ticks"],
@@ -314,7 +326,7 @@ def _transfer_json(
         patch_json = identity_records.stable_identity_json(patch_id)
         patch_ids.append(patch_json)
     return {
-        "path": record.path.value,
+        "path": record.path,
         "physical_alias": alias_by_channel[record.channel],
         "attribution": {
             "operation_id": identity_records.stable_identity_json(
@@ -380,7 +392,7 @@ def _relation_json(relation) -> Optional[dict]:
                 key.operation_id
             ),
             "window_id": key.window_id,
-            "tier": key.tier.value,
+            "tier": key.pool.word,
             "run_sequence": key.run_sequence,
         }
     }

@@ -48,7 +48,7 @@ class DecisionDispatch:
             last_round=None,
         )
         self.link.send(
-            transfer_records.LinkPath.FRAME_TO_CONTROLLER,
+            transfer_records.FRAME_TO_CONTROLLER,
             None,
             self.engine.now,
             attribution,

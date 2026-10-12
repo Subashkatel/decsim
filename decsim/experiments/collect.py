@@ -15,7 +15,6 @@ handed on the moment it ends, so a caller saves it while others run.
 """
 
 import collections
-import concurrent.futures
 import dataclasses
 import enum
 import hashlib
@@ -34,12 +33,19 @@ from typing import Optional, Union
 import numpy
 import stim
 
+import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.experiments.collection as collection_module
+import decsim.experiments.unit_pool as unit_pool
 import decsim.machine as machine_module
+import decsim.parameters.in_force as in_force
 import decsim.ports as ports
 import decsim.records.results as result_records
 import decsim.settings as machine_settings
+import decsim.topology.graph as topology_graph
+import decsim.topology.graph_layout as graph_layout
+import decsim.topology.part_kinds as part_kinds
+import decsim.topology.slotted as slotted
 import decsim.windows.built_window_models as built_window_models
 
 # The key a record's class is written under beside its fields. No field
@@ -50,6 +56,9 @@ RECORD_CLASS_KEY = "class"
 EVERY_SHOT = "all"
 # A name a folder can take on any filesystem the results go to.
 FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# The key a new-shape graph's id hashes it under, versioned: a graph
+# that read differently would take a new key, never an old id.
+GRAPH_ID_KEY = "graph_v1"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -87,12 +96,25 @@ class Task:
     It follows sinter's Task (sinter/_data/_task.py:18-75). name is the task's
     results folder, and --only picks a task by it. machine is read at the
     task (MachineSettings.at_task), so the strong id covers the number a
-    calibration table gives it. metadata is sinter's json_metadata.
+    calibration table gives it, after the assignments in force while
+    a run file loads (parameters/in_force.py) are applied to it.
+    metadata is sinter's json_metadata.
     collection overrides the experiment's, as sinter's collection_options
     does. online_threshold is the task's calibrator when its threshold
     learns across shots: it is built once here and every shot's build gets
     it, and a resumed piece keeps its saved state. The strong id holds the
     machine and the metadata only.
+
+    machine may be a graph (decsim/topology/graph.py): the assignments in
+    force then name its paths (uf.unit_count), and graph keeps the graph
+    as assigned. graph is a field of the record, so a copy made with
+    dataclasses.replace keeps it, and its layout is laid out again. A
+    graph today's slots hold runs as, and is identified by, the
+    MachineSettings it resolves to (topology/slotted.py). A graph
+    of a new shape is identified by itself, under GRAPH_ID_KEY, with its
+    workload as machine holds it, lowered; it runs on its layout
+    (topology/graph_layout.py), and machine is its entry edge's record,
+    which the reports read.
     """
 
     name: str
@@ -101,12 +123,28 @@ class Task:
     collection: Optional[collection_module.CollectionSettings] = None
     record_options: RecordOptions = RecordOptions()
     online_threshold: Optional[ports.ThresholdSource] = None
+    graph: Optional[topology_graph.Machine] = dataclasses.field(
+        default=None, compare=False
+    )
+    # a new-shape graph's pools, stores and edges; None for a machine
+    # today's slots hold
+    layout: Optional[layout_module.Layout] = dataclasses.field(
+        default=None, init=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         check_folder_name(self.name, "task")
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
-        machine = self.machine.at_task()
+        assigned = in_force.applied(self.machine)
+        if isinstance(assigned, topology_graph.Machine):
+            object.__setattr__(self, "graph", assigned)
+            assigned = _settings_of(assigned)
+        machine = assigned.at_task()
         object.__setattr__(self, "machine", machine)
+        if self.graph is not None and not slotted.holds(self.graph):
+            facts = machine.task_facts()
+            layout = graph_layout.layout_of(self.graph, facts)
+            object.__setattr__(self, "layout", layout)
         if self.online_threshold is None:
             calibrator = _task_calibrator(machine)
             object.__setattr__(self, "online_threshold", calibrator)
@@ -118,15 +156,23 @@ class Task:
         and is left out, as sinter leaves circuit_path out of its strong id
         (sinter/_data/_task.py:157, 167-204).
         """
+        value = self._identity()
+        value["metadata"] = json_value(self.metadata)
+        return _digest(value)
+
+    def machine_id(self) -> str:
+        """sha256 of the machine alone: two tasks that run alike share it."""
+        value = self._identity()
+        return _digest(value)
+
+    def _identity(self) -> dict:
+        """The machine's json value, under the key the ids have always used."""
         # The key stays "settings", so every recorded id stays valid.
-        value = {
-            "settings": json_value(self.machine, keep_labels=False),
-            "metadata": json_value(self.metadata),
-        }
-        text = json.dumps(value, sort_keys=True)
-        encoded = text.encode("utf8")
-        digest = hashlib.sha256(encoded)
-        return digest.hexdigest()
+        if self.layout is None:
+            return {"settings": json_value(self.machine, keep_labels=False)}
+        workload = self.machine.workload
+        graph = _with_workload(self.graph, workload)
+        return {GRAPH_ID_KEY: json_value(graph, keep_labels=False)}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,15 +208,24 @@ def run_units(
 ) -> None:
     """Every unit run, each handed on the moment it ends.
 
-    A job killed at its time limit loses only the units still running. The
-    unit carries the task as it ran, its calibrator having learned, in a
-    worker process when there is a pool.
+    A unit is handed to the pool only when one ends, so a job killed at
+    its time limit loses only the units still running. The unit carries
+    the task as it ran, its calibrator having learned, in a worker
+    process when there is a pool.
     """
-    outcomes = _unit_outcomes(units, measure, processes)
-    for position, outcome in outcomes:
-        unit = units[position]
-        ran_unit = dataclasses.replace(unit, task=outcome.task)
-        on_unit_done(ran_unit, outcome)
+    queued = iter(units)
+    with unit_pool.UnitPool(run_unit, measure, processes) as pool:
+        _submit_while_there_is_room(pool, queued)
+        while pool.running:
+            _tag, unit, outcome = pool.next_ended()
+            ran_unit = ran_as(unit, outcome)
+            on_unit_done(ran_unit, outcome)
+            _submit_while_there_is_room(pool, queued)
+
+
+def ran_as(unit: "Unit", outcome: result_records.UnitOutcome) -> "Unit":
+    """The unit with the task as it ran, its calibrator having learned."""
+    return dataclasses.replace(unit, task=outcome.task)
 
 
 def run_unit(
@@ -225,7 +280,11 @@ def run_shot(
     """
     wall_start = time.perf_counter()
     machine = machine_module.Machine.build(
-        task.machine, seed, built_models, task.online_threshold
+        task.machine,
+        seed,
+        built_models,
+        task.online_threshold,
+        layout=task.layout,
     )
     result = machine.run()
     wall_end = time.perf_counter()
@@ -267,6 +326,32 @@ def check_folder_name(name: object, what: str) -> None:
         f"the {what} name {name!r} is not a folder name; a name is letters, "
         "digits, '.', '_' and '-', starting with a letter or a digit"
     )
+
+
+def _settings_of(
+    machine: topology_graph.Machine,
+) -> machine_settings.MachineSettings:
+    """The record a graph runs as: its slots' record, or its entry edge's."""
+    if slotted.holds(machine):
+        return slotted.resolved(machine)
+    return graph_layout.entry_settings(machine)
+
+
+def _with_workload(
+    graph: topology_graph.Machine, workload: object
+) -> topology_graph.Machine:
+    """The graph with its workload part's record replaced: a lowered maker.
+
+    A graph with no workload part runs the default, and is kept.
+    """
+    held = part_kinds.workload_of(graph.parts)
+    parts = []
+    for part in graph.parts:
+        kept = part
+        if part.settings is held:
+            kept = dataclasses.replace(part, settings=workload)
+        parts.append(kept)
+    return dataclasses.replace(graph, parts=tuple(parts))
 
 
 def _task_calibrator(
@@ -365,63 +450,13 @@ def _top_level_name(path: importlib.metadata.PackagePath) -> str:
     return module_name or str(path)
 
 
-def _unit_outcomes(
-    units: list, measure: Callable[[Shot], object], processes: int
-):
-    """Each unit's position and outcome as it ends, run here or in a pool."""
-    if processes <= 1:
-        for position, unit in enumerate(units):
-            outcome = run_unit(unit, measure)
-            yield position, outcome
-        return
-    yield from _pooled_outcomes(units, measure, processes)
-
-
-def _pooled_outcomes(
-    units: list, measure: Callable[[Shot], object], processes: int
-):
-    """Each unit's position and outcome as it ends, `processes` at a time.
-
-    A unit is handed to the pool only when one ends (FIRST_COMPLETED), so a
-    killed job loses at most the running units.
-    """
-    queued = enumerate(units)
-    running = {}
-    pool = concurrent.futures.ProcessPoolExecutor(processes)
-    try:
-        _submit_up_to(pool, running, queued, measure, processes)
-        while running:
-            yield from _ended_outcomes(running)
-            _submit_up_to(pool, running, queued, measure, processes)
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-
-
-def _ended_outcomes(running: dict):
-    """The running units that have ended, each position and outcome, taken out.
-
-    It waits until at least one has ended.
-    """
-    ended, _still_running = concurrent.futures.wait(
-        running, return_when=concurrent.futures.FIRST_COMPLETED
-    )
-    for future in ended:
-        position = running.pop(future)
-        outcome = future.result()
-        yield position, outcome
-
-
-def _submit_up_to(
-    pool, running: dict, queued, measure: Callable[[Shot], object], limit: int
-) -> None:
-    """Queued units handed to the pool until `limit` of them run."""
-    while len(running) < limit:
-        queued_unit = next(queued, None)
-        if queued_unit is None:
+def _submit_while_there_is_room(pool: unit_pool.UnitPool, queued) -> None:
+    """Queued units handed to the pool until it is full or none is left."""
+    while pool.has_room():
+        unit = next(queued, None)
+        if unit is None:
             return
-        position, unit = queued_unit
-        future = pool.submit(run_unit, unit, measure)
-        running[future] = position
+        pool.submit(None, unit)
 
 
 def _json_record(record: object, form: _JsonForm) -> dict:
@@ -439,8 +474,17 @@ def _json_record(record: object, form: _JsonForm) -> dict:
         if not field.compare and not form.keep_labels:
             continue
         field_value = getattr(record, field.name)
+        if _is_added_at_default(field, field_value):
+            continue
         fields[field.name] = _json_in(field_value, form)
     return fields
+
+
+def _is_added_at_default(field: dataclasses.Field, value: object) -> bool:
+    """A field added after ids were recorded, holding its default."""
+    if not field.metadata.get(config.ADDED_FIELD, False):
+        return False
+    return value == field.default
 
 
 def _qualified_name(named_class: type) -> str:
@@ -560,3 +604,11 @@ def _json_number(
     if isinstance(value, (bool, int, float)):
         return value
     return str(value)
+
+
+def _digest(value: dict) -> str:
+    """sha256 of the value's json text, its keys sorted."""
+    text = json.dumps(value, sort_keys=True)
+    encoded = text.encode("utf8")
+    digest = hashlib.sha256(encoded)
+    return digest.hexdigest()

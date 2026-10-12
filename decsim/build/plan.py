@@ -12,7 +12,6 @@ from typing import Optional, Union
 
 import stim
 
-import decsim.build.escalation as escalation_build
 import decsim.controller.policies as idle_policies
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as detection_event_settings
@@ -73,11 +72,14 @@ def build_plan(
     detection_events: detection_event_settings.DetectionEventSettings,
     switching_settings: Optional[escalation_settings.SwitchingSettings],
     is_bulk_strong: bool,
-    switching: Optional[escalation_build.Switching],
+    switching_parts: tuple = (),
+    batches_each_member: bool = False,
 ) -> Plan:
     """The code, the workload's operations and the window plan.
 
-    A switching run's policy refuses a run shape it cannot serve.
+    switching_settings is the entry edge's; each edge's policy refuses
+    a run shape it cannot serve. batches_each_member says a pool's
+    batching row decodes its batches member by member.
     """
     is_switching = switching_settings is not None
     window_sizes = windows.scheme
@@ -128,9 +130,16 @@ def build_plan(
         is_bulk_strong=is_bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
+        batches_each_member=batches_each_member,
     )
-    if switching is not None:
-        switching.policy.check_plan(run_shape)
+    leaves_the_entry_pool = True
+    for part in switching_parts:
+        edge_settings = part.edge.settings
+        edge_shape = _edge_run_shape(
+            run_shape, edge_settings, leaves_the_entry_pool
+        )
+        part.policy.check_plan(edge_shape)
+        leaves_the_entry_pool = False
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,
@@ -304,6 +313,21 @@ def _strong_window_settings(
     if switching is None:
         return escalation_settings.SwitchingSettings.strong_window
     return switching.strong_window
+
+
+def _edge_run_shape(
+    run_shape: decoding_records.RunShape,
+    edge_settings: escalation_settings.SwitchingSettings,
+    leaves_the_entry_pool: bool,
+) -> decoding_records.RunShape:
+    """The run as one edge checks it: with its own strong window row."""
+    strong_window = edge_settings.strong_window
+    return dataclasses.replace(
+        run_shape,
+        strong_window=strong_window.name,
+        is_absorbing_strong_window=strong_window.absorbs_weak_windows,
+        leaves_the_entry_pool=leaves_the_entry_pool,
+    )
 
 
 def _scheme(windows: window_settings.WindowSettings):

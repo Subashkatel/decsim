@@ -16,11 +16,13 @@ import pathlib
 import sys
 import types
 from collections.abc import Sequence
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import decsim.experiments.collect as collect
 import decsim.experiments.collection as collection_module
 import decsim.experiments.refusal as refusal
+import decsim.parameters.assignments as assignments
+import decsim.parameters.in_force as in_force
 
 _THIS_FILE = pathlib.Path(__file__)
 _RESOLVED_FILE = _THIS_FILE.resolve()
@@ -38,12 +40,15 @@ class Experiment:
     """A named set of tasks under one collection plan.
 
     A task's name is its folder, so two tasks of one name are refused, as
-    is a task no collection stops.
+    is a task no collection stops. constants are the constants files its
+    tasks were built from (topology/constants.py), which `decsim params`
+    lists with each value's source.
     """
 
     name: str
     tasks: Sequence[collect.Task]
     collection: Optional[collection_module.CollectionSettings] = None
+    constants: Sequence[Any] = ()
 
     def __post_init__(self) -> None:
         collect.check_folder_name(self.name, "experiment")
@@ -73,7 +78,7 @@ class Experiment:
     def only(self, *names: str) -> "Experiment":
         """The experiment cut to its tasks of these names, in this order."""
         tasks = [self.task_named(name) for name in names]
-        return Experiment(self.name, tasks, self.collection)
+        return Experiment(self.name, tasks, self.collection, self.constants)
 
     def with_max_shots(self, shot_count: int) -> "Experiment":
         """Every task stopped at its first shot_count shots.
@@ -90,7 +95,7 @@ class Experiment:
             )
             capped_task = dataclasses.replace(task, collection=capped)
             tasks.append(capped_task)
-        return Experiment(self.name, tasks, self.collection)
+        return Experiment(self.name, tasks, self.collection, self.constants)
 
     def _refuse_a_task_without_a_collection(self, task: collect.Task) -> None:
         if self.collection_of(task) is not None:
@@ -148,7 +153,9 @@ def load(path: Union[str, pathlib.Path]) -> Experiment:
 
     The file is executed as a module of its own, registered under its
     name so a worker process can unpickle what it defines, and its
-    module-level `experiment` is the run's.
+    module-level `experiment` is the run's. DECSIM_SET's assignments
+    (`decsim run --set` writes them) are in force while it runs, so
+    every task it builds takes them (parameters/in_force.py).
     """
     path = pathlib.Path(path)
     _refuse_a_path_that_is_not_a_file(path)
@@ -201,7 +208,9 @@ def _executed_run_file(path: pathlib.Path):
     module.__file__ = str(path)
     sys.modules[module_name] = module
     with _refused_in(path):
-        exec(code, module.__dict__)
+        assigned = assignments.from_environment()
+        with in_force.in_force(assigned):
+            exec(code, module.__dict__)
     return module
 
 

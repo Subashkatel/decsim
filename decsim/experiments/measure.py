@@ -15,12 +15,13 @@ import pathlib
 import statistics
 from typing import Any, Optional, Union
 
+import decsim.build.decoders as decoders_part
+import decsim.build.layout as layout_module
 import decsim.config as config_module
-import decsim.decoders.decode_queue as decode_queue
-import decsim.decoders.decoder_output as decoder_output
 import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
+import decsim.experiments.transfer_index as transfer_index
 import decsim.observe.observation as observation_module
 import decsim.observe.settings as observe_settings
 import decsim.observe.stage_records as stage_records
@@ -29,9 +30,10 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
-import decsim.records.transfers as transfer_records
+import decsim.records.routes as route_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
 
 # Latency points, in path order, in microseconds per window unless noted.
 # Every point is one span, and its comment names the two ticks it runs
@@ -161,19 +163,9 @@ WINDOW_STATUS_COLUMNS = tuple(
     if status is not decoding_records.BackendDecodeStatus.SUCCEEDED
 )
 
-# which store's output link carries a tier's window in, keyed by the tier
-# whose decode the frame committed rather than by the row's name
-INPUT_LINK_BY_TIER = {
-    window_records.DecoderTier.WEAK: (
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
-    ),
-    window_records.DecoderTier.STRONG: (
-        transfer_records.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER
-    ),
-}
 
 # the hop a boundary's delay is kept under, whichever path it rode
-BOUNDARY_HOP = "boundary"
+BOUNDARY_HOP = transfer_index.BOUNDARY_HOP
 
 
 @dataclasses.dataclass(frozen=True)
@@ -359,6 +351,13 @@ class ShotMeasurement:
     # each window's answer and label, None unless
     # observation.record_window_outcomes; window_outcomes.csv holds it
     window_outcomes: Optional[tuple]
+    # every part's statistics as the run's registry rows (path,
+    # statistic, field, value); shot_stats.csv holds them
+    statistics: list
+    # each statistic's count of every value it saw, or ticks at every
+    # level it held, as the registry's ValueCounts; stat_values.csv adds
+    # them over a task's shots
+    statistic_values: list
 
 
 def measure_shot(
@@ -384,10 +383,12 @@ def measure_shot(
     round_period_microseconds = config_module.ticks_to_microseconds(
         device.clock.period_ticks
     )
+    layout = shot.machine.layout
     return _measurement(
         settings,
         observation,
         shot.result,
+        layout=layout,
         record_options=shot.task.record_options,
         code=device.code,
         round_period_microseconds=round_period_microseconds,
@@ -441,44 +442,24 @@ def link_delay_by_window(transfers: list) -> dict:
     pinned face and later ships its own boundary would otherwise span its
     decode.
     """
-    first_request = {}
-    last_delivery = {}
+    index = transfer_index.TransferIndex()
     for row in transfers:
-        hop = _hop_of(row)
-        operation_id, window_id = _waiting_window(row)
-        key = (hop, operation_id, window_id)
-        request = _hop_start_ticks(row)
-        earliest_request = first_request.get(key, request)
-        first_request[key] = min(earliest_request, request)
-        delivery = row["delivery_ticks"]
-        latest_delivery = last_delivery.get(key, delivery)
-        last_delivery[key] = max(latest_delivery, delivery)
-    delay = {}
-    for key, request in first_request.items():
-        delay[key] = last_delivery[key] - request
-    return delay
+        index.add(row)
+    return index.link_delays()
 
 
-def answer_send_ticks(transfers: list) -> dict:
+def answer_send_ticks(transfers: list, answer_hops: dict) -> dict:
     """The tick each window's answer first left for the frame, by window.
 
-    An answer rides every hop of its route (decoders/decoder_output.py
-    ANSWER_NAME_BITS_BY_PATH names them all), so its way home starts at
-    the earliest of those sends, whichever route it took.
+    An answer rides every hop of its route (records/routes.py
+    Routes.name_bits_by_answer_hop names them all), so its way home
+    starts at the earliest of those sends, whichever route it took. A
+    boundary may share a hop with an answer, and is no answer.
     """
-    send = {}
+    index = transfer_index.TransferIndex(answer_hops)
     for row in transfers:
-        if row["path"] not in decoder_output.ANSWER_NAME_BITS_BY_PATH:
-            continue
-        attribution = row["attribution"]
-        operation_id = identity_records.stable_identity_from_json(
-            attribution["operation_id"]
-        )
-        key = (operation_id, attribution["window_id"])
-        start = _hop_start_ticks(row)
-        earlier = send.get(key, start)
-        send[key] = min(earlier, start)
-    return send
+        index.add(row)
+    return index.answer_send
 
 
 def input_hop_by_request(transfers: list) -> dict:
@@ -488,17 +469,10 @@ def input_hop_by_request(transfers: list) -> dict:
     reads the hop of the decode it describes. The landing is the latest
     delivery, since a decode starts once every input transfer landed.
     """
-    hops = {}
+    index = transfer_index.TransferIndex()
     for row in transfers:
-        run_sequence = _request_run_sequence(row)
-        if run_sequence is None:
-            continue
-        key = (row["path"], row["attribution"]["window_id"], run_sequence)
-        delay, landing = hops.get(key, (0, 0))
-        delay += row["total_delay_ticks"]
-        landing = max(landing, row["delivery_ticks"])
-        hops[key] = (delay, landing)
-    return hops
+        index.add(row)
+    return index.input_hops()
 
 
 def controller_to_weak_buffer_delays_us(
@@ -589,19 +563,10 @@ def qpu_send_ticks(transfers: list) -> dict:
     by both, as gem5 finds an instruction (src/cpu/o3/rob.hh:131-134); its
     send is its earliest QC request.
     """
-    send = {}
+    index = transfer_index.TransferIndex()
     for row in transfers:
-        if row["path"] != "qpu_to_controller":
-            continue
-        (rounds,) = row["attribution"]["rounds_by_operation"]
-        operation_id = identity_records.stable_identity_from_json(
-            rounds["operation_id"]
-        )
-        round_key = (operation_id, rounds["round_lo"])
-        start = _hop_start_ticks(row)
-        earlier = send.get(round_key, start)
-        send[round_key] = min(earlier, start)
-    return send
+        index.add(row)
+    return index.qpu_send
 
 
 def window_points_us(
@@ -764,11 +729,15 @@ def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     observation_settings: observe_settings.ObservationSettings,
+    routes: route_records.Routes,
+    input_hops: dict,
 ) -> tuple:
     """Every recorded point's microsecond samples, and each window's tier.
 
     Every point describes the decode the frame committed, named by the
-    frame record's tier and run ordinal. Only the windows and rounds in
+    frame record's tier and run ordinal; input_hops is the hop each
+    pool's input rides (Layout.input_hop_by_pool), keyed by the pool
+    whose decode the frame committed. Only the windows and rounds in
     the measurement interval are sampled, but for the end-of-stream
     reaction, which is the drain the interval leaves out. It stays whole
     past the size
@@ -776,7 +745,8 @@ def collect_samples(
     """
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
-    answer_send = answer_send_ticks(transfers)
+    answer_hops = routes.name_bits_by_answer_hop
+    answer_send = answer_send_ticks(transfers, answer_hops)
     input_hop = input_hop_by_request(transfers)
     qpu_send = qpu_send_ticks(transfers)
     samples = {}
@@ -797,34 +767,142 @@ def collect_samples(
         strong_keys, waits, observation_settings
     )
     stages = observation.stages
+    reads = TransferReads(link_delay, input_hop, qpu_send, answer_send)
     for window, frame_record in recorded_windows(
         observation, observation_settings
     ):
-        decode = _committed_decode(stages, frame_record)
-        first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
-        input_link = INPUT_LINK_BY_TIER[decode.tier]
-        input_path = input_link.value
-        stage_us = _stage_microseconds(stages, frame_record)
-        window_samples = window_points_us(
-            window,
-            frame_record,
-            decode,
-            first_dispatch,
-            stage_us,
-            link_delay,
-            input_hop,
-            qpu_send,
-            input_path,
-            answer_send,
-        )
-        for name, value in window_samples.items():
+        sample = window_sample(window, frame_record, stages, reads, input_hops)
+        for name, value in sample.values.items():
             samples[name].append(value)
-        window_tiers.append(decode.tier.value)
+        window_tiers.append(sample.decode.tier.word)
     decoded = decoded_windows(observation)
     samples["end_of_stream_reaction"] = end_of_stream_reaction_us(
         decoded, stages, qpu_send
     )
     return samples, tuple(window_tiers)
+
+
+@dataclasses.dataclass(frozen=True)
+class TransferReads:
+    """What a window's latency reads of the link ledger, by its four keys.
+
+    The reductions of transfer_index.TransferIndex: each hop's span by
+    window, each decode's input hop, each round's QPU send and each
+    answer's send.
+    """
+
+    link_delay: dict
+    input_hop: dict
+    qpu_send: dict
+    answer_send: dict
+
+
+@dataclasses.dataclass(frozen=True)
+class WindowSample:
+    """One decoded window's latency values in us, and the decode they read."""
+
+    values: dict
+    decode: "_CommittedDecode"
+
+
+def window_sample(
+    window: window_records.Window,
+    frame_record: decoding_records.PauliFrameCommitRecord,
+    stages: stage_records.StageLedger,
+    reads: TransferReads,
+    input_hops: dict,
+) -> WindowSample:
+    """One decoded window's values, as collect_samples reads every one.
+
+    A stream reads each window here once the frame has committed it
+    (stream_measures.py), so a shot and a stream share this one code.
+    """
+    decode = committed_decode(stages, frame_record)
+    first_dispatch = _first_dispatch_ticks(stages, window, frame_record)
+    input_path = input_hops[decode.tier]
+    stage_us = _stage_microseconds(stages, frame_record)
+    values = window_points_us(
+        window,
+        frame_record,
+        decode,
+        first_dispatch,
+        stage_us,
+        reads.link_delay,
+        reads.input_hop,
+        reads.qpu_send,
+        input_path,
+        reads.answer_send,
+    )
+    return WindowSample(values, decode)
+
+
+def committed_decode(
+    stages: stage_records.StageLedger,
+    frame_record: decoding_records.PauliFrameCommitRecord,
+) -> "_CommittedDecode":
+    """The committing decode's tier and the ticks of its own life.
+
+    Its stage records are those whose request ordinals hold the frame
+    record's, so a merged batch answers for every window it served and a
+    window decoded more than once never mixes two decodes.
+    """
+    tier = window_records.PoolId(frame_record.tier)
+    operation_id, window_id = frame_record.window_key
+    records = _committing_stage_records(
+        stages, operation_id, window_id, frame_record.run_sequence
+    )
+    assert records, (
+        f"window ({operation_id}, {window_id}) committed the result of "
+        f"request {frame_record.run_sequence}, which recorded no stage"
+    )
+    starts = []
+    ends = []
+    for record in records:
+        starts.append(record.start_ticks)
+        ends.append(record.end_ticks)
+    first = min(starts)
+    last = max(ends)
+    ready = _ready_ticks(records)
+    run_sequence = frame_record.run_sequence
+    rounds = _rounds_read(records)
+    waited = _backend_queue_wait_ticks(records)
+    read = _store_read_ticks(records)
+    last_rounds = _last_rounds_read(records)
+    return _CommittedDecode(
+        tier,
+        first,
+        last,
+        ready,
+        run_sequence,
+        rounds,
+        waited,
+        read,
+        last_rounds,
+    )
+
+
+def pool_measures(
+    run_statistics: statistics_registry.Registry,
+    pool_paths: dict,
+    generation_ticks: int,
+) -> "_PoolMeasures":
+    """Each tier's queue peak, busy fraction and load over a span.
+
+    generation_ticks is the span the rounds were generated over
+    (_generation_span_ticks); a stream keeps its two ends as it runs.
+    """
+    weak_path = pool_paths.get(window_records.WEAK_POOL_ID)
+    strong_path = pool_paths.get(window_records.STRONG_POOL_ID)
+    weak = _pool_numbers(run_statistics, weak_path, generation_ticks)
+    strong = _pool_numbers(run_statistics, strong_path, generation_ticks)
+    return _PoolMeasures(
+        weak_queue_max=weak.queue_max,
+        strong_queue_max=strong.queue_max,
+        weak_busy_fraction=weak.busy_fraction,
+        strong_busy_fraction=strong.busy_fraction,
+        weak_offered_load=weak.offered_load,
+        strong_offered_load=strong.offered_load,
+    )
 
 
 def last_required_send_ticks(decode: "_CommittedDecode", qpu_send: dict) -> int:
@@ -866,7 +944,7 @@ def end_of_stream_reaction_us(
     final_sends = []
     commits = []
     for _window, frame_record in decoded:
-        decode = _committed_decode(stages, frame_record)
+        decode = committed_decode(stages, frame_record)
         decode_send = last_required_send_ticks(decode, qpu_send)
         final_sends.append(decode_send)
         commits.append(frame_record.committed_ticks)
@@ -877,7 +955,7 @@ def end_of_stream_reaction_us(
 
 
 def reaction_growth_rate(
-    recorded: list, tier: window_records.DecoderTier
+    recorded: list, tier: window_records.PoolId
 ) -> Optional[float]:
     """How fast a tier's reaction time grows along the shot, in us per us.
 
@@ -904,7 +982,7 @@ def reaction_growth_rate(
     arrivals_us = []
     reactions_us = []
     for window, frame_record in recorded:
-        if frame_record.tier != tier.value:
+        if frame_record.tier != tier.word:
             continue
         arrival_us = _arrival_microseconds(window)
         reaction_us = _reaction_microseconds(window, frame_record)
@@ -969,7 +1047,7 @@ def active_decoder_kind(
     settings: machine_settings.MachineSettings,
 ) -> Optional[Union[str, float]]:
     """The kind of the tier that decodes the plan's windows."""
-    tier = settings.window_tier.value
+    tier = settings.window_tier.word
     tier_settings = settings.decoder_settings_for(tier)
     if tier_settings is None:
         return None
@@ -1024,26 +1102,12 @@ def parallel_processes_needed(
     return math.ceil(processes)
 
 
-def _request_run_sequence(row: dict):
-    """The run ordinal of the request a transfer serves, None when it has none.
-
-    A boundary hand-off is no decode's input, though it names the
-    request that committed it, and a round's transfer names no request.
-    """
-    relation = row["attribution"].get("relation")
-    if not relation or _is_boundary(row):
-        return None
-    request_key = relation.get("request_key")
-    if request_key is None:
-        return None
-    return request_key["run_sequence"]
-
-
 def _measurement(
     settings: machine_settings.MachineSettings,
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
+    layout: layout_module.Layout,
     record_options: collect.RecordOptions,
     code: ports.CodeModel,
     round_period_microseconds: float,
@@ -1062,19 +1126,19 @@ def _measurement(
     owner_rounds = rounds_by_owner.values()
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
+    routes = layout.routes()
+    input_hops = layout.input_hop_by_pool()
     samples, window_tiers = collect_samples(
-        observation, result, settings.observation
+        observation, result, settings.observation, routes, input_hops
     )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
     recorded = recorded_windows(observation, settings.observation)
-    weak_growth = reaction_growth_rate(
-        recorded, window_records.DecoderTier.WEAK
-    )
+    weak_growth = reaction_growth_rate(recorded, window_records.WEAK_POOL_ID)
     strong_growth = reaction_growth_rate(
-        recorded, window_records.DecoderTier.STRONG
+        recorded, window_records.STRONG_POOL_ID
     )
     missed_windows, first_miss_us = deadline_misses(
         recorded, settings.observation.reaction_deadline_microseconds
@@ -1085,12 +1149,13 @@ def _measurement(
     window_period_us = commit_rounds * round_period_microseconds
     load = chain_load(samples, window_period_us)
     algorithm = active_decoder_kind(settings)
-    queued = observation.queue_depth.peak
-    primary_tier = settings.window_tier.value
+    managers = observation.statistics.groups[decoders_part.MANAGERS_PATH]
+    queued = managers.queued.peak
     round_period_ticks = config_module.microseconds_to_ticks(
         round_period_microseconds
     )
-    pools = _pool_measures(observation, primary_tier, round_period_ticks)
+    pool_paths = layout.statistics_path_by_pool()
+    pools = _pool_measures(observation, round_period_ticks, pool_paths)
     strong = _strong_decodes(observation)
     tiers = _tier_records(observation)
     backlog_peak = _backlog_peak_rounds(observation)
@@ -1107,6 +1172,8 @@ def _measurement(
     is_scored_failure = logical_failure and is_scored
     confidence = _shot_confidence(settings, observation, seed, record_options)
     window_outcomes = _shot_window_outcomes(observation, owners)
+    statistics = observation.statistics.rows()
+    statistic_values = observation.statistics.value_counts()
     return ShotMeasurement(
         task_id=task_id,
         algorithm=algorithm,
@@ -1160,6 +1227,8 @@ def _measurement(
         confidence=confidence,
         predictions=predictions,
         window_outcomes=window_outcomes,
+        statistics=statistics,
+        statistic_values=statistic_values,
     )
 
 
@@ -1240,7 +1309,7 @@ def _window_outcome_row(
     request_key = window.published_request_key
     tier = None
     if request_key is not None:
-        tier = request_key.tier.value
+        tier = request_key.pool.word
     verdict = _verdict_of(observation, window)
     detection_events = weights.get(request_key)
     is_right = None
@@ -1358,14 +1427,17 @@ def _sample_digest(
 
     Two tasks that differ only in their decoder draw the same shot at the
     same seed, so pairing their shots can be checked rather than assumed.
+    A source that keeps no whole shot (the flip stream, whose
+    shot_sampled is silent) gives its truth alone.
     """
     shots_by_operation = observation.sampled_shots.shots_by_operation
     digest = hashlib.sha256()
     for owner in owners:
-        shot = shots_by_operation[owner.operation_id]
-        event_bytes = bytes(shot.detection_events)
+        shot = shots_by_operation.get(owner.operation_id)
+        if shot is not None:
+            event_bytes = bytes(shot.detection_events)
+            digest.update(event_bytes)
         truth_bytes = bytes(owner.observable_truth)
-        digest.update(event_bytes)
         digest.update(truth_bytes)
     return digest.hexdigest()
 
@@ -1439,7 +1511,7 @@ class _CommittedDecode:
     the frame record's tier and run ordinal name the one that committed.
     """
 
-    tier: window_records.DecoderTier
+    tier: window_records.PoolId
     compute_start_ticks: int
     done_ticks: int
     ready_ticks: Optional[int]  # it first may compute, whatever the unit did
@@ -1465,6 +1537,18 @@ class _RefereeCounts:
 
     windows_checked: int
     window_disagreements: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _PoolNumbers:
+    """One pool's load over the shot."""
+
+    queue_max: int
+    busy_fraction: float
+    offered_load: float
+
+
+_NO_POOL = _PoolNumbers(queue_max=0, busy_fraction=0.0, offered_load=0.0)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1603,67 +1687,49 @@ def _referee_counts(
 
 def _pool_measures(
     observation: observation_module.Observation,
-    primary_tier: str,
     round_period_ticks: int,
+    pool_paths: dict,
 ) -> _PoolMeasures:
-    """Each pool's own queue peak, busy fraction and load, by tier name.
+    """Each tier's queue peak, busy fraction and load, from its statistics.
 
-    The plan's windows queue in the default pool, so its numbers are the
-    primary tier's; a run without a pool reads zero for it.
-    """
-    peaks = observation.queue_depth.peak_by_pool
-    utilization = observation.decoder_utilization.result()
-    busy = utilization["per_pool_busy_fraction"]
-    offered = _offered_load_by_pool(
-        observation, utilization, round_period_ticks
-    )
-    default_queue_max = peaks.get(decode_queue.DEFAULT_POOL, 0)
-    default_busy_fraction = busy.get(decode_queue.DEFAULT_POOL, 0.0)
-    default_offered_load = offered.get(decode_queue.DEFAULT_POOL, 0.0)
-    if primary_tier == window_records.DecoderTier.STRONG.value:
-        return _PoolMeasures(
-            weak_queue_max=0,
-            strong_queue_max=default_queue_max,
-            weak_busy_fraction=0.0,
-            strong_busy_fraction=default_busy_fraction,
-            weak_offered_load=0.0,
-            strong_offered_load=default_offered_load,
-        )
-    weak_queue_max = default_queue_max
-    strong_queue_max = peaks.get(decode_queue.STRONG_POOL, 0)
-    weak_busy_fraction = default_busy_fraction
-    strong_busy_fraction = busy.get(decode_queue.STRONG_POOL, 0.0)
-    weak_offered_load = default_offered_load
-    strong_offered_load = offered.get(decode_queue.STRONG_POOL, 0.0)
-    return _PoolMeasures(
-        weak_queue_max=weak_queue_max,
-        strong_queue_max=strong_queue_max,
-        weak_busy_fraction=weak_busy_fraction,
-        strong_busy_fraction=strong_busy_fraction,
-        weak_offered_load=weak_offered_load,
-        strong_offered_load=strong_offered_load,
-    )
-
-
-def _offered_load_by_pool(
-    observation: observation_module.Observation,
-    utilization: dict,
-    round_period_ticks: int,
-) -> dict:
-    """Each pool's busy unit ticks over its units times the generation span.
-
-    The run drains every decode, so the busy ticks are the work the
-    rounds offered the pool: rho = lambda E[S] / c, the ratio chain_load
-    forms for the serial chain.
+    pool_paths is where each pool keeps its statistics
+    (Layout.statistics_path_by_pool). The weak row reads the pool whose
+    results write weak, the strong row the one that writes strong (a
+    strong-only run's window pool); a tier the run lacks reads zero.
     """
     generation_ticks = _generation_span_ticks(observation, round_period_ticks)
-    busy_ticks = utilization["per_pool_busy_unit_ticks"]
-    units = utilization["per_pool_total_units"]
-    offered = {}
-    for pool, pool_busy_ticks in busy_ticks.items():
-        capacity_ticks = units[pool] * generation_ticks
-        offered[pool] = pool_busy_ticks / capacity_ticks
-    return offered
+    return pool_measures(observation.statistics, pool_paths, generation_ticks)
+
+
+def _pool_numbers(
+    run_statistics: statistics_registry.Registry,
+    path: Optional[str],
+    generation_ticks: int,
+) -> "_PoolNumbers":
+    """One pool's queue peak, busy fraction and offered load.
+
+    The busy fraction is the busy units' time average over the run, or
+    over its region of interest, drain included, per unit (Triage's
+    utilization, 2605.04459
+    lines 1024-1031); the offered load is the busy unit ticks over the
+    units times the generation span: rho = lambda E[S] / c, the ratio
+    chain_load forms for the serial chain.
+    """
+    if path is None:
+        return _NO_POOL
+    units_group = run_statistics.groups.get(f"{path}.units")
+    if units_group is None:
+        return _NO_POOL
+    queue_group = run_statistics.groups[f"{path}.queue"]
+    busy = units_group.busy_units
+    unit_count = units_group.units.count
+    time_average = 0.0
+    if busy.span:
+        time_average = busy.area / busy.span
+    busy_fraction = time_average / unit_count
+    capacity_ticks = unit_count * generation_ticks
+    offered_load = busy.area / capacity_ticks
+    return _PoolNumbers(queue_group.queued.peak, busy_fraction, offered_load)
 
 
 def _generation_span_ticks(
@@ -1676,9 +1742,16 @@ def _generation_span_ticks(
     readout's way out does not stretch it. Operations that run side by
     side share the span, and a later operation stretches it to its end,
     so it is the wall time the rounds arrived over, where rounds times
-    the round period would count side by side operations twice.
+    the round period would count side by side operations twice. With a
+    region of interest it is the readouts since the region began
+    (observe/region_of_interest.py), the span its busy time is over.
     """
-    readout_ticks = observation.round_events.readout_ticks
+    reset_tick = observation.statistics.reset_tick
+    readout_ticks = [
+        tick
+        for tick in observation.round_events.readout_ticks
+        if tick >= reset_tick
+    ]
     first_readout_tick = min(readout_ticks)
     last_readout_tick = max(readout_ticks)
     readout_span_ticks = last_readout_tick - first_readout_tick
@@ -1698,10 +1771,10 @@ def _strong_decodes(
     rounds = 0
     service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
-        tier = window_records.DecoderTier(frame_record.tier)
-        if tier is not window_records.DecoderTier.STRONG:
+        tier = window_records.PoolId(frame_record.tier)
+        if tier != window_records.STRONG_POOL_ID:
             continue
-        decode = _committed_decode(stages, frame_record)
+        decode = committed_decode(stages, frame_record)
         windows += 1
         rounds += decode.round_count
         service_ticks += decode.done_ticks - decode.compute_start_ticks
@@ -1776,7 +1849,7 @@ def _weak_syndrome_weights(requests: list) -> list:
     """The set bits of every weak request's landed input that has bits."""
     weights = []
     for request in requests:
-        is_weak = request.request_key.tier is window_records.DecoderTier.WEAK
+        is_weak = request.request_key.pool == window_records.WEAK_POOL_ID
         if is_weak and request.syndrome_weight is not None:
             weights.append(request.syndrome_weight)
     return weights
@@ -1810,7 +1883,7 @@ def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
 
     Held from the tick it may compute to its compute start, gem5's fuBusy
     wait (src/cpu/o3/inst_queue.cc:1009-1014). A merged batch counts once,
-    and a depth counts only when time passes at it (observe/queue_depth.py).
+    and a depth counts only when time passes at it (statistics/kinds.py).
     """
     change_by_tick = collections.defaultdict(int)
     held_decodes = set()
@@ -1835,7 +1908,7 @@ def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
     chosen = []
     for request in requests:
         key = request.request_key
-        if key.tier.value == tier and key.run_sequence in lives:
+        if key.pool.word == tier and key.run_sequence in lives:
             chosen.append(request)
     return chosen
 
@@ -1877,90 +1950,6 @@ def _reaction_microseconds(
     """buffer0_ready_to_frame: the window's data complete to its commit."""
     return _span_microseconds(
         frame_record.committed_ticks, window.t_data_complete
-    )
-
-
-def _hop_of(row: dict) -> str:
-    """The hop a transfer's delay is kept under: BOUNDARY_HOP, or its path."""
-    if _is_boundary(row):
-        return BOUNDARY_HOP
-    return row["path"]
-
-
-def _waiting_window(row: dict) -> tuple:
-    """(operation_id, window index) of the window the transfer holds up.
-
-    A boundary holds up its destination; every other transfer the window
-    its attribution names.
-    """
-    attribution = row["attribution"]
-    if _is_boundary(row):
-        destination = attribution["relation"]["destination_window_key"]
-        return identity_records.stable_identity_from_json(destination)
-    recorded_operation = attribution["operation_id"]
-    operation_id = identity_records.stable_identity_from_json(
-        recorded_operation
-    )
-    return operation_id, attribution["window_id"]
-
-
-def _is_boundary(row: dict) -> bool:
-    """Whether the transfer carries a boundary, which names its source."""
-    relation = row["attribution"].get("relation")
-    if not relation:
-        return False
-    return "source_window_key" in relation
-
-
-def _hop_start_ticks(row: dict) -> int:
-    """The tick a transfer was asked for, which is where its hop starts.
-
-    The request is the delivery less total_delay_ticks. The setup is the
-    hop's own cost, as gem5 adds a DMA's fixed delay to the completion
-    (src/dev/dma_device.cc:116-118).
-    """
-    return row["delivery_ticks"] - row["total_delay_ticks"]
-
-
-def _committed_decode(stages, frame_record) -> _CommittedDecode:
-    """The committing decode's tier and the ticks of its own life.
-
-    Its stage records are those whose request ordinals hold the frame
-    record's, so a merged batch answers for every window it served and a
-    window decoded more than once never mixes two decodes.
-    """
-    tier = window_records.DecoderTier(frame_record.tier)
-    operation_id, window_id = frame_record.window_key
-    records = _committing_stage_records(
-        stages, operation_id, window_id, frame_record.run_sequence
-    )
-    assert records, (
-        f"window ({operation_id}, {window_id}) committed the result of "
-        f"request {frame_record.run_sequence}, which recorded no stage"
-    )
-    starts = []
-    ends = []
-    for record in records:
-        starts.append(record.start_ticks)
-        ends.append(record.end_ticks)
-    first = min(starts)
-    last = max(ends)
-    ready = _ready_ticks(records)
-    run_sequence = frame_record.run_sequence
-    rounds = _rounds_read(records)
-    waited = _backend_queue_wait_ticks(records)
-    read = _store_read_ticks(records)
-    last_rounds = _last_rounds_read(records)
-    return _CommittedDecode(
-        tier,
-        first,
-        last,
-        ready,
-        run_sequence,
-        rounds,
-        waited,
-        read,
-        last_rounds,
     )
 
 

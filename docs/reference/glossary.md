@@ -68,6 +68,13 @@ These are not from the papers. The pages use them everywhere.
   `Readout`, `Windows`, `Decoders`, and `Switching` in a switching
   machine) or the links. A part builds its components and binds their
   ports; `Machine.assemble` wires the parts together.
+- **slotted machine**: a machine the two decoder slots of
+  `MachineSettings` hold: one decoder, or a weak one escalating to a
+  strong one (`decsim/topology/slotted.py`). Every preset and example
+  is one. Its parts, hops and records keep the slots' names, and its
+  task id is the hash of that record. A graph of more pools or edges
+  than the slots hold is a new shape
+  (`decsim/topology/graph_layout.py`).
 - **seat**: a place on a round's path where its detection events may
   form, named in the `formed_at` setting of `DetectionEventSettings`.
 - **card**: a set of stated numbers used in place of a measurement. A
@@ -200,7 +207,7 @@ buffer. These two names are decsim's own; this table cites no paper.
 | decsim | In other words | What it is for |
 | --- | --- | --- |
 | weak syndrome buffer, `SyndromeBuffer` in `decsim/syndrome_buffer/syndrome_buffer.py` | the streamed decoder buffer | what the weak tier reads, round by round, as it arrives |
-| strong syndrome buffer, a `SyndromeBuffer`; its receiving end is `StrongSyndromeRoundReceiver` in `decsim/syndrome_buffer/strong_syndrome_round_receiver.py`, seen by the sender through the port of that name in `decsim/ports.py` | the strong side's copy of the rounds | what a strong re-decode reads, in bulk, once its boundaries are known |
+| strong syndrome buffer, a `SyndromeBuffer`; its receiving end is a `SyndromeRoundReceiver` (`decsim/syndrome_buffer/syndrome_round_receiver.py`) that takes its rounds landed, seen by its senders through the port of that name in `decsim/ports.py` | the strong side's copy of the rounds | what a strong re-decode reads, in bulk, once its boundaries are known |
 | hold, `DecoderInputHold`, `PotentialStrong`, `PotentialRestart` | the reason a round may not be dropped yet | one token per consumer that still needs the round |
 
 ## The strong side's parts
@@ -210,16 +217,17 @@ is a field of a part in `decsim/build/` or a pool inside one.
 
 | The part | decsim | What it does |
 | --- | --- | --- |
-| strong syndrome buffer | the readout part's `strong_syndrome_buffer`, a `SyndromeBuffer`, with `strong_syndrome_round_receiver` as its landing and `strong_output` as its read | holds the rounds an escalation carried up until the strong decode has read them |
+| strong syndrome buffer | the readout part's store named `strong_syndrome_buffer` (`store_parts`), a `SyndromeBuffer`, with its `receiver` as its landing and its `output` as its read | holds the rounds an escalation carried up until the strong decode has read them |
 | ledger of pending regions | the switching part's `pending_strong_windows`, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
 | strong window manager | the switching part's `shape`, `RedoWindow` or `DoubleWindow` in `decsim/escalation/strong_window_shapes.py`, with its `regions` as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
-| strong decoder manager | the decoders part's `strong_decoder_manager`, a second `DecoderManager` over the strong pool alone, with its own ready queue, staging and outcomes; its `strong_requests` is the ledger it shares with the chip's `decoder_manager` | gives each strong job a free strong unit and returns its result; halts a request the weak result made unnecessary |
+| strong decoder manager | the decoders part's manager of the strong pool (`manager_of`), a second `DecoderManager` over that pool alone, with its own ready queue, staging and outcomes; its `strong_requests` is the ledger every pool's manager shares | gives each strong job a free strong unit and returns its result; halts a request the weak result made unnecessary |
 | the strong decoders, the strong pool's `unit_count` of them | the `strong_decoder` pool's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
 
 ## The link paths
 
-Every hop is booked under one path name, the `LinkPath` values in
-`decsim/records/transfers.py`.
+Every hop is booked under one path name. A graph names a hop by the
+parts at its ends; a slotted machine's twelve hops are the `SLOTTED_PATHS`
+names in `decsim/records/transfers.py`, below.
 
 | decsim | The hop |
 | --- | --- |

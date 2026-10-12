@@ -319,33 +319,53 @@ class SyndromeRoundSender(Protocol):
 
     The sender reserves room in every syndrome buffer the round must
     reach and sends it on; a round that finds no room waits in line for
-    a retry. strong_crossing_count is the strong-primary rounds sent and
-    not yet landed, which the packing stage's bound on rounds in flight
-    counts (controller/round_assembly.py RoundsInFlight).
+    a retry. crossing_count is the rounds sent to a store that takes them
+    landed and not yet landed there, which the packing stage's bound on
+    rounds in flight counts (controller/round_assembly.py RoundsInFlight).
     """
 
-    strong_crossing_count: int
+    crossing_count: int
 
     def admit(self, packed: round_records.PackedRound) -> bool:
         """Write the round where it belongs; False when it found no room."""
 
 
 @runtime_checkable
-class StrongSyndromeRoundReceiver(Protocol):
-    """The strong syndrome buffer's receiving end, as its two senders see it.
+class SyndromeRoundReceiver(Protocol):
+    """A syndrome buffer's receiving end, as its senders see it.
 
-    The bits still crossing toward the store count as room taken: a
-    round's or an escalated region's room is reserved before it leaves
-    and kept when it lands.
+    This end owns the store's room and its landing: the bits still
+    crossing toward the store count as room taken, so a round's or an
+    escalated region's room is reserved before it leaves and kept until
+    it is stored. A store takes the controller's rounds written or
+    landed (syndrome_buffer/syndrome_round_receiver.py).
     """
 
     def has_room(self, packed: round_records.PackedRound) -> bool:
-        """Whether this round's write can land."""
+        """Whether this round fits beside the stored and the crossing ones."""
 
     def reserve_write(self, packed: round_records.PackedRound) -> None:
         """Take the room this crossing round will need, before it leaves."""
 
-    def receive_round(self, packed: round_records.PackedRound) -> None:
+    def receive_written(
+        self,
+        packed: round_records.PackedRound,
+        on_published: Callable[[], None],
+    ) -> None:
+        """Take one written round: store it, announce it, then on_published.
+
+        on_published runs once the windows have heard of the round, which
+        is where the sender's count of rounds in flight lets it go.
+        """
+
+    def send_memory_round(
+        self,
+        packed: round_records.PackedRound,
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Write one timing-only round, then send it to the decoder."""
+
+    def receive_landed(self, packed: round_records.PackedRound) -> None:
         """Store a landed round and deliver it on its canonical route."""
 
     def reserve_region(self, region: round_records.EscalatedRegion) -> None:
@@ -361,40 +381,6 @@ class StrongSyndromeRoundReceiver(Protocol):
         on_stored is called once the store holds every round, which is
         later than the landing when this seat forms the rounds first.
         """
-
-
-@runtime_checkable
-class WeakSyndromeRoundReceiver(Protocol):
-    """The weak syndrome round receiver, as the controller sees it.
-
-    This end owns the store's room and its landing: has_room counts the
-    bits stored and those reserved for writes in flight, and a landed
-    round is stored, readable from that tick, and announced.
-    """
-
-    def has_room(self, packed: round_records.PackedRound) -> bool:
-        """Whether this round fits beside the stored and the crossing ones."""
-
-    def reserve_write(self, packed: round_records.PackedRound) -> None:
-        """Take the room this crossing round will need, before it leaves."""
-
-    def receive_round(
-        self,
-        packed: round_records.PackedRound,
-        on_published: Callable[[], None],
-    ) -> None:
-        """Take one landed round: store it, announce it, then on_published.
-
-        on_published runs once the windows have heard of the round, which
-        is where the sender's count of rounds in flight lets it go.
-        """
-
-    def send_memory_round(
-        self,
-        packed: round_records.PackedRound,
-        on_delivered: Callable[[], None],
-    ) -> None:
-        """Write one landed timing-only round, then send it to the decoder."""
 
 
 @runtime_checkable
@@ -532,10 +518,11 @@ class WindowInput(Protocol):
 
     def accept_room_round(
         self,
+        store: "SyndromeBuffer",
         operation_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
-        """Record a round that landed in the strong syndrome buffer instead."""
+        """Record a round that landed in a store a region lands in."""
 
     def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
         """A boundary landed in the window; True when it owed no other."""
@@ -616,16 +603,28 @@ class WindowRetention(Protocol):
     """The rounds a window may still read, as the escalation side sees it.
 
     Which store a strong window reads is the retention's to say, so a
-    caller asks for holds and input, never for a store.
+    caller asks for holds and input, never for a store. A call that
+    takes target asks about the edge to that pool: the store it carries
+    from and the store it lands in; None is the entry edge.
     """
 
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
         """The strong job's context becomes its input hold."""
 
     def strong_window_input(
-        self, builder: "WindowJobBuilder", window: window_records.Window
+        self,
+        builder: "WindowJobBuilder",
+        window: window_records.Window,
+        target: Optional[window_records.PoolId] = None,
     ) -> list:
-        """The room-side payloads of a strong window, first round stamped."""
+        """The payloads of a target's window, first round stamped."""
+
+    def landed_through(
+        self,
+        operation_id: Any,  # an opaque identity
+        target: Optional[window_records.PoolId] = None,
+    ) -> int:
+        """The operation's highest round the edge's landing store holds."""
 
     def hold_strong_context(
         self,
@@ -640,11 +639,20 @@ class WindowRetention(Protocol):
         request, or None.
         """
 
-    def context_rounds_in_flight(self, key: tuple, read_keys: tuple) -> tuple:
-        """The rounds the strong syndrome buffer lacks that the weak one has."""
+    def context_rounds_in_flight(
+        self,
+        key: tuple,
+        read_keys: tuple,
+        target: Optional[window_records.PoolId] = None,
+    ) -> tuple:
+        """The rounds the edge's landing store lacks that its source has."""
 
-    def escalated_rounds(self, round_keys: list) -> tuple:
-        """The weak syndrome buffer's packets of these rounds, to carry up."""
+    def escalated_rounds(
+        self,
+        round_keys: list,
+        target: Optional[window_records.PoolId] = None,
+    ) -> tuple:
+        """The packets of these rounds in the store the edge carries from."""
 
     def guard_restart_reads(
         self,
@@ -716,8 +724,13 @@ class WindowRetention(Protocol):
     ) -> None:
         """Refuse a new consumer if an already-arrived round was released."""
 
-    def require_strong_retained(self, round_keys: list, purpose: str) -> None:
-        """The same, on the strong syndrome buffer."""
+    def require_strong_retained(
+        self,
+        round_keys: list,
+        purpose: str,
+        target: Optional[window_records.PoolId] = None,
+    ) -> None:
+        """The same, on the edge's landing store."""
 
 
 @runtime_checkable
@@ -744,8 +757,9 @@ class WindowRounds(Protocol):
     def strong_rounds_arrived(
         self,
         operation_id: Any,  # an opaque identity
+        store: "SyndromeBuffer",
     ) -> int:
-        """The rounds of the operation stored in the strong syndrome buffer."""
+        """The operation's highest round stored in that store."""
 
 
 @runtime_checkable
@@ -761,7 +775,7 @@ class WindowJobBuilder(Protocol):
         self,
         operation_id: Any,  # an opaque identity
         window_id: int,
-        tier: window_records.DecoderTier,
+        tier: window_records.PoolId,
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
 
@@ -780,11 +794,7 @@ class WindowJobBuilder(Protocol):
 class WindowRequests(Protocol):
     """The submission side, as a strong window shape steers it."""
 
-    def request_if_ready(
-        self,
-        window: window_records.Window,
-        strong_redecode: Optional["StrongRedecode"],
-    ) -> None:
+    def request_if_ready(self, window: window_records.Window) -> None:
         """If the window has its data, submit it through the policy."""
 
     def withdraw(self, window: window_records.Window) -> None:
@@ -828,39 +838,95 @@ class BoundaryCourier(Protocol):
 
 
 @runtime_checkable
-class StrongRedecode(Protocol):
-    """The strong tier's window side, as the weak windows see it.
+class EscalateEdge(Protocol):
+    """One escalate edge's window side, as the windows see it.
 
-    The requester asks it for the speculative strong decode that starts
-    beside a weak one (Toshio et al. 2510.25222 lines 598-601); the
-    committer, the verdict and the window manager ask it to escalate,
-    release and cancel. A kept weak result halts the strong request it
-    made unnecessary, held here or on the strong side's manager (lines
-    606-614).
+    It carries a source pool's decodes of a window to its target pool.
+    The verdict reads its policy and costs and asks it to escalate or
+    cancel; the requester asks it for the speculative decode that starts
+    beside a source job (Toshio et al. 2510.25222 lines 598-601); the
+    committer and the window manager tell it of every commit and stored
+    round. A kept result halts the request it made unnecessary, held
+    here or on the target's manager (lines 606-614).
     """
+
+    # the pool whose results meet this edge's verdict, and the pool that
+    # decodes the windows it escalates
+    source: window_records.PoolId
+    target: window_records.PoolId
+    # the rule that keeps or escalates a source result
+    policy: "EscalationPolicy"
+    # the target pool's manager
+    decode_queue: "DecodeQueue"
+    # which of a window's revisions the frame takes, what a keep does to
+    # the target's decode, and the verdict's clock and cycles
+    # (windows/revision_rules.py EdgeRules)
+    rules: Any
 
     def parallel_strong_submission(
         self, weak_job: decoding_records.DecodeJob
     ) -> Optional[decoding_records.Submission]:
-        """The speculative strong decode started beside the weak job.
+        """The speculative target decode started beside the source job.
 
-        None when the weak job's window owes a boundary or the strong job
-        is held.
+        None when the source job's window owes a boundary or the target
+        job is held.
         """
 
     def released_submission(
         self, window_key: tuple
     ) -> Optional[decoding_records.Submission]:
-        """The weak job's last boundary arrived: its speculative decode."""
+        """The source job's last boundary arrived: its speculative decode."""
 
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
-        """Ask the strong tier to re-decode the weak job's window."""
+        """Ask the target pool to re-decode the source job's window."""
+
+    def accept_target_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A target decode ended: to the next edge's join, else the verdict."""
+
+    def enqueue_target(
+        self,
+        job: decoding_records.DecodeJob,
+        selection_arrival_ticks: Optional[int],
+    ) -> None:
+        """Queue a target job and its companions; the next edge may start.
+
+        selection_arrival_ticks is the tick the job's selection lands,
+        None for a decode started before its verdict.
+        """
+
+    def start_beside_source(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """A source job past the entry was queued: decode it here too."""
+
+    def arm_deadline(self, source_job: decoding_records.DecodeJob) -> None:
+        """A source job arrives: its deadline, when the edge has one."""
+
+    def note_source_result(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """The source result reached the verdict: met or missed."""
+
+    def result_is_unavailable(
+        self, source_job: decoding_records.DecodeJob
+    ) -> bool:
+        """Whether the source result missed its deadline and counts as none."""
 
     def submit_if_commit_releases(self, window_key: tuple) -> None:
-        """A weak window committed: a strong window waiting on it leaves."""
+        """A window committed: a target window waiting on it leaves."""
 
     def cancel_strong_request(self, window_key: tuple) -> None:
-        """A kept weak result: its strong request ends, held or submitted."""
+        """A kept source result: its target request ends, held or submitted."""
+
+    def abandon_strong_request(self, window_key: tuple) -> None:
+        """A kept source result: a held request ends, a submitted one runs out.
+
+        The submitted request's result is dropped when its decode ends.
+        """
 
     def submit_if_stored_data_releases(
         self,
@@ -874,23 +940,16 @@ class WindowVerdict(Protocol):
     """The window side, as a finished decode returns its result to it.
 
     The side that owns the window publishes and finalizes every
-    correction, primary or strong, so the decision and its outcome stay
-    in one place.
+    revision, the first decode or one along an escalate edge, so the
+    decision and its outcome stay in one place.
     """
 
-    def accept_result(
+    def accept_revision(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """The window's answer: apply the threshold, publish or escalate."""
-
-    def accept_strong_result(
-        self,
-        job: decoding_records.DecodeJob,
-        result: decoding_records.DecodeResult,
-    ) -> None:
-        """A strong decode finished: publish it, then finalize the window."""
+        """A decode of the window finished: its verdict, or its commit."""
 
 
 # ----------------------------------- the decoder manager schedules a decode
@@ -953,6 +1012,7 @@ class DecoderOutput(Protocol):
 
     def send_selection(
         self,
+        path: transfer_records.LinkPath,
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
@@ -961,10 +1021,12 @@ class DecoderOutput(Protocol):
 
     def send_region(
         self,
+        path: transfer_records.LinkPath,
+        store: SyndromeBuffer,
         region: round_records.EscalatedRegion,
         on_delivered: Callable[[], None],
     ) -> int:
-        """Read a strong window's rounds out of the weak store, send them up.
+        """Read a target window's rounds out of store, send them on path.
 
         The delay expected: the store's read, then the link.
         """
@@ -1025,6 +1087,9 @@ class DecodeQueue(Protocol):
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back a window's not-yet-started decode; it is superseded."""
 
+    def waiting_jobs(self) -> int:
+        """The jobs queued and not dispatched, read by a deadline trigger."""
+
     def release_window(self, window_key: tuple) -> None:
         """The window's last boundary arrived: its queued jobs may start."""
 
@@ -1070,6 +1135,13 @@ class DecodeQueue(Protocol):
 
         Queued, crossing, running, or done and waiting; nothing when none
         is live or done.
+        """
+
+    def abandon_strong(self, window_key: tuple) -> None:
+        """A kept weak result: the window's strong request runs out.
+
+        Its decode runs to its end, and its result is dropped then; one
+        done and waiting is dropped now.
         """
 
     def close_companion_request(
@@ -1222,6 +1294,25 @@ class Frame(Protocol):
         on_committed: Callable[[], None],
     ) -> None:
         """Accept a window's correction once, charge the write, call back."""
+
+
+@runtime_checkable
+class WindowKeeper(Protocol):
+    """What a component keeps per window, as a stream's release sees it.
+
+    The release tells it once the windows are final
+    (windows/window_release.py).
+    """
+
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """Let go what it keeps for the stream's windows before the index.
+
+        Every one of them is final.
+        """
 
 
 # ------------------------------------- the frame releases the controller
@@ -1849,16 +1940,17 @@ class EscalationPolicy(Protocol):
     and is told, the shape of gem5's conditional predictor
     (src/cpu/pred/conditional.hh: lookup answers, update teaches): it
     builds no job and sends nothing. check_plan refuses, once at build,
-    a run the policy cannot serve.
+    a run the policy cannot serve. verdict is the row it asks of each
+    weak result, whose statistics are recorded at <edge>.verdict.
     """
+
+    verdict: "EscalationVerdict"
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""
 
-    def tiers_for_ready_window(
-        self, window: window_records.Window
-    ) -> tuple[window_records.DecoderTier, ...]:
-        """The tiers that decode the complete window now, primary first.
+    def decodes_both_at_once(self, window: window_records.Window) -> bool:
+        """Whether the target decodes the complete window beside its source.
 
         Asked once per window, when its rounds are complete and its
         decision cycles have passed (windows/decode_requests.py).
@@ -1885,6 +1977,43 @@ class EscalationPolicy(Protocol):
         decode ends several escalations and is told once, under its
         first window's key.
         """
+
+
+class EscalationVerdict(Protocol):
+    """A verdict row: keep a source result or escalate its window.
+
+    escalation/verdicts.py holds the rows; the policy asks its row once
+    per source result, with the edge's threshold.
+    """
+
+    def decide(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold: "ThresholdSource",
+    ) -> decoding_records.Verdict:
+        """Keep the result as final, or escalate its window."""
+
+
+class ReplaceRule(Protocol):
+    """Which of a window's revisions the frame takes.
+
+    windows/revision_rules.py holds the rows; the committer asks the
+    rule of the edge a later revision came over.
+    """
+
+    def final_revision(self, earlier: tuple, latest: Any) -> Any:
+        """The revision the frame takes, of the earlier ones and the latest."""
+
+    def on_provisional(self, committer: Any, revision: Any) -> None:
+        """A later revision that escalates again: replace, or keep waiting."""
+
+
+class CancelRule(Protocol):
+    """What a keep does to the target's decode of the window."""
+
+    def on_keep(self, edge: EscalateEdge, window_key: tuple) -> None:
+        """End, or let run out, the edge's target decode of the window."""
 
 
 @runtime_checkable
@@ -2200,6 +2329,23 @@ class LayoutModel(Protocol):
         """The resources the operation holds while it runs."""
 
 
+class WorkloadMakerSettings(Protocol):
+    """A workload maker's row: its parameters, made into a workload at a task.
+
+    The workload slot takes a workload lowered in Python or a maker row
+    (decsim/producers.py), lowered when the task is made against
+    the qpu the task has. fixes_the_distance says the workload was made
+    at a distance of its own (from files, say), so the qpu's distance is
+    not set by path.
+    """
+
+    name: str
+    fixes_the_distance: bool
+
+    def lowered_for(self, qpu: object) -> object:
+        """The workload made for this qpu, lowered for the machine."""
+
+
 # ------------------------------ what a listener reads off what it hears
 
 
@@ -2214,10 +2360,9 @@ class DecoderMemory(Protocol):
 class DecoderUnit(Protocol):
     """A decoder unit, as its listeners see it.
 
-    The pool fires unit_busy(unit) and unit_freed(unit), the service
-    fires each job's dispatch, landing, start and finish with its unit,
-    and a listener reads the unit's names and its memory's size, never
-    its state.
+    The service fires each job's dispatch, landing, start and finish
+    with its unit, and a listener reads the unit's names and its
+    memory's size, never its state.
     """
 
     name: str
@@ -2231,3 +2376,31 @@ class WindowBacklog(Protocol):
 
     def backlog_round_counts(self, rounds_read_out_by_operation: dict) -> tuple:
         """Rounds read out whole, not final: (operation id, patch, rounds)."""
+
+
+class LinkCard(Protocol):
+    """A wire's price: a route's path from its reference path.
+
+    The reference and the path it returns are links' PathSettings
+    (decsim/links/settings.py), which this file does not import; a graph
+    puts a card on a wire or in a fabric (decsim/topology/fabrics.py).
+    """
+
+    def priced(
+        self,
+        name: str,
+        reference: Any,  # a links PathSettings
+        machine_clock: Optional[config.Clock],
+    ) -> object:  # a links PathSettings
+        """The path named name: the reference's payload rule on this wire."""
+
+
+class FabricRule(Protocol):
+    """A fabric: the link each route takes, None for the reference path.
+
+    A route is topology.fabrics.Route: a path's name and its two ends'
+    sites.
+    """
+
+    def link_for(self, route: Any) -> Optional[LinkCard]:
+        """The link this route takes, or None for the reference path."""

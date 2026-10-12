@@ -135,3 +135,19 @@ def test_the_output_slot_holds_one_finished_result_until_it_is_taken():
     assert unit.take_output((1, 0)) is completion
     assert unit.output_windows() == []
     assert unit.take_output((1, 0)) is None
+
+
+def test_the_output_slot_keeps_both_solves_of_one_window_in_order():
+    """An attempt's two forced-class solves may finish on one unit."""
+    unit = _unit()
+    first = object()
+    second = object()
+    unit.hold_output((1, 0), first)
+    unit.hold_output((1, 0), second)
+
+    taken_first = unit.take_output((1, 0))
+    taken_second = unit.take_output((1, 0))
+
+    assert taken_first is first
+    assert taken_second is second
+    assert unit.output_windows() == []

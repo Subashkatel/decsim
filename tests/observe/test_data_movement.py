@@ -112,7 +112,7 @@ class _Delivered:
     def __init__(self, payload_bits, header_bits: int) -> None:
         self.transfer = _Transfer(payload_bits, header_bits)
         self.attribution = _Attribution()
-        self.path = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+        self.path = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
 
 
 def test_the_ledger_keeps_the_most_one_history_held_at_each_seat():

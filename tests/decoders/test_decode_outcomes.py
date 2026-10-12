@@ -55,8 +55,15 @@ def _delivering_to(delivered):
 
 def _weak_job(delivered):
     on_decoded = _delivering_to(delivered)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.WEAK_POOL_ID, 0
+    )
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3, on_decoded=on_decoded
+        operation_id=1,
+        window_id=0,
+        round_count=3,
+        on_decoded=on_decoded,
+        request_key=request_key,
     )
 
 
@@ -69,7 +76,7 @@ def test_a_kept_weak_request_closes_the_attempt():
     outcomes.deliver_weak(job, result)
     assert delivered == [(job, result)]
     outcomes.resolve_weak_request(job, result, decoding_records.Verdict.KEEP)
-    assert (1, 0) not in requests.by_window
+    assert not requests.by_window
 
 
 def test_an_escalated_weak_request_closes_the_attempt():
@@ -83,14 +90,14 @@ def test_an_escalated_weak_request_closes_the_attempt():
     outcomes.resolve_weak_request(
         job, result, decoding_records.Verdict.ESCALATE
     )
-    assert (1, 0) not in requests.by_window
+    assert not requests.by_window
 
 
 def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     outcomes, requests, policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     strong_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 5
+        1, 0, window_records.STRONG_POOL_ID, 5
     )
     on_decoded = _delivering_to(delivered)
     strong_job = decoding_records.DecodeJob(
@@ -106,7 +113,7 @@ def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     requests.select((1, 0), strong_key)
     result = decoding_records.DecodeResult(1, 0, logical_observables=(1,))
     deliveries = requests.deliveries_for(strong_job, result, now=30)
-    outcomes.conclude_strong(strong_job, result, deliveries)
+    outcomes.conclude_strong(strong_job, deliveries)
     assert delivered == [(strong_job, result)]
     assert policy.learned == [((1, 0), result)]
     assert requests.unsettled() == {}
@@ -121,7 +128,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []
     strong_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.STRONG, 5
+        1, 0, window_records.STRONG_POOL_ID, 5
     )
     on_decoded = _delivering_to(delivered)
     strong_job = decoding_records.DecodeJob(
@@ -139,7 +146,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     requests.begin_selection((1, 0), strong_key)
     result = decoding_records.DecodeResult(1, 0, logical_observables=(1,))
     deliveries = requests.deliveries_for(strong_job, result, now=30)
-    outcomes.conclude_strong(strong_job, result, deliveries)
+    outcomes.conclude_strong(strong_job, deliveries)
     assert delivered == []
     assert unit.output_windows() == [(1, 0)]
     assert requests.select((1, 0), strong_key) is True
@@ -158,7 +165,7 @@ def test_the_terminal_source_carries_every_ended_request():
     delivered = []
     job = _weak_job(delivered)
     job.request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     job.service_dispatch_ticks = 0
     job.window = window_records.Window(

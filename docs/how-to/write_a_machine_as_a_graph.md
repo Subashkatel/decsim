@@ -1,0 +1,149 @@
+[decsim docs](../README.md) › [How-to guides](README.md)
+
+# How to write a machine as a graph
+
+A machine can be written as named parts and the wires between them,
+in Python or in YAML. Each part is a decsim settings record. Its
+parameters sit at its name (`uf.unit_count`), so `--set`, `decsim params`
+and `decsim describe` all reach it. Today the graph runs as the
+`MachineSettings` it resolves to, and a task keeps that record's id.
+
+## 1. Name the parts and wire them
+
+```python
+import decsim
+import decsim.presets.clocks as clocks
+import decsim.topology.graph as graph
+
+machine = graph.Machine(
+    clock=clocks.FRIDGE_CLOCK,
+    parts=(
+        graph.Part("qpu", qpu),
+        graph.Part("controller", controller),
+        graph.Part("chip_buffer", buffer, placed="fridge"),
+        graph.Part("uf", union_find_pool, placed="fridge"),
+        graph.Part("frame", frame),
+        graph.Part("workload", workload),
+    ),
+    wires=(
+        graph.Wire("qpu.readout", "controller.readout"),
+        graph.Wire("controller.rounds", "chip_buffer.rounds"),
+        graph.Wire("chip_buffer.reads", "uf.rounds"),
+        graph.Wire("uf.corrections", "frame.corrections"),
+        graph.Wire("frame.decisions", "controller.decisions"),
+        graph.Wire("controller.pulses", "qpu.pulses"),
+    ),
+)
+task = decsim.Task("uf_d5", machine, collection=collection)
+```
+
+A part's kind comes from the `MachineSettings` field that takes its
+record, so your own record joins a kind by meeting that field's type.
+The kinds and their ports are in `decsim/topology/part_kinds.py`. A
+wire runs from an output to an input that carries the same signal. A
+wrong wire is refused when the machine is made. A required port left
+unwired is refused when the task is built.
+
+For two decoders, add a second store and pool and a `SwitchingSettings`
+part, the escalate edge between them: wire the first pool's `escalate`
+to the switching part's `results`, and its `redecode` to the second
+pool's `escalated`. A pool alone placed on the host is the strong
+decoder. A machine of more pools adds a switching part per edge; every
+pool but the first is the target of one edge, and its parts' names name
+its hops (`strong_to_deep`), its statistics and its seeds.
+
+The machines decsim ships are graphs already (`decsim/presets/`), with
+their parts named as above. Start from one and change it by name:
+
+```python
+import decsim.presets.machines as machines
+
+base = machines.weak_baseline(5, 0.001, 1.0)
+two_units = base.with_settings(machines.WEAK_POOL, unit_count=2)
+task = decsim.Task("weak_d5", two_units, collection=collection)
+```
+
+`with_settings` changes fields of one part's record, `with_part`
+replaces a part of the same name or adds one, `with_wires` adds wires,
+and `without_part` drops a part and its wires.
+`machines.with_strong_tier` adds a strong decoder on the host that the
+weak one escalates to.
+
+## 2. Price the links
+
+A wire may carry its own link:
+
+```python
+import decsim.topology.fabrics as fabrics
+
+uplink = fabrics.ClockedLink(latency_cycles=40, bits_per_cycle=38.79, lane_count=4)
+graph.Wire("controller.rounds", "chip_buffer.rounds", link=uplink)
+```
+
+Every other hop takes the machine's `fabric`. The fabric prices a hop by
+the sites of its two ends:
+
+```python
+leg = fabrics.RoundTripLeg(2.305, 128, 100_000)
+host_poll = fabrics.TimedLink(0.0)
+machine = graph.Machine(..., fabric=fabrics.FridgeHostFabric(cable=leg, host_local=host_poll))
+```
+
+`ReferenceFabric` is the default card, and `PathLinks` gives a link
+to a path by its name.
+
+## 3. Or write it in YAML
+
+```yaml
+clock: 250MHz
+parts:
+  qpu: {type: QpuSettings, distance: 5, round_period: 1us}
+  uf:
+    type: DecoderPoolSettings
+    placed: fridge
+    unit_count: ${union_find.units}
+    algorithm: {type: PyMatchingDecoder, preset_latency: 28ns}
+  workload: python
+wires:
+  - qpu.readout -> controller.readout
+  - wire: uf.corrections -> frame.corrections
+    link: {type: ClockedLink, latency: "${fiber.down}"}
+```
+
+```python
+import decsim.topology.machine_file as machine_file
+
+machine = machine_file.load(
+    "machine.yaml", "constants.yaml", python_parts={"workload": workload}
+)
+```
+
+A part writes only the fields it changes from its record's defaults. A
+part that holds a Python object, such as the workload's Stim circuit, is
+written `python` and given in `python_parts`. `${name}` reads a
+constant from the constants file, where a comment after a value is its
+source. In a flow mapping, `{...}`, quote it. A constant that nothing
+reads is refused. `machine_file.dumps(machine)` writes any graph back as
+YAML.
+
+## 4. Set, list and describe
+
+```
+decsim params run.py --only uf_d5
+decsim run run.py --set uf.unit_count=2 --set uf.placed=host
+decsim describe run.py --only uf_d5
+decsim describe run.py --only uf_d5 --json
+```
+
+`describe` prints the task's machine as YAML, then every path's
+latency and rate as the run prices them. A task built from
+`MachineSettings` is printed as the graph it resolves from. `--json`
+writes the same graph and paths as one json object, for a script to
+read. A record decsim does not define is written by its import path, so
+the text reads back.
+
+A graph of two pools and one edge at most runs as the `MachineSettings`
+record it resolves to, and keeps that record's task id. A graph of more
+is identified by itself; [How to build a chain of
+decoders](build_a_chain_of_decoders.md) grows one. A pool no edge
+reaches, or a store feeding a store, is refused.

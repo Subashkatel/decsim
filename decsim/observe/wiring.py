@@ -28,8 +28,8 @@ import decsim.observe.link_traffic as link_traffic
 import decsim.observe.log_writers as log_writers
 import decsim.observe.metrics as metrics
 import decsim.observe.observation as observation_module
-import decsim.observe.queue_depth as queue_depth_module
 import decsim.observe.referee_audit as referee_audit_module
+import decsim.observe.region_of_interest as region_of_interest_module
 import decsim.observe.result_ledger as result_ledger_module
 import decsim.observe.round_events as round_events_module
 import decsim.observe.runtime_stamps as runtime_stamps_module
@@ -40,6 +40,8 @@ import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
+import decsim.statistics.registry as statistics_registry
+import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
 
 def observe(
@@ -55,6 +57,7 @@ def observe(
     switching: Optional[escalation_build.Switching],
     process_name: str,
     traffic_ledger: link_traffic.TrafficLedger,
+    run_statistics: statistics_registry.Registry,
 ) -> observation_module.Observation:
     """Every listener of the run, built and connected to what it hears.
 
@@ -63,19 +66,21 @@ def observe(
     """
     window_manager = windows.window_manager
     decoder_managers = _decoder_managers(decoders)
-    log = _connect_log(observation, engine)
+    keeps_records = not observation.folds_windows
+    log = _connect_log(observation, engine, keeps_records)
     links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
-    round_events = _connect_round_events(engine, qpu, control, readout)
+    round_events = _connect_round_events(
+        engine, qpu, control, readout, keeps_records
+    )
     window_ledger = _connect_window_ledger(window_manager)
     result_ledger = _connect_result_ledger(window_manager)
     runtime_stamps = runtime_stamps_module.RuntimeStamps()
     _connect_runtime_stamps(
         control.execution_runtime, qpu.factory, runtime_stamps
     )
-    queue_depth = _connect_queue_depth(decoder_managers)
     controller_counters = _connect_controller_counters(control.idle_rounds)
     command_events = _connect_command_events(qpu.device)
-    stages = _connect_stage_records(decoders)
+    stages = _connect_stage_records(decoders, keeps_records)
     referee_audit = _connect_referee_audit(decoders)
     sampled_shots = _connect_sampled_shots(qpu.syndrome_source)
     window_outcomes = _window_outcomes(observation)
@@ -83,9 +88,9 @@ def observe(
         _connect_window_outcomes(
             window_outcomes, qpu.syndrome_source, window_manager
         )
-    decode_records = _decode_records(observation)
+    decode_records = _decode_records(observation, keeps_records)
     _connect_decode_records(decoder_managers, decode_records)
-    confidence = _connect_confidence(switching, decoder_managers)
+    confidence = _connect_confidence(switching, decoder_managers, keeps_records)
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
     if data_movement is not None:
@@ -99,8 +104,14 @@ def observe(
     decode_backlog = _decode_backlog(
         observation, engine, window_manager, decoder_managers, round_events
     )
-    decoder_utilization = _decoder_utilization(engine, decoder_managers)
-    frame_corrections = _frame_corrections(control.pauli_frame)
+    if decode_backlog is not None:
+        run_statistics.on_reset(decode_backlog.reset)
+    region_of_interest = _region_of_interest(observation, run_statistics)
+    if region_of_interest is not None:
+        qpu.device.trace.round_emitted.connect(
+            region_of_interest.round_read_out
+        )
+    frame_corrections = _frame_corrections(control.pauli_frame, keeps_records)
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
@@ -111,7 +122,6 @@ def observe(
         data_movement=data_movement,
         decode_records=decode_records,
         runtime_stamps=runtime_stamps,
-        queue_depth=queue_depth,
         controller_counters=controller_counters,
         command_events=command_events,
         stages=stages,
@@ -119,9 +129,10 @@ def observe(
         sampled_shots=sampled_shots,
         window_outcomes=window_outcomes,
         decode_backlog=decode_backlog,
-        decoder_utilization=decoder_utilization,
+        statistics=run_statistics,
         round_events=round_events,
         confidence=confidence,
+        region_of_interest=region_of_interest,
     )
 
 
@@ -147,28 +158,14 @@ def _connect_result_ledger(window_manager) -> result_ledger_module.ResultLedger:
 
 
 def _decoder_managers(decoders) -> tuple:
-    """The chip's manager and, when the run escalates, the host's."""
-    managers = [decoders.decoder_manager]
-    strong = decoders.strong_decoder_manager
-    if strong is not None:
-        managers.append(strong)
-    return tuple(managers)
+    """Every pool's manager, the entry pool's first."""
+    return decoders.managers
 
 
 def _decoder_rows(decoders) -> list:
-    """Every decoder row of the run's two decoder units, either absent."""
-    units = (decoders.primary_decoder, decoders.strong_decoder)
+    """Every decoder row of the run's decoder units, in graph order."""
+    units = [pool.unit for pool in decoders.pools]
     return decoder_pool.decoder_rows(units)
-
-
-def _connect_queue_depth(decoder_managers) -> queue_depth_module.QueueDepthLog:
-    """The waiting jobs, sampled at every change of either queue's depth."""
-    depth_log = queue_depth_module.QueueDepthLog()
-    for manager in decoder_managers:
-        pool_name = manager.pool.name
-        depth_changed = functools.partial(depth_log.depth_changed, pool_name)
-        manager.queue.trace.depth_changed.connect(depth_changed)
-    return depth_log
 
 
 def _connect_controller_counters(
@@ -222,12 +219,8 @@ def _connect_data_movement(
     """
     qpu.device.trace.round_emitted.connect(data_movement.round_emitted)
     links.trace.transfer_delivered.connect(data_movement.transfer_delivered)
-    weak_syndrome_buffer = readout.weak_syndrome_buffer
-    if weak_syndrome_buffer is not None:
-        _connect_store_counts(data_movement, weak_syndrome_buffer)
-    strong_syndrome_buffer = readout.strong_syndrome_buffer
-    if strong_syndrome_buffer is not None:
-        _connect_store_counts(data_movement, strong_syndrome_buffer)
+    for parts in readout.stores:
+        _connect_store_counts(data_movement, parts.store)
     for manager in _decoder_managers(decoders):
         for source in manager.reference_sources():
             source.connect(data_movement.hold_registered)
@@ -255,16 +248,8 @@ def _connect_trace_writer(
     for source in _copy_sources(readout, windows, decoders):
         source.connect(trace_writer.copy_made)
     _connect_controller_trace(trace_writer, readout)
-    weak_syndrome_buffer = readout.weak_syndrome_buffer
-    if weak_syndrome_buffer is not None:
-        _connect_store_trace(
-            trace_writer, weak_syndrome_buffer, "weak syndrome buffer"
-        )
-    strong_syndrome_buffer = readout.strong_syndrome_buffer
-    if strong_syndrome_buffer is not None:
-        _connect_store_trace(
-            trace_writer, strong_syndrome_buffer, "strong syndrome buffer"
-        )
+    for parts in readout.stores:
+        _connect_store_trace(trace_writer, parts.store, parts.plan.label)
     decoder_managers = _decoder_managers(decoders)
     for index, manager in enumerate(decoder_managers):
         _connect_decoder_trace(trace_writer, index, manager)
@@ -322,12 +307,8 @@ def _copy_sources(readout, windows, decoders) -> list:
         readout.controller.trace.copy_made,
         readout.assembler.trace.copy_made,
     ]
-    weak_syndrome_round_receiver = readout.weak_syndrome_round_receiver
-    if weak_syndrome_round_receiver is not None:
-        sources.append(weak_syndrome_round_receiver.trace.copy_made)
-    strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
-    if strong_syndrome_round_receiver is not None:
-        sources.append(strong_syndrome_round_receiver.trace.copy_made)
+    for parts in readout.stores:
+        sources.append(parts.receiver.trace.copy_made)
     for manager in _decoder_managers(decoders):
         for source in manager.copy_sources():
             sources.append(source)
@@ -396,33 +377,29 @@ def _connect_window_trace(
     sources.window_data_complete.connect(trace_writer.window_ready)
     sources.solve_held.connect(trace_writer.solve_held)
     sources.window_committed.connect(trace_writer.window_committed)
+    sources.window_final.connect(trace_writer.window_final)
     sources.window_absorbed.connect(trace_writer.window_absorbed)
     for manager in decoder_managers:
         manager.outcomes.trace.verdict_given.connect(trace_writer.verdict_given)
-    strong_redecode = window_manager.strong_redecode
-    if strong_redecode is None:
-        return
-    strong_redecode.trace.strong_window_held.connect(
-        trace_writer.strong_window_held
-    )
-    strong_redecode.trace.strong_window_left.connect(
-        trace_writer.strong_window_left
-    )
+    for edge_trace in sources.edge_traces:
+        edge_trace.strong_window_held.connect(trace_writer.strong_window_held)
+        edge_trace.strong_window_left.connect(trace_writer.strong_window_left)
 
 
 def _decode_records(
-    observation: observe_settings.ObservationSettings,
+    observation: observe_settings.ObservationSettings, keeps_records: bool
 ) -> Optional[decode_records_module.DecodeRecordLedger]:
     """The decode record ledger, when the records that read it ask.
 
     The switching records and the window outcomes both read each
-    decode's syndrome weight off it.
+    decode's syndrome weight off it; a stream that lets its windows go
+    reads neither (observation.folds_windows).
     """
     is_asked = (
         observation.record_switching_windows
         or observation.record_window_outcomes
     )
-    if not is_asked:
+    if not is_asked or not keeps_records:
         return None
     return decode_records_module.DecodeRecordLedger()
 
@@ -440,10 +417,14 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    switching, decoder_managers: tuple
+    switching, decoder_managers: tuple, keeps_records: bool
 ) -> Optional[decode_records_module.ConfidenceLedger]:
-    """The confidence ledger, only on a run whose confidence decides."""
-    if switching is None:
+    """The confidence ledger, only on a run whose confidence decides.
+
+    It keeps every window's verdict result, which a stream that lets its
+    windows go never reads (observation.folds_windows).
+    """
+    if switching is None or not keeps_records:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:
@@ -465,20 +446,27 @@ def _connect_runtime_stamps(
 
 
 def _connect_round_events(
-    engine: engine_module.Engine, qpu, control, readout
+    engine: engine_module.Engine, qpu, control, readout, keeps_records: bool
 ) -> round_events_module.RoundEventRecorder:
-    """The recorder hears every round event, output and strong landing."""
-    round_events = round_events_module.RoundEventRecorder(engine)
-    components = (
+    """The recorder hears every round event, output and strong landing.
+
+    A written store's receiving end is on the readout's path; a landed
+    store's is heard after the outputs, with its stores.
+    """
+    round_events = _round_event_recorder(engine, keeps_records)
+    components = [
         qpu.device,
         readout.assembler,
         readout.held_rounds,
         readout.transmitter,
-        readout.weak_syndrome_round_receiver,
-    )
-    for component in components:
-        if component is None:
+    ]
+    landed = []
+    for parts in readout.stores:
+        if parts.plan.intake.shape == receiver_module.WRITTEN:
+            components.append(parts.receiver)
             continue
+        landed.append(parts)
+    for component in components:
         component.trace.round_event.connect(round_events.record)
     qpu.device.trace.round_emitted.connect(round_events.round_read_out)
     idle_rounds = control.idle_rounds
@@ -487,22 +475,27 @@ def _connect_round_events(
     )
     instruction_output = control.instruction_output
     instruction_output.trace.output_event.connect(round_events.output)
-    strong_syndrome_buffer = readout.strong_syndrome_buffer
-    strong_syndrome_round_receiver = readout.strong_syndrome_round_receiver
-    if strong_syndrome_buffer is not None:
-        strong_syndrome_buffer.trace.round_stored.connect(
-            round_events.round_stored
-        )
-    if strong_syndrome_round_receiver is not None:
-        strong_syndrome_round_receiver.trace.round_event.connect(
-            round_events.record
-        )
+    for parts in landed:
+        parts.store.trace.round_stored.connect(round_events.round_stored)
+    for parts in landed:
+        parts.receiver.trace.round_event.connect(round_events.record)
     return round_events
 
 
-def _connect_stage_records(decoders) -> stage_records_module.StageLedger:
+def _round_event_recorder(
+    engine: engine_module.Engine, keeps_records: bool
+) -> round_events_module.RoundEventRecorder:
+    """The run's recorder, or a stream's, which keeps no row."""
+    if keeps_records:
+        return round_events_module.RoundEventRecorder(engine)
+    return round_events_module.FoldingRoundEventRecorder(engine)
+
+
+def _connect_stage_records(
+    decoders, keeps_records: bool
+) -> stage_records_module.StageLedger:
     """The run's stage history, heard from every decoder row."""
-    stages = stage_records_module.StageLedger()
+    stages = stage_records_module.StageLedger(keeps_records)
     decoder_rows = _decoder_rows(decoders)
     for decoder in decoder_rows:
         decoder.stage_recorded.connect(stages.stage_recorded)
@@ -550,36 +543,16 @@ def _connect_window_outcomes(
 
 
 def _frame_corrections(
-    pauli_frame,
+    pauli_frame, keeps_records: bool
 ) -> frame_corrections_module.FrameCorrections:
     """The frame's landed corrections."""
-    corrections = frame_corrections_module.FrameCorrections()
+    corrections = frame_corrections_module.FrameCorrections(keeps_records)
     if pauli_frame is None:
         return corrections
     pauli_frame.trace.correction_committed.connect(
         corrections.correction_committed
     )
     return corrections
-
-
-def _decoder_utilization(
-    engine: engine_module.Engine, decoder_managers
-) -> metrics.DecoderUtilization:
-    """The busy-unit integral, stepping at every pool's claims and returns.
-
-    Always built: every run's pool columns read each tier's busy
-    fraction off it.
-    """
-    units_by_pool = {}
-    for manager in decoder_managers:
-        pool = manager.pool
-        units_by_pool[pool.name] = len(pool.units)
-    utilization = metrics.DecoderUtilization(engine, units_by_pool)
-    for manager in decoder_managers:
-        pool = manager.pool
-        pool.trace.unit_busy.connect(utilization.unit_busy)
-        pool.trace.unit_freed.connect(utilization.unit_freed)
-    return utilization
 
 
 def _decode_backlog(
@@ -595,21 +568,52 @@ def _decode_backlog(
     decode_backlog = metrics.DecodeBacklog(
         window_manager, decoder_managers, round_events
     )
-    engine.action_done.connect(decode_backlog.observe)
+    at_tick_end = functools.partial(_sample_at_tick_end, engine, decode_backlog)
+    engine.action_done.connect(at_tick_end)
     return decode_backlog
+
+
+def _region_of_interest(
+    observation: observe_settings.ObservationSettings,
+    run_statistics: statistics_registry.Registry,
+) -> Optional[region_of_interest_module.RegionOfInterest]:
+    """The warm-up's end, only when the run leaves one out."""
+    if observation.warmup_rounds == 0:
+        return None
+    return region_of_interest_module.RegionOfInterest(
+        run_statistics, observation.warmup_rounds
+    )
+
+
+def _sample_at_tick_end(
+    engine: engine_module.Engine,
+    decode_backlog: metrics.DecodeBacklog,
+    tick: int,
+) -> None:
+    """Sample the backlog after a tick's last action only.
+
+    The peak is over the counts ticks end at, so an action with another
+    due at its tick changes nothing the sampler keeps.
+    """
+    if engine.has_action_due_now():
+        return
+    decode_backlog.observe(tick)
 
 
 def _connect_log(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
+    keeps_records: bool,
 ) -> log_writers.LogWriter:
-    """The narrator's listeners: the record always, the console when asked.
+    """The narrator's listeners: the record, the console when asked.
 
     Connecting a listener to io_line is what turns the component I/O
-    lines on, gem5's named debug flag (src/base/debug.hh Flag).
+    lines on, gem5's named debug flag (src/base/debug.hh Flag). A stream
+    that lets its windows go keeps no record (observation.folds_windows).
     """
     log = log_writers.LogWriter()
-    engine.line.connect(log.write)
+    if keeps_records:
+        engine.line.connect(log.write)
     if observation.log_component_io:
         engine.io_line.connect(log.write)
     if observation.prints_log:

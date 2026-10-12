@@ -47,6 +47,7 @@ from typing import Optional
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.build.program as program_build
 import decsim.build.qpu as qpu_part
@@ -61,10 +62,12 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.seeds as seed_records
-import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.routers as routers
+import decsim.windows.window_release as window_release
 
 
 @dataclasses.dataclass(frozen=True)
@@ -85,9 +88,17 @@ class Machine:
     readout: readout_part.Readout
     windows: windows_part.Windows
     decoders: decoders_part.Decoders
-    # None on a run whose switching slot is empty
-    switching: Optional[escalation_build.Switching]
+    # one per escalate edge, in graph order; none on a run with no edge
+    switching_parts: tuple
     observation: observation_module.Observation
+    layout: layout_module.Layout
+
+    @property
+    def switching(self) -> Optional[escalation_build.Switching]:
+        """The entry edge's switching part; None on a run with no edge."""
+        if not self.switching_parts:
+            return None
+        return self.switching_parts[0]
 
     @classmethod
     def build(
@@ -96,6 +107,7 @@ class Machine:
         seed: Optional[int] = 0,
         built_models: Optional[built_window_models.BuiltWindowModels] = None,
         online_threshold: Optional[ports.ThresholdSource] = None,
+        layout: Optional[layout_module.Layout] = None,
     ) -> "Machine":
         """Build every part from the run's settings, then assemble them.
 
@@ -104,15 +116,19 @@ class Machine:
         model cache the shots of one unit share (collect.run_unit), and
         online_threshold the task's calibrator when its threshold
         learns across shots (collect.Task); both are task state, never
-        settings.
+        settings. layout is a new-shape graph's (collect.Task); None
+        lays out the settings' slots under their own names.
         """
         settings = settings.at_task()
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
+        if layout is None:
+            layout = layout_module.slotted_layout(settings)
         engine = engine_module.Engine()
-        switching = escalation_build.build_switching(
-            settings.switching, settings.weak_decoder, engine, online_threshold
+        switching_parts = escalation_build.build_switching(
+            layout, engine, online_threshold, settings.clock
         )
+        batches_each_member = decoders_part.batches_each_member(layout)
         plan = plan_build.build_plan(
             settings.qpu,
             settings.workload,
@@ -121,32 +137,19 @@ class Machine:
             settings.detection_events,
             settings.switching,
             settings.decoder_manager.bulk_strong,
-            switching,
+            switching_parts,
+            batches_each_member,
         )
-        window_tier = settings.window_tier
-        window_decoder = settings.decoder_settings_for(window_tier.value)
-        escalates = settings.switching is not None
+        formation_paths = layout.formation_paths()
         detection_events = readout_part.build_detection_events(
             settings.detection_events,
             settings.clock,
             plan.device,
-            window_tier,
-            escalates,
+            formation_paths,
         )
-        confidence_signal = None
-        if switching is not None:
-            confidence_signal = switching.confidence_signal
-        pool = decoders_part.build_decoder_pool(
-            window_decoder,
-            settings.strong_decoder,
-            window_tier,
-            escalates,
-            settings.clock,
-            detection_events,
-            confidence_signal,
-        )
-        weak_store_slot, strong_store_slot = store_slots(
-            settings, window_tier, pool
+        signal_by_pool = escalation_build.signal_by_pool(switching_parts)
+        pools = decoders_part.build_pool_units(
+            layout, settings.clock, detection_events, signal_by_pool
         )
         links = build_links(settings, engine)
         qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -161,8 +164,7 @@ class Machine:
         readout = readout_part.Readout.build(
             settings.controller,
             settings.links,
-            weak_store_slot,
-            strong_store_slot,
+            layout.stores,
             settings.clock,
             engine,
             detection_events,
@@ -171,18 +173,20 @@ class Machine:
         windows = windows_part.Windows.build(
             settings.windows,
             settings.workload,
-            settings.switching,
-            window_decoder,
-            settings.strong_decoder,
-            window_tier,
+            layout,
             settings.clock,
             engine,
             plan,
             links,
             built_models,
         )
+        target_by_source = layout.target_by_source()
         decoders = decoders_part.Decoders.build(
-            settings.decoder_manager, settings.clock, engine, pool
+            settings.decoder_manager,
+            settings.clock,
+            engine,
+            pools,
+            target_by_source,
         )
         return cls.assemble(
             settings,
@@ -194,7 +198,8 @@ class Machine:
             readout,
             windows,
             decoders,
-            switching,
+            layout,
+            switching_parts,
             seed,
         )
 
@@ -210,7 +215,8 @@ class Machine:
         readout: readout_part.Readout,
         windows: windows_part.Windows,
         decoders: decoders_part.Decoders,
-        switching: Optional[escalation_build.Switching] = None,
+        layout: layout_module.Layout,
+        switching_parts: tuple = (),
         seed: Optional[int] = 0,
     ) -> "Machine":
         """Connect the parts, start them, seed them, and load the program.
@@ -220,6 +226,10 @@ class Machine:
         src/sim/sim_object.hh lines 194 and 280).
         """
         root_seed = _root_seed(seed)
+        edges = escalation_build.escalate_edges_of(switching_parts)
+        weak_name, strong_name = layout.entry_edge_stores()
+        weak_store = readout.store_named(weak_name)
+        strong_store = readout.store_named(strong_name)
         qpu.connect(
             readout_receiver=readout.controller,
             runtime=control.execution_runtime,
@@ -231,19 +241,21 @@ class Machine:
             retention=windows.retention,
         )
         input_fold = decoders.decoder_manager.input_fold()
+        routed_sides = _routed_sides(layout, readout, decoders)
         windows.connect(
-            weak_store=readout.weak_syndrome_buffer,
-            strong_store=readout.strong_syndrome_buffer,
+            weak_store=weak_store,
+            strong_store=strong_store,
             store_output=readout.primary_output,
             primary_decoder=decoders.primary_decoder,
-            strong_decoder=decoders.strong_decoder,
+            target_decoders=decoders.target_decoders,
             decode_queue=decoders.decoder_manager,
-            strong_decode_queue=decoders.strong_decoder_manager,
+            edges=edges,
             input_fold=input_fold,
             frame=control.pauli_frame,
             conditional_release=control.conditional_release,
             factory=qpu.factory,
             detection_events=readout.detection_events,
+            routed_sides=routed_sides,
         )
         control.connect(
             qpu=qpu.device,
@@ -251,29 +263,45 @@ class Machine:
             windows=windows.window_manager,
             decode_queue=decoders.decoder_manager,
         )
-        if switching is not None:
-            switching.connect(plan, readout, windows, decoders)
+        for part in switching_parts:
+            part.connect(plan, readout, windows, decoders)
+        escalation_build.join_the_chain(switching_parts)
+        entry_switching = None
+        if switching_parts:
+            entry_switching = switching_parts[0]
+            # a window's solves join on the entry edge's signal alone
+            windows.gap_join.signal = entry_switching.confidence_signal
         # the managers hear their rows before the planner compiles a
         # model, and the sender asks the wired window side where it reads
         decoders.start()
         windows.start()
-        readout.start()
-        # the window side's one stochastic owner is the switching policy
-        parts = (qpu, control, readout, decoders)
-        seed_roots = _seed_roots(plan, links, parts, switching)
+        # the window side's stochastic owners are the edges' policies
+        parts = (qpu, control, readout, decoders, *switching_parts)
+        seed_roots = _seed_roots(plan, links, parts)
         seeding.bind_run_seed(root_seed, seed_roots)
+        keeps_series = not settings.observation.folds_windows
+        run_statistics = statistics_registry.Registry(
+            engine, keeps_series=keeps_series
+        )
+        decoders.attach_statistics(run_statistics)
+        statistics_parts = (control, readout, *switching_parts)
+        _attach_statistics(run_statistics, statistics_parts)
         observation = _observe(
             settings,
             engine,
             links,
+            run_statistics,
             qpu=qpu,
             control=control,
             readout=readout,
             windows=windows,
             decoders=decoders,
-            switching=switching,
+            switching=entry_switching,
             seed=seed,
         )
+        if settings.observation.folds_windows:
+            _connect_window_release(windows, control, readout, switching_parts)
+        decoders.read_program(plan.planned_operations)
         program_build.load_program(plan, control, windows)
         return cls(
             settings=settings,
@@ -285,8 +313,9 @@ class Machine:
             readout=readout,
             windows=windows,
             decoders=decoders,
-            switching=switching,
+            switching_parts=switching_parts,
             observation=observation,
+            layout=layout,
         )
 
     def start(self) -> None:
@@ -302,8 +331,13 @@ class Machine:
         """Start every component, run to quiescence, read the result."""
         self.start()
         self.engine.run()
-        if self.switching is not None:
-            self.switching.check_settled()
+        self.observation.statistics.finish()
+        region = self.observation.region_of_interest
+        if region is not None:
+            round_events = self.observation.round_events
+            region.check_begun(round_events.rounds_read_out_by_operation)
+        for part in self.switching_parts:
+            part.check_settled()
         self.windows.check_settled()
         self.decoders.check_settled()
         self.readout.check_settled()
@@ -317,48 +351,13 @@ def build_links(
     return fabric.LinkFabric(settings.links, engine)
 
 
-def store_slots(
-    settings: machine_settings.MachineSettings,
-    window_tier: window_records.DecoderTier,
-    pool: decoders_part.DecoderPool,
-) -> tuple:
-    """The weak and the strong syndrome buffer slots; None for an unread one.
-
-    Each pool says whether its units read the rounds in place.
-    """
-    if pool.active is None:
-        return None, None
-    chip_reads_in_place = not pool.chip.copies_input
-    if window_tier is window_records.DecoderTier.STRONG:
-        strong_store_slot = readout_part.StoreSlot(
-            settings.strong_syndrome_buffer, chip_reads_in_place
-        )
-        return None, strong_store_slot
-    weak_store_slot = readout_part.StoreSlot(
-        settings.weak_syndrome_buffer, chip_reads_in_place
-    )
-    if pool.host is None:
-        return weak_store_slot, None
-    host_reads_in_place = not pool.host.copies_input
-    strong_store_slot = readout_part.StoreSlot(
-        settings.strong_syndrome_buffer, host_reads_in_place
-    )
-    return weak_store_slot, strong_store_slot
-
-
 def _seed_roots(
-    plan: plan_build.Plan,
-    links: ports.Link,
-    parts: tuple,
-    switching: Optional[escalation_build.Switching],
+    plan: plan_build.Plan, links: ports.Link, parts: tuple
 ) -> tuple:
     """The seed path of every stochastic owner; the names are results.
 
     The seeding sorts the roots by path, so the order here moves nothing.
     """
-    escalation_policy = None
-    if switching is not None:
-        escalation_policy = switching.policy
     owners = [
         ("code", plan.code),
         ("scheme", plan.scheme),
@@ -372,7 +371,6 @@ def _seed_roots(
     for part in parts:
         part_roots = part.seed_roots()
         owners.extend(part_roots)
-    owners.append(("escalation_policy", escalation_policy))
     roots = []
     for name, owner in owners:
         path = (seed_records.RunSeedPathSegment("field", name),)
@@ -380,10 +378,27 @@ def _seed_roots(
     return tuple(roots)
 
 
+def _attach_statistics(
+    run_statistics: statistics_registry.Registry, parts: tuple
+) -> None:
+    """Every component each built part names, at the path it names.
+
+    gem5 binds each SimObject's stats into the hierarchy after the
+    objects exist (src/python/m5/stats/__init__.py:277-309); a part not
+    built (None) names none.
+    """
+    for part in parts:
+        if part is None:
+            continue
+        for path, component in part.statistics_parts():
+            run_statistics.attach(component, path)
+
+
 def _observe(
     settings: machine_settings.MachineSettings,
     engine: engine_module.Engine,
     links: ports.Link,
+    run_statistics: statistics_registry.Registry,
     *,
     qpu: qpu_part.Qpu,
     control: control_part.Control,
@@ -394,7 +409,8 @@ def _observe(
     seed: Optional[int],
 ) -> observation_module.Observation:
     """Connect the run's listeners, before the workload is loaded."""
-    traffic_ledger = link_traffic.TrafficLedger(settings.links)
+    keeps_records = not settings.observation.folds_windows
+    traffic_ledger = link_traffic.TrafficLedger(settings.links, keeps_records)
     name = _process_name(settings, seed)
     return wiring.observe(
         settings.observation,
@@ -408,7 +424,29 @@ def _observe(
         switching=switching,
         process_name=name,
         traffic_ledger=traffic_ledger,
+        run_statistics=run_statistics,
     )
+
+
+def _connect_window_release(
+    windows: windows_part.Windows,
+    control: control_part.Control,
+    readout: readout_part.Readout,
+    switching_parts: tuple,
+) -> None:
+    """A stream lets its final windows go (windows/window_release.py)."""
+    keepers = [windows.window_manager, windows.courier]
+    for parts in readout.stores:
+        keepers.append(parts.store)
+    if control.pauli_frame is not None:
+        keepers.append(control.pauli_frame)
+    for part in switching_parts:
+        keepers.append(part.strong_redecode)
+    release = window_release.WindowRelease(
+        windows.planner, windows.results, tuple(keepers)
+    )
+    sources = windows.window_manager.window_sources()
+    sources.window_final.connect(release.window_final)
 
 
 def _process_name(
@@ -418,6 +456,31 @@ def _process_name(
     kind = settings.escalation_kind
     distance = settings.qpu.distance
     return f"decsim {kind} d{distance} seed{seed}"
+
+
+def _routed_sides(
+    layout: layout_module.Layout,
+    readout: readout_part.Readout,
+    decoders: decoders_part.Decoders,
+) -> tuple:
+    """Each entry pool past the first: its manager and its store's end.
+
+    The entry store sends to each over a hop of its own (layout
+    StoreReader); none of them has an edge leaving it yet, so none has
+    a join.
+    """
+    entry_pools = layout.entry_pools
+    if len(entry_pools) == 1:
+        return ()
+    entry_store = readout.stores[0]
+    sides = []
+    for entry in entry_pools[1:]:
+        pool = entry.pool
+        manager = decoders.manager_of(pool)
+        store_output = entry_store.output_for(pool)
+        side = routers.EntrySide(pool, manager, store_output)
+        sides.append(side)
+    return tuple(sides)
 
 
 def _root_seed(value) -> Optional[int]:

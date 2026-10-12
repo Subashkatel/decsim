@@ -20,9 +20,14 @@ import decsim.config as config
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
+import decsim.statistics.registry as statistics_registry
+import tests.declared_run as declared_run
+import tests.observe.gate_point as gate_point
 
 DECODE_TICKS = config.microseconds_to_ticks(1.0)
+UNITS_PATH = "weak_decoder.units"
 
 
 def _settings(unit_count):
@@ -76,6 +81,61 @@ def _offer(pool, job, carries_input, input_is_on_the_unit=_input_nowhere):
         memory_demand_of=_no_demand,
         input_is_on_the_unit=input_is_on_the_unit,
     )
+
+
+def test_the_busy_integral_equals_the_services_own_spans():
+    """A unit's compute is busy from its job's dispatch to its decode end.
+
+    An identity, not a golden number: the busy units' area the pool
+    stepped at its claims and returns equals the sum of the gate point's
+    nine decodes' spans, dispatch to finish, which the decode service
+    reports and the pool never sees.
+    """
+    point = gate_point.settings()
+    machine = machine_module.Machine.build(point, gate_point.SEED)
+    decodes = declared_run.FinishedDecodes()
+    decodes.attach(machine)
+    machine.run()
+
+    groups = machine.observation.statistics.groups
+    units = groups[UNITS_PATH]
+    spans = [
+        decode.finish_ticks - decode.dispatch_ticks
+        for decode in decodes.finished
+    ]
+    busy_ticks = sum(spans)
+
+    assert len(decodes.finished) == 9
+    assert units.busy_units.area == busy_ticks
+    assert units.units.count == 1
+    assert units.busy_units.tick == machine.engine.now
+
+
+def test_a_unit_busy_a_tenth_of_the_run_is_busy_a_tenth_of_the_span():
+    """One unit busy from 10 us to 20 us of a 100 us run.
+
+    The area is held over the run, from tick 0 to the run's end (gem5
+    AvgStor: lastReset at 0, result at curTick), so a mean read from it
+    is 0.1, not the full busyness of the span the unit was in use.
+    """
+    pool = _pool(1)
+    (unit,) = pool.units
+    clock = types.SimpleNamespace(now=0)
+    run_statistics = statistics_registry.Registry(clock)
+    run_statistics.attach(pool, UNITS_PATH)
+    job = _job("a")
+
+    clock.now = config.microseconds_to_ticks(10.0)
+    pool.claim(unit, job)
+    clock.now = config.microseconds_to_ticks(20.0)
+    pool.release(unit)
+    clock.now = config.microseconds_to_ticks(100.0)
+    run_statistics.finish()
+
+    busy_units = pool.statistics.busy_units
+    assert busy_units.area == config.microseconds_to_ticks(10.0)
+    assert busy_units.tick == config.microseconds_to_ticks(100.0)
+    assert busy_units.peak == 1
 
 
 def test_a_free_unit_with_room_is_offered_with_its_compute():

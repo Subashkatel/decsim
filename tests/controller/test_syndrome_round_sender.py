@@ -27,6 +27,7 @@ left by). The crossing's own delay is the card's, on the reference
 profile.
 """
 
+import decsim.build.layout as layout_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -35,13 +36,9 @@ import decsim.links.fabric as fabric_module
 import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-from decsim.syndrome_buffer import (
-    strong_syndrome_round_receiver as strong_syndrome_round_receiver,
-)
-from decsim.syndrome_buffer import (
-    weak_syndrome_round_receiver as weak_syndrome_round_receiver,
-)
+import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
 # every round this file sends carries one fragment of two bits
 BITS_PER_ROUND = 2
@@ -102,7 +99,7 @@ class RecordingStrongReceiver:
         self.reserved += 1
         self.reserved_bits += packed.wire_bits
 
-    def receive_round(self, packed: round_records.PackedRound) -> None:
+    def receive_landed(self, packed: round_records.PackedRound) -> None:
         self.written.append(packed.packet.round_index)
 
 
@@ -126,22 +123,23 @@ def sender_with(
     profile = link_profiles.logical_reference_profile()
     links = fabric_module.LinkFabric(profile, engine)
     windows = RecordingWindows()
-    weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
-        engine
+    weak_receiver = receiver_module.SyndromeRoundReceiver(
+        engine, layout_module.WEAK_STORE_INTAKE
     )
     weak_receiver.store = weak_store
     weak_receiver.windows = windows
     weak_receiver.detection_events = formed_at_the_controller()
-    sender = syndrome_round_sender.SyndromeRoundSender(engine)
+    landing_path = None
+    receiver = weak_receiver
+    if publishes_from_strong_store:
+        landing_path = transfer_records.CONTROLLER_TO_STRONG_BUFFER
+        receiver = strong_receiver
+    sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
     sender.link = links
-    sender.weak_receiver = weak_receiver
-    sender.weak_store = weak_store
-    if strong_receiver is not None:
-        sender.strong_receiver = strong_receiver
+    sender.receiver = receiver
     sender.held_rounds = held
     sender.packing_line = syndrome_round_sender.HeldRounds(engine)
     sender.transmitter = transmitter
-    sender.publishes_from_strong_store = publishes_from_strong_store
     return sender, weak_receiver, transmitter, recorder
 
 
@@ -166,7 +164,7 @@ def test_a_narrow_round_waits_behind_a_held_round_it_would_fit_beside():
     sender.admit(second)
     narrow_admitted = sender.admit(narrow)
     sent_while_held = list(transmitter.sent)
-    weak_receiver.receive_round(first, no_sender_counts_it)
+    weak_receiver.receive_written(first, no_sender_counts_it)
     weak_receiver.store.release_round((1, 1))
 
     assert narrow_admitted is False
@@ -207,16 +205,16 @@ def test_a_strong_primary_round_is_in_flight_until_it_lands():
 
     retried_counts = []
     sender.packing_line.retry = lambda: retried_counts.append(
-        sender.strong_crossing_count
+        sender.crossing_count
     )
 
     sender.admit(first)
-    count_while_crossing = sender.strong_crossing_count
+    count_while_crossing = sender.crossing_count
     engine.run()
 
     assert count_while_crossing == 1
     assert strong_receiver.written == [1]
-    assert sender.strong_crossing_count == 0
+    assert sender.crossing_count == 0
     assert retried_counts == [0]
 
 

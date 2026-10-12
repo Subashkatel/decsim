@@ -44,10 +44,14 @@ import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.threshold_sources as threshold_sources
-import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
+import decsim.presets.clocks as clocks
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.settings as machine_settings
-import decsim.windows.settings as window_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
+import decsim.topology.slotted as slotted
 
 NAME = "data_movement"
 DISTANCES = (3, 5, 7)
@@ -56,8 +60,23 @@ PHYSICAL_ERROR_PROBABILITY = 0.003
 ROUND_PERIOD_MICROSECONDS = 1.0
 WEAK_DECODE_MICROSECONDS_PER_ROUND = 0.4 * ROUND_PERIOD_MICROSECONDS
 STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * ROUND_PERIOD_MICROSECONDS
-WEAK_COMMUNICATION_MICROSECONDS = ROUND_PERIOD_MICROSECONDS
-STRONG_COMMUNICATION_MICROSECONDS = 10 * ROUND_PERIOD_MICROSECONDS
+# T_weak_comm = tau_gen, 1 us: 250 cycles of the 250 MHz fridge clock
+WEAK_COMMUNICATION_LINK = fabrics.ClockedLink(
+    clock=clocks.FRIDGE_CLOCK,
+    latency_cycles=250,
+    source="T_weak_comm, 2510.25222 lines 1109-1114",
+)
+# T_strong_comm = 10 tau_gen, 10 us: 2500 cycles of the 250 MHz room clock
+STRONG_COMMUNICATION_LINK = fabrics.ClockedLink(
+    clock=clocks.ROOM_CLOCK,
+    latency_cycles=2500,
+    source="T_strong_comm, 2510.25222 lines 1109-1114",
+)
+# The weak base's hops, the controller's write a round period long.
+WEAK_TIER_FABRIC = fabrics.PathLinks(
+    controller_to_weak_buffer=WEAK_COMMUNICATION_LINK,
+    base=link_cards.WEAK_BASELINE_FABRIC,
+)
 # the keep threshold of 2510.25222 Sec. IV
 THRESHOLD_DECIBELS = 20.0
 COLLECTION = decsim.CollectionSettings(max_shots=100)
@@ -79,51 +98,44 @@ NO_STRONG_SIDE_CELLS = {
 }
 
 
-def every_hop_copies(distance: int) -> machine_settings.MachineSettings:
+def every_hop_copies(distance: int) -> graph.Machine:
     """Block 1: the weak tier on copies, every copy counted and traced.
 
     One traced shot a task records where every round sat.
     """
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance,
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
     )
-    links = link_profiles.with_path_latency(
-        base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
-    )
     weak_decoder = decoder_settings.linear_decoder_pool(
         WEAK_DECODE_MICROSECONDS_PER_ROUND,
-        machine_settings.FRIDGE_CLOCK,
+        clocks.FRIDGE_CLOCK,
         solves_per_window=1,
     )
     observation = dataclasses.replace(
         base.observation, trace="chrome", data_movement=True
     )
+    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
+    machine = base.with_part(weak_pool)
     return dataclasses.replace(
-        base, links=links, weak_decoder=weak_decoder, observation=observation
+        machine, fabric=WEAK_TIER_FABRIC, observation=observation
     )
 
 
-def weak_input_in_place(distance: int) -> machine_settings.MachineSettings:
+def weak_input_in_place(distance: int) -> graph.Machine:
     """Block 2: the weak unit reads its rounds where the store keeps them."""
     machine = every_hop_copies(distance)
-    weak_decoder = dataclasses.replace(machine.weak_decoder, copies_input=False)
-    return dataclasses.replace(machine, weak_decoder=weak_decoder)
+    return machine.with_settings(machines.WEAK_POOL, copies_input=False)
 
 
-def boundary_folded_in_place(
-    distance: int,
-) -> machine_settings.MachineSettings:
+def boundary_folded_in_place(distance: int) -> graph.Machine:
     """Block 3: the boundary is XORed into the unit's own copy."""
     machine = every_hop_copies(distance)
-    weak_decoder = dataclasses.replace(
-        machine.weak_decoder, copies_boundary_fold=False
-    )
-    return dataclasses.replace(machine, weak_decoder=weak_decoder)
+    return machine.with_settings(machines.WEAK_POOL, copies_boundary_fold=False)
 
 
-def switching(distance: int) -> machine_settings.MachineSettings:
+def switching(distance: int) -> graph.Machine:
     """Block 4: weak first, escalating below 20 dB to the strong tier.
 
     The complementary gap decodes each weak window twice.
@@ -131,31 +143,20 @@ def switching(distance: int) -> machine_settings.MachineSettings:
     machine = every_hop_copies(distance)
     weak_decoder = decoder_settings.linear_decoder_pool(
         WEAK_DECODE_MICROSECONDS_PER_ROUND,
-        machine_settings.FRIDGE_CLOCK,
+        clocks.FRIDGE_CLOCK,
         solves_per_window=2,
     )
     strong_decoder = decoder_settings.linear_decoder_pool(
         STRONG_DECODE_MICROSECONDS_PER_ROUND,
-        machine_settings.ROOM_CLOCK,
+        clocks.ROOM_CLOCK,
         solves_per_window=1,
     )
-    strong_side = machine_settings.one_cycle_strong_side(machine.links)
-    links = link_profiles.with_path_latency(
-        strong_side,
-        "weak_decoder_to_strong_decoder",
-        STRONG_COMMUNICATION_MICROSECONDS,
-    )
+    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
+    weak_tier = machine.with_part(weak_pool)
+    fabric = link_cards.strong_side(WEAK_TIER_FABRIC, STRONG_COMMUNICATION_LINK)
     switching_slot = _complementary_gap_switching()
-    windows = window_settings.switching_windows(
-        machine.windows, switching_slot.strong_window
-    )
-    return dataclasses.replace(
-        machine,
-        links=links,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching_slot,
+    return machines.with_strong_tier(
+        weak_tier, strong_decoder, switching_slot, fabric
     )
 
 
@@ -173,7 +174,8 @@ def data_movement_tasks() -> list:
     for block_name, machine_at in BLOCKS:
         for distance in DISTANCES:
             machine = machine_at(distance)
-            metadata = reported_cells(machine, distance)
+            resolved = slotted.resolved(machine)
+            metadata = reported_cells(resolved, distance)
             task_name = f"{block_name}_d{distance}"
             task = decsim.Task(task_name, machine, metadata)
             tasks.append(task)
@@ -192,7 +194,7 @@ def reported_cells(
     weak_link = _link_cell(
         machine.links.controller_to_weak_buffer,
         "fridge",
-        machine_settings.FRIDGE_CLOCK,
+        clocks.FRIDGE_CLOCK,
     )
     input_word = INPUT_WORDS[weak_decoder.copies_input]
     fold_word = BOUNDARY_FOLD_WORDS[weak_decoder.copies_boundary_fold]
@@ -232,7 +234,7 @@ def _complementary_gap_switching() -> escalation_settings.SwitchingSettings:
 def _strong_side_cells(machine: machine_settings.MachineSettings) -> dict:
     """Block 4's escalation, strong pool and strong-side hops, on the host."""
     links = machine.links
-    room = machine_settings.ROOM_CLOCK
+    room = clocks.ROOM_CLOCK
     escalation = {
         "kind": "switching",
         "gap_threshold_db": THRESHOLD_DECIBELS,

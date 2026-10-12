@@ -20,7 +20,6 @@ import decsim.ports as ports
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
-PATH = transfer_records.LinkPath
 FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(
     FREE_CHANNEL, None, "test payload", excludes_receiver_processing=False
@@ -67,8 +66,8 @@ def every_path_free():
     that one and leaves the rest on the shared free channel.
     """
     names = []
-    for path in transfer_records.LinkPath:
-        names.append(path.value)
+    for path in transfer_records.SLOTTED_PATHS:
+        names.append(path)
     return dict.fromkeys(names, FREE_PATH)
 
 
@@ -108,7 +107,7 @@ def request_relation_for(window_id):
     request_key = window_records.DecoderRequestKey(
         operation_id=1,
         window_id=window_id,
-        tier=window_records.DecoderTier.WEAK,
+        pool=window_records.WEAK_POOL_ID,
         run_sequence=window_id,
     )
     return transfer_records.RequestTransferRelation(request_key)
@@ -158,12 +157,18 @@ def test_two_paths_on_one_channel_share_its_queue():
     first_round = round_attribution(1)
     second_round = round_attribution(2)
     send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        first_round,
+        delivered,
     )
     send_on(
         engine,
         fabric,
-        PATH.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
         4,
         0,
         second_round,
@@ -188,8 +193,24 @@ def test_readout_footprints_select_independent_channel_queues() -> None:
     first = transfer_records.TransferAttribution.for_round(1, ("left",), 1)
     second = transfer_records.TransferAttribution.for_round(1, ("right",), 1)
     delivered = []
-    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first, delivered)
-    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, second, delivered)
+    send_on(
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        first,
+        delivered,
+    )
+    send_on(
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        second,
+        delivered,
+    )
 
     engine.run()
 
@@ -210,8 +231,24 @@ def test_readout_routes_with_one_channel_name_share_the_wire() -> None:
     first = transfer_records.TransferAttribution.for_round(1, ("left",), 1)
     second = transfer_records.TransferAttribution.for_round(1, ("right",), 1)
     delivered = []
-    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first, delivered)
-    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 4, 0, second, delivered)
+    send_on(
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        first,
+        delivered,
+    )
+    send_on(
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        4,
+        0,
+        second,
+        delivered,
+    )
 
     engine.run()
 
@@ -239,8 +276,24 @@ def test_a_joint_footprint_uses_its_whole_route_or_the_default() -> None:
         2, ("left", "other"), 1
     )
     delivered = []
-    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, pair, delivered)
-    send_on(engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, other_pair, delivered)
+    send_on(
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        pair,
+        delivered,
+    )
+    send_on(
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        other_pair,
+        delivered,
+    )
 
     engine.run()
 
@@ -255,7 +308,7 @@ def test_a_routed_readout_estimate_without_attribution_is_refused() -> None:
     fabric = fabric_with(engine, readout_routes=(route,))
 
     with pytest.raises(RuntimeError, match="a routed readout delay requires"):
-        fabric.expected_delay_ticks(PATH.QPU_TO_CONTROLLER, 8, 0)
+        fabric.expected_delay_ticks(transfer_records.QPU_TO_CONTROLLER, 8, 0)
 
 
 def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
@@ -271,12 +324,18 @@ def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
     first_round = round_attribution(1)
     second_round = round_attribution(2)
     send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        first_round,
+        delivered,
     )
     send_on(
         engine,
         fabric,
-        PATH.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
         8,
         0,
         second_round,
@@ -302,7 +361,7 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     send_on(
         engine,
         fabric,
-        PATH.WEAK_BUFFER_TO_WEAK_DECODER,
+        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
         8,
         10,
         weak_window,
@@ -311,7 +370,7 @@ def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     send_on(
         engine,
         fabric,
-        PATH.STRONG_BUFFER_TO_STRONG_DECODER,
+        transfer_records.STRONG_BUFFER_TO_STRONG_DECODER,
         8,
         11,
         strong_window,
@@ -349,7 +408,7 @@ def test_a_paths_header_is_framed_onto_the_transfer_it_sends():
     send_on(
         engine,
         fabric,
-        PATH.WEAK_DECODER_TO_STRONG_DECODER,
+        transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
         payload_bits,
         0,
         region,
@@ -372,7 +431,13 @@ def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
     delivered = []
     first_round = round_attribution(1)
     send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, None, 0, first_round, delivered
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        None,
+        0,
+        first_round,
+        delivered,
     )
     engine.run()
     record = listener.records[0]
@@ -390,7 +455,13 @@ def test_a_transfer_with_no_payload_size_still_stops_a_bounded_channel():
     fabric = fabric_with(engine, controller_to_weak_buffer=bounded)
     attribution = round_attribution(1)
     with pytest.raises(TypeError, match="unsupported operand type"):
-        fabric.send(PATH.CONTROLLER_TO_WEAK_BUFFER, None, 0, attribution, print)
+        fabric.send(
+            transfer_records.CONTROLLER_TO_WEAK_BUFFER,
+            None,
+            0,
+            attribution,
+            print,
+        )
         engine.run()
 
 
@@ -400,7 +471,9 @@ def test_an_actual_payload_on_a_path_without_a_source_is_refused():
     fabric = fabric_with(engine, qpu_to_controller=default_only)
     attribution = round_attribution(1)
     with pytest.raises(RuntimeError, match="qpu_to_controller does"):
-        fabric.send(PATH.QPU_TO_CONTROLLER, 3, 0, attribution, print)
+        fabric.send(
+            transfer_records.QPU_TO_CONTROLLER, 3, 0, attribution, print
+        )
 
 
 def test_the_expected_delay_includes_the_paths_setup():
@@ -408,7 +481,10 @@ def test_the_expected_delay_includes_the_paths_setup():
     with_setup = unbounded_path("store", 3, setup_ticks=5)
     fabric = fabric_with(engine, controller_to_strong_buffer=with_setup)
     assert (
-        fabric.expected_delay_ticks(PATH.CONTROLLER_TO_STRONG_BUFFER, 8, 0) == 8
+        fabric.expected_delay_ticks(
+            transfer_records.CONTROLLER_TO_STRONG_BUFFER, 8, 0
+        )
+        == 8
     )
 
 
@@ -465,12 +541,18 @@ def test_the_fabric_builds_one_channel_of_the_protocols_per_channel_name():
     first_round = round_attribution(1)
     second_round = round_attribution(2)
     send_on(
-        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+        engine,
+        fabric,
+        transfer_records.QPU_TO_CONTROLLER,
+        8,
+        0,
+        first_round,
+        delivered,
     )
     send_on(
         engine,
         fabric,
-        PATH.CONTROLLER_TO_WEAK_BUFFER,
+        transfer_records.CONTROLLER_TO_WEAK_BUFFER,
         4,
         0,
         second_round,

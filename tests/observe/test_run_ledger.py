@@ -31,7 +31,8 @@ import pytest
 
 import decsim.config as config_module
 import decsim.machine as machine_module
-import decsim.settings as machine_settings
+import decsim.presets.machines as machines
+import decsim.topology.slotted as slotted
 import tests.declared_run as declared_run
 import tests.observe.run_ledger as run_ledger
 
@@ -577,7 +578,8 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     when the logical Pauli frame is produced), each one a named probe point
     a listener reads here (gem5 src/sim/probe/probe.hh lines 122 and 272).
     """
-    settings = machine_settings.weak_decoder_baseline(3, 0.001, 10.0)
+    graph_machine = machines.weak_baseline(3, 0.001, 10.0)
+    settings = slotted.resolved(graph_machine)
     machine = machine_module.Machine.build(settings, 0)
     machine.run()
     ledger = run_ledger.ledger_of(machine)

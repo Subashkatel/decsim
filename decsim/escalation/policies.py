@@ -7,25 +7,33 @@ it builds no job; the window side plans and submits the strong
 re-decode, and the decoder manager owns the units and cancellation.
 """
 
+from typing import Optional
+
+import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
+import decsim.refusals as refusals
 
 
 class Switching:
-    """Weak decoder first; escalate to a strong decoder on low confidence.
+    """Weak decoder first; escalate to a strong decoder on the verdict.
 
-    A result without a soft output escalates. run_both_at_once starts a
-    speculative strong decode with the weak job and cancels it on
-    confidence (Step 1); otherwise the strong re-decode starts at the
-    verdict, after the weak_decoder_to_strong_decoder hop. check_plan
-    refuses, once at build, a run shape the escalation cannot serve.
+    verdict keeps or escalates each weak result (verdicts.py), by
+    default on its gap against the threshold, where a result without a
+    soft output escalates. run_both_at_once starts a speculative strong
+    decode with the weak job and cancels it on a keep (Step 1);
+    otherwise the strong re-decode starts at the verdict, after the
+    weak_decoder_to_strong_decoder hop. check_plan refuses, once at
+    build, a run shape the escalation cannot serve.
     """
 
     def __init__(
         self,
         threshold: ports.ThresholdSource,
         run_both_at_once: bool = False,
+        verdict: Optional[ports.EscalationVerdict] = None,
+        reads_threshold: bool = True,
     ) -> None:
         if run_both_at_once and threshold.audits_by_escalating:
             raise ValueError(
@@ -33,19 +41,27 @@ class Switching:
                 "run_both_at_once: the strong decoder already runs "
                 "for every window, so there is nothing to audit"
             )
+        if not reads_threshold and threshold.audits_by_escalating:
+            raise ValueError(
+                "online threshold calibration learns from the windows the "
+                "gap escalates, and switching.verdict reads no threshold; "
+                "use a fixed threshold or the gap_threshold verdict"
+            )
+        if verdict is None:
+            verdict = verdicts.GapThreshold()
         self.threshold = threshold
         self.run_both_at_once = run_both_at_once
+        self.verdict = verdict
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
         _refuse_flush_terminal(plan.scheme)
-        if plan.is_bulk_strong and self.run_both_at_once:
-            raise ValueError(
-                "bulk_strong is only meaningful in serial mode "
-                "(run_both_at_once=False)"
-            )
+        if self.run_both_at_once:
+            _refuse_batches_beside_run_both(plan)
         if not plan.is_absorbing_strong_window:
-            _refuse_eager_serial_boundaries(plan.boundary_policy)
+            # the boundaries the policy ships are the entry pool's
+            if plan.leaves_the_entry_pool:
+                _refuse_eager_serial_boundaries(plan.boundary_policy)
             return
         self._refuse_absorbing_window_contradictions(plan)
         _refuse_absorbing_window_scheme(
@@ -53,33 +69,22 @@ class Switching:
         )
         _refuse_absorbing_window_run(plan)
 
-    def tiers_for_ready_window(self, window: window_records.Window) -> tuple:
-        """The weak tier, and the strong tier too when both run at once."""
+    def decodes_both_at_once(self, window: window_records.Window) -> bool:
+        """Whether the strong tier starts beside the weak one (Step 1)."""
         del window
-        if self.run_both_at_once:
-            return (
-                window_records.DecoderTier.WEAK,
-                window_records.DecoderTier.STRONG,
-            )
-        return (window_records.DecoderTier.WEAK,)
+        return self.run_both_at_once
 
     def verdict_for_weak_result(
         self,
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> decoding_records.Verdict:
-        """Keep a confident weak result; otherwise escalate its window.
+        """The verdict row's decision on one weak result.
 
         The decision is made exactly once per window, since an online
         source learns from every call.
         """
-        soft_output = result.soft_output
-        if soft_output is None:
-            return decoding_records.Verdict.ESCALATE
-        if self.threshold.decide_keep(job, result):
-            # a kept result cancels the speculative strong decode
-            return decoding_records.Verdict.KEEP
-        return decoding_records.Verdict.ESCALATE
+        return self.verdict.decide(job, result, self.threshold)
 
     def learn_from_strong_result(
         self, window_key: tuple, result: decoding_records.DecodeResult
@@ -105,6 +110,12 @@ class Switching:
                 "not supported: deferred strong windows are submitted "
                 "one per escalation"
             )
+        if plan.batches_each_member:
+            raise NotImplementedError(
+                f"switching.strong_window {row_name} with a pool's "
+                "batching: a batch of deferred strong windows is not "
+                f"implemented yet; {refusals.REFUSALS}"
+            )
         if self.threshold.audits_by_escalating:
             raise ValueError(
                 "online threshold calibration is serial-only: an "
@@ -112,6 +123,21 @@ class Switching:
                 "committed observables, and an absorbing strong window "
                 "owns a larger extent than the audited window"
             )
+
+
+def _refuse_batches_beside_run_both(plan: decoding_records.RunShape) -> None:
+    """Batches serve escalations; run_both_at_once decodes every window."""
+    if plan.is_bulk_strong:
+        raise ValueError(
+            "bulk_strong is only meaningful in serial mode "
+            "(run_both_at_once=False)"
+        )
+    if plan.batches_each_member:
+        raise NotImplementedError(
+            "a pool's batching with run_both_at_once, a batch of every "
+            "window's speculative decode, is not implemented yet; "
+            f"{refusals.REFUSALS}"
+        )
 
 
 def _refuse_flush_terminal(scheme) -> None:

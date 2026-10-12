@@ -45,6 +45,7 @@ import pytest
 import decsim.confidence.complementary as complementary
 import decsim.config as config_module
 import decsim.decoders.backend_outcome as backend_outcome
+import decsim.decoders.batching as batching
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder as decoder_module
@@ -58,6 +59,7 @@ import decsim.decoders.verify_windows as verify_windows
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.escalation.verdicts as verdicts
 import decsim.experiments.collect as collect
 import decsim.experiments.experiment as experiment
 import decsim.experiments.fold as fold
@@ -65,11 +67,12 @@ import decsim.experiments.measure as measure
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.presets.clocks as clocks
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
@@ -82,11 +85,13 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
 import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
 import tests.qpu.memory_programs as memory_programs
+import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.measured_table import decoder as measured_table_decoder
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -121,7 +126,7 @@ TWO_TIER_HOPS = {
     "strong_decoder_to_weak_decoder": 3,
 }
 HOPS_SOURCE = "a measurement test's hops, in fridge cycles"
-FRIDGE_CLOCK = machine_settings.FRIDGE_CLOCK
+FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
 # the task cells every hand derivation here is at, and the switching runs'
 TASK_CELLS = {
     run_files.ERROR_RATE_PATH: 0.001,
@@ -157,20 +162,18 @@ def fridge_hops(hops: dict, setup_cycles: Optional[dict] = None):
     reference card's numbers.
     """
     setup_cycles = setup_cycles or {}
-    links = link_profiles.logical_reference_profile()
-    cards = {}
+    links_by_path = {}
     for path_name, latency_cycles in hops.items():
         path_setup_cycles = setup_cycles.get(path_name, 0)
-        cards[path_name] = link_profiles.path_card(
-            links,
-            path_name,
+        links_by_path[path_name] = fabrics.ClockedLink(
             clock=FRIDGE_CLOCK,
             latency_cycles=latency_cycles,
-            bits_per_cycle=None,
-            source=HOPS_SOURCE,
             setup_cycles_per_transfer=path_setup_cycles,
+            source=HOPS_SOURCE,
         )
-    return dataclasses.replace(links, **cards)
+    fabric = fabrics.PathLinks(**links_by_path)
+    routes = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
+    return fabrics.card(fabric, routes, {}, None)
 
 
 def charged(microseconds: float):
@@ -612,7 +615,7 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     in the strong columns and the weak columns read zero, the mirror of
     test_the_pool_columns_read_each_tiers_own_queue_and_units.
     """
-    shot = base_shot(machine_settings.strong_decoder_baseline)
+    shot = base_shot(machines.strong_baseline)
     measurement = measure.measure_shot(shot)
 
     assert measurement.weak_queue_max == 0
@@ -977,6 +980,32 @@ def test_an_escalated_windows_points_sum_to_its_reaction_time():
     assert totals == reaction_ticks(measurement)
 
 
+def test_a_batched_windows_points_sum_to_its_reaction_time():
+    """A merged batch's stages are found under each member's window.
+
+    Four patches escalate every window to one 10.0 us strong unit that
+    decodes each member of a batch and adds their times (batching.py,
+    sum), so a batch of two holds the unit 20 us. The batch's own key
+    is no window's, yet every window's chain still adds up to its
+    reaction time, and the twenty batched windows' service is the two
+    decodes'.
+    """
+    settings = switching_settings(1000000.0, patch_count=4)
+    decode_each = batching.DecodeEach.Settings()
+    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
+    settings = dataclasses.replace(settings, strong_decoder=strong)
+    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+
+    measurement = measured(task)
+
+    services = measurement.samples["service"]
+    batched = [service for service in services if service > 20.0]
+    totals = chain_sum_ticks(measurement)
+    assert totals == reaction_ticks(measurement)
+    assert len(services) == 40
+    assert len(batched) == 20
+
+
 def test_a_kept_weak_result_is_measured_on_the_weak_hops():
     """No window escalates: the weak hops, and no escalation at all.
 
@@ -1028,9 +1057,9 @@ def shipped_shot(run_file: str, task_name: str):
 
 
 def base_shot(base) -> collect.Shot:
-    """Seed 0 of a shipped base (decsim.settings) at that same task."""
-    settings = base(3, SWITCHING_ERROR_PROBABILITY, 1.0)
-    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+    """Seed 0 of a shipped base (presets/machines.py) at that same task."""
+    machine = base(3, SWITCHING_ERROR_PROBABILITY, 1.0)
+    task = task_at(machine, SWITCHING_ERROR_PROBABILITY)
     return collect.run_shot(task, 0)
 
 
@@ -1082,13 +1111,12 @@ def later_solve_ticks(shot, window_id: int) -> int:
 def test_the_shipped_weak_baseline_sums_to_its_reaction_time():
     """The identity on a machine the repository ships, not a test's own.
 
-    decsim.settings.weak_decoder_baseline decodes each of its nine
-    windows once and answers on that decode, so its confidence step is zero
-    and every window's points are its whole path from its data being
-    complete in the weak syndrome buffer to its correction committed in the
-    frame.
+    machines.weak_baseline decodes each of its nine windows once and
+    answers on that decode, so its confidence step is zero and every
+    window's points are its whole path from its data being complete in
+    the weak syndrome buffer to its correction committed in the frame.
     """
-    shot = base_shot(machine_settings.weak_decoder_baseline)
+    shot = base_shot(machines.weak_baseline)
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -1641,7 +1669,7 @@ def seam_only_fabric():
     is 0.5 us, and every other hop is free, so a window's outgoing
     boundary is the only thing a link charges for in the whole run.
     """
-    hops = {path.value: 0 for path in transfer_records.LinkPath}
+    hops = {path: 0 for path in transfer_records.SLOTTED_PATHS}
     hops["decoder_to_decoder"] = 125
     return fridge_hops(hops)
 
@@ -2002,9 +2030,9 @@ def lindley_waits_us(requests, stages) -> list:
 
 def strong_requests_by_arrival(requests) -> list:
     """The strong decode requests, in the order they became ready."""
-    strong = window_records.DecoderTier.STRONG
+    strong = window_records.STRONG_POOL_ID
     strong_requests = [
-        request for request in requests if request.request_key.tier is strong
+        request for request in requests if request.request_key.pool == strong
     ]
     return sorted(strong_requests, key=ready_ticks_of)
 
@@ -2053,12 +2081,8 @@ class StrongResidentsWaitingOnCompute:
 
     def __init__(self, machine) -> None:
         self.units = []
-        for manager in (
-            machine.decoders.decoder_manager,
-            machine.decoders.strong_decoder_manager,
-        ):
-            if manager is not None:
-                self.units.extend(manager.service.pool.units)
+        for manager in machine.decoders.managers:
+            self.units.extend(manager.service.pool.units)
         self.depth_by_tick = {}
 
     def sample(self, now: int) -> None:
@@ -2079,8 +2103,8 @@ def _strong_residents_waiting(unit) -> int:
 
 def _is_strong_and_waiting(resident) -> bool:
     """A strong decode landed and not started."""
-    strong = window_records.DecoderTier.STRONG
-    if resident.request_key.tier is not strong:
+    strong = window_records.STRONG_POOL_ID
+    if resident.request_key.pool != strong:
         return False
     if resident.service_started:
         return False
@@ -2102,9 +2126,11 @@ def test_the_strong_decodes_held_in_units_are_the_units_own_residents(
     build = machine_module.Machine.build
 
     def build_and_sample(
-        settings, seed, built_models=None, online_threshold=None
+        settings, seed, built_models=None, online_threshold=None, layout=None
     ):
-        machine = build(settings, seed, built_models, online_threshold)
+        machine = build(
+            settings, seed, built_models, online_threshold, layout=layout
+        )
         sampler = StrongResidentsWaitingOnCompute(machine)
         machine.engine.action_done.connect(sampler.sample)
         samplers.append(sampler)
@@ -2367,9 +2393,11 @@ def test_a_round_held_for_room_in_a_full_store_is_in_the_backlog(monkeypatch):
     build = machine_module.Machine.build
 
     def build_and_listen(
-        settings, seed, built_models=None, online_threshold=None
+        settings, seed, built_models=None, online_threshold=None, layout=None
     ):
-        machine = build(settings, seed, built_models, online_threshold)
+        machine = build(
+            settings, seed, built_models, online_threshold, layout=layout
+        )
         device = machine.qpu.device
         device.trace.round_emitted.connect(heard.round_read_out)
         window_manager = machine.windows.window_manager
@@ -2414,8 +2442,8 @@ def instant_machine() -> machine_settings.MachineSettings:
     """The one-tier machine with every cost zero: hops, unit and frame."""
     base = one_tier_machine(0.0)
     hop_cycles = {}
-    for path in transfer_records.LinkPath:
-        hop_cycles[path.value] = 0
+    for path in transfer_records.SLOTTED_PATHS:
+        hop_cycles[path] = 0
     links = fridge_hops(hop_cycles)
     algorithm = charged(0.0)
     pool = run_files.decoder_pool(algorithm, FRIDGE_CLOCK)
@@ -2613,8 +2641,8 @@ def test_the_sample_digest_names_the_draw_and_not_the_decoder():
     assert matching.sample_digest != next_seed.sample_digest
 
 
-WEAK = window_records.DecoderTier.WEAK
-STRONG = window_records.DecoderTier.STRONG
+WEAK = window_records.WEAK_POOL_ID
+STRONG = window_records.STRONG_POOL_ID
 # more windows than any escalation shot here plans, so a set of every
 # index names every window of a tier
 EVERY_WINDOW = range(64)
@@ -2643,7 +2671,7 @@ def crashing_decodes(monkeypatch, crashing: set) -> dict:
     syndromes = {}
 
     def answer(self, job, backend, model, faults, syndrome):
-        key = (job.request_key.tier, job.request_key.window_id)
+        key = (job.request_key.pool, job.request_key.window_id)
         syndromes[key] = syndrome.tolist()
         answers = dict.fromkeys(crashing, no_correction_answer)
         chosen = answers.get(key, real_answer)
@@ -3040,3 +3068,28 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
     assert "1" in weak_labels
     assert all(row.detection_events is not None for row in rows)
     assert "window_outcomes" not in shot_row
+
+
+def test_a_chains_deep_windows_are_measured_on_the_deep_pools_input():
+    """A window the third pool answered reads that pool's own input hop.
+
+    Each edge escalates every window, so the deep pool answers all four;
+    the weak row reads the entry pool's statistics at its part's name.
+    """
+    chain = _always_escalating_chain()
+    task = collect.Task("chain", chain)
+    shot = collect.run_shot(task, 0)
+
+    measurement = measure.measure_shot(shot)
+
+    assert measurement.window_tiers == (layout_tests.DEEP_POOL,) * 4
+    assert measurement.weak_busy_fraction > 0.0
+
+
+def _always_escalating_chain():
+    always = verdicts.Always.Settings()
+    deep_switching = dataclasses.replace(
+        layout_tests.DEEP_SWITCHING_SLOT, verdict=always
+    )
+    chain = layout_tests.chain_machine(deep_switching=deep_switching)
+    return chain.with_settings("switching", verdict=always)

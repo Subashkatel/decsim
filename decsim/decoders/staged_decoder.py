@@ -131,9 +131,18 @@ class StagedDecoder(decoder_module.DecoderBase):
     and 610-612).
     """
 
-    def __init__(self, decoder: ports.Decoder, timing: UnitTiming):
+    def __init__(
+        self,
+        decoder: ports.Decoder,
+        timing: UnitTiming,
+        batch_decoder: Optional[object] = None,
+    ):
         self.decoder = decoder
         self.timing = timing
+        # the pool's decode_each row over decoder (batching.py), which
+        # decodes a merged batch's members; None decodes a batch as one
+        # timing-only job
+        self.batch_decoder = batch_decoder
         self._running: dict = {}
         self.stage_recorded = trace_source.TraceSource()
 
@@ -171,12 +180,14 @@ class StagedDecoder(decoder_module.DecoderBase):
         stage_ticks = self.timing.stage_ticks(job)
         stage_values = stage_ticks.values()
         stages = sum(stage_values)
-        algorithm = self.decoder.latency(job)
+        decoder = self._algorithm_for(job)
+        algorithm = decoder.latency(job)
         return stages + algorithm
 
     def occupancy(self, job: decoding_records.DecodeJob) -> Optional[int]:
         """The whole latency, stages included; None when host-measured."""
-        algorithm = self.decoder.occupancy(job)
+        decoder = self._algorithm_for(job)
+        algorithm = decoder.occupancy(job)
         if algorithm is None:
             return None
         stage_ticks = self.timing.stage_ticks(job)
@@ -209,6 +220,12 @@ class StagedDecoder(decoder_module.DecoderBase):
             running.aborted = True
             self._close_stage(running, True)
         self.decoder.cancel(job)
+
+    def _algorithm_for(self, job: decoding_records.DecodeJob) -> object:
+        """The batch decoder for a merged batch it decodes, else the row."""
+        if self.batch_decoder is not None and job.batch_members:
+            return self.batch_decoder
+        return self.decoder
 
     def _steps(self, job: decoding_records.DecodeJob) -> list:
         """One step per stage; the algorithm's time is its own."""
@@ -272,9 +289,9 @@ class StagedDecoder(decoder_module.DecoderBase):
         running.open_stage = None
         job = running.job
         sequences = _run_sequences(job)
-        last_rounds_read = decoding_records.last_round_by_operation(
-            job.payloads
-        )
+        fragments = _fragments_read(job)
+        last_rounds_read = decoding_records.last_round_by_operation(fragments)
+        served_windows = _served_windows(job)
         record = decoding_records.DecoderStageRecord(
             job.operation_id,
             job.window_id,
@@ -292,6 +309,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             backend_queue_wait_ticks=job.backend_queue_wait_ticks,
             store_read_ticks=job.store_read_ticks,
             last_rounds_read=last_rounds_read,
+            served_windows=served_windows,
         )
         self.stage_recorded.fire(record)
 
@@ -314,7 +332,8 @@ class StagedDecoder(decoder_module.DecoderBase):
             next_index = index + 1
             self._enter(running, engine, steps, next_index)
 
-        self.decoder.start(job, engine, on_algorithm_result)
+        decoder = self._algorithm_for(job)
+        decoder.start(job, engine, on_algorithm_result)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -351,6 +370,29 @@ def _run_sequences(job: decoding_records.DecodeJob) -> tuple:
     for key in keys:
         sequences.append(key.run_sequence)
     return tuple(sequences)
+
+
+def _fragments_read(job: decoding_records.DecodeJob) -> list:
+    """The rounds the decode reads: its own, and every batch member's.
+
+    A merged batch holds no input of its own; it waits for each
+    member's to land, so what it read is theirs.
+    """
+    fragments = list(job.payloads)
+    for member in job.batch_members:
+        member_fragments = _fragments_of(member)
+        fragments.extend(member_fragments)
+    return fragments
+
+
+def _served_windows(job: decoding_records.DecodeJob) -> tuple:
+    """The windows of every request this decode serves, each once."""
+    windows = []
+    for key in job.service_original_request_keys:
+        window = (key.operation_id, key.window_id)
+        if window not in windows:
+            windows.append(window)
+    return tuple(windows)
 
 
 def _key(job: decoding_records.DecodeJob):

@@ -11,6 +11,7 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.confidence.complementary as complementary
 import decsim.controller.policies as policies
@@ -89,9 +90,8 @@ def _plan(
     if switching is not None:
         settings = _with_switching(settings, switching)
     engine = engine_module.Engine()
-    switching_part = escalation_build.build_switching(
-        settings.switching, settings.weak_decoder, engine
-    )
+    layout = layout_module.slotted_layout(settings)
+    switching_parts = escalation_build.build_switching(layout, engine)
     return plan_build.build_plan(
         settings.qpu,
         settings.workload,
@@ -100,7 +100,7 @@ def _plan(
         settings.detection_events,
         settings.switching,
         settings.decoder_manager.bulk_strong,
-        switching_part,
+        switching_parts,
     )
 
 

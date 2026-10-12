@@ -12,7 +12,7 @@ gross code by default.
 """
 
 import dataclasses
-from typing import Optional
+from typing import ClassVar, Optional
 
 
 @dataclasses.dataclass(frozen=True)
@@ -21,7 +21,16 @@ class SurfaceCodeModel:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The surface card has no keys beyond the qpu's distance."""
+        """The surface card has no keys beyond the qpu's distance.
+
+        stim_memory_tasks are the Stim generator's tasks whose circuit is
+        this card's code (src/stim/gen/gen_surface_code.cc).
+        """
+
+        stim_memory_tasks: ClassVar[tuple] = (
+            "surface_code:rotated_memory_z",
+            "surface_code:rotated_memory_x",
+        )
 
         def build(
             self,
@@ -115,8 +124,11 @@ class BivariateBicycleCodeModel:
 
         qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The
         defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines
-        180-184); its distance is twelve when the run names none.
+        180-184); its distance is twelve when the run names none. Stim
+        generates no circuit of it, so stim_memory_tasks is empty.
         """
+
+        stim_memory_tasks: ClassVar[tuple] = ()
 
         qubit_count: int = 144
         logical_qubit_count: int = 12
@@ -195,9 +207,19 @@ class BivariateBicycleCodeModel:
         return self.commit_rounds_override
 
     def buffer_rounds(self) -> int:
-        """Look-ahead rounds per decode window; none by default."""
+        """Look-ahead rounds per decode window, as the windows write it.
+
+        The card holds no default. The sliding windows decoded on a
+        bivariate-bicycle code in 2601.17757 (Fig. 13, line 1348) buffer d
+        rounds after d committed, and no source gives none; a default
+        taken in silence would change a run under an unchanged id.
+        """
         if self.buffer_rounds_override is None:
-            return 0
+            raise ValueError(
+                "the bivariate-bicycle card has no look-ahead of its own; "
+                "write windows.scheme.buffer_rounds (2601.17757 Fig. 13 "
+                "buffers d rounds)"
+            )
         return self.buffer_rounds_override
 
     def spatial_nodes(self, patch_count: int) -> int:

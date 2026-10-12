@@ -325,12 +325,8 @@ class EndedRequests:
         self.ended: list = []
 
     def attach(self, machine) -> None:
-        """Hear the requests of both decoder managers the run has."""
-        part = machine.decoders
-        managers = (part.decoder_manager, part.strong_decoder_manager)
-        for manager in managers:
-            if manager is None:
-                continue
+        """Hear the requests of every decoder manager the run has."""
+        for manager in machine.decoders.managers:
             manager.outcomes.trace.request_ended.connect(self.request_ended)
 
     def request_ended(self, job, result, outcome, decode_output_ticks) -> None:
@@ -343,7 +339,7 @@ class EndedRequests:
         """The requests of one tier, in the order they ended."""
         requests = []
         for ended in self.ended:
-            if ended.job.request_key.tier is tier:
+            if ended.job.request_key.pool == tier:
                 requests.append(ended)
         return requests
 
@@ -370,13 +366,9 @@ class FinishedDecodes:
         self.finished: list = []
 
     def attach(self, machine) -> None:
-        """Hear the decode services of both decoder managers the run has."""
-        part = machine.decoders
-        managers = (part.decoder_manager, part.strong_decoder_manager)
+        """Hear the decode services of every decoder manager the run has."""
         listener = functools.partial(self.job_finished, machine.engine)
-        for manager in managers:
-            if manager is None:
-                continue
+        for manager in machine.decoders.managers:
             manager.service.trace.job_finished.connect(listener)
 
     def job_finished(self, engine, job, unit) -> None:
@@ -407,12 +399,8 @@ class UnitMemoryDeposits:
         self.held_bits_by_unit: dict = {}
 
     def attach(self, machine) -> None:
-        """Hear the unit memories of both decoder managers the run has."""
-        part = machine.decoders
-        managers = (part.decoder_manager, part.strong_decoder_manager)
-        for manager in managers:
-            if manager is None:
-                continue
+        """Hear the unit memories of every decoder manager the run has."""
+        for manager in machine.decoders.managers:
             for unit in manager.pool.units:
                 self._hear(unit)
 
@@ -445,25 +433,30 @@ def operations_or_one(operations):
     return [memory_operation(1)]
 
 
-def weak_only_run(
+def weak_only_run(*, seed=0, probes=(), **changes):
+    """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
+
+    One complete machine keeps every path fixed while a test replaces
+    only the component card whose reaction-time shift it measures.
+    changes are weak_only_settings' own.
+    """
+    settings = weak_only_settings(**changes)
+    return run_machine(settings, seed, probes)
+
+
+def weak_only_settings(
     *,
     rounds=6,
     operations=None,
-    seed=0,
     io_trace=False,
     weak_syndrome_buffer=None,
     copies_input=True,
     windows=None,
     controller=None,
     observation=None,
-    probes=(),
     clock=None,
 ):
-    """The weak-only baseline: one tier, readiness on the weak syndrome buffer.
-
-    One complete machine keeps every path fixed while a test replaces
-    only the component card whose reaction-time shift it measures.
-    """
+    """The weak-only baseline's settings, not yet built."""
     workload = declared_workload(operations, rounds)
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
     algorithm = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
@@ -495,7 +488,7 @@ def weak_only_run(
         settings = dataclasses.replace(
             settings, weak_syndrome_buffer=weak_syndrome_buffer
         )
-    return run_machine(settings, seed, probes)
+    return settings
 
 
 def strong_only_run(
@@ -603,13 +596,19 @@ def switching_run(
     threshold_cycles=0,
     switch_cycles=0,
     strong_copies_input=True,
+    strong_algorithm=None,
+    strong_batching=None,
 ):
     """Weak-primary switching on the declared fabric.
 
     escalates declares every window's confidence gap 0.0 (escalate)
     rather than 1.0 (keep the weak result) against the threshold.
+    strong_algorithm replaces the declared strong row; strong_batching
+    is the strong pool's batching row.
     """
     weak, strong = switching_decoders(escalates)
+    if strong_algorithm is not None:
+        strong = strong_algorithm
     weak_memory = decoder_settings.UnitMemorySettings(bits=weak_memory_bits)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=weak,
@@ -621,6 +620,7 @@ def switching_run(
         algorithm=strong,
         copies_input=strong_copies_input,
         engine=DECLARED_ENGINE,
+        batching=strong_batching,
     )
     workload = declared_workload(operations, rounds)
     plain_windows = window_settings.WindowSettings()

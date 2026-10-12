@@ -3,11 +3,13 @@
 A Python caller hands a maker's records.workload.Workload to
 WorkloadSettings.running, which lowers it into the operations the
 machine issues (circuit_frontend.lowered), or hands the lowered fields
-in directly.
+in directly. A workload lowered here was made at the distance the run
+file gave its maker, so it fixes the qpu's distance; a maker row
+(decsim/producers.py) is lowered at the task instead and follows it.
 """
 
 import dataclasses
-from typing import Optional
+from typing import ClassVar, Optional
 
 import stim
 
@@ -20,7 +22,23 @@ FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
 
 @dataclasses.dataclass(frozen=True)
 class WorkloadSettings:
-    """The program the machine runs: a maker's workload, lowered."""
+    """The program the machine runs: a maker's workload, lowered.
+
+    fixes_the_distance and fields_set_in_the_run_file name what an
+    assignment by path may not change (decsim/settings.py): the circuit
+    was made at the qpu's distance and lowered to these fields.
+    """
+
+    fixes_the_distance: ClassVar[bool] = True
+    fields_set_in_the_run_file: ClassVar[tuple] = (
+        "operations",
+        "decode_operations",
+        "dynamic_streams",
+        "protected_regions",
+        "physical_circuits",
+        "rounds_policy",
+        "workload_record",
+    )
 
     operations: tuple = ()
     decode_operations: Optional[tuple] = None
@@ -51,22 +69,45 @@ class WorkloadSettings:
         lowered = _lowered_fields(workload)
         return cls(**lowered)
 
+    def lowered_for(self, qpu: object) -> "WorkloadSettings":
+        """These settings: they were lowered when they were made."""
+        del qpu
+        return self
+
+
+@dataclasses.dataclass(frozen=True)
+class StimNoise:
+    """Stim's four generated noise channels, each its own probability.
+
+    The arguments of stim.Circuit.generated (Stim 1.16 docstring): the
+    depolarizing after each Clifford gate, on each data qubit before a
+    round, the flip before each measurement and after each reset. Each
+    is 0 by default, and a channel at 0 is left out of the circuit.
+    """
+
+    after_clifford_depolarization: float = 0.0
+    before_round_data_depolarization: float = 0.0
+    before_measure_flip_probability: float = 0.0
+    after_reset_flip_probability: float = 0.0
+
 
 def memory_circuit(
-    code_task: str, rounds: int, distance: int, probability: float
+    code_task: str,
+    rounds: int,
+    distance: int,
+    probability: float,
+    noise: Optional[StimNoise] = None,
 ) -> stim.Circuit:
     """Stim's generated memory circuit.
 
-    One probability on all four noise channels, as Stim's guide does.
+    One probability on all four noise channels, as Stim's guide does,
+    or noise's four channels when it is given.
     """
+    if noise is None:
+        noise = StimNoise(probability, probability, probability, probability)
+    channels = dataclasses.asdict(noise)
     return stim.Circuit.generated(
-        code_task,
-        rounds=rounds,
-        distance=distance,
-        after_clifford_depolarization=probability,
-        before_round_data_depolarization=probability,
-        before_measure_flip_probability=probability,
-        after_reset_flip_probability=probability,
+        code_task, rounds=rounds, distance=distance, **channels
     )
 
 

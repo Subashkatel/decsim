@@ -28,7 +28,7 @@ import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 import tests.escalation.test_strong_window_shapes as test_strong_window_shapes
 
-WEAK_INPUT_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+WEAK_INPUT_PATH = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
 # a window identity the run never requests, so its solve is never joined
 UNJOINED_WINDOW_ID = 999
 
@@ -89,10 +89,10 @@ def _memory_patches(patch_count: int):
 
 
 def _weak_requests(machine) -> list:
-    weak = window_records.DecoderTier.WEAK
+    weak = window_records.WEAK_POOL_ID
     records = []
     for record in machine.observation.decode_records.requests:
-        if record.request_key.tier is weak:
+        if record.request_key.pool == weak:
             records.append(record)
     return records
 
@@ -112,7 +112,7 @@ def _companions_and_answers(requests) -> tuple:
     companion = outcomes.WEAK_FORCED_CLASS_COMPANION
     companions = []
     answered = []
-    for ended in requests.of_tier(window_records.DecoderTier.WEAK):
+    for ended in requests.of_tier(window_records.WEAK_POOL_ID):
         if ended.outcome is companion:
             companions.append(ended)
             continue
@@ -302,7 +302,7 @@ class _RecordingVerdict:
         self.engine = engine
         self.answers = []
 
-    def accept_result(self, job, result):
+    def accept_revision(self, job, result):
         """The window's answer, stamped with the tick it arrived."""
         self.answers.append((job, result, self.engine.now))
 

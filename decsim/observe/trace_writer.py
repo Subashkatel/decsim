@@ -84,7 +84,7 @@ def request_text(
         return ""
     return (
         f"{request_key.operation_id}:{request_key.window_id}:"
-        f"{request_key.tier.value}:{request_key.run_sequence}"
+        f"{request_key.pool.word}:{request_key.run_sequence}"
     )
 
 
@@ -228,7 +228,7 @@ class TraceWriter:
     ) -> None:
         """One move, from the wire's send to the receiver's delivery."""
         transfer = record.transfer
-        thread = record.path.value
+        thread = record.path
         attribution = record.attribution
         args = {
             "bits": transfer.payload_bits,
@@ -525,6 +525,19 @@ class TraceWriter:
             "forced_class": job.forced_logical_class,
         }
         self._instant("Window planner", "solve held", "window,confidence", args)
+
+    def window_final(self, window: window_records.Window) -> None:
+        """The window's record is final, under the request that decided it.
+
+        An escalated window's weak commit is provisional, and its strong
+        answer finalizes it with no commit of its own, so this instant is
+        the one that marks it.
+        """
+        args = {
+            "window": window_text(window.key),
+            "request": request_text(window.published_request_key),
+        }
+        self._instant("Window planner", "window final", "window", args)
 
     def window_absorbed(self, key: tuple, owner_key: tuple) -> None:
         """A strong window covers the window; the weak chain skips it."""

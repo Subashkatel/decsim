@@ -19,7 +19,7 @@ class BacklogView:
     """
 
     ready_jobs: int  # jobs waiting across every queue
-    per_lane: tuple  # ((lane, queued_jobs), ...); "" = default
+    per_lane: tuple  # ((lane, queued_jobs), ...); "" = the entry pool's
     per_op_rounds: tuple  # ((operation_id, rounds_waiting), ...)
     per_patch_rounds: tuple  # ((patch, rounds_waiting), ...)
     total_rounds: int  # system-level depth
@@ -32,15 +32,16 @@ def backlog_view(
 ) -> BacklogView:
     """Snapshot the job queues and the per-op, per-patch, system backlog.
 
-    The queues are every pool's over both sides' managers.
+    The queues are every pool's, the entry pool's manager first and each
+    other pool's lane by its queue's name.
     """
-    waiting_by_pool = _waiting_by_pool(decoder_managers)
-    ready_jobs = len(waiting_by_pool["default"])
+    entry_manager = decoder_managers[0]
+    ready_jobs = len(entry_manager.queue.waiting)
     per_lane = [("", ready_jobs)]
+    other_managers = decoder_managers[1:]
+    waiting_by_pool = _waiting_by_pool(other_managers)
     pool_items = waiting_by_pool.items()
     for lane, queue in sorted(pool_items):
-        if lane == "default":
-            continue
         queue_length = len(queue)
         per_lane.append((lane, queue_length))
         ready_jobs += queue_length
@@ -67,7 +68,7 @@ def backlog_view(
 
 
 def _waiting_by_pool(decoder_managers) -> dict:
-    """Every pool's ready queue, over both sides' managers."""
+    """Each of these managers' ready queues, by its pool's name."""
     waiting_by_pool = {}
     for manager in decoder_managers:
         waiting_by_pool[manager.pool.name] = manager.queue.waiting

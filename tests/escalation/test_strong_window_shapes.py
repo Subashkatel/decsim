@@ -22,11 +22,11 @@ on both tiers so the run is deterministic, puts a run in that regime.
 """
 
 import dataclasses
+import types
 
 import pytest
 
 import decsim.confidence.complementary as complementary
-import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
@@ -37,12 +37,17 @@ import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.ports as ports
+import decsim.presets.clocks as clocks
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.slotted as slotted
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.schemes.sliding as sliding_scheme
@@ -56,8 +61,8 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 
 # The gate's switching card: both clocks at 250 MHz, each hop one cycle
 # of its side's clock on an unbounded wire.
-FRIDGE_CLOCK = config.Clock.from_megahertz(250.0)
-ROOM_CLOCK = config.Clock.from_megahertz(250.0)
+FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
+ROOM_CLOCK = clocks.ROOM_CLOCK
 GATE_PATH_CLOCKS = {
     "qpu_to_controller": FRIDGE_CLOCK,
     "controller_to_weak_buffer": FRIDGE_CLOCK,
@@ -81,18 +86,13 @@ NAMED_BOUNDARY_PATHS = (
 
 def one_cycle_path(links, path_name: str, clock, latency_cycles: int = 1):
     """One path of the card on an unbounded wire of one lane."""
-    return link_profiles.path_card(
-        links,
-        path_name,
+    link = fabrics.ClockedLink(
         clock=clock,
         latency_cycles=latency_cycles,
-        bits_per_cycle=None,
         source="the gate's switching card",
-        lane_count=1,
-        setup_cycles_per_transfer=0,
-        header_bits_per_transfer=0,
-        protocol=None,
     )
+    path = getattr(links, path_name)
+    return link.priced(path_name, path, None)
 
 
 def gate_switching(
@@ -127,7 +127,7 @@ def gate_switching(
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=FRIDGE_CLOCK
     )
-    workload = machine_settings.memory_workload(
+    workload = machines.memory_workload(
         distance, physical_error_probability, rounds_per_shot
     )
     observation = observe_settings.ObservationSettings(log_component_io=True)
@@ -158,24 +158,18 @@ def weak_base_switching(
     weak base's chip unit escalates to belief matching on the host, the
     strong side's five hops one room cycle each.
     """
-    base = machine_settings.weak_decoder_baseline(
+    base = machines.weak_baseline(
         distance, physical_error_probability, round_period_microseconds
     )
     pymatching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=pymatching)
-    links = machine_settings.one_cycle_strong_side(base.links)
-    strong_window = declared_run.REDO_WINDOW
-    windows = window_settings.switching_windows(base.windows, strong_window)
+    weak_base = base.with_settings(machines.WEAK_POOL, algorithm=pymatching)
+    strong_side = link_cards.strong_side(base.fabric)
     strong_decoder = host_belief_matching()
-    switching = switching_slot(strong_window)
-    return dataclasses.replace(
-        base,
-        links=links,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
+    switching = switching_slot(declared_run.REDO_WINDOW)
+    switching_machine = machines.with_strong_tier(
+        weak_base, strong_decoder, switching, strong_side
     )
+    return slotted.resolved(switching_machine)
 
 
 def host_belief_matching() -> decoder_settings.DecoderPoolSettings:
@@ -226,7 +220,7 @@ def _heard_requests(machine) -> declared_run.EndedRequests:
 
 def _strong_job(requests: declared_run.EndedRequests, window_id: int):
     """The strong decode job one window's escalation sent, as it ended."""
-    strong = requests.of_tier(window_records.DecoderTier.STRONG)
+    strong = requests.of_tier(window_records.STRONG_POOL_ID)
     for ended in strong:
         if ended.job.request_key.window_id == window_id:
             return ended.job
@@ -258,7 +252,7 @@ def test_the_double_window_leaves_once_its_far_boundary_is_determined():
     assert len(submitted_lines) == 1
     assert submitted_lines[0].startswith("[ 87.000 us]")
     assert restart_lines[0].startswith("[ 87.000 us]")
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_a_region_at_a_back_to_back_seam_waits_for_its_own_weak_commit():
@@ -288,7 +282,7 @@ def _recorded_waits(machine) -> dict:
     def held(_request_key, window_key, waits_for, _rounds) -> None:
         waits[window_key] = waits_for
 
-    redecode = machine.windows.window_manager.strong_redecode
+    redecode = machine.windows.window_manager.edges.edges[0]
     redecode.trace.strong_window_held.connect(held)
     return waits
 
@@ -432,7 +426,7 @@ def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
     ) in resliced[0]
     withdrawn_restart = _log_index(machine, "WITHDRAW memory W6")
     assert withdrawn_restart < machine.observation.log.lines.index(resliced[0])
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
@@ -543,7 +537,7 @@ def test_the_double_window_lands_in_the_declared_backlog_regime():
         "restart window (1, 4) re-sliced across strong window edge 12"
         in (resliced[0])
     )
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 # ---- a shape row added from outside decsim
@@ -589,7 +583,7 @@ def test_a_shape_row_added_from_outside_runs_by_its_record():
         rounds=9, escalated_windows={2}, strong_window=recording_row
     )
     machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is RecordingRedoWindow
     assert shape.planned_windows == [2]
     # the row pins its past face on W1, the neighbour that committed
@@ -644,7 +638,7 @@ def test_an_absorbing_row_added_from_outside_builds_through_the_same_call():
         rounds=9, escalated_windows={0}, strong_window=recording_row
     )
     machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is RecordingDoubleWindow
     assert shape.planned_windows == [0]
     assert fabric.frame_tiers(machine) == [((1, 0), "strong")]
@@ -658,7 +652,7 @@ def test_the_shipped_components_fill_the_shapes_six_window_side_ports():
     the root binds there answer the whole port.
     """
     machine = fabric.switching_machine(rounds=9, escalated_windows=set())
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert isinstance(shape.planner, ports.WindowPlan)
     assert isinstance(shape.retention, ports.WindowRetention)
     assert isinstance(shape.builder, ports.WindowJobBuilder)
@@ -930,7 +924,7 @@ def test_the_redo_window_rows_pinned_faces_cross_the_wire():
     """
     machine = _gate_machine(declared_run.REDO_WINDOW)
     result = machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is strong_window_shapes.RedoWindow
     strong_windows = _strong_window_keys(machine)
     pinned = _pinned_boundary_transfers(result)
@@ -1104,11 +1098,11 @@ def test_the_gate_card_on_the_double_window_runs_through():
     """
     machine = _gate_machine(declared_run.DOUBLE_WINDOW)
     result = machine.run()
-    shape = machine.windows.window_manager.strong_redecode.shape
+    shape = machine.windows.window_manager.edges.edges[0].shape
     assert type(shape) is strong_window_shapes.DoubleWindow
     statuses = _run_statuses(result)
     assert statuses == [(1, "logical_observables")]
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_a_re_reading_restart_window_owns_the_faults_the_far_pin_carries():
@@ -1153,10 +1147,11 @@ def _strong_window_keys(machine) -> set:
 class _StoredRounds:
     """A retention that answers with the rounds the window reads."""
 
-    def strong_window_input(self, builder, window) -> tuple:
+    def strong_window_input(self, builder, window, target) -> tuple:
         """The stored rounds, whatever the builder and the window are."""
         del builder
         del window
+        del target
         return ("the stored rounds",)
 
 
@@ -1185,7 +1180,12 @@ def _folding_shape(retention, courier):
     shape.retention = retention
     shape.courier = courier
     shape.builder = _UnusedBuilder()
+    shape.edge = _EDGE_TO_STRONG
     return shape
+
+
+# the edge the folding shape lays windows out for, read for its target
+_EDGE_TO_STRONG = types.SimpleNamespace(target=window_records.STRONG_POOL_ID)
 
 
 class _UnusedBuilder:

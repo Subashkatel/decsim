@@ -5,8 +5,8 @@ it does not own (omnetpp src/sim/csimplemodule.cc:333-334,
 omnetpp-6.1.0), and gem5 bills a transfer to the port it left by rather
 than to whoever arranged it (packet.hh:424-431).
 decsim has no runtime check for it, so the rule is read out of the tree:
-a component module that names a LinkPath must be one of that path's two
-ends.
+a component module that names a slotted hop (records/transfers.py
+SLOTTED_PATHS) must be one of that hop's two ends.
 """
 
 import ast
@@ -24,7 +24,7 @@ ENDS_OF_PATH = {
     "WEAK_BUFFER_TO_WEAK_DECODER": ("syndrome_buffer", "decoders"),
     # a boundary is a window-side record and both its ends hold one
     # (decisions.md D12), so the window side is an end of every hop a
-    # boundary rides (windows/window_boundaries.py _BOUNDARY_ROUTES)
+    # boundary rides (build/routes.py generates its route)
     "WEAK_DECODER_TO_STRONG_DECODER": ("decoders", "windows"),
     "STRONG_BUFFER_TO_STRONG_DECODER": (
         "syndrome_buffer",
@@ -42,7 +42,7 @@ ENDS_OF_PATH = {
 }
 
 # A boundary's send names no path: the courier picks one from the two
-# sides (windows/window_boundaries.py _BOUNDARY_ROUTES), so a call of
+# sides (build/routes.py generates the route), so a call of
 # send_boundary is read as the boundary's own hop, whose ends are the
 # window side's at both decoders.
 BOUNDARY_ROUTE = "BOUNDARY_ROUTE"
@@ -66,19 +66,15 @@ COMPONENT_PACKAGES = (
 
 
 def _named_paths(path: pathlib.Path) -> list:
-    """Every LinkPath member this module names, with its line."""
+    """Every slotted hop this module names, with its line."""
     text = path.read_text()
     tree = ast.parse(text)
     named = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Attribute):
+        member = _link_path_member(node)
+        if member is None:
             continue
-        inner = node.value
-        if not isinstance(inner, ast.Attribute):
-            continue
-        if inner.attr != "LinkPath":
-            continue
-        named.append((node.attr, node.lineno))
+        named.append((member, node.lineno))
     return named
 
 
@@ -110,29 +106,20 @@ def test_the_table_of_ends_covers_every_hop():
     """A new hop joins the table, so the law never silently shrinks."""
     text = (DECSIM_ROOT / "records" / "transfers.py").read_text()
     tree = ast.parse(text)
-    members = _members_of_class(tree, "LinkPath")
+    members = _slotted_paths(tree)
     assert sorted(members) == sorted(ENDS_OF_PATH)
 
 
-def _members_of_class(tree: ast.Module, class_name: str) -> list:
+def _slotted_paths(tree: ast.Module) -> list:
+    """The names SLOTTED_PATHS lists, in its order."""
     members = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign):
             continue
-        if node.name != class_name:
+        if _assigned_names(statement) != ["SLOTTED_PATHS"]:
             continue
-        members = _member_names(node)
+        members = [element.id for element in statement.value.elts]
     return members
-
-
-def _member_names(node: ast.ClassDef) -> list:
-    """The enum members declared in the class body."""
-    names = []
-    for statement in node.body:
-        if isinstance(statement, ast.Assign):
-            assigned = _assigned_names(statement)
-            names.extend(assigned)
-    return names
 
 
 def _assigned_names(statement: ast.Assign) -> list:
@@ -157,14 +144,6 @@ DELIVERY_CALLBACKS = {
     ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
         "_publish",
         "_write_feedback_memory",
-    ),
-    ("controller/syndrome_round_sender.py", "CONTROLLER_TO_STRONG_BUFFER"): (
-        "_land_in_strong_store",
-    ),
-    ("decoders/decoder_output.py", "WEAK_DECODER_TO_STRONG_DECODER"): (
-        None,
-        None,
-        None,
     ),
     ("pauli_frame/decision_dispatch.py", "FRAME_TO_CONTROLLER"): (
         "_at_the_controller",
@@ -229,7 +208,7 @@ class _DeliverySite:
     def __init__(self, module, package: str, named: tuple, callback):
         self.module = module
         self.package = package
-        # (the LinkPath member, the line the send stands on)
+        # (the slotted hop, the line the send stands on)
         self.path_name, self.lineno = named
         self.callback = callback
 
@@ -309,7 +288,7 @@ def _registered_callback(node):
 
 
 def _path_argument(node: ast.Call):
-    """The LinkPath member this call names, BOUNDARY_ROUTE, or None."""
+    """The slotted hop this call names, BOUNDARY_ROUTE, or None."""
     if _is_boundary_send(node):
         return BOUNDARY_ROUTE
     for argument in node.args:
@@ -328,13 +307,15 @@ def _is_boundary_send(node: ast.Call) -> bool:
 
 
 def _link_path_member(argument):
-    """The member name of a LinkPath attribute, or None."""
+    """The name of a slotted hop the expression reads, or None."""
     if not isinstance(argument, ast.Attribute):
         return None
     inner = argument.value
-    if not isinstance(inner, ast.Attribute):
+    if not isinstance(inner, ast.Name):
         return None
-    if inner.attr != "LinkPath":
+    if inner.id != "transfer_records":
+        return None
+    if argument.attr not in ENDS_OF_PATH:
         return None
     return argument.attr
 

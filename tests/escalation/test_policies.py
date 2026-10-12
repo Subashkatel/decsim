@@ -17,8 +17,10 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
 import decsim.config as config
+import decsim.decoders.batching as batching
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
@@ -26,6 +28,7 @@ import decsim.escalation.policies as policies
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.escalation.verdicts as verdicts
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
@@ -62,8 +65,8 @@ WINDOW = window_records.Window(
 )
 JOB = decoding_records.DecodeJob(operation_id=1, window_id=1, round_count=6)
 BOTH_TIERS = (
-    window_records.DecoderTier.WEAK,
-    window_records.DecoderTier.STRONG,
+    window_records.WEAK_POOL_ID,
+    window_records.STRONG_POOL_ID,
 )
 
 
@@ -112,7 +115,7 @@ def _weak_gaps(machine) -> list[float]:
     """
     gaps = []
     for record in machine.observation.decode_records.requests:
-        if record.request_key.tier is not window_records.DecoderTier.WEAK:
+        if record.request_key.pool != window_records.WEAK_POOL_ID:
             continue
         if record.soft_output is None:
             continue
@@ -202,9 +205,11 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
 # ---- one law per port method
 
 
-def test_switching_decodes_both_tiers_at_once_when_asked():
+def test_switching_decodes_both_tiers_at_once_only_when_asked():
     parallel = _switching(run_both_at_once=True)
-    assert parallel.tiers_for_ready_window(WINDOW) == BOTH_TIERS
+    serial = _switching(run_both_at_once=False)
+    assert parallel.decodes_both_at_once(WINDOW)
+    assert not serial.decodes_both_at_once(WINDOW)
 
 
 def test_a_strong_result_teaches_the_online_source():
@@ -226,6 +231,25 @@ def test_a_plan_that_contradicts_itself_is_refused_at_build():
             escalated_windows=set(),
             strong_window=declared_run.DOUBLE_WINDOW,
             run_both_at_once=True,
+        )
+
+
+def test_a_pool_that_batches_beside_run_both_at_once_is_refused_for_now():
+    decode_each = batching.DecodeEach.Settings()
+
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
+        declared_run.switching_run(
+            run_both_at_once=True, strong_batching=decode_each
+        )
+
+
+def test_a_pool_that_batches_under_a_double_window_is_refused_for_now():
+    decode_each = batching.DecodeEach.Settings()
+
+    with pytest.raises(NotImplementedError, match="not implemented yet"):
+        declared_run.switching_run(
+            strong_window=declared_run.DOUBLE_WINDOW,
+            strong_batching=decode_each,
         )
 
 
@@ -544,9 +568,14 @@ def _switching_policy(threshold_decibels: float):
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    machine = machine_settings.MachineSettings(
+        weak_decoder=weak, strong_decoder=weak, switching=settings
+    )
+    layout = layout_module.slotted_layout(machine)
     engine = engine_module.Engine()
-    switching = escalation_build.Switching.build(settings, weak, engine)
-    return switching.policy
+    switching_parts = escalation_build.build_switching(layout, engine)
+    entry_switching = switching_parts[0]
+    return entry_switching.policy
 
 
 def test_a_weak_result_with_no_soft_output_escalates_its_window():
@@ -604,3 +633,12 @@ def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
         policy.verdict_for_weak_result(job, well_above)
         is decoding_records.Verdict.KEEP
     )
+
+
+def test_an_online_source_under_a_verdict_that_reads_no_threshold_is_refused():
+    """It learns from the windows the gap escalates; status escalates none."""
+    online = _always_auditing_online_threshold(threshold=2.0)
+    status = verdicts.Status()
+
+    with pytest.raises(ValueError, match="reads no threshold"):
+        policies.Switching(online, False, status, reads_threshold=False)

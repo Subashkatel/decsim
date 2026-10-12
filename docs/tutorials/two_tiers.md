@@ -42,12 +42,12 @@ switching = escalation_settings.SwitchingSettings(
 )
 weak_decoder = decoder_settings.linear_decoder_pool(
     WEAK_DECODE_MICROSECONDS_PER_ROUND,
-    machine_settings.FRIDGE_CLOCK,
+    clocks.FRIDGE_CLOCK,
     solves_per_window=2,
 )
 strong_decoder = decoder_settings.linear_decoder_pool(
     STRONG_DECODE_MICROSECONDS_PER_ROUND,
-    machine_settings.ROOM_CLOCK,
+    clocks.ROOM_CLOCK,
     solves_per_window=1,
 )
 ```
@@ -80,33 +80,62 @@ and prices the algorithm at zero.
 - The strong tier's tau_strong_dec is 10 tau_gen, 10 microseconds a
   round.
 
-Then, for each distance, the loop moves the paper's T_comm, the time
-from a round's measurement to its decoder, onto two links:
+The paper's T_comm, the time from a round's measurement to its
+decoder, is two links, each a latency in microseconds on an unbounded
+wire:
 
 ```python examples/two_tiers.py
-    weak_side = link_profiles.with_path_latency(
-        base.links, "controller_to_weak_buffer", WEAK_COMMUNICATION_MICROSECONDS
+weak_communication = fabrics.TimedLink(
+    WEAK_COMMUNICATION_MICROSECONDS, excludes_receiver_processing=True
+)
+strong_communication = fabrics.TimedLink(
+    STRONG_COMMUNICATION_MICROSECONDS, excludes_receiver_processing=True
+)
+```
+
+Then, for each distance, the loop builds the machine as a graph of
+named parts (`decsim/topology/graph.py`), starting from the weak base:
+
+```python examples/two_tiers.py
+    base = machines.weak_baseline(
+        distance,
+        PHYSICAL_ERROR_PROBABILITY,
+        ROUND_PERIOD_MICROSECONDS,
     )
-    strong_side = machine_settings.one_cycle_strong_side(weak_side)
-    links = link_profiles.with_path_latency(
-        strong_side,
-        "weak_decoder_to_strong_decoder",
-        STRONG_COMMUNICATION_MICROSECONDS,
+    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
+    weak_tier = base.with_part(weak_pool)
+    weak_side = fabrics.PathLinks(
+        controller_to_weak_buffer=weak_communication, base=base.fabric
+    )
+    # the strong side's other hops one host cycle each
+    fabric = link_cards.strong_side(weak_side, strong_communication)
+    machine = machines.with_strong_tier(
+        weak_tier, strong_decoder, switching, fabric
     )
 ```
 
-One tau_gen on `controller_to_weak_buffer`, ten on
-`weak_decoder_to_strong_decoder`, the hop an escalation crosses, and
-one cycle on each other hop of the strong side.
+- `with_part` puts the weak decoder in the place of the base's part of
+  the same name, `weak`, in the fridge.
+- The machine's fabric prices every hop no wire prices itself.
+  `PathLinks` gives a hop its link by the hop's name and leaves the
+  rest to its `base`: one tau_gen on `controller_to_weak_buffer`, and
+  the weak base's one cycle on every other hop of the weak side.
+  `link_cards.strong_side` adds the strong side's hops at one host
+  cycle each, and ten tau_gen on `weak_decoder_to_strong_decoder`, the
+  hop an escalation crosses.
+- `machines.with_strong_tier` adds the strong tier on the host: a
+  second syndrome buffer and the strong decoder, the switching record,
+  the wire from the weak decoder's escalation to the strong one, and
+  the windows the strong window needs.
 
 The cards price time and nothing else: both tiers still decode for
 real, on the minimum-weight perfect matching path, so the logical
 failures below are measured and only the time is stated.
 
-Two syndrome buffers, not one: `weak_syndrome_buffer` streams to the
-weak tier and keeps every round a strong re-decode might still ask for;
-`strong_syndrome_buffer` holds the rounds an escalation carries up to
-the strong decoder, and nothing else in this run.
+Two syndrome buffers, not one: `weak_buffer` streams to the weak tier
+and keeps every round a strong re-decode might still ask for;
+`strong_buffer` holds the rounds an escalation carries up to the strong
+decoder, and nothing else in this run.
 
 ## Step 2. Run the sweep
 
@@ -200,6 +229,7 @@ tick (us)  where                        what                                    
 9.408      Decoder unit default#0       stage release                                                 0.000
 9.412      Frame                        residence, unbounded, committed 9.416, freed at end of run    392.284   copy
 9.416      Window planner               W0 committed
+9.416      Window planner               window final
 9.416      Frame                        1:0 committed
 
 copies 1, references 2 jobs and 0 holds, moves 3
@@ -221,6 +251,8 @@ Then, at 9.408, `verdict`. This window's confidence was at or above the
 threshold, so the weak answer was kept: the boundary went to the next
 window on `decoder_to_decoder`, the correction went to the Pauli frame
 on `weak_decoder_to_frame`, and the window committed at 9.416.
+`window final` at the same tick says its record is final: no later
+decode will change it.
 
 Note the cost. Two solves is 2.4 microseconds of decoding, not 1.2, on
 every window, whether or not it escalates. That is what this confidence
@@ -276,6 +308,7 @@ tick (us)  where                            what                                
 98.412     Decoder unit strong#0            stage algorithm                                                0.000
 98.412     Decoder unit strong#0            stage release                                                  0.000
 98.416     Frame                            residence, unbounded, committed 98.420, freed at end of run    303.280   copy
+98.420     Window planner                   window final
 98.420     Frame                            1:3 committed
 
 copies 5, references 3 jobs and 0 holds, moves 7
@@ -330,7 +363,9 @@ eight things happen that did not happen for window 0.
 
 `W3 committed` at 18.408 is worth reading carefully. The window
 provisionally commits on the weak answer as soon as the verdict is in
-(`decsim/windows/window_commits.py`, `commit`). What it does not do is
+(`decsim/windows/window_commits.py`, `commit`), and its record turns
+final only at 98.420, the `window final` line, when the strong answer
+reaches the frame. What it does not do is
 ship its boundary: this run's boundary policy is held, the one the redo
 window's record hands `switching_windows`, because the redo window does
 not absorb the windows it covers. A strong window absorbs a

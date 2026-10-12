@@ -9,14 +9,11 @@ part's record is defined by the package that owns it.
 """
 
 import dataclasses
-from collections.abc import Mapping
 from typing import Optional, Union
 
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
-import decsim.decoders.belief_matching.decoder as belief_matching
-import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
@@ -26,21 +23,13 @@ import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.ports as ports
-import decsim.producers as producers
-import decsim.qpu.code_geometry as code_geometry
-import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
-import decsim.qpu.stim_device as stim_device
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-import decsim.windows.boundary_payloads as boundary_payloads
-import decsim.windows.boundary_policies as boundary_policies
-import decsim.windows.schemes.sliding as sliding_scheme
+import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
-from decsim.decoders.minimum_weight_perfect_matching import (
-    decoder as minimum_weight_perfect_matching,
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,7 +43,17 @@ class MachineSettings:
     The decode side is three slots, each None when the run has no such
     part: weak_decoder alone, strong_decoder alone, or both with
     switching, which decodes weak first and escalates a window to the
-    strong decoder. None of the three plans no decoding.
+    strong decoder. None of the three plans no decoding. router, None
+    by default, sends each window to one of several entry pools; only a
+    graph of its own shape holds more than one (windows/routers.py).
+
+    workload is a workload lowered in Python or a maker row
+    (decsim/producers.py), which at_task lowers against the qpu, so the
+    task's id and every shot see the lowered workload. A workload made
+    at a distance of its own fixes the qpu's: set_in_the_run_file names
+    the paths an assignment by path (decsim/parameters/tree.py) may not
+    change, since it would leave the circuit behind, a distance-5
+    machine running a distance-3 circuit.
     """
 
     clock: Optional[config.Clock] = None
@@ -85,15 +84,16 @@ class MachineSettings:
     )
     switching: Optional[escalation_settings.SwitchingSettings] = None
     pauli_frame: Optional[pauli_frame_module.PauliFrameConfig] = None
-    workload: workload_settings.WorkloadSettings = (
-        workload_settings.WorkloadSettings()
-    )
+    workload: Union[
+        workload_settings.WorkloadSettings, ports.WorkloadMakerSettings
+    ] = workload_settings.WorkloadSettings()
     magic_state_factory: qpu_settings.FactorySettings = (
         magic_state_factories.InfiniteFactory.Settings()
     )
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
     )
+    router: Optional[routers.Router.Settings] = config.added_field(None)
 
     def __post_init__(self) -> None:
         _check_decode_slots(self)
@@ -108,18 +108,18 @@ class MachineSettings:
         return self.strong_decoder
 
     @property
-    def window_tier(self) -> window_records.DecoderTier:
+    def window_tier(self) -> window_records.PoolId:
         """The tier that decodes the windows: weak if set, else strong."""
         if self.weak_decoder is None and self.strong_decoder is not None:
-            return window_records.DecoderTier.STRONG
-        return window_records.DecoderTier.WEAK
+            return window_records.STRONG_POOL_ID
+        return window_records.WEAK_POOL_ID
 
     @property
     def escalation_kind(self) -> str:
         """The word a trace names these slots' run by."""
         if self.switching is not None:
             return "switching"
-        if self.window_tier is window_records.DecoderTier.STRONG:
+        if self.window_tier == window_records.STRONG_POOL_ID:
             return "strong_only"
         return "weak_baseline"
 
@@ -143,343 +143,49 @@ class MachineSettings:
         }
 
     def at_task(self) -> "MachineSettings":
-        """The settings with the threshold their task's facts give.
+        """The settings with their workload lowered and their threshold read.
 
-        A calibration table's row is read here, once per task; reading
+        A maker row is lowered against the qpu, then a calibration
+        table's row is read at the task's facts, once per task; reading
         settings already read returns them unchanged.
         """
-        switching = self.switching
+        settings = self._with_workload_lowered()
+        _refuse_a_route_on_a_patch_no_operation_has(settings)
+        switching = settings.switching
         if switching is None:
-            return self
-        facts = self.task_facts()
+            return settings
+        facts = settings.task_facts()
         threshold = switching.threshold.at_task(facts)
         if threshold is switching.threshold:
-            return self
+            return settings
         resolved = dataclasses.replace(switching, threshold=threshold)
-        return dataclasses.replace(self, switching=resolved)
+        return dataclasses.replace(settings, switching=resolved)
+
+    def set_in_the_run_file(self) -> tuple:
+        """The paths the workload fixes, which an assignment may not set."""
+        return set_in_the_run_file_with(self.workload)
+
+    def _with_workload_lowered(self) -> "MachineSettings":
+        workload = self.workload.lowered_for(self.qpu)
+        if workload is self.workload:
+            return self
+        return dataclasses.replace(self, workload=workload)
 
 
-# The shipped machines' two clock domains: the chip's, at 250 MHz
-# (2605.04892 line 1063), and the host's, at the same rate, an estimate
-# that sets edge rounding only.
-FRIDGE_CLOCK = config.Clock.from_megahertz(250.0)
-ROOM_CLOCK = config.Clock.from_megahertz(250.0)
-# The hops the weak base prices: the weak chain, the decision and the
-# pulse. The strong side keeps the reference card.
-_WEAK_BASELINE_PATH_CLOCKS = {
-    "qpu_to_controller": FRIDGE_CLOCK,
-    "controller_to_weak_buffer": FRIDGE_CLOCK,
-    "weak_buffer_to_weak_decoder": FRIDGE_CLOCK,
-    "decoder_to_decoder": FRIDGE_CLOCK,
-    "weak_decoder_to_frame": FRIDGE_CLOCK,
-    "frame_to_controller": FRIDGE_CLOCK,
-    "controller_to_qpu": FRIDGE_CLOCK,
-}
-# The hops the strong base prices: the readout, the weak store's write,
-# the decision and the pulse on the chip; the strong store's write and
-# the strong chain on the host, whose boundaries ride the host's own
-# memory read. The weak chain and the escalation keep the reference card.
-_STRONG_BASELINE_PATH_CLOCKS = {
-    "qpu_to_controller": FRIDGE_CLOCK,
-    "controller_to_weak_buffer": FRIDGE_CLOCK,
-    "controller_to_strong_buffer": ROOM_CLOCK,
-    "strong_buffer_to_strong_decoder": ROOM_CLOCK,
-    "strong_decoder_to_frame": ROOM_CLOCK,
-    "frame_to_controller": FRIDGE_CLOCK,
-    "controller_to_qpu": FRIDGE_CLOCK,
-}
-# The strong side's five hops, all on the host.
-_STRONG_SIDE_PATH_CLOCKS = {
-    "controller_to_strong_buffer": ROOM_CLOCK,
-    "weak_decoder_to_strong_decoder": ROOM_CLOCK,
-    "strong_buffer_to_strong_decoder": ROOM_CLOCK,
-    "strong_decoder_to_frame": ROOM_CLOCK,
-    "strong_decoder_to_weak_decoder": ROOM_CLOCK,
-}
-# A base's shot is ten rounds per unit of distance.
-_BASELINE_ROUNDS_PER_DISTANCE = 10
-_BELIEF_MATCHING = belief_matching.BeliefMatchingDecoder.Settings(
-    max_iterations=30, belief_propagation_method="product_sum"
-)
-# The bases' engine: a round a cycle in and ten cycles to write the
-# correction out. No source states either count, so both are estimates.
-_ESTIMATED_ENGINE = decoder_settings.EngineSettings(
-    clock=FRIDGE_CLOCK,
-    fetch_cycles_per_round=1,
-    fetch_cycles_per_job=0,
-    release_cycles_per_job=10,
-    release_cycles_per_round=0,
-)
-# the same engine counted on the host's clock
-_HOST_ESTIMATED_ENGINE = dataclasses.replace(
-    _ESTIMATED_ENGINE, clock=ROOM_CLOCK
-)
-# Matching's answer at the latency of a d = 3 lookup-table core, 7 cycles
-# at 250 MHz, 28 ns (LILLIPUT, 2108.06569 line 1070 and Table 4, text
-# lines 1088-1100). The core is a lookup table, so the card borrows its
-# time, not its answer.
-_TIMED_MATCHING = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
-    preset_latency_microseconds=0.028
-)
-_UNBOUNDED_UNIT_MEMORY = decoder_settings.UnitMemorySettings(
-    bits=None, word_bits=None
-)
-# Belief matching on one host unit with an unbounded memory, charged its
-# measured wall clock: the strong base's tier.
-_HOST_BELIEF_MATCHING_POOL = decoder_settings.DecoderPoolSettings(
-    algorithm=_BELIEF_MATCHING,
-    unit_count=1,
-    engine=_HOST_ESTIMATED_ENGINE,
-    unit_memory=_UNBOUNDED_UNIT_MEMORY,
-    copies_input=True,
-    copies_boundary_fold=True,
-    result_blocks_unit=False,
-)
+def set_in_the_run_file_with(workload: object) -> tuple:
+    """The machine paths a workload fixes: the distance, its lowered fields.
 
-
-def weak_decoder_baseline(
-    distance: int,
-    physical_error_probability: float,
-    round_period_microseconds: float,
-) -> MachineSettings:
-    """The weak decoder alone.
-
-    Real PyMatching answers every window on one chip unit, charged
-    LILLIPUT's 28 ns, and each hop it prices is one fridge cycle on an
-    unbounded wire.
+    A workload made at a distance of its own fixes qpu.distance; a
+    lowered one fixes its lowered fields too. A maker row that follows
+    the qpu fixes nothing.
     """
-    reference = link_profiles.logical_reference_profile()
-    links = _one_cycle_paths(
-        reference, _WEAK_BASELINE_PATH_CLOCKS, "the weak base's hops"
-    )
-    weak_decoder = decoder_settings.DecoderPoolSettings(
-        algorithm=_TIMED_MATCHING,
-        unit_count=1,
-        engine=_ESTIMATED_ENGINE,
-        unit_memory=_UNBOUNDED_UNIT_MEMORY,
-        copies_input=True,
-        copies_boundary_fold=True,
-        result_blocks_unit=False,
-    )
-    qpu = _stim_qpu(distance, round_period_microseconds)
-    rounds_per_shot = _BASELINE_ROUNDS_PER_DISTANCE * distance
-    workload = memory_workload(
-        distance, physical_error_probability, rounds_per_shot
-    )
-    return _baseline(qpu, workload, links, weak_decoder, None)
-
-
-def strong_decoder_baseline(
-    distance: int,
-    physical_error_probability: float,
-    round_period_microseconds: float,
-) -> MachineSettings:
-    """The strong decoder alone.
-
-    Belief matching answers every window on one host unit, charged its
-    measured wall clock. Each hop it prices is one cycle on an unbounded
-    wire, of the fridge clock on the chip and the room clock on the
-    host.
-    """
-    reference = link_profiles.logical_reference_profile()
-    links = _one_cycle_paths(
-        reference, _STRONG_BASELINE_PATH_CLOCKS, "the strong base's hops"
-    )
-    qpu = _stim_qpu(distance, round_period_microseconds)
-    rounds_per_shot = _BASELINE_ROUNDS_PER_DISTANCE * distance
-    workload = memory_workload(
-        distance, physical_error_probability, rounds_per_shot
-    )
-    return _baseline(qpu, workload, links, None, _HOST_BELIEF_MATCHING_POOL)
-
-
-def one_cycle_strong_side(
-    links: link_settings.FabricSettings,
-) -> link_settings.FabricSettings:
-    """The card with the strong side's five hops one room cycle each.
-
-    A run that switches on the weak base reaches the strong decoder over
-    these hops, each an unbounded wire; every other path keeps its card.
-    """
-    return _one_cycle_paths(
-        links, _STRONG_SIDE_PATH_CLOCKS, "the strong side's hops"
-    )
-
-
-def memory_workload(
-    distance: int, physical_error_probability: float, rounds_per_shot: int
-) -> workload_settings.WorkloadSettings:
-    """One memory shot of Stim's rotated surface code, rounds_per_shot long.
-
-    One probability on all four of Stim's noise channels
-    (producers.memory_circuit).
-    """
-    workload = producers.memory_circuit(
-        "surface_code:rotated_memory_z",
-        rounds_per_shot,
-        distance,
-        physical_error_probability,
-    )
-    return workload_settings.WorkloadSettings.running(workload)
-
-
-def _stim_qpu(
-    distance: int, round_period_microseconds: float
-) -> qpu_settings.QpuSettings:
-    """Stim samples the rotated surface code at distance, on one layout."""
-    source = stim_device.StimDevice.Settings()
-    code_card = code_geometry.SurfaceCodeModel.Settings()
-    layout = layouts.UniformLayout.Settings()
-    return qpu_settings.QpuSettings(
-        source=source,
-        code_card=code_card,
-        round_period_microseconds=round_period_microseconds,
-        distance=distance,
-        layout=layout,
-        error_model_provider=None,
-    )
-
-
-def _baseline(
-    qpu: qpu_settings.QpuSettings,
-    workload: workload_settings.WorkloadSettings,
-    links: link_settings.FabricSettings,
-    weak_decoder: Optional[decoder_settings.DecoderPoolSettings],
-    strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
-) -> MachineSettings:
-    """What both bases share, every value written out, around one decoder.
-
-    Both stores are unbounded and free, and the frame writes in one
-    fridge cycle, 4 ns (2605.04892 Table I, lines 1051 and 1063).
-    """
-    controller = _baseline_controller()
-    idle_policy = idle_policies.SeparateDecodeJobsSettings()
-    detection_events = _baseline_detection_events()
-    unbounded_buffer = syndrome_buffer_module.SyndromeBufferSettings(
-        bits=None, clock=None, write_cycles=0, read_cycles=0
-    )
-    windows = _baseline_windows()
-    decoder_manager = _baseline_decoder_manager()
-    magic_state_factory = magic_state_factories.InfiniteFactory.Settings()
-    observation = _baseline_observation()
-    pauli_frame = pauli_frame_module.PauliFrameConfig(
-        write_cycles=1, clock=FRIDGE_CLOCK
-    )
-    return MachineSettings(
-        # the controller and every part that names no clock of its own
-        # count their cycles on the machine's clock
-        clock=FRIDGE_CLOCK,
-        qpu=qpu,
-        controller=controller,
-        idle_policy=idle_policy,
-        detection_events=detection_events,
-        links=links,
-        weak_syndrome_buffer=unbounded_buffer,
-        strong_syndrome_buffer=unbounded_buffer,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        decoder_manager=decoder_manager,
-        switching=None,
-        pauli_frame=pauli_frame,
-        workload=workload,
-        magic_state_factory=magic_state_factory,
-        observation=observation,
-    )
-
-
-def _baseline_controller() -> controller_settings.ControllerSettings:
-    """A controller whose per-round costs sit inside the round period."""
-    return controller_settings.ControllerSettings(
-        readout_to_bits_cycles=0,
-        packing_cycles_per_round=0,
-        decision_to_pulse_cycles=0,
-        packing_rounds_in_flight=None,
-    )
-
-
-def _baseline_detection_events() -> (
-    detection_event_settings.DetectionEventSettings
-):
-    """The controller forms every round's detection events, at no cost."""
-    return detection_event_settings.DetectionEventSettings(
-        formed_at=("controller",),
-        clock=None,
-        latency_cycles=0,
-        cycles_per_round=0,
-    )
-
-
-def _baseline_windows() -> window_settings.WindowSettings:
-    """Sliding windows of the code distance, issued free on the machine clock.
-
-    The last window drains with a flush tail, each committed window
-    ships its boundary at once, and the hand-off is a dense seam mask.
-    """
-    scheme = sliding_scheme.SlidingWindowScheme.Settings(
-        commit_rounds=None, buffer_rounds=None
-    )
-    eager = boundary_policies.Eager.Settings()
-    dense_seam_mask = boundary_payloads.DenseSeamMask.Settings()
-    return window_settings.WindowSettings(
-        clock=None,
-        decision_cycles=0,
-        scheme=scheme,
-        terminal_policy="flush",
-        boundary_policy=eager,
-        boundary_payload=dense_seam_mask,
-    )
-
-
-def _baseline_decoder_manager() -> decoder_settings.DecoderManagerSettings:
-    """First in, first out, one region a decode, dispatch unpriced."""
-    first_in_first_out = schedulers.FifoScheduler.Settings()
-    return decoder_settings.DecoderManagerSettings(
-        scheduler=first_in_first_out,
-        bulk_strong=False,
-        dispatch_cycles=0,
-        clock=None,
-    )
-
-
-def _baseline_observation() -> observe_settings.ObservationSettings:
-    """The results alone: no log, no trace, no extra counter."""
-    return observe_settings.ObservationSettings(
-        log="off",
-        log_component_io=False,
-        record_switching_windows=False,
-        backlog_trace=False,
-        trace="off",
-        trace_shots=(0,),
-        data_movement=False,
-    )
-
-
-def _one_cycle_paths(
-    links: link_settings.FabricSettings, path_clocks: Mapping, hops: str
-) -> link_settings.FabricSettings:
-    """The card with each named path one cycle of its clock, the rest kept.
-
-    Each named path is an unbounded wire of one lane, with no setup,
-    header or protocol; hops names the set in the card's name.
-    """
-    source = f"{hops}: one cycle of the hop's clock, an idealized wire"
-    cards = {}
-    for path_name, clock in path_clocks.items():
-        cards[path_name] = link_profiles.path_card(
-            links,
-            path_name,
-            clock=clock,
-            latency_cycles=1,
-            bits_per_cycle=None,
-            source=source,
-            lane_count=1,
-            setup_cycles_per_transfer=0,
-            header_bits_per_transfer=0,
-            protocol=None,
-        )
-    profile_name = f"{links.profile_name} with {hops} at one cycle"
-    return dataclasses.replace(links, **cards, profile_name=profile_name)
+    paths = []
+    if workload.fixes_the_distance:
+        paths.append("qpu.distance")
+    lowered_fields = getattr(workload, "fields_set_in_the_run_file", ())
+    for field in lowered_fields:
+        paths.append(f"workload.{field}")
+    return tuple(paths)
 
 
 def _check_decode_slots(settings: MachineSettings) -> None:
@@ -494,3 +200,44 @@ def _check_decode_slots(settings: MachineSettings) -> None:
         "not; a run with no switching decodes its windows on one decoder, "
         "so set switching or drop one decoder"
     )
+
+
+def _refuse_a_route_on_a_patch_no_operation_has(
+    settings: MachineSettings,
+) -> None:
+    """A readout route on a patch no operation reads out is never taken.
+
+    The fabric takes a route by a readout's whole footprint and
+    qpu_to_controller for every other (links/fabric.py), so such a route
+    would be ignored in silence. A footprint is an operation's patches,
+    one of them, or its qubits (qpu/syndrome_devices.py), so only a
+    patch no operation has is certain to match nothing.
+    """
+    routes = settings.links.readout_routes
+    workload_record = settings.workload.workload_record
+    if not routes or workload_record is None:
+        return
+    occupied = _patches_read_out(workload_record)
+    for route in routes:
+        unknown = _patches_not_in(route.patch_ids, occupied)
+        if unknown:
+            raise ValueError(
+                f"the readout route for patches {list(route.patch_ids)} "
+                f"names {unknown}, which no operation reads out, so it would "
+                "never be taken; the operations read out "
+                f"{sorted(occupied, key=repr)}"
+            )
+
+
+def _patches_not_in(patches: tuple, occupied: set) -> list:
+    return [patch for patch in patches if patch not in occupied]
+
+
+def _patches_read_out(workload_record: object) -> set:
+    """Every patch a readout's footprint can hold."""
+    patches = set()
+    for operation in workload_record.operations:
+        footprint = program_records.patches_of(operation)
+        patches.update(footprint)
+        patches.update(operation.qubits)
+    return patches

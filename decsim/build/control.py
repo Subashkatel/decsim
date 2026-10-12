@@ -117,6 +117,10 @@ class Control:
             ("pauli_frame", self.pauli_frame),
         )
 
+    def statistics_parts(self) -> tuple:
+        """The frame, at its settings path."""
+        return (("pauli_frame", self.pauli_frame),)
+
     def _wire_inside(self, links: ports.Link) -> None:
         self.execution_runtime.issuer = self.issuer
         self.issuer.streams = self.streams

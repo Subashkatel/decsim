@@ -6,8 +6,6 @@ beliefmatching's. Toshio arXiv 2510.25222: lightweight decoders
 decode constantly, a separate accurate decoder is invoked on demand.
 """
 
-import dataclasses
-
 import beliefmatching
 import numpy
 import pymatching
@@ -19,7 +17,8 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.machine as machine_module
-import decsim.settings as machine_settings
+import decsim.presets.machines as machines
+import decsim.topology.slotted as slotted
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -34,15 +33,9 @@ def _algorithm_records(machine) -> list:
     return records
 
 
-def _with_algorithm(settings, tier: str, algorithm):
-    """The settings with one tier's decoder row replaced."""
-    pool = getattr(settings, tier)
-    replaced = dataclasses.replace(pool, algorithm=algorithm)
-    return dataclasses.replace(settings, **{tier: replaced})
-
-
-def _run(settings, seed: int = 0):
-    """One shot of the settings: its machine and its result."""
+def _run(graph_machine, seed: int = 0):
+    """One shot of the graph: its machine and its result."""
+    settings = slotted.resolved(graph_machine)
     machine = machine_module.Machine.build(settings, seed)
     result = machine.run()
     return machine, result
@@ -82,10 +75,10 @@ def loop_predictions(result) -> list:
 def test_weak_unit_loop_matches_direct_pymatching(seed):
     # The functional gate: the loop with the weak unit's real MWPM reaches
     # the same prediction as whole-circuit PyMatching on the same events.
-    base = machine_settings.weak_decoder_baseline(3, 0.005, 1.0)
+    base = machines.weak_baseline(3, 0.005, 1.0)
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    settings = _with_algorithm(base, "weak_decoder", matching)
-    machine, result = _run(settings, seed)
+    graph_machine = base.with_settings(machines.WEAK_POOL, algorithm=matching)
+    machine, result = _run(graph_machine, seed)
     windows = machine.observation.windows.windows
     loop = loop_predictions(result)
     assert len(windows) > 0
@@ -123,8 +116,8 @@ def test_strong_unit_loop_matches_offline_belief_matching(seed):
     the observables beliefmatching reaches on the whole circuit's events,
     so its accuracy is the offline decoder's on the same shots.
     """
-    settings = machine_settings.strong_decoder_baseline(3, 0.01, 1.0)
-    machine, result = _run(settings, seed)
+    graph_machine = machines.strong_baseline(3, 0.01, 1.0)
+    machine, result = _run(graph_machine, seed)
     windows = machine.observation.windows.windows
     loop = loop_predictions(result)
     assert len(windows) > 0
@@ -138,7 +131,7 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count():
     cycle count holds its unit for whole cycles of the named clock and
     never fewer than the eleven the quiet machine costs.
     """
-    base = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    base = machines.weak_baseline(3, 0.001, 1.0)
     one_hundred_megahertz = config.Clock.from_megahertz(100.0)
     cycle_count = cycle_count_module.CycleCount(
         clock=one_hundred_megahertz, delay_cycles=3
@@ -146,8 +139,10 @@ def test_a_union_find_tier_with_a_cycle_count_is_held_by_the_count():
     union_find_decoder = union_find.UnionFindDecoder.Settings(
         timing=cycle_count
     )
-    settings = _with_algorithm(base, "weak_decoder", union_find_decoder)
-    machine, _result = _run(settings)
+    graph_machine = base.with_settings(
+        machines.WEAK_POOL, algorithm=union_find_decoder
+    )
+    machine, _result = _run(graph_machine)
     period_ticks = one_hundred_megahertz.period_ticks
     algorithm = _algorithm_records(machine)
     ticks_past_an_edge = {
@@ -167,10 +162,10 @@ def test_a_measured_table_tier_is_held_by_the_measured_line():
     nearest a d = 5 window (decoders/measured_table).
     """
     pytest.importorskip("relay_bp")
-    base = machine_settings.strong_decoder_baseline(5, 0.001, 1.0)
+    base = machines.strong_baseline(5, 0.001, 1.0)
     measured = measured_table.MeasuredTableDecoder.Settings(device="a100")
-    settings = _with_algorithm(base, "strong_decoder", measured)
-    machine, _result = _run(settings)
+    graph_machine = base.with_settings(machines.STRONG_POOL, algorithm=measured)
+    machine, _result = _run(graph_machine)
     algorithm = _algorithm_records(machine)
     intercept_ticks = 78_957_000
     ticks_per_iteration = 9_762_000

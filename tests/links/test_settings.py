@@ -6,11 +6,13 @@ is ns-3's DataRate (point-to-point-net-device.cc): the wire's rate is
 read exactly as the card writes it.
 """
 
+import dataclasses
 import fractions
 
 import pytest
 
 import decsim.experiments.collect as collect
+import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.records.transfers as transfer_records
 
@@ -52,8 +54,8 @@ def every_path_free():
     that one and leaves the rest on the shared free channel.
     """
     names = []
-    for path in transfer_records.LinkPath:
-        names.append(path.value)
+    for path in transfer_records.SLOTTED_PATHS:
+        names.append(path)
     return dict.fromkeys(names, FREE_PATH)
 
 
@@ -160,3 +162,21 @@ def test_readout_routes_share_the_same_channel_settings_contract() -> None:
     route = link_settings.ReadoutRoute((1,), delayed_path)
     with pytest.raises(ValueError, match="is declared with different settings"):
         card(readout_routes=(route,))
+
+
+def test_a_hop_the_card_names_twice_is_refused():
+    reference = link_profiles.logical_reference_profile()
+    hop = link_settings.NamedPath("uf_to_relay", reference.decoder_to_decoder)
+
+    with pytest.raises(ValueError, match="prices the hop 'uf_to_relay' twice"):
+        dataclasses.replace(reference, hops=(hop, hop))
+
+
+def test_a_cards_hops_follow_the_slotted_twelve_by_name():
+    reference = link_profiles.logical_reference_profile()
+    hop = link_settings.NamedPath("uf_to_relay", reference.decoder_to_decoder)
+
+    card = dataclasses.replace(reference, hops=(hop,))
+
+    assert card.path_names() == (*transfer_records.SLOTTED_PATHS, "uf_to_relay")
+    assert card.path_settings("uf_to_relay") == reference.decoder_to_decoder

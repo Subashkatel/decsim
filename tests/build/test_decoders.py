@@ -13,13 +13,22 @@ import dataclasses
 import pytest
 
 import decsim.build.decoders as decoder_build
+import decsim.build.escalation as escalation_build
 import decsim.confidence.cluster as cluster
+import decsim.confidence.consensus as consensus
 import decsim.config as config
+import decsim.decoders.batching as batching
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
+import decsim.engine as engine_module
+import decsim.escalation.verdicts as verdicts
 import decsim.machine as machine_module
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
+import decsim.topology.graph_layout as graph_layout
 import tests.declared_run as declared_run
+import tests.escalation.declared_fabric as declared_fabric
+import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -41,9 +50,40 @@ def test_each_tiers_unit_memory_reaches_the_pool_of_its_own_units():
     machine = machine_module.Machine.build(bounded, 0)
 
     weak_unit = machine.decoders.decoder_manager.pool.units[0]
-    strong_unit = machine.decoders.strong_decoder_manager.pool.units[0]
+    strong_manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
+    strong_unit = strong_manager.pool.units[0]
     assert weak_unit.memory.capacity_bits == 12
     assert strong_unit.memory.capacity_bits == 30
+
+
+def test_each_managers_statistics_are_kept_at_its_tiers_settings_path():
+    """The jobs waiting over both pools are the two queues' sum.
+
+    Each queue's level is set before it reports the change, so the sum
+    over the pools holds what the queues hold at every tick: its area is
+    the sum of their areas.
+    """
+    switching = declared_run.switching_run(escalates=True)
+    machine = machine_module.Machine.build(switching.settings, 0)
+    machine.run()
+
+    groups = machine.observation.statistics.groups
+    weak = groups["weak_decoder.queue"].queued
+    strong = groups["strong_decoder.queue"].queued
+    over_pools = groups[decoder_build.MANAGERS_PATH].queued
+
+    decoder_paths = [path for path in sorted(groups) if "decode" in path]
+    assert decoder_paths == [
+        "decoder_manager",
+        "strong_decoder.decodes",
+        "strong_decoder.queue",
+        "strong_decoder.units",
+        "weak_decoder.decodes",
+        "weak_decoder.queue",
+        "weak_decoder.units",
+    ]
+    assert over_pools.area == weak.area + strong.area
+    assert groups["strong_decoder.units"].busy_units.area > 0
 
 
 def test_an_engine_that_names_no_clock_counts_on_the_machines():
@@ -56,7 +96,7 @@ def test_an_engine_that_names_no_clock_counts_on_the_machines():
     )
 
     unit = decoder_build.build_decoder_unit(
-        weak, "weak", machine_clock, None, None
+        weak, "weak_decoder", machine_clock, None, None
     )
 
     assert unit.timing.clock == machine_clock
@@ -133,7 +173,8 @@ def test_each_managers_scheduler_is_seeded_on_its_own_path():
     machine = machine_module.Machine.build(settings, 7)
 
     chip_scheduler = machine.decoders.decoder_manager.queue.scheduler
-    host_scheduler = machine.decoders.strong_decoder_manager.queue.scheduler
+    strong_manager = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
+    host_scheduler = strong_manager.queue.scheduler
     assert len(chip_scheduler.reserved_seeds) == 1
     assert len(host_scheduler.reserved_seeds) == 1
     assert chip_scheduler.reserved_seeds != host_scheduler.reserved_seeds
@@ -154,4 +195,78 @@ def test_a_weak_decoder_short_of_the_signals_evidence_is_named_by_its_record():
 
     refusal = "weak_decoder PyMatchingDecoder.Settings cannot serve"
     with pytest.raises(ValueError, match=refusal):
-        decoder_build.build_decoder_unit(tier, "weak", None, None, signal)
+        decoder_build.build_decoder_unit(
+            tier, "weak_decoder", None, None, signal
+        )
+
+
+class _FormedBeforeEveryPool:
+    """A placement that forms each round before any pool reads it."""
+
+    def forms_at(self, seat: str) -> bool:
+        del seat
+        return False
+
+
+def test_the_consensus_row_needs_an_ensemble_on_the_source_pool():
+    confidence = consensus.Consensus.Settings()
+    agreement = verdicts.Agreement.Settings()
+    switching = declared_run.declared_switching(
+        confidence=confidence, verdict=agreement
+    )
+    settings = declared_fabric.switching_settings(
+        rounds=6, escalated_windows=set(), switching=switching
+    )
+
+    with pytest.raises(ValueError, match="only the ensemble row"):
+        machine_module.Machine.build(settings, 0)
+
+
+def test_a_pool_no_edge_escalates_to_may_not_batch():
+    decode_each = batching.DecodeEach.Settings()
+    settings = declared_fabric.switching_settings(
+        rounds=6, escalated_windows=set()
+    )
+    weak = dataclasses.replace(settings.weak_decoder, batching=decode_each)
+    settings = dataclasses.replace(settings, weak_decoder=weak)
+
+    with pytest.raises(ValueError, match="no edge escalates to"):
+        machine_module.Machine.build(settings, 0)
+
+
+def test_a_pools_batching_beside_bulk_strong_is_refused():
+    decode_each = batching.DecodeEach.Settings()
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+    settings = declared_fabric.switching_settings(
+        rounds=6, escalated_windows=set()
+    )
+    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
+    settings = dataclasses.replace(
+        settings, strong_decoder=strong, decoder_manager=bulk
+    )
+
+    with pytest.raises(ValueError, match="keep one"):
+        machine_module.Machine.build(settings, 0)
+
+
+def test_bulk_strong_merges_the_queue_of_every_pool_an_edge_leads_to():
+    """The entry pool decodes the planner's windows, one job each."""
+    chain = layout_tests.chain_machine()
+    settings = graph_layout.entry_settings(chain)
+    layout = layout_tests.laid_out(chain)
+    engine = engine_module.Engine()
+    parts = escalation_build.build_switching(layout, engine)
+    signals = escalation_build.signal_by_pool(parts)
+    placement = _FormedBeforeEveryPool()
+    pools = decoder_build.build_pool_units(
+        layout, settings.clock, placement, signals
+    )
+    bulk = decoder_settings.DecoderManagerSettings(bulk_strong=True)
+    targets = layout.target_by_source()
+
+    decoders = decoder_build.Decoders.build(
+        bulk, settings.clock, engine, pools, targets
+    )
+
+    merges = [manager.queue.merges_strong for manager in decoders.managers]
+    assert merges == [False, True, True]

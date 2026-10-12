@@ -1,7 +1,7 @@
 """`decsim trace follow` on gate point 1's own trace.
 
 The reader prints one round's and one window's path from gate point 1's
-trace (weak_decoder_baseline d 3 p 0.003 seed 0). The controller's
+trace (machines.weak_baseline d 3 p 0.003 seed 0). The controller's
 intake copy is at 1.000, the send tick, and the weak syndrome buffer
 holds detection events, so round 1's residence there carries 4 bits and
 not the link's 8.

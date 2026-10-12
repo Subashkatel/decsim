@@ -17,7 +17,7 @@ def _job():
         round_count=5,
     )
     request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     service_key = decoding_records.DecoderServiceKey(0)
     return decoding_records.DecodeJob(

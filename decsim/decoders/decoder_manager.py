@@ -39,6 +39,7 @@ import decsim.records.fault_model_contracts as fault_models
 import decsim.records.log_sources as log_sources
 import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
+import decsim.statistics.registry as statistics_registry
 
 
 class DecoderManager:
@@ -65,14 +66,15 @@ class DecoderManager:
         *,
         scheduler: schedulers.Scheduler,
         pool_settings: decoder_pool_module.PoolSettings,
-        bulk_strong: bool = False,
+        pool_id: window_records.PoolId = window_records.WEAK_POOL_ID,
+        merges_strong: bool = False,
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,
     ):
         self.engine = engine
+        # the pool the requests this manager serves are for
+        self.pool_id = pool_id
         pool = decoder_pool_module.DecoderPool(self, pool_settings)
-        is_strong_pool = pool_settings.name == decode_queue.STRONG_POOL
-        merges_strong = bulk_strong and is_strong_pool
         self.queue = decode_queue.WaitingJobs(
             engine, scheduler, self, merges_strong
         )
@@ -95,6 +97,28 @@ class DecoderManager:
             self.queue, pool, self.service
         )
         self.outcomes = decode_outcomes.DecodeOutcomes(engine, self)
+
+    def attach_statistics(
+        self, run_statistics: statistics_registry.Registry, path: str
+    ) -> None:
+        """Record the pool's, the queue's and the decodes' statistics.
+
+        A decoder row that declares statistics, the row the manager runs
+        or one it wraps, records them at the path's algorithm.
+        """
+        pool = self.pool
+        units_path = f"{path}.units"
+        group = run_statistics.attach(pool, units_path)
+        unit_count = len(pool.units)
+        group.units.add(unit_count)
+        queue_path = f"{path}.queue"
+        run_statistics.attach(self.queue, queue_path)
+        decodes_path = f"{path}.decodes"
+        run_statistics.attach(self.service, decodes_path)
+        algorithm_path = f"{path}.algorithm"
+        decoders = (self.decoder,)
+        for row in decoder_pool_module.decoder_rows(decoders):
+            run_statistics.attach(row, algorithm_path)
 
     def start(self) -> None:
         """Hear every row of the decoder say a model pins no class.
@@ -257,8 +281,12 @@ class DecoderManager:
             )
         for job in jobs:
             self._withdraw_job(job)
-        self.strong_requests.resolve_weak(window_key)
+        self.strong_requests.resolve_weak(window_key, self.pool_id)
         self.dispatcher.run()
+
+    def waiting_jobs(self) -> int:
+        """The jobs queued and not dispatched, read by a deadline trigger."""
+        return len(self.queue.waiting)
 
     def _withdraw_job(self, job: decoding_records.DecodeJob) -> None:
         """Take one unstarted job out of its queue or its slot."""
@@ -306,13 +334,16 @@ class DecoderManager:
     def accept_selection(
         self, window_key: tuple, request_key: window_records.DecoderRequestKey
     ) -> None:
-        """The selection landed: the request's result may reach the window."""
+        """The selection landed: the attempt's results may reach the window.
+
+        Each one finished before the selection waits in its unit, one per
+        forced class.
+        """
         if not self.strong_requests.select(window_key, request_key):
             return
-        completion = self.service.take_strong_output(window_key)
-        if completion is None:
-            return
-        self.outcomes.complete_strong(completion)
+        waiting = self._take_strong_outputs(window_key)
+        for completion in waiting:
+            self.outcomes.complete_strong(completion)
 
     def charge_soft_output(
         self, job: decoding_records.DecodeJob, ticks: int
@@ -348,7 +379,12 @@ class DecoderManager:
         job: decoding_records.DecodeJob,
         result: decoding_records.DecodeResult,
     ) -> None:
-        """A forced-class solve whose window is answered by the other one."""
+        """A forced-class solve whose window is answered by the other one.
+
+        A strong solve ended its request when it was delivered.
+        """
+        if job.kind is decoding_records.DecodeJobKind.STRONG_REDECODE:
+            return
         self.outcomes.close_companion_request(job, result)
         self.read_result(job)
 
@@ -366,6 +402,10 @@ class DecoderManager:
             return
         if job.unit is None:
             return
+        # a strong decode gave its unit back at its end; its result
+        # waits in the unit's output slot (_strong_decode_done)
+        if job.kind is not decoding_records.DecodeJobKind.WINDOW:
+            return
         self.service.free(job)
         self.dispatcher.run()
 
@@ -379,22 +419,48 @@ class DecoderManager:
         cancel ends one request and passes no verdict on the
         destination, so the cancelled request can be replaced.
         """
+        discarded = self._discard_strong_outputs(key)
+        taken = self.strong_requests.take_live(key, self.pool_id)
+        if not taken:
+            self.strong_requests.counts.cancelled += discarded
+            return
+        for live in taken:
+            self._cancel_live_strong(live)
+            self.strong_requests.counts.cancelled += 1
+        self.dispatcher.run()  # returned credits may admit a waiting head
+
+    def abandon_strong(self, key: tuple) -> None:
+        """Let an unneeded strong re-decode run to its end, then drop it.
+
+        The request runs out where it is, as a decode already launched
+        cannot be recalled; its result is dropped when its decode ends
+        (decode_outcomes.complete_strong). One already done and waiting
+        in its unit is dropped now.
+        """
+        discarded = self._discard_strong_outputs(key)
+        self.strong_requests.counts.abandoned += discarded
+        self.strong_requests.abandon(key, self.pool_id)
+
+    def _take_strong_outputs(self, key: tuple) -> list:
+        """Every finished result the units hold for the destination."""
+        waiting = []
         completion = self.service.take_strong_output(key)
-        if completion is not None:
+        while completion is not None:
+            waiting.append(completion)
+            completion = self.service.take_strong_output(key)
+        return waiting
+
+    def _discard_strong_outputs(self, key: tuple) -> int:
+        """Drop the results the units hold for the destination; how many."""
+        waiting = self._take_strong_outputs(key)
+        for completion in waiting:
             self.outcomes.report_request(
                 completion.request_job,
                 completion.result,
                 decoding_records.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
                 completion.decode_output_ticks,
             )
-        live = self.strong_requests.take_live(key)
-        if live is None:
-            if completion is not None:
-                self.strong_requests.counts.cancelled += 1
-            return
-        self._cancel_live_strong(live)
-        self.strong_requests.counts.cancelled += 1
-        self.dispatcher.run()  # returned credits may admit a waiting head
+        return len(waiting)
 
     # ------------------------------------------------------------ settling
 
@@ -441,10 +507,20 @@ class DecoderManager:
         deliveries = self.strong_requests.deliveries_for(job, result, now)
         job.completed = True
         self.service.free(job)
-        members = self.strong_requests.members_of(job)
+        members = self._held_inputs(job)
         self.service.release_inputs(members)
-        self.outcomes.conclude_strong(job, result, deliveries)
+        self.outcomes.conclude_strong(job, deliveries)
         self.dispatcher.run()
+
+    def _held_inputs(self, job: decoding_records.DecodeJob) -> list:
+        """The requests whose input the decode held, to free at its end.
+
+        A merged batch holds every member it was formed with: one
+        cancelled while the batch held a unit rode on with it.
+        """
+        if job.batch_members:
+            return list(job.batch_members)
+        return self.strong_requests.members_of(job)
 
     def _self_contained_decode_done(
         self, job: decoding_records.DecodeJob, result
@@ -517,8 +593,18 @@ class DecoderManager:
     def _cancel_staged_strong(
         self, live: strong_requests_module.LiveStrongRequest
     ) -> None:
-        """Cancelled in its slot before its decode started."""
+        """Cancelled in its slot before its decode started.
+
+        A batch with other members left goes on without decoding this
+        one (batching.py), whose input may still be crossing into the
+        unit: it rides the batch, which frees it at its end
+        (_held_inputs).
+        """
         job = live.service_job
+        if self.strong_requests.has_survivors(job):
+            live.request_job.cancelled = True
+            self._report_member_left(live)
+            return
         job.cancelled = True
         self.service.evict(job)
         self.service.release_input(live.request_job)
@@ -532,9 +618,15 @@ class DecoderManager:
     def _cancel_queued_strong(
         self, live: strong_requests_module.LiveStrongRequest
     ) -> None:
+        """Cancelled while queued; a batch with other members stays.
+
+        The next dispatch opens a waiting batch into its live members
+        (decode_queue.py), so the cancelled one leaves it then.
+        """
         job = live.service_job
-        self.service.cancel_input(job)
-        self.queue.remove(job)
+        if not self.strong_requests.has_survivors(job):
+            self.service.cancel_input(job)
+            self.queue.remove(job)
         # Credits belong to the original request, never to a batch service
         # job, and the request is its own service job before dispatch.
         self.service.release_input(live.request_job)
@@ -551,12 +643,7 @@ class DecoderManager:
         job = live.service_job
         if self.strong_requests.has_survivors(job):
             self.service.release_input(live.request_job)
-            self.outcomes.report_request(
-                live.request_job,
-                None,
-                decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
-                None,
-            )
+            self._report_member_left(live)
             return
         job.cancelled = True
         self.service.abort(job)
@@ -566,6 +653,17 @@ class DecoderManager:
             live.request_job,
             None,
             decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE,
+            None,
+        )
+
+    def _report_member_left(
+        self, live: strong_requests_module.LiveStrongRequest
+    ) -> None:
+        """One member of a batch that goes on without it was cancelled."""
+        self.outcomes.report_request(
+            live.request_job,
+            None,
+            decoding_records.RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED,
             None,
         )
 

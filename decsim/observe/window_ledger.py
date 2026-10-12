@@ -30,3 +30,7 @@ class WindowLedger:
         """A window committed; its record now carries its commit."""
         del contribution
         self.windows[window.key] = window
+
+    def forget(self, window_key: tuple) -> None:
+        """Let a window a stream has measured go."""
+        self.windows.pop(window_key, None)

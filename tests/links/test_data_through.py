@@ -63,6 +63,7 @@ import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
+import decsim.presets.link_cards as link_cards
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -483,7 +484,7 @@ def bounded_strong_hops_run(distance: int) -> dict:
     """
     data_qubit_count = distance * distance
     syndrome_bits_per_round = data_qubit_count - 1
-    bounded = link_profiles.bandwidth_limited_profile(
+    bounded = link_cards.bandwidth_limited_card(
         syndrome_bits_per_round=syndrome_bits_per_round,
         round_microseconds=1.0,
         commit_rounds=distance,

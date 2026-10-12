@@ -10,7 +10,7 @@ none), both strong windows, the three threshold sources, both cluster
 gaps, the four window schemes, bounded links and buffers, the ported
 store, the credit and reliable protocols, the chip side's priced
 stages, the data path read in place, and Experiment 1's two machines,
-each at d = 3 from the shipped base functions and run files.
+each at d = 3 from the shipped presets and run files.
 
 The decoders' and confidence walks' host clocks are a counter stepping
 20 microseconds a reading, as the fingerprint harness steps them, so a
@@ -45,9 +45,14 @@ import decsim.links.credit_channel as credit_channel
 import decsim.links.framings as framings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.reliable_channel as reliable_channel
+import decsim.presets.clocks as clocks
+import decsim.presets.experiment_one as experiment_one
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.seeding as seeding
-import decsim.settings as machine_settings
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.naive_online as naive_online
@@ -71,34 +76,30 @@ SEED = 0
 HOST_CLOCK_READERS = (decoder_module, cluster, extra_cluster)
 
 
-def weak_alone() -> machine_settings.MachineSettings:
-    return machine_settings.weak_decoder_baseline(
-        DISTANCE, 0.003, ROUND_PERIOD_MICROSECONDS
-    )
+def weak_alone() -> graph.Machine:
+    return machines.weak_baseline(DISTANCE, 0.003, ROUND_PERIOD_MICROSECONDS)
 
 
-def strong_alone() -> machine_settings.MachineSettings:
-    return machine_settings.strong_decoder_baseline(
-        DISTANCE, 0.003, ROUND_PERIOD_MICROSECONDS
-    )
+def strong_alone() -> graph.Machine:
+    return machines.strong_baseline(DISTANCE, 0.003, ROUND_PERIOD_MICROSECONDS)
 
 
-def redo_window_switching() -> machine_settings.MachineSettings:
+def redo_window_switching() -> graph.Machine:
     run_file = _run_file("switching")
     return run_file.redo_window_switching(DISTANCE)
 
 
-def cluster_gap_switching() -> machine_settings.MachineSettings:
+def cluster_gap_switching() -> graph.Machine:
     run_file = _run_file("switching")
     return run_file.cluster_gap_switching(DISTANCE)
 
 
-def table_threshold() -> machine_settings.MachineSettings:
+def table_threshold() -> graph.Machine:
     table = threshold_sources.TableThreshold.Settings(table=THRESHOLD_TABLE)
     return _redo_window_switching_on(table)
 
 
-def online_threshold() -> machine_settings.MachineSettings:
+def online_threshold() -> graph.Machine:
     # an audit rate high enough that a short shot audits, so the
     # calibrator moves its threshold within the shot
     online = threshold_sources.OnlineThreshold.Settings(
@@ -114,55 +115,50 @@ def online_threshold() -> machine_settings.MachineSettings:
     return _redo_window_switching_on(online)
 
 
-def bounded_links() -> machine_settings.MachineSettings:
+def bounded_links() -> graph.Machine:
     # every path carries exactly its nominal traffic, so jitter queues
     base = weak_alone()
-    links = link_profiles.bandwidth_limited_profile(
+    card = link_cards.bandwidth_limited_card(
         syndrome_bits_per_round=SYNDROME_BITS_PER_ROUND,
         round_microseconds=ROUND_PERIOD_MICROSECONDS,
         commit_rounds=DISTANCE,
         buffer_rounds=DISTANCE,
     )
-    return dataclasses.replace(base, links=links)
+    fabric = fabrics.CardFabric(card)
+    return dataclasses.replace(base, fabric=fabric)
 
 
-def bounded_buffer() -> machine_settings.MachineSettings:
+def bounded_buffer() -> graph.Machine:
     # a 64-bit store behind a 5 microsecond unit fills, and the
     # controller holds rounds
     base = weak_alone()
-    store = dataclasses.replace(base.weak_syndrome_buffer, bits=64)
+    small_store = base.with_settings(machines.WEAK_STORE, bits=64)
     slow = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
         preset_latency_microseconds=5.0
     )
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=slow)
-    return dataclasses.replace(
-        base, weak_syndrome_buffer=store, weak_decoder=weak_decoder
-    )
+    return small_store.with_settings(machines.WEAK_POOL, algorithm=slow)
 
 
-def data_path_in_place() -> machine_settings.MachineSettings:
+def data_path_in_place() -> graph.Machine:
     run_file = _run_file("data_movement")
     return run_file.weak_input_in_place(DISTANCE)
 
 
-def experiment_one_switching() -> machine_settings.MachineSettings:
-    run_file = _run_file("switching_baseline")
-    return run_file.switching(DISTANCE, 0.003)
+def experiment_one_switching() -> graph.Machine:
+    return experiment_one.switching(DISTANCE, 0.003)
 
 
-def experiment_one_weak_alone() -> machine_settings.MachineSettings:
-    run_file = _run_file("switching_baseline")
-    return run_file.weak_alone(DISTANCE, 0.003)
+def experiment_one_weak_alone() -> graph.Machine:
+    return experiment_one.weak_alone(DISTANCE, 0.003)
 
 
-def extra_cluster_gap_switching() -> machine_settings.MachineSettings:
+def extra_cluster_gap_switching() -> graph.Machine:
     machine = cluster_gap_switching()
     confidence = extra_cluster.ExtraClusterGap.Settings()
-    switching = dataclasses.replace(machine.switching, confidence=confidence)
-    return dataclasses.replace(machine, switching=switching)
+    return machine.with_settings(machines.SWITCHING, confidence=confidence)
 
 
-def parallel_windows() -> machine_settings.MachineSettings:
+def parallel_windows() -> graph.Machine:
     scheme = parallel.ParallelWindowScheme.Settings(
         commit_rounds=2, buffer_rounds=2
     )
@@ -170,29 +166,30 @@ def parallel_windows() -> machine_settings.MachineSettings:
     return _weak_alone_on_windows(scheme, sparse, None)
 
 
-def sandwich_windows() -> machine_settings.MachineSettings:
+def sandwich_windows() -> graph.Machine:
     scheme = sandwich.TanSandwichScheme.Settings(
         commit_rounds=2, buffer_rounds=3
     )
     return _weak_alone_on_windows(scheme, None, None)
 
 
-def naive_online_windows() -> machine_settings.MachineSettings:
+def naive_online_windows() -> graph.Machine:
     scheme = naive_online.NaiveOnlineScheme.Settings()
     sparse = boundary_payloads.SparseSeamList.Settings()
     held = boundary_policies.Held.Settings()
     return _weak_alone_on_windows(scheme, sparse, held)
 
 
-def ported_buffer() -> machine_settings.MachineSettings:
+def ported_buffer() -> graph.Machine:
     base = weak_alone()
     store = ported_syndrome_buffer.PortedSyndromeBufferSettings(
         read_write_ports=1, cycles_per_access=2, access_latency_cycles=1
     )
-    return dataclasses.replace(base, weak_syndrome_buffer=store)
+    ported = graph.Part(machines.WEAK_STORE, store, fabrics.FRIDGE)
+    return base.with_part(ported)
 
 
-def protocol_links() -> machine_settings.MachineSettings:
+def protocol_links() -> graph.Machine:
     # a reliable RoCE hop that drops bits and retransmits, then a credit
     # hop in flits, so both protocols queue and the drops draw seeds
     base = weak_alone()
@@ -206,26 +203,26 @@ def protocol_links() -> machine_settings.MachineSettings:
         retransmit_timeout_cycles=400,
         retry_count=7,
         bit_error_rate=0.0005,
-        clock=machine_settings.FRIDGE_CLOCK,
+        clock=clocks.FRIDGE_CLOCK,
     )
     flits = framings.Flits.Settings(flit_bits=8)
     credit = credit_channel.CreditChannel.Settings(
         framing=flits,
         receive_buffer_frames=2,
         credit_latency_cycles=1,
-        clock=machine_settings.FRIDGE_CLOCK,
+        clock=clocks.FRIDGE_CLOCK,
     )
-    to_store = _protocol_path(base.links, "controller_to_weak_buffer", reliable)
-    to_unit = _protocol_path(base.links, "weak_buffer_to_weak_decoder", credit)
-    links = dataclasses.replace(
-        base.links,
+    to_store = _protocol_path("controller_to_weak_buffer", reliable)
+    to_unit = _protocol_path("weak_buffer_to_weak_decoder", credit)
+    fabric = fabrics.PathLinks(
         controller_to_weak_buffer=to_store,
         weak_buffer_to_weak_decoder=to_unit,
+        base=base.fabric,
     )
-    return dataclasses.replace(base, links=links)
+    return dataclasses.replace(base, fabric=fabric)
 
 
-def chip_side_costs() -> machine_settings.MachineSettings:
+def chip_side_costs() -> graph.Machine:
     # the chip-side prices the bases leave free: two units with a bounded
     # memory read in words, held until their result is read, every stage
     # priced per job and per round, events formed at the decoder, and a
@@ -238,8 +235,8 @@ def chip_side_costs() -> machine_settings.MachineSettings:
         release_cycles_per_round=7,
     )
     memory = decoder_settings.UnitMemorySettings(bits=4096, word_bits=8)
-    weak_decoder = dataclasses.replace(
-        base.weak_decoder,
+    priced_units = base.with_settings(
+        machines.WEAK_POOL,
         unit_count=2,
         engine=engine,
         unit_memory=memory,
@@ -248,19 +245,15 @@ def chip_side_costs() -> machine_settings.MachineSettings:
     events = detection_event_settings.DetectionEventSettings(
         formed_at=("weak_decoder",), latency_cycles=2, cycles_per_round=1
     )
-    manager = dataclasses.replace(base.decoder_manager, dispatch_cycles=1)
-    return dataclasses.replace(
-        base,
-        weak_decoder=weak_decoder,
-        detection_events=events,
-        decoder_manager=manager,
-    )
+    events_part = graph.Part("detection_events", events)
+    at_the_decoder = priced_units.with_part(events_part)
+    return at_the_decoder.with_settings("decoder_manager", dispatch_cycles=1)
 
 
-def no_decoder() -> machine_settings.MachineSettings:
+def no_decoder() -> graph.Machine:
     base = weak_alone()
-    workload = dataclasses.replace(base.workload, decode_operations=())
-    return dataclasses.replace(base, weak_decoder=None, workload=workload)
+    without_decodes = base.with_settings("workload", decoded=False)
+    return without_decodes.without_part(machines.WEAK_POOL)
 
 
 SHAPES = {
@@ -353,39 +346,48 @@ def _run_file(name: str) -> types.ModuleType:
     return module
 
 
-def _redo_window_switching_on(threshold) -> machine_settings.MachineSettings:
+def _redo_window_switching_on(threshold) -> graph.Machine:
     """The redo window switching task with its threshold source swapped."""
     machine = redo_window_switching()
-    switching = dataclasses.replace(machine.switching, threshold=threshold)
-    return dataclasses.replace(machine, switching=switching)
+    return machine.with_settings(machines.SWITCHING, threshold=threshold)
 
 
 def _weak_alone_on_windows(
     scheme, boundary_payload, boundary_policy
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The weak base on another scheme; None keeps the base's choice."""
     base = weak_alone()
-    windows = dataclasses.replace(base.windows, scheme=scheme)
+    base_windows = base.part(machines.WINDOWS)
+    windows = dataclasses.replace(base_windows.settings, scheme=scheme)
     if boundary_payload is not None:
         windows = dataclasses.replace(
             windows, boundary_payload=boundary_payload
         )
     if boundary_policy is not None:
         windows = dataclasses.replace(windows, boundary_policy=boundary_policy)
-    return dataclasses.replace(base, windows=windows)
+    windows_part = graph.Part(machines.WINDOWS, windows)
+    return base.with_part(windows_part)
 
 
-def _protocol_path(links, path_name: str, protocol):
-    """One path of the card, one fridge cycle at 8 bits, on a protocol."""
-    return link_profiles.path_card(
-        links,
-        path_name,
-        clock=machine_settings.FRIDGE_CLOCK,
+def _protocol_path(path_name: str, protocol) -> fabrics.FixedPath:
+    """One path, one fridge cycle at 8 bits, on a packet protocol.
+
+    A clocked link has no protocol, so the path is written out whole:
+    the reference path's payload on the clocked wire, its channel on
+    the protocol.
+    """
+    reference = link_profiles.logical_reference_profile()
+    reference_path = getattr(reference, path_name)
+    wire = fabrics.ClockedLink(
+        clock=clocks.FRIDGE_CLOCK,
         latency_cycles=1,
         bits_per_cycle=8.0,
         source="the regression lock's protocol hop",
-        protocol=protocol,
     )
+    priced = wire.priced(path_name, reference_path, None)
+    channel = dataclasses.replace(priced.channel, protocol=protocol)
+    path = dataclasses.replace(priced, channel=channel)
+    return fabrics.FixedPath(path)
 
 
 def _recording_derive(derive, seed_rows: list):

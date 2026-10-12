@@ -11,9 +11,20 @@ runs, so `decsim trace` never loads Stim. The console script and
     decsim run <run file> --seed S [--only NAME] [--out DIR] [--log ...]
         [--trace]
     decsim run <run file> --slurm [--cores C] [--hours H] [--memory-mb M]
-        [--out DIR] [--dry-run]
+        [--memory-margin F] [--out DIR] [--dry-run]
     decsim run --fold --out DIR
     decsim trace follow <file> --round k:n | --window k:n
+    decsim params <run file> [--only NAME] [--match PATTERN]
+    decsim info <record name>
+    decsim describe <run file> [--only NAME]
+    decsim check <run file> [--only NAME]
+    decsim estimates <run dir>
+    decsim stream <run file> --rounds N [--only NAME] [--warmup W]
+        [--seed S] [--out FILE]
+
+Every run form takes --set PATH=VALUE, repeated, to set any parameter
+of every task's machine (decsim/parameters; `decsim params` lists the
+paths); DECSIM_SET holds more, `;` between them, the flags winning.
 
 What the experiments layer refuses reaches the user as one sentence and
 exit 1 (decsim/experiments/refusal.py); anything else keeps its
@@ -62,9 +73,12 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 def _run(argv: list) -> None:
     """An experiment's tasks, one task, one shot, Slurm, a job, a fold."""
+    import decsim.experiments.parameters_command as parameters_command
+
     parser = _run_parser()
     parsed = parser.parse_args(argv)
     _check_the_run_arguments(parser, parsed)
+    parameters_command.put_in_force(parsed.set)
     if parsed.fold:
         _fold(parsed)
         return
@@ -87,7 +101,12 @@ def _launch_on_slurm(parsed) -> None:
     """Every task recorded, its pieces packed into Slurm jobs, then a fold."""
     import decsim.experiments.plan_command as plan_command
 
-    job = plan_command.JobShape(parsed.cores, parsed.hours, parsed.memory_mb)
+    memory_mb = parsed.memory_mb
+    if memory_mb is None:
+        memory_mb = plan_command.measured_memory_mb(
+            parsed.run_file, parsed.cores, parsed.memory_margin
+        )
+    job = plan_command.JobShape(parsed.cores, parsed.hours, memory_mb)
     plan_command.launch(
         parsed.run_file, parsed.out, job, dry_run=parsed.dry_run
     )
@@ -163,6 +182,8 @@ def _run_parser():
     """
     import argparse
 
+    import decsim.experiments.parameters_command as parameters_command
+
     parser = argparse.ArgumentParser(prog="decsim run")
     parser.add_argument(
         "run_file",
@@ -221,7 +242,18 @@ def _run_parser():
         "--hours", type=int, default=24, help="a job's longest walltime"
     )
     parser.add_argument(
-        "--memory-mb", type=int, default=16384, help="a job's memory"
+        "--memory-mb",
+        type=int,
+        default=None,
+        help="a job's memory; by default its cores times the largest "
+        "peak_memory_mb in seconds_per_shot.csv, times --memory-margin, "
+        "or 16384 without one",
+    )
+    parser.add_argument(
+        "--memory-margin",
+        type=float,
+        default=1.25,
+        help="what a job asks over its workers' measured peaks",
     )
     parser.add_argument(
         "--dry-run",
@@ -234,6 +266,7 @@ def _run_parser():
         help="fold the --out folder's saved pieces and run nothing",
     )
     parser.add_argument("--job", type=int, default=None, help=argparse.SUPPRESS)
+    parameters_command.add_set_argument(parser)
     return parser
 
 
@@ -301,6 +334,48 @@ def _trace(argv: list) -> None:
     trace_follow.main(argv)
 
 
+def _params(argv: list) -> None:
+    """One task's settable paths, their values, defaults and setters."""
+    import decsim.experiments.parameters_command as parameters_command
+
+    parameters_command.params(argv)
+
+
+def _info(argv: list) -> None:
+    """One record's parameters and the records each of its parts takes."""
+    import decsim.experiments.parameters_command as parameters_command
+
+    parameters_command.info(argv)
+
+
+def _describe(argv: list) -> None:
+    """One task's machine as a graph, and its priced paths."""
+    import decsim.experiments.describe_command as describe_command
+
+    describe_command.describe(argv)
+
+
+def _estimates(argv: list) -> None:
+    """What --slurm sizes its jobs by, read off a folded run."""
+    import decsim.experiments.estimates_command as estimates_command
+
+    estimates_command.estimates(argv)
+
+
+def _check(argv: list) -> None:
+    """Every task's machine built once, before any job runs it."""
+    import decsim.experiments.check_command as check_command
+
+    check_command.check(argv)
+
+
+def _stream(argv: list) -> None:
+    """One memory task run as an unbounded stream, measured as it runs."""
+    import decsim.experiments.stream_command as stream_command
+
+    stream_command.stream(argv)
+
+
 def _report_the_refusal(refused: refusal.RefusalError) -> None:
     """One sentence and exit 1, gem5's fatal (src/base/logging.hh)."""
     print(f"decsim: {refused}", file=sys.stderr)
@@ -325,4 +400,10 @@ def _report_no_verb(verb: Optional[str]) -> None:
 _RUN_BY_VERB = {
     "run": _run,
     "trace": _trace,
+    "params": _params,
+    "info": _info,
+    "describe": _describe,
+    "check": _check,
+    "estimates": _estimates,
+    "stream": _stream,
 }

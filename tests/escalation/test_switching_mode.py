@@ -23,12 +23,14 @@ import json
 
 import pytest
 
+import decsim.build.layout as layout_module
 import decsim.confidence.cluster as cluster
 import decsim.config as decsim_config
 import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
+import decsim.presets.clocks as clocks
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 import tests.declared_run as declared_run
@@ -153,7 +155,7 @@ def never_escalating_settings():
     alone.
     """
     settings = switching_settings(0.0)
-    cycle_count_law = cycle_count.CycleCount(clock=shape_tests.FRIDGE_CLOCK)
+    cycle_count_law = cycle_count.CycleCount(clock=clocks.FRIDGE_CLOCK)
     union_find_decoder = union_find.UnionFindDecoder.Settings(
         timing=cycle_count_law
     )
@@ -239,7 +241,7 @@ def gaps_by_window(requests, weak_tier) -> dict:
     """
     gaps = {}
     for record in requests:
-        if record.request_key.tier is not weak_tier:
+        if record.request_key.pool != weak_tier:
             continue
         if record.soft_output is None:
             continue
@@ -274,14 +276,14 @@ def test_gap_records_decide_the_selected_tier(seed):
         settings.observation, record_switching_windows=True
     )
     settings = dataclasses.replace(settings, observation=observation)
-    weak_tier = window_records.DecoderTier.WEAK
-    strong_tier = window_records.DecoderTier.STRONG
+    weak_tier = window_records.WEAK_POOL_ID
+    strong_tier = window_records.STRONG_POOL_ID
     completed, _result = run_shot(settings, seed)
     requests = completed.observation.decode_records.requests
     gap_by_window = gaps_by_window(requests, weak_tier)
     windows = completed.observation.windows.windows
     selected_tiers = {
-        key: window.published_request_key.tier
+        key: window.published_request_key.pool
         for key, window in windows.items()
     }
     expected_tiers = {
@@ -413,7 +415,7 @@ def test_the_speculative_decode_waits_for_the_context_it_reads():
     assert held < submitted
     assert submitted == last_context_round
     assert started > submitted
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
@@ -523,7 +525,7 @@ def test_a_held_speculative_decode_is_cancelled_by_a_confident_result():
         machine, "cancelled while held for its input"
     )
     assert len(cancelled) == 3
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
     assert fabric.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 1), "weak"),
@@ -552,7 +554,8 @@ def test_every_strong_request_is_cancelled_when_the_weak_tier_is_confident():
     assert tiers == [((1, 0), "weak"), ((1, 1), "weak"), ((1, 2), "weak")]
     assert counts.cancelled == 3
     assert counts.needed == 0
-    machine.readout.strong_syndrome_round_receiver.check_settled()
+    strong = machine.readout.store_parts(layout_module.STRONG_STORE)
+    strong.receiver.check_settled()
 
 
 def test_every_window_takes_the_strong_result_when_the_weak_tier_is_not():
@@ -599,7 +602,7 @@ def test_a_pinned_speculative_decode_is_planned_at_its_weak_jobs_release():
 
     assert tiers == [((1, 0), "strong"), ((1, 1), "strong"), ((1, 2), "strong")]
     assert counts.needed == 3
-    assert not machine.windows.window_manager.strong_redecode.has_pending()
+    assert not machine.windows.window_manager.edges.edges[0].has_pending()
 
 
 def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
@@ -624,7 +627,7 @@ def test_the_chips_manager_serves_no_strong_job_and_the_hosts_no_weak_one():
         host_kinds.add(job.kind)
 
     chip = machine.decoders.decoder_manager
-    host = machine.decoders.strong_decoder_manager
+    host = machine.decoders.manager_of(window_records.STRONG_POOL_ID)
     chip.outcomes.trace.request_ended.connect(ended_on_chip)
     host.outcomes.trace.request_ended.connect(ended_on_host)
     machine.run()

@@ -7,10 +7,11 @@ before the parts because the window models are compiled for the units.
 """
 
 import dataclasses
+import functools
 from typing import Optional
 
+import decsim.build.layout as layout_module
 import decsim.config as config
-import decsim.decoders.decode_queue as decode_queue
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.detection_events as detection_events_module
@@ -20,42 +21,51 @@ import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.windows as window_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 
 # The name the tier's event-detection stage carries in the trace, the
 # stage ledger and the narrator log.
 FORMATION_STAGE = "detection_event_formation"
+# The path the decode side's own statistics are kept at: the managers'
+# card's path, since the jobs waiting over every pool are theirs.
+MANAGERS_PATH = "decoder_manager"
+MANAGERS_STATISTICS = (
+    statistics_registry.Statistic(
+        "queued",
+        statistic_kinds.History,
+        "jobs waiting over every pool",
+        "jobs",
+    ),
+)
 
 
 @dataclasses.dataclass(frozen=True)
-class DecoderPool:
-    """What each tier's decoder manager is built over.
+class PoolUnits:
+    """What one pool's manager is built over: its unit and its pool.
 
-    active and chip are the unit and pool settings of the tier that
-    decodes the plan's windows (active None with no decoder); strong and
-    host are the strong tier's, on a switching run only.
+    unit is None for a run with no decoder, whose one pool holds an idle
+    unit.
     """
 
-    active: Optional[ports.Decoder]
-    strong: Optional[ports.Decoder]
-    chip: decoder_pool_module.PoolSettings
-    host: Optional[decoder_pool_module.PoolSettings]
+    plan: layout_module.PoolPlan
+    unit: Optional[ports.Decoder]
+    settings: decoder_pool_module.PoolSettings
 
 
 @dataclasses.dataclass(frozen=True)
 class Decoders:
-    """The decode side: each tier's decoder manager over its units.
+    """The decode side: each pool's decoder manager over its units.
 
-    A switching run has the host's manager over the strong tier's units
-    too (LATTE 2509.03954 lines 705-720); the two share one ledger of
-    strong requests, since the chip side opens a strong request and the
-    host side serves it.
+    The entry pool's manager decodes the planner's windows; a switching
+    run has a manager over each edge's target too (LATTE 2509.03954
+    lines 705-720). They share one ledger of escalated requests, since
+    a source's side opens a request and its target's side serves it.
     """
 
-    primary_decoder: Optional[ports.Decoder]
-    strong_decoder: Optional[ports.Decoder]
+    pools: tuple
+    managers: tuple
     strong_requests: strong_requests_module.StrongRequests
-    decoder_manager: decoder_manager_module.DecoderManager
-    strong_decoder_manager: Optional[decoder_manager_module.DecoderManager]
 
     @classmethod
     def build(
@@ -63,63 +73,118 @@ class Decoders:
         manager_settings: decoder_settings.DecoderManagerSettings,
         machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
-        pool: DecoderPool,
+        pools: tuple,
+        target_by_source: dict,
     ) -> "Decoders":
-        """Each manager over its pool, bound to its tier's unit."""
+        """Each manager over its pool, bound to its pool's unit.
+
+        target_by_source names the pool each source escalates to.
+        """
         clocked_manager = config.with_machine_clock(
             manager_settings, machine_clock
         )
-        strong_requests = strong_requests_module.StrongRequests()
-        decoder_manager = _decoder_manager(clocked_manager, engine, pool.chip)
-        decoder_manager.decoder = pool.active
-        decoder_manager.strong_requests = strong_requests
-        strong_decoder_manager = None
-        if pool.host is not None:
-            strong_decoder_manager = _decoder_manager(
-                clocked_manager, engine, pool.host
-            )
-            strong_decoder_manager.decoder = pool.strong
-            strong_decoder_manager.strong_requests = strong_requests
-        return cls(
-            primary_decoder=pool.active,
-            strong_decoder=pool.strong,
-            strong_requests=strong_requests,
-            decoder_manager=decoder_manager,
-            strong_decoder_manager=strong_decoder_manager,
+        strong_requests = strong_requests_module.StrongRequests(
+            target_by_source
         )
+        target_pools = target_by_source.values()
+        targets = set(target_pools)
+        managers = []
+        for pool in pools:
+            is_target = pool.plan.pool in targets
+            manager = _decoder_manager(clocked_manager, engine, pool, is_target)
+            manager.decoder = pool.unit
+            manager.strong_requests = strong_requests
+            managers.append(manager)
+        return cls(
+            pools=pools,
+            managers=tuple(managers),
+            strong_requests=strong_requests,
+        )
+
+    def read_program(self, operations: tuple) -> None:
+        """Every manager's scheduler reads the planned operations."""
+        for manager in self.managers:
+            scheduler = manager.queue.scheduler
+            scheduler.read_program(operations)
+
+    @property
+    def decoder_manager(self) -> decoder_manager_module.DecoderManager:
+        """The entry pool's manager, which decodes the planner's windows."""
+        return self.managers[0]
+
+    @property
+    def primary_decoder(self) -> Optional[ports.Decoder]:
+        """The entry pool's unit."""
+        entry = self.pools[0]
+        return entry.unit
+
+    @property
+    def target_decoders(self) -> tuple:
+        """The unit of each pool an edge leads to, in graph order."""
+        units = []
+        for pool in self.pools[1:]:
+            if pool.unit is not None:
+                units.append(pool.unit)
+        return tuple(units)
+
+    def manager_of(
+        self, pool: window_records.PoolId
+    ) -> decoder_manager_module.DecoderManager:
+        """The manager of one pool."""
+        for manager in self.managers:
+            if manager.pool_id == pool:
+                return manager
+        raise KeyError(pool)
+
+    def attach_statistics(
+        self, run_statistics: statistics_registry.Registry
+    ) -> None:
+        """Each manager's statistics at its pool's path.
+
+        The entry pool's are at its settings path (weak_decoder, or
+        strong_decoder for a strong-only run), as are each target's.
+        """
+        queues = []
+        for pool, manager in zip(self.pools, self.managers, strict=True):
+            path = pool.plan.names.statistics_path
+            manager.attach_statistics(run_statistics, path)
+            queues.append(manager.queue)
+        over_pools = run_statistics.group(MANAGERS_PATH, MANAGERS_STATISTICS)
+        _count_the_jobs_waiting_over_pools(over_pools.queued, queues)
 
     def start(self) -> None:
         """Let each manager hear its units before any window model exists."""
-        self.decoder_manager.start()
-        if self.strong_decoder_manager is not None:
-            self.strong_decoder_manager.start()
+        for manager in self.managers:
+            manager.start()
 
     def check_settled(self) -> None:
-        """Every decode either manager admitted has finished."""
-        self.decoder_manager.check_decode_work_settled()
-        if self.strong_decoder_manager is not None:
-            self.strong_decoder_manager.check_decode_work_settled()
+        """Every decode each manager admitted has finished."""
+        for manager in self.managers:
+            manager.check_decode_work_settled()
 
     def seed_roots(self) -> tuple:
-        """This part's stochastic owners, each by the name its seed hashes."""
+        """This part's stochastic owners, each by the name its seed hashes.
+
+        The entry manager's transport is the one input transport.
+        """
+        roots = []
+        for pool, manager in zip(self.pools, self.managers, strict=True):
+            names = pool.plan.names
+            roots.append((names.unit_seed, pool.unit))
+            roots.append((names.manager_seed, manager))
         input_transport = self.decoder_manager.input_transport()
-        return (
-            ("primary_decoder", self.primary_decoder),
-            ("strong_decoder", self.strong_decoder),
-            ("decoder_manager", self.decoder_manager),
-            ("strong_decoder_manager", self.strong_decoder_manager),
-            ("decoder_memory_transfer", input_transport),
-        )
+        roots.append(("decoder_memory_transfer", input_transport))
+        return tuple(roots)
 
 
 def build_decoder_unit(
     tier_settings: Optional[decoder_settings.DecoderPoolSettings],
-    tier: str,
+    seat: str,
     machine_clock: Optional[config.Clock],
     formation: Optional[detection_events_module.TierFormation],
     signal: Optional[ports.ConfidenceSignal],
 ) -> Optional[staged_decoder.StagedDecoder]:
-    """The decoder unit of one tier, weak or strong; None for an empty slot.
+    """The decoder unit of one pool, at its seat; None for an empty slot.
 
     A tier handed a confidence signal must produce the evidence it reads.
     """
@@ -132,46 +197,48 @@ def build_decoder_unit(
         # latency, which names no decoder
         record = type(algorithm_settings)
         _check_serves_the_confidence(
-            algorithm, record.__qualname__, tier, signal
+            algorithm, record.__qualname__, seat, signal
         )
     return _staged_unit(tier_settings, algorithm, formation, machine_clock)
 
 
-def build_decoder_pool(
-    window_decoder: Optional[decoder_settings.DecoderPoolSettings],
-    strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
-    window_tier: window_records.DecoderTier,
-    escalates: bool,
+def build_pool_units(
+    layout: layout_module.Layout,
     machine_clock: Optional[config.Clock],
     detection_events: ports.DetectionEventPlacement,
-    signal: Optional[ports.ConfidenceSignal],
-) -> DecoderPool:
-    """The tiers' units and the managers' pools.
+    signal_by_pool: dict,
+) -> tuple:
+    """Each pool's unit and its manager's pool, entry first.
 
-    Each tier seated by the detection event placement gets its own
-    event-detection logic, so a round both tiers read is formed and
-    charged by each.
+    Each pool seated by the detection event placement gets its own
+    event-detection logic, so a round two pools read is formed and
+    charged by each. A pool whose results meet an edge's verdict must
+    produce the evidence that edge's confidence signal reads
+    (signal_by_pool).
     """
-    active_tier = window_tier.value
-    active_seat = f"{active_tier}_decoder"
-    active_formation = _tier_formation(detection_events, active_seat)
-    active = build_decoder_unit(
-        window_decoder, active_tier, machine_clock, active_formation, signal
-    )
-    blocks_unit = _blocks_unit(window_decoder)
-    chip = _pool(
-        window_decoder, decode_queue.DEFAULT_POOL, active_formation, blocks_unit
-    )
-    if not escalates:
-        return DecoderPool(active=active, strong=None, chip=chip, host=None)
-    strong_formation = _tier_formation(detection_events, "strong_decoder")
-    strong = build_decoder_unit(
-        strong_decoder, "strong", machine_clock, strong_formation, None
-    )
-    host = _pool(
-        strong_decoder, decode_queue.STRONG_POOL, strong_formation, False
-    )
-    return DecoderPool(active=active, strong=strong, chip=chip, host=host)
+    built = []
+    for index, plan in enumerate(layout.pools):
+        names = plan.names
+        formation = _tier_formation(detection_events, names.seat)
+        signal = signal_by_pool.get(plan.pool)
+        unit = build_decoder_unit(
+            plan.settings, names.seat, machine_clock, formation, signal
+        )
+        blocks_unit = False
+        if index < layout.entry_count:
+            blocks_unit = _blocks_unit(plan.settings)
+        settings = _pool(plan.settings, names.queue, formation, blocks_unit)
+        pool = PoolUnits(plan, unit, settings)
+        built.append(pool)
+    return tuple(built)
+
+
+def batches_each_member(layout: layout_module.Layout) -> bool:
+    """Whether any pool decodes its merged batches member by member."""
+    for plan in layout.pools:
+        if _batching_of(plan) is not None:
+            return True
+    return False
 
 
 def _pool(
@@ -203,9 +270,9 @@ def _blocks_unit(
 ) -> bool:
     """The blocking rule of the pool that decodes the windows.
 
-    The strong pool never blocks: a strong result waits in its unit's
+    An edge's target never blocks: its result waits in its unit's
     output slot (decoder_unit.py hold_output), so result_blocks_unit is
-    read on the primary tier alone.
+    read on the entry pool alone.
     """
     if tier_settings is None:
         return False
@@ -222,7 +289,7 @@ def _tier_formation(
 
 
 def _check_serves_the_confidence(
-    algorithm, record_name: str, tier: str, signal: ports.ConfidenceSignal
+    algorithm, record_name: str, seat: str, signal: ports.ConfidenceSignal
 ) -> None:
     """Refuse a weak tier that cannot serve the run's confidence signal.
 
@@ -236,7 +303,7 @@ def _check_serves_the_confidence(
     reason = _missing_evidence_reason(algorithm, missing, signal)
     signal_name = signal.source.method
     raise ValueError(
-        f"{tier}_decoder {record_name} cannot serve the confidence "
+        f"{seat} {record_name} cannot serve the confidence "
         f"{signal_name}: {reason}"
     )
 
@@ -290,7 +357,18 @@ def _staged_unit(
         after=(release,),
         clock=clocked_engine.clock,
     )
-    return staged_decoder.StagedDecoder(algorithm, timing)
+    batch_decoder = _batch_decoder(tier_settings, algorithm)
+    return staged_decoder.StagedDecoder(algorithm, timing, batch_decoder)
+
+
+def _batch_decoder(
+    tier_settings: decoder_settings.DecoderPoolSettings, algorithm
+) -> Optional[object]:
+    """The pool's batching over its algorithm; None when it has none."""
+    if tier_settings.batching is None:
+        return None
+    batching = tier_settings.batching.build()
+    return batching.over(algorithm)
 
 
 def _formation_stage(
@@ -313,15 +391,72 @@ def _formation_stage(
 def _decoder_manager(
     manager_settings: decoder_settings.DecoderManagerSettings,
     engine: engine_module.Engine,
-    pool_settings: decoder_pool_module.PoolSettings,
+    pool: PoolUnits,
+    is_target: bool,
 ) -> decoder_manager_module.DecoderManager:
     """One manager over its pool, on the run's one manager card."""
     scheduler = manager_settings.scheduler.build()
+    plan = pool.plan
+    merges_strong = _merges_strong(manager_settings, plan, is_target)
     return decoder_manager_module.DecoderManager(
         engine,
         scheduler=scheduler,
-        pool_settings=pool_settings,
-        bulk_strong=manager_settings.bulk_strong,
+        pool_settings=pool.settings,
+        pool_id=plan.pool,
+        merges_strong=merges_strong,
         clock=manager_settings.clock,
         dispatch_cycles=manager_settings.dispatch_cycles,
     )
+
+
+def _merges_strong(
+    manager_settings: decoder_settings.DecoderManagerSettings,
+    plan: layout_module.PoolPlan,
+    is_target: bool,
+) -> bool:
+    """Whether the pool serves its waiting re-decodes as one batch.
+
+    bulk_strong batches every pool an edge escalates to, timing-only; a
+    pool's batching row batches that pool, decoding each member.
+    """
+    if _batching_of(plan) is None:
+        return manager_settings.bulk_strong and is_target
+    path = plan.names.statistics_path
+    if not is_target:
+        raise ValueError(
+            f"{path}.batching batches the re-decodes an edge escalates "
+            f"to, and no edge escalates to {path}; remove the key"
+        )
+    if manager_settings.bulk_strong:
+        raise ValueError(
+            f"{path}.batching and decoder_manager.bulk_strong both batch "
+            f"{path}'s re-decodes; keep one"
+        )
+    return True
+
+
+def _batching_of(plan: layout_module.PoolPlan) -> Optional[object]:
+    """The pool's batching row; None for no row or no decoder."""
+    if plan.settings is None:
+        return None
+    return plan.settings.batching
+
+
+def _count_the_jobs_waiting_over_pools(queued, queues: list) -> None:
+    """The jobs waiting over the pools as each queue's depth changes.
+
+    The total is the sum of each queue's last depth, sampled whenever
+    either changes; nothing is kept when the run records no statistics.
+    """
+    if queued is statistic_kinds.DISABLED:
+        return
+    note = functools.partial(_note_jobs_waiting, queued, queues)
+    for queue in queues:
+        queue.trace.depth_changed.connect(note)
+
+
+def _note_jobs_waiting(queued, queues: list, tick: int, depth: int) -> None:
+    del tick, depth
+    depths = [queue.statistics.queued.level for queue in queues]
+    total = sum(depths)
+    queued.set(total)

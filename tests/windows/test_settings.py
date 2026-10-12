@@ -9,6 +9,7 @@ import dataclasses
 
 import pytest
 
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.naive_online as naive_online_scheme
 import decsim.windows.schemes.parallel as parallel_scheme
@@ -79,3 +80,14 @@ def test_the_switching_preset_takes_the_record_its_strong_window_gives():
 def test_every_scheme_record_refuses_a_window_that_commits_nothing(row):
     with pytest.raises(ValueError, match="commit_rounds"):
         row.Settings(commit_rounds=0)
+
+
+def test_switching_windows_take_the_strong_windows_row_over_the_default():
+    plain = window_settings.WindowSettings()
+    redo_window = strong_window_shapes.RedoWindow.Settings()
+
+    switched = window_settings.switching_windows(plain, redo_window)
+    again = window_settings.switching_windows(switched, redo_window)
+
+    assert switched.boundary_policy == redo_window.boundary_policy
+    assert again == switched

@@ -49,13 +49,56 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 | `name` | `str` |
 | `build(self, weak_algorithm: DecoderSettings, threshold_nats: Optional[float])` | `ConfidenceSignal` |
 
+### `WorkloadMakerSettings`
+
+`decsim/ports.py`. A workload maker's row: its parameters, made into a workload at a task.
+
+The workload slot takes a workload lowered in Python or a maker row (decsim/producers.py), lowered when the task is made against the qpu the task has. fixes_the_distance says the workload was made at a distance of its own (from files, say), so the qpu's distance is not set by path.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `fixes_the_distance` | `bool` |
+| `lowered_for(self, qpu: object)` | `object` |
+
+### `MemorySettings`
+
+`decsim/producers.py`. A memory experiment at the qpu's distance, on one patch or several.
+
+physical_error_probability is p on each of Stim's four channels; with noise the channels are noise's and p is the task's label, which a threshold table and the reports read. One of rounds and rounds_per_distance is given: a shot's rounds, or that many for each unit of the distance. code_task is a Stim task whose circuit is the qpu's card's code (code_geometry.py stim_memory_tasks), or None for patches with no circuit. patches run at once, side by side (memory_patches). decoded False decodes nothing: the readout-and-frame baseline.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `physical_error_probability` | `float` | required |
+| `rounds` | `Optional[int]` | `None` |
+| `rounds_per_distance` | `Optional[int]` | `None` |
+| `code_task` | `Optional[str]` | `'surface_code:rotated_memory_z'` |
+| `patches` | `int` | `1` |
+| `noise` | `Optional[workload_settings.StimNoise]` | `None` |
+| `decoded` | `bool` | `True` |
+
+### `LiveMemorySettings`
+
+`decsim/producers.py`. Live fragments read from a folder, decoded after some rounds.
+
+fragments is a folder of the four fragments and physical.json (workload_files.read_fragments). The prefix is decoded, and the patch waits, protected, until the decoded result releases it (live_memory); examples/live_memory_example.py runs it on StreamingStimDevice. feedback_boundary_mode is the workload's (frontends/settings.py).
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `fragments` | `pathlib.Path` | required |
+| `decode_after_rounds` | `int` | required |
+| `patch` | `str` | `'memory-patch'` |
+| `feedback_boundary_mode` | `str` | `'trailing_buffer'` |
+
 ### `MachineSettings`
 
 `decsim/settings.py`. One settings record per part of the machine.
 
 Every field has a default: a timing-only run of distance-three surface code patches with no decoder. clock is the machine's clock, the one every part that names none of its own counts its cycles on.
 
-The decode side is three slots, each None when the run has no such part: weak_decoder alone, strong_decoder alone, or both with switching, which decodes weak first and escalates a window to the strong decoder. None of the three plans no decoding.
+The decode side is three slots, each None when the run has no such part: weak_decoder alone, strong_decoder alone, or both with switching, which decodes weak first and escalates a window to the strong decoder. None of the three plans no decoding. router, None by default, sends each window to one of several entry pools; only a graph of its own shape holds more than one (windows/routers.py).
+
+workload is a workload lowered in Python or a maker row (decsim/producers.py), which at_task lowers against the qpu, so the task's id and every shot see the lowered workload. A workload made at a distance of its own fixes the qpu's: set_in_the_run_file names the paths an assignment by path (decsim/parameters/tree.py) may not change, since it would leave the circuit behind, a distance-5 machine running a distance-3 circuit.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -73,9 +116,10 @@ The decode side is three slots, each None when the run has no such part: weak_de
 | `decoder_manager` | `decoder_settings.DecoderManagerSettings` | `decoder_settings.DecoderManagerSettings()` |
 | `switching` | `Optional[escalation_settings.SwitchingSettings]` | `None` |
 | `pauli_frame` | `Optional[pauli_frame_module.PauliFrameConfig]` | `None` |
-| `workload` | `workload_settings.WorkloadSettings` | `workload_settings.WorkloadSettings()` |
+| `workload` | `Union[workload_settings.WorkloadSettings, ports.WorkloadMakerSettings]` | `workload_settings.WorkloadSettings()` |
 | `magic_state_factory` | `qpu_settings.FactorySettings` | `magic_state_factories.InfiniteFactory.Settings()` |
 | `observation` | `observe_settings.ObservationSettings` | `observe_settings.ObservationSettings()` |
+| `router` | `Optional[routers.Router.Settings]` | `config.added_field(None)` |
 
 ## decsim/confidence
 
@@ -95,6 +139,10 @@ The decode side is three slots, each None when the run has no such part: weak_de
 | --- | --- | --- |
 | `walk_microseconds` | `Optional[float]` | `None` |
 
+### `Consensus.Settings`
+
+`decsim/confidence/consensus.py`. The consensus row, which takes no setting.
+
 ### `ExtraClusterGap.Settings`
 
 `decsim/confidence/extra_cluster.py`. Its settings: walk_microseconds prices the growth, or None.
@@ -104,6 +152,10 @@ None charges the weak row's own timing: its loop's cycle count on the unit that 
 | Field | Type | Default |
 | --- | --- | --- |
 | `walk_microseconds` | `Optional[float]` | `None` |
+
+### `NoSignal.Settings`
+
+`decsim/confidence/no_signal.py`. The none row, which takes no setting.
 
 ## decsim/controller
 
@@ -135,6 +187,31 @@ packing_rounds_in_flight bounds the rounds in the packing stage (round_assembly.
 
 ## decsim/decoders
 
+### `LawSettings`
+
+`decsim/decoders/batching.py`. A law row's settings record (this module), which builds it.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `build(self)` | `BatchLaw` |
+
+### `Sum.Settings`
+
+`decsim/decoders/batching.py`. The sum law, which takes no setting.
+
+### `Slowest.Settings`
+
+`decsim/decoders/batching.py`. The slowest law, which takes no setting.
+
+### `DecodeEach.Settings`
+
+`decsim/decoders/batching.py`. law is a row of this module: sum (the default) or slowest.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `law` | `LawSettings` | `Sum.Settings()` |
+
 ### `PoolSettings`
 
 `decsim/decoders/decoder_pool.py`. One pool as the root derives it from its tier's settings.
@@ -158,9 +235,60 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 | --- | --- | --- |
 | `latency_microseconds` | `float` | `1.0` |
 
+### `PoolingSettings`
+
+`decsim/decoders/ensembles.py`. A pooling row's settings record (this module), which builds it.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `reads_likelihood` | `bool` |
+| `build(self)` | `object` |
+
+### `Vote.Settings`
+
+`decsim/decoders/ensembles.py`. The vote row, which takes no setting.
+
+### `SumLikelihood.Settings`
+
+`decsim/decoders/ensembles.py`. The sum-likelihood row, which takes no setting.
+
+### `MostLikely.Settings`
+
+`decsim/decoders/ensembles.py`. The most-likely row, which takes no setting.
+
+### `FirstConverged.Settings`
+
+`decsim/decoders/ensembles.py`. count is VibeLSD's M, the converged members it waits for.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `count` | `int` | `1` |
+
+### `EnsembleDecoder.Settings`
+
+`decsim/decoders/ensembles.py`. members are decoder rows; pooling is a row of this module.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `members` | `tuple` | `()` |
+| `pooling` | `PoolingSettings` | `MostLikely.Settings()` |
+
 ### `FifoScheduler.Settings`
 
 `decsim/decoders/schedulers.py`. FIFO's settings: the rule has no knob.
+
+### `LongestUndecoded.Settings`
+
+`decsim/decoders/schedulers.py`. MLS's settings: the rule has no knob.
+
+### `RoundRobin.Settings`
+
+`decsim/decoders/schedulers.py`. RR's settings: the rule has no knob.
+
+### `MostCritical.Settings`
+
+`decsim/decoders/schedulers.py`. MFD's settings: the rule has no knob.
 
 ### `UnitMemorySettings`
 
@@ -189,6 +317,14 @@ clock is the domain the stages count on, None for the machine's; the four stage 
 | `release_cycles_per_job` | `int` | `1` |
 | `release_cycles_per_round` | `int` | `0` |
 
+### `BatchingSettings`
+
+`decsim/decoders/settings.py`. A pool's batching row's settings record (batching.py).
+
+| Member | Type |
+| --- | --- |
+| `build(self)` | `batching.Batching` |
+
 ### `DecoderPoolSettings`
 
 `decsim/decoders/settings.py`. One tier's pool of decoder units.
@@ -201,6 +337,8 @@ unit_memory is one unit's input SRAM (UnitMemorySettings); a unit overlaps input
 
 result_blocks_unit says when a unit's compute goes back to its pool: False at the decode's end or when the confidence walk charged on it ends, as Chen's frame manager takes the correction without blocking the decoder (2605.30765 lines 1618-1620); True when the result is read, a unit with no output buffer stalled until its output is taken (Bascones et al. 2605.01035 lines 607-609 add FIFOs to avoid that stall). It is read on the tier that decodes the plan's windows.
 
+batching, None by default, is the pool's batching row (batching.py): decode_each serves the re-decodes waiting for a unit as one batch, decodes each member with the algorithm and prices the batch by its law, sum or slowest. Only a pool an edge escalates to batches.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `algorithm` | `ports.DecoderSettings` | required |
@@ -210,6 +348,7 @@ result_blocks_unit says when a unit's compute goes back to its pool: False at th
 | `copies_input` | `bool` | `True` |
 | `copies_boundary_fold` | `bool` | `True` |
 | `result_blocks_unit` | `bool` | `False` |
+| `batching` | `Optional[BatchingSettings]` | `config.added_field(None)` |
 
 ### `SchedulerSettings`
 
@@ -383,6 +522,43 @@ formed_at lists the seats, each once; every path a round takes to a decoder cros
 
 ## decsim/escalation
 
+### `TriggerSettings`
+
+`decsim/escalation/deadlines.py`. A rescue trigger row's settings record (this module).
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `rescue_delay(self, slack_ticks: int, queued_jobs: int)` | `Optional[int]` |
+
+### `SlackTrigger.Settings`
+
+`decsim/escalation/deadlines.py`. The slack row: the slack left at which the rescue starts.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `threshold_microseconds` | `float` | `0.0` |
+
+### `BacklogTrigger.Settings`
+
+`decsim/escalation/deadlines.py`. The backlog row: the waiting jobs at which the rescue starts.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `queued_jobs` | `int` | `1` |
+
+### `Deadline.Settings`
+
+`decsim/escalation/deadlines.py`. An edge's deadline: the slack budget, the trigger, a late result.
+
+slack_microseconds is DART-Q's Delta, which it requires positive (Sec. III-A, Eq. 1). late_source_result names one of LATE_SOURCE_RESULTS.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `slack_microseconds` | `float` | required |
+| `trigger` | `TriggerSettings` | `SlackTrigger.Settings()` |
+| `late_source_result` | `str` | `'unavailable'` |
+
 ### `ThresholdSettings`
 
 `decsim/escalation/settings.py`. A threshold row's settings record: decibels in, nats out.
@@ -396,6 +572,57 @@ The facts at_task and for_task read are MachineSettings.task_facts, keyed by thr
 | `at_task(self, facts: Mapping)` | `'ThresholdSettings'` |
 | `for_task(self, facts: Mapping)` | `Optional[ports.ThresholdSource]` |
 | `build(self)` | `ports.ThresholdSource` |
+
+### `VerdictSettings`
+
+`decsim/escalation/settings.py`. A verdict row's settings record (verdicts.py).
+
+reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `reads_threshold` | `bool` |
+| `reads_consensus` | `bool` |
+| `build(self)` | `ports.EscalationVerdict` |
+
+### `ReplaceRuleSettings`
+
+`decsim/escalation/settings.py`. A replace rule's settings record (windows/revision_rules.py).
+
+replaces_provisionally says whether a later revision replaces the prediction before the window is final.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `replaces_provisionally` | `bool` |
+| `build(self)` | `ports.ReplaceRule` |
+
+### `CancelRuleSettings`
+
+`decsim/escalation/settings.py`. A cancel rule's settings record (windows/revision_rules.py).
+
+cancels_on_keep says whether a keep cancels the target's decode.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `cancels_on_keep` | `bool` |
+| `build(self)` | `ports.CancelRule` |
+
+### `DeadlineSettings`
+
+`decsim/escalation/settings.py`. An edge's deadline record (deadlines.py).
+
+slack_microseconds is the budget from the source job's arrival.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `slack_microseconds` | `float` |
+| `trigger` | `deadlines.TriggerSettings` |
+| `late_source_result` | `str` |
+| `build(self, engine: engine_module.Engine)` | `deadlines.Deadline` |
 
 ### `StrongWindowSettings`
 
@@ -417,7 +644,11 @@ restart_reread_buffer_regions is the double window's re-read width.
 
 Toshio et al. 2510.25222 Sec. III A. confidence is the signal the weak tier reports (decsim/confidence/), and the build refuses a weak decoder that cannot produce its evidence. threshold is a threshold row (threshold_sources.py); a weak result whose gap is at or above it is kept (the paper uses 20 dB). run_both_at_once is Step 1, the strong decoder started with the weak one and cancelled on confidence; False is the same section's on-demand variant (lines 631-640). strong_window is the shape the strong tier re-decodes (strong_window_shapes.py): redo_window, the default, or double_window, Sec. III C. clock, threshold_cycles and switch_cycles price the verdict's threshold and switch logic; clock None is the machine's clock. The complementary gap's two solves are two jobs of the weak pool, so its unit_count decides whether they overlap.
 
-strong_answer_route names a row of decoder_output.STRONG_ANSWER_ROUTES, the way a strong answer reaches the frame. direct, the default: the strong host joins the weak crossing commit, which rides up with the selection, and sends the answer on strong_decoder_to_frame (Toshio 2510.25222 Fig. 1). through_weak_chip: the answer goes down on strong_decoder_to_weak_decoder, the weak chip joins it in one cycle of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892 Table I, the Pauli frame update). A run with no switching sends a strong answer direct.
+verdict is the row that keeps or escalates each weak result (verdicts.py), the gap against the threshold by default. replace_rule says which revision the frame takes, and cancel_rule what a keep does to the strong decode already asked for (windows/revision_rules.py).
+
+deadline, None by default, gives each source job a deadline and a trigger that starts the target decode before the verdict, and makes a late source result unavailable (deadlines.py, after DART-Q, Bhave et al. 2605.09142). It starts the target early, so it contradicts run_both_at_once, which starts it with every source job, and an absorbing strong window, which starts it late.
+
+strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a strong answer reaches the frame. direct, the default: the strong host joins the weak crossing commit, which rides up with the selection, and sends the answer on strong_decoder_to_frame (Toshio 2510.25222 Fig. 1). through_weak_chip: the answer goes down on strong_decoder_to_weak_decoder, the weak chip joins it in one cycle of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892 Table I, the Pauli frame update). A run with no switching sends a strong answer direct.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -429,6 +660,10 @@ strong_answer_route names a row of decoder_output.STRONG_ANSWER_ROUTES, the way 
 | `run_both_at_once` | `bool` | `False` |
 | `strong_window` | `StrongWindowSettings` | `strong_window_shapes.RedoWindow.Settings()` |
 | `strong_answer_route` | `str` | `'direct'` |
+| `verdict` | `VerdictSettings` | `config.added_field(GAP_THRESHOLD)` |
+| `replace_rule` | `ReplaceRuleSettings` | `config.added_field(LATEST_REVISION)` |
+| `cancel_rule` | `CancelRuleSettings` | `config.added_field(CANCEL_DOWNSTREAM)` |
+| `deadline` | `Optional[DeadlineSettings]` | `config.added_field(None)` |
 
 ### `RedoWindow.Settings`
 
@@ -481,11 +716,37 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | `min_escalation_rate` | `float` | `1e-05` |
 | `max_escalation_rate` | `float` | `0.3` |
 
+### `GapThreshold.Settings`
+
+`decsim/escalation/verdicts.py`. The gap row, which reads the edge's confidence and threshold.
+
+### `Status.Settings`
+
+`decsim/escalation/verdicts.py`. The status row, which takes no setting.
+
+### `Agreement.Settings`
+
+`decsim/escalation/verdicts.py`. minimum is the share of members that must vote with the majority.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `minimum` | `float` | `1.0` |
+
+### `Always.Settings`
+
+`decsim/escalation/verdicts.py`. The always row, which takes no setting.
+
+### `Never.Settings`
+
+`decsim/escalation/verdicts.py`. The never row, which takes no setting.
+
 ## decsim/frontends
 
 ### `WorkloadSettings`
 
 `decsim/frontends/settings.py`. The program the machine runs: a maker's workload, lowered.
+
+fixes_the_distance and fields_set_in_the_run_file name what an assignment by path may not change (decsim/settings.py): the circuit was made at the qpu's distance and lowered to these fields.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -651,7 +912,7 @@ excludes_receiver_processing says what the latency covers: a number measured end
 
 `decsim/links/settings.py`. A fabric card: one path setting per hop.
 
-Every hop of the reaction path is priced, so a card names all twelve. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
+Every hop of the reaction path is priced, so a card names all twelve a slotted machine rides, and hops holds each further hop a graph's pools ride, by name. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -669,6 +930,7 @@ Every hop of the reaction path is priced, so a card names all twelve. A card who
 | `strong_decoder_to_weak_decoder` | `PathSettings` | required |
 | `profile_name` | `str` | required |
 | `readout_routes` | `tuple[ReadoutRoute, ...]` | `()` |
+| `hops` | `tuple[NamedPath, ...]` | `config.added_field(())` |
 
 ## decsim/observe
 
@@ -683,6 +945,10 @@ first_recorded_round and last_recorded_round are the measurement interval, both 
 The interval cuts the latency samples and what is made from them: the means and maxes, the windows' tiers, the reaction growth rates and deadline misses, load and parallel_processes_needed, but for the end-of-stream reaction, which is the drain itself. The logical failure and the predictions stay whole, since a logical error rate is a rate over whole shots, and so do the shot's counts and rates (decoded_windows, escalated_windows, throughput, the queue peaks, busy fractions, switching and backlog columns, the link totals): a report divides one count by another, escalated over decoded windows, and a cut on one side would bias the ratio.
 
 reaction_deadline_microseconds is a budget on each recorded window's reaction time (buffer0_ready_to_frame); None, the default, sets none. A shot then counts the windows over it and the shot-clock time the first of them arrived, which says when an overloaded tier, whose wait grows without bound, first breaks the budget over the run length chosen.
+
+warmup_rounds is the rounds a region of interest leaves out: at the first round past them the run's statistics restart, gem5's m5.stats.reset() (observe/region_of_interest.py). It cuts the statistic rows and what is read from them, the queue peaks, busy fractions, offered loads and backlog peak; the latency samples keep the interval above. 0, the default, measures the whole run.
+
+folds_windows is a stream's: the run keeps no run-long ledger of windows, frame writes, stages, round events, transfers, decode requests, confidence records or log lines, and a stream's measures (experiments/stream_measures.py) read each window once it is final and let it go, as ns-3's FlowMonitor keeps a running record per flow rather than its packets. The machine lets a stream's final windows go a few behind (windows/window_release.py), so a stream's memory stays flat however long it runs. measure_shot then has nothing to read. False, the default, keeps everything.
 
 record_window_outcomes keeps each window's committed answer, and its true label when the source keeps its errors (ErrorModelStimDevice), for window_outcomes.csv (observe/window_outcomes.py).
 
@@ -701,6 +967,8 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `first_recorded_round` | `int` | `1` |
 | `last_recorded_round` | `Optional[int]` | `None` |
 | `reaction_deadline_microseconds` | `Optional[float]` | `None` |
+| `warmup_rounds` | `int` | `config.added_field(0)` |
+| `folds_windows` | `bool` | `config.added_field(False)` |
 
 ## decsim/pauli_frame
 
@@ -721,16 +989,29 @@ A write is one XOR into a register, one cycle of the frame unit: Yang et al. (26
 
 `decsim/qpu/code_geometry.py`. The surface card has no keys beyond the qpu's distance.
 
+stim_memory_tasks are the Stim generator's tasks whose circuit is this card's code (src/stim/gen/gen_surface_code.cc).
+
 ### `BivariateBicycleCodeModel.Settings`
 
 `decsim/qpu/code_geometry.py`. The card's own keys.
 
-qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines 180-184); its distance is twelve when the run names none.
+qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The defaults are the gross code [[144, 12, 12]] (2308.07915v2 lines 180-184); its distance is twelve when the run names none. Stim generates no circuit of it, so stim_memory_tasks is empty.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `qubit_count` | `int` | `144` |
 | `logical_qubit_count` | `int` | `12` |
+
+### `FlipStreamDevice.Settings`
+
+`decsim/qpu/flip_stream_device.py`. rollover_rounds is how often the simulator lets go of its past.
+
+stabilizer_randomization draws the random outcomes of the first measurement of each stabilizer, as Stim does by default; off, the rollover changes no bit.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `rollover_rounds` | `int` | `DEFAULT_ROLLOVER_ROUNDS` |
+| `stabilizer_randomization` | `bool` | `True` |
 
 ### `UniformLayout.Settings`
 
@@ -886,6 +1167,48 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 ### `Held.Settings`
 
 `decsim/windows/boundary_policies.py`. The held row, which takes no setting.
+
+### `LatestRevision.Settings`
+
+`decsim/windows/revision_rules.py`. The latest row, which takes no setting.
+
+### `BestStatus.Settings`
+
+`decsim/windows/revision_rules.py`. The best-status row, which takes no setting.
+
+### `CancelDownstream.Settings`
+
+`decsim/windows/revision_rules.py`. The cancelling row, which takes no setting.
+
+### `NoCancel.Settings`
+
+`decsim/windows/revision_rules.py`. The row that never cancels, which takes no setting.
+
+### `RuleSettings`
+
+`decsim/windows/routers.py`. A routing rule's settings record (this module).
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `pool_for(self, operation: program_records.Operation)` | `str` |
+| `check_operations(self, operations: tuple, pool_names: tuple)` | `None` |
+
+### `ByPatch.Settings`
+
+`decsim/windows/routers.py`. The table: (patch, pool name) pairs, one pair per patch.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `pool_by_patch` | `tuple` | `()` |
+
+### `Router.Settings`
+
+`decsim/windows/routers.py`. The router's rule (this module's rows).
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `rule` | `RuleSettings` | `ByPatch.Settings()` |
 
 ### `SchemeSettings`
 

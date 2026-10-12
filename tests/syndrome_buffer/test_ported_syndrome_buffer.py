@@ -18,9 +18,11 @@ import random
 
 import pytest
 
+import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.rounds as round_records
+import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.declared_run as declared_run
 
@@ -198,6 +200,20 @@ def test_each_access_is_reported_with_its_port_and_its_three_ticks():
     ]
 
 
+def test_a_read_behind_another_on_the_one_read_port_waits_its_words():
+    engine = engine_module.Engine()
+    store = _store(engine)
+    run_statistics = statistics_registry.Registry(engine)
+    run_statistics.attach(store, "weak_syndrome_buffer")
+    window = _stored_window(store, (8, 8))
+
+    store.book_read(window)
+    store.book_read(window)
+
+    assert store.statistics.reads.count == 2
+    assert store.statistics.port_wait.value_counts() == {0: 1, 20: 1}
+
+
 def test_the_default_shape_is_the_sky130_byte_fifo_one_port_each_way():
     """sky130_sram_1kbyte_1r1w_8x1024_8.py lines 6 and 14-16."""
     fifo = ported_syndrome_buffer.PortedSyndromeBufferSettings()
@@ -260,9 +276,7 @@ def test_a_declared_weak_run_on_a_ported_store_delays_the_decode_only():
     ported = declared_run.weak_only_run(weak_syndrome_buffer=settings)
     free_ticks = declared_run.reaction_ticks(free)
     ported_ticks = declared_run.reaction_ticks(ported)
+    ported_store = ported.readout.store_named(layout_module.WEAK_STORE)
 
-    assert isinstance(
-        ported.readout.weak_syndrome_buffer,
-        ported_syndrome_buffer.PortedSyndromeBuffer,
-    )
+    assert isinstance(ported_store, ported_syndrome_buffer.PortedSyndromeBuffer)
     assert ported_ticks[3] > free_ticks[3]

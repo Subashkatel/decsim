@@ -22,6 +22,7 @@ from typing import Optional
 
 import stim
 
+import decsim.detector_error_model.circuit_builds as circuit_builds
 import decsim.records.formation as formation_records
 from decsim.detector_error_model import detector_chronology
 
@@ -40,25 +41,22 @@ def build_formation_table(
     absolute measurement index. detector_rounds is each detector's declared
     round in 1..round_count; a detector forms only once every bit it reads
     has arrived, so it may not precede them. live_reach marks a live
-    stream's table.
+    stream's table. A table is kept by its circuit's text and these
+    arguments, so the shots of a task read the circuit once
+    (circuit_builds).
     """
-    if round_count < 1:
-        raise ValueError("round_count must be positive")
-    packet_of_measurement, packet_width_by_round, readout_slot_start = (
-        _measurement_packets(circuit, round_count, measurement_rounds)
+    circuit_text = str(circuit)
+    measurement_key = circuit_builds.frozen(measurement_rounds)
+    detector_key = circuit_builds.frozen(detector_rounds)
+    key = (circuit_text, round_count, measurement_key, detector_key, live_reach)
+    table = _TABLES.held(key)
+    if table is not None:
+        return table
+    table = _formation_table(
+        circuit, round_count, measurement_rounds, detector_rounds, live_reach
     )
-    tables = _circuit_tables(
-        circuit, packet_of_measurement, round_count, detector_rounds
-    )
-    detectors, observables = _read_recipes(circuit, tables)
-    return formation_records.FormationTable(
-        round_count=round_count,
-        packet_width_by_round=packet_width_by_round,
-        readout_slot_start=readout_slot_start,
-        detectors=tuple(detectors),
-        observables=tuple(observables),
-        live_reach=live_reach,
-    )
+    _TABLES.keep(key, table)
+    return table
 
 
 def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
@@ -81,6 +79,23 @@ def rounds_read_back(fragment: stim.Circuit, round_width: int) -> int:
             before_start = -offset - measured_so_far
             reach_count = _rounds_back(before_start, round_width)
             furthest_count = max(furthest_count, reach_count)
+    return furthest_count
+
+
+def measurements_read_back(fragment: stim.Circuit) -> int:
+    """How many measurements before the fragment any of its records reads.
+
+    Every rec[-k] counts, a detector's, an observable's or a classically
+    controlled gate's: a simulator that kept fewer could not run the
+    fragment (stim.FlipSimulator raises on a record it does not hold).
+    """
+    furthest_count = 0
+    measured_so_far = 0
+    for instruction in _flat_instructions(fragment):
+        for offset in _record_offsets(instruction):
+            before_start = -offset - measured_so_far
+            furthest_count = max(furthest_count, before_start)
+        measured_so_far += _measurement_count(instruction)
     return furthest_count
 
 
@@ -168,7 +183,7 @@ class StreamingDetectorFormer:
         they read that this seat was never given comes with the read
         (rounds_needed_before).
         """
-        _check_formation_prefix(self.table, table)
+        table.check_extends(self.table)
         self.table = table
 
     def _let_go_of_unread_packets(self) -> None:
@@ -318,17 +333,35 @@ class _CircuitTables:
     detector_rounds: Optional[dict]
 
 
-def _check_formation_prefix(
-    previous: formation_records.FormationTable,
-    table: formation_records.FormationTable,
-) -> None:
-    for round_index, width in previous.packet_width_by_round.items():
-        if table.packet_width_by_round.get(round_index) != width:
-            raise RuntimeError("formation extension changes an existing packet")
-    previous_detector_count = len(previous.detectors)
-    detector_prefix = table.detectors[:previous_detector_count]
-    if detector_prefix != previous.detectors:
-        raise RuntimeError("formation extension changes an existing detector")
+# (circuit text, round count, schedules, live reach) -> table, in this
+# process; a task reads few circuits
+_TABLES = circuit_builds.KeptBuilds(kept_count=16)
+
+
+def _formation_table(
+    circuit: stim.Circuit,
+    round_count: int,
+    measurement_rounds: Optional[dict[int, int]],
+    detector_rounds: Optional[dict[int, int]],
+    live_reach: Optional[int],
+) -> formation_records.FormationTable:
+    if round_count < 1:
+        raise ValueError("round_count must be positive")
+    packet_of_measurement, packet_width_by_round, readout_slot_start = (
+        _measurement_packets(circuit, round_count, measurement_rounds)
+    )
+    tables = _circuit_tables(
+        circuit, packet_of_measurement, round_count, detector_rounds
+    )
+    detectors, observables = _read_recipes(circuit, tables)
+    return formation_records.FormationTable(
+        round_count=round_count,
+        packet_width_by_round=packet_width_by_round,
+        readout_slot_start=readout_slot_start,
+        detectors=tuple(detectors),
+        observables=tuple(observables),
+        live_reach=live_reach,
+    )
 
 
 def _circuit_tables(

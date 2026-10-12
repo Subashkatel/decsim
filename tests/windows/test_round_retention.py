@@ -11,7 +11,9 @@ told no earlier escalation can re-slice the window (Toshio 2510.25222
 Sec. III C). A read whose reader forms the detection events also holds
 the raw rounds its first round's recipes read, the rounds Stim's
 converter reads for that round's detectors
-(stim.Circuit.compile_m2d_converter).
+(stim.Circuit.compile_m2d_converter). A chain keeps a window's potential
+read on each escalate edge, in the store the edge carries from and the
+one it lands in, until the window is final.
 """
 
 import types
@@ -45,11 +47,11 @@ def _retention(store, round_counts: dict, successors: dict):
     tracker = types.SimpleNamespace(
         effective_round_count_for_window=effective_round_count_for_window,
         rounds_arrived=lambda _operation_id: 0,
-        strong_rounds_arrived=lambda _operation_id: 0,
+        strong_rounds_arrived=lambda _operation_id, _store: 0,
     )
     retention = round_retention.RoundRetention(
         is_strong_context_retained=False,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
     )
     retention.weak_store = store
     retention.planner = planner
@@ -84,12 +86,12 @@ def _strong_retention(strong_store, rounds_arrived: int):
     tracker = types.SimpleNamespace(
         effective_round_count_for_window=lambda _operation_id, _window: 9,
         rounds_arrived=lambda _operation_id: rounds_arrived,
-        strong_rounds_arrived=lambda _operation_id: 0,
+        strong_rounds_arrived=lambda _operation_id, _store: 0,
     )
     weak_store = _store()
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
     )
     retention.weak_store = weak_store
     retention.strong_store = strong_store
@@ -154,7 +156,7 @@ def _reach_growing_table():
 def _forming_retention(table, **forms):
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
         **forms,
     )
     retention.detection_events = _placement(table)
@@ -234,7 +236,7 @@ def test_a_source_with_no_recipes_reads_nothing_before_a_redo():
     )
     retention = round_retention.RoundRetention(
         is_strong_context_retained=True,
-        primary_tier=window_records.DecoderTier.WEAK,
+        primary_tier=window_records.WEAK_POOL_ID,
         strong_side_seat="strong_decoder",
     )
     retention.detection_events = formation.SeatedFormation(None, settings)
@@ -260,7 +262,7 @@ def test_a_context_round_still_crossing_is_told_apart_from_one_released():
     store.accept_packed_round(packet, publication_tick=1)
     crossing = retention.context_rounds_in_flight((1, 0), ((1, 1), (1, 2)))
     assert crossing == ((1, 2),)
-    with pytest.raises(RuntimeError, match="arrived at the weak syndrome"):
+    with pytest.raises(RuntimeError, match="arrived at the store it is"):
         retention.context_rounds_in_flight((1, 0), ((1, 3),))
 
 
@@ -303,7 +305,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
     retention.register_window((1, 0), window)
     _publish_rounds(store, 1, (1, 2, 3, 4, 5))
     request_key = window_records.DecoderRequestKey(
-        1, 0, window_records.DecoderTier.WEAK, 0
+        1, 0, window_records.WEAK_POOL_ID, 0
     )
     job = decoding_records.DecodeJob(
         operation_id=1, window_id=0, round_count=5, request_key=request_key
@@ -365,7 +367,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     store.register_hold(claim, claimed)
     _publish_rounds(store, 1, range(1, 10))
     request_key = window_records.DecoderRequestKey(
-        1, 1, window_records.DecoderTier.WEAK, 0
+        1, 1, window_records.WEAK_POOL_ID, 0
     )
     job = decoding_records.DecodeJob(
         operation_id=1, window_id=1, round_count=6, request_key=request_key
@@ -439,3 +441,112 @@ def test_an_absorbed_read_past_the_first_round_that_nobody_holds_is_refused():
     )
     with pytest.raises(RuntimeError, match="are held by neither the strong"):
         retention.release_absorbed_strong_hold((1, 1), (1, 2), request)
+
+
+DEEP_POOL = window_records.PoolId("deep")
+
+
+def _chain_retention():
+    """Weak escalating to strong, strong on to deep: three stores."""
+    strong = _store()
+    deep = _store()
+    retention = _strong_retention(strong, rounds_arrived=9)
+    weak = retention.weak_store
+    retention.add_edge(window_records.STRONG_POOL_ID, weak, strong)
+    retention.add_edge(DEEP_POOL, strong, deep)
+    return retention, (weak, strong, deep)
+
+
+def _chain_window() -> window_records.Window:
+    return window_records.Window(
+        operation_id=1,
+        window_index=0,
+        commit_lo=1,
+        commit_hi=3,
+        buffer_hi=5,
+        round_count=6,
+    )
+
+
+def test_a_chain_keeps_a_windows_reads_in_each_edges_two_stores():
+    retention, stores = _chain_retention()
+    weak, strong, deep = stores
+    window = _chain_window()
+
+    retention.register_window((1, 0), window)
+
+    to_strong = decoding_records.PotentialStrong((1, 0))
+    to_deep = decoding_records.PotentialStrong((1, 0), DEEP_POOL)
+    held_by_store = [
+        (weak.has_hold(to_strong), weak.has_hold(to_deep)),
+        (strong.has_hold(to_strong), strong.has_hold(to_deep)),
+        (deep.has_hold(to_strong), deep.has_hold(to_deep)),
+    ]
+    assert held_by_store == [(True, False), (True, True), (False, True)]
+
+
+def test_a_final_window_ends_its_reads_on_every_edge():
+    retention, stores = _chain_retention()
+    window = _chain_window()
+    retention.register_window((1, 0), window)
+
+    retention.release_potential_strong((1, 0))
+
+    to_strong = decoding_records.PotentialStrong((1, 0))
+    to_deep = decoding_records.PotentialStrong((1, 0), DEEP_POOL)
+    held = []
+    for store in stores:
+        for holder in (to_strong, to_deep):
+            is_held = store.has_hold(holder)
+            held.append(is_held)
+    assert held == [False] * 6
+
+
+def test_a_middle_jobs_rounds_stay_held_for_the_edge_after_it():
+    """The deep edge redoes the strong revision, rounds 6 and 7 too.
+
+    The strong job reads past the window's own rounds 1-5, as a double
+    window does; once its input lands, the strong store still keeps
+    every round it read for the deep edge's verdict.
+    """
+    retention, stores = _chain_retention()
+    _weak, strong, _deep = stores
+    window = _chain_window()
+    retention.register_window((1, 0), window)
+    request_key = window_records.DecoderRequestKey(
+        1, 0, window_records.STRONG_POOL_ID, 0
+    )
+    payloads = []
+    for round_index in range(1, 8):
+        fragment = _raw_fragment(round_index)
+        payloads.append(fragment)
+    job = decoding_records.DecodeJob(
+        operation_id=1,
+        window_id=0,
+        round_count=7,
+        strong_decode_for=(1, 0),
+        request_key=request_key,
+        payloads=payloads,
+    )
+
+    retention.hold_strong_input(job)
+    job.input_hold()
+
+    to_deep = decoding_records.PotentialStrong((1, 0), DEEP_POOL)
+    held = []
+    for round_index in range(1, 8):
+        is_held = strong.is_round_held((1, round_index))
+        held.append(is_held)
+    assert strong.has_hold(to_deep)
+    assert held == [True] * 7
+
+
+def test_a_deep_edge_carries_its_rounds_from_the_middle_store():
+    retention, stores = _chain_retention()
+    _weak, strong, _deep = stores
+    packet = _packet(1, 2)
+    strong.accept_packed_round(packet, publication_tick=2)
+
+    packets = retention.escalated_rounds([(1, 2)], DEEP_POOL)
+
+    assert packets == (packet,)

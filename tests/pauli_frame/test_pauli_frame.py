@@ -10,7 +10,6 @@ is charged from the frame clock's next edge, gem5's clockEdge
 """
 
 import dataclasses
-import enum
 
 import pytest
 
@@ -20,19 +19,18 @@ import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.presets.machines as machines
+import decsim.records.windows as window_records
 import decsim.settings as machine_settings
+import decsim.statistics.registry as statistics_registry
+import decsim.topology.slotted as slotted
 import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
 
 
-class Tier(enum.Enum):
-    WEAK = "weak"
-    STRONG = "strong"
-
-
 @dataclasses.dataclass(frozen=True)
 class RequestKey:
-    tier: Tier
+    pool: window_records.PoolId
     run_sequence: int
 
 
@@ -54,7 +52,13 @@ def frame_with_commit_ticks(commit_ticks):
     return engine, frame
 
 
-def commit(frame, window_key, observables, tier=Tier.WEAK, on_committed=None):
+def commit(
+    frame,
+    window_key,
+    observables,
+    tier=window_records.WEAK_POOL_ID,
+    on_committed=None,
+):
     request_key = RequestKey(tier, run_sequence=window_key[1])
     if on_committed is None:
         on_committed = do_nothing
@@ -113,9 +117,9 @@ def test_a_snapshot_does_not_change_when_the_frame_does():
 
 def test_a_second_correction_for_a_window_is_refused():
     engine, frame = frame_with_commit_ticks(0)
-    commit(frame, ("stream", 0), (1,), tier=Tier.WEAK)
+    commit(frame, ("stream", 0), (1,), tier=window_records.WEAK_POOL_ID)
     with pytest.raises(RuntimeError, match="already has a weak correction"):
-        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
+        commit(frame, ("stream", 0), (0,), tier=window_records.STRONG_POOL_ID)
     assert frame.frame_for_stream("stream") == (1,)
 
 
@@ -150,7 +154,7 @@ def test_a_second_correction_arriving_while_the_first_is_pending_is_refused():
 
     commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
     with pytest.raises(RuntimeError, match="already has a weak correction"):
-        commit(frame, ("stream", 0), (0,), tier=Tier.STRONG)
+        commit(frame, ("stream", 0), (0,), tier=window_records.STRONG_POOL_ID)
     engine.run()
     assert continued == [4]
     snapshot = frame.snapshot()
@@ -209,7 +213,8 @@ class CountingFrameConfig(pauli_frame_module.PauliFrameConfig):
 
 def test_a_frame_written_outside_decsim_runs_from_its_record():
     """One record that builds the frame is the whole edit."""
-    base = machine_settings.weak_decoder_baseline(3, 0.001, 1.0)
+    weak_base = machines.weak_baseline(3, 0.001, 1.0)
+    base = slotted.resolved(weak_base)
     frame = base.pauli_frame
     counting = CountingFrameConfig(
         write_cycles=frame.write_cycles, clock=frame.clock
@@ -248,6 +253,47 @@ def test_two_windows_writes_are_charged_in_parallel_and_never_queued():
     assert continued_at == [14, 14]
 
 
+def test_each_correction_waits_its_own_write_cost_and_is_counted():
+    engine, frame = frame_with_commit_ticks(4)
+    run_statistics = statistics_registry.Registry(engine)
+    run_statistics.attach(frame, "pauli_frame")
+
+    def commit_both():
+        commit(frame, ("stream", 0), (1,))
+        commit(frame, ("stream", 1), (1,))
+
+    engine.schedule(10, commit_both)
+    engine.run()
+
+    assert frame.statistics.commits.count == 2
+    assert frame.statistics.write_wait.value_counts() == {4: 2}
+
+
+def test_the_frames_statistics_are_its_records_on_a_switching_run():
+    """The commits and the write waits are the frame's own records.
+
+    Every escalated window of this run is answered by the strong tier,
+    so the switching side's escalations are the strong commits.
+    """
+    switching = declared_run.switching_run(escalates=True)
+    machine = machine_module.Machine.build(switching.settings, 0)
+    machine.run()
+
+    groups = machine.observation.statistics.groups
+    frame = groups["pauli_frame"]
+    snapshot = machine.control.pauli_frame.snapshot()
+    records = snapshot.records
+    waits = [
+        record.committed_ticks - record.accepted_ticks for record in records
+    ]
+    strong = [record for record in records if record.tier == "strong"]
+    write_wait_ticks = sum(waits)
+
+    assert frame.commits.count == len(records)
+    assert frame.write_wait.total == write_wait_ticks
+    assert groups["switching"].escalated.count == len(strong)
+
+
 def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     """What the frame holds is what the run reports, escalations included.
 
@@ -259,7 +305,7 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     effects). Both folds must agree.
     """
     distance_three = two_tiers.tasks[0]
-    workload = machine_settings.memory_workload(3, 0.01, 30)
+    workload = machines.memory_workload(3, 0.01, 30)
     settings = dataclasses.replace(distance_three.machine, workload=workload)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
@@ -272,3 +318,26 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
 
     assert (1,) in strong_flips
     assert frame == tuple(operation_result.logical_observables)
+
+
+def test_letting_corrections_go_folds_them_into_the_same_frame():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0, 1))
+    commit(frame, ("stream", 1), (1, 1, 0))
+    commit(frame, ("stream", 2), (0, 1, 1))
+
+    frame.let_go_before("stream", 2)
+
+    assert frame.frame_for_stream("stream") == (0, 0, 0)
+    snapshot = frame.snapshot()
+    kept_keys = [record.window_key for record in snapshot.records]
+    assert kept_keys == [("stream", 2)]
+
+
+def test_a_write_to_a_window_let_go_is_a_second_write():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0))
+    frame.let_go_before("stream", 1)
+
+    with pytest.raises(RuntimeError, match="second write"):
+        commit(frame, ("stream", 0), (0, 1))

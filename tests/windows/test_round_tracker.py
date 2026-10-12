@@ -227,3 +227,19 @@ def test_registration_is_idempotent_for_a_known_operation():
     _arrive_through(tracker, 1, 3)
     assert tracker.register_operation(operation) is False
     assert tracker.rounds_arrived(1) == 3
+
+
+def test_each_store_a_region_lands_in_counts_its_own_rounds():
+    tracker = round_tracker.RoundTracker()
+    strong = object()
+    deep = object()
+
+    tracker.note_room_round(strong, 1, 4)
+    tracker.note_room_round(deep, 1, 2)
+    tracker.note_room_round(strong, 1, 3)
+
+    stored = [
+        tracker.strong_rounds_arrived(1, strong),
+        tracker.strong_rounds_arrived(1, deep),
+    ]
+    assert stored == [4, 2]

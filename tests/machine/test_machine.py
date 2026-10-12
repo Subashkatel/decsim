@@ -37,6 +37,7 @@ import stim
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
 import decsim.build.escalation as escalation_build
+import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
@@ -70,6 +71,8 @@ import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.ports as ports
+import decsim.presets.experiment_one as experiment_one
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.cycle_clock as cycle_clock
@@ -90,6 +93,8 @@ import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.topology.graph as graph
+import decsim.topology.slotted as slotted
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
@@ -219,10 +224,10 @@ def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
 
 def test_a_new_decoder_is_one_class_and_its_settings_record():
     """Gate point 1's settings run to completion on a decoder added here."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
     fake = FakeWeakDecoder.Settings()
-    weak_decoder = dataclasses.replace(settings.weak_decoder, algorithm=fake)
-    settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
+    with_fake = gate_point.with_settings(machines.WEAK_POOL, algorithm=fake)
+    settings = slotted.resolved(with_fake)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -233,15 +238,15 @@ def test_a_new_decoder_is_one_class_and_its_settings_record():
 
 def test_a_second_table_row_runs_gate_point_one():
     """Gate point 1's settings run to completion on the union_find row."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
     host_time = cycle_count_module.HostMeasuredTime()
     union_find_settings = union_find_decoder.UnionFindDecoder.Settings(
         timing=host_time
     )
-    weak_decoder = dataclasses.replace(
-        settings.weak_decoder, algorithm=union_find_settings
+    with_union_find = gate_point.with_settings(
+        machines.WEAK_POOL, algorithm=union_find_settings
     )
-    settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
+    settings = slotted.resolved(with_union_find)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -261,7 +266,8 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     tick, because no component has queued anything while the rest of the
     machine is still being built.
     """
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
+    settings = slotted.resolved(gate_point)
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
 
@@ -377,8 +383,9 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     distance_three = two_tiers.tasks[0]
     settings = distance_three.machine
     engine = engine_module.Engine()
-    switching = escalation_build.build_switching(
-        settings.switching, settings.weak_decoder, engine
+    layout = layout_module.slotted_layout(settings)
+    switching_parts = escalation_build.build_switching(
+        layout, engine, machine_clock=settings.clock
     )
     plan = plan_build.build_plan(
         settings.qpu,
@@ -388,30 +395,18 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         settings.detection_events,
         settings.switching,
         settings.decoder_manager.bulk_strong,
-        switching,
+        switching_parts,
     )
-    window_tier = settings.window_tier
-    window_decoder = settings.decoder_settings_for(window_tier.value)
-    escalates = settings.switching is not None
+    formation_paths = layout.formation_paths()
     detection_events = readout_part.build_detection_events(
         settings.detection_events,
         settings.clock,
         plan.device,
-        window_tier,
-        escalates,
+        formation_paths,
     )
-    signal = switching.confidence_signal
-    pool = decoders_part.build_decoder_pool(
-        window_decoder,
-        settings.strong_decoder,
-        window_tier,
-        escalates,
-        settings.clock,
-        detection_events,
-        signal,
-    )
-    weak_store_slot, strong_store_slot = machine_module.store_slots(
-        settings, window_tier, pool
+    signal_by_pool = escalation_build.signal_by_pool(switching_parts)
+    pools = decoders_part.build_pool_units(
+        layout, settings.clock, detection_events, signal_by_pool
     )
     links = machine_module.build_links(settings, engine)
     qpu = qpu_part.Qpu.build(settings.magic_state_factory, engine, plan)
@@ -426,8 +421,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     readout = readout_part.Readout.build(
         settings.controller,
         settings.links,
-        weak_store_slot,
-        strong_store_slot,
+        layout.stores,
         settings.clock,
         engine,
         detection_events,
@@ -437,27 +431,30 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     windows = windows_part.Windows.build(
         settings.windows,
         settings.workload,
-        settings.switching,
-        window_decoder,
-        settings.strong_decoder,
-        window_tier,
+        layout,
         settings.clock,
         engine,
         plan,
         links,
         built_models,
     )
+    target_by_source = layout.target_by_source()
     decoders = decoders_part.Decoders.build(
-        settings.decoder_manager, settings.clock, engine, pool
+        settings.decoder_manager,
+        settings.clock,
+        engine,
+        pools,
+        target_by_source,
     )
-    sender = readout.syndrome_round_sender
-    unbound = "SyndromeRoundSender.windows was read before it was bound"
+    arrivals = readout.memory_arrivals
+    unbound = "MemoryRoundArrivals.windows was read before it was bound"
 
-    assert isinstance(switching.policy, escalation_policies.Switching)
+    entry_switching = switching_parts[0]
+    assert isinstance(entry_switching.policy, escalation_policies.Switching)
     assert plan.round_ticks == 1_000_000
     assert readout.controller.assembler is readout.assembler
     with pytest.raises(RuntimeError, match=unbound):
-        assert sender.windows is None
+        assert arrivals.windows is None
 
     machine = machine_module.Machine.assemble(
         settings,
@@ -469,14 +466,15 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         readout,
         windows,
         decoders,
-        switching,
+        layout,
+        switching_parts,
     )
     result = machine.run()
     whole_machine = machine_module.Machine.build(settings, 0)
     whole = whole_machine.run()
 
     requester = windows.window_manager.requester
-    assert sender.windows is windows.window_manager
+    assert arrivals.windows is windows.window_manager
     assert requester.decode_queue is decoders.decoder_manager
     assert result.terminal_status == "complete"
     assert result.fully_done_ticks == 289_904_000
@@ -869,7 +867,7 @@ def test_a_one_round_store_runs_a_stream_no_round_of_which_reads_back():
     )
 
     machine = machine_module.Machine.build(settings, RUN_SEED)
-    store = machine.readout.weak_syndrome_buffer
+    store = _weak_store(machine)
     stalled = functools.partial(_refuse_a_round_still_held, store)
     machine.engine.schedule(STALL_GUARD_TICKS, stalled, label="stall guard")
 
@@ -1524,7 +1522,8 @@ def test_joint_live_memory_can_use_the_weak_primary_tier(
     _assert_joint_acquisitions(run)
     assert run.result.terminal_status == "complete"
     assert run.result.event_queue_empty
-    assert run.machine.readout.weak_syndrome_buffer.occupancy == 0
+    weak_store = _weak_store(run.machine)
+    assert weak_store.occupancy == 0
     assert run.weak_writes
     paths = _transfer_paths(run)
     assert "controller_to_weak_buffer" in paths
@@ -1828,6 +1827,60 @@ def test_a_machine_built_from_its_record_reads_the_tables_row(tmp_path):
     assert threshold.threshold_nats == twelve_decibels
 
 
+def test_settings_read_at_the_task_hold_their_memory_row_lowered():
+    """The row is made at the qpu's distance; reading again changes nothing."""
+    memory = producers.MemorySettings(0.002, rounds=6)
+    qpu = qpu_settings.QpuSettings(distance=5)
+    settings = machine_settings.MachineSettings(qpu=qpu, workload=memory)
+
+    read = settings.at_task()
+    read_again = read.at_task()
+
+    assert read.workload == machines.memory_workload(5, 0.002, 6)
+    assert read_again is read
+
+
+def test_a_readout_route_on_a_patch_no_operation_reads_out_is_refused():
+    memory = producers.MemorySettings(0.002, rounds=3)
+    qpu = qpu_settings.QpuSettings(distance=3)
+    settings = machine_settings.MachineSettings(qpu=qpu, workload=memory)
+    base_path = settings.links.qpu_to_controller
+    route = _readout_route(base_path, ("nowhere",), "nowhere", 1_000)
+    links = dataclasses.replace(settings.links, readout_routes=(route,))
+    routed = dataclasses.replace(settings, links=links)
+
+    with pytest.raises(ValueError, match="never be taken"):
+        routed.at_task()
+
+
+def test_a_lowered_workload_fixes_the_distance_and_its_lowered_fields():
+    lowered = machine_settings.MachineSettings()
+
+    paths = lowered.set_in_the_run_file()
+
+    assert paths == (
+        "qpu.distance",
+        "workload.operations",
+        "workload.decode_operations",
+        "workload.dynamic_streams",
+        "workload.protected_regions",
+        "workload.physical_circuits",
+        "workload.rounds_policy",
+        "workload.workload_record",
+    )
+
+
+def test_a_memory_row_fixes_nothing_and_a_live_memory_the_distance():
+    memory = producers.MemorySettings(0.002, rounds=6)
+    fragments = pathlib.Path("fragments")
+    live = producers.LiveMemorySettings(fragments, 2)
+    with_memory = machine_settings.MachineSettings(workload=memory)
+    with_live = machine_settings.MachineSettings(workload=live)
+
+    assert with_memory.set_in_the_run_file() == ()
+    assert with_live.set_in_the_run_file() == ("qpu.distance",)
+
+
 def test_settings_whose_threshold_reads_no_table_are_their_own_reading():
     """A fixed threshold is the same at every task: nothing is rebuilt."""
     settings = _switching_memory("pymatching", "complementary_gap")
@@ -1871,7 +1924,8 @@ class CountingSyndromeBufferSettings(
 
 def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     """Gate point 1's settings run to completion on a store plugged in."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
+    settings = slotted.resolved(gate_point)
     weak_store = settings.weak_syndrome_buffer
     counting = CountingSyndromeBufferSettings(
         bits=weak_store.bits,
@@ -1883,9 +1937,10 @@ def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
-    assert type(machine.readout.weak_syndrome_buffer) is CountingSyndromeBuffer
+    weak_store = _weak_store(machine)
+    assert type(weak_store) is CountingSyndromeBuffer
     fired = declared_run.log_lines_containing(machine, "fires round")
-    assert machine.readout.weak_syndrome_buffer.stored_count == len(fired)
+    assert weak_store.stored_count == len(fired)
     assert fired
 
 
@@ -1933,7 +1988,8 @@ class AlwaysReadyFactorySettings:
 
 def test_a_factory_written_outside_decsim_is_built_by_its_record():
     """The part calls the record's build, whatever factory it is."""
-    settings = machine_settings.weak_decoder_baseline(3, 0.003, 1.0)
+    gate_point = machines.weak_baseline(3, 0.003, 1.0)
+    settings = slotted.resolved(gate_point)
     always_ready = AlwaysReadyFactorySettings()
     settings = dataclasses.replace(settings, magic_state_factory=always_ready)
     machine = machine_module.Machine.build(settings, 0)
@@ -2401,7 +2457,7 @@ def test_every_measured_bit_crosses_the_link_exactly_once(recorded_memory):
     circuit, measurements, _detectors, _observables = recorded_memory
     machine, _result = replayed_run(circuit, measurements, 0)
     traffic = machine.observation.traffic.snapshot()
-    upward = transfer_records.LinkPath.QPU_TO_CONTROLLER
+    upward = transfer_records.QPU_TO_CONTROLLER
 
     bits_by_round = bits_by_round_on(traffic.transfers, upward)
 
@@ -2501,9 +2557,12 @@ def test_both_stores_settle_empty_at_the_end_of_an_escalating_run():
     """
     machine = declared_run.switching_run(escalates=True, rounds=9)
 
-    assert machine.readout.weak_syndrome_buffer.occupancy == 0
-    assert machine.readout.strong_syndrome_buffer.occupancy == 0
-    receiver = machine.readout.strong_syndrome_round_receiver
+    weak_store = _weak_store(machine)
+    strong_store = _strong_store(machine)
+    receiver = _strong_receiver(machine)
+
+    assert weak_store.occupancy == 0
+    assert strong_store.occupancy == 0
     assert receiver.reserved_bits_by_round == {}
 
 
@@ -2629,7 +2688,8 @@ DATA_QUBIT_COUNT = 9
 
 def base_run(base):
     """One shot of the base at d=3, p=0.001."""
-    settings = base(3, 0.001, 1.0)
+    graph_machine = base(3, 0.001, 1.0)
+    settings = slotted.resolved(graph_machine)
     machine = machine_module.Machine.build(settings, 0)
     machine.run()
     return machine
@@ -2648,10 +2708,10 @@ def test_the_controller_writes_every_round_into_buffer_0_over_a_priced_hop():
     the data qubits' with the last round, and the store hop the events
     they formed, eight per round.
     """
-    machine = base_run(machine_settings.weak_decoder_baseline)
-    store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
-    readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
-    room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+    machine = base_run(machines.weak_baseline)
+    store_hop = transfer_records.CONTROLLER_TO_WEAK_BUFFER
+    readout_hop = transfer_records.QPU_TO_CONTROLLER
+    room_hop = transfer_records.CONTROLLER_TO_STRONG_BUFFER
 
     events = BASE_ROUND_COUNT * CHECK_COUNT
     outcomes = events + DATA_QUBIT_COUNT
@@ -2669,10 +2729,10 @@ def test_a_strong_only_run_writes_every_round_into_buffer_1_over_a_priced_hop():
     once, at the width it leaves the controller, and the weak syndrome buffer
     sees none of them.
     """
-    machine = base_run(machine_settings.strong_decoder_baseline)
-    store_hop = transfer_records.LinkPath.CONTROLLER_TO_WEAK_BUFFER
-    readout_hop = transfer_records.LinkPath.QPU_TO_CONTROLLER
-    room_hop = transfer_records.LinkPath.CONTROLLER_TO_STRONG_BUFFER
+    machine = base_run(machines.strong_baseline)
+    store_hop = transfer_records.CONTROLLER_TO_WEAK_BUFFER
+    readout_hop = transfer_records.QPU_TO_CONTROLLER
+    room_hop = transfer_records.CONTROLLER_TO_STRONG_BUFFER
 
     events = BASE_ROUND_COUNT * CHECK_COUNT
     outcomes = events + DATA_QUBIT_COUNT
@@ -2709,7 +2769,7 @@ def test_a_strong_primary_run_reads_its_windows_on_the_strong_tier():
     machine = machine_module.Machine.build(settings, 0)
     machine.run()
     tiers = {tier for _window, tier in declared_run.frame_tiers(machine)}
-    assert settings.window_tier is window_records.DecoderTier.STRONG
+    assert settings.window_tier == window_records.STRONG_POOL_ID
     assert tiers == {"strong"}
 
 
@@ -2789,7 +2849,7 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing():
     free_machine, free_run = late_landing_shot(strong_crossing_cycles=0)
 
     assert priced_run.terminal_status == "complete"
-    receiver = priced_machine.readout.strong_syndrome_round_receiver
+    receiver = _strong_receiver(priced_machine)
     assert receiver.store.occupancy == 0
     assert frame_commit_ticks(priced_machine) == frame_commit_ticks(
         free_machine
@@ -3031,10 +3091,6 @@ def test_a_matching_arrangement_predicts_what_qldpcs_sliding_windows_predict(
     assert predictions == reference_predictions
 
 
-THIS_FILE = pathlib.Path(__file__)
-EXPERIMENT_ONE_RUN_FILE = (
-    THIS_FILE.parents[2] / "experiments" / "switching_baseline" / "run.py"
-)
 UNION_FIND_DISTANCE = 5
 # Experiment 1's highest rate, where most windows hold defects to match
 UNION_FIND_ERROR_RATE = 0.005
@@ -3042,25 +3098,17 @@ UNION_FIND_ROUNDS = 20  # four windows of d rounds
 UNION_FIND_SHOT_COUNT = 100
 
 
-@functools.cache
-def experiment_one_run_file():
-    """experiments/switching_baseline/run.py, for its machine functions."""
-    specification = importlib.util.spec_from_file_location(
-        "experiment_one_run_file", EXPERIMENT_ONE_RUN_FILE
-    )
-    module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
-    return module
-
-
 def experiment_one_weak_alone() -> machine_settings.MachineSettings:
     """Experiment 1's weak-alone machine on shots of four windows."""
-    run_file = experiment_one_run_file()
-    machine = run_file.weak_alone(UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE)
-    workload = machine_settings.memory_workload(
+    machine = experiment_one.weak_alone(
+        UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE
+    )
+    workload = machines.memory_workload(
         UNION_FIND_DISTANCE, UNION_FIND_ERROR_RATE, UNION_FIND_ROUNDS
     )
-    return dataclasses.replace(machine, workload=workload)
+    workload_part = graph.Part("workload", workload)
+    four_windows = machine.with_part(workload_part)
+    return slotted.resolved(four_windows)
 
 
 def note_weak_commit(commits, job, result, outcome, ended_ticks) -> None:
@@ -3145,18 +3193,19 @@ SWITCHING_SHOT_COUNT = 100
 
 def experiment_one_switching_on_matching() -> machine_settings.MachineSettings:
     """Experiment 1's switching machine, PyMatching as its strong tier."""
-    run_file = experiment_one_run_file()
-    machine = run_file.switching(SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE)
-    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    strong_decoder = dataclasses.replace(
-        machine.strong_decoder, algorithm=matching
+    machine = experiment_one.switching(
+        SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE
     )
-    workload = machine_settings.memory_workload(
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    on_matching = machine.with_settings(
+        machines.STRONG_POOL, algorithm=matching
+    )
+    workload = machines.memory_workload(
         SWITCHING_DISTANCE, UNION_FIND_ERROR_RATE, SWITCHING_ROUNDS
     )
-    return dataclasses.replace(
-        machine, strong_decoder=strong_decoder, workload=workload
-    )
+    workload_part = graph.Part("workload", workload)
+    six_windows = on_matching.with_part(workload_part)
+    return slotted.resolved(six_windows)
 
 
 DELIVERED_TIERS = {
@@ -3210,7 +3259,8 @@ def switching_shot(settings, seed: int, models) -> tuple:
     decoders = machine.decoders
     weak_outcomes = decoders.decoder_manager.outcomes
     weak_outcomes.trace.request_ended.connect(listener)
-    strong_outcomes = decoders.strong_decoder_manager.outcomes
+    strong_manager = decoders.manager_of(window_records.STRONG_POOL_ID)
+    strong_outcomes = strong_manager.outcomes
     strong_outcomes.trace.request_ended.connect(listener)
     result = machine.run()
     observation = machine.observation
@@ -3714,7 +3764,7 @@ def _run(
     weak_writes = []
     strong_occupancies = []
     machine.qpu.device.trace.round_emitted.connect(packets.append)
-    weak_store = machine.readout.weak_syndrome_buffer
+    weak_store = _weak_store(machine)
     if weak_store is not None:
         weak_store.trace.round_stored.connect(
             lambda *event: weak_writes.append(event)
@@ -3722,8 +3772,8 @@ def _run(
     observe = functools.partial(
         _record_strong_occupancy, machine, strong_occupancies
     )
-    if machine.readout.strong_syndrome_buffer is not None:
-        strong_store = machine.readout.strong_syndrome_buffer
+    strong_store = _strong_store(machine)
+    if strong_store is not None:
         strong_store.trace.round_stored.connect(observe)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
@@ -3749,8 +3799,9 @@ def _record_strong_occupancy(
     _packet: round_records.SyndromeRoundPacket,
 ) -> None:
     """The strong store's bits held and reserved, as its room test sums them."""
-    stored_bits = machine.readout.strong_syndrome_buffer.occupied_bits
-    receiver = machine.readout.strong_syndrome_round_receiver
+    strong_store = _strong_store(machine)
+    stored_bits = strong_store.occupied_bits
+    receiver = _strong_receiver(machine)
     reserved_widths = receiver.reserved_bits_by_round.values()
     reserved_bits = sum(reserved_widths)
     taken = stored_bits + reserved_bits
@@ -3762,8 +3813,8 @@ def _assert_direct_strong_path(run: _Run) -> None:
     assert run.result.decode_work_settled
     assert run.result.event_queue_empty
     requests = run.machine.observation.decode_records.requests
-    tiers = {request.request_key.tier for request in requests}
-    assert tiers == {window_records.DecoderTier.STRONG}
+    tiers = {request.request_key.pool for request in requests}
+    assert tiers == {window_records.STRONG_POOL_ID}
     paths = _transfer_paths(run)
     forbidden = {
         "controller_to_weak_buffer",
@@ -3801,10 +3852,11 @@ def _assert_actual_truth(run: _Run) -> None:
 
 
 def _assert_drained(run: _Run) -> None:
-    weak_store = run.machine.readout.weak_syndrome_buffer
+    weak_store = _weak_store(run.machine)
     assert weak_store is None or weak_store.occupancy == 0
-    assert run.machine.readout.strong_syndrome_buffer.occupancy == 0
-    receiver = run.machine.readout.strong_syndrome_round_receiver
+    strong_store = _strong_store(run.machine)
+    assert strong_store.occupancy == 0
+    receiver = _strong_receiver(run.machine)
     assert receiver.reserved_bits_by_round == {}
     units = run.machine.decoders.decoder_manager.pool.units
     occupied = [unit.memory.occupied_bits for unit in units]
@@ -3880,14 +3932,12 @@ def _zero_delay_links(
     links: link_settings.FabricSettings,
 ) -> link_settings.FabricSettings:
     paths_by_name = {}
-    for path in transfer_records.LinkPath:
+    for path in transfer_records.SLOTTED_PATHS:
         settings = links.path_settings(path)
         channel = dataclasses.replace(
             settings.channel, propagation_latency_ticks=0, capacity=None
         )
-        paths_by_name[path.value] = dataclasses.replace(
-            settings, channel=channel
-        )
+        paths_by_name[path] = dataclasses.replace(settings, channel=channel)
     return dataclasses.replace(links, **paths_by_name)
 
 
@@ -4024,7 +4074,7 @@ def _run_static(
 ) -> tuple[_Run, dict]:
     machine = machine_module.Machine.build(settings, seed)
     weak_writes = []
-    weak_store = machine.readout.weak_syndrome_buffer
+    weak_store = _weak_store(machine)
     if weak_store is not None:
         weak_store.trace.round_stored.connect(
             lambda *event: weak_writes.append(event)
@@ -4033,7 +4083,7 @@ def _run_static(
     released = functools.partial(
         _record_release, machine, release_ticks_by_round
     )
-    strong_store = machine.readout.strong_syndrome_buffer
+    strong_store = _strong_store(machine)
     strong_store.trace.round_released.connect(released)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)
@@ -4436,3 +4486,16 @@ class _FifthRoundReadsTheFirst(circuit_records.RepeatedStimCircuit):
 
 _ADDED_ON_ROUND = {5: stim.Circuit("DETECTOR rec[-1] rec[-5]")}
 _NOTHING_ADDED = stim.Circuit()
+
+
+def _weak_store(machine: machine_module.Machine):
+    return machine.readout.store_named(layout_module.WEAK_STORE)
+
+
+def _strong_store(machine: machine_module.Machine):
+    return machine.readout.store_named(layout_module.STRONG_STORE)
+
+
+def _strong_receiver(machine: machine_module.Machine):
+    strong = machine.readout.store_parts(layout_module.STRONG_STORE)
+    return strong.receiver

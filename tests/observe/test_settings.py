@@ -39,9 +39,18 @@ PYTHON_REFUSALS = [
         "at least 200",
     ),
     (
+        {"warmup_rounds": -1},
+        "observation.warmup_rounds must be a whole number of rounds, "
+        "at least 0",
+    ),
+    (
         {"reaction_deadline_microseconds": -1.0},
         "observation.reaction_deadline_microseconds must be finite and not "
         "negative",
+    ),
+    (
+        {"folds_windows": True, "record_window_outcomes": True},
+        "not implemented yet: observation.record_window_outcomes keeps",
     ),
 ]
 

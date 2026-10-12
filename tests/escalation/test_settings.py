@@ -13,7 +13,9 @@ import pytest
 
 import decsim.confidence.complementary as complementary
 import decsim.decoders.settings as decoder_settings
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.settings as escalation_settings
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
 import decsim.settings as machine_settings
@@ -47,6 +49,23 @@ def test_a_switching_record_refuses_a_strong_answer_route_it_lacks():
     )
 
 
+def test_a_deadline_beside_both_decoders_started_at_once_is_refused():
+    """A rescue starts the target on its trigger; Step 1 starts it always."""
+    deadline = deadlines.Deadline.Settings(slack_microseconds=10.0)
+
+    with pytest.raises(ValueError, match="run_both_at_once"):
+        _switching(deadline=deadline, run_both_at_once=True)
+
+
+def test_a_deadline_beside_an_absorbing_window_is_refused():
+    """A rescue starts the target early; a double window starts it late."""
+    deadline = deadlines.Deadline.Settings(slack_microseconds=10.0)
+    double_window = strong_window_shapes.DoubleWindow.Settings()
+
+    with pytest.raises(ValueError, match="double_window"):
+        _switching(deadline=deadline, strong_window=double_window)
+
+
 def test_a_route_through_the_weak_chip_with_no_clock_is_refused():
     """The chip's commit is one cycle, and a run with no clock has none."""
     settings = shape_tests.gate_switching()
@@ -77,12 +96,18 @@ def test_two_decoders_without_switching_are_refused():
         machine_settings.MachineSettings(weak_decoder=pool, strong_decoder=pool)
 
 
-@pytest.mark.parametrize("empty_slot", ["weak_decoder", "strong_decoder"])
-def test_switching_with_an_empty_decoder_slot_still_stops(empty_slot):
-    """No weak tier stops the build; no strong tier, the first escalation."""
+@pytest.mark.parametrize(
+    "empty_slot, stop",
+    [("weak_decoder", KeyError), ("strong_decoder", AttributeError)],
+)
+def test_switching_with_an_empty_decoder_slot_still_stops(empty_slot, stop):
+    """No weak tier stops the build; no strong tier, the first escalation.
+
+    With no weak tier the edge's source has no pool.
+    """
     settings = shape_tests.gate_switching()
     one_decoder = dataclasses.replace(settings, **{empty_slot: None})
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(stop):
         machine = machine_module.Machine.build(one_decoder, 0)
         machine.run()

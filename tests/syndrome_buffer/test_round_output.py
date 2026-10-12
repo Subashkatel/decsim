@@ -153,7 +153,7 @@ def _output(
 ) -> round_output.SyndromeBufferOutput:
     output = round_output.SyndromeBufferOutput(
         engine,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
         reads_in_place,
         "weak_decoder",

@@ -19,6 +19,7 @@ import numpy
 import stim
 
 import decsim.config as config
+import decsim.detector_error_model.circuit_builds as circuit_builds
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.error_model_sampler as error_model_sampler
@@ -49,7 +50,7 @@ import decsim.trace_source as trace_source
 BURST_CHANNELS = ("gate", "idle", "measurement", "reset")
 
 
-class StimDevice(seeding._AtomicRunSeedConsumer):
+class StimDevice(seeding.AtomicRunSeedConsumer):
     """Streams one sampled Stim shot as raw measurement packets, by round.
 
     The maps are keyed by stream identity with one-based rounds.
@@ -87,7 +88,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         measurement_rounds: Optional[dict] = None,
     ) -> None:
         self._seed = validated_seed(seed)
-        seeding._AtomicRunSeedConsumer.__init__(self, self._seed)
+        seeding.AtomicRunSeedConsumer.__init__(self, self._seed)
         detector_rounds_override = _rounds_by_key(detector_rounds)
         terminal_ids = _detector_ids_by_key(terminal_detector_ids)
         measurement_rounds_override = _rounds_by_key(measurement_rounds)
@@ -398,7 +399,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             sample_key_by_operation_id={},
             stream_model_by_id={},
             source_binding_by_key={},
-            strong_slicer_by_key={},
         )
 
     def _sampler_for(
@@ -513,46 +513,74 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         """The operation's slicer, indexed once for all its strong windows.
 
         Indexing the circuit's faults is the costly step and is the same
-        for every window, so a shot builds it once instead of once per
-        escalation.
+        for every window of every shot of the task, so it is kept by the
+        circuit's text and what else it reads (circuit_builds).
         """
         key = program_records.decode_identity(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
-        slicer_key = (key, requirement)
-        slicer = self._shots.strong_slicer_by_key.get(slicer_key)
-        if slicer is None:
-            slicer = window_slicer.WindowSlicer(
-                operation.circuit,
-                round_count=round_count,
-                detector_rounds=detector_rounds,
-                fault_model_requirement=requirement,
-            )
-            self._shots.strong_slicer_by_key[slicer_key] = slicer
+        binding = self._shots.source_binding_by_key[key]
+        slicer_key = (
+            binding.circuit_text,
+            round_count,
+            binding.detector_key,
+            requirement,
+        )
+        slicer = _STRONG_SLICERS.held(slicer_key)
+        if slicer is not None:
+            return slicer
+        slicer = window_slicer.WindowSlicer(
+            operation.circuit,
+            round_count=round_count,
+            detector_rounds=detector_rounds,
+            fault_model_requirement=requirement,
+        )
+        _STRONG_SLICERS.keep(slicer_key, slicer)
         return slicer
 
     def _bind_source(
         self, key, circuit: stim.Circuit, source_round_count: int
     ) -> dict:
-        """Bind one finite circuit, duration and detector chronology per key."""
-        detector_rounds_override = self._shots.detector_rounds_override.get(key)
-        resolved = detector_chronology.resolve_detector_rounds(
-            circuit, detector_rounds_override, source_round_count
-        )
-        circuit_text = str(circuit)
+        """Bind one finite circuit, duration and detector chronology per key.
+
+        The chronology is resolved once, at the binding. A bound key comes
+        back once per strong window, so its circuit is compared by text
+        only when it is not the very circuit bound.
+        """
         binding = self._shots.source_binding_by_key.get(key)
         if binding is None:
-            detector_rounds = dict(resolved)
-            self._shots.source_binding_by_key[key] = _SourceBinding(
-                circuit_text, source_round_count, detector_rounds
-            )
-            return detector_rounds
-        if binding.circuit_text != circuit_text:
-            raise ValueError("circuit differs from the bound finite source")
+            binding = self._new_binding(key, circuit, source_round_count)
+            self._shots.source_binding_by_key[key] = binding
+            return binding.detector_rounds
+        if binding.circuit is not circuit:
+            _check_the_bound_text(binding, circuit)
         if binding.round_count != source_round_count:
             raise ValueError(
                 "source duration differs from the bound finite source"
             )
         return binding.detector_rounds
+
+    def _new_binding(
+        self, key, circuit: stim.Circuit, source_round_count: int
+    ) -> "_SourceBinding":
+        detector_rounds_override = self._shots.detector_rounds_override.get(key)
+        resolved = detector_chronology.resolve_detector_rounds(
+            circuit, detector_rounds_override, source_round_count
+        )
+        detector_rounds = dict(resolved)
+        circuit_text = str(circuit)
+        detector_key = circuit_builds.digest(detector_rounds)
+        return _SourceBinding(
+            circuit,
+            circuit_text,
+            source_round_count,
+            detector_rounds,
+            detector_key,
+        )
+
+
+# (circuit text, round count, detector rounds, requirement) -> slicer, in
+# this process; a slicer of a large circuit is large, so few are kept
+_STRONG_SLICERS = circuit_builds.KeptBuilds(kept_count=4)
 
 
 class RecordedStimDevice(StimDevice):
@@ -882,9 +910,13 @@ class _SampledShot:
 class _SourceBinding:
     """The finite circuit one stream identity is bound to."""
 
+    # the circuit as bound, so the same circuit back needs no text check
+    circuit: stim.Circuit
     circuit_text: str
     round_count: int
     detector_rounds: dict
+    # the detector rounds as a slicer key, made once
+    detector_key: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -893,6 +925,15 @@ class _StreamModel:
 
     round_count: int
     slicer: window_slicer.WindowSlicer
+
+
+def _check_the_bound_text(
+    binding: "_SourceBinding", circuit: stim.Circuit
+) -> None:
+    """Refuse a circuit whose text is not the bound one's."""
+    circuit_text = str(circuit)
+    if binding.circuit_text != circuit_text:
+        raise ValueError("circuit differs from the bound finite source")
 
 
 def _check_finite_stream_length(
@@ -992,7 +1033,6 @@ class _ShotTable:
     sample_key_by_operation_id: dict = dataclasses.field(default_factory=dict)
     stream_model_by_id: dict = dataclasses.field(default_factory=dict)
     source_binding_by_key: dict = dataclasses.field(default_factory=dict)
-    strong_slicer_by_key: dict = dataclasses.field(default_factory=dict)
 
 
 def _rounds_by_key(declared: Optional[dict]) -> dict:

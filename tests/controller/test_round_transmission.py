@@ -20,6 +20,7 @@ import dataclasses
 
 import pytest
 
+import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
@@ -35,15 +36,13 @@ import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-from decsim.syndrome_buffer import (
-    weak_syndrome_round_receiver as weak_syndrome_round_receiver,
-)
+import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
 CWB_TICKS = config.microseconds_to_ticks(0.25)
 WBD_TICKS = config.microseconds_to_ticks(5.0)
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(7)
-WBD_PATH = transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
+WBD_PATH = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
 ROUND_BITS = 64
 # a pure-delay controller_to_weak_buffer, so a window round publishes
 # one fixed store hop after it is sent
@@ -178,14 +177,14 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     transfers.link = links
     store_output = round_output.SyndromeBufferOutput(
         engine,
-        transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
         "weak syndrome buffer",
     )
     store_output.transfers = transfers
     store_output.store = store
     store_output.link = links
-    weak_receiver = weak_syndrome_round_receiver.WeakSyndromeRoundReceiver(
-        engine
+    weak_receiver = receiver_module.SyndromeRoundReceiver(
+        engine, layout_module.WEAK_STORE_INTAKE
     )
     weak_receiver.store = store
     weak_receiver.output = store_output
@@ -197,7 +196,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     transmitter = round_transmission.RoundTransmitter(engine)
     transmitter.link = links
     transmitter.memory_arrivals = windows
-    transmitter.weak_receiver = weak_receiver
+    transmitter.receiver = weak_receiver
     transmitter.packing_line = RecordingPackingLine(transmitter)
     transmitter.trace.round_event.connect(recorder.record)
     weak_receiver.trace.round_event.connect(recorder.record)
@@ -206,7 +205,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
 
 def reserve_and_send(transmitter, packed) -> None:
     """The sender's two steps: the room is reserved, then the round leaves."""
-    transmitter.weak_receiver.reserve_write(packed)
+    transmitter.receiver.reserve_write(packed)
     transmitter.send(packed)
 
 

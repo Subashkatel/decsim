@@ -1,6 +1,9 @@
-"""The strong re-decode: the window side of the strong tier.
+"""The strong re-decode: the window side of one escalate edge.
 
-When the policy escalates a weak result, StrongRedecode asks the shape
+One StrongRedecode serves each edge, from its source pool to its target
+pool, with its own policy, verdict costs, shape and held windows; a
+slotted machine has one, from the weak pool to the strong one. When the
+policy escalates a source result, StrongRedecode asks the shape
 for the strong window's job, sends the window's selection over
 weak_decoder_to_strong_decoder, tells the decoder side to await the
 result, and submits the job now or when the conditions the shape
@@ -11,7 +14,8 @@ several (CUDA-Q QEC's enqueue_syndromes, realtime_decoding.rst lines
 52-56). When both tiers decode at once (Step 1), it builds the
 speculative strong decode beside the weak job and selects it at the
 verdict; a landed strong input waits for its selection before it
-decodes.
+decodes. An edge with a deadline (deadlines.py) starts that decode
+when its trigger fires, before the verdict, as DART-Q's rescue.
 """
 
 import dataclasses
@@ -20,19 +24,34 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 import decsim.engine as engine_module
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
+import decsim.records.routes as route_records
 import decsim.records.windows as window_records
+import decsim.statistics.kinds as statistic_kinds
+import decsim.statistics.registry as statistics_registry
 import decsim.trace_source as trace_source
+import decsim.windows.revision_rules as revision_rules
+import decsim.windows.round_retention as round_retention
 
 
 class StrongRedecode:
-    """Drives each escalated window's strong re-decode."""
+    """Drives each window this edge escalates through its target's decode.
 
+    hops names the edge: its source, the pool whose results meet its
+    verdict; its target, the pool that re-decodes the windows it
+    escalates; and the forward hop its selections and regions ride.
+    rules says how the window side takes its verdicts and revisions,
+    the verdict priced on its own clock (windows/revision_rules.py).
+    """
+
+    # the rule that keeps or escalates a source result
+    policy = ports.Port(ports.EscalationPolicy)
     shape = ports.Port(strong_window_shapes.StrongWindowShape)
     # the ledger of held strong windows and what releases each
     pending = ports.Port(pending_strong_windows.PendingStrongWindows)
@@ -42,15 +61,61 @@ class StrongRedecode:
     # and the escalated region leave by the decoder output, and the strong
     # syndrome buffer sends the strong input
     decoder_output = ports.Port(ports.DecoderOutput)
+    # the store a held window's missing rounds are read out of
+    carried_from = ports.Port(ports.SyndromeBuffer)
     # the strong syndrome buffer's receiving end, where the region lands
-    strong_receiver = ports.Port(ports.StrongSyndromeRoundReceiver)
+    strong_receiver = ports.Port(ports.SyndromeRoundReceiver)
     strong_output = ports.Port(ports.SyndromeBufferOutput)
+    # the target pool's manager
     decode_queue = ports.Port(ports.DecodeQueue)
     # the strong job's return path
     verdict = ports.Port(ports.WindowVerdict)
+    # the join of the edge that leaves the target pool, which reads the
+    # target's results for that edge's signal; none when no edge leaves
+    target_join = ports.Port(ports.WindowGapJoin, optional=True)
+    # the edge that leaves the target pool: it may start beside a target
+    # job, and a keep here ends its work on the window too
+    next_edge = ports.Port(ports.EscalateEdge, optional=True)
+    # the source job's deadline and its rescue; none on most edges
+    deadline = ports.Port(deadlines.Deadline, optional=True)
 
-    def __init__(self, engine: engine_module.Engine) -> None:
+    # the windows escalated, those whose speculative strong decode was
+    # selected as it ran, and the strong windows held for their
+    # conditions and dropped held when the weak result was kept
+    STATISTICS = (
+        statistics_registry.Statistic(
+            "escalated", statistic_kinds.Count, "windows escalated", "windows"
+        ),
+        statistics_registry.Statistic(
+            "speculative_selected",
+            statistic_kinds.Count,
+            "escalations that took the running speculative decode",
+            "windows",
+        ),
+        statistics_registry.Statistic(
+            "held",
+            statistic_kinds.Count,
+            "strong windows held for their release conditions",
+            "windows",
+        ),
+        statistics_registry.Statistic(
+            "held_cancelled",
+            statistic_kinds.Count,
+            "held strong windows dropped for a kept weak result",
+            "windows",
+        ),
+    )
+    statistics = statistics_registry.unrecorded(STATISTICS)
+
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        hops: route_records.EdgeHops,
+        rules: revision_rules.EdgeRules = revision_rules.DEFAULT_RULES,
+    ) -> None:
         self.engine = engine
+        self.hops = hops
+        self.rules = rules
         self.selections = _StrongSelections()
         # the rounds sent up and not landed yet, so a wake-up while a
         # region crosses does not carry them twice
@@ -58,6 +123,124 @@ class StrongRedecode:
         # trace sources: the wait a held strong window sits in, from the
         # hold to the condition that ends it
         self.trace = _TraceSources()
+
+    @property
+    def source(self) -> window_records.PoolId:
+        """The pool whose results meet this edge's verdict."""
+        return self.hops.source
+
+    @property
+    def target(self) -> window_records.PoolId:
+        """The pool that re-decodes the windows this edge escalates."""
+        return self.hops.target
+
+    def accept_target_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A target decode ended: to the next edge's join, else the verdict.
+
+        A target pool that is the source of an edge of its own reads its
+        results for that edge's signal first, as the entry pool's solves
+        reach the requester's join.
+        """
+        if self.target_join is None:
+            self.verdict.accept_revision(job, result)
+            return
+        self.target_join.accept_result(job, result)
+
+    def enqueue_target(
+        self,
+        job: decoding_records.DecodeJob,
+        selection_arrival_ticks: Optional[int],
+    ) -> None:
+        """Queue a target job and its companions; the next edge may start.
+
+        The edge out of the target starts beside the job itself, which
+        names the attempt; its signal joins the companions' solves.
+        """
+        attempt = self._attempt_of(job)
+        next_edge = self.next_edge
+        if next_edge is not None:
+            next_edge.arm_deadline(job)
+        for attempt_job in attempt:
+            send_input = self._strong_input_send(
+                attempt_job, selection_arrival_ticks
+            )
+            self.decode_queue.enqueue(
+                attempt_job, send_input, self.accept_target_result
+            )
+        if next_edge is None:
+            return
+        next_edge.start_beside_source(job)
+
+    def start_beside_source(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """A source job past the entry was queued: decode it here too.
+
+        The speculative decode starts with the source pool's job (Toshio
+        et al. 2510.25222 lines 598-601), one depth down. The source job
+        was built with its faces pinned, so nothing defers it.
+        """
+        if not self.policy.decodes_both_at_once(source_job.window):
+            return
+        submission = self._planned_speculative_decode(source_job)
+        if submission is None:
+            return
+        self.enqueue_target(submission.job, None)
+
+    # ---- the deadline
+
+    def arm_deadline(self, source_job: decoding_records.DecodeJob) -> None:
+        """A source job arrives at its pool: its deadline starts now.
+
+        DART-Q's deadline is the job's arrival plus the slack budget
+        (Bhave et al. 2605.09142 Sec. III-A, Eq. 1); the source's queue
+        is read before the job joins it.
+        """
+        if self.deadline is None:
+            return
+        rescue = functools.partial(self._rescue, source_job)
+        self.deadline.arm(source_job, rescue)
+
+    def note_source_result(
+        self, source_job: decoding_records.DecodeJob
+    ) -> None:
+        """The source result reached the verdict: met or missed."""
+        if self.deadline is None:
+            return
+        self.deadline.note_result(source_job)
+
+    def result_is_unavailable(
+        self, source_job: decoding_records.DecodeJob
+    ) -> bool:
+        """Whether the source result came late and counts as no answer.
+
+        "a late decode output is treated as unavailable at the required
+        control boundary" (2605.09142 Sec. III-C), so the target answers.
+        """
+        if self.deadline is None:
+            return False
+        return self.deadline.is_unavailable(source_job)
+
+    def _rescue(self, source_job: decoding_records.DecodeJob) -> None:
+        """The trigger fired: the target decodes before the verdict.
+
+        The rescue is the speculative decode (Toshio et al. 2510.25222
+        Step 1) started late, so the verdict selects it or cancels it as
+        it would one started with the source job.
+        """
+        self.engine.log(
+            log_sources.DECODER_MANAGER,
+            f"{source_job.label}: deadline trigger -> target decode "
+            "started before the verdict",
+        )
+        submission = self.parallel_strong_submission(source_job)
+        if submission is None:
+            return
+        self.enqueue_target(submission.job, None)
 
     # ---- the two entries
 
@@ -110,9 +293,11 @@ class StrongRedecode:
         window, whose job is queued behind its selection now or held
         under its conditions.
         """
+        self.statistics.escalated.add()
         key = (weak_job.operation_id, weak_job.window_id)
-        speculative_request_key = self.selections.speculative_decode_for(key)
+        speculative_request_key = self.selections.take_speculative_decode(key)
         if speculative_request_key is not None:
+            self.statistics.speculative_selected.add()
             self._send_selection(weak_job, speculative_request_key)
             self.decode_queue.await_strong_result(key, speculative_request_key)
             return
@@ -129,12 +314,7 @@ class StrongRedecode:
     # ---- the two events that meet a declared condition
 
     def submit_if_commit_releases(self, window_key: tuple) -> None:
-        """A weak window committed: a strong window waiting on it leaves.
-
-        The committed window's own speculative strong decode, selected or
-        cancelled by its verdict, is forgotten.
-        """
-        self.selections.forget_speculative_decode(window_key)
+        """A weak window committed: a strong window waiting on it leaves."""
         released = self.pending.released_by_commit(window_key)
         self._submit_released(released)
 
@@ -158,11 +338,37 @@ class StrongRedecode:
         held = self.pending.held_for(window_key)
         if held is not None:
             self._drop_held(window_key, held)
+        self._disarm(window_key)
+        self.selections.forget_speculative_decode(window_key)
         self.decode_queue.cancel_strong(window_key)
+        if self.next_edge is not None:
+            self.next_edge.cancel_strong_request(window_key)
+
+    def abandon_strong_request(self, window_key: tuple) -> None:
+        """A kept weak result: a held request ends, a submitted one runs out.
+
+        A held request was never sent, so it is dropped as a cancel drops
+        it; one the strong side holds runs to its end there, and its
+        result is dropped (revision_rules.NoCancel).
+        """
+        held = self.pending.held_for(window_key)
+        if held is not None:
+            self._drop_held(window_key, held)
+        self._disarm(window_key)
+        self.selections.forget_speculative_decode(window_key)
+        self.decode_queue.abandon_strong(window_key)
+        if self.next_edge is not None:
+            self.next_edge.abandon_strong_request(window_key)
+
+    def _disarm(self, window_key: tuple) -> None:
+        """The window's source job here was dropped: no deadline, no rescue."""
+        if self.deadline is None:
+            return
+        self.deadline.disarm(window_key)
 
     def _drop_held(self, window_key: tuple, held) -> None:
+        self.statistics.held_cancelled.add()
         self.pending.take(held)
-        self.selections.forget_speculative_decode(window_key)
         self.trace.strong_window_left.fire(
             held.assignment.request_key,
             window_key,
@@ -174,6 +380,18 @@ class StrongRedecode:
             f"speculative strong decode for {window_key} cancelled while "
             f"held for its input (the weak result is confident)",
         )
+
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """A stream let its windows before the index go: their selections.
+
+        The windows are final (window_release.py), so no input of theirs
+        lands again.
+        """
+        self.selections.forget_before(stream_id, window_index)
 
     # ---- observation
 
@@ -202,6 +420,7 @@ class StrongRedecode:
             selection_arrival_ticks=selection_arrival_ticks,
         )
         self.pending.register(held)
+        self.statistics.held.add()
         waits_for = pending_strong_windows.waiting_text(conditions)
         self.trace.strong_window_held.fire(
             assignment.request_key, key, waits_for, assignment.round_count
@@ -243,14 +462,17 @@ class StrongRedecode:
                 missing.append(round_key)
         if not missing:
             return
-        packets = self.retention.escalated_rounds(missing)
+        target = self.target
+        packets = self.retention.escalated_rounds(missing, target)
         region = round_records.EscalatedRegion.of(
             assignment.request_key, packets, assignment.first_round
         )
         self.strong_receiver.reserve_region(region)
         self.carried_round_keys.update(missing)
         landed = functools.partial(self._region_landed, region)
-        self.decoder_output.send_region(region, landed)
+        self.decoder_output.send_region(
+            self.hops.forward, self.carried_from, region, landed
+        )
         self.engine.log(
             log_sources.DECODER_MANAGER,
             f"strong request {assignment.request_key}: rounds "
@@ -278,12 +500,38 @@ class StrongRedecode:
         selection_arrival_ticks: int,
     ) -> None:
         """Queue the strong job; its input is sent at dispatch."""
-        send_input = self._strong_input_send(
-            strong_job, selection_arrival_ticks
-        )
-        self.decode_queue.enqueue(
-            strong_job, send_input, self.verdict.accept_strong_result
-        )
+        self.enqueue_target(strong_job, selection_arrival_ticks)
+
+    def _attempt_of(self, job: decoding_records.DecodeJob) -> list:
+        """The job, and a companion per other class the next edge forces.
+
+        A complementary gap on the edge out of the target takes the
+        lightest correction in each logical class (Toshio et al.
+        2510.25222 Sec. II C; Smith et al. 2405.03766 Sec. II), solved
+        at once (Mishima et al. 2605.14637 App. B). The solves read one
+        input, kept until the last of them has it.
+        """
+        forced_classes = self._forced_classes()
+        if not forced_classes:
+            return [job]
+        job.forced_logical_class = forced_classes[0]
+        attempt = [job]
+        for forced_class in forced_classes[1:]:
+            companion = strong_window_shapes.forced_class_companion(
+                self.shape, job, forced_class
+            )
+            attempt.append(companion)
+        shared = round_retention.SharedInputHold(job.input_hold, len(attempt))
+        for attempt_job in attempt:
+            attempt_job.input_hold = shared.release
+        return attempt
+
+    def _forced_classes(self) -> tuple:
+        """The classes the next edge's signal pins its source's solves to."""
+        if self.target_join is None:
+            return ()
+        signal = self.target_join.signal
+        return signal.forced_logical_classes
 
     def _strong_input_send(
         self,
@@ -337,7 +585,7 @@ class StrongRedecode:
             on_selection_delivered,
         )
         expected_delay_ticks = self.decoder_output.send_selection(
-            weak_job, strong_request_key, delivered
+            self.hops.forward, weak_job, strong_request_key, delivered
         )
         return self.engine.now + expected_delay_ticks
 
@@ -374,10 +622,10 @@ class _StrongSelections:
     ) -> None:
         self.speculative_key_by_window[window_key] = request_key
 
-    def speculative_decode_for(
+    def take_speculative_decode(
         self, window_key: tuple
     ) -> Optional[window_records.DecoderRequestKey]:
-        return self.speculative_key_by_window.get(window_key)
+        return self.speculative_key_by_window.pop(window_key, None)
 
     def forget_speculative_decode(self, window_key: tuple) -> None:
         self.speculative_key_by_window.pop(window_key, None)
@@ -392,6 +640,16 @@ class _StrongSelections:
             on_landed()
             return
         self.landing_by_request_key[request_key] = on_landed
+
+    def forget_before(self, stream_id, window_index: int) -> None:
+        """Forget the delivered selections of the stream's windows before it."""
+        stale = []
+        for request_key in self.delivered_request_keys:
+            if request_key.operation_id != stream_id:
+                continue
+            if request_key.window_id < window_index:
+                stale.append(request_key)
+        self.delivered_request_keys.difference_update(stale)
 
     def note_delivered(
         self, request_key: window_records.DecoderRequestKey

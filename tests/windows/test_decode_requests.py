@@ -19,16 +19,18 @@ import decsim.decoders.decoder_memory_transfer as decoder_memory_transfer
 import decsim.engine as engine_module
 import decsim.links.window_transfers as window_transfers
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.topology.slotted as slotted
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
+import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.round_retention as round_retention
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
@@ -87,7 +89,7 @@ def _arrive_all(fixture, round_indices) -> None:
 
 def _completed_weak_jobs(requests, window_id: int) -> list:
     """One window's weak jobs whose requests were forwarded for delivery."""
-    weak = requests.of_tier(window_records.DecoderTier.WEAK)
+    weak = requests.of_tier(window_records.WEAK_POOL_ID)
     outcomes = decoding_records.RequestProcessingOutcome
     completed = outcomes.PRIMARY_FORWARDED_FOR_DELIVERY
     jobs = []
@@ -135,14 +137,14 @@ class _Fixture:
             effective_round_count_for_window=lambda _operation_id, _window: 6,
             round_count_for_window=lambda _operation_id, _window=None: 6,
             rounds_arrived=lambda _operation_id: self.arrived,
-            strong_rounds_arrived=lambda _operation_id: 0,
+            strong_rounds_arrived=lambda _operation_id, _store: 0,
             has_first_round=self._has_first_round,
             is_data_complete=self._is_data_complete,
             is_buffer_filled_by_memory=lambda _window: False,
         )
         self.retention = round_retention.RoundRetention(
             is_strong_context_retained=False,
-            primary_tier=window_records.DecoderTier.WEAK,
+            primary_tier=window_records.WEAK_POOL_ID,
         )
         self.retention.weak_store = self.store
         self.retention.planner = self.planner
@@ -153,7 +155,7 @@ class _Fixture:
         transfers.retention = self.retention
         store_output = round_output.SyndromeBufferOutput(
             self.engine,
-            transfer_records.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER,
+            transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
             "weak syndrome buffer",
         )
         store_output.transfers = transfers
@@ -176,9 +178,7 @@ class _Fixture:
         self.builder.interaction = interaction
         self.builder.gate = gate
         self.queue = _RecordingQueue()
-        verdict = types.SimpleNamespace(
-            accept_result=_ignore_result, accept_strong_result=_ignore_result
-        )
+        verdict = types.SimpleNamespace(accept_revision=_ignore_result)
         self.requester = decode_requests.DecodeRequester(
             decision_cycles=decision_cycles,
             clock=clock,
@@ -188,6 +188,7 @@ class _Fixture:
         self.requester.builder = self.builder
         self.requester.decode_queue = self.queue
         self.requester.verdict = verdict
+        self.requester.edges = escalate_edges.EscalateEdges()
         self.requester.store_output = store_output
         self.retention.register_window((1, 0), self.window)
         self.interaction = interaction
@@ -225,7 +226,7 @@ class _Fixture:
         packet = round_records.SyndromeRoundPacket(1, round_index, (fragment,))
         self.store.accept_packed_round(packet, publication_tick=round_index)
         self.arrived = round_index
-        self.requester.request_if_ready(self.window, None)
+        self.requester.request_if_ready(self.window)
 
 
 def test_a_complete_window_is_requested_once():
@@ -233,7 +234,7 @@ def test_a_complete_window_is_requested_once():
     _arrive_all(fixture, (1, 2, 3, 4))
     assert fixture.queue.enqueued == []
     fixture.arrive(5)
-    fixture.requester.request_if_ready(fixture.window, None)
+    fixture.requester.request_if_ready(fixture.window)
     assert len(fixture.queue.enqueued) == 1
     (job, send_input) = fixture.queue.enqueued[0]
     assert job.window is fixture.window
@@ -301,7 +302,7 @@ def test_a_withdrawn_window_is_requested_again_fresh():
     assert fixture.queue.withdrawn == [(1, 0)]
     assert not fixture.window.queued
     assert fixture.window.t_queued is None
-    fixture.requester.request_if_ready(fixture.window, None)
+    fixture.requester.request_if_ready(fixture.window)
     assert len(fixture.queue.enqueued) == 2
     (second_job, _send_input) = fixture.queue.enqueued[1]
     assert second_job is not first_job
@@ -327,10 +328,10 @@ def test_a_decode_job_is_priced_for_the_rounds_it_reads():
     tail = tail_request.job
     assert regular.request_key.window_id == 1
     assert tail.request_key.window_id == 2
-    assert regular.request_key.tier is window_records.DecoderTier.WEAK
+    assert regular.request_key.pool == window_records.WEAK_POOL_ID
     assert (regular.window.start_round, regular.window.buffer_hi) == (4, 9)
     assert regular.round_count == 6
-    assert tail.request_key.tier is window_records.DecoderTier.WEAK
+    assert tail.request_key.pool == window_records.WEAK_POOL_ID
     assert (tail.window.start_round, tail.window.buffer_hi) == (7, 12)
     assert tail.round_count == 3
 
@@ -418,7 +419,7 @@ FOLD_ROUNDS = 15
 
 def _fifteen_rounds(settings, probability: float):
     """The settings on a memory shot of fifteen rounds at distance 3."""
-    workload = machine_settings.memory_workload(3, probability, FOLD_ROUNDS)
+    workload = machines.memory_workload(3, probability, FOLD_ROUNDS)
     return dataclasses.replace(settings, workload=workload)
 
 
@@ -433,7 +434,8 @@ def test_every_window_with_a_predecessor_folds_its_boundary(probability, seed):
     do. The rounds come out of a fold that changed nothing unchanged, so
     every one of five seeds still agrees with whole-circuit PyMatching.
     """
-    base = machine_settings.weak_decoder_baseline(3, probability, 1.0)
+    weak_base = machines.weak_baseline(3, probability, 1.0)
+    base = slotted.resolved(weak_base)
     observation = dataclasses.replace(base.observation, data_movement=True)
     settings = dataclasses.replace(base, observation=observation)
     settings = _fifteen_rounds(settings, probability)
@@ -566,7 +568,7 @@ def test_a_speculative_decode_leaves_at_its_windows_decision():
 
 def _speculative_jobs(requests) -> dict:
     """Window index -> its speculative strong decode's job."""
-    strong = requests.of_tier(window_records.DecoderTier.STRONG)
+    strong = requests.of_tier(window_records.STRONG_POOL_ID)
     jobs = {}
     for ended in strong:
         window_id = ended.job.request_key.window_id
@@ -682,7 +684,8 @@ def test_the_decision_and_the_verdict_run_on_the_machines_clock():
     machine = machine_module.Machine.build(settings)
 
     requester = machine.windows.requester
+    (edge,) = requester.edges.edges
     assert settings.windows.clock is None
     assert settings.switching.clock is None
     assert requester.clock == machine_clock
-    assert requester.verdict.clock == machine_clock
+    assert edge.rules.costs.clock == machine_clock

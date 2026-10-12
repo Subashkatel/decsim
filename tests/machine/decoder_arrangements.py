@@ -13,7 +13,6 @@ import dataclasses
 
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
-import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as bposd
 import decsim.decoders.relay_belief_propagation.decoder as relay_bp
@@ -23,7 +22,11 @@ import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.presets.clocks as clocks
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.settings as machine_settings
+import decsim.topology.slotted as slotted
 import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -32,8 +35,8 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 DISTANCE = 3
 PHYSICAL_ERROR_PROBABILITY = 0.001
 ROUND_PERIOD_MICROSECONDS = 1.0
-FRIDGE_CLOCK = config.Clock.from_megahertz(250.0)
-ROOM_CLOCK = config.Clock.from_megahertz(250.0)
+FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
+ROOM_CLOCK = clocks.ROOM_CLOCK
 HOST_TIME = cycle_count.HostMeasuredTime()
 # every row at its own settings, union-find charged the host's time
 ALGORITHMS = {
@@ -59,14 +62,14 @@ def machine() -> machine_settings.MachineSettings:
     commit) and the single tier arrangements take the same plan so the
     comparison is fair.
     """
-    base = machine_settings.weak_decoder_baseline(
+    weak_graph = machines.weak_baseline(
         DISTANCE, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
-    links = machine_settings.one_cycle_strong_side(base.links)
+    fabric = link_cards.strong_side(weak_graph.fabric)
+    graph_base = dataclasses.replace(weak_graph, fabric=fabric)
+    base = slotted.resolved(graph_base)
     windows = dataclasses.replace(base.windows, terminal_policy="lookahead")
-    return dataclasses.replace(
-        base, links=links, windows=windows, weak_decoder=None
-    )
+    return dataclasses.replace(base, windows=windows, weak_decoder=None)
 
 
 def decoder_unit(kind: str, clock) -> decoder_settings.DecoderPoolSettings:

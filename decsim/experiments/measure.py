@@ -894,16 +894,20 @@ def committed_decode(
 
 def pool_measures(
     run_statistics: statistics_registry.Registry,
-    pool_paths: dict,
+    layout: layout_module.Layout,
     generation_ticks: int,
 ) -> "_PoolMeasures":
     """Each tier's queue peak, busy fraction and load over a span.
 
+    The tiers are the layout's (Layout.tier_pools), each read where its
+    pool keeps its statistics; a tier the run lacks reads zero.
     generation_ticks is the span the rounds were generated over
     (_generation_span_ticks); a stream keeps its two ends as it runs.
     """
-    weak_path = pool_paths.get(window_records.WEAK_POOL_ID)
-    strong_path = pool_paths.get(window_records.STRONG_POOL_ID)
+    weak_pool, strong_pool = layout.tier_pools()
+    pool_paths = layout.statistics_path_by_pool()
+    weak_path = pool_paths.get(weak_pool)
+    strong_path = pool_paths.get(strong_pool)
     weak = _pool_numbers(run_statistics, weak_path, generation_ticks)
     strong = _pool_numbers(run_statistics, strong_path, generation_ticks)
     return _PoolMeasures(
@@ -966,7 +970,7 @@ def end_of_stream_reaction_us(
 
 
 def reaction_growth_rate(
-    recorded: list, tier: window_records.PoolId
+    recorded: list, tier: Optional[window_records.PoolId]
 ) -> Optional[float]:
     """How fast a tier's reaction time grows along the shot, in us per us.
 
@@ -993,7 +997,7 @@ def reaction_growth_rate(
     arrivals_us = []
     reactions_us = []
     for window, frame_record in recorded:
-        if frame_record.tier != tier.word:
+        if window_records.PoolId(frame_record.tier) != tier:
             continue
         arrival_us = _arrival_microseconds(window)
         reaction_us = _reaction_microseconds(window, frame_record)
@@ -1144,10 +1148,9 @@ def _measurement(
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
     recorded = recorded_windows(observation, graph.observation)
-    weak_growth = reaction_growth_rate(recorded, window_records.WEAK_POOL_ID)
-    strong_growth = reaction_growth_rate(
-        recorded, window_records.STRONG_POOL_ID
-    )
+    weak_pool, strong_pool = layout.tier_pools()
+    weak_growth = reaction_growth_rate(recorded, weak_pool)
+    strong_growth = reaction_growth_rate(recorded, strong_pool)
     missed_windows, first_miss_us = deadline_misses(
         recorded, graph.observation.reaction_deadline_microseconds
     )
@@ -1162,10 +1165,9 @@ def _measurement(
     round_period_ticks = config_module.microseconds_to_ticks(
         round_period_microseconds
     )
-    pool_paths = layout.statistics_path_by_pool()
-    pools = _pool_measures(observation, round_period_ticks, pool_paths)
-    strong = _strong_decodes(observation)
-    tiers = _tier_records(observation)
+    pools = _pool_measures(observation, round_period_ticks, layout)
+    strong = _strong_decodes(observation, strong_pool)
+    tiers = _tier_records(observation, weak_pool, strong_pool)
     backlog_peak = _backlog_peak_rounds(observation)
     processes = parallel_processes_needed(
         samples, code, round_period_microseconds
@@ -1696,17 +1698,15 @@ def _referee_counts(
 def _pool_measures(
     observation: observation_module.Observation,
     round_period_ticks: int,
-    pool_paths: dict,
+    layout: layout_module.Layout,
 ) -> _PoolMeasures:
     """Each tier's queue peak, busy fraction and load, from its statistics.
 
-    pool_paths is where each pool keeps its statistics
-    (Layout.statistics_path_by_pool). The weak row reads the pool whose
-    results write weak, the strong row the one that writes strong (a
-    strong-only run's window pool); a tier the run lacks reads zero.
+    The weak row reads the layout's weak tier, the strong row its strong
+    one (a strong-only run's window pool); a tier the run lacks reads zero.
     """
     generation_ticks = _generation_span_ticks(observation, round_period_ticks)
-    return pool_measures(observation.statistics, pool_paths, generation_ticks)
+    return pool_measures(observation.statistics, layout, generation_ticks)
 
 
 def _pool_numbers(
@@ -1768,6 +1768,7 @@ def _generation_span_ticks(
 
 def _strong_decodes(
     observation: observation_module.Observation,
+    strong_pool: Optional[window_records.PoolId],
 ) -> _StrongDecodes:
     """The windows the strong tier committed, their rounds, their service.
 
@@ -1780,7 +1781,7 @@ def _strong_decodes(
     service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
         tier = window_records.PoolId(frame_record.tier)
-        if tier != window_records.STRONG_POOL_ID:
+        if tier != strong_pool:
             continue
         decode = committed_decode(stages, frame_record)
         windows += 1
@@ -1794,6 +1795,8 @@ def _strong_decodes(
 
 def _tier_records(
     observation: observation_module.Observation,
+    weak_pool: Optional[window_records.PoolId],
+    strong_pool: Optional[window_records.PoolId],
 ) -> _TierRecords:
     """Each tier's inputs, computes and waits off the switching records.
 
@@ -1806,10 +1809,13 @@ def _tier_records(
     if records is None:
         return _TierRecords()
     lives = _decode_lives(observation.stages)
-    weights = _weak_syndrome_weights(records.requests)
-    weak_computes = _weak_compute_microseconds(records.requests, lives)
-    strong_waits = _strong_wait_microseconds(records.requests, lives)
-    held_peak = _strong_held_in_units_peak(records.requests, lives)
+    requests = records.requests
+    weak_requests = _requests_of_pool(requests, lives, weak_pool)
+    strong_requests = _requests_of_pool(requests, lives, strong_pool)
+    weights = _weak_syndrome_weights(requests, weak_pool)
+    weak_computes = _weak_compute_microseconds(weak_requests, lives)
+    strong_waits = _strong_wait_microseconds(strong_requests, lives)
+    held_peak = _strong_held_in_units_peak(strong_requests, lives)
     weight_mean = _mean_or_zero(weights)
     weight_max = max(weights, default=0)
     compute_mean = _mean_or_zero(weak_computes)
@@ -1853,30 +1859,32 @@ def _decode_life(records: list) -> _DecodeLife:
     return _DecodeLife(dispatch, ready, compute_start, max(ends))
 
 
-def _weak_syndrome_weights(requests: list) -> list:
+def _weak_syndrome_weights(
+    requests: list, weak_pool: Optional[window_records.PoolId]
+) -> list:
     """The set bits of every weak request's landed input that has bits."""
     weights = []
     for request in requests:
-        is_weak = request.request_key.pool == window_records.WEAK_POOL_ID
+        is_weak = request.request_key.pool == weak_pool
         if is_weak and request.syndrome_weight is not None:
             weights.append(request.syndrome_weight)
     return weights
 
 
-def _weak_compute_microseconds(requests: list, lives: dict) -> list:
+def _weak_compute_microseconds(weak_requests: list, lives: dict) -> list:
     """Each weak decode's compute, first stage start to last stage end."""
     durations = []
-    for request in _requests_of_tier(requests, lives, "weak"):
+    for request in weak_requests:
         life = lives[request.request_key.run_sequence]
         duration = _span_microseconds(life.end, life.compute_start)
         durations.append(duration)
     return durations
 
 
-def _strong_wait_microseconds(requests: list, lives: dict) -> list:
+def _strong_wait_microseconds(strong_requests: list, lives: dict) -> list:
     """Each strong decode's queue wait plus its compute wait."""
     waits = []
-    for request in _requests_of_tier(requests, lives, "strong"):
+    for request in strong_requests:
         life = lives[request.request_key.run_sequence]
         queue_wait = life.dispatch - request.ready_ticks
         compute_wait = life.compute_start - life.ready
@@ -1886,7 +1894,7 @@ def _strong_wait_microseconds(requests: list, lives: dict) -> list:
     return waits
 
 
-def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
+def _strong_held_in_units_peak(strong_requests: list, lives: dict) -> int:
     """The most strong decodes held in unit memory at once, on compute.
 
     Held from the tick it may compute to its compute start, gem5's fuBusy
@@ -1895,7 +1903,7 @@ def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
     """
     change_by_tick = collections.defaultdict(int)
     held_decodes = set()
-    for request in _requests_of_tier(requests, lives, "strong"):
+    for request in strong_requests:
         run_sequence = request.request_key.run_sequence
         if run_sequence in held_decodes:
             continue
@@ -1911,12 +1919,14 @@ def _strong_held_in_units_peak(requests: list, lives: dict) -> int:
     return peak
 
 
-def _requests_of_tier(requests: list, lives: dict, tier: str) -> list:
-    """The tier's requests whose decode ran at least one stage."""
+def _requests_of_pool(
+    requests: list, lives: dict, pool: Optional[window_records.PoolId]
+) -> list:
+    """The pool's requests whose decode ran at least one stage."""
     chosen = []
     for request in requests:
         key = request.request_key
-        if key.pool.word == tier and key.run_sequence in lives:
+        if key.pool == pool and key.run_sequence in lives:
             chosen.append(request)
     return chosen
 

@@ -162,26 +162,39 @@ class Layout:
                 return plan
         raise KeyError(name)
 
-    def entry_edge_stores(self) -> tuple:
-        """The store the entry pool reads and the entry edge's target's.
+    def tier_pools(self) -> tuple:
+        """The weak tier's pool and the strong tier's, either None if absent.
 
-        The retention calls them weak and strong; either is None when
-        the run has none. An entry store its rounds land in, as a host
-        pool's does, is a strong store: the retention counts its
-        arrivals as it stores them.
+        The weak tier is the entry pool and the strong one its entry
+        edge's target, whatever their parts are named. An entry pool whose
+        rounds land in its store, as a host pool's do, is a strong tier
+        with no weak one. A run with no store has neither. The retention
+        and the reports read the two tiers off this one rule.
         """
         if not self.stores:
             return (None, None)
         entry = self.entry_pool
         entry_store = self.store(entry.store)
         if entry_store.intake.shape == receiver_module.LANDED:
-            return (None, entry.store)
+            return (None, entry.pool)
         if not self.edges:
-            return (entry.store, None)
+            return (entry.pool, None)
         entry_edge = self.edges[0]
-        hops = entry_edge.hops
-        target = self.pool(hops.target)
-        return (entry.store, target.store)
+        return (entry.pool, entry_edge.hops.target)
+
+    def entry_edge_stores(self) -> tuple:
+        """The stores the weak and the strong tier read, None for none.
+
+        The retention calls them weak and strong (tier_pools); the strong
+        store counts its arrivals as it stores them.
+        """
+        stores = []
+        for pool in self.tier_pools():
+            if pool is None:
+                stores.append(None)
+            else:
+                stores.append(self.pool(pool).store)
+        return tuple(stores)
 
     def input_hop_by_pool(self) -> dict:
         """The hop each pool's input rides: its store's read hop.

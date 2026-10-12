@@ -72,6 +72,7 @@ import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.presets.clocks as clocks
+import decsim.presets.experiment_one as experiment_one
 import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
@@ -3092,3 +3093,58 @@ def _always_escalating_chain():
     chain = layout_tests.chain_machine(deep_switching=deep_switching)
     return chain.with_settings("switching", verdict=always)
 
+
+def test_a_tiers_columns_follow_its_pools_and_not_their_names():
+    """The weak columns read the entry pool, the strong its edge's target.
+
+    Experiment 1's switching machine is run twice on one seed, its pools
+    and stores named weak and strong, then fast and deep; seeds and
+    prices go by role, so every tier column must read the same.
+    """
+    written = experiment_one.switching(3, 0.01)
+    names = {
+        "weak": "fast",
+        "weak_buffer": "fast_buffer",
+        "strong": "deep",
+        "strong_buffer": "deep_buffer",
+    }
+    renamed = _with_parts_renamed(written, names)
+
+    as_written = _tier_columns(written)
+    as_renamed = _tier_columns(renamed)
+
+    assert as_written["strong_decoded_rounds"] > 0
+    assert as_renamed == as_written
+
+
+def _with_parts_renamed(machine, names: dict):
+    """The machine with these parts renamed, its wires following them."""
+
+    def renamed(name: str) -> str:
+        return names.get(name, name)
+
+    def renamed_end(end: str) -> str:
+        part, _, port = end.partition(".")
+        return f"{renamed(part)}.{port}"
+
+    parts = []
+    for part in machine.parts:
+        parts.append(dataclasses.replace(part, name=renamed(part.name)))
+    wires = []
+    for wire in machine.wires:
+        source = renamed_end(wire.source)
+        target = renamed_end(wire.target)
+        wires.append(dataclasses.replace(wire, source=source, target=target))
+    return dataclasses.replace(machine, parts=tuple(parts), wires=tuple(wires))
+
+
+def _tier_columns(machine) -> dict:
+    """Seed 0's columns that name a tier, weak_* and strong_*."""
+    task = collect.Task("tiers", machine, {})
+    shot = collect.run_shot(task, 0)
+    measured = measure.measure_shot(shot)
+    columns = {}
+    for field in dataclasses.fields(measured):
+        if field.name.startswith(("weak_", "strong_")):
+            columns[field.name] = getattr(measured, field.name)
+    return columns

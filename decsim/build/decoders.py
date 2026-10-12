@@ -199,7 +199,9 @@ def build_decoder_unit(
         _check_serves_the_confidence(
             algorithm, record.__qualname__, seat, signal
         )
-    return _staged_unit(tier_settings, algorithm, formation, machine_clock)
+    return _staged_unit(
+        tier_settings, algorithm, formation, seat, machine_clock
+    )
 
 
 def build_pool_units(
@@ -326,6 +328,7 @@ def _staged_unit(
     tier_settings: decoder_settings.DecoderPoolSettings,
     algorithm,
     formation: Optional[detection_events_module.TierFormation],
+    seat: str,
     machine_clock: Optional[config.Clock],
 ) -> staged_decoder.StagedDecoder:
     """The algorithm between its stages, on the tier's engine clock.
@@ -333,9 +336,7 @@ def _staged_unit(
     Event detection first when the rounds reach it raw, then fetch, the
     algorithm and release, each priced once a job and once a round.
     """
-    clocked_engine = config.with_machine_clock(
-        tier_settings.engine, machine_clock
-    )
+    clocked_engine = _clocked_engine(tier_settings, seat, machine_clock)
     before = []
     formation_stage = _formation_stage(formation)
     if formation_stage is not None:
@@ -359,6 +360,26 @@ def _staged_unit(
     )
     batch_decoder = _batch_decoder(tier_settings, algorithm)
     return staged_decoder.StagedDecoder(algorithm, timing, batch_decoder)
+
+
+def _clocked_engine(
+    tier_settings: decoder_settings.DecoderPoolSettings,
+    seat: str,
+    machine_clock: Optional[config.Clock],
+) -> decoder_settings.EngineSettings:
+    """The pool's engine on its own clock, or on the machine's.
+
+    A pool on neither has no clock to count its stages on.
+    """
+    clocked_engine = config.with_machine_clock(
+        tier_settings.engine, machine_clock
+    )
+    if clocked_engine.clock is None:
+        raise ValueError(
+            f"pool {seat!r} has no clock: give the pool's engine a clock "
+            f"or the machine a clock"
+        )
+    return clocked_engine
 
 
 def _batch_decoder(

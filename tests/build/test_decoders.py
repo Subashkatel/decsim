@@ -100,6 +100,16 @@ def test_an_engine_that_names_no_clock_counts_on_the_machines():
     assert unit.timing.clock == machine_clock
 
 
+def test_a_pool_on_no_clock_at_all_is_refused():
+    """Neither the pool's engine nor the machine names a clock."""
+    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
+
+    refusal = "pool 'weak' has no clock: give the pool's engine a clock"
+    with pytest.raises(ValueError, match=refusal):
+        decoder_build.build_decoder_unit(weak, "weak", None, None, None)
+
+
 def test_a_manager_that_names_no_clock_dispatches_on_the_machines():
     """A dispatch cost on no clock of its own is charged on the machine's.
 

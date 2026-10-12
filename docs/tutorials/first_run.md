@@ -7,7 +7,7 @@ run file, run one shot of it, collected one task into a results folder
 and followed one round of syndrome data through the machine.
 
 You do not need to know anything about decsim, and the words you need
-are defined as they appear. You do need a terminal and a Python 3.10 or
+are defined as they appear. You do need a terminal and a Python 3.13 or
 newer interpreter.
 
 ## What decsim is, in one paragraph

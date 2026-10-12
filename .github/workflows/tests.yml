@@ -1,14 +1,15 @@
 # A fresh clone on a clean runner, installed the way the README says,
-# on the lowest and the highest Python constraints.txt was resolved and
-# tested for: the tutorials' runs on the run extra alone, then the style
-# checks and the whole suite with the test, dev and bb-decoders extras,
-# so the Tesseract and Relay-BP tests run rather than skip. relay-bp
-# 0.2.2 has a wheel for Python 3.14 alone, so the runner builds it with
-# its own Rust toolchain.
+# on the Python decsim requires: the tutorials' runs on the run extra
+# alone, then the style checks and the whole suite with the test, dev
+# and bb-decoders extras, so the Tesseract and Relay-BP tests run rather
+# than skip. relay-bp 0.2.2 has a wheel for Python 3.14 alone, so the
+# runner builds it with its own Rust toolchain. It runs once per change:
+# on each pull request, and on main when one is merged.
 name: tests
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -18,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

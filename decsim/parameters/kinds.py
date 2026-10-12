@@ -19,6 +19,7 @@ type admits it.
 import dataclasses
 import functools
 import importlib
+import importlib.util
 import inspect
 import pkgutil
 import typing
@@ -156,12 +157,15 @@ def every_record_class() -> tuple:
     """Every settings record class decsim defines, nested ones included.
 
     A module whose compiled library is not built here is skipped: its
-    records cannot run on this machine.
+    records cannot run on this machine. Only Python modules are walked
+    (is_python_module).
     """
     decsim_package = importlib.import_module("decsim")
     found = []
     modules = pkgutil.walk_packages(decsim_package.__path__, "decsim.")
     for module_info in modules:
+        if not is_python_module(module_info.name):
+            continue
         try:
             module = importlib.import_module(module_info.name)
         except ImportError:
@@ -169,6 +173,19 @@ def every_record_class() -> tuple:
         classes = _classes_defined_in(module)
         _add_new(found, classes)
     return tuple(found)
+
+
+def is_python_module(module_name: str) -> bool:
+    """Whether the module comes from a Python source file.
+
+    The compiled Union-Find libraries beside their C sources are loaded
+    through ctypes, never imported: Python lists a bare .so as an
+    extension module, and importing the sanitized build starts the
+    sanitizer runtime, which ends the process.
+    """
+    specification = importlib.util.find_spec(module_name)
+    origin = specification.origin
+    return origin.endswith(".py")
 
 
 def _classes_defined_in(module: Any) -> list:

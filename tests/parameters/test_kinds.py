@@ -131,6 +131,14 @@ def test_an_import_path_no_prefix_of_which_imports_is_refused():
         kinds.imported_class("no_such_lab.parts.Decoder", "a test")
 
 
+def test_a_compiled_library_beside_the_sources_is_not_a_python_module():
+    library = "decsim.decoders.union_find.union_find"
+    source = "decsim.decoders.union_find.compiled_decoder"
+
+    assert not kinds.is_python_module(library)
+    assert kinds.is_python_module(source)
+
+
 def test_a_record_outside_decsim_is_written_by_its_import_path():
     written = kinds.unique_name(PluginDecoder.Settings)
     by_row = kinds.unique_name(union_find.UnionFindDecoder.Settings)

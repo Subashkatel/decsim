@@ -102,7 +102,9 @@ class Machine:
 
     clock is the clock every part that names none of its own counts its
     cycles on; fabric prices every route no wire's own link prices;
-    observation is what the run records beside its results.
+    readout_routes give a readout of a whole patch footprint its own path
+    (links/settings.py ReadoutRoute); observation is what the run records
+    beside its results.
     """
 
     # the fields whose parts parameters/tree.py addresses by name
@@ -112,6 +114,7 @@ class Machine:
     parts: tuple = ()
     wires: tuple = ()
     fabric: ports.FabricRule = fabrics.ReferenceFabric()
+    readout_routes: tuple = ()
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
     )

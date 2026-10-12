@@ -81,8 +81,8 @@ for distance in DISTANCES:
     )
     weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
     weak_tier = base.with_part(weak_pool)
-    weak_side = fabrics.PathLinks(
-        controller_to_weak_buffer=weak_communication, base=base.fabric
+    weak_side = fabrics.RoleLinks(
+        write_written=weak_communication, base=base.fabric
     )
     # the strong side's other hops one host cycle each
     fabric = link_cards.strong_side(weak_side, strong_communication)

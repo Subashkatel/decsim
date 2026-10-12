@@ -43,6 +43,7 @@ class SeatedFormation:
         self,
         source: Optional[ports.DetectionEventFormer],
         settings: detection_event_settings.DetectionEventSettings,
+        decoder_seats: frozenset = frozenset(),
     ) -> None:
         _check_charged_cost_has_a_clock(settings)
         self.settings = settings
@@ -52,7 +53,8 @@ class SeatedFormation:
         self.trace = _TraceSources()
         self.history_by_seat = {}
         for seat in settings.formed_at:
-            history = _SeatHistory(seat, source)
+            keeps_landed_width = seat in decoder_seats
+            history = _SeatHistory(seat, source, keeps_landed_width)
             history.state_held = self.trace.state_held
             self.history_by_seat[seat] = history
 
@@ -168,8 +170,11 @@ class _SeatHistory:
         self,
         seat: str,
         source: Optional[ports.DetectionEventFormer],
+        keeps_landed_width: bool,
     ) -> None:
         self.seat = seat
+        # a decoder seat keeps the width a round landed at
+        self.keeps_landed_width = keeps_landed_width
         # the source's recipes, read per operation
         self.recipes = source
         # where the seat reports the raw bits it holds; bound by the
@@ -177,11 +182,6 @@ class _SeatHistory:
         self.state_held = trace_source.SILENT
         self.former_by_operation: dict = {}
         self.memory = _SeatMemory()
-
-    @property
-    def keeps_landed_width(self) -> bool:
-        """A decoder seat keeps the width a round landed at."""
-        return self.seat in detection_event_settings.DECODER_SEATS
 
     def form(self, fragments: tuple) -> tuple:
         """Every round among the fragments formed, in the order they came.

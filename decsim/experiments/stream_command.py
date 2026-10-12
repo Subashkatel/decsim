@@ -106,7 +106,7 @@ def stream_settings(
     """
     _refuse_a_graph_of_a_new_shape(task)
     settings = task.machine
-    _refuse_what_a_stream_does_not_build(settings)
+    _refuse_what_a_stream_does_not_build(settings, task.layout)
     workload = _stream_workload(settings.workload, rounds)
     source = flip_stream_device.FlipStreamDevice.Settings()
     qpu = dataclasses.replace(settings.qpu, source=source)
@@ -141,21 +141,25 @@ def _stream_workload(workload, rounds: int):
 
 
 def _refuse_a_graph_of_a_new_shape(task: collect.Task) -> None:
-    if task.layout is None:
+    """A stream builds the entry edge alone: at most two pools, no router."""
+    layout = task.layout
+    if len(layout.pools) <= 2 and layout.router is None:
         return
     raise refusal.RefusalError(
         f"not implemented yet: task {task.name} is a graph of a new shape, "
-        "and a stream runs a machine today's slots hold; "
+        "and a stream runs its entry edge alone; "
         f"{refusals.REFUSALS}"
     )
 
 
 def _refuse_what_a_stream_does_not_build(
     settings: machine_settings.MachineSettings,
+    layout: layout_module.Layout,
 ) -> None:
     """The first shape a stream does not build yet, refused."""
-    for check in _STREAM_CHECKS:
-        reason = check(settings)
+    reasons = [check(settings) for check in _STREAM_CHECKS]
+    reasons.append(_batching(layout))
+    for reason in reasons:
         if reason is None:
             continue
         raise refusal.RefusalError(
@@ -219,8 +223,7 @@ def _bulk_strong_decoding(settings) -> Optional[str]:
     )
 
 
-def _batching(settings) -> Optional[str]:
-    layout = layout_module.slotted_layout(settings)
+def _batching(layout: layout_module.Layout) -> Optional[str]:
     if not decoders_part.batches_each_member(layout):
         return None
     return (
@@ -238,7 +241,6 @@ _STREAM_CHECKS = (
     _a_window_outcome_ledger,
     _an_absorbing_strong_window,
     _bulk_strong_decoding,
-    _batching,
 )
 
 

@@ -67,19 +67,23 @@ def build_plan(
     workload: workload_settings.WorkloadSettings,
     windows: window_settings.WindowSettings,
     idle_policy_settings: Union[
-        idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings
+        idle_policies.IgnoreSettings,
+        idle_policies.SeparateDecodeJobsSettings,
+        ports.IdlePolicySettings,
     ],
     detection_events: detection_event_settings.DetectionEventSettings,
     switching_settings: Optional[escalation_settings.SwitchingSettings],
     is_bulk_strong: bool,
     switching_parts: tuple = (),
     batches_each_member: bool = False,
+    landed_seats: tuple = (),
 ) -> Plan:
     """The code, the workload's operations and the window plan.
 
     switching_settings is the entry edge's; each edge's policy refuses
     a run shape it cannot serve. batches_each_member says a pool's
-    batching row decodes its batches member by member.
+    batching row decodes its batches member by member. landed_seats are
+    the layout's (Layout.landed_seats).
     """
     is_switching = switching_settings is not None
     window_sizes = windows.scheme
@@ -157,8 +161,8 @@ def build_plan(
         device, planned_operations, physical_tables, rounds_policy, code
     )
     # a strong read also holds the raw rounds its first round reads when
-    # a seat past the weak syndrome buffer forms the events
-    strong_side_seat = detection_events.strong_side_seat()
+    # a seat on the landed side forms the events
+    strong_side_seat = detection_events.landed_seat(landed_seats)
     formation_reads = window_records.FormationReads(
         strong_side_seat=strong_side_seat, tables=formation_tables
     )

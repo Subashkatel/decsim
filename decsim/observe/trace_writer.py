@@ -17,42 +17,19 @@ from typing import Any, Optional, Union
 
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
+import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-
-# The threads in the order the pipeline uses them, so a viewer's lanes
-# read top to bottom as the data flows. A thread the run never uses gets
-# no tid and no metadata event; one this list does not name (a decoder
-# unit, a decoder lane) is allocated after these, on first use.
-THREAD_ORDER = (
-    "QPU",
-    "qpu_to_controller",
-    "Controller",
-    "controller_to_weak_buffer",
-    "weak syndrome buffer",
-    "controller_to_strong_buffer",
-    "strong syndrome buffer",
-    "Window planner",
-    "Strong tier",
-    "weak_buffer_to_weak_decoder",
-    "strong_buffer_to_strong_decoder",
-    "weak_decoder_to_strong_decoder",
-    "decoder_to_decoder",
-    "weak_decoder_to_frame",
-    "strong_decoder_to_frame",
-    "strong_decoder_to_weak_decoder",
-    "Frame",
-    "frame_to_controller",
-    "controller_to_qpu",
-)
 
 # the strong tier's own lane: what its window side waits on before a
 # unit is even asked for
 STRONG_TIER_THREAD = "Strong tier"
+WINDOW_PLANNER_THREAD = "Window planner"
 
 PROCESS_ID = 1
 # the controller's packing workspace draws on the controller's own lane
@@ -62,6 +39,38 @@ ASSEMBLER_COUNTER = "controller assembler rounds"
 # in front of the stores
 WAITING_ROUNDS_COUNTER = "controller rounds waiting for a packing place"
 HELD_ROUNDS_COUNTER = "controller rounds held for store room"
+
+
+def thread_order(
+    card: link_settings.FabricSettings, store_names: tuple
+) -> tuple:
+    """The threads in the order the pipeline uses them.
+
+    A viewer's lanes then read top to bottom as the data flows: the
+    readout, the controller's writes and its stores, the window side,
+    each pool's input, the escalations and boundaries, the answers, the
+    frame and the way back. A thread the run never uses gets no tid and
+    no metadata event; one this order does not name (a decoder unit, a
+    decoder lane) is allocated after these, on first use.
+    """
+
+    def hops(*kinds) -> list:
+        return [path.name for path in card.paths if path.role.kind in kinds]
+
+    return (
+        "QPU",
+        *hops(route_records.READOUT),
+        "Controller",
+        *hops(route_records.WRITE),
+        *store_names,
+        WINDOW_PLANNER_THREAD,
+        STRONG_TIER_THREAD,
+        *hops(route_records.READ),
+        *hops(route_records.FORWARD, route_records.SAME_POOL),
+        *hops(route_records.ANSWER, route_records.REVERSE),
+        "Frame",
+        *hops(route_records.DECISION, route_records.COMMAND),
+    )
 
 
 def round_text(round_key: tuple) -> str:
@@ -91,9 +100,16 @@ def request_text(
 class TraceWriter:
     """Every event of one shot, in the Chrome trace event format."""
 
-    def __init__(self, engine: engine_module.Engine, process_name: str) -> None:
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        process_name: str,
+        threads: tuple,
+    ) -> None:
         self.engine = engine
         self.process_name = process_name
+        # the lanes in pipeline order (thread_order)
+        self.threads = threads
         self.events: list[dict] = []
         # each manager's waiting jobs, so the counter is the run's total
         self.queue_depth_by_manager: dict = {}
@@ -394,7 +410,7 @@ class TraceWriter:
             "commit": f"{window.commit_lo}..{window.commit_hi}",
         }
         name = f"W{window.window_index} planned"
-        self._instant("Window planner", name, "window", args)
+        self._instant(WINDOW_PLANNER_THREAD, name, "window", args)
 
     def window_ready(
         self, window: window_records.Window, read_keys: list
@@ -406,7 +422,7 @@ class TraceWriter:
             "commit": f"{window.commit_lo}..{window.commit_hi}",
         }
         name = f"W{window.window_index} ready"
-        self._instant("Window planner", name, "window", args)
+        self._instant(WINDOW_PLANNER_THREAD, name, "window", args)
 
     def job_enqueued(self, job: decoding_records.DecodeJob) -> None:
         """A window's decode request joins its ready queue."""
@@ -417,14 +433,14 @@ class TraceWriter:
         }
         name = f"W{job.window_id} queued"
         self._begin_residence(
-            "Window planner", job.request_key, name, "window,queue", args
+            WINDOW_PLANNER_THREAD, job.request_key, name, "window,queue", args
         )
-        self._start_window_flow("Window planner", window_key)
+        self._start_window_flow(WINDOW_PLANNER_THREAD, window_key)
 
     def job_withdrawn(self, job: decoding_records.DecodeJob) -> None:
         """The job left the ready queue unserved; its wait ends here."""
         closing = {"freed_reason": "withdrawn"}
-        self._end_residence("Window planner", job.request_key, closing)
+        self._end_residence(WINDOW_PLANNER_THREAD, job.request_key, closing)
 
     def depth_changed(self, manager: int, tick: int, depth: int) -> None:
         """One manager's waiting jobs changed; the counter is the sum."""
@@ -432,7 +448,7 @@ class TraceWriter:
         depths = self.queue_depth_by_manager.values()
         total = sum(depths)
         values = {"jobs": total}
-        self._counter("Window planner", "ready queue depth", values, tick)
+        self._counter(WINDOW_PLANNER_THREAD, "ready queue depth", values, tick)
 
     def verdict_given(
         self,
@@ -446,7 +462,7 @@ class TraceWriter:
             "request": request_text(request_key),
             "verdict": _verdict_text(verdict),
         }
-        self._instant("Window planner", "verdict", "window", args)
+        self._instant(WINDOW_PLANNER_THREAD, "verdict", "window", args)
 
     def window_committed(
         self,
@@ -471,7 +487,7 @@ class TraceWriter:
             "result": result,
         }
         name = f"W{window.window_index} committed"
-        self._instant("Window planner", name, "window", args)
+        self._instant(WINDOW_PLANNER_THREAD, name, "window", args)
 
     def strong_window_held(
         self,
@@ -524,7 +540,9 @@ class TraceWriter:
             "request": request_text(job.request_key),
             "forced_class": job.forced_logical_class,
         }
-        self._instant("Window planner", "solve held", "window,confidence", args)
+        self._instant(
+            WINDOW_PLANNER_THREAD, "solve held", "window,confidence", args
+        )
 
     def window_final(self, window: window_records.Window) -> None:
         """The window's record is final, under the request that decided it.
@@ -537,7 +555,7 @@ class TraceWriter:
             "window": window_text(window.key),
             "request": request_text(window.published_request_key),
         }
-        self._instant("Window planner", "window final", "window", args)
+        self._instant(WINDOW_PLANNER_THREAD, "window final", "window", args)
 
     def window_absorbed(self, key: tuple, owner_key: tuple) -> None:
         """A strong window covers the window; the weak chain skips it."""
@@ -545,7 +563,7 @@ class TraceWriter:
             "window": window_text(key),
             "into": window_text(owner_key),
         }
-        self._instant("Window planner", "window absorbed", "window", args)
+        self._instant(WINDOW_PLANNER_THREAD, "window absorbed", "window", args)
 
     # ---- the decoder units
 
@@ -556,7 +574,7 @@ class TraceWriter:
     ) -> None:
         """The job left the ready queue for a unit."""
         closing = {"unit": unit.name}
-        self._end_residence("Window planner", job.request_key, closing)
+        self._end_residence(WINDOW_PLANNER_THREAD, job.request_key, closing)
 
     def input_landed(
         self,
@@ -715,14 +733,14 @@ class TraceWriter:
         }
 
     def _tid(self, thread: str) -> int:
-        """The thread's lane: its rank in THREAD_ORDER, or after them all."""
+        """The thread's lane: its rank in threads, or after them all."""
         known = self._open.tid_by_thread.get(thread)
         if known is not None:
             return known
-        if thread in THREAD_ORDER:
-            allocated = THREAD_ORDER.index(thread) + 1
+        if thread in self.threads:
+            allocated = self.threads.index(thread) + 1
         else:
-            allocated = len(THREAD_ORDER) + 1 + self._open.unnamed_threads
+            allocated = len(self.threads) + 1 + self._open.unnamed_threads
             self._open.unnamed_threads += 1
         self._open.tid_by_thread[thread] = allocated
         return allocated
@@ -1075,7 +1093,7 @@ def _copy_thread(target_name: str) -> str:
     if target_name in ("controller intake", "controller assembler"):
         return "Controller"
     if target_name == "masked view":
-        return "Window planner"
+        return WINDOW_PLANNER_THREAD
     unit_name = _unit_of_memory(target_name)
     return _unit_thread(unit_name)
 

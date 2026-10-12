@@ -22,9 +22,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from typing import Optional
 
-import decsim.build.decoders as decoders_build
 import decsim.build.escalation as escalation_build
-import decsim.build.layout as layout_module
 import decsim.build.plan as plan_build
 import decsim.compiled_libraries as compiled_libraries
 import decsim.engine as engine_module
@@ -657,22 +655,11 @@ def _plan(task: collect.Task) -> plan_build.Plan:
     """The plan the build derives from the task, before it wires."""
     settings = task.machine
     engine = engine_module.Engine()
-    layout = layout_module.slotted_layout(settings)
+    layout = task.layout
     switching_parts = escalation_build.build_switching(
         layout, engine, task.online_threshold
     )
-    batches_each_member = decoders_build.batches_each_member(layout)
-    return plan_build.build_plan(
-        settings.qpu,
-        settings.workload,
-        settings.windows,
-        settings.idle_policy,
-        settings.detection_events,
-        settings.switching,
-        settings.decoder_manager.bulk_strong,
-        switching_parts,
-        batches_each_member,
-    )
+    return machine_module.plan_of(settings, layout, switching_parts)
 
 
 def _built_values(plan: plan_build.Plan) -> dict:

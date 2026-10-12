@@ -1,214 +1,61 @@
-"""The data-movement study: the copies, references and moves of the data path.
+"""The data-movement study: four blocks, d = 3, 5 and 7.
 
-Four blocks on the weak decoder baseline, each apart from the first in
-what it studies alone, at d = 3, 5 and 7 and p = 0.003:
-
-1. Every hop copies, the research note's defaults: the weak unit is
-   given a copy of the rounds it decodes (AFS 2001.06598 lines 520-535,
-   Collision Clustering 2309.05558 lines 268-272) and XORs the window's
-   boundary into a duplicate of that copy (cuda-q QEC's
-   sliding_window.cpp:287-293).
-2. The weak input read in place, where the weak syndrome buffer keeps
-   it: the software decoder on the controller host, which reads the
-   detections as they stream into shared memory (2408.13687 lines
-   476-477, 487-489).
-3. The boundary folded in place, into the unit's own copy: the hardware
-   decoder, which writes its on-chip storage directly (2001.06598 lines
-   528-531, Helios 2301.08419 lines 632-640).
-4. The strong tier and its links: switching at the paper's 20 dB, which
-   opens the escalation hop and the strong syndrome buffer's write and
-   read (Toshio 2510.25222 lines 605-622 and 1248-1250).
-
-Both tiers are Toshio et al.'s linear decoder on priced cards, so the
-counts are the same on any host: a decode of r rounds costs tau_dec r on
-the unit (2510.25222 lines 968-971), tau_weak_dec is 0.4 tau_gen (lines
-1125-1126), which block 4's complementary gap splits over its two
-solves, and tau_strong_dec is 10 tau_gen. A round reaches the weak
-decoder T_weak_comm = tau_gen after it is measured and the strong one
-T_strong_comm = 10 tau_gen after the escalation sends it (lines
-1109-1114). tau_gen is the 1.0 us round period.
-
-Usage
------
-
-```
-decsim run experiments/data_movement/run.py
-```
+Each task reports, under the names its results carry, every setting
+some block changes, read off the machine it runs; a hop goes by its
+name on the machine's card.
 """
 
-import dataclasses
-
 import decsim
-import decsim.confidence.complementary as complementary
-import decsim.config as config
+import decsim.config as config_module
 import decsim.decoders.settings as decoder_settings
-import decsim.escalation.settings as escalation_settings
-import decsim.escalation.threshold_sources as threshold_sources
+import decsim.experiments.sweeps as sweeps
 import decsim.links.settings as link_settings
 import decsim.presets.clocks as clocks
-import decsim.presets.link_cards as link_cards
-import decsim.presets.machines as machines
-import decsim.settings as machine_settings
-import decsim.topology.fabrics as fabrics
-import decsim.topology.graph as graph
-import decsim.topology.slotted as slotted
 
-NAME = "data_movement"
-DISTANCES = (3, 5, 7)
-PHYSICAL_ERROR_PROBABILITY = 0.003
-# the round period, the paper's tau_gen
-ROUND_PERIOD_MICROSECONDS = 1.0
-WEAK_DECODE_MICROSECONDS_PER_ROUND = 0.4 * ROUND_PERIOD_MICROSECONDS
-STRONG_DECODE_MICROSECONDS_PER_ROUND = 10 * ROUND_PERIOD_MICROSECONDS
-# T_weak_comm = tau_gen, 1 us: 250 cycles of the 250 MHz fridge clock
-WEAK_COMMUNICATION_LINK = fabrics.ClockedLink(
-    clock=clocks.FRIDGE_CLOCK,
-    latency_cycles=250,
-    source="T_weak_comm, 2510.25222 lines 1109-1114",
-)
-# T_strong_comm = 10 tau_gen, 10 us: 2500 cycles of the 250 MHz room clock
-STRONG_COMMUNICATION_LINK = fabrics.ClockedLink(
-    clock=clocks.ROOM_CLOCK,
-    latency_cycles=2500,
-    source="T_strong_comm, 2510.25222 lines 1109-1114",
-)
-# The weak base's hops, the controller's write a round period long.
-WEAK_TIER_FABRIC = fabrics.PathLinks(
-    controller_to_weak_buffer=WEAK_COMMUNICATION_LINK,
-    base=link_cards.WEAK_BASELINE_FABRIC,
-)
-# the keep threshold of 2510.25222 Sec. IV
-THRESHOLD_DECIBELS = 20.0
-COLLECTION = decsim.CollectionSettings(max_shots=100)
+config = sweeps.load_beside(__file__, "config.py")
+constants = config.constants
 # The word a results column shows for whether a pool copies its input,
 # and its boundary fold.
-INPUT_WORDS = {True: "copy", False: "in_place"}
-BOUNDARY_FOLD_WORDS = {True: "copy", False: "in_place"}
-# Blocks 1 to 3 run no strong tier. The weak base they extend escalates
-# nothing, names three strong-side hops null, which keeps the reference
-# card, and writes no fourth hop and no strong decoder; the results show
-# those cells as written.
+WORDS = {True: "copy", False: "in_place"}
+# Blocks 1 to 3 run no strong tier: the weak base names three
+# strong-side hops null and writes no fourth hop and no strong decoder.
 NO_STRONG_SIDE_CELLS = {
     "escalation": {"kind": "weak_baseline"},
     "strong_decoder": "",
     "links.controller_to_strong_buffer": None,
-    "links.weak_decoder_to_strong_decoder": None,
-    "links.strong_buffer_to_strong_decoder": None,
-    "links.strong_decoder_to_frame": "",
+    "links.weak_to_strong": None,
+    "links.strong_buffer_to_strong": None,
+    "links.strong_to_frame": "",
 }
 
 
-def every_hop_copies(distance: int) -> graph.Machine:
-    """Block 1: the weak tier on copies, every copy counted and traced.
-
-    One traced shot a task records where every round sat.
-    """
-    base = machines.weak_baseline(
-        distance,
-        PHYSICAL_ERROR_PROBABILITY,
-        ROUND_PERIOD_MICROSECONDS,
-    )
-    weak_decoder = decoder_settings.linear_decoder_pool(
-        WEAK_DECODE_MICROSECONDS_PER_ROUND,
-        clocks.FRIDGE_CLOCK,
-        solves_per_window=1,
-    )
-    observation = dataclasses.replace(
-        base.observation, trace="chrome", data_movement=True
-    )
-    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    machine = base.with_part(weak_pool)
-    return dataclasses.replace(
-        machine, fabric=WEAK_TIER_FABRIC, observation=observation
-    )
-
-
-def weak_input_in_place(distance: int) -> graph.Machine:
-    """Block 2: the weak unit reads its rounds where the store keeps them."""
-    machine = every_hop_copies(distance)
-    return machine.with_settings(machines.WEAK_POOL, copies_input=False)
-
-
-def boundary_folded_in_place(distance: int) -> graph.Machine:
-    """Block 3: the boundary is XORed into the unit's own copy."""
-    machine = every_hop_copies(distance)
-    return machine.with_settings(machines.WEAK_POOL, copies_boundary_fold=False)
-
-
-def switching(distance: int) -> graph.Machine:
-    """Block 4: weak first, escalating below 20 dB to the strong tier.
-
-    The complementary gap decodes each weak window twice.
-    """
-    machine = every_hop_copies(distance)
-    weak_decoder = decoder_settings.linear_decoder_pool(
-        WEAK_DECODE_MICROSECONDS_PER_ROUND,
-        clocks.FRIDGE_CLOCK,
-        solves_per_window=2,
-    )
-    strong_decoder = decoder_settings.linear_decoder_pool(
-        STRONG_DECODE_MICROSECONDS_PER_ROUND,
-        clocks.ROOM_CLOCK,
-        solves_per_window=1,
-    )
-    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    weak_tier = machine.with_part(weak_pool)
-    fabric = link_cards.strong_side(WEAK_TIER_FABRIC, STRONG_COMMUNICATION_LINK)
-    switching_slot = _complementary_gap_switching()
-    return machines.with_strong_tier(
-        weak_tier, strong_decoder, switching_slot, fabric
-    )
-
-
-BLOCKS = (
-    ("every_hop_copies", every_hop_copies),
-    ("weak_input_in_place", weak_input_in_place),
-    ("boundary_folded_in_place", boundary_folded_in_place),
-    ("switching", switching),
+# the strong side's hops, in column order
+STRONG_SIDE_HOPS = (
+    "controller_to_strong_buffer",
+    "weak_to_strong",
+    "strong_buffer_to_strong",
+    "strong_to_frame",
 )
 
 
-def data_movement_tasks() -> list:
-    """Every block at every distance, blocks in order."""
-    tasks = []
-    for block_name, machine_at in BLOCKS:
-        for distance in DISTANCES:
-            machine = machine_at(distance)
-            resolved = slotted.resolved(machine)
-            metadata = reported_cells(resolved, distance)
-            task_name = f"{block_name}_d{distance}"
-            task = decsim.Task(task_name, machine, metadata)
-            tasks.append(task)
-    return tasks
-
-
-def reported_cells(
-    machine: machine_settings.MachineSettings, distance: int
-) -> dict:
-    """Every cell the study's results show for a task, in column order.
-
-    Each column is a setting some block changes, so every task reports
-    its value there, read off the machine it runs.
-    """
-    weak_decoder = machine.weak_decoder
-    weak_link = _link_cell(
-        machine.links.controller_to_weak_buffer,
-        "fridge",
-        clocks.FRIDGE_CLOCK,
-    )
-    input_word = INPUT_WORDS[weak_decoder.copies_input]
-    fold_word = BOUNDARY_FOLD_WORDS[weak_decoder.copies_boundary_fold]
+def metadata(cell: dict, settings: decsim.MachineSettings) -> dict:
+    """Every cell the study's results show for a task, in column order."""
+    weak_decoder = settings.weak_decoder
+    weak_write = settings.links.path_settings("controller_to_weak_buffer")
+    weak_link = link_cell(weak_write, "fridge", clocks.FRIDGE_CLOCK)
+    input_word = WORDS[weak_decoder.copies_input]
+    fold_word = WORDS[weak_decoder.copies_boundary_fold]
     weak_fetch_cycles = weak_decoder.engine.fetch_cycles_per_round
     strong_side = NO_STRONG_SIDE_CELLS
-    if machine.switching is not None:
-        strong_side = _strong_side_cells(machine)
+    if settings.switching is not None:
+        strong_side = strong_side_cells(settings)
     return {
         "links.controller_to_weak_buffer": weak_link,
         "workload.arguments.physical_error_probability": (
-            PHYSICAL_ERROR_PROBABILITY
+            constants.physical_error_probability
         ),
-        "qpu.distance": distance,
-        "qpu.round_period_microseconds": ROUND_PERIOD_MICROSECONDS,
+        "qpu.distance": cell["distance"],
+        "qpu.round_period_microseconds": constants.round_period_microseconds,
         "weak_decoder.input": input_word,
         "weak_decoder.boundary_fold": fold_word,
         "weak_decoder.engine.fetch_cycles_per_round": weak_fetch_cycles,
@@ -216,47 +63,28 @@ def reported_cells(
     }
 
 
-def _complementary_gap_switching() -> escalation_settings.SwitchingSettings:
-    """Keep a weak result whose complementary gap is at least 20 dB.
-
-    The verdict is free, and an escalated window is redone on the redo
-    window, the strong decode starting after the weak verdict.
-    """
-    complementary_gap = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_decibels=THRESHOLD_DECIBELS
-    )
-    return escalation_settings.SwitchingSettings(
-        confidence=complementary_gap, threshold=threshold
-    )
-
-
-def _strong_side_cells(machine: machine_settings.MachineSettings) -> dict:
+def strong_side_cells(settings: decsim.MachineSettings) -> dict:
     """Block 4's escalation, strong pool and strong-side hops, on the host."""
-    links = machine.links
+    links = settings.links
     room = clocks.ROOM_CLOCK
+    threshold = settings.switching.threshold
     escalation = {
         "kind": "switching",
-        "gap_threshold_db": THRESHOLD_DECIBELS,
+        "gap_threshold_db": threshold.threshold_decibels,
         "strong_window": "redo_window",
     }
-    strong_decoder = _pool_cell(machine.strong_decoder, "room")
-    write = _link_cell(links.controller_to_strong_buffer, "room", room)
-    escalated = _link_cell(links.weak_decoder_to_strong_decoder, "room", room)
-    read = _link_cell(links.strong_buffer_to_strong_decoder, "room", room)
-    result = _link_cell(links.strong_decoder_to_frame, "room", room)
-    return {
-        "escalation": escalation,
-        "strong_decoder": strong_decoder,
-        "links.controller_to_strong_buffer": write,
-        "links.weak_decoder_to_strong_decoder": escalated,
-        "links.strong_buffer_to_strong_decoder": read,
-        "links.strong_decoder_to_frame": result,
-    }
+    strong_decoder = pool_cell(settings.strong_decoder, "room")
+    cells = {"escalation": escalation, "strong_decoder": strong_decoder}
+    for hop in STRONG_SIDE_HOPS:
+        path = links.path_settings(hop)
+        cells[f"links.{hop}"] = link_cell(path, "room", room)
+    return cells
 
 
-def _link_cell(
-    path: link_settings.PathSettings, clock_name: str, clock: config.Clock
+def link_cell(
+    path: link_settings.PathSettings,
+    clock_name: str,
+    clock: config_module.Clock,
 ) -> dict:
     """A path's card in the cycles of its clock, on an unbounded wire."""
     latency_ticks = path.channel.propagation_latency_ticks
@@ -268,13 +96,12 @@ def _link_cell(
     }
 
 
-def _pool_cell(
+def pool_cell(
     pool: decoder_settings.DecoderPoolSettings, clock_name: str
 ) -> dict:
     """A priced matching pool: its card, units, input, memory and engine."""
     engine = pool.engine
     unit_memory = {"bits": pool.unit_memory.bits}
-    input_word = INPUT_WORDS[pool.copies_input]
     engine_cell = {
         "clock": clock_name,
         "fetch_cycles_per_round": engine.fetch_cycles_per_round,
@@ -286,11 +113,20 @@ def _pool_cell(
     return {
         "kind": pool.algorithm.preset_latency_microseconds,
         "units": pool.unit_count,
-        "input": input_word,
+        "input": WORDS[pool.copies_input],
         "unit_memory": unit_memory,
         "engine": engine_cell,
     }
 
 
-tasks = data_movement_tasks()
-experiment = decsim.Experiment(NAME, tasks, COLLECTION)
+stop = decsim.CollectionSettings(max_shots=constants.stop.max_shots)
+sweep = decsim.Sweep(
+    "data_movement",
+    config.machine,
+    grid={"block": list(config.BLOCKS), "distance": [3, 5, 7]},
+    task_name="{block}_d{distance}",
+    stop_all=stop,
+    metadata=metadata,
+    constants=constants,
+)
+experiment = sweep.experiment()

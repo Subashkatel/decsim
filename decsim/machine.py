@@ -65,6 +65,8 @@ import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
+import decsim.topology.graph_layout as graph_layout
+import decsim.topology.slotted as slotted
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.routers as routers
 import decsim.windows.window_release as window_release
@@ -116,30 +118,20 @@ class Machine:
         model cache the shots of one unit share (collect.run_unit), and
         online_threshold the task's calibrator when its threshold
         learns across shots (collect.Task); both are task state, never
-        settings. layout is a new-shape graph's (collect.Task); None
-        lays out the settings' slots under their own names.
+        settings. layout is the task's graph laid out (collect.Task);
+        None lays out the graph the settings describe.
         """
         settings = settings.at_task()
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
         if layout is None:
-            layout = layout_module.slotted_layout(settings)
+            graph = slotted.graph_of(settings)
+            settings, layout = graph_layout.laid_out(graph)
         engine = engine_module.Engine()
         switching_parts = escalation_build.build_switching(
             layout, engine, online_threshold, settings.clock
         )
-        batches_each_member = decoders_part.batches_each_member(layout)
-        plan = plan_build.build_plan(
-            settings.qpu,
-            settings.workload,
-            settings.windows,
-            settings.idle_policy,
-            settings.detection_events,
-            settings.switching,
-            settings.decoder_manager.bulk_strong,
-            switching_parts,
-            batches_each_member,
-        )
+        plan = plan_of(settings, layout, switching_parts)
         formation_paths = layout.formation_paths()
         detection_events = readout_part.build_detection_events(
             settings.detection_events,
@@ -164,7 +156,7 @@ class Machine:
         readout = readout_part.Readout.build(
             settings.controller,
             settings.links,
-            layout.stores,
+            layout,
             settings.clock,
             engine,
             detection_events,
@@ -344,6 +336,28 @@ class Machine:
         return _capture_result(self)
 
 
+def plan_of(
+    settings: machine_settings.MachineSettings,
+    layout: layout_module.Layout,
+    switching_parts: tuple,
+) -> plan_build.Plan:
+    """The plan the build derives from the settings, before it wires."""
+    batches_each_member = decoders_part.batches_each_member(layout)
+    landed_seats = layout.landed_seats()
+    return plan_build.build_plan(
+        settings.qpu,
+        settings.workload,
+        settings.windows,
+        settings.idle_policy,
+        settings.detection_events,
+        settings.switching,
+        settings.decoder_manager.bulk_strong,
+        switching_parts,
+        batches_each_member,
+        landed_seats,
+    )
+
+
 def build_links(
     settings: machine_settings.MachineSettings, engine: engine_module.Engine
 ) -> ports.Link:
@@ -425,6 +439,7 @@ def _observe(
         process_name=name,
         traffic_ledger=traffic_ledger,
         run_statistics=run_statistics,
+        links_card=settings.links,
     )
 
 

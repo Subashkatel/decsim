@@ -18,7 +18,6 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -62,14 +61,16 @@ class MachineSettings:
         controller_settings.ControllerSettings()
     )
     idle_policy: Union[
-        idle_policies.IgnoreSettings, idle_policies.SeparateDecodeJobsSettings
+        idle_policies.IgnoreSettings,
+        idle_policies.SeparateDecodeJobsSettings,
+        ports.IdlePolicySettings,
     ] = idle_policies.SeparateDecodeJobsSettings()
     detection_events: detection_event_settings.DetectionEventSettings = (
         detection_event_settings.DetectionEventSettings()
     )
-    links: link_settings.FabricSettings = (
-        link_profiles.logical_reference_profile()
-    )
+    # the card every hop is priced on; None prices each on the reference
+    # card by its role (links/link_profiles.py)
+    links: Optional[link_settings.FabricSettings] = None
     weak_syndrome_buffer: ports.SyndromeBufferSettings = (
         syndrome_buffer_module.SyndromeBufferSettings()
     )
@@ -87,9 +88,9 @@ class MachineSettings:
     workload: Union[
         workload_settings.WorkloadSettings, ports.WorkloadMakerSettings
     ] = workload_settings.WorkloadSettings()
-    magic_state_factory: qpu_settings.FactorySettings = (
-        magic_state_factories.InfiniteFactory.Settings()
-    )
+    magic_state_factory: Union[
+        qpu_settings.FactorySettings, ports.MagicStateFactorySettings
+    ] = magic_state_factories.InfiniteFactory.Settings()
     observation: observe_settings.ObservationSettings = (
         observe_settings.ObservationSettings()
     )
@@ -213,6 +214,8 @@ def _refuse_a_route_on_a_patch_no_operation_has(
     one of them, or its qubits (qpu/syndrome_devices.py), so only a
     patch no operation has is certain to match nothing.
     """
+    if settings.links is None:
+        return
     routes = settings.links.readout_routes
     workload_record = settings.workload.workload_record
     if not routes or workload_record is None:

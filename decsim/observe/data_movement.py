@@ -10,17 +10,19 @@ the class is the cost: a DRAM access is "a couple of orders-of-magnitude
 higher than the cost of an internal cache access" (Horowitz, ISSCC
 2014), and "memory accesses have a cost that is a function of the size
 of the memory being accessed" (Dally, CACM 2020), so a register copy and
-a cryostat-link copy must not be summed. The two tables are decsim's
-placement of its structures and links, a report-side grouping no
-component reads.
+a cryostat-link copy must not be summed. A hop is classed by its role
+and its ends' sites, a structure by its name; both are a report-side
+grouping no component reads.
 """
 
 import dataclasses
 import enum
 from typing import Any, Optional, Union
 
+import decsim.links.settings as link_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
+import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 
 
@@ -46,37 +48,42 @@ CLASS_ORDER = (
 )
 
 
-# What each link crosses. The readout leaves the cryostat: measurement
+# What each hop crosses. The readout leaves the cryostat: measurement
 # signals "are classified into bits then transmitted to a specialized
 # workstation via low-latency Ethernet" (Google 2408.13687 lines
 # 471-474), and the instruction returns the same way. The controller
-# writes its rounds into memory it shares with the tier beside it, "a
+# writes its rounds into memory it shares with the pool beside it, "a
 # shared memory buffer" (2408.13687 lines 475-477) and "the decoder
 # sequencer's memory" (Caune et al. 2410.05202 lines 1243-1245), and
-# that tier reads its input from the same board because its decoder sits
+# that pool reads its input from the same board because its decoder sits
 # in the sequencer's own FPGA (Chen 2605.30765 lines 1605-1608). The
-# frame is the controller's, so the correction that reaches it stays on
-# that board and the conditional release never leaves the chip. The
-# strong tier is a separate machine, room side in this tree, given its
-# assigned data (Toshio 2510.25222 lines 1248-1250), so the write into
-# its store and its answer cross boards while its own store-to-decoder
-# hop does not. One decoder's boundary reaches another through the
-# shared memory the processing elements write, "implemented using
-# registers" (Helios 2301.08419 lines 632-640).
-MEMORY_CLASS_BY_LINK_PATH = {
-    "qpu_to_controller": MemoryClass.OFF_BOARD,
-    "controller_to_qpu": MemoryClass.OFF_BOARD,
-    "controller_to_weak_buffer": MemoryClass.ON_BOARD,
-    "controller_to_strong_buffer": MemoryClass.OFF_BOARD,
-    "weak_buffer_to_weak_decoder": MemoryClass.ON_BOARD,
-    "strong_buffer_to_strong_decoder": MemoryClass.ON_BOARD,
-    "weak_decoder_to_strong_decoder": MemoryClass.OFF_BOARD,
-    "weak_decoder_to_frame": MemoryClass.ON_BOARD,
-    "strong_decoder_to_frame": MemoryClass.OFF_BOARD,
-    "strong_decoder_to_weak_decoder": MemoryClass.OFF_BOARD,
-    "decoder_to_decoder": MemoryClass.ON_CHIP,
-    "frame_to_controller": MemoryClass.ON_CHIP,
-}
+# frame is the controller's, so a correction that reaches it from the
+# fridge stays on that board and the conditional release never leaves
+# the chip. A pool on the host is a separate machine, given its assigned
+# data (Toshio 2510.25222 lines 1248-1250), so any hop between the sites
+# crosses boards while the host's own store-to-decoder hop does not. One
+# decoder's boundary reaches another on the chip through the shared
+# memory the processing elements write, "implemented using registers"
+# (Helios 2301.08419 lines 632-640); two decodes on the host meet in its
+# memory.
+_OFF_BOARD_KINDS = (route_records.READOUT, route_records.COMMAND)
+_ON_CHIP_ROLES = (
+    route_records.HopRole(route_records.DECISION),
+    route_records.HopRole(route_records.SAME_POOL, route_records.FRIDGE),
+)
+
+
+def memory_class_of_hop(path: link_settings.NamedPath) -> MemoryClass:
+    """The class of the memory one hop's move crosses."""
+    role = path.role
+    if role.kind in _OFF_BOARD_KINDS:
+        return MemoryClass.OFF_BOARD
+    if role in _ON_CHIP_ROLES:
+        return MemoryClass.ON_CHIP
+    if path.source_site != path.target_site:
+        return MemoryClass.OFF_BOARD
+    return MemoryClass.ON_BOARD
+
 
 # Where each copied-into structure lives. A copy is billed where it
 # lands, the way gem5 fills the destination block
@@ -94,41 +101,41 @@ MEMORY_CLASS_BY_STRUCTURE = {
     "controller assembler": MemoryClass.ON_CHIP,
     "masked view": MemoryClass.ON_CHIP,
 }
-_STORE_SUFFIX = "syndrome buffer"
 _UNIT_PREFIX = "unit "
 # a copy's path names where the bits came from and where they landed,
 # which no link path is; the report keeps the two apart by this word
 PATH_SEPARATOR = " -> "
 
 
-def memory_class_of_structure(name: str) -> MemoryClass:
+def memory_class_of_structure(name: str, store_names: frozenset) -> MemoryClass:
     """The class of the structure a copy landed in, by its reported name.
 
-    A name no row, no suffix and no prefix names is unclassified rather than
+    store_names are the run's stores, each memory two chips share. A name
+    no row, no store and no prefix names is unclassified rather than
     guessed, so the grouped rows still sum to the run's total.
     """
     named = MEMORY_CLASS_BY_STRUCTURE.get(name)
     if named is not None:
         return named
-    if name.endswith(_STORE_SUFFIX):
+    if name in store_names:
         return MemoryClass.ON_BOARD
     if name.startswith(_UNIT_PREFIX):
         return MemoryClass.ON_CHIP
     return MemoryClass.UNCLASSIFIED
 
 
-def memory_class_of_link_path(path: str) -> MemoryClass:
-    """The class of the memory one link's move crosses."""
-    return MEMORY_CLASS_BY_LINK_PATH.get(path, MemoryClass.UNCLASSIFIED)
-
-
 class DataMovement:
     """The run's data-movement tally.
 
     It counts copies, references and moves, in total and per named path.
+    class_by_hop is the memory class of each hop the card prices
+    (memory_class_of_hop), store_names the name each store reports its
+    copies under; a hop or a structure neither names is unclassified.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, class_by_hop: dict, store_names: frozenset) -> None:
+        self.class_by_hop = class_by_hop
+        self.store_names = store_names
         self.copies = _PathCounts()
         self.moves = _PathCounts()
         self.references = _Counts()
@@ -147,7 +154,7 @@ class DataMovement:
         """One structure duplicated the bits into another."""
         path = f"{source_name}{PATH_SEPARATOR}{target_name}"
         rounds = _rounds(key)
-        memory_class = memory_class_of_structure(target_name)
+        memory_class = memory_class_of_structure(target_name, self.store_names)
         self._add(self.copies, path, bits, rounds, memory_class)
 
     def transfer_delivered(
@@ -165,7 +172,7 @@ class DataMovement:
             bits += transfer.payload_bits
         rounds = len(record.attribution.round_keys)
         path = record.path
-        memory_class = memory_class_of_link_path(path)
+        memory_class = self.class_by_hop.get(path, MemoryClass.UNCLASSIFIED)
         self._add(self.moves, path, bits, rounds, memory_class)
 
     def hold_registered(

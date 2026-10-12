@@ -30,7 +30,6 @@ import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
-import decsim.records.routes as route_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
@@ -475,16 +474,20 @@ def input_hop_by_request(transfers: list) -> dict:
     return index.input_hops()
 
 
-def controller_to_weak_buffer_delays_us(
-    transfers: list, observation_settings: observe_settings.ObservationSettings
+def controller_write_delays_us(
+    transfers: list,
+    write_hop: Optional[str],
+    observation_settings: observe_settings.ObservationSettings,
 ) -> list:
-    """Every recorded round's controller_to_weak_buffer delay, in us.
+    """Every recorded round's delay into the written store, in us.
 
-    A packed transfer is recorded by its first round.
+    write_hop is the controller's write into it (Layout.controller_write_hop),
+    None for a run with no written store. A packed transfer is recorded
+    by its first round.
     """
     delays = []
     for row in transfers:
-        if row["path"] != "controller_to_weak_buffer":
+        if row["path"] != write_hop:
             continue
         first_rounds = row["attribution"]["rounds_by_operation"][0]
         if not observation_settings.records_round(first_rounds["round_lo"]):
@@ -730,22 +733,23 @@ def collect_samples(
     observation: observation_module.Observation,
     result: result_records.RunResult,
     observation_settings: observe_settings.ObservationSettings,
-    routes: route_records.Routes,
-    input_hops: dict,
-    escalation_hop: Optional[str],
+    layout: layout_module.Layout,
 ) -> tuple:
     """Every recorded point's microsecond samples, and each window's tier.
 
     Every point describes the decode the frame committed, named by the
-    frame record's tier and run ordinal; input_hops is the hop each
-    pool's input rides (Layout.input_hop_by_pool), keyed by the pool
-    whose decode the frame committed, and escalation_hop the entry
-    edge's (Layout.entry_escalation_hop). Only the windows and rounds in
-    the measurement interval are sampled, but for the end-of-stream
-    reaction, which is the drain the interval leaves out. It stays whole
-    past the size
+    frame record's tier and run ordinal, and reads its hops off the
+    layout: the hop each pool's input rides, keyed by the pool whose
+    decode the frame committed, the entry edge's escalation, and the
+    controller's write. Only the windows and rounds in the measurement
+    interval are sampled, but for the end-of-stream reaction, which is
+    the drain the interval leaves out. It stays whole past the size
     prompt: one walk over the windows in key order, read top to bottom.
     """
+    routes = layout.routes()
+    input_hops = layout.input_hop_by_pool()
+    escalation_hop = layout.entry_escalation_hop()
+    write_hop = layout.controller_write_hop()
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
     answer_hops = routes.name_bits_by_answer_hop
@@ -756,8 +760,8 @@ def collect_samples(
     for name in POINTS:
         samples[name] = []
     window_tiers = []
-    samples["cwb_per_round"] = controller_to_weak_buffer_delays_us(
-        transfers, observation_settings
+    samples["cwb_per_round"] = controller_write_delays_us(
+        transfers, write_hop, observation_settings
     )
     round_events = observation.round_events
     waits = round_stall_ticks(round_events.events)
@@ -1133,16 +1137,8 @@ def _measurement(
     owner_rounds = rounds_by_owner.values()
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
-    routes = layout.routes()
-    input_hops = layout.input_hop_by_pool()
-    escalation_hop = layout.entry_escalation_hop()
     samples, window_tiers = collect_samples(
-        observation,
-        result,
-        settings.observation,
-        routes,
-        input_hops,
-        escalation_hop,
+        observation, result, settings.observation, layout
     )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)

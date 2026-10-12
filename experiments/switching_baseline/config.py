@@ -172,7 +172,7 @@ def relay_bp_pool() -> decoder_settings.DecoderPoolSettings:
     )
 
 
-def fabric() -> fabrics.PathLinks:
+def fabric() -> fabrics.RoleLinks:
     """The fiber loop in the fridge rack; Backline's RoCE v2 to the host."""
     loop = constants.fiber_loop
     chip = constants.clocks.chip
@@ -181,9 +181,9 @@ def fabric() -> fabrics.PathLinks:
         links[name] = record(
             fabrics.ClockedLink, loop[name], clock=chip, source=loop.source
         )
-    return fabrics.PathLinks(
-        controller_to_weak_buffer=links["up"],
-        weak_buffer_to_weak_decoder=links["read"],
-        weak_decoder_to_frame=links["down"],
+    return fabrics.RoleLinks(
+        write_written=links["up"],
+        read_written=links["read"],
+        answer_fridge=links["down"],
         base=link_cards.ROCE_V2_CPU_FABRIC,
     )

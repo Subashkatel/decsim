@@ -104,11 +104,11 @@ def linear_pool(
     )
 
 
-def weak_tier_fabric() -> fabrics.PathLinks:
+def weak_tier_fabric() -> fabrics.RoleLinks:
     """The weak base's hops, the controller's write a round period long."""
     weak_link = machine_file.record(fabrics.ClockedLink, constants.weak_link)
-    return fabrics.PathLinks(
-        controller_to_weak_buffer=weak_link,
+    return fabrics.RoleLinks(
+        write_written=weak_link,
         base=link_cards.WEAK_BASELINE_FABRIC,
     )
 

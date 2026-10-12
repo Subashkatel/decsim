@@ -56,8 +56,8 @@ RECORD_CLASS_KEY = "class"
 EVERY_SHOT = "all"
 # A name a folder can take on any filesystem the results go to.
 FOLDER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-# The key a new-shape graph's id hashes it under, versioned: a graph
-# that read differently would take a new key, never an old id.
+# The key a task's graph is hashed under, versioned: a graph that read
+# differently would take a new key, never an old id.
 GRAPH_ID_KEY = "graph_v1"
 
 
@@ -106,15 +106,14 @@ class Task:
     machine and the metadata only.
 
     machine may be a graph (decsim/topology/graph.py): the assignments in
-    force then name its paths (uf.unit_count), and graph keeps the graph
-    as assigned. graph is a field of the record, so a copy made with
-    dataclasses.replace keeps it, and its layout is laid out again. A
-    graph today's slots hold runs as, and is identified by, the
-    MachineSettings it resolves to (topology/slotted.py). A graph
-    of a new shape is identified by itself, under GRAPH_ID_KEY, with its
-    workload as machine holds it, lowered; it runs on its layout
-    (topology/graph_layout.py), and machine is its entry edge's record,
-    which the reports read.
+    force then name its paths (uf.unit_count). Settings given as a
+    MachineSettings record become the graph they describe
+    (topology/slotted.py graph_of). graph keeps the graph as assigned; it
+    is a field of the record, so a copy made with dataclasses.replace
+    keeps it, and its layout is laid out again. A task is identified by
+    its graph, under GRAPH_ID_KEY, with its workload as machine holds it,
+    lowered; it runs on its layout (topology/graph_layout.py), and
+    machine is its entry edge's record, which the reports read.
     """
 
     name: str
@@ -126,8 +125,7 @@ class Task:
     graph: Optional[topology_graph.Machine] = dataclasses.field(
         default=None, compare=False
     )
-    # a new-shape graph's pools, stores and edges; None for a machine
-    # today's slots hold
+    # the graph's pools, stores and edges
     layout: Optional[layout_module.Layout] = dataclasses.field(
         default=None, init=False, compare=False
     )
@@ -136,15 +134,12 @@ class Task:
         check_folder_name(self.name, "task")
         _refuse_a_key_that_is_not_text(self.metadata, "metadata")
         assigned = in_force.applied(self.machine)
-        if isinstance(assigned, topology_graph.Machine):
-            object.__setattr__(self, "graph", assigned)
-            assigned = _settings_of(assigned)
-        machine = assigned.at_task()
+        if not isinstance(assigned, topology_graph.Machine):
+            assigned = slotted.graph_of(assigned.at_task())
+        machine, layout = graph_layout.laid_out(assigned)
+        object.__setattr__(self, "graph", assigned)
         object.__setattr__(self, "machine", machine)
-        if self.graph is not None and not slotted.holds(self.graph):
-            facts = machine.task_facts()
-            layout = graph_layout.layout_of(self.graph, facts)
-            object.__setattr__(self, "layout", layout)
+        object.__setattr__(self, "layout", layout)
         if self.online_threshold is None:
             calibrator = _task_calibrator(machine)
             object.__setattr__(self, "online_threshold", calibrator)
@@ -166,10 +161,7 @@ class Task:
         return _digest(value)
 
     def _identity(self) -> dict:
-        """The machine's json value, under the key the ids have always used."""
-        # The key stays "settings", so every recorded id stays valid.
-        if self.layout is None:
-            return {"settings": json_value(self.machine, keep_labels=False)}
+        """The graph's json value, its workload lowered, under its key."""
         workload = self.machine.workload
         graph = _with_workload(self.graph, workload)
         return {GRAPH_ID_KEY: json_value(graph, keep_labels=False)}
@@ -326,15 +318,6 @@ def check_folder_name(name: object, what: str) -> None:
         f"the {what} name {name!r} is not a folder name; a name is letters, "
         "digits, '.', '_' and '-', starting with a letter or a digit"
     )
-
-
-def _settings_of(
-    machine: topology_graph.Machine,
-) -> machine_settings.MachineSettings:
-    """The record a graph runs as: its slots' record, or its entry edge's."""
-    if slotted.holds(machine):
-        return slotted.resolved(machine)
-    return graph_layout.entry_settings(machine)
 
 
 def _with_workload(

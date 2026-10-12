@@ -79,7 +79,7 @@ class Readout:
         cls,
         controller_settings: controller_settings_module.ControllerSettings,
         link_card: link_settings.FabricSettings,
-        store_plans: tuple,
+        layout: layout_module.Layout,
         machine_clock: Optional[config.Clock],
         engine: engine_module.Engine,
         detection_events: ports.DetectionEventPlacement,
@@ -87,6 +87,7 @@ class Readout:
     ) -> "Readout":
         """Every component of the readout path, wired to one another."""
         _check_readout_cost_is_priced(controller_settings, link_card)
+        store_plans = layout.stores
         for plan in store_plans:
             _check_the_store_prices(plan, link_card)
         clocked_controller = config.with_machine_clock(
@@ -99,7 +100,7 @@ class Readout:
         rounds_in_flight = round_assembly.RoundsInFlight(in_flight_bound)
         landing_path = _landing_path(store_plans)
         sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
-        write_path = _controller_write_path(store_plans)
+        write_path = layout.controller_write_hop()
         transmitter = round_transmission.RoundTransmitter(engine, write_path)
         held_rounds = syndrome_round_sender.HeldRounds(engine)
         store_transfers = window_transfers.WindowTransfers(engine)
@@ -264,13 +265,30 @@ def build_detection_events(
     formed_at = detection_event_settings.formed_at
     for path in paths:
         _check_one_seat_on(path, formed_at)
+    _refuse_a_seat_on_no_path(formed_at, paths)
     source = None
     if isinstance(device, ports.DetectionEventFormer):
         source = device
     clocked_settings = config.with_machine_clock(
         detection_event_settings, machine_clock
     )
-    return formation.SeatedFormation(source, clocked_settings)
+    # each path ends at the pool that decodes what it carries
+    decoder_seats = frozenset(path[-1] for path in paths)
+    return formation.SeatedFormation(source, clocked_settings, decoder_seats)
+
+
+def _refuse_a_seat_on_no_path(formed_at: tuple, paths: tuple) -> None:
+    """Every seat formed_at names is on some path, so none is a typo."""
+    on_a_path = set()
+    for path in paths:
+        on_a_path.update(path)
+    for seat in formed_at:
+        if seat in on_a_path:
+            continue
+        raise ValueError(
+            f"detection_events.formed_at names {seat!r}, which no round "
+            f"crosses; the seats are {sorted(on_a_path)}"
+        )
 
 
 def _store_parts(
@@ -304,15 +322,6 @@ def _store_parts(
         )
         other_outputs.append((reader.pool, other_output))
     return StoreParts(plan, store, output, receiver, tuple(other_outputs))
-
-
-def _controller_write_path(store_plans: tuple) -> Optional[str]:
-    """The hop the controller writes the written store over, if one is."""
-    for plan in store_plans:
-        intake = plan.intake
-        if intake.shape == receiver_module.WRITTEN:
-            return intake.controller_write.path_name
-    return None
 
 
 def _landing_path(store_plans: tuple) -> Optional[transfer_records.LinkPath]:
@@ -402,7 +411,8 @@ def _check_readout_cost_is_priced(
     readout_cycles = controller_settings.readout_to_bits_cycles
     if readout_cycles == 0:
         return
-    readout_hops = [link_card.qpu_to_controller]
+    readout = link_card.path_settings(transfer_records.QPU_TO_CONTROLLER)
+    readout_hops = [readout]
     readout_hops.extend(route.settings for route in link_card.readout_routes)
     for readout_hop in readout_hops:
         if not readout_hop.excludes_receiver_processing:

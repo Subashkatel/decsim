@@ -80,10 +80,10 @@ DOWNLINK = fabrics.ClockedLink(
 # tier's correction ride the fiber loop; the strong side, Backline's
 # cable. The fabric prices the machine's every hop, so a run that drops
 # the weak pool keeps Experiment 1's card.
-FABRIC = fabrics.PathLinks(
-    controller_to_weak_buffer=UPLINK,
-    weak_buffer_to_weak_decoder=FRAME_READ,
-    weak_decoder_to_frame=DOWNLINK,
+FABRIC = fabrics.RoleLinks(
+    write_written=UPLINK,
+    read_written=FRAME_READ,
+    answer_fridge=DOWNLINK,
     base=link_cards.ROCE_V2_CPU_FABRIC,
 )
 

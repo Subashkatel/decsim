@@ -150,7 +150,16 @@ KINDS = (
 
 @functools.cache
 def kind_of(record_class: type) -> Optional[PartKind]:
-    """The kind whose slot takes records of this class; None for none."""
+    """The kind whose slot takes records of this class; None for none.
+
+    A slot that names the class takes it before one whose Protocol it
+    only fills, so a record with a build of the same shape as another
+    kind's port stays its own kind.
+    """
+    for kind in KINDS:
+        hint = slot_hint(kind)
+        if kinds.names(hint, record_class):
+            return kind
     for kind in KINDS:
         hint = slot_hint(kind)
         if kinds.admits(hint, record_class):

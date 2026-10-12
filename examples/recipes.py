@@ -137,8 +137,8 @@ def buffer_and_link(
     link = fabrics.TimedLink(
         link_microseconds, excludes_receiver_processing=True
     )
-    fabric = fabrics.PathLinks(
-        weak_buffer_to_weak_decoder=link, base=base.fabric
+    fabric = fabrics.RoleLinks(
+        read_written=link, base=base.fabric
     )
     with_store = base.with_part(weak_store)
     return dataclasses.replace(with_store, fabric=fabric)

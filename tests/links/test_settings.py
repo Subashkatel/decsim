@@ -54,7 +54,7 @@ def every_path_free():
     that one and leaves the rest on the shared free channel.
     """
     names = []
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         names.append(path)
     return dict.fromkeys(names, FREE_PATH)
 
@@ -172,11 +172,11 @@ def test_a_hop_the_card_names_twice_is_refused():
         dataclasses.replace(reference, hops=(hop, hop))
 
 
-def test_a_cards_hops_follow_the_legacy_twelve_by_name():
+def test_a_cards_hops_follow_the_slotted_twelve_by_name():
     reference = link_profiles.logical_reference_profile()
     hop = link_settings.NamedPath("uf_to_relay", reference.decoder_to_decoder)
 
     card = dataclasses.replace(reference, hops=(hop,))
 
-    assert card.path_names() == (*transfer_records.LEGACY_PATHS, "uf_to_relay")
+    assert card.path_names() == (*transfer_records.SLOTTED_PATHS, "uf_to_relay")
     assert card.path_settings("uf_to_relay") == reference.decoder_to_decoder

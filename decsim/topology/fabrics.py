@@ -44,7 +44,7 @@ PROFILE_NAME = "a graph's fabric"
 # Each path of today's card, by the MachineSettings slots at its ends.
 # decoder_to_decoder carries a window's boundary to the next window on
 # the pool that decodes the windows.
-LEGACY_ENDS = {
+SLOTTED_ENDS = {
     "qpu_to_controller": ("qpu", "controller"),
     "controller_to_weak_buffer": ("controller", "weak_syndrome_buffer"),
     "weak_buffer_to_weak_decoder": ("weak_syndrome_buffer", "weak_decoder"),
@@ -64,7 +64,7 @@ LEGACY_ENDS = {
 # Where each slot's part sits when its part says nothing: the controller,
 # the frame and the weak tier on the chip in the fridge, the strong tier
 # on the host, as the reference card prices them.
-LEGACY_SITES = {
+SLOTTED_SITES = {
     "qpu": FRIDGE,
     "controller": FRIDGE,
     "pauli_frame": FRIDGE,
@@ -80,7 +80,7 @@ class Route:
     """One hop between two parts: its path's name and each end's site.
 
     reference names the reference card's path whose payload rule the hop
-    carries: a graph's own hop carries the rule of the legacy hop with
+    carries: a graph's own hop carries the rule of the slotted hop with
     its role (topology/graph_layout.py); None is the path itself.
     """
 
@@ -268,7 +268,7 @@ class ReferenceFabric:
 class PathLinks:
     """A link per path, by the path's name; any other route, the base's.
 
-    A graph's own hop takes the link of the legacy path whose role it
+    A graph's own hop takes the link of the slotted path whose role it
     carries (Route.reference), so a chain's entry pool reads its store
     on the link the weak tier's read rides.
     """
@@ -290,7 +290,7 @@ class PathLinks:
     def link_for(self, route: Route) -> Optional[ports.LinkCard]:
         """This path's link, or its reference's, else the base's."""
         path = route.path
-        if path not in transfer_records.LEGACY_PATHS:
+        if path not in transfer_records.SLOTTED_PATHS:
             path = route.reference
         if path is None:
             return self.base.link_for(route)
@@ -347,7 +347,7 @@ def card(
 
     wire_links holds the link a wire carries, by its route's path name;
     a route with no link of its own takes the rule's, and one the rule
-    gives none the reference path. A route off the legacy twelve is one
+    gives none the reference path. A route off the slotted twelve is one
     of the card's named hops.
     """
     reference = link_profiles.logical_reference_profile()
@@ -355,7 +355,7 @@ def card(
     hops = []
     for route in routes:
         priced = _priced(route, rule, wire_links, reference, machine_clock)
-        if route.path in transfer_records.LEGACY_PATHS:
+        if route.path in transfer_records.SLOTTED_PATHS:
             paths[route.path] = priced
             continue
         hop = link_settings.NamedPath(route.path, priced)
@@ -365,14 +365,14 @@ def card(
     )
 
 
-def legacy_routes(sites: dict) -> tuple:
+def slotted_routes(sites: dict) -> tuple:
     """Every path of today's card as a route, its ends at these sites.
 
     sites maps a slot to its part's site; a slot it leaves out, or maps
-    to None, sits where LEGACY_SITES puts it.
+    to None, sits where SLOTTED_SITES puts it.
     """
     routes = []
-    for path, (source_slot, target_slot) in LEGACY_ENDS.items():
+    for path, (source_slot, target_slot) in SLOTTED_ENDS.items():
         source_site = _site(sites, source_slot)
         target_site = _site(sites, target_slot)
         route = Route(path, source_site, target_site)
@@ -389,7 +389,7 @@ def _priced(
 ) -> link_settings.PathSettings:
     """One route's path: its wire's link, else the rule's, else the reference.
 
-    A graph's own hop rides a channel of its own name, never the legacy
+    A graph's own hop rides a channel of its own name, never the slotted
     hop's whose payload rule it carries.
     """
     reference_name = route.reference
@@ -417,5 +417,5 @@ def _on_its_own_channel(
 def _site(sites: dict, slot: str) -> Optional[str]:
     site = sites.get(slot)
     if site is None:
-        return LEGACY_SITES.get(slot)
+        return SLOTTED_SITES.get(slot)
     return site

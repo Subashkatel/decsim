@@ -37,7 +37,7 @@ INSTRUCTION_PATHS = (
 
 def channel_names_of(profile):
     names = []
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         names.append(path_settings.channel.name)
     return names
@@ -45,7 +45,7 @@ def channel_names_of(profile):
 
 def path_names():
     names = []
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         names.append(path)
     return names
 
@@ -136,7 +136,7 @@ def test_the_reference_card_names_the_runtime_quantity_of_each_actual_path():
 def _unbounded_paths(profile) -> list:
     """The names of the paths whose channel carries no rate."""
     unbounded = []
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         if path_settings.channel.capacity is None:
             unbounded.append(path)
@@ -147,7 +147,7 @@ def test_every_hop_of_the_reaction_path_has_a_reference_card():
     """A null card is the reference numbers, so no hop is ever free.
 
     The traffic report lists one row per hop of the reaction path, and
-    each row is priced: walking LEGACY_PATHS finds a card on every one, and
+    each row is priced: walking SLOTTED_PATHS finds a card on every one, and
     each card's channel carries the hop's own name.
     """
     profile = link_profiles.logical_reference_profile()
@@ -212,7 +212,7 @@ ARXIV = re.compile(r"\b\d{4}\.\d{4,5}\b")
 def sources_of(profile):
     """The configuration source of each path's channel, by path name."""
     sources = {}
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         sources[path] = path_settings.channel.configuration_source
     return sources
@@ -221,7 +221,7 @@ def sources_of(profile):
 def _capacity_sources(profile) -> list:
     """The source of each rate the card declares, in path order."""
     sources = []
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         capacity = path_settings.channel.capacity
         if capacity is not None:

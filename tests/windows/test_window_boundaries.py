@@ -25,11 +25,11 @@ import decsim.windows.round_retention as round_retention
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 
-# the legacy pools joined by their edge, so a strong window can pin a
+# the slotted pools joined by their edge, so a strong window can pin a
 # face; the planner's windows on the weak pool
-_EDGE = routes_build.legacy_edge("direct")
+_EDGE = routes_build.slotted_edge("direct")
 _ROUTES = routes_build.generated(
-    routes_build.LEGACY_POOL_HOPS, (_EDGE,), window_records.WEAK_POOL_ID
+    routes_build.SLOTTED_POOL_HOPS, (_EDGE,), window_records.WEAK_POOL_ID
 )
 
 

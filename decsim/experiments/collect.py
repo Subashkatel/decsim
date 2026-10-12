@@ -44,8 +44,8 @@ import decsim.records.results as result_records
 import decsim.settings as machine_settings
 import decsim.topology.graph as topology_graph
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.legacy as legacy
 import decsim.topology.part_kinds as part_kinds
+import decsim.topology.slotted as slotted
 import decsim.windows.built_window_models as built_window_models
 
 # The key a record's class is written under beside its fields. No field
@@ -110,7 +110,7 @@ class Task:
     as assigned. graph is a field of the record, so a copy made with
     dataclasses.replace keeps it, and its layout is laid out again. A
     graph today's slots hold runs as, and is identified by, the
-    MachineSettings it resolves to (topology/legacy.py). A graph
+    MachineSettings it resolves to (topology/slotted.py). A graph
     of a new shape is identified by itself, under GRAPH_ID_KEY, with its
     workload as machine holds it, lowered; it runs on its layout
     (topology/graph_layout.py), and machine is its entry edge's record,
@@ -141,7 +141,7 @@ class Task:
             assigned = _settings_of(assigned)
         machine = assigned.at_task()
         object.__setattr__(self, "machine", machine)
-        if self.graph is not None and not legacy.holds(self.graph):
+        if self.graph is not None and not slotted.holds(self.graph):
             facts = machine.task_facts()
             layout = graph_layout.layout_of(self.graph, facts)
             object.__setattr__(self, "layout", layout)
@@ -332,8 +332,8 @@ def _settings_of(
     machine: topology_graph.Machine,
 ) -> machine_settings.MachineSettings:
     """The record a graph runs as: its slots' record, or its entry edge's."""
-    if legacy.holds(machine):
-        return legacy.resolved(machine)
+    if slotted.holds(machine):
+        return slotted.resolved(machine)
     return graph_layout.entry_settings(machine)
 
 

@@ -1101,7 +1101,7 @@ def _workload(final_round: int) -> workload_settings.WorkloadSettings:
 def _zero_delay_links(data_hop_ticks: int) -> link_settings.FabricSettings:
     reference = link_profiles.logical_reference_profile()
     paths = {}
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         settings = reference.path_settings(path)
         channel = dataclasses.replace(
             settings.channel, propagation_latency_ticks=0

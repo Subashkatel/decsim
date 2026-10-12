@@ -27,8 +27,8 @@ import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.legacy as legacy
 import decsim.topology.machine_file as machine_file
+import decsim.topology.slotted as slotted
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
@@ -109,8 +109,8 @@ def test_a_chain_is_a_new_shape():
 
     two_pools = _two_pools()
 
-    assert not legacy.holds(chain)
-    assert legacy.holds(two_pools)
+    assert not slotted.holds(chain)
+    assert slotted.holds(two_pools)
 
 
 def test_a_chains_pools_go_by_their_parts_entry_first():
@@ -135,8 +135,8 @@ def test_a_chain_seeds_its_entry_edge_as_the_two_pool_machine_does():
     chain_graph = chain_machine()
     chain = laid_out(chain_graph)
     two_pool_machine = _two_pools()
-    two_pool_settings = legacy.resolved(two_pool_machine)
-    two_pools = layout_module.legacy_layout(two_pool_settings)
+    two_pool_settings = slotted.resolved(two_pool_machine)
+    two_pools = layout_module.slotted_layout(two_pool_settings)
 
     chain_pools = _pool_seeds(chain)
     chain_edges = _policy_seeds(chain)
@@ -205,14 +205,14 @@ def test_a_round_reaches_each_pool_through_one_path_of_seats():
     )
 
 
-def test_the_card_prices_the_graphs_own_hops_beside_the_legacy_twelve():
+def test_the_card_prices_the_graphs_own_hops_beside_the_slotted_twelve():
     chain = chain_machine()
     settings = graph_layout.entry_settings(chain)
 
     card = settings.links
     names = card.path_names()
 
-    assert names[:12] == transfer_records.LEGACY_PATHS
+    assert names[:12] == transfer_records.SLOTTED_PATHS
     assert "strong_to_deep" in names
     assert "deep_to_frame" in names
     assert card.path_settings("deep_to_deep") is not None
@@ -270,7 +270,7 @@ def test_a_pool_reached_by_no_edge_and_no_router_is_refused():
 
 
 def test_a_chains_task_is_identified_by_its_graph():
-    """Its entry edge's record is a legacy one, whose id it never takes."""
+    """Its entry edge's record is a slotted one, whose id it never takes."""
     chain = chain_machine()
     task = collect.Task("chain", chain)
     two_pools = collect.Task("two_pools", task.machine)

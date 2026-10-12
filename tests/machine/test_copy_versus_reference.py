@@ -36,7 +36,7 @@ import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
 import decsim.records.workload as workload_records
 import decsim.settings as machine_settings
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -67,7 +67,7 @@ def weak_base(
     graph_machine = machines.weak_baseline(
         distance, physical_error_probability, round_period_microseconds
     )
-    return legacy.resolved(graph_machine)
+    return slotted.resolved(graph_machine)
 
 
 def strong_base(
@@ -79,7 +79,7 @@ def strong_base(
     graph_machine = machines.strong_baseline(
         distance, physical_error_probability, round_period_microseconds
     )
-    return legacy.resolved(graph_machine)
+    return slotted.resolved(graph_machine)
 
 
 # (machine, windowing scheme, strong window, formed_at): every seat

@@ -123,7 +123,7 @@ class Machine:
         if built_models is None:
             built_models = built_window_models.BuiltWindowModels()
         if layout is None:
-            layout = layout_module.legacy_layout(settings)
+            layout = layout_module.slotted_layout(settings)
         engine = engine_module.Engine()
         switching_parts = escalation_build.build_switching(
             layout, engine, online_threshold, settings.clock

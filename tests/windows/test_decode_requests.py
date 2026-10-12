@@ -27,7 +27,7 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.escalate_edges as escalate_edges
@@ -435,7 +435,7 @@ def test_every_window_with_a_predecessor_folds_its_boundary(probability, seed):
     every one of five seeds still agrees with whole-circuit PyMatching.
     """
     weak_base = machines.weak_baseline(3, probability, 1.0)
-    base = legacy.resolved(weak_base)
+    base = slotted.resolved(weak_base)
     observation = dataclasses.replace(base.observation, data_movement=True)
     settings = dataclasses.replace(base, observation=observation)
     settings = _fifteen_rounds(settings, probability)

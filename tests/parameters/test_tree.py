@@ -18,7 +18,7 @@ import decsim.parameters.assignments as assignments_module
 import decsim.parameters.fields as fields
 import decsim.parameters.tree as tree
 import decsim.presets.machines as machines
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import tests.experiments.run_files as run_files
 from decsim.decoders.union_find import decoder as union_find
 
@@ -56,12 +56,12 @@ def _settable(machine) -> list:
 
 def _weak_graph():
     machine = run_files.minimal_machine()
-    return legacy.graph_of(machine)
+    return slotted.graph_of(machine)
 
 
 def _switching_graph():
     machine = run_files.switching_machine()
-    return legacy.graph_of(machine)
+    return slotted.graph_of(machine)
 
 
 def _with_part(machine, name, **changes):

@@ -8,8 +8,8 @@ hop; across an edge it rides the edge's forward or reverse hop. Every
 message that crosses the wall between two sites names the request it
 belongs to, as every message across the wall does while other requests
 are open (records/windows.py REQUEST_KEY_WIRE_BITS); one that stays on
-its site carries no name. A legacy machine's pools and edge keep the
-legacy hop names and sites (legacy_routes).
+its site carries no name. A slotted machine's pools and edge keep the
+slotted hop names and sites (slotted_routes).
 """
 
 from typing import Optional
@@ -20,8 +20,8 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 # the weak tier on the chip in the fridge, the strong tier on the host,
-# as topology/fabrics.py LEGACY_SITES places their slots
-LEGACY_WEAK_POOL_HOPS = route_records.PoolHops(
+# as topology/fabrics.py SLOTTED_SITES places their slots
+SLOTTED_WEAK_POOL_HOPS = route_records.PoolHops(
     pool=window_records.WEAK_POOL_ID,
     site=route_records.FRIDGE,
     answer=transfer_records.WEAK_DECODER_TO_FRAME,
@@ -29,36 +29,36 @@ LEGACY_WEAK_POOL_HOPS = route_records.PoolHops(
 )
 # Two strong decodes meet in the host's own memory, the read the strong
 # window's input takes.
-LEGACY_STRONG_POOL_HOPS = route_records.PoolHops(
+SLOTTED_STRONG_POOL_HOPS = route_records.PoolHops(
     pool=window_records.STRONG_POOL_ID,
     site=route_records.HOST,
     answer=transfer_records.STRONG_DECODER_TO_FRAME,
     same_pool=transfer_records.STRONG_BUFFER_TO_STRONG_DECODER,
 )
-LEGACY_POOL_HOPS = (LEGACY_WEAK_POOL_HOPS, LEGACY_STRONG_POOL_HOPS)
+SLOTTED_POOL_HOPS = (SLOTTED_WEAK_POOL_HOPS, SLOTTED_STRONG_POOL_HOPS)
 # the frame sits on the chip with the controller (topology/fabrics.py
-# LEGACY_SITES)
+# SLOTTED_SITES)
 FRAME_SITE = route_records.FRIDGE
 
 
-def legacy_routes(
+def slotted_routes(
     window_pool: window_records.PoolId,
     switching: Optional[escalation_settings.SwitchingSettings],
 ) -> route_records.Routes:
-    """A legacy machine's routes: both pools, the weak-to-strong edge.
+    """A slotted machine's routes: both pools, the weak-to-strong edge.
 
     A run with no switching has no edge, so its strong answer goes
     direct.
     """
     edges = ()
     if switching is not None:
-        edge = legacy_edge(switching.strong_answer_route)
+        edge = slotted_edge(switching.strong_answer_route)
         edges = (edge,)
-    return generated(LEGACY_POOL_HOPS, edges, window_pool)
+    return generated(SLOTTED_POOL_HOPS, edges, window_pool)
 
 
-def legacy_edge(answer_route: str) -> route_records.EdgeHops:
-    """The legacy weak-to-strong edge, its answers on answer_route."""
+def slotted_edge(answer_route: str) -> route_records.EdgeHops:
+    """The slotted weak-to-strong edge, its answers on answer_route."""
     return route_records.EdgeHops(
         source=window_records.WEAK_POOL_ID,
         target=window_records.STRONG_POOL_ID,

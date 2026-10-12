@@ -68,6 +68,13 @@ These are not from the papers. The pages use them everywhere.
   `Readout`, `Windows`, `Decoders`, and `Switching` in a switching
   machine) or the links. A part builds its components and binds their
   ports; `Machine.assemble` wires the parts together.
+- **slotted machine**: a machine the two decoder slots of
+  `MachineSettings` hold: one decoder, or a weak one escalating to a
+  strong one (`decsim/topology/slotted.py`). Every preset and example
+  is one. Its parts, hops and records keep the slots' names, and its
+  task id is the hash of that record. A graph of more pools or edges
+  than the slots hold is a new shape
+  (`decsim/topology/graph_layout.py`).
 - **seat**: a place on a round's path where its detection events may
   form, named in the `formed_at` setting of `DetectionEventSettings`.
 - **card**: a set of stated numbers used in place of a measurement. A
@@ -219,7 +226,7 @@ is a field of a part in `decsim/build/` or a pool inside one.
 ## The link paths
 
 Every hop is booked under one path name. A graph names a hop by the
-parts at its ends; a legacy machine's twelve hops are the `LEGACY_PATHS`
+parts at its ends; a slotted machine's twelve hops are the `SLOTTED_PATHS`
 names in `decsim/records/transfers.py`, below.
 
 | decsim | The hop |

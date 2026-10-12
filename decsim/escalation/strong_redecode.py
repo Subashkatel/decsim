@@ -2,7 +2,7 @@
 
 One StrongRedecode serves each edge, from its source pool to its target
 pool, with its own policy, verdict costs, shape and held windows; a
-legacy machine has one, from the weak pool to the strong one. When the
+slotted machine has one, from the weak pool to the strong one. When the
 policy escalates a source result, StrongRedecode asks the shape
 for the strong window's job, sends the window's selection over
 weak_decoder_to_strong_decoder, tells the decoder side to await the

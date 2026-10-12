@@ -5,8 +5,8 @@ it does not own (omnetpp src/sim/csimplemodule.cc:333-334,
 omnetpp-6.1.0), and gem5 bills a transfer to the port it left by rather
 than to whoever arranged it (packet.hh:424-431).
 decsim has no runtime check for it, so the rule is read out of the tree:
-a component module that names a legacy hop (records/transfers.py
-LEGACY_PATHS) must be one of that hop's two ends.
+a component module that names a slotted hop (records/transfers.py
+SLOTTED_PATHS) must be one of that hop's two ends.
 """
 
 import ast
@@ -66,7 +66,7 @@ COMPONENT_PACKAGES = (
 
 
 def _named_paths(path: pathlib.Path) -> list:
-    """Every legacy hop this module names, with its line."""
+    """Every slotted hop this module names, with its line."""
     text = path.read_text()
     tree = ast.parse(text)
     named = []
@@ -106,17 +106,17 @@ def test_the_table_of_ends_covers_every_hop():
     """A new hop joins the table, so the law never silently shrinks."""
     text = (DECSIM_ROOT / "records" / "transfers.py").read_text()
     tree = ast.parse(text)
-    members = _legacy_paths(tree)
+    members = _slotted_paths(tree)
     assert sorted(members) == sorted(ENDS_OF_PATH)
 
 
-def _legacy_paths(tree: ast.Module) -> list:
-    """The names LEGACY_PATHS lists, in its order."""
+def _slotted_paths(tree: ast.Module) -> list:
+    """The names SLOTTED_PATHS lists, in its order."""
     members = []
     for statement in tree.body:
         if not isinstance(statement, ast.Assign):
             continue
-        if _assigned_names(statement) != ["LEGACY_PATHS"]:
+        if _assigned_names(statement) != ["SLOTTED_PATHS"]:
             continue
         members = [element.id for element in statement.value.elts]
     return members
@@ -208,7 +208,7 @@ class _DeliverySite:
     def __init__(self, module, package: str, named: tuple, callback):
         self.module = module
         self.package = package
-        # (the legacy hop, the line the send stands on)
+        # (the slotted hop, the line the send stands on)
         self.path_name, self.lineno = named
         self.callback = callback
 
@@ -288,7 +288,7 @@ def _registered_callback(node):
 
 
 def _path_argument(node: ast.Call):
-    """The legacy hop this call names, BOUNDARY_ROUTE, or None."""
+    """The slotted hop this call names, BOUNDARY_ROUTE, or None."""
     if _is_boundary_send(node):
         return BOUNDARY_ROUTE
     for argument in node.args:
@@ -307,7 +307,7 @@ def _is_boundary_send(node: ast.Call) -> bool:
 
 
 def _link_path_member(argument):
-    """The name of a legacy hop the expression reads, or None."""
+    """The name of a slotted hop the expression reads, or None."""
     if not isinstance(argument, ast.Attribute):
         return None
     inner = argument.value

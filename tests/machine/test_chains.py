@@ -28,7 +28,7 @@ import decsim.records.decoding as decoding_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
 import tests.topology.test_graph_layout as layout_tests
@@ -74,8 +74,8 @@ class DeclaredTwoSolves:
 class DeclaredHops:
     """The declared card; a chain's own hop at its role's declared latency.
 
-    A test's fabric rule: a legacy hop is the card's path as written, and
-    a hop of the graph's own is the card's latency for the legacy hop
+    A test's fabric rule: a slotted hop is the card's path as written, and
+    a hop of the graph's own is the card's latency for the slotted hop
     whose role it carries (fabrics.Route.reference).
     """
 
@@ -145,7 +145,7 @@ def chain_graph(
         run_both_at_once=entry_speculates,
         record=record,
     )
-    base = legacy.graph_of(settings)
+    base = slotted.graph_of(settings)
     strong_microseconds = fabric.DECLARED_MICROSECONDS["strong"]
     is_doubted = fabric.escalate_only(strong_doubts)
     strong_algorithm = declared_run.DeclaredConfidenceDecoder.Settings(

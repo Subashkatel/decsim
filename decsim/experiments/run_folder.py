@@ -657,7 +657,7 @@ def _plan(task: collect.Task) -> plan_build.Plan:
     """The plan the build derives from the task, before it wires."""
     settings = task.machine
     engine = engine_module.Engine()
-    layout = layout_module.legacy_layout(settings)
+    layout = layout_module.slotted_layout(settings)
     switching_parts = escalation_build.build_switching(
         layout, engine, task.online_threshold
     )

@@ -11,13 +11,13 @@ import dataclasses
 import pytest
 
 import decsim.topology.graph as graph
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import tests.experiments.run_files as run_files
 
 
 def _weak_graph() -> graph.Machine:
     machine = run_files.minimal_machine()
-    return legacy.graph_of(machine)
+    return slotted.graph_of(machine)
 
 
 def _with_wires(machine: graph.Machine, *ends) -> graph.Machine:
@@ -35,7 +35,7 @@ def test_a_weak_machine_wires_every_required_port():
 def test_a_switching_machine_wires_every_required_port():
     settings = run_files.switching_machine()
 
-    machine = legacy.graph_of(settings)
+    machine = slotted.graph_of(settings)
 
     assert machine.unbound_ports() == []
 
@@ -96,7 +96,7 @@ def test_a_wire_between_two_signals_is_refused():
 def test_a_pools_escalations_reach_a_switching_part_never_a_pool():
     """The edge's verdict sits between the pools; a direct wire is refused."""
     settings = run_files.switching_machine()
-    machine = legacy.graph_of(settings)
+    machine = slotted.graph_of(settings)
     wires = [wire for wire in machine.wires if "switching." not in wire.target]
     without_edge = dataclasses.replace(machine, wires=tuple(wires))
 

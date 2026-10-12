@@ -51,7 +51,7 @@ import decsim.presets.machines as machines
 import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 
 NAME = "data_movement"
 DISTANCES = (3, 5, 7)
@@ -174,7 +174,7 @@ def data_movement_tasks() -> list:
     for block_name, machine_at in BLOCKS:
         for distance in DISTANCES:
             machine = machine_at(distance)
-            resolved = legacy.resolved(machine)
+            resolved = slotted.resolved(machine)
             metadata = reported_cells(resolved, distance)
             task_name = f"{block_name}_d{distance}"
             task = decsim.Task(task_name, machine, metadata)

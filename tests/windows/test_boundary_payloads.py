@@ -19,7 +19,7 @@ import decsim.machine as machine_module
 import decsim.ports as ports
 import decsim.presets.machines as machines
 import decsim.records.windows as window_records
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.settings as window_settings
@@ -61,7 +61,7 @@ def _source_committing(commit_lo: int, commit_hi: int):
 def reference_run(distance: int):
     """One shot of the weak baseline at that distance."""
     weak_base = machines.weak_baseline(distance, 0.003, 1.0)
-    settings = legacy.resolved(weak_base)
+    settings = slotted.resolved(weak_base)
     machine = machine_module.Machine.build(settings, 0)
     return machine.run()
 
@@ -398,7 +398,7 @@ def _parallel_run(distance: int, seed: int):
     is counted is visible in the bits.
     """
     weak_base = machines.weak_baseline(distance, 0.005, 1.0)
-    settings = legacy.resolved(weak_base)
+    settings = slotted.resolved(weak_base)
     windows = declared_run.windows_on(
         settings.windows, parallel_scheme.ParallelWindowScheme
     )

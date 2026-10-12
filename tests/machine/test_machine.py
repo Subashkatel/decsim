@@ -94,7 +94,7 @@ import decsim.seeding as seeding
 import decsim.settings as machine_settings
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.topology.graph as graph
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.built_window_models as built_window_models
@@ -227,7 +227,7 @@ def test_a_new_decoder_is_one_class_and_its_settings_record():
     gate_point = machines.weak_baseline(3, 0.003, 1.0)
     fake = FakeWeakDecoder.Settings()
     with_fake = gate_point.with_settings(machines.WEAK_POOL, algorithm=fake)
-    settings = legacy.resolved(with_fake)
+    settings = slotted.resolved(with_fake)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -246,7 +246,7 @@ def test_a_second_table_row_runs_gate_point_one():
     with_union_find = gate_point.with_settings(
         machines.WEAK_POOL, algorithm=union_find_settings
     )
-    settings = legacy.resolved(with_union_find)
+    settings = slotted.resolved(with_union_find)
     machine = machine_module.Machine.build(settings, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
@@ -267,7 +267,7 @@ def test_no_component_queues_an_event_until_the_machine_is_started():
     machine is still being built.
     """
     gate_point = machines.weak_baseline(3, 0.003, 1.0)
-    settings = legacy.resolved(gate_point)
+    settings = slotted.resolved(gate_point)
     machine = machine_module.Machine.build(settings, 0)
     assert machine.engine.idle is True
 
@@ -383,7 +383,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     distance_three = two_tiers.tasks[0]
     settings = distance_three.machine
     engine = engine_module.Engine()
-    layout = layout_module.legacy_layout(settings)
+    layout = layout_module.slotted_layout(settings)
     switching_parts = escalation_build.build_switching(
         layout, engine, machine_clock=settings.clock
     )
@@ -1925,7 +1925,7 @@ class CountingSyndromeBufferSettings(
 def test_a_new_syndrome_buffer_is_one_class_and_one_settings_record():
     """Gate point 1's settings run to completion on a store plugged in."""
     gate_point = machines.weak_baseline(3, 0.003, 1.0)
-    settings = legacy.resolved(gate_point)
+    settings = slotted.resolved(gate_point)
     weak_store = settings.weak_syndrome_buffer
     counting = CountingSyndromeBufferSettings(
         bits=weak_store.bits,
@@ -1989,7 +1989,7 @@ class AlwaysReadyFactorySettings:
 def test_a_factory_written_outside_decsim_is_built_by_its_record():
     """The part calls the record's build, whatever factory it is."""
     gate_point = machines.weak_baseline(3, 0.003, 1.0)
-    settings = legacy.resolved(gate_point)
+    settings = slotted.resolved(gate_point)
     always_ready = AlwaysReadyFactorySettings()
     settings = dataclasses.replace(settings, magic_state_factory=always_ready)
     machine = machine_module.Machine.build(settings, 0)
@@ -2689,7 +2689,7 @@ DATA_QUBIT_COUNT = 9
 def base_run(base):
     """One shot of the base at d=3, p=0.001."""
     graph_machine = base(3, 0.001, 1.0)
-    settings = legacy.resolved(graph_machine)
+    settings = slotted.resolved(graph_machine)
     machine = machine_module.Machine.build(settings, 0)
     machine.run()
     return machine
@@ -3108,7 +3108,7 @@ def experiment_one_weak_alone() -> machine_settings.MachineSettings:
     )
     workload_part = graph.Part("workload", workload)
     four_windows = machine.with_part(workload_part)
-    return legacy.resolved(four_windows)
+    return slotted.resolved(four_windows)
 
 
 def note_weak_commit(commits, job, result, outcome, ended_ticks) -> None:
@@ -3205,7 +3205,7 @@ def experiment_one_switching_on_matching() -> machine_settings.MachineSettings:
     )
     workload_part = graph.Part("workload", workload)
     six_windows = on_matching.with_part(workload_part)
-    return legacy.resolved(six_windows)
+    return slotted.resolved(six_windows)
 
 
 DELIVERED_TIERS = {
@@ -3932,7 +3932,7 @@ def _zero_delay_links(
     links: link_settings.FabricSettings,
 ) -> link_settings.FabricSettings:
     paths_by_name = {}
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         settings = links.path_settings(path)
         channel = dataclasses.replace(
             settings.channel, propagation_latency_ticks=0, capacity=None

@@ -20,6 +20,10 @@ price the path (fabrics.py); the two wires through the switching part
 are the escalation's one path. A graph of more pools or edges than the
 slots hold is a new shape (holds), laid out by graph_layout.py; any
 other graph the slots cannot hold, a store feeding a store, is refused.
+
+A slotted machine is one the slots hold. Every preset and example is
+one, and its parts, hops and records keep the slots' names
+(build/layout.py slotted_layout).
 """
 
 import decsim.settings as machine_settings
@@ -33,7 +37,7 @@ BUFFER_SLOTS = ("weak_syndrome_buffer", "strong_syndrome_buffer")
 BUFFER_BY_POOL = dict(zip(POOL_SLOTS, BUFFER_SLOTS, strict=True))
 # each path of today's card by the slots at its ends; the boundary's
 # path joins a pool to itself, no wire
-PATH_BY_ENDS = {ends: path for path, ends in fabrics.LEGACY_ENDS.items()}
+PATH_BY_ENDS = {ends: path for path, ends in fabrics.SLOTTED_ENDS.items()}
 FRIDGE = fabrics.FRIDGE
 HOST = fabrics.HOST
 # graph_of's pools, by name and site, and each one's read and corrections
@@ -54,7 +58,7 @@ ESCALATION_WIRES = (
     graph.Wire("weak.escalate", "switching.results"),
     graph.Wire("switching.redecode", "strong.escalated"),
 )
-_NOT_BUILT = "not implemented yet as a legacy machine"
+_NOT_BUILT = "not implemented yet as a slotted machine"
 _ESCALATE = "escalate"
 _READS = "reads"
 _REDECODE = "redecode"
@@ -87,7 +91,7 @@ def resolved(machine: graph.Machine) -> machine_settings.MachineSettings:
     parts_by_slot = _slots(machine)
     slot_by_part = {part.name: slot for slot, part in parts_by_slot.items()}
     sites = {slot: part.placed for slot, part in parts_by_slot.items()}
-    routes = fabrics.legacy_routes(sites)
+    routes = fabrics.slotted_routes(sites)
     wire_links = _wire_links(machine, slot_by_part)
     links = fabrics.card(machine.fabric, routes, wire_links, machine.clock)
     records = {slot: part.settings for slot, part in parts_by_slot.items()}

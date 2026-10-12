@@ -1,10 +1,10 @@
 """A graph of a new shape, laid out as pools, stores and escalate edges.
 
 A graph of more pools or edges than MachineSettings' slots hold
-(legacy.holds) is built from its own parts. Each pool, store and edge
+(slotted.holds) is built from its own parts. Each pool, store and edge
 goes by its part's name, and each hop by the parts at its ends,
 <source part>_to_<target part>: the wire's own link prices it, else the
-machine's fabric rule, on the payload rule of the legacy hop with the
+machine's fabric rule, on the payload rule of the slotted hop with the
 same role (_REFERENCE_BY_ROLE). The pools form a tree: one pool decodes
 the planner's windows, the entry, and every other pool is the target of
 one switching part, an escalate edge, whose results come from another
@@ -16,11 +16,11 @@ reads its own store, which takes an escalated window's rounds from the
 store its source pool reads. A router between the entry store and
 several pools makes each of them an entry pool: they share that store,
 each over a hop of its own, and the first wired is the entry the
-legacy names go to (windows/routers.py). Two pools no edge joins trade
+slotted names go to (windows/routers.py). Two pools no edge joins trade
 boundaries on a hop of their own. A store no pool reads is not built.
 
 The entry pool, its edge and that edge's target draw their seeds at the
-roots the legacy slots give them, and every other part at its own name:
+roots their slots give them, and every other part at its own name:
 a pool added past the entry moves no other part's seed, so a chain
 whose deep pool is never asked runs as its two-pool machine, shot for
 shot.
@@ -43,7 +43,7 @@ import decsim.settings as machine_settings
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 
 # the hops every machine rides between its parts that are held once,
 # by the kinds at their ends
@@ -52,10 +52,10 @@ SHARED_PATHS = {
     ("controller", "qpu"): transfer_records.CONTROLLER_TO_QPU,
     ("pauli_frame", "controller"): transfer_records.FRAME_TO_CONTROLLER,
 }
-# The legacy hop whose payload rule each role's hop carries, by the
+# The slotted hop whose payload rule each role's hop carries, by the
 # site or the intake it leaves from: a fridge pool's answer is the weak
 # tier's, a host pool's the strong tier's, and two decodes on the host
-# meet in its memory, as the legacy strong pool's do.
+# meet in its memory, as the slotted strong pool's do.
 _REFERENCE_BY_ROLE = {
     (
         "write",
@@ -79,7 +79,7 @@ _REFERENCE_BY_ROLE = {
     ("forward", None): transfer_records.WEAK_DECODER_TO_STRONG_DECODER,
     ("reverse", None): transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
 }
-# the seed roots the legacy slots give the entry pool and its edge's target
+# the seed roots the slots give the entry pool and its edge's target
 _ENTRY_SEED_ROOTS = (
     layout_module.PRIMARY_UNIT_SEED,
     layout_module.PRIMARY_MANAGER_SEED,
@@ -101,7 +101,7 @@ def entry_settings(machine: graph.Machine) -> machine_settings.MachineSettings:
 
     Its weak tier is the entry pool, its strong tier the entry edge's
     target, its switching the entry edge's; its card prices every hop
-    of the graph, the legacy twelve and the graph's own.
+    of the graph, the slotted twelve and the graph's own.
     """
     shape = _shape(machine)
     card = _card(shape)
@@ -254,7 +254,7 @@ def _edge(machine: graph.Machine, part: graph.Part) -> _Edge:
             f"{results} hears no pool: an escalate edge decides on the "
             "results of the pool whose escalate port is wired to it"
         )
-    target = legacy.redecode_target(machine, part.name)
+    target = slotted.redecode_target(machine, part.name)
     return _Edge(part, source, target)
 
 
@@ -440,7 +440,7 @@ def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
 
     The controller writes the entry store, unless the first entry pool
     sits on the host, which reads a store the rounds land in, as a
-    legacy strong-only run's does; an edge's target store takes its
+    slotted strong-only run's does; an edge's target store takes its
     rounds as they land.
     """
     if pool not in shape.entries:
@@ -482,7 +482,7 @@ def _pool_plan(
 
 
 def _seed_roots(shape: _Shape, pool: graph.Part) -> tuple:
-    """A pool's unit and manager seed roots: its legacy slot's, else its own."""
+    """A pool's unit and manager seed roots: its slot's, else its own."""
     if pool.name == shape.entry.name:
         return _ENTRY_SEED_ROOTS
     if shape.edges and pool.name == shape.edges[0].target.name:
@@ -491,9 +491,9 @@ def _seed_roots(shape: _Shape, pool: graph.Part) -> tuple:
 
 
 def _policy_seed(shape: _Shape, edge: _Edge) -> str:
-    """An edge's policy seed root: the legacy edge's for the entry edge."""
+    """An edge's policy seed root: the slotted edge's for the entry edge."""
     if edge is shape.edges[0]:
-        return layout_module.LEGACY_POLICY_SEED
+        return layout_module.SLOTTED_POLICY_SEED
     return f"{edge.part.name}_policy"
 
 
@@ -587,12 +587,12 @@ def _edge_plan(
 
 
 def _card(shape: _Shape) -> Any:
-    """Every hop the graph rides, priced: the legacy twelve, then its own."""
+    """Every hop the graph rides, priced: the slotted twelve, then its own."""
     machine = shape.machine
     sites = _shared_sites(machine)
-    legacy_routes = fabrics.legacy_routes(sites)
+    slotted_routes = fabrics.slotted_routes(sites)
     own_routes = _own_routes(shape)
-    routes = (*legacy_routes, *own_routes)
+    routes = (*slotted_routes, *own_routes)
     wire_links = _wire_links(shape)
     return fabrics.card(machine.fabric, routes, wire_links, machine.clock)
 
@@ -600,7 +600,7 @@ def _card(shape: _Shape) -> Any:
 def _shared_sites(machine: graph.Machine) -> dict:
     """The site of each part held once, by its slot, where it says one.
 
-    The legacy twelve's pool and store ends sit where the reference
+    The slotted twelve's pool and store ends sit where the reference
     card puts them: a new-shape graph rides none of those hops.
     """
     sites = {}

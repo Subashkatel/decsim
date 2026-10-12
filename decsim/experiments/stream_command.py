@@ -220,7 +220,7 @@ def _bulk_strong_decoding(settings) -> Optional[str]:
 
 
 def _batching(settings) -> Optional[str]:
-    layout = layout_module.legacy_layout(settings)
+    layout = layout_module.slotted_layout(settings)
     if not decoders_part.batches_each_member(layout):
         return None
     return (

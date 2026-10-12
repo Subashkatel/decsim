@@ -43,7 +43,7 @@ import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -146,7 +146,7 @@ def minimal_machine(
     # the reference card with the readout one fridge cycle
     fabric = fabrics.PathLinks(qpu_to_controller=readout)
     graph_base = dataclasses.replace(weak_graph, fabric=fabric)
-    base = legacy.resolved(graph_base)
+    base = slotted.resolved(graph_base)
     charged = PYMATCHING.Settings(
         preset_latency_microseconds=WEAK_DECODE_MICROSECONDS
     )
@@ -233,7 +233,7 @@ def reference_machine(
         )
     # the reference card with every hop of REFERENCE_HOPS priced
     fabric = fabrics.PathLinks(**links_by_path)
-    routes = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+    routes = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
     links = fabrics.card(fabric, routes, {}, None)
     controller = dataclasses.replace(
         base.controller, decision_to_pulse_cycles=REFERENCE_ISSUE_CYCLES

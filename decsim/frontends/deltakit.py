@@ -4,12 +4,14 @@ Explorer's css_code_memory_circuit and CSSStage define the physical
 history and measurement order. Deltakit is imported only here.
 """
 
+import dataclasses
 import itertools
 import math
 from typing import TYPE_CHECKING, Optional
 
 import stim
 
+import decsim.frontends.settings as workload_settings
 import decsim.records.circuits as circuit_records
 
 # The smallest memory whose export has a distinct first round, a repeated
@@ -146,6 +148,67 @@ def css_memory_rounds(
     )
     _check_memory_cadence(template, single, device, fragments)
     return fragments
+
+
+@dataclasses.dataclass(frozen=True)
+class SD6Noise:
+    """Deltakit's SD6 on a generated memory, a noise row (ports.CircuitNoise).
+
+    Explorer's qpu.SD6Noise, the standard depolarising model of Gidney
+    et al. 2108.10457 Tables 1 and 2: one- and two-qubit depolarising
+    after each gate, a flip after each reset and before each
+    measurement, and one-qubit depolarising on each idle qubit. Stim's
+    generator puts no noise in; Explorer's QPU adds SD6 to the circuit
+    (qpu/_qpu.py add_noise_to_circuit) without merging Stim's time
+    steps, and the circuit keeps Stim's qubit numbers. probability None
+    is the memory's p.
+    """
+
+    probability: Optional[float] = None
+    name = "sd6"
+
+    def generator_noise(
+        self, probability: float
+    ) -> "workload_settings.StimNoise":
+        """No channel: the generator makes the noiseless circuit."""
+        del probability
+        return workload_settings.NO_GENERATOR_NOISE
+
+    def noisy(self, circuit: stim.Circuit, probability: float) -> stim.Circuit:
+        """The noiseless circuit with SD6 at this row's p or the memory's.
+
+        Explorer parses Stim's text in its own fork of Stim; handed
+        stim's own circuit, it reads no instruction at all.
+        """
+        import deltakit_circuit as circuit_api
+        import deltakit_explorer.qpu as qpu
+        import deltakit_stim
+
+        rate = probability
+        if self.probability is not None:
+            rate = self.probability
+        qubit_by_index = _deltakit_qubits(circuit)
+        text = str(circuit)
+        forked = deltakit_stim.Circuit(text)
+        parsed = circuit_api.Circuit.from_stim_circuit(
+            forked, qubit_mapping=qubit_by_index
+        )
+        noise = qpu.SD6Noise(p=rate)
+        native_gates = qpu.ExhaustiveGateSet()
+        device = qpu.QPU(
+            parsed.qubits,
+            native_gates_and_times=native_gates,
+            noise_model=noise,
+            maximise_parallelism=False,
+        )
+        with_noise = device.add_noise_to_circuit(parsed)
+        index_by_qubit = {
+            qubit: index for index, qubit in qubit_by_index.items()
+        }
+        exported = with_noise.as_stim_circuit(qubit_mapping=index_by_qubit)
+        exported_text = str(exported)
+        noisy_circuit = stim.Circuit(exported_text)
+        return _sorted_order_free_targets(noisy_circuit)
 
 
 def _memory_code(
@@ -480,3 +543,19 @@ def _check_fragment_measurements(
         raise ValueError(
             "Deltakit final and single-round measurement widths must match"
         )
+
+
+def _deltakit_qubits(circuit: stim.Circuit) -> dict:
+    """Each Stim qubit index's Deltakit qubit, at its coordinates."""
+    coordinates = circuit.get_final_qubit_coordinates()
+    return {
+        index: _deltakit_qubit(position)
+        for index, position in coordinates.items()
+    }
+
+
+def _deltakit_qubit(position: list) -> "circuit_api.Qubit":
+    import deltakit_circuit as circuit_api
+
+    coordinate = circuit_api.Coordinate(*position)
+    return circuit_api.Qubit(coordinate)

@@ -18,6 +18,8 @@ the [reference](../reference/README.md) pages.
 - [How to plug in a workload maker](plug_in_a_workload_maker.md): a
   function that returns an operation list and its physical circuit,
   handed to the machine.
+- [How to use your own noise model](use_your_own_noise_model.md): a
+  memory's noise row, Stim's channels, SD6 or your own.
 - [How to set any parameter without editing code](set_parameters.md):
   `decsim params`, `decsim info` and `--set path=value`, for one task
   or every one, on Slurm too.

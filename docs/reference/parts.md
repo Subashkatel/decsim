@@ -912,7 +912,7 @@ excludes_receiver_processing says what the latency covers: a number measured end
 
 `decsim/links/settings.py`. A fabric card: one path setting per hop.
 
-Every hop of the reaction path is priced, so a card names all twelve a legacy machine rides, and hops holds each further hop a graph's pools ride, by name. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
+Every hop of the reaction path is priced, so a card names all twelve a slotted machine rides, and hops holds each further hop a graph's pools ride, by name. A card whose QPU-to-controller latency leaves out the controller's readout processing says so, since the timing card prices it apart. readout_routes picks a path by the complete contributing footprint; unmatched footprints use qpu_to_controller. Equal channel names share a setup engine and serializer, across routed cards too.
 
 | Field | Type | Default |
 | --- | --- | --- |

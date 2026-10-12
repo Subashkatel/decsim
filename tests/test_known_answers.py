@@ -40,7 +40,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.schemes.parallel as parallel
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -202,7 +202,7 @@ def with_latency_added(
     The path keeps the rest of its wire: on the weak base every hop of
     the reaction path is an unbounded one with no setup or framing.
     """
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
     path = getattr(settings.links, path_name)
     latency_ticks = path.channel.propagation_latency_ticks
     latency = config.ticks_to_microseconds(latency_ticks)

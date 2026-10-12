@@ -289,9 +289,9 @@ A pool, a store and an escalate edge go by their parts' names. A
 component takes the names its layout record gives it (its word, seat,
 statistics path, seeds and hops, `decsim/build/layout.py`) and never
 names a tier: code loops over the pools, stores and edges, the entry
-first, and asks for one by its name. A legacy machine's records carry
+first, and asks for one by its name. A slotted machine's records carry
 the names its slots have always given, from one table
-(`legacy_layout`), so its results, seeds and statistics stay as they
+(`slotted_layout`), so its results, seeds and statistics stay as they
 were.
 
 Adding a component means: write one class that implements the port,

@@ -38,7 +38,7 @@ def _settings_forming_at(formed_at=("controller",)):
     return _machine_settings(detection_events=detection_events)
 
 
-# The paths a legacy run's rounds take to a decoder
+# The paths a slotted run's rounds take to a decoder
 # (Layout.formation_paths): the weak tier alone, the weak tier escalating
 # to the strong one, the strong tier alone.
 WEAK_BASELINE = (event_settings.WEAK_PATH,)

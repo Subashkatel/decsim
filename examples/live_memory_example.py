@@ -141,7 +141,7 @@ def live_settings(
         feedback_microseconds, word_capacity.input_bits_per_microsecond
     )
     fabric = fabrics.PathLinks(frame_to_controller=feedback)
-    routes = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+    routes = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
     links = fabrics.card(fabric, routes, {}, None)
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True

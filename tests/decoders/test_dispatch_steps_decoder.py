@@ -28,12 +28,12 @@ DISPATCHER = dispatch_steps.DISPATCHER
 WORKER = dispatch_steps.WORKER
 ECHO = dispatch_steps.ECHO
 # every path of today's card, each end where the reference card puts it
-LEGACY_ROUTES = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+SLOTTED_ROUTES = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
 ROCE_V2_GPU_CARD = fabrics.card(
-    link_cards.ROCE_V2_GPU_FABRIC, LEGACY_ROUTES, {}, None
+    link_cards.ROCE_V2_GPU_FABRIC, SLOTTED_ROUTES, {}, None
 )
 NVQLINK_GPU_CARD = fabrics.card(
-    link_cards.NVQLINK_GPU_FABRIC, LEGACY_ROUTES, {}, None
+    link_cards.NVQLINK_GPU_FABRIC, SLOTTED_ROUTES, {}, None
 )
 
 

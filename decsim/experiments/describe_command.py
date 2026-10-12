@@ -4,7 +4,7 @@
 
 It prints the task's machine as the YAML a machine file holds
 (topology/machine_file.py), a task built from MachineSettings written as
-the graph it resolves from (topology/legacy.py), then each path's
+the graph it resolves from (topology/slotted.py), then each path's
 latency and rate as the run prices them. gem5 writes the instantiated
 system as config.ini and config.json for the same reason: what ran is
 read, not inferred from the script (src/python/m5/simulate.py).
@@ -19,8 +19,8 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.parameters_command as parameters_command
 import decsim.links.settings as link_settings
 import decsim.parameters.fields as fields
-import decsim.topology.legacy as legacy
 import decsim.topology.machine_file as machine_file
+import decsim.topology.slotted as slotted
 
 UNBOUNDED = "unbounded"
 # the channel's parameters, which write a latency and a rate as --set does
@@ -37,7 +37,7 @@ def describe(argv: list) -> None:
     task = study.tasks[0]
     written = task.graph
     if written is None:
-        written = legacy.graph_of(task.machine)
+        written = slotted.graph_of(task.machine)
     if parsed.json:
         _print_json(task, written)
         return

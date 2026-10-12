@@ -24,10 +24,10 @@ class WindowProtocol(Enum):
 class PoolId:
     """The decoder pool a request is for, by the word results write for it.
 
-    A machine's pool is named by its part. A legacy machine's two pools
+    A machine's pool is named by its part. A slotted machine's two pools
     keep the words its results have always written, WEAK_POOL_ID for the
     pool that decodes first and STRONG_POOL_ID for the one it escalates
-    to, so a legacy run's records are unchanged.
+    to, so a slotted run's records are unchanged.
     """
 
     word: str
@@ -35,8 +35,8 @@ class PoolId:
 
 WEAK_POOL_ID = PoolId("weak")
 STRONG_POOL_ID = PoolId("strong")
-# the legacy pools, in the order reports list them
-LEGACY_POOL_IDS = (WEAK_POOL_ID, STRONG_POOL_ID)
+# the slotted pools, in the order reports list them
+SLOTTED_POOL_IDS = (WEAK_POOL_ID, STRONG_POOL_ID)
 
 
 # WindowSettings.terminal_policy names one of these: how a finite serial stream

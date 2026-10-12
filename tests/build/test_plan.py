@@ -90,7 +90,7 @@ def _plan(
     if switching is not None:
         settings = _with_switching(settings, switching)
     engine = engine_module.Engine()
-    layout = layout_module.legacy_layout(settings)
+    layout = layout_module.slotted_layout(settings)
     switching_parts = escalation_build.build_switching(layout, engine)
     return plan_build.build_plan(
         settings.qpu,

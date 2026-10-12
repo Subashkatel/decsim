@@ -66,7 +66,7 @@ def every_path_free():
     that one and leaves the rest on the shared free channel.
     """
     names = []
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         names.append(path)
     return dict.fromkeys(names, FREE_PATH)
 

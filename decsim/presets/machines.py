@@ -3,7 +3,7 @@
 Each base is every part a machine holds, every value written out, around
 one decoder: the weak base's PyMatching on a chip unit, the strong base's
 belief matching on a host unit. The parts are named as
-topology/legacy.py's graph_of names them, so `--set weak.unit_count=2`
+topology/slotted.py's graph_of names them, so `--set weak.unit_count=2`
 reaches the weak pool of any of them.
 
     weak_baseline      the weak decoder alone, its hops a fridge cycle
@@ -51,7 +51,7 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# the parts' names, as topology/legacy.py's graph_of names them
+# the parts' names, as topology/slotted.py's graph_of names them
 QPU = "qpu"
 CONTROLLER = "controller"
 WINDOWS = "windows"

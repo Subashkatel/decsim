@@ -1,4 +1,4 @@
-"""A graph as today's MachineSettings, and back (topology/legacy.py).
+"""A graph as today's MachineSettings, and back (topology/slotted.py).
 
 The referents are today's records: every shipped task and every
 regression machine, written as a graph, resolves to the record it was
@@ -23,7 +23,7 @@ import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
 import tests.experiments.run_files as run_files
@@ -82,7 +82,7 @@ def _preset(name: str) -> graph.Machine:
 
 def _weak_graph() -> graph.Machine:
     machine = run_files.minimal_machine()
-    return legacy.graph_of(machine)
+    return slotted.graph_of(machine)
 
 
 def _with(machine: graph.Machine, parts=(), wires=()) -> graph.Machine:
@@ -98,8 +98,8 @@ def test_every_shipped_task_resolves_to_its_record_and_its_id():
     tasks = _shipped_tasks()
 
     for task in tasks:
-        written = legacy.graph_of(task.machine)
-        machine = legacy.resolved(written)
+        written = slotted.graph_of(task.machine)
+        machine = slotted.resolved(written)
         again = collect.Task(task.name, machine, task.metadata)
         assert machine == task.machine, task.name
         assert again.strong_id() == task.strong_id(), task.name
@@ -112,8 +112,8 @@ def test_every_regression_machine_resolves_to_its_record_and_its_id(name):
     settings = build()
     task = collect.Task(name, settings)
 
-    written = legacy.graph_of(task.machine)
-    machine = legacy.resolved(written)
+    written = slotted.graph_of(task.machine)
+    machine = slotted.resolved(written)
 
     again = collect.Task(name, machine)
     assert machine == task.machine
@@ -123,11 +123,11 @@ def test_every_regression_machine_resolves_to_its_record_and_its_id(name):
 @pytest.mark.parametrize("name", PRESETS)
 def test_every_preset_machine_resolves_again_from_its_written_record(name):
     preset = _preset(name)
-    settings = legacy.resolved(preset)
+    settings = slotted.resolved(preset)
     task = collect.Task(name, settings)
 
-    written = legacy.graph_of(settings)
-    machine = legacy.resolved(written)
+    written = slotted.graph_of(settings)
+    machine = slotted.resolved(written)
 
     again = collect.Task(name, machine)
     written_names = {part.name for part in written.parts}
@@ -140,11 +140,11 @@ def test_every_preset_machine_resolves_again_from_its_written_record(name):
 
 def test_a_hand_written_graph_holds_its_parts_records():
     settings = run_files.minimal_machine()
-    written = legacy.graph_of(settings)
+    written = slotted.graph_of(settings)
     reference = fabrics.ReferenceFabric()
 
     referenced = dataclasses.replace(written, fabric=reference)
-    machine = legacy.resolved(referenced)
+    machine = slotted.resolved(referenced)
 
     links = link_profiles.logical_reference_profile()
     assert machine == dataclasses.replace(settings, links=links)
@@ -152,13 +152,13 @@ def test_a_hand_written_graph_holds_its_parts_records():
 
 def test_a_lone_pool_on_the_host_is_the_strong_decoder():
     settings = run_files.minimal_machine()
-    written = legacy.graph_of(settings)
+    written = slotted.graph_of(settings)
     pool = written.part("weak")
     hosted = dataclasses.replace(pool, placed=fabrics.HOST)
     others = [part for part in written.parts if part is not pool]
     moved = dataclasses.replace(written, parts=(*others, hosted))
 
-    machine = legacy.resolved(moved)
+    machine = slotted.resolved(moved)
 
     assert machine.weak_decoder is None
     assert machine.strong_decoder == settings.weak_decoder
@@ -172,7 +172,7 @@ def _linked(wire: graph.Wire, links_by_target: dict) -> graph.Wire:
 
 def test_experiment_one_is_its_parts_its_fiber_wires_and_a_cable():
     preset = regression.experiment_one_weak_alone()
-    settings = legacy.resolved(preset)
+    settings = slotted.resolved(preset)
     uplink = fabrics.ClockedLink(
         clock=FRIDGE_CLOCK,
         latency_cycles=40,
@@ -194,13 +194,13 @@ def test_experiment_one_is_its_parts_its_fiber_wires_and_a_cable():
         "weak.rounds": frame_read,
         "frame.corrections": downlink,
     }
-    written = legacy.graph_of(settings)
+    written = slotted.graph_of(settings)
     wires = [_linked(wire, links_by_target) for wire in written.wires]
     linked = dataclasses.replace(
         written, wires=tuple(wires), fabric=ROCE_V2_CPU
     )
 
-    machine = legacy.resolved(linked)
+    machine = slotted.resolved(linked)
 
     assert machine == settings
 
@@ -231,9 +231,9 @@ def test_three_pools_are_a_new_shape_the_slots_do_not_hold():
 
     grown = _with(written, parts, wires)
 
-    assert not legacy.holds(grown)
-    with pytest.raises(legacy.ShapeError, match="3 parts of kind decoder"):
-        legacy.resolved(grown)
+    assert not slotted.holds(grown)
+    with pytest.raises(slotted.ShapeError, match="3 parts of kind decoder"):
+        slotted.resolved(grown)
 
 
 def test_two_pools_with_no_escalation_wait_for_stage_five():
@@ -242,8 +242,8 @@ def test_two_pools_with_no_escalation_wait_for_stage_five():
 
     grown = _with(written, parts, wires)
 
-    with pytest.raises(legacy.ShapeError, match="escalating"):
-        legacy.resolved(grown)
+    with pytest.raises(slotted.ShapeError, match="escalating"):
+        slotted.resolved(grown)
 
 
 def test_a_store_feeding_a_store_waits_for_stage_five():
@@ -261,8 +261,8 @@ def test_a_store_feeding_a_store_waits_for_stage_five():
 
     grown = _with(rewired, extra, wires)
 
-    with pytest.raises(legacy.ShapeError, match="a store feeds a store"):
-        legacy.resolved(grown)
+    with pytest.raises(slotted.ShapeError, match="a store feeds a store"):
+        slotted.resolved(grown)
 
 
 def test_a_controller_feeding_a_pool_waits_for_stage_five():
@@ -273,8 +273,8 @@ def test_a_controller_feeding_a_pool_waits_for_stage_five():
     direct = graph.Wire("controller.rounds", "weak.rounds")
     rewired = dataclasses.replace(written, wires=(*without_read, direct))
 
-    with pytest.raises(legacy.ShapeError, match="no path of today's"):
-        legacy.resolved(rewired)
+    with pytest.raises(slotted.ShapeError, match="no path of today's"):
+        slotted.resolved(rewired)
 
 
 def test_a_part_of_no_kind_waits_for_stage_five():
@@ -283,8 +283,8 @@ def test_a_part_of_no_kind_waits_for_stage_five():
 
     grown = _with(written, (spare,), ())
 
-    with pytest.raises(legacy.ShapeError, match=STAGE_FIVE):
-        legacy.resolved(grown)
+    with pytest.raises(slotted.ShapeError, match=STAGE_FIVE):
+        slotted.resolved(grown)
 
 
 def test_two_window_schemes_wait_for_stage_five():
@@ -294,8 +294,8 @@ def test_two_window_schemes_wait_for_stage_five():
 
     grown = _with(written, (second,), ())
 
-    with pytest.raises(legacy.ShapeError, match="2 parts of kind windows"):
-        legacy.resolved(grown)
+    with pytest.raises(slotted.ShapeError, match="2 parts of kind windows"):
+        slotted.resolved(grown)
 
 
 def test_a_required_port_left_unwired_is_refused_by_name():
@@ -305,4 +305,4 @@ def test_a_required_port_left_unwired_is_refused_by_name():
     unwired = dataclasses.replace(written, wires=tuple(wires))
 
     with pytest.raises(graph.GraphError, match=r"\['weak.rounds'\]"):
-        legacy.resolved(unwired)
+        slotted.resolved(unwired)

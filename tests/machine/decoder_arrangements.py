@@ -26,7 +26,7 @@ import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.settings as machine_settings
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -67,7 +67,7 @@ def machine() -> machine_settings.MachineSettings:
     )
     fabric = link_cards.strong_side(weak_graph.fabric)
     graph_base = dataclasses.replace(weak_graph, fabric=fabric)
-    base = legacy.resolved(graph_base)
+    base = slotted.resolved(graph_base)
     windows = dataclasses.replace(base.windows, terminal_policy="lookahead")
     return dataclasses.replace(base, windows=windows, weak_decoder=None)
 

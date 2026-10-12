@@ -1,6 +1,6 @@
 """The decoder bases and the strong tier, as the graphs they are.
 
-The referent is the record each graph resolves to (topology/legacy.py),
+The referent is the record each graph resolves to (topology/slotted.py),
 the record a task keeps and is identified by: every port of a base is
 bound, each pool sits where its decoder runs, the weak base's hops are
 one 250 MHz fridge cycle (4 ns, 2605.04892 line 1063), and a strong tier
@@ -16,7 +16,7 @@ import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
@@ -38,7 +38,7 @@ def _weak_base_switching(fabric=None):
 def test_every_port_of_the_weak_base_is_bound():
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
 
-    settings = legacy.resolved(weak_base)
+    settings = slotted.resolved(weak_base)
 
     assert weak_base.unbound_ports() == []
     assert settings.weak_decoder == machines.WEAK_BASELINE_POOL
@@ -49,7 +49,7 @@ def test_every_port_of_the_weak_base_is_bound():
 def test_every_port_of_the_strong_base_is_bound():
     strong_base = machines.strong_baseline(3, 0.001, 1.0)
 
-    settings = legacy.resolved(strong_base)
+    settings = slotted.resolved(strong_base)
 
     assert strong_base.unbound_ports() == []
     assert settings.weak_decoder is None
@@ -76,7 +76,7 @@ def test_a_bases_shot_is_ten_rounds_a_unit_of_distance_on_the_fridge_clock():
     weak_base = machines.weak_baseline(5, 0.002, 1.0)
     fifty_rounds = machines.memory_workload(5, 0.002, 50)
 
-    resolved = legacy.resolved(weak_base)
+    resolved = slotted.resolved(weak_base)
     settings = resolved.at_task()
 
     assert settings.workload == fifty_rounds
@@ -88,7 +88,7 @@ def test_the_weak_bases_chain_is_one_fridge_cycle_a_hop_on_unbounded_wires():
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
     reference = link_profiles.logical_reference_profile()
 
-    settings = legacy.resolved(weak_base)
+    settings = slotted.resolved(weak_base)
     links = settings.links
 
     chain = (
@@ -113,7 +113,7 @@ def test_a_strong_tier_adds_the_strong_side_and_the_escalation_wire():
 
     strong_pool = machine.part(machines.STRONG_POOL)
     strong_store = machine.part(machines.STRONG_STORE)
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
 
     assert machine.unbound_ports() == []
     assert set(machines.ESCALATION_WIRES) <= set(machine.wires)
@@ -154,7 +154,7 @@ def test_a_strong_tier_on_the_strong_side_reaches_the_host_in_a_room_cycle():
     strong_side = link_cards.strong_side(weak_base.fabric)
     machine = _weak_base_switching(strong_side)
 
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
     links = settings.links
 
     escalation = links.weak_decoder_to_strong_decoder.channel
@@ -168,7 +168,7 @@ def test_a_part_changed_by_name_reaches_the_record():
 
     two_units = weak_base.with_settings(machines.WEAK_POOL, unit_count=2)
 
-    settings = legacy.resolved(two_units)
+    settings = slotted.resolved(two_units)
     expected = dataclasses.replace(machines.WEAK_BASELINE_POOL, unit_count=2)
     assert settings.weak_decoder == expected
 
@@ -193,7 +193,7 @@ def test_an_escalation_grows_a_chain_one_pool_and_edge_at_a_time():
     edges = [(edge.name, edge.carried_from) for edge in layout.edges]
     deep = chain.part("deep")
     assert chain.unbound_ports() == []
-    assert not legacy.holds(chain)
+    assert not slotted.holds(chain)
     assert deep.placed == fabrics.HOST
     assert edges == [
         ("switching", "weak_buffer"),

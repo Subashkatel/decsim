@@ -41,15 +41,15 @@ STRONG_SIDE_PATHS = (
     "strong_decoder_to_weak_decoder",
 )
 # every path of today's card, each end where the reference card puts it
-LEGACY_ROUTES = fabrics.legacy_routes(fabrics.LEGACY_SITES)
+SLOTTED_ROUTES = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
 ROCE_V2_CPU_CARD = fabrics.card(
-    link_cards.ROCE_V2_CPU_FABRIC, LEGACY_ROUTES, {}, None
+    link_cards.ROCE_V2_CPU_FABRIC, SLOTTED_ROUTES, {}, None
 )
 ROCE_V2_GPU_CARD = fabrics.card(
-    link_cards.ROCE_V2_GPU_FABRIC, LEGACY_ROUTES, {}, None
+    link_cards.ROCE_V2_GPU_FABRIC, SLOTTED_ROUTES, {}, None
 )
 NVQLINK_GPU_CARD = fabrics.card(
-    link_cards.NVQLINK_GPU_FABRIC, LEGACY_ROUTES, {}, None
+    link_cards.NVQLINK_GPU_FABRIC, SLOTTED_ROUTES, {}, None
 )
 
 TESTS_FILE = pathlib.Path(__file__)
@@ -77,7 +77,7 @@ DISTANCE_5_GEOMETRY = dict(
 
 def latencies_of(profile):
     latencies = {}
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         channel = path_settings.channel
         latencies[path] = channel.propagation_latency_ticks
@@ -86,7 +86,7 @@ def latencies_of(profile):
 
 def capacities_of(profile):
     capacities = {}
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         capacity = path_settings.channel.capacity
         rate = capacity.input_bits_per_microsecond
@@ -97,7 +97,7 @@ def capacities_of(profile):
 def sources_of(profile):
     """The configuration source of each path's channel, by path name."""
     sources = {}
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         sources[path] = path_settings.channel.configuration_source
     return sources
@@ -106,7 +106,7 @@ def sources_of(profile):
 def payload_sources_of(profile) -> list:
     """Every payload source string one card states, path by path."""
     sources = []
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         path_settings = profile.path_settings(path)
         _add_payload_sources(path_settings, sources)
     return sources
@@ -126,7 +126,7 @@ def names_by_class() -> dict:
 def paths_outside_the_strong_side(profile) -> dict:
     """What every hop but the five strong-side ones is priced at."""
     priced = {}
-    for path in transfer_records.LEGACY_PATHS:
+    for path in transfer_records.SLOTTED_PATHS:
         if path in STRONG_SIDE_PATHS:
             continue
         path_settings = profile.path_settings(path)
@@ -394,8 +394,8 @@ def test_the_strong_side_puts_its_five_hops_one_room_cycle_on_the_base():
     rule = link_cards.strong_side(link_cards.WEAK_BASELINE_FABRIC)
     weak_base_rule = link_cards.WEAK_BASELINE_FABRIC
 
-    card = fabrics.card(rule, LEGACY_ROUTES, {}, None)
-    weak_base = fabrics.card(weak_base_rule, LEGACY_ROUTES, {}, None)
+    card = fabrics.card(rule, SLOTTED_ROUTES, {}, None)
+    weak_base = fabrics.card(weak_base_rule, SLOTTED_ROUTES, {}, None)
 
     strong_side = [getattr(card, name) for name in STRONG_SIDE_PATHS]
     latencies = [path.channel.propagation_latency_ticks for path in strong_side]
@@ -412,7 +412,7 @@ def test_the_strong_side_prices_the_escalation_where_a_study_sets_it():
         link_cards.WEAK_BASELINE_FABRIC, ten_microseconds
     )
 
-    card = fabrics.card(rule, LEGACY_ROUTES, {}, None)
+    card = fabrics.card(rule, SLOTTED_ROUTES, {}, None)
 
     escalation = card.weak_decoder_to_strong_decoder.channel
     reply = card.strong_decoder_to_weak_decoder.channel

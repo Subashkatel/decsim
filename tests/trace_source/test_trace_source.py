@@ -31,10 +31,10 @@ def test_a_run_with_every_listener_connected_has_the_same_ticks_as_a_bare_one():
 
     import decsim.machine as machine_module
     import decsim.presets.machines as machines
-    import decsim.topology.legacy as legacy
+    import decsim.topology.slotted as slotted
 
     weak_base = machines.weak_baseline(3, 0.003, 1.0)
-    settings = legacy.resolved(weak_base)
+    settings = slotted.resolved(weak_base)
     bare = machine_module.Machine.build(settings, 0)
     bare.run()
     every_listener = dataclasses.replace(

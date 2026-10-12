@@ -47,7 +47,7 @@ import decsim.records.identity as identity_records
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.trace_source as trace_source
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.schemes.sliding as sliding_scheme
@@ -169,7 +169,7 @@ def weak_base_switching(
     switching_machine = machines.with_strong_tier(
         weak_base, strong_decoder, switching, strong_side
     )
-    return legacy.resolved(switching_machine)
+    return slotted.resolved(switching_machine)
 
 
 def host_belief_matching() -> decoder_settings.DecoderPoolSettings:

@@ -21,7 +21,7 @@ import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.records.transfers as transfer_records
 import decsim.topology.fabrics as fabrics
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 
 FRIDGE = clocks.FRIDGE_CLOCK
 ROOM = clocks.ROOM_CLOCK
@@ -62,7 +62,7 @@ THREE_MACHINE_CYCLES = fabrics.ClockedLink(latency_cycles=3)
 
 
 def _card(rule, wire_links=None):
-    routes = fabrics.legacy_routes({})
+    routes = fabrics.slotted_routes({})
     links = wire_links or {}
     return fabrics.card(rule, routes, links, None)
 
@@ -135,8 +135,8 @@ def test_a_cable_between_fridge_and_host_gives_each_measured_card(
 def test_the_weak_and_strong_bases_are_links_by_path():
     weak_graph = machines.weak_baseline(3, 0.001, 1.0)
     strong_graph = machines.strong_baseline(3, 0.001, 1.0)
-    weak = legacy.resolved(weak_graph)
-    strong = legacy.resolved(strong_graph)
+    weak = slotted.resolved(weak_graph)
+    strong = slotted.resolved(strong_graph)
 
     assert _card(WEAK_BASE) == weak.links
     assert _card(STRONG_BASE) == strong.links
@@ -230,7 +230,7 @@ def test_a_route_inside_the_fridge_takes_the_base_rules_link():
 
 
 def test_a_clocked_link_counts_on_the_machines_clock_when_it_names_none():
-    routes = fabrics.legacy_routes({})
+    routes = fabrics.slotted_routes({})
     rule = fabrics.PathLinks(qpu_to_controller=THREE_MACHINE_CYCLES)
 
     card = fabrics.card(rule, routes, {}, FRIDGE)
@@ -245,7 +245,7 @@ def test_a_strong_pool_placed_in_the_fridge_leaves_the_cable():
         "strong_decoder": fabrics.FRIDGE,
         "strong_syndrome_buffer": fabrics.FRIDGE,
     }
-    routes = fabrics.legacy_routes(sites)
+    routes = fabrics.slotted_routes(sites)
 
     card = fabrics.card(rule, routes, {}, None)
 

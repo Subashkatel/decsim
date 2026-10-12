@@ -32,7 +32,7 @@ import pytest
 import decsim.config as config_module
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import tests.declared_run as declared_run
 import tests.observe.run_ledger as run_ledger
 
@@ -579,7 +579,7 @@ def test_every_window_of_a_shipped_run_records_its_four_trace_events():
     a listener reads here (gem5 src/sim/probe/probe.hh lines 122 and 272).
     """
     graph_machine = machines.weak_baseline(3, 0.001, 10.0)
-    settings = legacy.resolved(graph_machine)
+    settings = slotted.resolved(graph_machine)
     machine = machine_module.Machine.build(settings, 0)
     machine.run()
     ledger = run_ledger.ledger_of(machine)

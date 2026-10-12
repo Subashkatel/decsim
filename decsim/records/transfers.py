@@ -17,7 +17,7 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
 # A hop between two parts, by its name. A graph names each hop by the
-# parts at its ends; a legacy machine's twelve hops keep the names below,
+# parts at its ends; a slotted machine's twelve hops keep the names below,
 # in report order, and a fabric card prices every one of them.
 LinkPath = str
 
@@ -38,7 +38,7 @@ CONTROLLER_TO_QPU = "controller_to_qpu"  # the instruction back
 CONTROLLER_TO_STRONG_BUFFER = "controller_to_strong_buffer"  # the room side
 # a strong answer to the chip, and a strong boundary to a weak window
 STRONG_DECODER_TO_WEAK_DECODER = "strong_decoder_to_weak_decoder"
-LEGACY_PATHS = (
+SLOTTED_PATHS = (
     QPU_TO_CONTROLLER,
     CONTROLLER_TO_WEAK_BUFFER,
     WEAK_BUFFER_TO_WEAK_DECODER,

@@ -28,7 +28,7 @@ import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 REGION_LINK_TICKS = 5
-# the legacy edge's forward hop, which an escalated region rides
+# the slotted edge's forward hop, which an escalated region rides
 _REGION_HOP = transfer_records.WEAK_DECODER_TO_STRONG_DECODER
 
 
@@ -125,10 +125,10 @@ def _operation(patch_count: int) -> program_records.Operation:
 
 
 def _routes(answer_route: str = "direct") -> route_records.Routes:
-    """The legacy pools joined by their edge, its answers on answer_route."""
-    edge = routes_build.legacy_edge(answer_route)
+    """The slotted pools joined by their edge, its answers on answer_route."""
+    edge = routes_build.slotted_edge(answer_route)
     return routes_build.generated(
-        routes_build.LEGACY_POOL_HOPS, (edge,), window_records.WEAK_POOL_ID
+        routes_build.SLOTTED_POOL_HOPS, (edge,), window_records.WEAK_POOL_ID
     )
 
 

@@ -64,7 +64,7 @@ round clock), the detection event formation, and the decoder units.
 
 ```python
 engine = engine_module.Engine()
-layout = layout_module.legacy_layout(settings)
+layout = layout_module.slotted_layout(settings)
 switching_parts = escalation_build.build_switching(
     layout, engine, machine_clock=settings.clock
 )

@@ -23,7 +23,7 @@ import decsim.presets.machines as machines
 import decsim.records.windows as window_records
 import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
 
@@ -214,7 +214,7 @@ class CountingFrameConfig(pauli_frame_module.PauliFrameConfig):
 def test_a_frame_written_outside_decsim_runs_from_its_record():
     """One record that builds the frame is the whole edit."""
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
-    base = legacy.resolved(weak_base)
+    base = slotted.resolved(weak_base)
     frame = base.pauli_frame
     counting = CountingFrameConfig(
         write_cycles=frame.write_cycles, clock=frame.clock

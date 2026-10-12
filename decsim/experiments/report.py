@@ -1567,7 +1567,7 @@ def _add_tier_split_columns(row: dict, counts: dict, task_key: tuple) -> None:
     A tier that committed no window at the task gets no column, since
     a percentile of no sample is no number.
     """
-    for tier in window_records.LEGACY_POOL_IDS:
+    for tier in window_records.SLOTTED_POOL_IDS:
         key = (task_key, TIER_SPLIT_POINT, tier.word)
         multiset = counts.get(key)
         if not multiset:

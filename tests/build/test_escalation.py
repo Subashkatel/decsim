@@ -75,7 +75,7 @@ def _built(
     machine = machine_settings.MachineSettings(
         weak_decoder=weak, strong_decoder=weak, switching=settings
     )
-    layout = layout_module.legacy_layout(machine)
+    layout = layout_module.slotted_layout(machine)
     switching_parts = escalation_build.build_switching(layout, engine)
     return switching_parts[0]
 

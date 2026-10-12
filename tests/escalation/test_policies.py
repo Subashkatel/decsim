@@ -571,7 +571,7 @@ def _switching_policy(threshold_decibels: float):
     machine = machine_settings.MachineSettings(
         weak_decoder=weak, strong_decoder=weak, switching=settings
     )
-    layout = layout_module.legacy_layout(machine)
+    layout = layout_module.slotted_layout(machine)
     engine = engine_module.Engine()
     switching_parts = escalation_build.build_switching(layout, engine)
     entry_switching = switching_parts[0]

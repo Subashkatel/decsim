@@ -1,6 +1,6 @@
 """Experiment 1's machine resolves, with its fiber loop where it runs.
 
-The referent is the record each machine resolves to (topology/legacy.py)
+The referent is the record each machine resolves to (topology/slotted.py)
 and the fiber network the preset cites: a round goes up in 40 cycles of
 the 250 MHz chip clock (2603.16203 lines 895-897), the correction comes
 back in 41 (lines 903-904), on four lanes of 38.79 bits a cycle (lines
@@ -14,7 +14,7 @@ import fractions
 import decsim.presets.experiment_one as experiment_one
 import decsim.presets.machines as machines
 import decsim.topology.fabrics as fabrics
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 
 # 40 and 41 cycles of 4000 ticks
 UPLINK_TICKS = 160_000
@@ -29,7 +29,7 @@ CABLE_LEG_TICKS = 1_151_220
 def test_the_weak_machine_resolves_with_every_port_bound():
     machine = experiment_one.weak_alone(3, 0.001)
 
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
 
     assert machine.unbound_ports() == []
     assert settings.weak_decoder == experiment_one.weak_decoder()
@@ -41,7 +41,7 @@ def test_the_strong_machine_drops_the_weak_pool_and_keeps_its_store():
     strong_pool = experiment_one.strong_decoder_pool()
     machine = experiment_one.strong_alone(3, 0.001, strong_pool)
 
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
 
     part_names = [part.name for part in machine.parts]
     assert machine.unbound_ports() == []
@@ -54,7 +54,7 @@ def test_the_strong_machine_drops_the_weak_pool_and_keeps_its_store():
 def test_the_switching_machine_escalates_union_find_to_relay_belief():
     machine = experiment_one.switching(3, 0.001)
 
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
 
     threshold = settings.switching.threshold
     assert machine.unbound_ports() == []
@@ -77,7 +77,7 @@ def test_the_pools_sit_on_the_chip_and_the_host():
 def test_the_fiber_loop_carries_the_weak_tiers_write_read_and_correction():
     machine = experiment_one.weak_alone(3, 0.001)
 
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
     links = settings.links
 
     uplink = links.controller_to_weak_buffer
@@ -97,7 +97,7 @@ def test_only_the_uplink_times_the_wire_alone():
     """The uplink leaves out the root's 20 ns (2603.16203 lines 897-899)."""
     machine = experiment_one.weak_alone(3, 0.001)
 
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
     links = settings.links
 
     assert links.controller_to_weak_buffer.excludes_receiver_processing
@@ -108,7 +108,7 @@ def test_only_the_uplink_times_the_wire_alone():
 def test_the_strong_side_rides_backlines_cpu_echo():
     machine = experiment_one.switching(3, 0.001)
 
-    settings = legacy.resolved(machine)
+    settings = slotted.resolved(machine)
     links = settings.links
 
     escalation = links.weak_decoder_to_strong_decoder.channel

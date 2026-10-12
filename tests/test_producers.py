@@ -26,7 +26,7 @@ import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.settings as qpu_settings
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import examples.deltakit_example as deltakit_example
 import examples.live_memory_example as live_memory_example
 import tests.qpu.memory_programs as memory_programs
@@ -94,7 +94,7 @@ def test_memory_patches_runs_one_memory_per_patch_at_once():
         physical_error_probability=0.001,
     )
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
-    base = legacy.resolved(weak_base)
+    base = slotted.resolved(weak_base)
     workload = workload_settings.WorkloadSettings.running(patches)
     settings = dataclasses.replace(base, workload=workload)
     machine = machine_module.Machine.build(settings, 0)

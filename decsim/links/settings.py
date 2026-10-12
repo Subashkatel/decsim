@@ -197,7 +197,7 @@ class ReadoutRoute:
 
 @dataclasses.dataclass(frozen=True)
 class NamedPath:
-    """A hop beyond a legacy machine's twelve, by name: a graph's own wire.
+    """A hop beyond a slotted machine's twelve, by name: a graph's own wire.
 
     A graph's hop is named <source part>_to_<target part>
     (topology/graph_layout.py).
@@ -212,7 +212,7 @@ class FabricSettings:
     """A fabric card: one path setting per hop.
 
     Every hop of the reaction path is priced, so a card names all twelve
-    a legacy machine rides, and hops holds each further hop a graph's
+    a slotted machine rides, and hops holds each further hop a graph's
     pools ride, by name. A card whose QPU-to-controller latency leaves
     out the controller's readout processing says so, since the timing
     card prices it apart. readout_routes picks a path by the complete
@@ -267,8 +267,8 @@ class FabricSettings:
         return getattr(self, path)
 
     def path_names(self) -> tuple:
-        """Every path's name: the legacy twelve in report order, then hops."""
-        names = list(transfer_records.LEGACY_PATHS)
+        """Every path's name: the slotted twelve in report order, then hops."""
+        names = list(transfer_records.SLOTTED_PATHS)
         for hop in self.hops:
             names.append(hop.name)
         return tuple(names)
@@ -335,8 +335,8 @@ def _require_finite_number(value, name: str) -> None:
 
 
 def _refuse_a_hop_named_twice(hops: tuple) -> None:
-    """Each hop's name is its own, and none is a legacy path's."""
-    taken = set(transfer_records.LEGACY_PATHS)
+    """Each hop's name is its own, and none is a slotted path's."""
+    taken = set(transfer_records.SLOTTED_PATHS)
     for hop in hops:
         if hop.name in taken:
             raise ValueError(f"the card prices the hop {hop.name!r} twice")

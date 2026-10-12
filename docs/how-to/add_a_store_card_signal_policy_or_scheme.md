@@ -115,8 +115,8 @@ one link per hop; the presets' links and fabrics are in
 - **Write the paper's numbers in your run file**, each with its source
   in a comment (STYLE.md rule 2), not in decsim.
 - **Check the card** by pricing the paper's own transfer on it. The
-  card a graph runs on is `legacy.resolved(machine).links`
-  (`decsim/topology/legacy.py`); with
+  card a graph runs on is `slotted.resolved(machine).links`
+  (`decsim/topology/slotted.py`); with
   `fabric = decsim.links.fabric.LinkFabric(card, engine)`,
   `fabric.expected_delay_ticks(path, bits, engine.now)` is what one send
   costs on an idle wire

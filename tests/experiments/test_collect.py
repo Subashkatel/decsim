@@ -80,7 +80,7 @@ import decsim.records.program as program_records
 import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as topology_graph
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.built_window_models as built_window_models
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
@@ -935,7 +935,7 @@ def test_a_task_reads_its_threshold_table_at_the_machine_assigned_to_it(
 
 def test_a_task_built_from_a_graph_runs_as_its_settings_with_their_id():
     settings = run_files.minimal_machine()
-    written = legacy.graph_of(settings)
+    written = slotted.graph_of(settings)
 
     from_graph = collect.Task("graph_task", written)
     from_settings = collect.Task("graph_task", settings)
@@ -948,7 +948,7 @@ def test_a_task_built_from_a_graph_runs_as_its_settings_with_their_id():
 
 def test_the_assignments_in_force_name_a_graph_tasks_paths():
     settings = run_files.minimal_machine()
-    written = legacy.graph_of(settings)
+    written = slotted.graph_of(settings)
     assignment = tree.Assignment("weak.unit_count", 3, "a test")
 
     with in_force.in_force([assignment]):

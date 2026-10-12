@@ -25,7 +25,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.machine.test_chains as chains
@@ -144,7 +144,7 @@ def _two_memories() -> graph.Machine:
         declared_run.memory_operation(2),
     ]
     settings = declared_run.weak_only_settings(rounds=9, operations=operations)
-    base = legacy.graph_of(settings)
+    base = slotted.graph_of(settings)
     fabric = chains.DeclaredHops(settings.links)
     return dataclasses.replace(base, fabric=fabric)
 

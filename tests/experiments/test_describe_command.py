@@ -20,11 +20,11 @@ import tests.experiments.run_files as run_files
 GRAPH_RUN_FILE = '''"""A graph task, for describe's tests."""
 
 import decsim
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 import tests.experiments.run_files as run_files
 
 settings = run_files.minimal_machine()
-machine = legacy.graph_of(settings)
+machine = slotted.graph_of(settings)
 collection = decsim.CollectionSettings(max_shots=1)
 task = decsim.Task("graph_task", machine, collection=collection)
 experiment = decsim.Experiment("graph", [task])
@@ -62,7 +62,7 @@ def test_describe_prints_the_graph_and_every_path(tmp_path, capsys):
     path_lines = lines[1:]
     pool = read.part("weak")
     assert pool.settings == settings.weak_decoder
-    assert len(path_lines) == len(transfer_records.LEGACY_PATHS)
+    assert len(path_lines) == len(transfer_records.SLOTTED_PATHS)
 
 
 def test_describe_shows_a_graph_path_set_on_the_command_line(tmp_path, capsys):
@@ -100,5 +100,5 @@ def test_describe_json_holds_the_graph_and_paths_the_text_prints(
     graph_json = json.dumps(described["graph"])
     from_json = machine_file.loads(graph_json, python_parts=workload)
     assert from_json == from_text
-    assert len(described["paths"]) == len(transfer_records.LEGACY_PATHS)
+    assert len(described["paths"]) == len(transfer_records.SLOTTED_PATHS)
     assert set(described["paths"]["qpu_to_controller"]) == {"latency", "rate"}

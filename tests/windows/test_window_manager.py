@@ -37,8 +37,8 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# the legacy pools, no edge, the planner's windows on the weak pool
-_ROUTES = routes_build.legacy_routes(window_records.WEAK_POOL_ID, None)
+# the slotted pools, no edge, the planner's windows on the weak pool
+_ROUTES = routes_build.slotted_routes(window_records.WEAK_POOL_ID, None)
 
 
 def _weak_run():

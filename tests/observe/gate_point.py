@@ -13,7 +13,7 @@ import json
 import decsim.build.decoders as decoders_part
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 
 SEED = 0
 # the log hash of the point; it moves when a log line changes text, and the
@@ -27,7 +27,7 @@ def settings(**observation_changes):
     changes = {"log_component_io": True, **observation_changes}
     observation = dataclasses.replace(shipped.observation, **changes)
     point = dataclasses.replace(shipped, observation=observation)
-    return legacy.resolved(point)
+    return slotted.resolved(point)
 
 
 def run(**observation_changes):

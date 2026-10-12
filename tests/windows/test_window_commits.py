@@ -23,8 +23,8 @@ import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
 
-# the legacy pools, no edge, the planner's windows on the weak pool
-_ROUTES = routes_build.legacy_routes(window_records.WEAK_POOL_ID, None)
+# the slotted pools, no edge, the planner's windows on the weak pool
+_ROUTES = routes_build.slotted_routes(window_records.WEAK_POOL_ID, None)
 
 
 class _RecordingCourier:

@@ -12,8 +12,8 @@ import pytest
 
 import decsim.parameters.fields as fields
 import decsim.topology.constants as constants_module
-import decsim.topology.legacy as legacy
 import decsim.topology.machine_file as machine_file
+import decsim.topology.slotted as slotted
 import tests.experiments.run_files as run_files
 import tests.regression.test_shot_results as regression
 
@@ -75,7 +75,7 @@ def test_every_regression_machine_written_out_reads_back(name):
 
 def test_a_file_holds_only_what_differs_from_the_defaults():
     settings = run_files.minimal_machine()
-    machine = legacy.graph_of(settings)
+    machine = slotted.graph_of(settings)
 
     text = machine_file.dumps(machine)
 

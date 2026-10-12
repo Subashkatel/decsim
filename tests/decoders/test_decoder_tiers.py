@@ -18,7 +18,7 @@ import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
-import decsim.topology.legacy as legacy
+import decsim.topology.slotted as slotted
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -35,7 +35,7 @@ def _algorithm_records(machine) -> list:
 
 def _run(graph_machine, seed: int = 0):
     """One shot of the graph: its machine and its result."""
-    settings = legacy.resolved(graph_machine)
+    settings = slotted.resolved(graph_machine)
     machine = machine_module.Machine.build(settings, seed)
     result = machine.run()
     return machine, result

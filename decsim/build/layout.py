@@ -4,8 +4,8 @@ The build loops over these, entry first, then each edge's target in
 graph order, so a machine of any number of pools builds through one
 code path. Each record carries the names its components go by: the
 word its results write, its statistics path, its seed names, its log
-labels and its hops. A legacy machine's records keep the names its
-slots have always given (legacy_layout), so its results, seeds and
+labels and its hops. A slotted machine's records keep the names its
+slots have always given (slotted_layout), so its results, seeds and
 statistics are unchanged; a graph's other parts go by their own names.
 
 The order is part of a run's results: the entry store is built first,
@@ -164,7 +164,7 @@ class Layout:
         """The store the entry pool reads and the entry edge's target's.
 
         The retention calls them weak and strong; either is None when
-        the run has none. A legacy strong-only run's one store is its
+        the run has none. A slotted strong-only run's one store is its
         strong store.
         """
         entry = self.entry_pool
@@ -248,10 +248,10 @@ class Layout:
         return tuple(paths)
 
 
-# A legacy machine's names, by slot. The pool that decodes the windows
+# A slotted machine's names, by slot. The pool that decodes the windows
 # is always the primary one, its manager's pool "default", even when
 # the strong tier is that pool (a strong-only run): its seeds and
-# statistics stay where a legacy run has them.
+# statistics stay where a slotted run has them.
 WEAK_STORE = "weak_syndrome_buffer"
 STRONG_STORE = "strong_syndrome_buffer"
 PRIMARY_UNIT_SEED = "primary_decoder"
@@ -266,11 +266,11 @@ STRONG_NAMES = PoolNames(
 )
 # the edge's statistics path, the switching settings' own, and the
 # root its verdict's seed hashes
-LEGACY_EDGE_NAME = "switching"
-LEGACY_POLICY_SEED = "escalation_policy"
+SLOTTED_EDGE_NAME = "switching"
+SLOTTED_POLICY_SEED = "escalation_policy"
 # where every round's path to a decoder starts
 CONTROLLER_SEAT = "controller"
-# how each legacy store takes its rounds, by the names its log and
+# how each slotted store takes its rounds, by the names its log and
 # copies use: the weak store written by the controller, the strong one
 # landed, from the controller or carried up with an escalation
 CONTROLLER_TO_WEAK_STORE = receiver_module.Hop(
@@ -297,7 +297,7 @@ STRONG_STORE_INTAKE = receiver_module.StoreIntake(
 )
 
 
-def legacy_layout(settings: Any) -> Layout:
+def slotted_layout(settings: Any) -> Layout:
     """The layout of a MachineSettings record, every name its slot's.
 
     settings is Any: build sits below the settings package, which
@@ -309,30 +309,30 @@ def legacy_layout(settings: Any) -> Layout:
     """
     window_tier = settings.window_tier
     window_decoder = settings.decoder_settings_for(window_tier.word)
-    entry = _legacy_entry_pool(window_tier, window_decoder)
+    entry = _slotted_entry_pool(window_tier, window_decoder)
     pools = [entry]
     stores = []
     if window_decoder is not None:
-        entry_store = _legacy_entry_store(settings, entry)
+        entry_store = _slotted_entry_store(settings, entry)
         stores.append(entry_store)
     edges = []
     switching = settings.switching
     if switching is not None:
-        strong = _legacy_strong_pool(settings.strong_decoder)
+        strong = _slotted_strong_pool(settings.strong_decoder)
         pools.append(strong)
-        strong_store = _legacy_store(
+        strong_store = _slotted_store(
             settings.strong_syndrome_buffer, STRONG_STORE, strong
         )
         stores.append(strong_store)
-        hops = routes_build.legacy_edge(switching.strong_answer_route)
+        hops = routes_build.slotted_edge(switching.strong_answer_route)
         edge = EdgePlan(
-            LEGACY_EDGE_NAME, switching, hops, WEAK_STORE, LEGACY_POLICY_SEED
+            SLOTTED_EDGE_NAME, switching, hops, WEAK_STORE, SLOTTED_POLICY_SEED
         )
         edges.append(edge)
     return Layout(tuple(pools), tuple(stores), tuple(edges))
 
 
-def _legacy_entry_pool(
+def _slotted_entry_pool(
     window_tier: window_records.PoolId,
     window_decoder: Optional[decoder_settings.DecoderPoolSettings],
 ) -> PoolPlan:
@@ -345,32 +345,32 @@ def _legacy_entry_pool(
         unit_seed=PRIMARY_UNIT_SEED,
         manager_seed=PRIMARY_MANAGER_SEED,
     )
-    hops = routes_build.LEGACY_WEAK_POOL_HOPS
+    hops = routes_build.SLOTTED_WEAK_POOL_HOPS
     store = WEAK_STORE
     if window_tier == window_records.STRONG_POOL_ID:
-        hops = routes_build.LEGACY_STRONG_POOL_HOPS
+        hops = routes_build.SLOTTED_STRONG_POOL_HOPS
         store = STRONG_STORE
     return PoolPlan(hops, window_decoder, names, store)
 
 
-def _legacy_strong_pool(
+def _slotted_strong_pool(
     strong_decoder: Optional[decoder_settings.DecoderPoolSettings],
 ) -> PoolPlan:
-    hops = routes_build.LEGACY_STRONG_POOL_HOPS
+    hops = routes_build.SLOTTED_STRONG_POOL_HOPS
     return PoolPlan(hops, strong_decoder, STRONG_NAMES, STRONG_STORE)
 
 
-def _legacy_entry_store(settings, entry: PoolPlan) -> StorePlan:
+def _slotted_entry_store(settings, entry: PoolPlan) -> StorePlan:
     """The store the window tier reads: the weak one, or the strong one."""
     if entry.store == STRONG_STORE:
-        return _legacy_store(
+        return _slotted_store(
             settings.strong_syndrome_buffer, STRONG_STORE, entry
         )
-    return _legacy_store(settings.weak_syndrome_buffer, WEAK_STORE, entry)
+    return _slotted_store(settings.weak_syndrome_buffer, WEAK_STORE, entry)
 
 
-def _legacy_store(store_settings, name: str, reader: PoolPlan) -> StorePlan:
-    """A legacy store, read by one pool, under its slot's names."""
+def _slotted_store(store_settings, name: str, reader: PoolPlan) -> StorePlan:
+    """A slotted store, read by one pool, under its slot's names."""
     reads_in_place = _reads_in_place(reader.settings)
     if name == WEAK_STORE:
         return StorePlan(

@@ -193,6 +193,62 @@ def test_noise_sets_stims_four_channels_apart_and_p_stays_the_label():
     assert record.physical_error_probability == 0.005
 
 
+@pytest.mark.parametrize(
+    ("code_task", "reset", "flip", "readout"),
+    [(Z_MEMORY, "R", "X_ERROR", "M"), (X_MEMORY, "RX", "Z_ERROR", "MX")],
+)
+def test_noiseless_time_boundaries_drop_the_two_data_flips(
+    code_task, reset, flip, readout
+):
+    """Only the data's flips after their reset and before the readout go.
+
+    Stim joins the two resets, or the two readouts, that a dropped flip
+    separated, so the circuits are compared, not their text.
+    """
+    noisy = workload_settings.memory_circuit(code_task, 4, 3, 0.002)
+    noiseless = workload_settings.memory_circuit(
+        code_task, 4, 3, 0.002, noiseless_time_boundaries=True
+    )
+
+    noisy_text = str(noisy)
+    noisy_lines = noisy_text.splitlines()
+    readouts = [line for line in noisy_lines if line.startswith(f"{readout} ")]
+    last_readout = readouts[-1]
+    data = last_readout.removeprefix(f"{readout} ")
+    data_flip = f"{flip}(0.002) {data}"
+    data_reset = f"{reset} {data}"
+    reset_index = noisy_lines.index(data_reset)
+    last_readout_index = noisy_lines.index(last_readout)
+    assert noisy_lines[reset_index + 1] == data_flip
+    assert noisy_lines[last_readout_index - 1] == data_flip
+    assert noisy_lines.count(data_flip) == 2
+    kept = [line for line in noisy_lines if line != data_flip]
+    kept_text = "\n".join(kept)
+    assert noiseless == stim.Circuit(kept_text)
+
+
+def test_a_memory_with_noiseless_time_boundaries_is_lowered_with_them():
+    memory = producers.MemorySettings(
+        0.002, rounds=4, noiseless_time_boundaries=True
+    )
+    qpu = _qpu(3)
+
+    lowered = memory.lowered_for(qpu)
+
+    expected = workload_settings.memory_circuit(
+        Z_MEMORY, 4, 3, 0.002, noiseless_time_boundaries=True
+    )
+    (operation,) = lowered.workload_record.operations
+    assert operation.circuit == expected
+
+
+def test_noiseless_time_boundaries_refuse_a_circuit_with_no_readout():
+    circuit = stim.Circuit("R 0 1\nX_ERROR(0.1) 0 1\nH 0")
+
+    with pytest.raises(ValueError, match="final data measurement"):
+        workload_settings._without_time_boundary_noise(circuit)
+
+
 def test_several_patches_are_the_memory_patches_maker():
     memory = producers.MemorySettings(0.002, rounds=4, patches=2)
     qpu = _qpu(3)

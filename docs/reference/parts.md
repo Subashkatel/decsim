@@ -83,7 +83,7 @@ The workload slot takes a workload lowered in Python or a maker row (decsim/prod
 
 `decsim/producers.py`. A memory experiment at the qpu's distance, on one patch or several.
 
-physical_error_probability is p on each of Stim's four channels; with noise the channels are noise's and p is the task's label, which a threshold table and the reports read. One of rounds and rounds_per_distance is given: a shot's rounds, or that many for each unit of the distance. code_task is a Stim task whose circuit is the qpu's card's code (code_geometry.py stim_memory_tasks), or None for patches with no circuit. patches run at once, side by side (memory_patches). decoded False decodes nothing: the readout-and-frame baseline.
+physical_error_probability is p on each of Stim's four channels; noise is a noise row (ports.CircuitNoise) that makes the circuit noisy at p, as SD6 does, or with its own probabilities, p then the task's label, which a threshold table and the reports read. One of rounds and rounds_per_distance is given: a shot's rounds, or that many for each unit of the distance. code_task is a Stim task whose circuit is the qpu's card's code (code_geometry.py stim_memory_tasks), or None for patches with no circuit. patches run at once, side by side (memory_patches). decoded False decodes nothing: the readout-and-frame baseline. noiseless_time_boundaries prepares and reads out the data qubits without noise (frontends/settings.py memory_circuit), as Toshio et al. 2510.25222's memories do.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -92,8 +92,9 @@ physical_error_probability is p on each of Stim's four channels; with noise the 
 | `rounds_per_distance` | `Optional[int]` | `None` |
 | `code_task` | `Optional[str]` | `'surface_code:rotated_memory_z'` |
 | `patches` | `int` | `1` |
-| `noise` | `Optional[workload_settings.StimNoise]` | `None` |
+| `noise` | `Optional[ports.CircuitNoise]` | `None` |
 | `decoded` | `bool` | `True` |
+| `noiseless_time_boundaries` | `bool` | `False` |
 
 ### `LiveMemorySettings`
 

@@ -37,6 +37,7 @@ import stim
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
+import decsim.ports as ports
 import decsim.qpu.settings as qpu_settings
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
@@ -55,16 +56,23 @@ def memory_circuit(
     rounds_per_shot: int,
     distance: int,
     physical_error_probability: float,
-    noise: Optional[workload_settings.StimNoise] = None,
+    noise: Optional[ports.CircuitNoise] = None,
+    noiseless_time_boundaries: bool = False,
 ) -> workload_records.Workload:
     """Stim's generated memory circuit, one operation for the whole shot.
 
     One probability on all four of Stim's noise channels, as Stim's
     guide does (frontends/settings.py memory_circuit), or noise's four
     channels; physical_error_probability is then the task's label.
+    noiseless_time_boundaries is memory_circuit's.
     """
     circuit = workload_settings.memory_circuit(
-        code_task, rounds_per_shot, distance, physical_error_probability, noise
+        code_task,
+        rounds_per_shot,
+        distance,
+        physical_error_probability,
+        noise,
+        noiseless_time_boundaries,
     )
     operation = program_records.Operation(
         id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit
@@ -82,7 +90,8 @@ def memory_patches(
     patch_count: int,
     distance: int,
     physical_error_probability: float,
-    noise: Optional[workload_settings.StimNoise] = None,
+    noise: Optional[ports.CircuitNoise] = None,
+    noiseless_time_boundaries: bool = False,
 ) -> workload_records.Workload:
     """Independent memory patches run at once.
 
@@ -93,8 +102,8 @@ def memory_patches(
     The copies sit side by side along x in one Stim coordinate frame,
     patch p shifted by p (2 d + 2) with a SHIFT_COORDS ahead of its
     circuit, so a surface-code patch, 2 d units wide, starts one lattice
-    step past its neighbour. Each copy draws its own shot. noise is
-    memory_circuit's.
+    step past its neighbour. Each copy draws its own shot. noise and
+    noiseless_time_boundaries are memory_circuit's.
     """
     if patch_count < 1:
         raise ValueError(
@@ -102,7 +111,12 @@ def memory_patches(
             "no patch the run would finish having run nothing"
         )
     circuit = workload_settings.memory_circuit(
-        code_task, rounds_per_shot, distance, physical_error_probability, noise
+        code_task,
+        rounds_per_shot,
+        distance,
+        physical_error_probability,
+        noise,
+        noiseless_time_boundaries,
     )
     pitch = 2 * distance + 2
     operations = []
@@ -261,15 +275,19 @@ def live_memory(
 class MemorySettings:
     """A memory experiment at the qpu's distance, on one patch or several.
 
-    physical_error_probability is p on each of Stim's four channels; with
-    noise the channels are noise's and p is the task's label, which a
-    threshold table and the reports read. One of rounds and
-    rounds_per_distance is given: a shot's rounds, or that many for each
-    unit of the distance. code_task is a Stim task whose circuit is the
-    qpu's card's code (code_geometry.py stim_memory_tasks), or None for
-    patches with no circuit. patches run at once, side by side
-    (memory_patches). decoded False decodes nothing: the
-    readout-and-frame baseline.
+    physical_error_probability is p on each of Stim's four channels;
+    noise is a noise row (ports.CircuitNoise) that makes the circuit
+    noisy at p, as SD6 does, or with its own probabilities, p then the
+    task's label, which a threshold table and the reports read. One of
+    rounds and rounds_per_distance is given: a shot's rounds, or that
+    many for each unit of the distance. code_task is a Stim task whose
+    circuit is the qpu's card's code (code_geometry.py
+    stim_memory_tasks), or None for patches with no circuit. patches
+    run at once, side by side (memory_patches). decoded False decodes
+    nothing: the readout-and-frame baseline. noiseless_time_boundaries
+    prepares and reads out the data qubits without noise
+    (frontends/settings.py memory_circuit), as Toshio et al.
+    2510.25222's memories do.
     """
 
     physical_error_probability: float
@@ -277,8 +295,9 @@ class MemorySettings:
     rounds_per_distance: Optional[int] = None
     code_task: Optional[str] = "surface_code:rotated_memory_z"
     patches: int = 1
-    noise: Optional[workload_settings.StimNoise] = None
+    noise: Optional[ports.CircuitNoise] = None
     decoded: bool = True
+    noiseless_time_boundaries: bool = False
     name = "memory"
     fixes_the_distance = False
 
@@ -313,7 +332,12 @@ class MemorySettings:
         _refuse_another_codes_task(self.code_task, code_card)
         if self.patches == 1:
             return memory_circuit(
-                self.code_task, rounds, distance, probability, self.noise
+                self.code_task,
+                rounds,
+                distance,
+                probability,
+                self.noise,
+                self.noiseless_time_boundaries,
             )
         return memory_patches(
             self.code_task,
@@ -322,6 +346,7 @@ class MemorySettings:
             distance,
             probability,
             self.noise,
+            self.noiseless_time_boundaries,
         )
 
     def _rounds(self, distance: int) -> int:

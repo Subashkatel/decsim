@@ -2364,6 +2364,26 @@ class WorkloadMakerSettings(Protocol):
         """The workload made for this qpu, lowered for the machine."""
 
 
+class CircuitNoise(Protocol):
+    """A memory's noise row: Stim's generator noise, then the noise added.
+
+    A Stim memory is generated with generator_noise's four channels
+    (frontends/settings.py StimNoise) and then handed to noisy, so a
+    model the generator cannot express, an idle qubit's noise or a
+    device's calibration, is added to the circuit Stim made. A row that
+    adds all its noise afterwards asks the generator for none, and one
+    the generator expresses adds nothing. Stim's own channels stay in
+    Stim: a circuit generated without noise joins its resets, and noise
+    added to the joined resets draws other shots from the same seed.
+    """
+
+    def generator_noise(self, probability: float) -> object:
+        """Stim's four channels for the generator, at the memory's p."""
+
+    def noisy(self, circuit: Any, probability: float) -> object:
+        """The generated circuit with this row's own noise added at p."""
+
+
 # ------------------------------ what a listener reads off what it hears
 
 

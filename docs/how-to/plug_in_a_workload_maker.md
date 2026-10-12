@@ -67,7 +67,7 @@ qpu (`decsim/producers.py`):
 
 | Row | Makes | Its parameters |
 |---|---|---|
-| `memory` | Stim's memory at the qpu's distance (`memory_circuit`, `memory_patches`), or patches with no circuit (`memory_without_circuit`) | `physical_error_probability`; `rounds` or `rounds_per_distance`; `code_task`, a Stim task of the qpu's card or `none`; `patches`; `noise`, Stim's four channels apart (`StimNoise`); `decoded` |
+| `memory` | Stim's memory at the qpu's distance (`memory_circuit`, `memory_patches`), or patches with no circuit (`memory_without_circuit`) | `physical_error_probability`; `rounds` or `rounds_per_distance`; `code_task`, a Stim task of the qpu's card or `none`; `patches`; `noise`, a noise row ([use your own noise model](use_your_own_noise_model.md)); `decoded`; `noiseless_time_boundaries` |
 | `live_memory` | a live memory over a fragments folder (`live_memory`) | `fragments`, `decode_after_rounds`, `patch`, `feedback_boundary_mode`; the fragments fix the distance |
 
 Every preset base holds a `memory` row, so on them:

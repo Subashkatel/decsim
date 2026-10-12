@@ -16,6 +16,9 @@ import stim
 
 import decsim.detector_error_model.detector_formation as formation
 import decsim.frontends.deltakit as deltakit
+import decsim.frontends.settings as workload_settings
+import decsim.producers as producers
+import decsim.topology.machine_file as machine_file
 
 EXPLORER_SPECIFICATION = importlib.util.find_spec("deltakit_explorer")
 HAS_EXPLORER = EXPLORER_SPECIFICATION is not None
@@ -530,6 +533,120 @@ def _layer_count(fragment) -> int:
         instruction for instruction in fragment if instruction.name == "TICK"
     ]
     return len(ticks)
+
+
+Z_MEMORY = "surface_code:rotated_memory_z"
+needs_explorer = pytest.mark.skipif(
+    not HAS_EXPLORER, reason="SD6 noise is Deltakit Explorer's"
+)
+
+
+def test_sd6_leaves_stims_generator_without_noise():
+    noise = deltakit.SD6Noise()
+
+    channels = noise.generator_noise(0.004)
+
+    assert channels == workload_settings.NO_GENERATOR_NOISE
+
+
+def test_measured_then_reset_splits_each_mr_and_keeps_the_record():
+    generated = stim.Circuit.generated(Z_MEMORY, rounds=4, distance=3)
+
+    split = deltakit.measured_then_reset(generated)
+
+    flattened = split.flattened()
+    generated_flattened = generated.flattened()
+    names = [instruction.name for instruction in flattened]
+    generated_names = [instruction.name for instruction in generated_flattened]
+    assert "MR" not in names
+    assert names.count("M") == generated_names.count("MR") + 1
+    assert names.count("TICK") == generated_names.count("TICK") + 4
+    assert split.num_measurements == generated.num_measurements
+    assert split.num_detectors == generated.num_detectors
+    # stim refuses a detector that is not deterministic without noise
+    model = split.detector_error_model()
+    assert model.num_errors == 0
+
+
+@needs_explorer
+def test_sd6_noise_keeps_stims_qubits_detectors_and_observables():
+    generated = stim.Circuit.generated(Z_MEMORY, rounds=3, distance=3)
+    noise = deltakit.SD6Noise()
+
+    noisy = workload_settings.memory_circuit(Z_MEMORY, 3, 3, 0.001, noise)
+
+    noisy_coordinates = noisy.get_final_qubit_coordinates()
+    generated_coordinates = generated.get_final_qubit_coordinates()
+    assert noisy_coordinates == generated_coordinates
+    assert noisy.num_detectors == generated.num_detectors
+    assert noisy.num_observables == generated.num_observables
+    # stim refuses a detector that is not deterministic without noise
+    noiseless = noisy.without_noise()
+    noiseless_model = noiseless.detector_error_model()
+    assert noiseless_model.num_errors == 0
+
+
+@needs_explorer
+def test_sd6_noise_puts_idle_depolarising_at_the_rows_p():
+    noise = deltakit.SD6Noise(probability=0.003)
+
+    noisy = workload_settings.memory_circuit(Z_MEMORY, 3, 3, 0.001, noise)
+
+    text = str(noisy)
+    assert "DEPOLARIZE1(0.003)" in text
+    assert "DEPOLARIZE2(0.003)" in text
+    assert "(0.001)" not in text
+
+
+@needs_explorer
+def test_sd6_time_boundaries_lose_the_data_flip_and_readout_flip():
+    noise = deltakit.SD6Noise()
+
+    noisy = workload_settings.memory_circuit(Z_MEMORY, 3, 3, 0.001, noise)
+    noiseless = workload_settings.memory_circuit(
+        Z_MEMORY, 3, 3, 0.001, noise, noiseless_time_boundaries=True
+    )
+
+    instructions = list(noiseless)
+    readout = instructions[-7]
+    assert readout.name == "M"
+    assert readout.gate_args_copy() == []
+    noisy_instructions = list(noisy)
+    noisy_readout = noisy_instructions[-7]
+    assert noisy_readout.gate_args_copy() == [0.001]
+    noisy_model = noisy.detector_error_model(decompose_errors=True)
+    noiseless_model = noiseless.detector_error_model(decompose_errors=True)
+    assert noisy_model != noiseless_model
+
+
+@needs_explorer
+def test_sd6_measures_and_resets_apart_unless_told_not_to():
+    apart = deltakit.SD6Noise()
+    together = deltakit.SD6Noise(measure_and_reset_apart=False)
+
+    apart_circuit = workload_settings.memory_circuit(
+        Z_MEMORY, 3, 3, 0.001, apart
+    )
+    together_circuit = workload_settings.memory_circuit(
+        Z_MEMORY, 3, 3, 0.001, together
+    )
+
+    apart_text = str(apart_circuit)
+    together_text = str(together_circuit)
+    assert "MR" not in apart_text
+    assert "MR" in together_text
+
+
+@needs_explorer
+def test_a_memory_names_sd6_noise_by_its_type():
+    memory = machine_file.record(
+        producers.MemorySettings,
+        physical_error_probability=0.001,
+        rounds=3,
+        noise={"type": "sd6"},
+    )
+
+    assert memory.noise == deltakit.SD6Noise()
 
 
 def _idle_probabilities(

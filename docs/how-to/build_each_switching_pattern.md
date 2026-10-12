@@ -83,6 +83,13 @@ to this table, when the machine is built:
 | likelihood pooling over members of two fault representations | Harmony prices a matching's hyperedge errors by an edge decomposition |
 | an ensemble member, or a pool's batching, over a strong backend row | the device prices each decode as it runs it, and an ensemble or a batch does not take its time from there yet |
 | a pool's batching with `run_both_at_once` or `double_window` | a batch of every window's speculative decode, or of deferred windows, is not built |
+| `decsim stream` over a workload other than one decoded Stim memory patch | a stream repeats the one REPEAT block of Stim's memory circuit on one patch |
+| `decsim stream` with a source other than the Stim device | the flip stream samples the circuit as the Stim device does |
+| `decsim stream` with the trace, the log, or the data movement or window outcome records | each keeps something for every round or window, and a stream keeps nothing that grows with its length |
+| `decsim stream` with a pool's batching or `bulk_strong` | a merged batch files its stages under its own key, which the per-window measures do not read |
+| `decsim stream` with the double window | it absorbs windows the plan lays up front, and a stream lays its windows as its rounds arrive |
+| `decsim stream` over a graph of a new shape | a stream runs a machine today's slots hold |
+| a logical failure counted inside a stream | no source defines one inside an unbounded stream; a stream's one outcome is its end readout's |
 
 Not built, because no source describes it: one window's results merged
 across separate pools (a race or a vote across pools); a router rule

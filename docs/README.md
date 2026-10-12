@@ -71,6 +71,7 @@ Each guide adds one kind of thing to the machine.
 - [How to use your own decoder and verdict](how-to/use_your_own_decoder_and_verdict.md)
 - [How to sweep a machine over a grid](how-to/sweep_a_machine_over_a_grid.md)
 - [How to build each switching pattern](how-to/build_each_switching_pattern.md)
+- [How to run a memory as a stream](how-to/run_a_memory_as_a_stream.md)
 
 ## Reference
 

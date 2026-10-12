@@ -23,6 +23,7 @@ simulator's memory, and none of a real system's timing depends on it.
 
 from typing import Any
 
+import decsim.ports as ports
 import decsim.records.windows as window_records
 import decsim.windows.operation_results as operation_results
 import decsim.windows.window_planner as window_planner
@@ -46,7 +47,7 @@ class WindowRelease:
         self,
         planner: window_planner.WindowPlanner,
         results: operation_results.OperationResults,
-        keepers: tuple,
+        keepers: tuple[ports.WindowKeeper, ...],
     ) -> None:
         self.planner = planner
         self.results = results

@@ -14,11 +14,11 @@ import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
+import decsim.frontends.memory_stream as memory_stream
 import decsim.frontends.settings as workload_settings
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame
 import decsim.qpu.flip_stream_device as flip_stream_device
-import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.settings as machine_settings
@@ -78,26 +78,8 @@ def stream_settings(
 
 def stream_workload(program, rounds: int) -> workload_settings.WorkloadSettings:
     """The stream owner, protected from round 1, read out at the round."""
-    owner = program_records.Operation(STREAM_ID, "memory", (0,), patches=(0,))
-    begin = program_records.Operation(
-        1, "protect", (0,), patches=(0,), emits_detector_data=False
-    )
-    finish = dataclasses.replace(
-        begin,
-        id=2,
-        name="readout",
-        predecessors=(1,),
-        scheduled_start_round=rounds,
-    )
-    region = program_records.ProtectedRegion(STREAM_ID, 1, 2)
-    policy = round_policies.PerOperationRounds(((STREAM_ID, 0), (1, 0), (2, 0)))
-    return workload_settings.WorkloadSettings(
-        operations=(begin, finish),
-        dynamic_streams=(owner,),
-        protected_regions=(region,),
-        rounds_policy=policy,
-        physical_circuits=((STREAM_ID, program),),
-    )
+    memory = program_records.Operation(STREAM_ID, "memory", (0,), patches=(0,))
+    return memory_stream.stream_of(memory, program, rounds)
 
 
 def matching_pool(latency: float) -> decoder_settings.DecoderPoolSettings:

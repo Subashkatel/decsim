@@ -113,6 +113,26 @@ class RoundHolds:
         for holder in stale:
             del self.released_holders[holder]
 
+    def forget_released_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """Forget the spent tokens of the stream's windows before the index.
+
+        The windows are final and let go (window_release.py), so none of
+        their tokens registers again.
+        """
+        stale = []
+        for holder in self.released_holders:
+            window_key = holder.served_window_key()
+            if window_key is None:
+                continue
+            if window_key[0] == stream_id and window_key[1] < window_index:
+                stale.append(holder)
+        for holder in stale:
+            del self.released_holders[holder]
+
     def _attach(self, round_key, holder) -> None:
         holders = self.holders_by_round.setdefault(round_key, set())
         holders.add(holder)

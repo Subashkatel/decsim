@@ -66,9 +66,9 @@ def observe(
     """
     window_manager = windows.window_manager
     decoder_managers = _decoder_managers(decoders)
-    log = _connect_log(observation, engine)
-    links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
     keeps_records = not observation.folds_windows
+    log = _connect_log(observation, engine, keeps_records)
+    links.trace.transfer_delivered.connect(traffic_ledger.on_transfer)
     round_events = _connect_round_events(
         engine, qpu, control, readout, keeps_records
     )
@@ -88,9 +88,9 @@ def observe(
         _connect_window_outcomes(
             window_outcomes, qpu.syndrome_source, window_manager
         )
-    decode_records = _decode_records(observation)
+    decode_records = _decode_records(observation, keeps_records)
     _connect_decode_records(decoder_managers, decode_records)
-    confidence = _connect_confidence(switching, decoder_managers)
+    confidence = _connect_confidence(switching, decoder_managers, keeps_records)
     trace_writer = _trace_writer(observation, engine, process_name)
     data_movement = _data_movement(observation)
     if data_movement is not None:
@@ -387,18 +387,19 @@ def _connect_window_trace(
 
 
 def _decode_records(
-    observation: observe_settings.ObservationSettings,
+    observation: observe_settings.ObservationSettings, keeps_records: bool
 ) -> Optional[decode_records_module.DecodeRecordLedger]:
     """The decode record ledger, when the records that read it ask.
 
     The switching records and the window outcomes both read each
-    decode's syndrome weight off it.
+    decode's syndrome weight off it; a stream that lets its windows go
+    reads neither (observation.folds_windows).
     """
     is_asked = (
         observation.record_switching_windows
         or observation.record_window_outcomes
     )
-    if not is_asked:
+    if not is_asked or not keeps_records:
         return None
     return decode_records_module.DecodeRecordLedger()
 
@@ -416,10 +417,14 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    switching, decoder_managers: tuple
+    switching, decoder_managers: tuple, keeps_records: bool
 ) -> Optional[decode_records_module.ConfidenceLedger]:
-    """The confidence ledger, only on a run whose confidence decides."""
-    if switching is None:
+    """The confidence ledger, only on a run whose confidence decides.
+
+    It keeps every window's verdict result, which a stream that lets its
+    windows go never reads (observation.folds_windows).
+    """
+    if switching is None or not keeps_records:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:
@@ -598,14 +603,17 @@ def _sample_at_tick_end(
 def _connect_log(
     observation: observe_settings.ObservationSettings,
     engine: engine_module.Engine,
+    keeps_records: bool,
 ) -> log_writers.LogWriter:
-    """The narrator's listeners: the record always, the console when asked.
+    """The narrator's listeners: the record, the console when asked.
 
     Connecting a listener to io_line is what turns the component I/O
-    lines on, gem5's named debug flag (src/base/debug.hh Flag).
+    lines on, gem5's named debug flag (src/base/debug.hh Flag). A stream
+    that lets its windows go keeps no record (observation.folds_windows).
     """
     log = log_writers.LogWriter()
-    engine.line.connect(log.write)
+    if keeps_records:
+        engine.line.connect(log.write)
     if observation.log_component_io:
         engine.io_line.connect(log.write)
     if observation.prints_log:

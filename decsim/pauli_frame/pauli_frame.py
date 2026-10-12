@@ -14,6 +14,7 @@ caller is called back when the write lands on a clock edge.
 """
 
 import dataclasses
+import functools
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -109,6 +110,7 @@ class PauliFrame:
         on_committed: Callable[[], None],
     ) -> None:
         """Accept a window's correction, charge the write, then call back."""
+        self._refuse_let_go(window_key, request_key)
         if self._has_accepted(window_key):
             earlier_tier = self._tier_of(window_key)
             raise RuntimeError(
@@ -147,19 +149,39 @@ class PauliFrame:
         None when any correction carries no observables, since a fold over an
         unknown value is unknown.
         """
-        window_keys = self._state.windows_by_stream.get(stream_id, ())
-        records = [self._state.committed_by_window[key] for key in window_keys]
-        if not records:
+        observables_per_record = self._observables_on(stream_id)
+        if not observables_per_record:
             return ()
-        observables_per_record = [
-            record.logical_observables for record in records
-        ]
         has_unknown = any(
             observables is None for observables in observables_per_record
         )
         if has_unknown:
             return None
         return _fold_by_xor(observables_per_record, stream_id)
+
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """Fold the stream's corrections before the window index into one.
+
+        The windows are final (window_release.py): each took its one
+        correction, and a write to one now is refused as a second write.
+        The frame keeps their XOR only, as PECOS's accumulator keeps a
+        running mask (crates/pecos-decoder-core/src/pauli_frame.rs:82);
+        the snapshot's records are the kept ones.
+        """
+        is_let_go = functools.partial(_is_before, stream_id, window_index)
+        observables_per_record = self._take_let_go(stream_id, is_let_go)
+        earlier = self._state.let_go_by_stream.get(stream_id)
+        if earlier is not None:
+            observables_per_record.extend(earlier.folded)
+        folded = _folded(observables_per_record, stream_id)
+        let_go = _LetGo(window_index, folded)
+        self._state.let_go_by_stream[stream_id] = let_go
+        records = self._state.records
+        self._state.records = _kept_records(records, is_let_go)
 
     def snapshot(self) -> PauliFrameSnapshot:
         """A frozen copy of what the frame holds now."""
@@ -206,6 +228,43 @@ class PauliFrame:
             return now
         return self.clock.edge(self.write_cycles, now)
 
+    def _observables_on(self, stream_id) -> list:
+        """Each kept correction's observables on the stream, and the fold."""
+        window_keys = self._state.windows_by_stream.get(stream_id, ())
+        observables_per_record = []
+        for window_key in window_keys:
+            record = self._state.committed_by_window[window_key]
+            observables_per_record.append(record.logical_observables)
+        let_go = self._state.let_go_by_stream.get(stream_id)
+        if let_go is not None:
+            observables_per_record.extend(let_go.folded)
+        return observables_per_record
+
+    def _take_let_go(self, stream_id, is_let_go) -> list:
+        """The let-go windows' observables, their records taken out."""
+        window_keys = self._state.windows_by_stream.get(stream_id, [])
+        kept_keys = []
+        observables_per_record = []
+        for window_key in window_keys:
+            if not is_let_go(window_key):
+                kept_keys.append(window_key)
+                continue
+            record = self._state.committed_by_window.pop(window_key)
+            observables_per_record.append(record.logical_observables)
+        self._state.windows_by_stream[stream_id] = kept_keys
+        return observables_per_record
+
+    def _refuse_let_go(self, window_key, request_key) -> None:
+        """A window the stream let go is final: a write to it is a second."""
+        let_go = self._state.let_go_by_stream.get(window_key[0])
+        if let_go is None or window_key[1] >= let_go.first_kept_index:
+            return
+        raise RuntimeError(
+            f"window {window_key} is final and its correction folded; the "
+            f"{request_key.pool.word} correction (request "
+            f"{request_key.run_sequence}) is a second write"
+        )
+
     def _has_accepted(self, window_key) -> bool:
         is_pending = window_key in self._state.pending_by_window
         is_committed = window_key in self._state.committed_by_window
@@ -248,6 +307,32 @@ class _PendingWrite:
     on_committed: Callable[[], None]
 
 
+def _is_before(stream_id, window_index: int, window_key: tuple) -> bool:
+    """Whether the window key is the stream's and before the index."""
+    if window_key[0] != stream_id:
+        return False
+    return window_key[1] < window_index
+
+
+def _kept_records(records: list, is_let_go) -> list:
+    """The records of the windows not let go, in acceptance order."""
+    return [record for record in records if not is_let_go(record.window_key)]
+
+
+def _folded(observables_per_record: list, stream_id) -> tuple:
+    """The corrections as one: their XOR, None when any is unknown.
+
+    A tuple of that one, or empty when there was none to fold.
+    """
+    if not observables_per_record:
+        return ()
+    for observables in observables_per_record:
+        if observables is None:
+            return (None,)
+    folded = _fold_by_xor(observables_per_record, stream_id)
+    return (folded,)
+
+
 def _as_observable_bits(logical_observables) -> Optional[ObservableBits]:
     if logical_observables is None:
         return None
@@ -279,13 +364,26 @@ class _TraceSources:
     correction_committed: trace_source.TraceSource = trace_source.new_source()
 
 
+@dataclasses.dataclass(frozen=True)
+class _LetGo:
+    """A stream's corrections let go: where the kept windows start, the XOR.
+
+    folded holds their XOR, or None when any was unknown, or is empty when
+    none was folded.
+    """
+
+    first_kept_index: int
+    folded: tuple
+
+
 @dataclasses.dataclass
 class _FrameState:
     """What the frame holds, as one member.
 
     records is every accepted correction in acceptance order, a write still
     landing included; pending_by_window the writes not yet landed;
-    committed_by_window the windows already corrected. A stream id is
+    committed_by_window the windows already corrected; let_go_by_stream a
+    stream's corrections it let go, folded (let_go_before). A stream id is
     opaque to the frame.
     """
 
@@ -293,3 +391,4 @@ class _FrameState:
     pending_by_window: dict = dataclasses.field(default_factory=dict)
     committed_by_window: dict = dataclasses.field(default_factory=dict)
     windows_by_stream: dict = dataclasses.field(default_factory=dict)
+    let_go_by_stream: dict = dataclasses.field(default_factory=dict)

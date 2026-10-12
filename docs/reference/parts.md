@@ -948,7 +948,7 @@ reaction_deadline_microseconds is a budget on each recorded window's reaction ti
 
 warmup_rounds is the rounds a region of interest leaves out: at the first round past them the run's statistics restart, gem5's m5.stats.reset() (observe/region_of_interest.py). It cuts the statistic rows and what is read from them, the queue peaks, busy fractions, offered loads and backlog peak; the latency samples keep the interval above. 0, the default, measures the whole run.
 
-folds_windows is a stream's: the run keeps no run-long ledger of windows, frame writes, stages, round events or transfers, and a stream's measures (experiments/stream_measures.py) read each window once it is final and let it go, as ns-3's FlowMonitor keeps a running record per flow rather than its packets. measure_shot then has nothing to read. False, the default, keeps every ledger.
+folds_windows is a stream's: the run keeps no run-long ledger of windows, frame writes, stages, round events, transfers, decode requests, confidence records or log lines, and a stream's measures (experiments/stream_measures.py) read each window once it is final and let it go, as ns-3's FlowMonitor keeps a running record per flow rather than its packets. The machine lets a stream's final windows go a few behind (windows/window_release.py), so a stream's memory stays flat however long it runs. measure_shot then has nothing to read. False, the default, keeps everything.
 
 record_window_outcomes keeps each window's committed answer, and its true label when the source keeps its errors (ErrorModelStimDevice), for window_outcomes.csv (observe/window_outcomes.py).
 

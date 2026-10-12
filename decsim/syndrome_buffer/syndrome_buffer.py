@@ -249,6 +249,14 @@ class SyndromeBuffer:
         """True while any live hold refers to this operation."""
         return self.holds.references(operation_id)
 
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """A stream let its windows before the index go: their spent holds."""
+        self.holds.forget_released_before(stream_id, window_index)
+
     # ---- holds
 
     def register_hold(

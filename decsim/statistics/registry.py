@@ -102,11 +102,12 @@ class Group:
         statistics: Sequence[Statistic],
         level: int,
         clock: Any,
+        keeps_series: bool = True,
     ) -> None:
         self.path = path
         self.declared = tuple(statistics)
         for statistic in self.declared:
-            accumulator = _accumulator(statistic, level, clock)
+            accumulator = _accumulator(statistic, level, clock, keeps_series)
             setattr(self, statistic.name, accumulator)
 
     def accumulators(self) -> list:
@@ -122,12 +123,17 @@ class Registry:
 
     clock is the run's engine, read for the tick a level changes at;
     level is the most detailed level recorded; OFF records nothing, and
-    every group's statistics are then the null one.
+    every group's statistics are then the null one. keeps_series False
+    builds each kind's series_free() (kinds.py), for a stream that lets
+    its windows go.
     """
 
-    def __init__(self, clock: Any, level: int = BASIC) -> None:
+    def __init__(
+        self, clock: Any, level: int = BASIC, keeps_series: bool = True
+    ) -> None:
         self.clock = clock
         self.level = level
+        self.keeps_series = keeps_series
         self.groups: dict = {}
         # what a reset also restarts, each called with the reset's tick
         self.reset_callbacks: list = []
@@ -156,7 +162,9 @@ class Registry:
         """
         if path in self.groups:
             raise ValueError(f"two parts keep statistics at the path {path}")
-        group = Group(path, statistics, self.level, self.clock)
+        group = Group(
+            path, statistics, self.level, self.clock, self.keeps_series
+        )
         self.groups[path] = group
         return group
 
@@ -203,10 +211,15 @@ def unrecorded(statistics: Sequence[Statistic]) -> Group:
     return Group("", statistics, OFF, None)
 
 
-def _accumulator(statistic: Statistic, level: int, clock: Any) -> Any:
+def _accumulator(
+    statistic: Statistic, level: int, clock: Any, keeps_series: bool
+) -> Any:
     if statistic.level > level:
         return kinds.DISABLED
-    return statistic.kind(clock)
+    kind = statistic.kind
+    if not keeps_series:
+        kind = kind.series_free()
+    return kind(clock)
 
 
 def _reset_group(group: Group) -> None:

@@ -16,7 +16,7 @@ observation.folds_windows the window's records are then let go.
 
 What is folded is what measure_shot computes from windows, for the
 windows the region of interest records: each latency's values (count,
-mean, maximum; the mean over the same multiset, by fsum, is the same
+mean, maximum; the mean, an exact sum rounded once, is fmean's
 number), the windows by tier and by status, the escalated windows, the
 reaction growth rates (an exact least-squares fit in ticks), the
 deadline misses, the end-of-stream reaction and the throughput. The
@@ -26,7 +26,6 @@ per-round latencies (cwb_per_round and the stalls) are not folded.
 import collections
 import dataclasses
 import fractions
-import statistics
 from typing import Optional
 
 import decsim.build.decoders as decoders_part
@@ -561,24 +560,30 @@ class _Counts:
 
 
 class _Values:
-    """One latency's values in us, each counted.
+    """One latency's values in us: their count, exact sum and maximum.
 
-    The mean is fsum over the same multiset measure_shot averages
-    (statistics.fmean), so it is the same number in any order.
+    measure_shot averages by statistics.fmean, fsum over the count, and
+    fsum is the exact sum correctly rounded. The floats' exact sum, kept
+    as a Fraction and rounded once (float(Fraction) rounds correctly),
+    is the same number in any order, and a stream of any length keeps
+    three numbers per latency.
     """
 
     def __init__(self) -> None:
-        self.counts: collections.Counter = collections.Counter()
+        self.count = 0
+        self.total = fractions.Fraction(0)
+        self.maximum: Optional[float] = None
 
     def add(self, value: float) -> None:
-        self.counts[value] += 1
+        self.count += 1
+        exact = fractions.Fraction(value)
+        self.total += exact
+        self.maximum = _higher(self.maximum, value)
 
     def summary(self) -> dict:
-        elements = self.counts.elements()
-        values = list(elements)
-        mean = statistics.fmean(values)
-        maximum = max(values)
-        return {"count": len(values), "mean": mean, "maximum": maximum}
+        total = float(self.total)
+        mean = total / self.count
+        return {"count": self.count, "mean": mean, "maximum": self.maximum}
 
 
 class _Growth:
@@ -660,7 +665,7 @@ def _lower(current: Optional[float], value: Optional[float]):
     return min(current, value)
 
 
-def _higher(current: Optional[int], value: int) -> int:
+def _higher(current: Optional[float], value: float) -> float:
     if current is None:
         return value
     return max(current, value)

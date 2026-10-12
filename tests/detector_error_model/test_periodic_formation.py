@@ -71,3 +71,18 @@ def test_a_longer_live_table_extends_a_shorter_and_a_changed_one_is_refused():
     longer.check_extends(shorter)
     with pytest.raises(RuntimeError, match="changes an existing"):
         changed.check_extends(shorter)
+
+
+def test_a_finished_table_read_again_extends_it_and_a_longer_one_is_checked():
+    """A finished stream's source reads its table anew for every seat."""
+    program = memory_programs.memory_program(3)
+    template = periodic_formation.StreamTemplate(program)
+    rounds = template.round_count + 4
+    more_rounds = rounds + 1
+    finished = template.table(rounds, is_final=True, live_reach=None)
+    again = template.table(rounds, is_final=True, live_reach=None)
+    longer = template.table(more_rounds, is_final=True, live_reach=None)
+
+    again.check_extends(finished)
+    with pytest.raises(RuntimeError, match="changes an existing"):
+        longer.check_extends(finished)

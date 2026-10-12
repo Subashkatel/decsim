@@ -78,6 +78,7 @@ class _Fixture:
             window_at=self.windows.__getitem__,
             windowed_operation_ids=self._windowed_operation_ids,
             windows_of=self._windows_of,
+            commit_extent_of=self._commit_extent_of,
             total_windows=2,
             round_count_of=lambda _operation_id: 6,
         )
@@ -116,6 +117,14 @@ class _Fixture:
 
     def _window_indices_of(self, _operation_id) -> list:
         return [0, 1]
+
+    def _commit_extent_of(self, _operation_id) -> tuple:
+        windows = self.windows.values()
+        commit_los = [window.commit_lo for window in windows]
+        commit_his = [window.commit_hi for window in windows]
+        commit_lo = min(commit_los)
+        commit_hi = max(commit_his)
+        return commit_lo, commit_hi
 
     def _windowed_operation_ids(self) -> list:
         return [1]

@@ -381,6 +381,18 @@ class StrongRedecode:
             f"held for its input (the weak result is confident)",
         )
 
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """A stream let its windows before the index go: their selections.
+
+        The windows are final (window_release.py), so no input of theirs
+        lands again.
+        """
+        self.selections.forget_before(stream_id, window_index)
+
     # ---- observation
 
     def has_pending(self) -> bool:
@@ -628,6 +640,16 @@ class _StrongSelections:
             on_landed()
             return
         self.landing_by_request_key[request_key] = on_landed
+
+    def forget_before(self, stream_id, window_index: int) -> None:
+        """Forget the delivered selections of the stream's windows before it."""
+        stale = []
+        for request_key in self.delivered_request_keys:
+            if request_key.operation_id != stream_id:
+                continue
+            if request_key.window_id < window_index:
+                stale.append(request_key)
+        self.delivered_request_keys.difference_update(stale)
 
     def note_delivered(
         self, request_key: window_records.DecoderRequestKey

@@ -434,6 +434,8 @@ def test_the_start_floors_follow_out_of_order_starts_and_a_reslice():
         plan.windows[(7, index)] = window
     plan.op_windows[7] = [0, 1, 2, 3]
     planner = window_planner.WindowPlanner((), plan, ())
-    assert planner.start_floors_of(7) == [1, 4, 4, 9]
+    floors = planner.start_floors_of(7)
+    assert list(floors) == [1, 4, 4, 9]
     planner.reslice_window((7, 3), 2, None)
-    assert planner.start_floors_of(7) == [1, 2, 2, 2]
+    floors = planner.start_floors_of(7)
+    assert list(floors) == [1, 2, 2, 2]

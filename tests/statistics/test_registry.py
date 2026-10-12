@@ -159,3 +159,18 @@ class _Pool:
 
     STATISTICS = POOL_STATISTICS
     statistics = registry.unrecorded(POOL_STATISTICS)
+
+
+def test_a_run_that_keeps_no_series_keeps_a_historys_fields_alone():
+    clock = _clock()
+    run = registry.Registry(clock, keeps_series=False)
+    declared = (
+        registry.Statistic("queued", kinds.History, "jobs waiting", "jobs"),
+    )
+
+    group = run.group("decoder_manager", declared)
+    group.queued.set(2)
+    group.queued.finish()
+
+    assert not hasattr(group.queued, "changes")
+    assert group.queued.peak == 2

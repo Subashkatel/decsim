@@ -1296,6 +1296,25 @@ class Frame(Protocol):
         """Accept a window's correction once, charge the write, call back."""
 
 
+@runtime_checkable
+class WindowKeeper(Protocol):
+    """What a component keeps per window, as a stream's release sees it.
+
+    The release tells it once the windows are final
+    (windows/window_release.py).
+    """
+
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """Let go what it keeps for the stream's windows before the index.
+
+        Every one of them is final.
+        """
+
+
 # ------------------------------------- the frame releases the controller
 
 

@@ -318,3 +318,26 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
 
     assert (1,) in strong_flips
     assert frame == tuple(operation_result.logical_observables)
+
+
+def test_letting_corrections_go_folds_them_into_the_same_frame():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0, 1))
+    commit(frame, ("stream", 1), (1, 1, 0))
+    commit(frame, ("stream", 2), (0, 1, 1))
+
+    frame.let_go_before("stream", 2)
+
+    assert frame.frame_for_stream("stream") == (0, 0, 0)
+    snapshot = frame.snapshot()
+    kept_keys = [record.window_key for record in snapshot.records]
+    assert kept_keys == [("stream", 2)]
+
+
+def test_a_write_to_a_window_let_go_is_a_second_write():
+    engine, frame = frame_with_commit_ticks(0)
+    commit(frame, ("stream", 0), (1, 0))
+    frame.let_go_before("stream", 1)
+
+    with pytest.raises(RuntimeError, match="second write"):
+        commit(frame, ("stream", 0), (0, 1))

@@ -1,13 +1,16 @@
-"""The decoder bases, written as graphs, and a strong tier added to one.
+"""Machines written as graphs: the decoder bases, and the steps that grow one.
 
 Each base is every part a machine holds, every value written out, around
 one decoder: the weak base's PyMatching on a chip unit, the strong base's
-belief matching on a host unit. The parts are named as
-topology/slotted.py's graph_of names them, so `--set weak.unit_count=2`
-reaches the weak pool of any of them.
+belief matching on a host unit. The parts share their names, so
+`--set weak.unit_count=2` reaches the weak pool of any of them.
 
+    base               the parts a machine holds once, its loop wired
+    with_pool          a machine with a pool reading a store of its own
+    with_frame         a machine given a frame that every pool corrects
     weak_baseline      the weak decoder alone, its hops a fridge cycle
     strong_baseline    the strong decoder alone, its hops a cycle each
+    strong_alone       a machine's weak pool replaced by a strong one
     with_strong_tier   a machine that escalates its weak decoder's
                        windows to a strong tier on the host
     with_escalation    a machine whose pool escalates on to one more
@@ -20,6 +23,7 @@ reaches the weak pool of any of them.
 import dataclasses
 from typing import Any, Optional
 
+import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -39,9 +43,11 @@ import decsim.qpu.layouts as layouts
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
+import decsim.topology.part_kinds as part_kinds
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.routers as routers
@@ -51,40 +57,21 @@ from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
 
-# the parts' names, as topology/slotted.py's graph_of names them
+# the parts' names
 QPU = "qpu"
 CONTROLLER = "controller"
 WINDOWS = "windows"
 FRAME = "frame"
-WEAK_STORE = "weak_buffer"
-WEAK_POOL = "weak"
-STRONG_STORE = "strong_buffer"
-STRONG_POOL = "strong"
+WEAK_POOL = window_records.WEAK_POOL_ID.word
+STRONG_POOL = window_records.STRONG_POOL_ID.word
 SWITCHING = "switching"
 ROUTER = "router"
-# the loop every machine closes: readout, decision, pulse
-LOOP_WIRES = (
-    graph.Wire("qpu.readout", "controller.readout"),
-    graph.Wire("frame.decisions", "controller.decisions"),
-    graph.Wire("controller.pulses", "qpu.pulses"),
-)
-WEAK_STORE_WRITE = graph.Wire("controller.rounds", "weak_buffer.rounds")
-# each tier's store read and corrections
-WEAK_TIER_WIRES = (
-    graph.Wire("weak_buffer.reads", "weak.rounds"),
-    graph.Wire("weak.corrections", "frame.corrections"),
-)
-STRONG_TIER_WIRES = (
-    graph.Wire("controller.rounds", "strong_buffer.rounds"),
-    graph.Wire("strong_buffer.reads", "strong.rounds"),
-    graph.Wire("strong.corrections", "frame.corrections"),
-)
-# the weak pool's escalations reach the switching part, whose re-decodes
-# reach the strong pool
-ESCALATION_WIRES = (
-    graph.Wire("weak.escalate", "switching.results"),
-    graph.Wire("switching.redecode", "strong.escalated"),
-)
+# a store goes by its pool's name and this
+STORE_SUFFIX = "_buffer"
+WEAK_STORE = WEAK_POOL + STORE_SUFFIX
+STRONG_STORE = STRONG_POOL + STORE_SUFFIX
+_RECORDS_NOTHING_EXTRA = observe_settings.ObservationSettings()
+_REFERENCE_FABRIC = fabrics.ReferenceFabric()
 # A base's shot is ten rounds per unit of distance.
 BASELINE_ROUNDS_PER_DISTANCE = 10
 _BELIEF_MATCHING = belief_matching.BeliefMatchingDecoder.Settings(
@@ -141,6 +128,94 @@ _UNBOUNDED_STORE = syndrome_buffer_module.SyndromeBufferSettings(
 )
 
 
+def base(
+    *records: Any,
+    clock: Optional[config.Clock] = None,
+    observation: observe_settings.ObservationSettings = _RECORDS_NOTHING_EXTRA,
+    fabric: ports.FabricRule = _REFERENCE_FABRIC,
+) -> graph.Machine:
+    """A machine of parts held once, its loop wired, no decoder yet.
+
+    Each record is the part of its kind, named for the kind and the
+    frame FRAME; a QPU or a controller not given is its kind's default,
+    and any other kind not given runs on its default unnamed. The QPU
+    reads out to the controller and takes its pulses, and a frame sends
+    the controller its decisions.
+    """
+    parts = {
+        QPU: graph.Part(QPU, part_kinds.kind_named(QPU).default),
+        CONTROLLER: graph.Part(
+            CONTROLLER, part_kinds.kind_named(CONTROLLER).default
+        ),
+    }
+    for record in records:
+        name = _held_name(record)
+        parts[name] = graph.Part(name, record)
+    wires = [graph.Wire(f"{QPU}.readout", f"{CONTROLLER}.readout")]
+    if FRAME in parts:
+        decisions = graph.Wire(f"{FRAME}.decisions", f"{CONTROLLER}.decisions")
+        wires.append(decisions)
+    wires.append(graph.Wire(f"{CONTROLLER}.pulses", f"{QPU}.pulses"))
+    return graph.Machine(
+        clock=clock,
+        parts=tuple(parts.values()),
+        wires=tuple(wires),
+        fabric=fabric,
+        observation=observation,
+    )
+
+
+def with_pool(
+    machine: graph.Machine,
+    pool: decoder_settings.DecoderPoolSettings,
+    name: str = WEAK_POOL,
+    site: str = fabrics.FRIDGE,
+    store: Optional[ports.SyndromeBufferSettings] = None,
+) -> graph.Machine:
+    """The machine with a pool that reads a store of its own, name_buffer.
+
+    The controller writes the store and the pool corrects the frame,
+    when the machine has one; both sit at site. store None is the
+    default buffer.
+    """
+    if store is None:
+        store = syndrome_buffer_module.SyndromeBufferSettings()
+    store_name = f"{name}{STORE_SUFFIX}"
+    controller = machine.parts_of("controller")[0]
+    grown = machine.with_part(graph.Part(store_name, store, site))
+    grown = grown.with_part(graph.Part(name, pool, site))
+    wires = [
+        graph.Wire(f"{controller.name}.rounds", f"{store_name}.rounds"),
+        graph.Wire(f"{store_name}.reads", f"{name}.rounds"),
+    ]
+    frames = machine.parts_of("pauli_frame")
+    if frames:
+        corrections = f"{frames[0].name}.corrections"
+        wires.append(graph.Wire(f"{name}.corrections", corrections))
+    return grown.with_wires(*wires)
+
+
+def with_frame(
+    machine: graph.Machine, frame: Optional[Any] = None
+) -> graph.Machine:
+    """The machine with a frame named FRAME, every pool correcting it.
+
+    frame None is the default frame; the frame sends the controller its
+    decisions.
+    """
+    if frame is None:
+        frame = pauli_frame_module.PauliFrameConfig()
+    controller = machine.parts_of("controller")[0]
+    wires = [graph.Wire(f"{FRAME}.decisions", f"{controller.name}.decisions")]
+    for pool in machine.parts_of("decoder_pool"):
+        corrections = graph.Wire(
+            f"{pool.name}.corrections", f"{FRAME}.corrections"
+        )
+        wires.append(corrections)
+    grown = machine.with_part(graph.Part(FRAME, frame))
+    return grown.with_wires(*wires)
+
+
 def weak_baseline(
     distance: int,
     physical_error_probability: float,
@@ -152,13 +227,12 @@ def weak_baseline(
     LILLIPUT's 28 ns, and each hop it prices is one fridge cycle on an
     unbounded wire.
     """
-    base = _baseline(
+    machine = _baseline(
         distance, physical_error_probability, round_period_microseconds
     )
-    weak_pool = graph.Part(WEAK_POOL, WEAK_BASELINE_POOL, fabrics.FRIDGE)
-    with_pool = base.with_part(weak_pool)
-    wired = with_pool.with_wires(*WEAK_TIER_WIRES)
-    return dataclasses.replace(wired, fabric=link_cards.WEAK_BASELINE_FABRIC)
+    with_weak = with_pool(machine, WEAK_BASELINE_POOL, store=_UNBOUNDED_STORE)
+    fabric = link_cards.WEAK_BASELINE_FABRIC
+    return dataclasses.replace(with_weak, fabric=fabric)
 
 
 def strong_baseline(
@@ -171,18 +245,32 @@ def strong_baseline(
     Belief matching answers every window on one host unit, charged its
     measured wall clock. Each hop it prices is one cycle on an unbounded
     wire, of the fridge clock on the chip and the room clock on the
-    host. The controller still writes the weak store, which no decoder
-    reads.
+    host.
     """
-    base = _baseline(
+    machine = _baseline(
         distance, physical_error_probability, round_period_microseconds
     )
-    strong_store = graph.Part(STRONG_STORE, _UNBOUNDED_STORE, fabrics.HOST)
-    strong_pool = graph.Part(STRONG_POOL, STRONG_BASELINE_POOL, fabrics.HOST)
-    with_store = base.with_part(strong_store)
-    with_pool = with_store.with_part(strong_pool)
-    wired = with_pool.with_wires(*STRONG_TIER_WIRES)
-    return dataclasses.replace(wired, fabric=link_cards.STRONG_BASELINE_FABRIC)
+    with_strong = with_pool(
+        machine,
+        STRONG_BASELINE_POOL,
+        STRONG_POOL,
+        fabrics.HOST,
+        _UNBOUNDED_STORE,
+    )
+    fabric = link_cards.STRONG_BASELINE_FABRIC
+    return dataclasses.replace(with_strong, fabric=fabric)
+
+
+def strong_alone(
+    machine: graph.Machine, strong_pool: decoder_settings.DecoderPoolSettings
+) -> graph.Machine:
+    """The machine's weak pool and its store replaced by a strong pool.
+
+    The strong pool reads a store of its own, and both sit on the host.
+    """
+    without_pool = machine.without_part(WEAK_POOL)
+    without_store = without_pool.without_part(WEAK_STORE)
+    return with_pool(without_store, strong_pool, STRONG_POOL, fabrics.HOST)
 
 
 def with_strong_tier(
@@ -199,24 +287,22 @@ def with_strong_tier(
     given, replaces the machine's: a base's own hops reach no strong
     side, so a study on a base names one (link_cards.strong_side).
     """
-    windows = machine.part(WINDOWS)
+    windows = machine.held(WINDOWS)
     switching_windows = window_settings.switching_windows(
-        windows.settings, switching.strong_window
+        windows, switching.strong_window
     )
-    store = syndrome_buffer_module.SyndromeBufferSettings()
-    parts = (
-        graph.Part(WINDOWS, switching_windows),
-        graph.Part(STRONG_STORE, store, fabrics.HOST),
-        graph.Part(STRONG_POOL, strong_pool, fabrics.HOST),
-        graph.Part(SWITCHING, switching),
+    reshaped = machine.with_held(WINDOWS, switching_windows)
+    grown = with_escalation(
+        reshaped,
+        WEAK_POOL,
+        STRONG_POOL,
+        strong_pool,
+        switching,
+        switching_name=SWITCHING,
     )
-    grown = machine
-    for part in parts:
-        grown = grown.with_part(part)
-    wired = grown.with_wires(*STRONG_TIER_WIRES, *ESCALATION_WIRES)
     if fabric is None:
-        return wired
-    return dataclasses.replace(wired, fabric=fabric)
+        return grown
+    return dataclasses.replace(grown, fabric=fabric)
 
 
 def with_escalation(
@@ -226,36 +312,27 @@ def with_escalation(
     pool: decoder_settings.DecoderPoolSettings,
     switching: escalation_settings.SwitchingSettings,
     site: str = fabrics.HOST,
+    switching_name: Optional[str] = None,
 ) -> graph.Machine:
     """The machine whose source pool escalates on to a pool named name.
 
-    The new pool reads a store of its own, name_buffer, and the switching
-    part name_switching decides on the source pool's results; both sit
-    at site. An escalated window's rounds come from the source pool's
-    store over the hop source_to_name (topology/graph_layout.py). An
-    edge that does not leave the entry pool takes the redo window; a
-    confidence of two solves there has its source pool solve each
-    escalated window once per logical class.
+    The new pool reads a store of its own, name_buffer (with_pool), and
+    the switching part, name_switching unless switching_name names it,
+    decides on the source pool's results; both sit at site. An escalated
+    window's rounds come from the source pool's store over the hop
+    source_to_name (topology/graph_layout.py). An edge that does not
+    leave the entry pool takes the redo window; a confidence of two
+    solves there has its source pool solve each escalated window once
+    per logical class.
     """
-    store_name = f"{name}_buffer"
-    switching_name = f"{name}_switching"
-    store = syndrome_buffer_module.SyndromeBufferSettings()
-    parts = (
-        graph.Part(store_name, store, site),
-        graph.Part(name, pool, site),
-        graph.Part(switching_name, switching),
-    )
-    wires = (
-        graph.Wire(f"{CONTROLLER}.rounds", f"{store_name}.rounds"),
-        graph.Wire(f"{store_name}.reads", f"{name}.rounds"),
-        graph.Wire(f"{name}.corrections", f"{FRAME}.corrections"),
+    if switching_name is None:
+        switching_name = f"{name}_switching"
+    grown = with_pool(machine, pool, name, site)
+    grown = grown.with_part(graph.Part(switching_name, switching))
+    return grown.with_wires(
         graph.Wire(f"{source}.escalate", f"{switching_name}.results"),
         graph.Wire(f"{switching_name}.redecode", f"{name}.escalated"),
     )
-    grown = machine
-    for part in parts:
-        grown = grown.with_part(part)
-    return grown.with_wires(*wires)
 
 
 def with_router(
@@ -318,8 +395,8 @@ def _baseline(
 ) -> graph.Machine:
     """What both bases share, every value written out, no decoder yet.
 
-    The weak store is unbounded and free, and the frame writes in one
-    fridge cycle, 4 ns (2605.04892 Table I, lines 1051 and 1063).
+    The frame writes in one fridge cycle, 4 ns (2605.04892 Table I,
+    lines 1051 and 1063); each base's store is unbounded and free.
     """
     qpu = _stim_qpu(distance, round_period_microseconds)
     # made at the task, so it follows an assigned qpu.distance
@@ -336,25 +413,20 @@ def _baseline(
     detection_events = _baseline_detection_events()
     windows = _baseline_windows()
     decoder_manager = _baseline_decoder_manager()
-    parts = (
-        graph.Part(QPU, qpu),
-        graph.Part(CONTROLLER, controller),
-        graph.Part("idle_policy", idle_policy),
-        graph.Part("detection_events", detection_events),
-        graph.Part(WINDOWS, windows),
-        graph.Part("decoder_manager", decoder_manager),
-        graph.Part("workload", workload),
-        graph.Part("magic_state_factory", factory),
-        graph.Part(FRAME, pauli_frame),
-        graph.Part(WEAK_STORE, _UNBOUNDED_STORE, fabrics.FRIDGE),
-    )
     observation = _baseline_observation()
-    return graph.Machine(
+    return base(
+        qpu,
+        controller,
+        idle_policy,
+        detection_events,
+        windows,
+        decoder_manager,
+        workload,
+        factory,
+        pauli_frame,
         # the controller and every part that names no clock of its own
         # count their cycles on the machine's clock
         clock=clocks.FRIDGE_CLOCK,
-        parts=parts,
-        wires=(*LOOP_WIRES, WEAK_STORE_WRITE),
         observation=observation,
     )
 
@@ -441,3 +513,15 @@ def _baseline_observation() -> observe_settings.ObservationSettings:
         trace_shots=(0,),
         data_movement=False,
     )
+
+
+def _held_name(record: Any) -> str:
+    """The name a part held once goes by: its kind's, the frame FRAME."""
+    kind = part_kinds.kind_of(type(record))
+    if kind is None or kind.is_many:
+        raise graph.GraphError(
+            f"a {type(record).__name__} is no part a machine holds once"
+        )
+    if kind.name == "pauli_frame":
+        return FRAME
+    return kind.name

@@ -19,13 +19,13 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -239,7 +239,6 @@ def _machine(workload, device) -> machine_module.Machine:
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=decoder
-    )
-    return machine_module.Machine.build(settings, 17)
+    base = machines.base(workload, qpu)
+    graph = machines.with_pool(base, decoder)
+    return machine_module.Machine.build(graph, 17)

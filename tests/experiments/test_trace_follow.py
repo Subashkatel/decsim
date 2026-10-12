@@ -30,7 +30,7 @@ def trace_path(tmp_path_factory):
     """Gate point 1, run once with its trace written to a file."""
     directory = tmp_path_factory.mktemp("follow")
     path = directory / "point1.trace.json"
-    point = gate_point.settings(trace=str(path))
+    point = gate_point.point(trace=str(path))
     machine = machine_module.Machine.build(point, gate_point.SEED)
     machine.run()
     machine.observation.trace_writer.write(str(path))
@@ -78,7 +78,7 @@ def test_round_ones_first_hops_are_its_emission_move_and_intake(traced):
 def test_round_one_sits_in_buffer_zero_as_detection_events(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
-    residence = _row_of(followed, "weak syndrome buffer", "residence")
+    residence = _row_of(followed, "weak_buffer", "residence")
     # the slot is taken where the bits are, at the landing of
     # controller_to_weak_buffer, which is also when the round is readable
     assert residence.tick == 1_008_000
@@ -91,12 +91,12 @@ def test_round_one_sits_in_buffer_zero_as_detection_events(traced):
 def test_round_one_leaves_on_window_zeros_input_move(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
-    move = _row_of(followed, "weak_buffer_to_weak_decoder", "move")
+    move = _row_of(followed, "weak_buffer_to_weak", "move")
     assert move.tick == 6_008_000
     assert move.duration_ticks == 4_000
     assert move.bits == 44
     assert "with W0 rounds 1:1..6" in move.what
-    memory = _row_of(followed, "Decoder unit default#0", "residence")
+    memory = _row_of(followed, "Decoder unit weak#0", "residence")
     assert memory.tick == 6_012_000
     assert memory.duration_ticks == 92_000
     assert memory.transfer == "copy"
@@ -108,7 +108,7 @@ def test_a_bounded_unit_memory_residence_states_its_room_in_bits():
         "ph": "X",
         "cat": "window,residence",
         "name": "W0 input in memory",
-        "thread": "Decoder unit default#0",
+        "thread": "Decoder unit weak#0",
         "tid": 7,
         "dur": 0.092,
         "args": {"tick": 6_012_000, "window": "1:0", "capacity_bits": 96},
@@ -129,7 +129,7 @@ def test_round_ones_counts_name_four_copies_and_three_moves(traced):
     assert counts.job_references == 1
     assert counts.holds == 1
     assert counts.moves == 3
-    assert counts.longest_residence.where == "weak syndrome buffer"
+    assert counts.longest_residence.where == "weak_buffer"
     assert counts.longest_residence.duration_ticks == 5_004_000
 
 
@@ -138,7 +138,7 @@ def test_a_rounds_path_ends_where_its_bits_land_in_the_unit(traced):
     followed = trace_follow.follow(traced, "round", "1:1")
 
     last = followed.hops[-1]
-    assert last.where == "Decoder unit default#0"
+    assert last.where == "Decoder unit weak#0"
     assert last.tick == 6_012_000
 
 
@@ -154,7 +154,7 @@ def _what_happened_at(hops, where: str) -> list:
 def test_a_round_two_windows_read_shows_both_of_them(traced):
     followed = trace_follow.follow(traced, "round", "1:4")
 
-    moves = _what_happened_at(followed.hops, "weak_buffer_to_weak_decoder")
+    moves = _what_happened_at(followed.hops, "weak_buffer_to_weak")
 
     assert "with W0 rounds 1:1..6" in moves[0]
     assert "with W1 rounds 1:4..9" in moves[1]
@@ -166,8 +166,8 @@ def test_window_zeros_path_runs_from_its_queue_to_the_frame(traced):
 
     queued = _row_of(followed, "Window planner", "queued")
     assert queued.tick == 6_008_000
-    assert "dispatched to default#0" in queued.what
-    service = _row_of(followed, "Decoder unit default#0", "decode service")
+    assert "dispatched to weak#0" in queued.what
+    service = _row_of(followed, "Decoder unit weak#0", "decode service")
     assert service.tick == 6_012_000
     assert service.duration_ticks == 92_000
     correction = _row_of(followed, "Frame", "residence")
@@ -179,13 +179,13 @@ def test_a_withdrawn_request_reads_as_withdrawn_when_it_left(tmp_path):
     """double_window takes back 1:3:weak:6 1.132 us after it queued."""
     path = tmp_path / "withdrawn.trace.json"
     double_window = strong_window_shapes.DoubleWindow.Settings()
-    settings = measure_tests.switching_settings(
+    machine = measure_tests.switching_settings(
         20.0, weak_microseconds=5.0, strong_window=double_window
     )
-    observation = dataclasses.replace(settings.observation, trace=str(path))
-    traced_settings = dataclasses.replace(settings, observation=observation)
+    observation = dataclasses.replace(machine.observation, trace=str(path))
+    traced_machine = dataclasses.replace(machine, observation=observation)
     task = measure_tests.task_at(
-        traced_settings, measure_tests.SWITCHING_ERROR_PROBABILITY
+        traced_machine, measure_tests.SWITCHING_ERROR_PROBABILITY
     )
     shot = collect.run_shot(task, 0)
     shot.machine.observation.trace_writer.write(str(path))
@@ -201,9 +201,9 @@ def test_a_withdrawn_request_reads_as_withdrawn_when_it_left(tmp_path):
 def test_window_zeros_stages_are_the_units_own_lanes(traced):
     followed = trace_follow.follow(traced, "window", "1:0")
 
-    fetch = _row_of(followed, "Decoder unit default#0", "stage fetch")
-    algorithm = _row_of(followed, "Decoder unit default#0", "stage algorithm")
-    release = _row_of(followed, "Decoder unit default#0", "stage release")
+    fetch = _row_of(followed, "Decoder unit weak#0", "stage fetch")
+    algorithm = _row_of(followed, "Decoder unit weak#0", "stage algorithm")
+    release = _row_of(followed, "Decoder unit weak#0", "stage release")
 
     assert fetch.duration_ticks == 24_000
     assert algorithm.duration_ticks == 28_000
@@ -371,7 +371,7 @@ def test_a_window_across_two_operations_is_followed_from_each_ones_rounds(
 
     ready = ("Window planner", "W1 ready")
     moved = (
-        "weak_buffer_to_weak_decoder",
+        "weak_buffer_to_weak",
         "move, with W1 rounds 1:4..6 and 2:1..3",
     )
     first_hops = _hops_of(from_the_first)

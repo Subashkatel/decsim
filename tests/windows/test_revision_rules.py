@@ -121,7 +121,9 @@ def test_a_best_status_run_whose_revisions_succeed_answers_as_latest():
     latest_result = latest_run.run()
     best_result = best_run.run()
 
-    assert fabric.frame_tiers(best_run) == fabric.frame_tiers(latest_run)
+    assert declared_run.frame_tiers(best_run) == declared_run.frame_tiers(
+        latest_run
+    )
     assert best_result.operation_results == latest_result.operation_results
 
 
@@ -146,7 +148,7 @@ def test_a_no_cancel_run_drops_each_speculative_result_it_let_run_out():
     machine.run()
 
     counts = machine.decoders.decoder_manager.strong_requests.counts
-    tiers = fabric.frame_tiers(machine)
+    tiers = declared_run.frame_tiers(machine)
     assert [tier for _, tier in tiers] == ["weak", "weak", "weak"]
     assert counts.cancelled == 0
     assert counts.abandoned >= 1

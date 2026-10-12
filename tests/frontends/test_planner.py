@@ -21,13 +21,13 @@ import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.planner as planner
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
 
@@ -37,16 +37,16 @@ def test_the_card_period_wins_over_the_run_period():
     qpu = qpu_settings.QpuSettings(
         round_period_microseconds=1.25, code_card=card_record
     )
-    settings = machine_settings.MachineSettings(qpu=qpu)
-    machine = machine_module.Machine.build(settings)
+    graph = machines.base(qpu)
+    machine = machine_module.Machine.build(graph)
     assert machine.qpu.device.clock.period_ticks == 2_000_000
 
 
 def test_a_period_shorter_than_one_tick_is_refused():
     qpu = qpu_settings.QpuSettings(round_period_microseconds=0.0)
-    settings = machine_settings.MachineSettings(qpu=qpu)
+    graph = machines.base(qpu)
     with pytest.raises(ValueError, match="resolved round cadence"):
-        machine_module.Machine.build(settings)
+        machine_module.Machine.build(graph)
 
 
 def test_a_card_cadence_that_is_not_a_finite_number_still_stops():
@@ -54,9 +54,9 @@ def test_a_card_cadence_that_is_not_a_finite_number_still_stops():
     card = code_geometry.SurfaceCodeModel(round_microseconds=float("inf"))
     card_record = declared_run.GivenCard(card)
     qpu = qpu_settings.QpuSettings(code_card=card_record)
-    settings = machine_settings.MachineSettings(qpu=qpu)
+    graph = machines.base(qpu)
     with pytest.raises(OverflowError, match="cannot convert float infinity"):
-        machine_module.Machine.build(settings)
+        machine_module.Machine.build(graph)
 
 
 def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
@@ -68,9 +68,9 @@ def test_a_distance_that_is_not_a_whole_number_is_refused_by_name():
     card = code_geometry.SurfaceCodeModel(distance=3.5)
     card_record = declared_run.GivenCard(card)
     qpu = qpu_settings.QpuSettings(code_card=card_record)
-    settings = machine_settings.MachineSettings(qpu=qpu)
+    graph = machines.base(qpu)
     with pytest.raises(ValueError, match="distance must be an int"):
-        machine_module.Machine.build(settings)
+        machine_module.Machine.build(graph)
 
 
 # The plan's other half: the graph it validates, the windows it
@@ -412,11 +412,10 @@ def test_a_graph_that_waits_forever_after_a_root_is_refused_at_build(
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, weak_decoder=weak_decoder
-    )
+    base = machines.base(workload)
+    graph = machines.with_pool(base, weak_decoder)
     with pytest.raises(ValueError, match=message):
-        machine_module.Machine.build(settings)
+        machine_module.Machine.build(graph)
 
 
 def test_two_objects_with_one_id_in_one_role_are_refused_naming_it():
@@ -719,7 +718,7 @@ def test_a_strong_side_that_forms_holds_the_raw_round_before_the_commit():
     """Its former reads round 2 for round 3's surface-code detectors."""
     table = surface_code_table()
     reads = window_records.FormationReads(
-        strong_side_seat="strong_decoder", tables={1: table}
+        strong_side_seat="strong", tables={1: table}
     )
 
     plan = seven_round_plan(reads)
@@ -732,7 +731,7 @@ def test_a_strong_side_that_forms_holds_every_round_the_commit_reads():
     """Round 3's detector is rec[-1] ^ rec[-3]: it reads round 1."""
     table = lookback_table()
     reads = window_records.FormationReads(
-        strong_side_seat="strong_decoder", tables={1: table}
+        strong_side_seat="strong", tables={1: table}
     )
 
     plan = seven_round_plan(reads)
@@ -745,7 +744,7 @@ def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
     """Round 3 reads only itself; round 4 of the same read reads round 1."""
     table = reach_growing_table()
     reads = window_records.FormationReads(
-        strong_side_seat="strong_decoder", tables={1: table}
+        strong_side_seat="strong", tables={1: table}
     )
 
     plan = seven_round_plan(reads)
@@ -755,7 +754,7 @@ def test_a_strong_hold_covers_every_round_a_later_round_of_the_read_reads():
 
 
 def test_an_operation_with_no_recipes_holds_nothing_before_the_commit():
-    reads = window_records.FormationReads(strong_side_seat="strong_decoder")
+    reads = window_records.FormationReads(strong_side_seat="strong")
 
     plan = seven_round_plan(reads)
 

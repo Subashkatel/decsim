@@ -81,7 +81,7 @@ def test_a_shots_statistics_rows_are_its_registrys_rows():
         }
         assert len(own_rows) == len(measurement.statistics)
         assert values == recorded
-        assert ("weak_decoder.units", "busy_units", "area") in values
+        assert ("weak.units", "busy_units", "area") in values
 
 
 def test_a_tasks_value_counts_add_its_shots_counts():
@@ -99,7 +99,7 @@ def test_a_tasks_value_counts_add_its_shots_counts():
     }
 
     assert counted == dict(added)
-    assert ("weak_decoder.decodes", "service") in {key[:2] for key in counted}
+    assert ("weak.decodes", "service") in {key[:2] for key in counted}
 
 
 def _summary_values(rows: list, path: str, statistic: str) -> dict:
@@ -121,15 +121,15 @@ def test_the_summary_is_derived_from_the_shots_own_statistics(tmp_path):
     for measurement in measurements:
         for row in measurement.statistics:
             fields[(row.path, row.statistic, row.field)].append(row.value)
-    service_count = sum(fields[("weak_decoder.decodes", "service", "count")])
-    service_total = sum(fields[("weak_decoder.decodes", "service", "total")])
-    busy_area = sum(fields[("weak_decoder.units", "busy_units", "area")])
-    busy_span = sum(fields[("weak_decoder.units", "busy_units", "span")])
-    busy_peak = max(fields[("weak_decoder.units", "busy_units", "peak")])
+    service_count = sum(fields[("weak.decodes", "service", "count")])
+    service_total = sum(fields[("weak.decodes", "service", "total")])
+    busy_area = sum(fields[("weak.units", "busy_units", "area")])
+    busy_span = sum(fields[("weak.units", "busy_units", "span")])
+    busy_peak = max(fields[("weak.units", "busy_units", "peak")])
 
-    service = _summary_values(summary, "weak_decoder.decodes", "service")
-    busy = _summary_values(summary, "weak_decoder.units", "busy_units")
-    units = _summary_values(summary, "weak_decoder.units", "units")
+    service = _summary_values(summary, "weak.decodes", "service")
+    busy = _summary_values(summary, "weak.units", "busy_units")
+    units = _summary_values(summary, "weak.units", "units")
     assert service["count"] == service_count
     service_mean = service_total / service_count
     busy_mean = busy_area / busy_span
@@ -161,7 +161,7 @@ def test_each_rows_memory_class_is_the_one_the_counters_placed():
     assert class_by_path["qpu_to_controller"] == "off_board"
     assert class_by_path["controller_to_weak_buffer"] == "on_board"
     assert class_by_path["readout -> controller intake"] == "on_chip"
-    path = "controller assembler -> weak syndrome buffer"
+    path = "controller assembler -> weak_buffer"
     assert class_by_path[path] == "on_board"
 
 

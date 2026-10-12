@@ -17,6 +17,7 @@ grouping no component reads.
 
 import dataclasses
 import enum
+from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import decsim.links.settings as link_settings
@@ -124,20 +125,38 @@ def memory_class_of_structure(name: str, store_names: frozenset) -> MemoryClass:
     return MemoryClass.UNCLASSIFIED
 
 
+@dataclasses.dataclass(frozen=True)
+class MemoryClasses:
+    """A run's memory classes: each priced hop's, and its stores' names.
+
+    by_hop is the class of each hop the card prices (memory_class_of_hop),
+    store_names the name each store reports its copies under; a hop or a
+    structure neither names is unclassified.
+    """
+
+    by_hop: dict
+    store_names: frozenset
+
+    def of_hop(self, path: str) -> MemoryClass:
+        """The class of the memory a move along the hop crosses."""
+        return self.by_hop.get(path, MemoryClass.UNCLASSIFIED)
+
+    def of_structure(self, name: str) -> MemoryClass:
+        """The class of the structure a copy landed in."""
+        return memory_class_of_structure(name, self.store_names)
+
+
 class DataMovement:
     """The run's data-movement tally.
 
-    It counts copies, references and moves, in total and per named path.
-    class_by_hop is the memory class of each hop the card prices
-    (memory_class_of_hop), store_names the name each store reports its
-    copies under; a hop or a structure neither names is unclassified.
+    It counts copies, references and moves, in total and per named path,
+    each in the memory class the run's classes give it.
     """
 
-    def __init__(self, class_by_hop: dict, store_names: frozenset) -> None:
-        self.class_by_hop = class_by_hop
-        self.store_names = store_names
-        self.copies = _PathCounts()
-        self.moves = _PathCounts()
+    def __init__(self, classes: MemoryClasses) -> None:
+        # a copy is classed where it lands, a move by the hop it crosses
+        self.copies = _PathCounts(classes.of_structure)
+        self.moves = _PathCounts(classes.of_hop)
         self.references = _Counts()
         self.holds = _HoldTallies()
         self.rounds_seen: set = set()
@@ -154,7 +173,7 @@ class DataMovement:
         """One structure duplicated the bits into another."""
         path = f"{source_name}{PATH_SEPARATOR}{target_name}"
         rounds = _rounds(key)
-        memory_class = memory_class_of_structure(target_name, self.store_names)
+        memory_class = self.copies.class_of(target_name)
         self._add(self.copies, path, bits, rounds, memory_class)
 
     def transfer_delivered(
@@ -172,7 +191,7 @@ class DataMovement:
             bits += transfer.payload_bits
         rounds = len(record.attribution.round_keys)
         path = record.path
-        memory_class = self.class_by_hop.get(path, MemoryClass.UNCLASSIFIED)
+        memory_class = self.moves.class_of(path)
         self._add(self.moves, path, bits, rounds, memory_class)
 
     def hold_registered(
@@ -338,10 +357,12 @@ def _as_row(counts: "_Counts") -> dict:
 class _PathCounts:
     """One kind's tally: the total, a row per path, a row per class.
 
-    class_by_path is the class each path crossed, kept so a path row can
-    name it without the reader parsing the path's text.
+    class_of gives an event's memory class. class_by_path is the class
+    each path crossed, kept so a path row can name it without the reader
+    parsing the path's text.
     """
 
+    class_of: Callable[[str], MemoryClass]
     total: _Counts = dataclasses.field(default_factory=_Counts)
     by_path: dict = dataclasses.field(default_factory=dict)
     by_class: dict = dataclasses.field(default_factory=dict)

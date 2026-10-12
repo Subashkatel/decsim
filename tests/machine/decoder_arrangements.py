@@ -5,7 +5,7 @@ alone and as the strong tier alone (belief matching too), and switching
 from a weak tier that reports a confidence to each strong tier: the
 arrangements of the decoder experiments that ran in September 2026,
 at their distance-3 task, p = 0.001 and one microsecond rounds. The
-arrangements differ only in their switching slot and decoder rows, so a
+arrangements differ only in their switching part and decoder rows, so a
 check that holds on one machine holds on every decoder the tree ships.
 """
 
@@ -25,9 +25,8 @@ import decsim.escalation.threshold_sources as threshold_sources
 import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
-import decsim.settings as machine_settings
-import decsim.topology.slotted as slotted
-import decsim.windows.settings as window_settings
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -53,8 +52,8 @@ CONFIDENCES = {
 }
 
 
-def machine() -> machine_settings.MachineSettings:
-    """Every section but the switching slot and the decoder rows.
+def machine() -> graph.Machine:
+    """Every part but the switching part and the decoder rows.
 
     The weak base with every hop one cycle of its side's clock. One
     window plan for all sixteen: switching needs the lookahead tail
@@ -66,10 +65,10 @@ def machine() -> machine_settings.MachineSettings:
         DISTANCE, PHYSICAL_ERROR_PROBABILITY, ROUND_PERIOD_MICROSECONDS
     )
     fabric = link_cards.strong_side(weak_graph.fabric)
-    graph_base = dataclasses.replace(weak_graph, fabric=fabric)
-    base = slotted.resolved(graph_base)
-    windows = dataclasses.replace(base.windows, terminal_policy="lookahead")
-    return dataclasses.replace(base, windows=windows, weak_decoder=None)
+    base = dataclasses.replace(weak_graph, fabric=fabric)
+    windows = base.held(machines.WINDOWS)
+    lookahead = dataclasses.replace(windows, terminal_policy="lookahead")
+    return base.with_held(machines.WINDOWS, lookahead)
 
 
 def decoder_unit(kind: str, clock) -> decoder_settings.DecoderPoolSettings:
@@ -82,18 +81,17 @@ def decoder_unit(kind: str, clock) -> decoder_settings.DecoderPoolSettings:
     )
 
 
-def weak_only(kind: str) -> machine_settings.MachineSettings:
+def weak_only(kind: str) -> graph.Machine:
     """The weak tier alone, decoding every window in the fridge."""
     weak_decoder = decoder_unit(kind, FRIDGE_CLOCK)
-    base = machine()
-    return dataclasses.replace(base, weak_decoder=weak_decoder)
+    weak = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
+    return machine().with_part(weak)
 
 
-def strong_only(kind: str) -> machine_settings.MachineSettings:
+def strong_only(kind: str) -> graph.Machine:
     """The strong tier alone, decoding every window at room temperature."""
     strong_decoder = decoder_unit(kind, ROOM_CLOCK)
-    base = machine()
-    return dataclasses.replace(base, strong_decoder=strong_decoder)
+    return machines.strong_alone(machine(), strong_decoder)
 
 
 def switching(weak_kind: str, strong_kind: str):
@@ -112,17 +110,9 @@ def switching(weak_kind: str, strong_kind: str):
         threshold=threshold,
         strong_window=strong_window,
     )
-    base = machine()
-    windows = window_settings.switching_windows(base.windows, strong_window)
-    weak_decoder = decoder_unit(weak_kind, FRIDGE_CLOCK)
     strong_decoder = decoder_unit(strong_kind, ROOM_CLOCK)
-    return dataclasses.replace(
-        base,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching_slot,
-    )
+    weak = weak_only(weak_kind)
+    return machines.with_strong_tier(weak, strong_decoder, switching_slot)
 
 
 ARRANGEMENTS = {

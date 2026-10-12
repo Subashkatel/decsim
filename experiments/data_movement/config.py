@@ -47,8 +47,7 @@ def every_hop_copies(distance: int) -> graph.Machine:
     observation = dataclasses.replace(
         base.observation, trace="chrome", data_movement=True
     )
-    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    with_pool = base.with_part(weak_pool)
+    with_pool = base.with_record(machines.WEAK_POOL, weak_decoder)
     fabric = weak_tier_fabric()
     return dataclasses.replace(
         with_pool, fabric=fabric, observation=observation
@@ -79,8 +78,7 @@ def switching(distance: int) -> graph.Machine:
     strong_decoder = linear_pool(
         constants.strong_decode_microseconds_per_round, clocks.ROOM_CLOCK, 1
     )
-    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    weak_tier = copies.with_part(weak_pool)
+    weak_tier = copies.with_record(machines.WEAK_POOL, weak_decoder)
     strong_link = machine_file.record(
         fabrics.ClockedLink, constants.strong_link
     )

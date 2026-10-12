@@ -5,7 +5,7 @@
     decsim info [<record name>]
 
 params prints every settable path of one task's machine (the first, or
-the --only one; a graph's paths for a task built from a graph) with its
+the --only one), at its parts' names, with its
 value as it would be written, its record's default where the run file
 moved it, and the assignment that set it; then each constants file the
 run read, every value with its source.
@@ -16,8 +16,8 @@ OMNeT++'s `-q params` for decsim's settings tree.
 info prints one record's parameters, their units and defaults, and for
 each part the records its slot takes, so a researcher swaps a part
 (`path.type=NAME`) without reading the code. With no name it prints
-every slot a machine has, from MachineSettings down, and the records
-each takes, as sst-info lists every element it can load.
+every kind of part and every slot below it, and the records each takes,
+as sst-info lists every element it can load.
 """
 
 import argparse
@@ -31,8 +31,8 @@ import decsim.parameters.fields as fields
 import decsim.parameters.kinds as kinds
 import decsim.parameters.tree as tree
 import decsim.parameters.units as units
-import decsim.settings as machine_settings
 import decsim.topology.constants as constants_module
+import decsim.topology.part_kinds as part_kinds
 
 _NO_ORIGIN = ""
 _RUN_FILE_ONLY = "run file only"
@@ -56,7 +56,7 @@ def params(argv: list) -> None:
     put_in_force(parsed.set)
     study = experiment.load_one_task(parsed.run_file, parsed.only)
     task = study.tasks[0]
-    root = settings_root(task)
+    root = task.machine
     every_assignment = _assignments_or_refusal()
     applied = tree.apply(root, every_assignment)
     settings = tree.settings_of(root)
@@ -96,13 +96,18 @@ def info(argv: list) -> None:
 
 
 def every_slot() -> dict:
-    """(record class, field name): the records that slot takes.
+    """Each slot by its written name: the records it takes.
 
-    Every slot reached from MachineSettings through the records its
-    slots take, each record read once.
+    Every kind of part, by its name, then every slot reached through the
+    records a kind or a slot takes, as record.field, each record read
+    once.
     """
     slots = {}
-    waiting = [machine_settings.MachineSettings]
+    waiting = []
+    for kind in part_kinds.KINDS:
+        offered = kinds.records_for(kind.hint)
+        slots[kind.name] = offered
+        waiting.extend(offered)
     seen = set()
     while waiting:
         record_class = waiting.pop()
@@ -112,13 +117,6 @@ def every_slot() -> dict:
         offered = _add_slots_of(record_class, slots)
         waiting.extend(offered)
     return slots
-
-
-def settings_root(task: Any) -> Any:
-    """What a task's paths name: its graph if built from one, its machine."""
-    if task.graph is not None:
-        return task.graph
-    return task.machine
 
 
 def put_in_force(flag_texts: list) -> None:
@@ -143,7 +141,7 @@ def add_set_argument(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="PATH=VALUE",
-        help="set a parameter, e.g. weak_decoder.unit_count=3; repeat it, "
+        help="set a parameter, e.g. weak.unit_count=3; repeat it, "
         "a later one winning; `decsim params` lists the paths",
     )
 
@@ -216,21 +214,21 @@ def _add_slots_of(record_class: type, slots: dict) -> list:
         if parameter.kind != fields.RECORD:
             continue
         offered = kinds.records_for(parameter.hint)
-        slots[(record_class, parameter.name)] = offered
+        owner = kinds.written_name(record_class)
+        slots[f"{owner}.{parameter.name}"] = offered
         every_offered.extend(offered)
     return every_offered
 
 
 def _print_every_slot() -> None:
-    """Each slot as record.field, and the names of the records it takes."""
+    """Each slot by its name, and the names of the records it takes."""
     print("# slot: the records it takes; `decsim info NAME` prints one")
     lines = []
     slots = every_slot()
-    for (record_class, field_name), offered in slots.items():
-        owner = kinds.written_name(record_class)
+    for slot, offered in slots.items():
         names = [kinds.written_name(record) for record in offered]
         listed = ", ".join(sorted(names))
-        lines.append(f"{owner}.{field_name}: {listed}")
+        lines.append(f"{slot}: {listed}")
     for line in sorted(lines):
         print(line)
 

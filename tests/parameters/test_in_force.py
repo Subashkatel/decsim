@@ -11,6 +11,7 @@ import decsim.experiments.collect as collect
 import decsim.parameters.fields as fields
 import decsim.parameters.in_force as in_force
 import decsim.parameters.tree as tree
+import decsim.presets.machines as machines
 import decsim.topology.constants as constants_module
 import tests.experiments.run_files as run_files
 
@@ -19,6 +20,11 @@ ORIGIN = "--set"
 
 def _assignment(pattern: str, written) -> tree.Assignment:
     return tree.Assignment(pattern, written, ORIGIN)
+
+
+def _unit_count(task: collect.Task, pool_name: str) -> int:
+    pool = task.machine.part(pool_name)
+    return pool.settings.unit_count
 
 
 def test_nothing_is_in_force_outside_a_load():
@@ -31,41 +37,41 @@ def test_nothing_is_in_force_outside_a_load():
 
 def test_every_task_built_inside_takes_the_assignments():
     machine = run_files.minimal_machine()
-    unit_count = _assignment("weak_decoder.unit_count", 2)
+    unit_count = _assignment("weak.unit_count", 2)
 
     with in_force.in_force([unit_count]):
         first = collect.Task("first", machine)
         second = collect.Task("second", machine)
     after = collect.Task("after", machine)
 
-    assert first.machine.weak_decoder.unit_count == 2
-    assert second.machine.weak_decoder.unit_count == 2
-    assert after.machine.weak_decoder.unit_count == 1
+    assert _unit_count(first, machines.WEAK_POOL) == 2
+    assert _unit_count(second, machines.WEAK_POOL) == 2
+    assert _unit_count(after, machines.WEAK_POOL) == 1
 
 
 def test_an_assignment_no_task_reaches_is_refused_with_the_near_path():
     machine = run_files.minimal_machine()
-    misspelt = _assignment("weak_decoder.unit_cont", 2)
+    misspelt = _assignment("weak.unit_cont", 2)
 
     with pytest.raises(fields.ParameterError) as refused:
         with in_force.in_force([misspelt]):
             collect.Task("first", machine)
 
     message = str(refused.value)
-    assert "--set weak_decoder.unit_cont=2 reaches no parameter" in message
-    assert "Did you mean weak_decoder.unit_count" in message
+    assert "--set weak.unit_cont=2 reaches no parameter" in message
+    assert "Did you mean weak.unit_count" in message
 
 
 def test_an_assignment_one_task_reaches_is_not_refused_for_the_others():
     minimal = run_files.minimal_machine()
     switching = run_files.switching_machine()
-    strong = _assignment("strong_decoder.unit_count", 2)
+    strong = _assignment("strong.unit_count", 2)
 
     with in_force.in_force([strong]):
         collect.Task("weak_only", minimal)
         switched = collect.Task("switching", switching)
 
-    assert switched.machine.strong_decoder.unit_count == 2
+    assert _unit_count(switched, machines.STRONG_POOL) == 2
 
 
 def test_a_misspelt_constant_is_refused_with_the_near_constant(tmp_path):
@@ -83,7 +89,7 @@ def test_a_misspelt_constant_is_refused_with_the_near_constant(tmp_path):
 
 def test_the_assignments_in_force_are_none_outside_a_load():
     machine = run_files.minimal_machine()
-    unit_count = _assignment("weak_decoder.unit_count", 2)
+    unit_count = _assignment("weak.unit_count", 2)
 
     with in_force.in_force([unit_count]):
         inside = in_force.current()

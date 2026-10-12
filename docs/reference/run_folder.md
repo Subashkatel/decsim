@@ -164,11 +164,11 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `release` | the unit writing the correction out |
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for outside the unit. A strong backend's queue holds the unit, so `backend_queue_wait` is inside |
 | `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the other forced-class solve's remaining time under `complementary_gap`, and zero for an escalated window whose strong decode began after the verdict |
-| `selection_wait` | the verdict, or the committing decode's end when later, to its answer leaving for the frame: a finished strong answer kept in its unit's output slot until the verdict's selection has crossed `weak_decoder_to_strong_decoder`, which a speculative strong decode under `run_both_at_once` waits for, and zero for every other window |
+| `selection_wait` | the verdict, or the committing decode's end when later, to its answer leaving for the frame: a finished strong answer kept in its unit's output slot until the verdict's selection has crossed `weak_to_strong`, which a speculative strong decode under `run_both_at_once` waits for, and zero for every other window |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
 | `dd_per_window` | the boundary handoff into the window: the first boundary sent to it, to the last landing, zero for a window no boundary reaches |
-| `output_link_per_window` | the answer's first send toward the Pauli frame, to the frame accepting it: one hop on the `direct` route, and `strong_decoder_to_weak_decoder`, the weak chip's commit and `weak_decoder_to_frame` for a strong answer `through_weak_chip` |
+| `output_link_per_window` | the answer's first send toward the Pauli frame, to the frame accepting it: one hop on the `direct` route, and `strong_to_weak`, the weak chip's commit and `weak_to_frame` for a strong answer `through_weak_chip` |
 | `frame_commit` | the frame accepting a correction, to it being committed |
 | `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |
 | `buffer0_first_round_to_frame` | the window's first round in that syndrome buffer, to the frame |
@@ -302,7 +302,7 @@ event happens.
 | Column | What it is |
 | --- | --- |
 | `task_id`, the swept paths, `algorithm`, `seed` | the shot |
-| `path` | the part, at its settings path: `weak_decoder.units`, `weak_decoder.queue`, `strong_decoder.units`, `strong_decoder.queue`, `decoder_manager` |
+| `path` | the part, at its settings path: `weak.units`, `weak.queue`, `strong.units`, `strong.queue` (each pool at its part's name), `decoder_manager` |
 | `statistic` | the statistic the part declares, such as `busy_units` or `queued` |
 | `field` | `count` for a count; `area`, `span` and `peak` for a level over time |
 | `value` | the field's value, in the statistic's unit; ticks are picoseconds |
@@ -330,8 +330,9 @@ but `peak` adds over shots. A part the run does not build has no rows.
 | `switching` | `escalated`, `speculative_selected` | count | windows escalated; escalations that took the running speculative decode |
 | `switching` | `held`, `held_cancelled` | count | strong windows held for their release conditions; held ones dropped for a kept weak result |
 
-`<tier>` is `weak_decoder` or `strong_decoder`, and `<store>`
-`weak_syndrome_buffer` or `strong_syndrome_buffer`. A distribution's
+`<tier>` is a pool's part name, `weak` or `strong` on a preset, and
+`<store>` a store's, `weak_buffer` or `strong_buffer`; a switching
+part's statistics sit at its own name. A distribution's
 fields are `count`, `total`, and `minimum` and `maximum` once it holds
 a value.
 

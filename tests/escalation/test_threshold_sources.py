@@ -21,7 +21,7 @@ import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
 import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
-import decsim.settings as machine_settings
+import decsim.topology.graph as graph
 import decsim.windows.schemes.sliding as sliding_scheme
 import tests.escalation.test_strong_window_shapes as shape_tests
 
@@ -497,11 +497,14 @@ CALIBRATION_TABLE = (
 GATE_FACTS = {"distance": 3, "physical_error_probability": 0.008}
 
 
-def _gate_on(threshold) -> machine_settings.MachineSettings:
+def _gate_on(threshold) -> graph.Machine:
     """The gate's switching card, d 3 and p 0.008, on this threshold."""
-    settings = shape_tests.gate_switching()
-    switching = dataclasses.replace(settings.switching, threshold=threshold)
-    return dataclasses.replace(settings, switching=switching)
+    gate = shape_tests.gate_switching()
+    switching_part = gate.part(machines.SWITCHING)
+    switching = dataclasses.replace(
+        switching_part.settings, threshold=threshold
+    )
+    return gate.with_record(machines.SWITCHING, switching)
 
 
 def _online_gate(physical_error_probability=0.008):
@@ -512,9 +515,9 @@ def _online_gate(physical_error_probability=0.008):
         target_escalation_rate=0.2,
         max_escalation_rate=0.5,
     )
-    settings = _gate_on(online)
+    gate = _gate_on(online)
     workload = machines.memory_workload(3, physical_error_probability, 30)
-    return dataclasses.replace(settings, workload=workload)
+    return gate.with_held("workload", workload)
 
 
 @pytest.mark.parametrize(
@@ -571,13 +574,16 @@ def test_a_round_period_sweep_finds_its_table_row_by_its_facts(tmp_path):
     )
     table = threshold_sources.TableThreshold.Settings(table_path)
     whole = _gate_on(table)
-    half_qpu = dataclasses.replace(whole.qpu, round_period_microseconds=0.5)
-    half = dataclasses.replace(whole, qpu=half_qpu)
+    whole_qpu = whole.held(machines.QPU)
+    half_qpu = dataclasses.replace(whole_qpu, round_period_microseconds=0.5)
+    half = whole.with_held(machines.QPU, half_qpu)
 
     half_read = half.at_task()
     whole_read = whole.at_task()
-    half_threshold = half_read.switching.threshold
-    whole_threshold = whole_read.switching.threshold
+    half_switching = half_read.part(machines.SWITCHING)
+    whole_switching = whole_read.part(machines.SWITCHING)
+    half_threshold = half_switching.settings.threshold
+    whole_threshold = whole_switching.settings.threshold
 
     assert half_threshold.threshold_decibels == 12.0
     assert whole_threshold.threshold_decibels == 13.0
@@ -611,10 +617,12 @@ def _threshold_at_commit_rounds(gate, commit_rounds: int):
     scheme = sliding_scheme.SlidingWindowScheme.Settings(
         commit_rounds=commit_rounds, buffer_rounds=2
     )
-    windows = dataclasses.replace(gate.windows, scheme=scheme)
-    settings = dataclasses.replace(gate, windows=windows)
-    placed = settings.at_task()
-    return placed.switching.threshold
+    gate_windows = gate.held(machines.WINDOWS)
+    windows = dataclasses.replace(gate_windows, scheme=scheme)
+    resized = gate.with_held(machines.WINDOWS, windows)
+    placed = resized.at_task()
+    switching_part = placed.part(machines.SWITCHING)
+    return switching_part.settings.threshold
 
 
 def test_a_table_read_from_two_folders_names_its_tasks_alike(tmp_path):
@@ -773,8 +781,10 @@ def test_two_online_tasks_whose_rates_print_alike_have_two_ids():
 
     plain = collect.Task("plain", plain_gate, {})
     nudged = collect.Task("nudged", nudged_gate, {})
-    (plain_operation,) = plain.machine.workload.operations
-    (nudged_operation,) = nudged.machine.workload.operations
+    plain_workload = plain.machine.held("workload")
+    nudged_workload = nudged.machine.held("workload")
+    (plain_operation,) = plain_workload.operations
+    (nudged_operation,) = nudged_workload.operations
 
     assert str(plain_operation.circuit) == str(nudged_operation.circuit)
     assert plain.strong_id() != nudged.strong_id()

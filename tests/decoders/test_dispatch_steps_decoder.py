@@ -8,6 +8,8 @@ lines 1065-1113). The region is Stim's rotated memory circuit at d = 5
 and 15 rounds, 360 detectors, the traced region's own shape.
 """
 
+import dataclasses
+
 import pytest
 
 import decsim.config as config
@@ -16,24 +18,25 @@ import decsim.decoders.dispatch_steps.measurements as measurements
 import decsim.decoders.relay_belief_propagation.decoder as relay
 import decsim.engine as engine_module
 import decsim.links.channel as channel_module
+import decsim.links.settings as link_settings
 import decsim.presets.link_cards as link_cards
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.seeding as seeding
-import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.escalation.test_strong_window_shapes as shape_tests
 from tests.decoders import windows
 
 REQUIREMENT = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
 DISPATCHER = dispatch_steps.DISPATCHER
 WORKER = dispatch_steps.WORKER
 ECHO = dispatch_steps.ECHO
-# every path of today's card, each end where the reference card puts it
-SLOTTED_ROUTES = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
-ROCE_V2_GPU_CARD = fabrics.card(
-    link_cards.ROCE_V2_GPU_FABRIC, SLOTTED_ROUTES, {}, None
-)
-NVQLINK_GPU_CARD = fabrics.card(
-    link_cards.NVQLINK_GPU_FABRIC, SLOTTED_ROUTES, {}, None
+# the legs an escalation's echo crosses: up the cable, the host's poll
+# of the strong store, and down the cable to the frame
+ESCALATION_LEGS = (
+    "weak_to_strong",
+    "strong_buffer_to_strong",
+    "strong_to_frame",
 )
 
 
@@ -128,15 +131,20 @@ def test_the_host_path_hands_the_dispatcher_to_a_worker_at_launch():
     ]
 
 
-def _escalation_round_trip(profile, echo_bits: int) -> int:
+def _card_of(fabric) -> link_settings.FabricSettings:
+    """The gate's switching machine on the fabric, every hop priced."""
+    gate = shape_tests.gate_switching()
+    on_fabric = dataclasses.replace(gate, fabric=fabric)
+    at_task = on_fabric.at_task()
+    layout = graph_layout.layout_of(at_task)
+    return layout.card
+
+
+def _escalation_round_trip(card, echo_bits: int) -> int:
     """The legs an echo of `echo_bits` crosses out and back, in ticks."""
-    legs = (
-        profile.weak_decoder_to_strong_decoder,
-        profile.strong_buffer_to_strong_decoder,
-        profile.strong_decoder_to_frame,
-    )
     ticks = 0
-    for leg in legs:
+    for path_name in ESCALATION_LEGS:
+        leg = card.path_settings(path_name)
         ticks += leg.channel.propagation_latency_ticks
         ticks += _wire_ticks(leg.channel, echo_bits)
     return ticks
@@ -150,14 +158,14 @@ def _wire_ticks(channel, bits: int) -> int:
 
 
 @pytest.mark.parametrize(
-    "profile, echo_bits, echo_microseconds",
+    "fabric, echo_bits, echo_microseconds",
     [
-        (ROCE_V2_GPU_CARD, 128, 4.5),
-        (NVQLINK_GPU_CARD, 256, 3.839),
+        (link_cards.ROCE_V2_GPU_FABRIC, 128, 4.5),
+        (link_cards.NVQLINK_GPU_FABRIC, 256, 3.839),
     ],
 )
 def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
-    profile, echo_bits, echo_microseconds
+    fabric, echo_bits, echo_microseconds
 ):
     """Backline 2609.09270 Table III, 4.5 us; NVQLink 2510.25213, 3.839 us.
 
@@ -174,7 +182,8 @@ def test_an_echo_on_a_published_card_costs_its_measured_round_trip(
     steps = backend.steps(ticket)
     echo_steps = (steps[0], steps[1], steps[2], steps[5])
     echo_ticks = sum(step.ticks for step in echo_steps)
-    round_trip = _escalation_round_trip(profile, echo_bits) + echo_ticks
+    card = _card_of(fabric)
+    round_trip = _escalation_round_trip(card, echo_bits) + echo_ticks
     assert round_trip == config.microseconds_to_ticks(echo_microseconds)
 
 

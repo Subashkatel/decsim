@@ -2,8 +2,8 @@
 
 measure_shot reads the run's listeners, its RunResult, and the code card
 and cadence its QPU ran, and no other component. Transfers are named by
-role, not by wire; the tier that decodes the plan's windows decides
-which wire carries each role (MachineSettings.window_tier).
+role, not by wire; the layout names the hop that carries each role
+(build/layout.py).
 """
 
 import collections
@@ -31,8 +31,8 @@ import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
+import decsim.topology.graph as topology_graph
 
 # Latency points, in path order, in microseconds per window unless noted.
 # Every point is one span, and its comment names the two ticks it runs
@@ -370,11 +370,11 @@ def measure_shot(
     run_dir receives the log file and the Chrome trace when asked; None
     writes nothing. only_traced_shot writes a named trace path as it stands.
     """
-    settings = shot.task.machine
+    graph = shot.task.machine
     task_id = shot.task.strong_id()
     label = shot_label(task_id, shot.seed)
     observation = shot.machine.observation
-    if run_dir is not None and settings.observation.writes_log:
+    if run_dir is not None and graph.observation.writes_log:
         run_folder.write_log(observation, run_dir, label)
     if run_dir is not None:
         _write_trace(shot, run_dir, label, only_traced_shot)
@@ -384,7 +384,7 @@ def measure_shot(
     )
     layout = shot.machine.layout
     return _measurement(
-        settings,
+        graph,
         observation,
         shot.result,
         layout=layout,
@@ -1055,14 +1055,13 @@ def chain_load(samples: dict, window_period_us: float) -> float:
 
 
 def active_decoder_kind(
-    settings: machine_settings.MachineSettings,
+    layout: layout_module.Layout,
 ) -> Optional[Union[str, float]]:
-    """The kind of the tier that decodes the plan's windows."""
-    tier = settings.window_tier.word
-    tier_settings = settings.decoder_settings_for(tier)
-    if tier_settings is None:
+    """The kind of the entry pool, which decodes the plan's windows."""
+    pool_settings = layout.entry_pool.settings
+    if pool_settings is None:
         return None
-    return tier_settings.algorithm.name
+    return pool_settings.algorithm.name
 
 
 def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
@@ -1114,7 +1113,7 @@ def parallel_processes_needed(
 
 
 def _measurement(
-    settings: machine_settings.MachineSettings,
+    graph: topology_graph.Machine,
     observation: observation_module.Observation,
     result: result_records.RunResult,
     *,
@@ -1138,26 +1137,26 @@ def _measurement(
     executed_rounds = sum(owner_rounds)
     rounds_per_output = _one_length(owner_rounds)
     samples, window_tiers = collect_samples(
-        observation, result, settings.observation, layout
+        observation, result, graph.observation, layout
     )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
-    recorded = recorded_windows(observation, settings.observation)
+    recorded = recorded_windows(observation, graph.observation)
     weak_growth = reaction_growth_rate(recorded, window_records.WEAK_POOL_ID)
     strong_growth = reaction_growth_rate(
         recorded, window_records.STRONG_POOL_ID
     )
     missed_windows, first_miss_us = deadline_misses(
-        recorded, settings.observation.reaction_deadline_microseconds
+        recorded, graph.observation.reaction_deadline_microseconds
     )
     throughput = _throughput_per_microsecond(observation, decoded_window_count)
     referee = _referee_counts(observation)
     commit_rounds = code.commit_rounds()
     window_period_us = commit_rounds * round_period_microseconds
     load = chain_load(samples, window_period_us)
-    algorithm = active_decoder_kind(settings)
+    algorithm = active_decoder_kind(layout)
     managers = observation.statistics.groups[decoders_part.MANAGERS_PATH]
     queued = managers.queued.peak
     round_period_ticks = config_module.microseconds_to_ticks(
@@ -1179,7 +1178,7 @@ def _measurement(
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
-    confidence = _shot_confidence(settings, observation, seed, record_options)
+    confidence = _shot_confidence(layout, observation, seed, record_options)
     window_outcomes = _shot_window_outcomes(observation, owners)
     statistics = observation.statistics.rows()
     statistic_values = observation.statistics.value_counts()
@@ -1242,7 +1241,7 @@ def _measurement(
 
 
 def _shot_confidence(
-    settings: machine_settings.MachineSettings,
+    layout: layout_module.Layout,
     observation: observation_module.Observation,
     seed: int,
     record_options: collect.RecordOptions,
@@ -1253,7 +1252,7 @@ def _shot_confidence(
         return None
     windows = ledger.windows()
     is_sampled = record_options.samples_confidence_of(seed)
-    signal = settings.switching.confidence.name
+    signal = layout.entry_switching().confidence.name
     sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 

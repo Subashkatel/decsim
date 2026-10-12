@@ -19,7 +19,6 @@ import decsim.machine as machine_module
 import decsim.ports as ports
 import decsim.presets.machines as machines
 import decsim.records.windows as window_records
-import decsim.topology.slotted as slotted
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.settings as window_settings
@@ -35,10 +34,10 @@ PAYLOAD_ROWS = (
 
 
 def boundary_transfers(link_traffic: dict) -> list:
-    """Every decoder_to_decoder transfer of a run's traffic report."""
+    """Every weak_to_weak transfer of a run's traffic report."""
     found = []
     for transfer in link_traffic["transfers"]:
-        if transfer["path"] == "decoder_to_decoder":
+        if transfer["path"] == "weak_to_weak":
             found.append(transfer)
     return found
 
@@ -61,8 +60,7 @@ def _source_committing(commit_lo: int, commit_hi: int):
 def reference_run(distance: int):
     """One shot of the weak baseline at that distance."""
     weak_base = machines.weak_baseline(distance, 0.003, 1.0)
-    settings = slotted.resolved(weak_base)
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(weak_base, 0)
     return machine.run()
 
 
@@ -235,17 +233,16 @@ def _pinned_run(strong_window, distance: int, seed: int = 0):
     The row under test replaces the redo window in the switching slot,
     which is where the build reads it from.
     """
-    settings = shape_tests.weak_base_switching(distance, 0.008, 1.0)
-    switching = dataclasses.replace(
-        settings.switching, strong_window=strong_window
-    )
+    graph = shape_tests.weak_base_switching(distance, 0.008, 1.0)
+    edge = graph.part(machines.SWITCHING)
+    switching = dataclasses.replace(edge.settings, strong_window=strong_window)
+    held_windows = graph.held(machines.WINDOWS)
     windows = window_settings.switching_windows(
-        settings.windows, switching.strong_window
+        held_windows, switching.strong_window
     )
-    settings = dataclasses.replace(
-        settings, switching=switching, windows=windows
-    )
-    machine = machine_module.Machine.build(settings, seed)
+    graph = graph.with_record(machines.SWITCHING, switching)
+    graph = graph.with_held(machines.WINDOWS, windows)
+    machine = machine_module.Machine.build(graph, seed)
     return machine.run()
 
 
@@ -398,14 +395,14 @@ def _parallel_run(distance: int, seed: int):
     is counted is visible in the bits.
     """
     weak_base = machines.weak_baseline(distance, 0.005, 1.0)
-    settings = slotted.resolved(weak_base)
+    sliding_windows = weak_base.held(machines.WINDOWS)
     windows = declared_run.windows_on(
-        settings.windows, parallel_scheme.ParallelWindowScheme
+        sliding_windows, parallel_scheme.ParallelWindowScheme
     )
     sparse = boundary_payloads.SparseSeamList.Settings()
     windows = dataclasses.replace(windows, boundary_payload=sparse)
-    settings = dataclasses.replace(settings, windows=windows)
-    machine = machine_module.Machine.build(settings, seed)
+    graph = weak_base.with_held(machines.WINDOWS, windows)
+    machine = machine_module.Machine.build(graph, seed)
     return machine.run()
 
 
@@ -413,7 +410,7 @@ def _hand_offs(result) -> dict:
     """(source window, destination window) to the bits its message took."""
     charged = {}
     for transfer in result.link_traffic["transfers"]:
-        if transfer["path"] != "decoder_to_decoder":
+        if transfer["path"] != "weak_to_weak":
             continue
         relation = transfer["attribution"]["relation"]
         source = _window_key(relation["source_window_key"])

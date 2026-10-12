@@ -11,6 +11,7 @@ import decsim.decoders.settings as decoder_settings
 import decsim.experiments.sweeps as sweeps
 import decsim.links.settings as link_settings
 import decsim.presets.clocks as clocks
+import decsim.presets.machines as machines
 
 config = sweeps.load_beside(__file__, "config.py")
 constants = config.constants
@@ -38,17 +39,19 @@ STRONG_SIDE_HOPS = (
 )
 
 
-def metadata(cell: dict, settings: decsim.MachineSettings) -> dict:
+def metadata(cell: dict, task: decsim.Task) -> dict:
     """Every cell the study's results show for a task, in column order."""
-    weak_decoder = settings.weak_decoder
-    weak_write = settings.links.path_settings("controller_to_weak_buffer")
+    machine = task.machine
+    card = task.layout.card
+    weak_decoder = machine.part(machines.WEAK_POOL).settings
+    weak_write = card.path_settings("controller_to_weak_buffer")
     weak_link = link_cell(weak_write, "fridge", clocks.FRIDGE_CLOCK)
     input_word = WORDS[weak_decoder.copies_input]
     fold_word = WORDS[weak_decoder.copies_boundary_fold]
     weak_fetch_cycles = weak_decoder.engine.fetch_cycles_per_round
     strong_side = NO_STRONG_SIDE_CELLS
-    if settings.switching is not None:
-        strong_side = strong_side_cells(settings)
+    if task.layout.edges:
+        strong_side = strong_side_cells(task)
     return {
         "links.controller_to_weak_buffer": weak_link,
         "workload.arguments.physical_error_probability": (
@@ -56,27 +59,28 @@ def metadata(cell: dict, settings: decsim.MachineSettings) -> dict:
         ),
         "qpu.distance": cell["distance"],
         "qpu.round_period_microseconds": constants.round_period_microseconds,
-        "weak_decoder.input": input_word,
-        "weak_decoder.boundary_fold": fold_word,
-        "weak_decoder.engine.fetch_cycles_per_round": weak_fetch_cycles,
+        "weak.input": input_word,
+        "weak.boundary_fold": fold_word,
+        "weak.engine.fetch_cycles_per_round": weak_fetch_cycles,
         **strong_side,
     }
 
 
-def strong_side_cells(settings: decsim.MachineSettings) -> dict:
+def strong_side_cells(task: decsim.Task) -> dict:
     """Block 4's escalation, strong pool and strong-side hops, on the host."""
-    links = settings.links
+    card = task.layout.card
     room = clocks.ROOM_CLOCK
-    threshold = settings.switching.threshold
+    threshold = task.layout.entry_switching().threshold
     escalation = {
         "kind": "switching",
         "gap_threshold_db": threshold.threshold_decibels,
         "strong_window": "redo_window",
     }
-    strong_decoder = pool_cell(settings.strong_decoder, "room")
+    strong_pool = task.machine.part(machines.STRONG_POOL)
+    strong_decoder = pool_cell(strong_pool.settings, "room")
     cells = {"escalation": escalation, "strong_decoder": strong_decoder}
     for hop in STRONG_SIDE_HOPS:
-        path = links.path_settings(hop)
+        path = card.path_settings(hop)
         cells[f"links.{hop}"] = link_cell(path, "room", room)
     return cells
 

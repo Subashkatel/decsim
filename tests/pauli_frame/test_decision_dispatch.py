@@ -10,12 +10,28 @@ the same instant, and only the controller's own costs stand
 (tests/controller/test_instruction_output.py).
 """
 
+import dataclasses
+
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
-import decsim.links.link_profiles as link_profiles
 import decsim.pauli_frame.decision_dispatch as decision_dispatch
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
+
+
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
 
 
 class RecordingController:
@@ -45,7 +61,7 @@ def dispatch_over(link):
 
 
 def priced_fabric(engine):
-    reference = link_profiles.logical_reference_profile()
+    reference = REFERENCE_LAYOUT.card
     return fabric_module.LinkFabric(reference, engine)
 
 

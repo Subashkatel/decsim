@@ -49,10 +49,12 @@ import decsim.presets.clocks as clocks
 import decsim.presets.experiment_one as experiment_one
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
+import decsim.records.routes as route_records
 import decsim.seeding as seeding
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.naive_online as naive_online
@@ -118,13 +120,12 @@ def online_threshold() -> graph.Machine:
 def bounded_links() -> graph.Machine:
     # every path carries exactly its nominal traffic, so jitter queues
     base = weak_alone()
-    card = link_cards.bandwidth_limited_card(
+    fabric = link_cards.bandwidth_limited_fabric(
         syndrome_bits_per_round=SYNDROME_BITS_PER_ROUND,
         round_microseconds=ROUND_PERIOD_MICROSECONDS,
         commit_rounds=DISTANCE,
         buffer_rounds=DISTANCE,
     )
-    fabric = fabrics.CardFabric(card)
     return dataclasses.replace(base, fabric=fabric)
 
 
@@ -185,8 +186,7 @@ def ported_buffer() -> graph.Machine:
     store = ported_syndrome_buffer.PortedSyndromeBufferSettings(
         read_write_ports=1, cycles_per_access=2, access_latency_cycles=1
     )
-    ported = graph.Part(machines.WEAK_STORE, store, fabrics.FRIDGE)
-    return base.with_part(ported)
+    return base.with_record(machines.WEAK_STORE, store)
 
 
 def protocol_links() -> graph.Machine:
@@ -212,14 +212,10 @@ def protocol_links() -> graph.Machine:
         credit_latency_cycles=1,
         clock=clocks.FRIDGE_CLOCK,
     )
-    to_store = _protocol_path("controller_to_weak_buffer", reliable)
-    to_unit = _protocol_path("weak_buffer_to_weak_decoder", credit)
-    fabric = fabrics.PathLinks(
-        controller_to_weak_buffer=to_store,
-        weak_buffer_to_weak_decoder=to_unit,
-        base=base.fabric,
+    to_store = _on_protocol(
+        base, "controller.rounds", "weak_buffer.rounds", reliable
     )
-    return dataclasses.replace(base, fabric=fabric)
+    return _on_protocol(to_store, "weak_buffer.reads", "weak.rounds", credit)
 
 
 def chip_side_costs() -> graph.Machine:
@@ -243,7 +239,7 @@ def chip_side_costs() -> graph.Machine:
         result_blocks_unit=True,
     )
     events = detection_event_settings.DetectionEventSettings(
-        formed_at=("weak_decoder",), latency_cycles=2, cycles_per_round=1
+        formed_at=(machines.WEAK_POOL,), latency_cycles=2, cycles_per_round=1
     )
     events_part = graph.Part("detection_events", events)
     at_the_decoder = priced_units.with_part(events_part)
@@ -337,9 +333,9 @@ class _CountingClock:
 
 @functools.cache
 def _run_file(name: str) -> types.ModuleType:
-    """experiments/<name>/run.py as a module, for its machine functions."""
-    path = EXPERIMENTS / name / "run.py"
-    module_name = f"regression_run_file_{name}"
+    """experiments/<name>/config.py as a module, for its machine functions."""
+    path = EXPERIMENTS / name / "config.py"
+    module_name = f"regression_config_{name}"
     specification = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
@@ -365,29 +361,31 @@ def _weak_alone_on_windows(
         )
     if boundary_policy is not None:
         windows = dataclasses.replace(windows, boundary_policy=boundary_policy)
-    windows_part = graph.Part(machines.WINDOWS, windows)
-    return base.with_part(windows_part)
+    return base.with_held(machines.WINDOWS, windows)
 
 
-def _protocol_path(path_name: str, protocol) -> fabrics.FixedPath:
-    """One path, one fridge cycle at 8 bits, on a packet protocol.
+def _on_protocol(machine, source: str, target: str, protocol) -> graph.Machine:
+    """The wire from source to target, a fridge cycle at 8 bits, on protocol.
 
     A clocked link has no protocol, so the path is written out whole:
-    the reference path's payload on the clocked wire, its channel on
-    the protocol.
+    the reference path of the hop's role on the clocked wire, its
+    channel on the protocol.
     """
-    reference = link_profiles.logical_reference_profile()
-    reference_path = getattr(reference, path_name)
+    hop = route_records.hop_between(source.split(".")[0], target.split(".")[0])
+    card = graph_layout.layout_of(machine.at_task()).card
+    (role,) = [path.role for path in card.paths if path.name == hop]
+    reference = link_profiles.reference_path(role, hop)
     wire = fabrics.ClockedLink(
         clock=clocks.FRIDGE_CLOCK,
         latency_cycles=1,
         bits_per_cycle=8.0,
         source="the regression lock's protocol hop",
     )
-    priced = wire.priced(path_name, reference_path, None)
+    priced = wire.priced(hop, reference, None)
     channel = dataclasses.replace(priced.channel, protocol=protocol)
-    path = dataclasses.replace(priced, channel=channel)
-    return fabrics.FixedPath(path)
+    link = fabrics.FixedPath(dataclasses.replace(priced, channel=channel))
+    without = machine.without_wire(source, target)
+    return without.with_wires(graph.Wire(source, target, link))
 
 
 def _recording_derive(derive, seed_rows: list):

@@ -59,11 +59,10 @@ class PoolSettings:
     """One pool as the root derives it from its tier's settings.
 
     As a gem5 FUPool takes its units as one parameter
-    (src/cpu/o3/FUPool.py:49). name is "default" for the tier that
-    decodes the plan's windows and "strong" for a switching run's strong
-    tier; unit_count is <tier>.units; capacity_bits is one unit's memory
-    (None unbounded); copies_input is <tier>.input; blocks_unit is
-    result_blocks_unit on the default pool and false on the strong one;
+    (src/cpu/o3/FUPool.py:49). name is the pool's part name;
+    unit_count is <pool>.units; capacity_bits is one unit's memory
+    (None unbounded); copies_input is <pool>.input; blocks_unit is
+    result_blocks_unit on an entry pool and false on every other;
     formation is the tier's event-detection logic when
     detection_events.formed_at seats it at the tier's decoder, else
     None.

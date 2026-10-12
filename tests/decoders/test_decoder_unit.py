@@ -15,8 +15,8 @@ BITS_PER_ROUND = 2
 
 
 def _unit(capacity_bits=None):
-    memory = decoder_memory.DecoderMemory("default", 0, capacity_bits)
-    return decoder_unit.DecoderUnit("default", 0, memory)
+    memory = decoder_memory.DecoderMemory("weak", 0, capacity_bits)
+    return decoder_unit.DecoderUnit("weak", 0, memory)
 
 
 def _job(label, rounds=1):
@@ -102,8 +102,8 @@ def test_a_second_window_waits_while_a_landed_one_fills_the_memory():
     raised.
     """
     three_rounds_bits = 3 * BITS_PER_ROUND
-    memory = decoder_memory.DecoderMemory("default", 0, three_rounds_bits)
-    unit = decoder_unit.DecoderUnit("default", 0, memory)
+    memory = decoder_memory.DecoderMemory("weak", 0, three_rounds_bits)
+    unit = decoder_unit.DecoderUnit("weak", 0, memory)
     landed = _carrying_job("landed", 3)
     unit.admit(landed)
     landed.decoder_input = memory.deposit(landed)

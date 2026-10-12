@@ -10,7 +10,7 @@ or log 99 = 4.595.
 
 The timelines run one memory, mem1, on the declared fabric
 (tests/declared_run.py): W0's input lands at 20 us, its answer rides
-weak_decoder_to_frame (2 us) and commits 1 us later; W1 waits for W0's
+weak_to_frame (2 us) and commits 1 us later; W1 waits for W0's
 boundary (decoder_to_decoder, 0.5 us), then its own input (5 us).
 """
 
@@ -28,6 +28,7 @@ import decsim.decoders.ensembles as ensembles
 import decsim.engine as engine_module
 import decsim.escalation.verdicts as verdicts
 import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
 import tests.declared_run as declared_run
@@ -326,7 +327,7 @@ def test_a_disagreement_escalates_the_window_to_the_strong_pool():
     The serial escalation of the declared switching machine follows
     (tests/escalation/test_deadlines.py): the strong decode runs 39-69
     us and its answer lands at 73 us. W1's members agree, so it is kept;
-    its boundary crosses strong_decoder_to_weak_decoder (4 us) and its
+    its boundary crosses strong_to_weak (4 us) and its
     input (5 us), and it decodes 78-88 us, landing at 90.
     """
     members = (
@@ -375,13 +376,12 @@ class _WindowMember(decoder_module.DecoderBase):
 def _weak_only(pooling, members) -> machine_module.Machine:
     """The declared weak-only machine over mem1, its pool an ensemble."""
     memory = declared_run.memory_operation(1)
-    settings = declared_run.weak_only_settings(rounds=9, operations=[memory])
+    graph = declared_run.weak_only_graph(rounds=9, operations=[memory])
     ensemble = ensembles.EnsembleDecoder.Settings(
         members=members, pooling=pooling
     )
-    weak = dataclasses.replace(settings.weak_decoder, algorithm=ensemble)
-    settings = dataclasses.replace(settings, weak_decoder=weak)
-    return declared_run.run_machine(settings)
+    pooled = graph.with_settings(machines.WEAK_POOL, algorithm=ensemble)
+    return declared_run.run_machine(pooled)
 
 
 def _layered(members) -> machine_module.Machine:
@@ -391,14 +391,13 @@ def _layered(members) -> machine_module.Machine:
     switching = declared_run.declared_switching(
         confidence=confidence, verdict=agreement
     )
-    settings = declared_fabric.switching_settings(
+    graph = declared_fabric.switching_graph(
         rounds=9, escalated_windows=set(), switching=switching
     )
     vote = ensembles.Vote.Settings()
     ensemble = ensembles.EnsembleDecoder.Settings(members=members, pooling=vote)
-    weak = dataclasses.replace(settings.weak_decoder, algorithm=ensemble)
-    settings = dataclasses.replace(settings, weak_decoder=weak)
-    return declared_run.run_machine(settings)
+    voting = graph.with_settings(machines.WEAK_POOL, algorithm=ensemble)
+    return declared_run.run_machine(voting)
 
 
 def _records_by_window(machine: machine_module.Machine) -> dict:

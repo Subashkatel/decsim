@@ -56,7 +56,7 @@ def _job_with_rounds() -> decoding_records.DecodeJob:
         payloads=payloads,
         label="job(41, 7)",
     )
-    job.input_source_name = "weak syndrome buffer"
+    job.input_source_name = "weak_buffer"
     return job
 
 
@@ -80,15 +80,15 @@ def test_a_staged_job_claims_its_rounds_before_it_reads_them():
     that went at retirement, and pay for a round another job paid for.
     """
     engine = engine_module.Engine()
-    settings = event_settings.DetectionEventSettings(
-        formed_at=("weak_decoder",)
-    )
-    placement = formation.SeatedFormation(None, settings)
-    tier = detection_events.TierFormation(placement, "weak_decoder")
+    settings = event_settings.DetectionEventSettings(formed_at=("weak",))
+    # the weak pool is a decoder seat: it keeps the landed width
+    decoder_seats = frozenset({"weak"})
+    placement = formation.SeatedFormation(None, settings, decoder_seats)
+    tier = detection_events.TierFormation(placement, "weak")
     staging = decoder_memory_transfer.DecoderInputStaging(
         None, engine, formation=tier
     )
-    memory = decoder_memory.DecoderMemory("default", 0, None)
+    memory = decoder_memory.DecoderMemory("weak", 0, None)
     resident = _job_with_rounds()
     resident.input_key = "window 7's request"
     memory.deposit(resident)
@@ -105,7 +105,7 @@ def test_a_folded_copy_is_booked_by_the_side_that_makes_it():
     staging = _staging(engine)
     copies = _CopyRecorder()
     staging.trace.copy_made.connect(copies.copy_made)
-    memory = decoder_memory.DecoderMemory("default", 0, None)
+    memory = decoder_memory.DecoderMemory("weak", 0, None)
     job = _landed_in(memory)
     landed = job.decoder_input
     masked = dataclasses.replace(landed)
@@ -114,13 +114,13 @@ def test_a_folded_copy_is_booked_by_the_side_that_makes_it():
 
     assert job.decoder_input is masked
     assert memory.input_of(job) is landed
-    assert copies.made == [(3, "unit default#0 memory", "masked view")]
+    assert copies.made == [(3, "unit weak#0 memory", "masked view")]
 
 
 def test_a_fold_in_place_is_written_by_the_memory_that_holds_the_input():
     engine = engine_module.Engine()
     staging = _staging(engine)
-    memory = decoder_memory.DecoderMemory("default", 0, None)
+    memory = decoder_memory.DecoderMemory("weak", 0, None)
     job = _landed_in(memory)
     masked = dataclasses.replace(job.decoder_input)
 
@@ -140,13 +140,10 @@ def test_each_tier_folds_its_boundary_where_its_own_setting_says():
     reading_in_place = declared_run.switching_run(
         rounds=9, escalates=True, strong_copies_input=False
     )
-    settings = reading_in_place.settings
-    weak = dataclasses.replace(
-        settings.weak_decoder, copies_boundary_fold=False
-    )
-    folding_in_place = dataclasses.replace(settings, weak_decoder=weak)
+    graph = reading_in_place.graph
+    folding_in_place = graph.with_settings("weak", copies_boundary_fold=False)
     in_place_machine = machine_module.Machine.build(folding_in_place, 0)
-    copying_machine = machine_module.Machine.build(settings, 0)
+    copying_machine = machine_module.Machine.build(graph, 0)
 
     in_place = in_place_machine.run()
     copying = copying_machine.run()
@@ -164,7 +161,7 @@ def test_a_companion_that_joins_after_the_fold_reads_the_written_rounds():
     """
     engine = engine_module.Engine()
     staging = _staging(engine)
-    memory = decoder_memory.DecoderMemory("default", 0, None)
+    memory = decoder_memory.DecoderMemory("weak", 0, None)
     first = _job_with_rounds()
     first.input_key = "window 7's request"
     first.decoder_input = memory.deposit(first)

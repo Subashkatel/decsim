@@ -1,11 +1,10 @@
 """The strong re-decode: the window side of one escalate edge.
 
 One StrongRedecode serves each edge, from its source pool to its target
-pool, with its own policy, verdict costs, shape and held windows; a
-slotted machine has one, from the weak pool to the strong one. When the
-policy escalates a source result, StrongRedecode asks the shape
-for the strong window's job, sends the window's selection over
-weak_decoder_to_strong_decoder, tells the decoder side to await the
+pool, with its own policy, verdict costs, shape and held windows. When
+the policy escalates a source result, StrongRedecode asks the shape
+for the strong window's job, sends the window's selection over the
+edge's forward hop, tells the decoder side to await the
 result, and submits the job now or when the conditions the shape
 declared fire. A held window whose rounds the strong syndrome buffer
 lacks has them read out of the weak syndrome buffer and carried over the

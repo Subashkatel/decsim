@@ -23,39 +23,46 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
-import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
-import decsim.settings as machine_settings
+import decsim.records.routes as route_records
+import decsim.topology.fabrics as fabrics
 import decsim.windows.settings as window_settings
 
-# every declared stage of the fabric, in microseconds
+# every declared stage off the hops, in microseconds
 DECLARED_MICROSECONDS = {
-    "qpu_to_controller": 2.0,
     "readout_to_bits": 3.0,
     "packing": 0.0,
-    "controller_to_weak_buffer": 4.0,
-    "controller_to_strong_buffer": 7.0,
-    "weak_buffer_to_weak_decoder": 5.0,
-    "weak_decoder_to_strong_decoder": 3.0,
-    "strong_buffer_to_strong_decoder": 6.0,
     "weak": 10.0,
     "strong": 30.0,
-    "weak_decoder_to_frame": 2.0,
-    "decoder_to_decoder": 0.5,
-    "strong_decoder_to_frame": 4.0,
-    # the strong answer's hop to the weak chip, as long as the one home
-    "strong_decoder_to_weak_decoder": 4.0,
     "frame": 1.0,
-    "frame_to_controller": 2.0,
-    "controller_to_qpu": 2.0,
 }
+# every hop's declared latency, in microseconds, by its role
+# (records/routes.py HopRole.key)
+DECLARED_HOP_MICROSECONDS = {
+    "readout": 2.0,
+    "write_written": 4.0,
+    "write_landed": 7.0,
+    "read_written": 5.0,
+    "read_landed": 6.0,
+    "forward": 3.0,
+    "answer_fridge": 2.0,
+    "same_pool_fridge": 0.5,
+    "answer_host": 4.0,
+    # the strong answer's hop to the weak chip, as long as the one home
+    "reverse": 4.0,
+    # a host pool's hand-on to itself, as long as its store's read
+    "same_pool_host": 6.0,
+    "decision": 2.0,
+    "command": 2.0,
+}
+DECLARED_SOURCE = "declared tick"
 # the controller and the frame price their cycles on a 2 MHz clock, so
 # every declared microsecond above is a whole number of its cycles and
 # every declared instant lands on one of its edges
@@ -94,22 +101,6 @@ def declared_cycles(name):
 
 
 ROUND_MICROSECONDS = 1.0
-# every path whose latency the card carries, in the order the reference
-# card declares them
-DECLARED_EDGE_NAMES = (
-    "qpu_to_controller",
-    "controller_to_weak_buffer",
-    "controller_to_strong_buffer",
-    "weak_buffer_to_weak_decoder",
-    "weak_decoder_to_strong_decoder",
-    "strong_buffer_to_strong_decoder",
-    "weak_decoder_to_frame",
-    "decoder_to_decoder",
-    "strong_decoder_to_frame",
-    "frame_to_controller",
-    "controller_to_qpu",
-    "strong_decoder_to_weak_decoder",
-)
 # 0.5 nats, which decibels_to_nats gives back exactly
 ESCALATION_THRESHOLD_DECIBELS = threshold_sources.nats_to_decibels(0.5)
 DECLARED_CONFIDENCE_SOURCE = decoding_records.SoftOutputSource(
@@ -181,37 +172,21 @@ def windows_on(windows, scheme_row=None, **sizes):
     return dataclasses.replace(windows, scheme=scheme)
 
 
-def declared_edge(base_edge, latency_microseconds):
-    """One path of the card, at a declared latency and no rate bound."""
-    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
-    channel = link_settings.ChannelSettings(
-        base_edge.channel.name,
-        latency_ticks,
-        None,
-        "declared tick",
-    )
-    return link_settings.PathSettings(
-        channel,
-        base_edge.default_payload,
-        base_edge.actual_payload_source,
-        excludes_receiver_processing=base_edge.excludes_receiver_processing,
-    )
+def declared_fabric(**microseconds):
+    """Every hop at its role's declared latency, on an unbounded wire.
 
-
-def declared_profile():
-    """The reference card with every latency replaced by a declared tick."""
-    base = link_profiles.logical_reference_profile()
-    declared_edges = {}
-    for name in DECLARED_EDGE_NAMES:
-        base_edge = getattr(base, name)
-        latency = DECLARED_MICROSECONDS[name]
-        declared_edges[name] = declared_edge(base_edge, latency)
-    # the declared qpu tick is wire time only; readout classification
-    # prices the controller processing separately
-    declared_edges["qpu_to_controller"] = dataclasses.replace(
-        declared_edges["qpu_to_controller"], excludes_receiver_processing=True
-    )
-    return dataclasses.replace(base, **declared_edges)
+    microseconds replace a role's latency, by its key. The declared
+    readout is wire time only, so the controller prices its own
+    classification.
+    """
+    latencies = {**DECLARED_HOP_MICROSECONDS, **microseconds}
+    links = {}
+    for key, latency in latencies.items():
+        is_readout = key == route_records.READOUT
+        links[key] = fabrics.TimedLink(
+            latency, None, is_readout, DECLARED_SOURCE
+        )
+    return fabrics.RoleLinks(**links)
 
 
 def declared_controller(**changes):
@@ -295,9 +270,9 @@ def declared_workload(operations, rounds):
     )
 
 
-def run_machine(settings, seed=0, probes=()):
+def run_machine(graph, seed=0, probes=()):
     """Build the machine, attach the test's probes to it, run it."""
-    machine = machine_module.Machine.build(settings, seed)
+    machine = machine_module.Machine.build(graph, seed)
     for probe in probes:
         probe.attach(machine)
     machine.run()
@@ -438,13 +413,13 @@ def weak_only_run(*, seed=0, probes=(), **changes):
 
     One complete machine keeps every path fixed while a test replaces
     only the component card whose reaction-time shift it measures.
-    changes are weak_only_settings' own.
+    changes are weak_only_graph's own.
     """
-    settings = weak_only_settings(**changes)
-    return run_machine(settings, seed, probes)
+    graph = weak_only_graph(**changes)
+    return run_machine(graph, seed, probes)
 
 
-def weak_only_settings(
+def weak_only_graph(
     *,
     rounds=6,
     operations=None,
@@ -456,39 +431,26 @@ def weak_only_settings(
     observation=None,
     clock=None,
 ):
-    """The weak-only baseline's settings, not yet built."""
+    """The weak-only baseline's graph, not yet built."""
     workload = declared_workload(operations, rounds)
     weak_microseconds = DECLARED_MICROSECONDS["weak"]
     algorithm = decoders.PresetLatencyDecoder.Settings(weak_microseconds)
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, copies_input=copies_input, engine=DECLARED_ENGINE
     )
-    links = declared_profile()
     if controller is None:
         controller = declared_controller()
     if observation is None:
         observation = observe_settings.ObservationSettings(
             log_component_io=io_trace
         )
-    qpu = declared_qpu()
-    frame = declared_frame()
-    settings = machine_settings.MachineSettings(
-        clock=clock,
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak_decoder,
-        links=links,
-        controller=controller,
-        pauli_frame=frame,
-        observation=observation,
-    )
+    records = [workload, declared_qpu(), controller, declared_frame()]
     if windows is not None:
-        settings = dataclasses.replace(settings, windows=windows)
-    if weak_syndrome_buffer is not None:
-        settings = dataclasses.replace(
-            settings, weak_syndrome_buffer=weak_syndrome_buffer
-        )
-    return settings
+        records.append(windows)
+    machine = machines.base(
+        *records, clock=clock, observation=observation, fabric=declared_fabric()
+    )
+    return machines.with_pool(machine, weak_decoder, store=weak_syndrome_buffer)
 
 
 def strong_only_run(
@@ -504,20 +466,18 @@ def strong_only_run(
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace, record_switching_windows=record
     )
-    qpu = declared_qpu()
-    links = declared_profile()
-    controller = declared_controller()
-    frame = declared_frame()
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        strong_decoder=strong_decoder,
-        links=links,
-        controller=controller,
-        pauli_frame=frame,
+    machine = machines.base(
+        workload,
+        declared_qpu(),
+        declared_controller(),
+        declared_frame(),
         observation=observation,
+        fabric=declared_fabric(),
     )
-    return run_machine(settings, seed)
+    with_strong = machines.with_pool(
+        machine, strong_decoder, machines.STRONG_POOL, fabrics.HOST
+    )
+    return run_machine(with_strong, seed)
 
 
 class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
@@ -635,28 +595,25 @@ def switching_run(
         threshold_cycles=threshold_cycles,
         switch_cycles=switch_cycles,
     )
-    links = declared_profile()
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace,
         record_switching_windows=record,
     )
-    qpu = declared_qpu(round_microseconds)
-    controller = declared_controller()
-    frame = declared_frame()
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        decoder_manager=decoder_manager,
-        switching=switching,
-        links=links,
-        controller=controller,
-        pauli_frame=frame,
+    machine = machines.base(
+        workload,
+        declared_qpu(round_microseconds),
+        windows,
+        decoder_manager,
+        declared_controller(),
+        declared_frame(),
         observation=observation,
+        fabric=declared_fabric(),
     )
-    return run_machine(settings, seed, probes)
+    with_weak = machines.with_pool(machine, weak_decoder)
+    with_strong = machines.with_strong_tier(
+        with_weak, strong_decoder, switching
+    )
+    return run_machine(with_strong, seed, probes)
 
 
 def log_tick(log_lines, needle):

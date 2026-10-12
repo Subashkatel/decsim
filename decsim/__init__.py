@@ -2,15 +2,16 @@
 
 A readout leaves the QPU, crosses the controller, the buffers and the
 decoder, and comes back as an instruction; every hop is priced. The
-root is decsim.machine.Machine, built from a MachineSettings; the
-experiments layer over it is decsim.experiments, whose command is
-`decsim`; decsim.experiments.collect runs the shots of a sweep's tasks.
+root is decsim.machine.Machine, built from a machine's graph
+(decsim/topology/graph.py); the experiments layer over it is
+decsim.experiments, whose command is `decsim`;
+decsim.experiments.collect runs the shots of a sweep's tasks.
 
 A run file reaches the names it builds an experiment from at the root:
-decsim.Experiment, Task, grid, Sweep, CollectionSettings, MachineSettings and
-Machine. Each loads its module on first use (PEP 562 module
-__getattr__), so `import decsim.config` and the command line start
-without the machine's imports.
+decsim.Experiment, Task, grid, Sweep, CollectionSettings and Machine.
+Each loads its module on first use (PEP 562 module __getattr__), so
+`import decsim.config` and the command line start without the machine's
+imports.
 """
 
 import importlib
@@ -20,7 +21,6 @@ _MODULE_OF = {
     "Task": "decsim.experiments.collect",
     "grid": "decsim.experiments.experiment",
     "CollectionSettings": "decsim.experiments.collection",
-    "MachineSettings": "decsim.settings",
     "Machine": "decsim.machine",
     "Sweep": "decsim.experiments.sweeps",
 }

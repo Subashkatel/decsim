@@ -13,20 +13,30 @@ rather than guessed: the grouped rows still sum to the run's total.
 """
 
 import decsim.observe.data_movement as data_movement
+import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 
 
 def test_a_structure_no_row_and_no_prefix_names_is_unclassified():
     """Unclassified, not guessed, so the grouped rows still sum."""
-    unknown = data_movement.memory_class_of_structure("a new cache")
+    unknown = data_movement.memory_class_of_structure(
+        "a new cache", frozenset()
+    )
 
     assert unknown is data_movement.MemoryClass.UNCLASSIFIED
 
 
-def test_a_link_path_no_row_names_is_unclassified():
-    unknown = data_movement.memory_class_of_link_path("controller_to_moon")
+def test_a_hop_the_card_does_not_price_is_unclassified():
+    movement = _movement()
+    unpriced = _Delivered(payload_bits=8, header_bits=0)
+    unpriced.path = "controller_to_moon"
 
-    assert unknown is data_movement.MemoryClass.UNCLASSIFIED
+    movement.transfer_delivered(unpriced)
+    counted = movement.json_value()
+
+    row = counted["moves_by_path"]["controller_to_moon"]
+    unclassified = data_movement.MemoryClass.UNCLASSIFIED
+    assert row["memory_class"] == unclassified.value
 
 
 def test_a_move_counts_the_header_and_known_payload_bits_the_ledger_charges():
@@ -36,7 +46,7 @@ def test_a_move_counts_the_header_and_known_payload_bits_the_ledger_charges():
     (src/point-to-point/model/point-to-point-net-device.cc lines 528 and
     243); a transfer of unknown size still carries its header.
     """
-    movement = data_movement.DataMovement()
+    movement = _movement()
     framed = _Delivered(payload_bits=44, header_bits=16)
     unknown_size = _Delivered(payload_bits=None, header_bits=16)
 
@@ -55,7 +65,7 @@ def test_a_move_counts_the_rounds_its_attribution_names():
     its range reads 4 to 9 of a six-round stream while the move carries
     rounds 4 to 6 (windows/round_retention.py, read_keys_for_bounds).
     """
-    movement = data_movement.DataMovement()
+    movement = _movement()
     terminal = _Delivered(payload_bits=24, header_bits=0)
     terminal.attribution = transfer_records.TransferAttribution(
         operation_id=1,
@@ -73,7 +83,7 @@ def test_a_move_counts_the_rounds_its_attribution_names():
 
 
 def test_the_same_round_emitted_twice_is_one_round():
-    movement = data_movement.DataMovement()
+    movement = _movement()
 
     once = _Readout(1, 1)
     again = _Readout(1, 1)
@@ -112,19 +122,25 @@ class _Delivered:
     def __init__(self, payload_bits, header_bits: int) -> None:
         self.transfer = _Transfer(payload_bits, header_bits)
         self.attribution = _Attribution()
-        self.path = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
+        self.path = route_records.hop_between("weak_buffer", "weak")
+
+
+def _movement() -> data_movement.DataMovement:
+    """A tally of a run whose card prices no hop and that has no store."""
+    classes = data_movement.MemoryClasses({}, frozenset())
+    return data_movement.DataMovement(classes)
 
 
 def test_the_ledger_keeps_the_most_one_history_held_at_each_seat():
-    ledger = data_movement.DataMovement()
+    ledger = _movement()
 
-    ledger.formation_state_held("weak_decoder", 1, 8)
-    ledger.formation_state_held("weak_decoder", 1, 16)
-    ledger.formation_state_held("weak_decoder", 2, 8)
+    ledger.formation_state_held("weak", 1, 8)
+    ledger.formation_state_held("weak", 1, 16)
+    ledger.formation_state_held("weak", 2, 8)
     ledger.formation_state_held("controller", 1, 4)
 
     counted = ledger.json_value()
     assert counted["formation_state_bits_by_seat"] == {
         "controller": 4,
-        "weak_decoder": 16,
+        "weak": 16,
     }

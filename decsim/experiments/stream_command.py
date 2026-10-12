@@ -45,10 +45,10 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.stream_measures as stream_measures
 import decsim.frontends.memory_stream as memory_stream
 import decsim.machine as machine_module
-import decsim.pauli_frame.pauli_frame as pauli_frame
+import decsim.presets.machines as machines
 import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.refusals as refusals
-import decsim.settings as machine_settings
+import decsim.topology.graph as topology_graph
 
 # the sources whose rounds the flip stream samples the same way
 STIM_SOURCES = ("stim_device", "flip_stream")
@@ -77,9 +77,9 @@ def stream_record(
     task: collect.Task, rounds: int, warmup: int, seed: int
 ) -> dict:
     """The task's memory streamed for the rounds, measured as one record."""
-    settings = stream_settings(task, rounds, warmup)
+    graph = stream_machine(task, rounds, warmup)
     machine = machine_module.Machine.build(
-        settings, seed, online_threshold=task.online_threshold
+        graph, seed, online_threshold=task.online_threshold
     )
     measures = stream_measures.StreamMeasures(machine)
     result = machine.run()
@@ -96,40 +96,38 @@ def stream_record(
     }
 
 
-def stream_settings(
+def stream_machine(
     task: collect.Task, rounds: int, warmup: int
-) -> machine_settings.MachineSettings:
+) -> topology_graph.Machine:
     """The task's machine running its memory as a stream that folds.
 
     A task with no Pauli frame gets the default one, whose commit is
     what a window's measures are read at.
     """
     _refuse_a_graph_of_a_new_shape(task)
-    settings = task.machine
-    _refuse_what_a_stream_does_not_build(settings, task.layout)
-    workload = _stream_workload(settings.workload, rounds)
+    machine = task.machine
+    _refuse_what_a_stream_does_not_build(machine, task.layout)
+    workload = machine.held("workload")
+    streamed = _stream_workload(workload, rounds)
+    qpu = machine.held("qpu")
     source = flip_stream_device.FlipStreamDevice.Settings()
-    qpu = dataclasses.replace(settings.qpu, source=source)
+    flip_qpu = dataclasses.replace(qpu, source=source)
     first_after_warmup = warmup + 1
     first_recorded = max(
-        settings.observation.first_recorded_round, first_after_warmup
+        machine.observation.first_recorded_round, first_after_warmup
     )
     observation = dataclasses.replace(
-        settings.observation,
+        machine.observation,
         folds_windows=True,
         warmup_rounds=warmup,
         first_recorded_round=first_recorded,
     )
-    frame = settings.pauli_frame
-    if frame is None:
-        frame = pauli_frame.PauliFrameConfig()
-    return dataclasses.replace(
-        settings,
-        workload=workload,
-        qpu=qpu,
-        observation=observation,
-        pauli_frame=frame,
-    )
+    machine = dataclasses.replace(machine, observation=observation)
+    machine = machine.with_held("workload", streamed)
+    machine = machine.with_held("qpu", flip_qpu)
+    if machine.held("pauli_frame") is None:
+        machine = machines.with_frame(machine)
+    return machine
 
 
 def _stream_workload(workload, rounds: int):
@@ -153,11 +151,13 @@ def _refuse_a_graph_of_a_new_shape(task: collect.Task) -> None:
 
 
 def _refuse_what_a_stream_does_not_build(
-    settings: machine_settings.MachineSettings,
+    machine: topology_graph.Machine,
     layout: layout_module.Layout,
 ) -> None:
     """The first shape a stream does not build yet, refused."""
-    reasons = [check(settings) for check in _STREAM_CHECKS]
+    reasons = [check(machine) for check in _STREAM_CHECKS]
+    reasons.append(_an_absorbing_strong_window(layout))
+    reasons.append(_bulk_strong_decoding(machine))
     reasons.append(_batching(layout))
     for reason in reasons:
         if reason is None:
@@ -167,8 +167,8 @@ def _refuse_what_a_stream_does_not_build(
         )
 
 
-def _another_source(settings) -> Optional[str]:
-    source_name = settings.qpu.source.name
+def _another_source(machine) -> Optional[str]:
+    source_name = machine.held("qpu").source.name
     if source_name in STIM_SOURCES:
         return None
     return (
@@ -177,32 +177,34 @@ def _another_source(settings) -> Optional[str]:
     )
 
 
-def _a_trace(settings) -> Optional[str]:
-    if settings.observation.trace == "off":
+def _a_trace(machine) -> Optional[str]:
+    if machine.observation.trace == "off":
         return None
     return "a stream keeps no trace, which grows with every round"
 
 
-def _a_log(settings) -> Optional[str]:
-    if settings.observation.log == "off":
+def _a_log(machine) -> Optional[str]:
+    if machine.observation.log == "off":
         return None
     return "a stream keeps no log, which grows with every round"
 
 
-def _a_data_movement_ledger(settings) -> Optional[str]:
-    if not settings.observation.data_movement:
+def _a_data_movement_ledger(machine) -> Optional[str]:
+    if not machine.observation.data_movement:
         return None
     return "a stream keeps no data movement ledger, which keeps every hop"
 
 
-def _a_window_outcome_ledger(settings) -> Optional[str]:
-    if not settings.observation.record_window_outcomes:
+def _a_window_outcome_ledger(machine) -> Optional[str]:
+    if not machine.observation.record_window_outcomes:
         return None
     return "a stream keeps no window outcomes, which keep every window"
 
 
-def _an_absorbing_strong_window(settings) -> Optional[str]:
-    switching = settings.switching
+def _an_absorbing_strong_window(
+    layout: layout_module.Layout,
+) -> Optional[str]:
+    switching = layout.entry_switching()
     if switching is None:
         return None
     strong_window = switching.strong_window
@@ -214,8 +216,8 @@ def _an_absorbing_strong_window(settings) -> Optional[str]:
     )
 
 
-def _bulk_strong_decoding(settings) -> Optional[str]:
-    if not settings.decoder_manager.bulk_strong:
+def _bulk_strong_decoding(machine) -> Optional[str]:
+    if not machine.held("decoder_manager").bulk_strong:
         return None
     return (
         "a merged batch files its stages under its own key, which a "
@@ -232,15 +234,14 @@ def _batching(layout: layout_module.Layout) -> Optional[str]:
     )
 
 
-# each shape a stream does not build yet, in the order a refusal names it
+# each shape of the observation or the QPU a stream does not build yet,
+# in the order a refusal names it; the layout's follow
 _STREAM_CHECKS = (
     _another_source,
     _a_trace,
     _a_log,
     _a_data_movement_ledger,
     _a_window_outcome_ledger,
-    _an_absorbing_strong_window,
-    _bulk_strong_decoding,
 )
 
 

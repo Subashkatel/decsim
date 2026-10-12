@@ -41,9 +41,8 @@ import decsim.frontends.settings as workload_settings
 import decsim.presets.clocks as clocks
 import decsim.presets.machines as machines
 import decsim.producers as producers
-import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
-import decsim.topology.slotted as slotted
+import decsim.topology.graph as graph
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -90,16 +89,16 @@ ALGORITHMS = {
     "relay_bp": RELAY_BP.Settings(),
     "union_find": UNION_FIND.Settings(timing=HOST_TIME),
 }
-# reference_machine's hops: (path, latency cycles, bits a cycle a lane,
+# reference_machine's hops: (role, latency cycles, bits a cycle a lane,
 # lanes), each on the fridge clock
 REFERENCE_HOPS = (
-    ("qpu_to_controller", 1, None, 1),
-    ("controller_to_weak_buffer", 1, 1.0, 8),
-    ("weak_buffer_to_weak_decoder", 1, None, 1),
-    ("decoder_to_decoder", 1, None, 1),
-    ("weak_decoder_to_frame", 1, None, 1),
-    ("frame_to_controller", 0, 32, 1),
-    ("controller_to_qpu", 22, 128, 1),
+    ("readout", 1, None, 1),
+    ("write_written", 1, 1.0, 8),
+    ("read_written", 1, None, 1),
+    ("same_pool_fridge", 1, None, 1),
+    ("answer_fridge", 1, None, 1),
+    ("decision", 0, 32, 1),
+    ("command", 22, 128, 1),
 )
 REFERENCE_SOURCE = "the reference machine's hops, in fridge cycles"
 # the control processor's issue pipeline, the reference machine's count
@@ -126,7 +125,7 @@ def minimal_machine(
     *,
     weak_decoder: Optional[str] = None,
     rounds_per_shot: int = ROUNDS_PER_SHOT,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The minimal machine at one task's cells.
 
     cells maps an axis path to the task's value there; a path it does
@@ -144,9 +143,8 @@ def minimal_machine(
         clock=clocks.FRIDGE_CLOCK, latency_cycles=1, source=READOUT_SOURCE
     )
     # the reference card with the readout one fridge cycle
-    fabric = fabrics.PathLinks(qpu_to_controller=readout)
-    graph_base = dataclasses.replace(weak_graph, fabric=fabric)
-    base = slotted.resolved(graph_base)
+    fabric = fabrics.RoleLinks(readout=readout)
+    base = dataclasses.replace(weak_graph, fabric=fabric)
     charged = PYMATCHING.Settings(
         preset_latency_microseconds=WEAK_DECODE_MICROSECONDS
     )
@@ -159,13 +157,14 @@ def minimal_machine(
         code_task, rounds_per_shot, distance, probability
     )
     workload = workload_settings.WorkloadSettings.running(made)
-    windows = base.windows
+    windows = base.held(machines.WINDOWS)
     commit_rounds = cells.get(COMMIT_ROUNDS_PATH)
     if commit_rounds is not None:
         windows = _windows_committing(windows, commit_rounds)
-    return dataclasses.replace(
-        base, weak_decoder=pool, workload=workload, windows=windows
-    )
+    weak = graph.Part(machines.WEAK_POOL, pool, fabrics.FRIDGE)
+    with_pool = base.with_part(weak)
+    with_workload = with_pool.with_held("workload", workload)
+    return with_workload.with_held(machines.WINDOWS, windows)
 
 
 def switching_machine(
@@ -173,7 +172,7 @@ def switching_machine(
     *,
     online: Optional[Mapping] = None,
     rounds_per_shot: int = ROUNDS_PER_SHOT,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The minimal machine switching from PyMatching to PyMatching.
 
     A window whose complementary gap is below the threshold is redone on
@@ -198,21 +197,11 @@ def switching_machine(
         threshold=threshold,
         strong_window=strong_window,
     )
-    windows = window_settings.switching_windows(
-        base.windows, switching.strong_window
-    )
     strong_decoder = decoder_pool(ALGORITHMS["pymatching"], clocks.ROOM_CLOCK)
-    return dataclasses.replace(
-        base,
-        windows=windows,
-        strong_decoder=strong_decoder,
-        switching=switching,
-    )
+    return machines.with_strong_tier(base, strong_decoder, switching)
 
 
-def reference_machine(
-    cells: Optional[Mapping] = None,
-) -> machine_settings.MachineSettings:
+def reference_machine(cells: Optional[Mapping] = None) -> graph.Machine:
     """The reference machine, the minimal one on priced hops.
 
     PyMatching decodes for real; every hop is priced in fridge cycles
@@ -222,9 +211,9 @@ def reference_machine(
     """
     base = minimal_machine(cells, weak_decoder="pymatching")
     fridge = clocks.FRIDGE_CLOCK
-    links_by_path = {}
-    for path_name, latency_cycles, bits_per_cycle, lane_count in REFERENCE_HOPS:
-        links_by_path[path_name] = fabrics.ClockedLink(
+    links_by_role = {}
+    for role, latency_cycles, bits_per_cycle, lane_count in REFERENCE_HOPS:
+        links_by_role[role] = fabrics.ClockedLink(
             clock=fridge,
             latency_cycles=latency_cycles,
             bits_per_cycle=bits_per_cycle,
@@ -232,25 +221,18 @@ def reference_machine(
             source=REFERENCE_SOURCE,
         )
     # the reference card with every hop of REFERENCE_HOPS priced
-    fabric = fabrics.PathLinks(**links_by_path)
-    routes = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
-    links = fabrics.card(fabric, routes, {}, None)
+    fabric = fabrics.RoleLinks(**links_by_role)
     controller = dataclasses.replace(
-        base.controller, decision_to_pulse_cycles=REFERENCE_ISSUE_CYCLES
+        base.held("controller"), decision_to_pulse_cycles=REFERENCE_ISSUE_CYCLES
     )
-    weak_store = dataclasses.replace(base.weak_syndrome_buffer, clock=fridge)
-    windows = dataclasses.replace(base.windows, clock=fridge)
-    manager = dataclasses.replace(base.decoder_manager, clock=fridge)
+    windows = dataclasses.replace(base.held(machines.WINDOWS), clock=fridge)
+    manager = dataclasses.replace(base.held("decoder_manager"), clock=fridge)
     observation = dataclasses.replace(base.observation, trace="chrome")
-    return dataclasses.replace(
-        base,
-        links=links,
-        controller=controller,
-        weak_syndrome_buffer=weak_store,
-        windows=windows,
-        decoder_manager=manager,
-        observation=observation,
-    )
+    priced = dataclasses.replace(base, fabric=fabric, observation=observation)
+    machine = priced.with_held("controller", controller)
+    machine = machine.with_held(machines.WINDOWS, windows)
+    machine = machine.with_held("decoder_manager", manager)
+    return machine.with_settings(machines.WEAK_STORE, clock=fridge)
 
 
 MACHINES = {
@@ -447,7 +429,7 @@ def _write_a_bare_task_record(experiment_dir, task_id: str) -> None:
 
 
 def _named_task(
-    settings: machine_settings.MachineSettings,
+    settings: graph.Machine,
     cells: Mapping,
     collection: collection_module.CollectionSettings,
     record_options: collect.RecordOptions,

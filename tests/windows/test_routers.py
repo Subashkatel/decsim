@@ -6,13 +6,11 @@ syndromes to it by a schedule fixed before the run (Sec. 5). On the
 declared fabric (tests/declared_run.py) two memories, mem1 on patch 1
 and mem2 on patch 2, each have two windows: W0's input lands at 20 us
 and W1's waits for W0's boundary. A decode takes 10 us, the answer
-rides weak_decoder_to_frame (2 us) and commits 1 us later. A pool past
-the first reads the weak store over its own hop, priced as
-weak_buffer_to_weak_decoder (5 us), and hands a boundary to itself as
-the weak pool does, over decoder_to_decoder (0.5 us).
+rides weak_to_frame (2 us) and commits 1 us later. A pool past the
+first reads the weak store over its own hop, priced as a written
+store's read (5 us), and hands a boundary to itself as the weak pool
+does, as a same-pool hop in the fridge (0.5 us).
 """
-
-import dataclasses
 
 import pytest
 
@@ -24,11 +22,8 @@ import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
 import decsim.topology.graph as graph
-import decsim.topology.graph_layout as graph_layout
-import decsim.topology.slotted as slotted
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
-import tests.machine.test_chains as chains
 import tests.topology.test_graph_layout as layout_tests
 
 SECOND_POOL = "fpga_b"
@@ -143,10 +138,7 @@ def _two_memories() -> graph.Machine:
         declared_run.memory_operation(1),
         declared_run.memory_operation(2),
     ]
-    settings = declared_run.weak_only_settings(rounds=9, operations=operations)
-    base = slotted.graph_of(settings)
-    fabric = chains.DeclaredHops(settings.links)
-    return dataclasses.replace(base, fabric=fabric)
+    return declared_run.weak_only_graph(rounds=9, operations=operations)
 
 
 def _routed_two_memories() -> graph.Machine:
@@ -157,14 +149,13 @@ def _routed_two_memories() -> graph.Machine:
 
 
 def _weak_pool():
-    settings = declared_run.weak_only_settings()
-    return settings.weak_decoder
+    weak_only = declared_run.weak_only_graph()
+    weak = weak_only.part(machines.WEAK_POOL)
+    return weak.settings
 
 
 def _run(declared: graph.Machine) -> machine_module.Machine:
-    layout = layout_tests.laid_out(declared)
-    entry_settings = graph_layout.entry_settings(declared)
-    machine = machine_module.Machine.build(entry_settings, 0, layout=layout)
+    machine = machine_module.Machine.build(declared, 0)
     machine.run()
     return machine
 

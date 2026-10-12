@@ -28,21 +28,21 @@ class _WindowManager:
         return self.backlog_rounds
 
 
-def test_the_default_pool_is_the_unnamed_lane_and_the_hosts_keeps_its_name():
-    chip = _DecoderManager("default", ["a"])
+def test_each_lane_is_its_pools_and_the_entry_pools_comes_first():
+    chip = _DecoderManager("weak", ["a"])
     host = _DecoderManager("strong", ["b", "c"])
     decoders = (chip, host)
     windows = _WindowManager(())
 
     view = run_views.backlog_view(windows, decoders, {})
 
-    assert view.per_lane == (("", 1), ("strong", 2))
+    assert view.per_lane == (("weak", 1), ("strong", 2))
     assert view.ready_jobs == 3
 
 
 def test_the_rounds_are_summed_per_operation_per_patch_and_over_the_run():
     """The window side counts each operation's rounds from its readouts."""
-    decoders = (_DecoderManager("default", []),)
+    decoders = (_DecoderManager("weak", []),)
     windows = _WindowManager(((1, "p0", 4), (2, "p0", 3), (3, "p1", 2)))
     rounds_read_out = {1: 6, 2: 3, 3: 8}
 

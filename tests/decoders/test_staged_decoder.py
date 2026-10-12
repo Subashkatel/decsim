@@ -22,6 +22,7 @@ import decsim.engine as engine_module
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.stage_records as stage_records
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -29,7 +30,6 @@ import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 
 MEGAHERTZ = 250.0
@@ -166,10 +166,9 @@ def memory_machine(decoder, circuit):
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=engine
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder
-    )
-    return machine_module.Machine.build(settings, 3)
+    base = machines.base(workload, qpu)
+    weak_alone = machines.with_pool(base, weak_decoder)
+    return machine_module.Machine.build(weak_alone, 3)
 
 
 def _algorithm_records(machine) -> list:

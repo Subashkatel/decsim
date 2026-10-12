@@ -82,10 +82,9 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.decoding as decoding_records
 import decsim.records.identity as identity_records
 import decsim.records.program as program_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
@@ -104,26 +103,28 @@ REPOSITORY = THIS_PATH.parents[2]
 # and of its readout round, which compares the data qubits as well
 BITS_PER_ROUND = 8
 READOUT_ROUND_BITS = 12
-# every hop of the weak-only fabric, in cycles of the fridge clock
+# every hop of the weak-only fabric, in cycles of the fridge clock, by
+# its role (records/routes.py HopRole.key): qpu_to_controller,
+# controller_to_weak_buffer, weak_buffer_to_weak, weak_to_weak and
+# weak_to_frame
 ONE_TIER_HOPS = {
-    "qpu_to_controller": 1,
-    "controller_to_weak_buffer": 1,
-    "weak_buffer_to_weak_decoder": 1,
-    "decoder_to_decoder": 1,
-    "weak_decoder_to_frame": 1,
+    "readout": 1,
+    "write_written": 1,
+    "read_written": 1,
+    "same_pool_fridge": 1,
+    "answer_fridge": 1,
 }
-# the two-tier fabric, every strong hop on a card of its own
+# the two-tier fabric, every strong hop on a card of its own: the strong
+# store's read and the strong pool's own boundary hop two cycles, the
+# escalation five, the strong answer and its reply to the weak side three
 TWO_TIER_HOPS = {
-    "qpu_to_controller": 1,
-    "controller_to_weak_buffer": 1,
-    "controller_to_strong_buffer": 1,
-    "weak_buffer_to_weak_decoder": 1,
-    "strong_buffer_to_strong_decoder": 2,
-    "weak_decoder_to_strong_decoder": 5,
-    "decoder_to_decoder": 1,
-    "weak_decoder_to_frame": 1,
-    "strong_decoder_to_frame": 3,
-    "strong_decoder_to_weak_decoder": 3,
+    **ONE_TIER_HOPS,
+    "write_landed": 1,
+    "read_landed": 2,
+    "same_pool_host": 2,
+    "forward": 5,
+    "answer_host": 3,
+    "reverse": 3,
 }
 HOPS_SOURCE = "a measurement test's hops, in fridge cycles"
 FRIDGE_CLOCK = clocks.FRIDGE_CLOCK
@@ -154,26 +155,26 @@ CHAIN = (
 )
 
 
-def fridge_hops(hops: dict, setup_cycles: Optional[dict] = None):
-    """The logical reference card, each named hop that many fridge cycles.
+def fridge_hops(
+    hops: dict, setup_cycles: Optional[dict] = None
+) -> fabrics.RoleLinks:
+    """The reference card, each named role's hops that many fridge cycles.
 
-    Every named hop is an unbounded wire; setup_cycles gives a hop a
-    per-transfer setup in the same cycles. A hop not named keeps the
+    Every named hop is an unbounded wire; setup_cycles gives a role a
+    per-transfer setup in the same cycles. A role not named keeps the
     reference card's numbers.
     """
     setup_cycles = setup_cycles or {}
-    links_by_path = {}
-    for path_name, latency_cycles in hops.items():
-        path_setup_cycles = setup_cycles.get(path_name, 0)
-        links_by_path[path_name] = fabrics.ClockedLink(
+    links_by_role = {}
+    for role, latency_cycles in hops.items():
+        role_setup_cycles = setup_cycles.get(role, 0)
+        links_by_role[role] = fabrics.ClockedLink(
             clock=FRIDGE_CLOCK,
             latency_cycles=latency_cycles,
-            setup_cycles_per_transfer=path_setup_cycles,
+            setup_cycles_per_transfer=role_setup_cycles,
             source=HOPS_SOURCE,
         )
-    fabric = fabrics.PathLinks(**links_by_path)
-    routes = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
-    return fabrics.card(fabric, routes, {}, None)
+    return fabrics.RoleLinks(**links_by_role)
 
 
 def charged(microseconds: float):
@@ -197,15 +198,13 @@ def cells_at(probability: float) -> dict:
     return cells
 
 
-def task_at(
-    settings: machine_settings.MachineSettings, probability: float = 0.001
-) -> collect.Task:
-    """The task of the settings at TASK_CELLS, at that error probability.
+def task_at(machine: graph.Machine, probability: float = 0.001) -> collect.Task:
+    """The task of the machine at TASK_CELLS, at that error probability.
 
-    The probability is the one the settings' circuit was built at.
+    The probability is the one the machine's circuit was built at.
     """
     cells = cells_at(probability)
-    return collect.Task("task", settings, cells)
+    return collect.Task("task", machine, cells)
 
 
 def measured(task: collect.Task, seed: int = 0) -> measure.ShotMeasurement:
@@ -218,20 +217,21 @@ def one_tier_machine(
     weak_microseconds: float,
     units: int = 1,
     setup_cycles: Optional[dict] = None,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """30 rounds on the weak-only fabric, its units charged that long."""
     base = run_files.minimal_machine(TASK_CELLS, rounds_per_shot=SHOT_ROUNDS)
-    links = fridge_hops(ONE_TIER_HOPS, setup_cycles)
+    fabric = fridge_hops(ONE_TIER_HOPS, setup_cycles)
     algorithm = charged(weak_microseconds)
     weak_decoder = ten_cycle_release_pool(algorithm, units)
-    return dataclasses.replace(base, links=links, weak_decoder=weak_decoder)
+    machine = base.with_record(machines.WEAK_POOL, weak_decoder)
+    return dataclasses.replace(machine, fabric=fabric)
 
 
 def slow_unit_settings(
     units: int,
     card_microseconds: float = 5.0,
     decision_cycles: int = 0,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """One shot of 30 rounds on `units` weak units of that card.
 
     decision_cycles is the window side's decision before each request,
@@ -239,9 +239,11 @@ def slow_unit_settings(
     """
     base = one_tier_machine(card_microseconds, units)
     windows = dataclasses.replace(
-        base.windows, decision_cycles=decision_cycles, clock=FRIDGE_CLOCK
+        base.held(machines.WINDOWS),
+        decision_cycles=decision_cycles,
+        clock=FRIDGE_CLOCK,
     )
-    return dataclasses.replace(base, windows=windows)
+    return base.with_held(machines.WINDOWS, windows)
 
 
 def slow_unit_shot(units: int, **arguments) -> measure.ShotMeasurement:
@@ -262,7 +264,7 @@ def switching_settings(
     strong_algorithm=None,
     strong_window=None,
     strong_answer_route: str = "direct",
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """A 1.0 us weak tier beside a 10.0 us one, on the two-tier fabric.
 
     A threshold far above every gap escalates every window and one far
@@ -278,7 +280,7 @@ def switching_settings(
     """
     cells = cells_at(SWITCHING_ERROR_PROBABILITY)
     base = run_files.minimal_machine(cells, rounds_per_shot=SHOT_ROUNDS)
-    workload = base.workload
+    workload = base.held("workload")
     if patch_count > 1:
         patches = producers.memory_patches(
             run_files.CODE_TASK,
@@ -288,7 +290,7 @@ def switching_settings(
             SWITCHING_ERROR_PROBABILITY,
         )
         workload = workload_settings.WorkloadSettings.running(patches)
-    windows = base.windows
+    windows = base.held(machines.WINDOWS)
     if commit_rounds is not None:
         scheme = dataclasses.replace(
             windows.scheme, commit_rounds=commit_rounds
@@ -306,24 +308,19 @@ def switching_settings(
         strong_window=strong_window,
         strong_answer_route=strong_answer_route,
     )
-    windows = window_settings.switching_windows(windows, strong_window)
     weak_algorithm = charged(weak_microseconds)
     weak_decoder = ten_cycle_release_pool(weak_algorithm)
     strong_algorithm = strong_algorithm or charged(10.0)
     strong_decoder = ten_cycle_release_pool(strong_algorithm, strong_units)
     flags = dict.fromkeys(observation, True)
     watched = dataclasses.replace(base.observation, **flags)
-    links = fridge_hops(TWO_TIER_HOPS)
-    return dataclasses.replace(
-        base,
-        links=links,
-        workload=workload,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
-        observation=watched,
-    )
+    fabric = fridge_hops(TWO_TIER_HOPS)
+    machine = base.with_held("workload", workload)
+    machine = machine.with_held(machines.WINDOWS, windows)
+    machine = machine.with_record(machines.WEAK_POOL, weak_decoder)
+    machine = dataclasses.replace(machine, fabric=fabric, observation=watched)
+    # the strong tier reshapes the windows to its strong window's
+    return machines.with_strong_tier(machine, strong_decoder, switching)
 
 
 def switching_run(
@@ -345,7 +342,7 @@ def switching_shot(
     return measure.measure_shot(shot)
 
 
-def bounded_store_settings() -> machine_settings.MachineSettings:
+def bounded_store_settings() -> graph.Machine:
     """A weak syndrome buffer of six rounds, with a slow unit.
 
     Thirty rounds arrive a microsecond apart into a store of six
@@ -355,8 +352,7 @@ def bounded_store_settings() -> machine_settings.MachineSettings:
     """
     base = one_tier_machine(5.0)
     six_rounds_bits = 5 * BITS_PER_ROUND + READOUT_ROUND_BITS
-    store = dataclasses.replace(base.weak_syndrome_buffer, bits=six_rounds_bits)
-    return dataclasses.replace(base, weak_syndrome_buffer=store)
+    return base.with_settings(machines.WEAK_STORE, bits=six_rounds_bits)
 
 
 def bounded_store_shot() -> measure.ShotMeasurement:
@@ -476,7 +472,7 @@ def test_a_strong_answer_held_for_its_selection_waits_in_its_own_point():
     (Toshio et al. 2510.25222 lines 598-601) and its answer waits in its
     unit's output slot, as a sender keeps a packet until the far side
     takes it (gem5 port.hh:244-255), until the verdict's selection has
-    crossed weak_decoder_to_strong_decoder. That crossing is
+    crossed weak_to_strong. That crossing is
     selection_wait, and the points add up to every window's reaction.
     A 5.0 us weak card that runs both forced-class solves on one unit
     answers after the 10.0 us strong decode it started with.
@@ -638,8 +634,8 @@ def test_patches_named_by_an_int_and_a_str_are_measured():
         workload, operations=(first, named), round_counts=round_counts
     )
     lowered = workload_settings.WorkloadSettings.running(mixed)
-    settings = dataclasses.replace(task.machine, workload=lowered)
-    mixed_task = collect.Task("mixed", settings, {})
+    machine = task.machine.with_held("workload", lowered)
+    mixed_task = collect.Task("mixed", machine, {})
     shot = collect.run_shot(mixed_task, 0)
 
     measured = measure.measure_shot(shot)
@@ -663,9 +659,10 @@ def test_the_window_sizes_and_period_are_the_card_the_qpu_ran():
         buffer_rounds_override=1,
     )
     card_record = declared_run.GivenCard(card)
-    qpu = dataclasses.replace(task.machine.qpu, code_card=card_record)
-    settings = dataclasses.replace(task.machine, qpu=qpu)
-    carded = collect.Task("carded", settings, {})
+    task_qpu = task.machine.held("qpu")
+    qpu = dataclasses.replace(task_qpu, code_card=card_record)
+    machine = task.machine.with_held("qpu", qpu)
+    carded = collect.Task("carded", machine, {})
     shot = collect.run_shot(carded, 0)
 
     measured = measure.measure_shot(shot)
@@ -901,7 +898,7 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     us after the verdict, and from window 1 on it pins its past face on
     the window before, whose committed boundary is a strong decode's, so
     the host reads it out of its own memory on
-    strong_buffer_to_strong_decoder in 0.008 us; the job takes a unit
+    strong_to_strong in 0.008 us; the job takes a unit
     only then, so its input hop follows both, 0.028 us. The last
     window's rounds were carried up with the window before it, so its
     input hop starts 0.008 us after the verdict and waits 0.004 us after
@@ -917,7 +914,7 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
     decode, 12.224 us on window 0 and 12.232 us after (its whole path
     less the 0.012 us hop home and the 0.004 us frame commit, since the
     boundary leaves when the decode ends), and its strong boundary's
-    0.012 us hop down strong_decoder_to_weak_decoder, less the 3 us
+    0.012 us hop down strong_to_weak, less the 3 us
     between the two windows' data. It is 9.236 us on window 1, 9.264 us
     with the input hop, and grows by 9.244 us a window; the last
     window's data completes with the window before it's, so it waits
@@ -951,9 +948,9 @@ def test_an_escalated_window_is_measured_on_the_strong_tiers_own_hops():
 def test_a_strong_answer_through_the_weak_chip_comes_home_over_its_route():
     """The way home is the hop down, the chip's commit and the hop home.
 
-    The strong answer crosses strong_decoder_to_weak_decoder (0.012 us),
+    The strong answer crosses strong_to_weak (0.012 us),
     the weak chip joins it on the next edge of the machine's clock
-    (0.004 us), and it crosses weak_decoder_to_frame (0.004 us), so
+    (0.004 us), and it crosses weak_to_frame (0.004 us), so
     output_link_per_window is 0.020 us, and the points still sum to the
     window's reaction time.
     """
@@ -990,11 +987,10 @@ def test_a_batched_windows_points_sum_to_its_reaction_time():
     reaction time, and the twenty batched windows' service is the two
     decodes'.
     """
-    settings = switching_settings(1000000.0, patch_count=4)
+    machine = switching_settings(1000000.0, patch_count=4)
     decode_each = batching.DecodeEach.Settings()
-    strong = dataclasses.replace(settings.strong_decoder, batching=decode_each)
-    settings = dataclasses.replace(settings, strong_decoder=strong)
-    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+    machine = machine.with_settings(machines.STRONG_POOL, batching=decode_each)
+    task = task_at(machine, SWITCHING_ERROR_PROBABILITY)
 
     measurement = measured(task)
 
@@ -1376,19 +1372,19 @@ def test_a_restarted_window_is_recorded_by_its_first_committed_round():
 
 
 def with_deadline(
-    settings: machine_settings.MachineSettings,
+    machine: graph.Machine,
     deadline_microseconds: float,
     first_recorded_round: int = 1,
     last_recorded_round: Optional[int] = None,
-) -> machine_settings.MachineSettings:
-    """The settings with a reaction deadline and a measurement interval."""
+) -> graph.Machine:
+    """The machine with a reaction deadline and a measurement interval."""
     observation = dataclasses.replace(
-        settings.observation,
+        machine.observation,
         reaction_deadline_microseconds=deadline_microseconds,
         first_recorded_round=first_recorded_round,
         last_recorded_round=last_recorded_round,
     )
-    return dataclasses.replace(settings, observation=observation)
+    return dataclasses.replace(machine, observation=observation)
 
 
 def test_an_overloaded_units_reaction_grows_at_its_load_less_one():
@@ -1493,13 +1489,13 @@ def test_the_first_deadline_miss_is_the_earliest_on_the_shot_clock():
     windows of the first stream and eight of the second miss.
     """
     settings = seam_streams_settings(2, stagger_rounds=20)
+    weak = settings.part(machines.WEAK_POOL)
     algorithm = dataclasses.replace(
-        settings.weak_decoder.algorithm, preset_latency_microseconds=2.0
+        weak.settings.algorithm, preset_latency_microseconds=2.0
     )
-    one_unit = dataclasses.replace(
-        settings.weak_decoder, unit_count=1, algorithm=algorithm
+    one_unit_settings = settings.with_settings(
+        machines.WEAK_POOL, unit_count=1, algorithm=algorithm
     )
-    one_unit_settings = dataclasses.replace(settings, weak_decoder=one_unit)
     deadline_settings = with_deadline(one_unit_settings, 3.0)
     task = collect.Task("task", deadline_settings, {})
 
@@ -1617,11 +1613,10 @@ def test_a_stores_read_is_its_own_point_and_not_in_the_park():
     window's reaction time.
     """
     base = one_tier_machine(0.1)
-    store = dataclasses.replace(
-        base.weak_syndrome_buffer, read_cycles=25, clock=FRIDGE_CLOCK
+    machine = base.with_settings(
+        machines.WEAK_STORE, read_cycles=25, clock=FRIDGE_CLOCK
     )
-    settings = dataclasses.replace(base, weak_syndrome_buffer=store)
-    task = task_at(settings)
+    task = task_at(machine)
     measurement = measured(task)
 
     assert measurement.samples["store_read"] == [0.1] * 9
@@ -1629,9 +1624,10 @@ def test_a_stores_read_is_its_own_point_and_not_in_the_park():
     assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
 
 
-def input_setup_settings() -> machine_settings.MachineSettings:
+def input_setup_settings() -> graph.Machine:
     """A 0.1 us unit behind an input hop of one cycle and five of setup."""
-    setup_cycles = {"weak_buffer_to_weak_decoder": 5}
+    # weak_buffer_to_weak, the written store's read
+    setup_cycles = {"read_written": 5}
     return one_tier_machine(0.1, setup_cycles=setup_cycles)
 
 
@@ -1662,16 +1658,24 @@ def seam_streams(stream_count: int, stagger_rounds: int = 0) -> tuple:
     return tuple(operations)
 
 
-def seam_only_fabric():
-    """The logical reference card with one hop priced: the seam.
+def seam_only_fabric() -> fabrics.RoleLinks:
+    """The reference card with one hop priced: the seam.
 
-    decoder_to_decoder is 125 cycles of the 250 MHz fridge clock, which
-    is 0.5 us, and every other hop is free, so a window's outgoing
-    boundary is the only thing a link charges for in the whole run.
+    weak_to_weak, a fridge pool's same-pool hop, is 125 cycles of the
+    250 MHz fridge clock, which is 0.5 us, and every other hop is free,
+    so a window's outgoing boundary is the only thing a link charges for
+    in the whole run.
     """
-    hops = {path: 0 for path in transfer_records.SLOTTED_PATHS}
-    hops["decoder_to_decoder"] = 125
+    hops = every_role_at(0)
+    hops["same_pool_fridge"] = 125
     return fridge_hops(hops)
+
+
+def every_role_at(cycles: int) -> dict:
+    """Every role a fabric prices (fabrics.RoleLinks), at those cycles."""
+    fields = dataclasses.fields(fabrics.RoleLinks)
+    roles = [field.name for field in fields if field.name != "base"]
+    return dict.fromkeys(roles, cycles)
 
 
 def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
@@ -1683,14 +1687,14 @@ def seam_streams_shot(stream_count: int, stagger_rounds: int = 0):
 
 def seam_streams_settings(
     stream_count: int, stagger_rounds: int = 0
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The machine of those streams on that fabric.
 
     Eight one-microsecond weak units decode them, so the streams run
     side by side and each plans nine sliding windows.
     """
     operations = seam_streams(stream_count, stagger_rounds)
-    links = seam_only_fabric()
+    fabric = seam_only_fabric()
     rounds_policy = round_policies.FixedRounds(30)
     workload = workload_settings.WorkloadSettings(
         operations=operations,
@@ -1720,15 +1724,10 @@ def seam_streams_settings(
     frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=4, clock=frame_clock
     )
-    return machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        windows=windows,
-        weak_decoder=weak_decoder,
-        decoder_manager=manager,
-        pauli_frame=frame,
-        links=links,
+    machine = machines.base(
+        workload, qpu, windows, manager, frame, fabric=fabric
     )
+    return machines.with_pool(machine, weak_decoder)
 
 
 def test_a_windows_seam_delay_is_the_same_however_many_streams_run():
@@ -1772,7 +1771,7 @@ def _boundary_row(source_index, destination_index, attributed_index, times):
         "relation": relation,
     }
     return {
-        "path": "strong_decoder_to_weak_decoder",
+        "path": "strong_to_weak",
         "attribution": attribution,
         "delivery_ticks": delivery,
         "total_delay_ticks": delivery - request,
@@ -1850,7 +1849,7 @@ def test_a_shot_with_no_pauli_frame_got_no_window_through():
     still measured.
     """
     settings = seam_streams_settings(1)
-    frameless = dataclasses.replace(settings, pauli_frame=None)
+    frameless = settings.without_part(machines.FRAME)
     task = collect.Task("frameless", frameless, {})
     shot = collect.run_shot(task, 0)
     measured = measure.measure_shot(shot)
@@ -1964,7 +1963,7 @@ def test_a_shot_records_each_operations_prediction():
     assert fold.typed_value(measurement.predictions) == measurement.predictions
 
 
-def two_patch_burst_settings() -> machine_settings.MachineSettings:
+def two_patch_burst_settings() -> graph.Machine:
     """Two six-round memory patches under a burst on the second."""
     base = run_files.minimal_machine(TASK_CELLS)
     patches = producers.memory_patches(run_files.CODE_TASK, 6, 2, 3, 0.001)
@@ -1974,8 +1973,10 @@ def two_patch_burst_settings() -> machine_settings.MachineSettings:
         burst_center=(11.0, 3.0),
         burst_error_probability=0.3,
     )
-    qpu = dataclasses.replace(base.qpu, source=burst)
-    return dataclasses.replace(base, workload=workload, qpu=qpu)
+    base_qpu = base.held("qpu")
+    qpu = dataclasses.replace(base_qpu, source=burst)
+    machine = base.with_held("workload", workload)
+    return machine.with_held("qpu", qpu)
 
 
 def _two_patch_burst_shot(*, seed: int) -> collect.Shot:
@@ -2294,18 +2295,19 @@ def test_an_idle_patchs_rounds_stretch_the_span_the_load_is_offered_over():
     the QPU generated rounds for.
     """
     settings = one_tier_machine(1.0)
-    (memory,) = settings.workload.operations
+    memory_workload = settings.held("workload")
+    (memory,) = memory_workload.operations
     quiet = program_records.Operation(
         2, "quiet", (99,), patches=(99,), emits_detector_data=False
     )
     rounds = round_policies.PerOperationRounds(((memory.id, 30), (2, 300)))
     workload = dataclasses.replace(
-        settings.workload,
+        memory_workload,
         operations=(memory, quiet),
         rounds_policy=rounds,
         workload_record=None,
     )
-    beside_a_quiet_patch = dataclasses.replace(settings, workload=workload)
+    beside_a_quiet_patch = settings.with_held("workload", workload)
     task = task_at(beside_a_quiet_patch)
     measurement = measured(task)
     busy_over_generation = 105.372 / 300.0
@@ -2438,28 +2440,23 @@ def test_a_unit_that_keeps_up_holds_one_windows_commit_rounds():
     assert measurement.backlog_peak_rounds == 6
 
 
-def instant_machine() -> machine_settings.MachineSettings:
+def instant_machine() -> graph.Machine:
     """The one-tier machine with every cost zero: hops, unit and frame."""
     base = one_tier_machine(0.0)
-    hop_cycles = {}
-    for path in transfer_records.SLOTTED_PATHS:
-        hop_cycles[path] = 0
-    links = fridge_hops(hop_cycles)
+    hop_cycles = every_role_at(0)
+    fabric = fridge_hops(hop_cycles)
     algorithm = charged(0.0)
     pool = run_files.decoder_pool(algorithm, FRIDGE_CLOCK)
     engine = dataclasses.replace(
         pool.engine, fetch_cycles_per_round=0, release_cycles_per_job=0
     )
     instant_pool = dataclasses.replace(pool, engine=engine)
-    frame = dataclasses.replace(base.pauli_frame, write_cycles=0)
+    base_frame = base.held("pauli_frame")
+    frame = dataclasses.replace(base_frame, write_cycles=0)
     observation = dataclasses.replace(base.observation, backlog_trace=True)
-    return dataclasses.replace(
-        base,
-        links=links,
-        weak_decoder=instant_pool,
-        pauli_frame=frame,
-        observation=observation,
-    )
+    machine = base.with_record(machines.WEAK_POOL, instant_pool)
+    machine = machine.with_held("pauli_frame", frame)
+    return dataclasses.replace(machine, fabric=fabric, observation=observation)
 
 
 def test_an_instant_decoder_on_instant_links_holds_no_backlog():
@@ -2501,12 +2498,13 @@ def test_a_source_that_samples_no_shot_is_refused_with_a_sentence():
         measured(task)
 
 
-def timing_only_settings() -> machine_settings.MachineSettings:
+def timing_only_settings() -> graph.Machine:
     """The minimal machine on a source that states each round's size."""
     base = run_files.minimal_machine(TASK_CELLS)
     timing_only = syndrome_devices.TimingOnlyDevice.Settings()
-    qpu = dataclasses.replace(base.qpu, source=timing_only)
-    return dataclasses.replace(base, qpu=qpu)
+    base_qpu = base.held("qpu")
+    qpu = dataclasses.replace(base_qpu, source=timing_only)
+    return base.with_held("qpu", qpu)
 
 
 def test_a_live_stream_is_scored_through_its_owner_over_its_run_rounds():
@@ -2518,7 +2516,7 @@ def test_a_live_stream_is_scored_through_its_owner_over_its_run_rounds():
     back; a d=3 memory round holds 8 of Stim's detectors.
     """
     program = memory_programs.memory_program()
-    live = live_memory_example.live_settings(
+    live = live_memory_example.live_machine(
         program,
         distance=3,
         round_period_microseconds=1.1,
@@ -2527,8 +2525,7 @@ def test_a_live_stream_is_scored_through_its_owner_over_its_run_rounds():
         feedback_microseconds=4.0,
         decoder_microseconds=0.1,
     )
-    frame = pauli_frame_module.PauliFrameConfig()
-    settings = dataclasses.replace(live, pauli_frame=frame)
+    settings = machines.with_frame(live)
     task = collect.Task("task", settings, {})
     shot = collect.run_shot(task, 17)
     measured = measure.measure_shot(shot)
@@ -2606,7 +2603,7 @@ def test_the_status_columns_count_the_statuses_the_decoder_returned(
     assert rows[0]["nonconverged_windows"] == nonconverged
 
 
-def one_iteration_relay_settings() -> machine_settings.MachineSettings:
+def one_iteration_relay_settings() -> graph.Machine:
     """The minimal machine on Relay-BP held to one iteration, no relay."""
     cells = cells_at(0.003)
     base = run_files.minimal_machine(cells)
@@ -2614,7 +2611,7 @@ def one_iteration_relay_settings() -> machine_settings.MachineSettings:
         pre_iterations=1, relay_set_count=0, iterations_per_set=1
     )
     weak_decoder = run_files.decoder_pool(relay, FRIDGE_CLOCK)
-    return dataclasses.replace(base, weak_decoder=weak_decoder)
+    return base.with_record(machines.WEAK_POOL, weak_decoder)
 
 
 def decoder_row_shot(kind: str, seed: int):
@@ -2748,15 +2745,15 @@ def test_a_strong_window_with_no_correction_moves_the_next_ones_input(
     assert measurement.window_statuses["backend_error_windows"] == 1
 
 
-def refereed_settings() -> machine_settings.MachineSettings:
+def refereed_settings() -> graph.Machine:
     """PyMatching weak decodes, each window decoded again by Tesseract."""
     cells = cells_at(0.01)
     base = run_files.minimal_machine(cells, weak_decoder="pymatching")
+    weak = base.part(machines.WEAK_POOL)
     checked = verify_windows.TesseractCheckedDecoder.Settings(
-        inner=base.weak_decoder.algorithm
+        inner=weak.settings.algorithm
     )
-    weak_decoder = dataclasses.replace(base.weak_decoder, algorithm=checked)
-    return dataclasses.replace(base, weak_decoder=weak_decoder)
+    return base.with_settings(machines.WEAK_POOL, algorithm=checked)
 
 
 def test_a_shot_counts_the_referees_checks_in_the_referee_columns(tmp_path):
@@ -3053,8 +3050,9 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
         strong_window=double_window,
     )
     source = stim_device.ErrorModelStimDevice.Settings()
-    qpu = dataclasses.replace(settings.qpu, source=source)
-    drawn = dataclasses.replace(settings, qpu=qpu)
+    settings_qpu = settings.held("qpu")
+    qpu = dataclasses.replace(settings_qpu, source=source)
+    drawn = settings.with_held("qpu", qpu)
     task = task_at(drawn, SWITCHING_ERROR_PROBABILITY)
     measurement = measured(task, seed=3)
     rows = measurement.window_outcomes
@@ -3093,3 +3091,4 @@ def _always_escalating_chain():
     )
     chain = layout_tests.chain_machine(deep_switching=deep_switching)
     return chain.with_settings("switching", verdict=always)
+

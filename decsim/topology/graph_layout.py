@@ -24,11 +24,6 @@ The entry pool, its edge and that edge's target draw their seeds at
 roots kept by role, and every other part at its own name: a pool added
 past the entry moves no other part's seed, so a chain whose deep pool
 is never asked runs as its two-pool machine, shot for shot.
-
-entry_settings gives the graph's entry edge as a MachineSettings record,
-read by the reports that name a weak and a strong tier and by the build
-for the parts every machine holds once; the graph's id is its own
-(experiments/collect.py Task).
 """
 
 import dataclasses
@@ -39,7 +34,6 @@ import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.refusals as refusals
-import decsim.settings as machine_settings
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
@@ -84,57 +78,18 @@ _SWITCHING_KIND = "switching"
 _ROUTER_KIND = "router"
 
 
-def entry_settings(machine: graph.Machine) -> machine_settings.MachineSettings:
-    """The graph's entry edge as a MachineSettings record, every hop priced.
+def layout_of(machine: graph.Machine) -> layout_module.Layout:
+    """The graph's pools, stores and edges, each under its part's name.
 
-    Its weak tier is the entry pool, its strong tier the entry edge's
-    target, its switching the entry edge's; its card prices every hop
-    of the graph.
+    machine is at its task (graph.Machine.at_task), each edge's
+    threshold read; the card prices every hop.
     """
     shape = _shape(machine)
     card = _card(shape)
-    singles = _single_records(machine)
-    tiers = {}
-    if shape.pools:
-        entry = shape.entry
-        entry_store = shape.entry_store()
-        tiers["weak_decoder"] = entry.settings
-        tiers["weak_syndrome_buffer"] = entry_store.settings
-    if shape.edges:
-        entry_edge = shape.edges[0]
-        target = entry_edge.target
-        target_store = shape.store_by_pool[target.name]
-        tiers["strong_decoder"] = target.settings
-        tiers["strong_syndrome_buffer"] = target_store.settings
-        tiers["switching"] = entry_edge.part.settings
-    return machine_settings.MachineSettings(
-        clock=machine.clock,
-        links=card,
-        observation=machine.observation,
-        **singles,
-        **tiers,
-    )
-
-
-def laid_out(machine: graph.Machine) -> tuple:
-    """The graph's entry edge record at its task, and its layout."""
-    settings = entry_settings(machine).at_task()
-    facts = settings.task_facts()
-    layout = layout_of(machine, facts)
-    return (settings, layout)
-
-
-def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
-    """The graph's pools, stores and edges, each under its part's name.
-
-    task_facts are the task's facts each edge's threshold reads
-    (MachineSettings.task_facts).
-    """
-    shape = _shape(machine)
     frame_name = _frame_name(machine)
     if not shape.pools:
         idle = _idle_pool(frame_name)
-        return layout_module.Layout((idle,), (), ())
+        return layout_module.Layout((idle,), (), (), card)
     pools = []
     stores = []
     for pool in shape.pools:
@@ -149,7 +104,7 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
     for edge in shape.edges:
         carried_from = shape.store_by_pool[edge.source.name]
         policy_seed = _policy_seed(shape, edge)
-        edge_plan = _edge_plan(edge, carried_from.name, policy_seed, task_facts)
+        edge_plan = _edge_plan(edge, carried_from.name, policy_seed)
         edges.append(edge_plan)
     router = shape.router_settings()
     entry_count = len(shape.entries)
@@ -157,6 +112,7 @@ def layout_of(machine: graph.Machine, task_facts: dict) -> layout_module.Layout:
         tuple(pools),
         tuple(stores),
         tuple(edges),
+        card,
         router=router,
         entry_count=entry_count,
     )
@@ -207,8 +163,8 @@ class _Shape:
 def _shape(machine: graph.Machine) -> _Shape:
     """The graph's pools from its entry, its edges, each pool's store."""
     _refuse_unbound_ports(machine)
-    pools = _parts_of_kind(machine, _POOL_KIND)
-    switching_parts = _parts_of_kind(machine, _SWITCHING_KIND)
+    pools = machine.parts_of(_POOL_KIND)
+    switching_parts = machine.parts_of(_SWITCHING_KIND)
     edges = []
     for part in switching_parts:
         edge = _edge(machine, part)
@@ -231,16 +187,6 @@ def _refuse_unbound_ports(machine: graph.Machine) -> None:
     unbound = machine.unbound_ports()
     if unbound:
         raise graph.GraphError(f"required ports with no wire: {unbound}")
-
-
-def _parts_of_kind(machine: graph.Machine, kind_name: str) -> list:
-    """The parts of one kind, in the order the graph writes them."""
-    found = []
-    for part in machine.parts:
-        kind = part.kind
-        if kind is not None and kind.name == kind_name:
-            found.append(part)
-    return found
 
 
 def _edge(machine: graph.Machine, part: graph.Part) -> _Edge:
@@ -273,7 +219,7 @@ def _redecode_target(machine: graph.Machine, switching_name: str) -> graph.Part:
 
 def _router(machine: graph.Machine) -> Optional[graph.Part]:
     """The machine's router; None for none, and at most one."""
-    routers = _parts_of_kind(machine, _ROUTER_KIND)
+    routers = machine.parts_of(_ROUTER_KIND)
     if not routers:
         return None
     if len(routers) > 1:
@@ -416,25 +362,11 @@ def _part_at(machine: graph.Machine, written: str) -> graph.Part:
 
 def _frame_name(machine: graph.Machine) -> str:
     """The frame's part name; "frame" for a machine with none."""
-    frames = _parts_of_kind(machine, "pauli_frame")
+    frames = machine.parts_of("pauli_frame")
     if not frames:
         return "frame"
     frame = frames[0]
     return frame.name
-
-
-def _single_records(machine: graph.Machine) -> dict:
-    """The record of every part held once, by its MachineSettings slot."""
-    records = {}
-    for part in machine.parts:
-        kind = part.kind
-        if kind is None:
-            continue
-        if kind.name in (_POOL_KIND, _STORE_KIND, _SWITCHING_KIND):
-            continue
-        slot = kind.slots[0]
-        records[slot] = part.settings
-    return records
 
 
 def _site(part: graph.Part) -> str:
@@ -464,7 +396,7 @@ def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
 
 
 def _controller_name(machine: graph.Machine) -> str:
-    controllers = _parts_of_kind(machine, "controller")
+    controllers = machine.parts_of("controller")
     controller = controllers[0]
     return controller.name
 
@@ -593,12 +525,10 @@ def _escalation_hop(
 
 
 def _edge_plan(
-    edge: _Edge, carried_from: str, policy_seed: str, task_facts: dict
+    edge: _Edge, carried_from: str, policy_seed: str
 ) -> layout_module.EdgePlan:
-    """A switching part's edge, its threshold read at the task's facts."""
+    """A switching part's edge."""
     settings = edge.part.settings
-    threshold = settings.threshold.at_task(task_facts)
-    at_task = dataclasses.replace(settings, threshold=threshold)
     source = window_records.PoolId(edge.source.name)
     target = window_records.PoolId(edge.target.name)
     forward = _hop(edge.source.name, edge.target.name)
@@ -612,7 +542,7 @@ def _edge_plan(
     )
     name = edge.part.name
     return layout_module.EdgePlan(
-        name, at_task, hops, carried_from, policy_seed
+        name, settings, hops, carried_from, policy_seed
     )
 
 

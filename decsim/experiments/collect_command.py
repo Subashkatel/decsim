@@ -36,7 +36,7 @@ import decsim.experiments.run_folder as run_folder
 import decsim.experiments.unit_pool as unit_pool
 import decsim.machine as machine_module
 import decsim.records.results as result_records
-import decsim.settings as machine_settings
+import decsim.topology.graph as topology_graph
 
 
 @dataclasses.dataclass
@@ -339,10 +339,13 @@ def run_one_shot(
     recorded with other settings is refused. Returns the lines to print.
     """
     first_task = _with_its_own_calibrator(study.tasks[0])
-    settings = _with_observation(first_task.machine, log, trace)
-    task = dataclasses.replace(first_task, machine=settings)
+    graph = _with_observation(first_task.machine, log, trace)
+    task = dataclasses.replace(first_task, machine=graph)
     machine = machine_module.Machine.build(
-        task.machine, seed, online_threshold=task.online_threshold
+        task.machine,
+        seed,
+        online_threshold=task.online_threshold,
+        layout=task.layout,
     )
     run_dir = run_folder.run_dir_for(study.name, out_dir)
     _refuse_another_tree(run_dir)
@@ -353,7 +356,7 @@ def run_one_shot(
     _record_a_new_task(run_dir, task, seed)
     result = machine.run()
     label = measure.shot_label(task_id, seed)
-    run_folder.write_shot(machine, settings, run_dir, label, result)
+    run_folder.write_shot(machine, run_dir, label, result)
     run_folder.finish_run(run_dir, run_file, run_task_ids, started_utc)
     return _shot_lines(study, task, seed, result, run_dir)
 
@@ -525,10 +528,10 @@ def _chosen_tasks(
 
 
 def _with_observation(
-    settings: machine_settings.MachineSettings,
+    machine: topology_graph.Machine,
     log: Optional[str],
     trace: bool,
-) -> machine_settings.MachineSettings:
+) -> topology_graph.Machine:
     """The flags this shot was given, over the task's observation."""
     changes = {}
     if log is not None:
@@ -536,9 +539,9 @@ def _with_observation(
     if trace:
         changes["trace"] = "chrome"
     if not changes:
-        return settings
-    observation = dataclasses.replace(settings.observation, **changes)
-    return dataclasses.replace(settings, observation=observation)
+        return machine
+    observation = dataclasses.replace(machine.observation, **changes)
+    return dataclasses.replace(machine, observation=observation)
 
 
 def _shot_lines(
@@ -747,7 +750,7 @@ def _experiment_facts(
     return {
         "collection": dataclasses.asdict(settings),
         "adaptive": task.online_threshold is not None,
-        "algorithm": measure.active_decoder_kind(task.machine),
+        "algorithm": measure.active_decoder_kind(task.layout),
     }
 
 

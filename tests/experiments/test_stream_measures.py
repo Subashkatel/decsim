@@ -37,9 +37,9 @@ POOL_FIELDS = (
 )
 
 
-def _run(settings):
+def _run(graph):
     """(machine, result, the stream's measurement) of one run."""
-    machine = machine_module.Machine.build(settings, SEED)
+    machine = machine_module.Machine.build(graph, SEED)
     measures = stream_measures.StreamMeasures(machine)
     result = machine.run()
     folded = measures.measurement(result)
@@ -138,9 +138,9 @@ def _same_rate(folded_rate, shot_rate) -> bool:
 
 @pytest.mark.parametrize("run", RUNS)
 def test_the_stream_measures_what_measure_shot_reads_off_the_whole_run(run):
-    settings = stream_machines.stream_settings(run, folds=False)
-    machine, result, folded = _run(settings)
-    task = collect.Task("stream", settings, {})
+    graph = stream_machines.stream_graph(run, folds=False)
+    machine, result, folded = _run(graph)
+    task = collect.Task("stream", graph, {})
     shot = collect.Shot(task, SEED, machine, result, 0.0)
 
     measured = measure.measure_shot(shot)
@@ -156,8 +156,8 @@ def test_the_stream_measures_what_measure_shot_reads_off_the_whole_run(run):
 def test_a_stream_that_lets_each_window_go_measures_the_same_and_keeps_none(
     run,
 ):
-    whole = stream_machines.stream_settings(run, folds=False)
-    lean = stream_machines.stream_settings(run, folds=True)
+    whole = stream_machines.stream_graph(run, folds=False)
+    lean = stream_machines.stream_graph(run, folds=True)
     _machine, _result, kept = _run(whole)
 
     machine, _result, folded = _run(lean)

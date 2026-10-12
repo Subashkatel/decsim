@@ -63,7 +63,7 @@ The machine attaches each part after it is built, at its settings path:
 
 | Part | Path |
 | --- | --- |
-| a decoder row, or a row a wrapper holds | `weak_decoder.algorithm`, `strong_decoder.algorithm` |
+| a decoder row, or a row a wrapper holds | `weak.algorithm`, `strong.algorithm` |
 | a syndrome buffer | `weak_syndrome_buffer`, `strong_syndrome_buffer` |
 | the frame | `pauli_frame` |
 | the strong redecode | `switching` |

@@ -8,6 +8,7 @@ and the controller_to_qpu crossing first. The operation claims its
 patches' idle rounds when it starts, not here (test_idle_rounds.py).
 """
 
+import dataclasses
 import types
 
 import decsim.config as config
@@ -16,16 +17,30 @@ import decsim.controller.instruction_output as instruction_output
 import decsim.controller.operation_issue as operation_issue
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
-import decsim.links.link_profiles as link_profiles
 import decsim.observe.round_events as round_events
 import decsim.records.program as program_records
 import decsim.records.transfers as transfer_records
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 BOUNDARY_TICK = 3000
 # a one-tick period, so the pulse cost is its cycles and every tick is
 # an edge (tests/controller/test_instruction_output.py holds the law)
 CLOCK = config.Clock(1)
 PULSE_TICKS = 17
+
+
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
 
 
 class RecordingQpu:
@@ -60,7 +75,7 @@ def resolved(operation_id, round_ticks=1000, round_count=6):
 
 
 def issuer_with(engine, qpu, idle_rounds, recorder):
-    reference = link_profiles.logical_reference_profile()
+    reference = REFERENCE_LAYOUT.card
     output = instruction_output.InstructionOutput(engine, CLOCK, PULSE_TICKS)
     output.link = fabric_module.LinkFabric(reference, engine)
     output.qpu = qpu

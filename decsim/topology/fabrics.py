@@ -18,7 +18,6 @@ it, or the reference card's path where the rule picks none.
     RoleLinks        a link by the route's role, else a base rule
     FridgeHostFabric a cable between the sites, a host link on the host,
                      else a base rule
-    CardFabric       a card written out, a path per hop
 
 A link times a transfer as its latency plus its bits over its rate,
 ns-3's point-to-point law (point-to-point-net-device.cc:243); the rule
@@ -38,8 +37,6 @@ import decsim.records.routes as route_records
 
 FRIDGE = route_records.FRIDGE
 HOST = route_records.HOST
-# the name a card built from a graph goes by; a label, no part of an id
-PROFILE_NAME = "a graph's fabric"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -287,27 +284,6 @@ class FridgeHostFabric:
         return self.base.link_for(route)
 
 
-@dataclasses.dataclass(frozen=True)
-class CardFabric:
-    """A card written out: each route takes the card's path for its hop.
-
-    A route the card names no hop for takes the card's path of the same
-    role, channel and all; none when the card has neither.
-    """
-
-    card: link_settings.FabricSettings
-
-    def link_for(self, route: Route) -> Optional[ports.LinkCard]:
-        """The card's path for the route, else for a hop of its role."""
-        for path in self.card.paths:
-            if path.name == route.path:
-                return FixedPath(path.settings)
-        for path in self.card.paths:
-            if path.role == route.role:
-                return FixedPath(path.settings)
-        return None
-
-
 def card(
     rule: ports.FabricRule,
     routes: tuple,
@@ -333,9 +309,7 @@ def card(
             route.target_site,
         )
         paths.append(path)
-    return link_settings.FabricSettings(
-        tuple(paths), PROFILE_NAME, readout_routes
-    )
+    return link_settings.FabricSettings(tuple(paths), readout_routes)
 
 
 def _priced(

@@ -27,10 +27,6 @@ import decsim.trace_source as trace_source
 if TYPE_CHECKING:
     import decsim.decoders.decoder_manager as decoder_manager_module
 
-# The names the build gives the two pools (decoder_pool.PoolSettings).
-DEFAULT_POOL = "default"
-STRONG_POOL = "strong"
-
 
 class WaitingJobs:
     """The pool's ready queue.
@@ -160,9 +156,7 @@ class WaitingJobs:
 
 
 def pool_tag_of(pool: str) -> str:
-    """The pool's name as a log prefix; the default pool has none."""
-    if pool == DEFAULT_POOL:
-        return ""
+    """The pool's name as a log prefix."""
     return f"{pool} "
 
 

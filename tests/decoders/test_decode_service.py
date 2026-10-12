@@ -17,11 +17,12 @@ import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
+import decsim.topology.fabrics as fabrics
 import tests.declared_run as declared_run
 
 # a one-tick period for the manager, so its dispatch cost is its cycles
@@ -81,15 +82,18 @@ def _send_after(engine, ticks):
 
 def _manager(engine, decoder, dispatch_cycles=0):
     scheduler = schedulers.FifoScheduler()
-    pool_settings = decoder_pool.PoolSettings(name="default", unit_count=1)
+    pool_settings = decoder_pool.PoolSettings(name="weak", unit_count=1)
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=window_records.WEAK_POOL_ID,
         clock=DISPATCH_CLOCK,
         dispatch_cycles=dispatch_cycles,
     )
-    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.strong_requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     manager.decoder = decoder
     return manager
 
@@ -184,7 +188,7 @@ def _recording(manager, engine):
 def strong_primary_run(decoder):
     """One three-round patch decoded by this row alone, on declared ticks.
 
-    The strong slot alone is filled, so this row is the primary tier:
+    The strong pool alone is built, so this row is the primary tier:
     its window reads the strong syndrome buffer and rides the
     strong-buffer path.
     """
@@ -194,18 +198,14 @@ def strong_primary_run(decoder):
         algorithm=decoder, engine=declared_run.DECLARED_ENGINE
     )
     qpu = declared_run.declared_qpu()
-    links = declared_run.declared_profile()
+    fabric = declared_run.declared_fabric()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        strong_decoder=strong_decoder,
-        links=links,
-        controller=controller,
-        pauli_frame=frame,
+    base = machines.base(workload, qpu, controller, frame, fabric=fabric)
+    strong_alone = machines.with_pool(
+        base, strong_decoder, machines.STRONG_POOL, fabrics.HOST
     )
-    return declared_run.run_machine(settings, 0)
+    return declared_run.run_machine(strong_alone, 0)
 
 
 def test_a_job_starts_when_its_input_landed_and_masks_it_once():

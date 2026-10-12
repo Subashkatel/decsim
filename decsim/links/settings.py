@@ -229,9 +229,6 @@ class FabricSettings:
     """
 
     paths: tuple[NamedPath, ...]
-    # the card's name for the run's description, a label: no part of a
-    # task's id
-    profile_name: str = dataclasses.field(compare=False)
     readout_routes: tuple[ReadoutRoute, ...] = ()
 
     def __post_init__(self) -> None:

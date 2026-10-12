@@ -24,12 +24,31 @@ import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.routes as route_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 
 REGION_LINK_TICKS = 5
-# the slotted edge's forward hop, which an escalated region rides
-_REGION_HOP = transfer_records.WEAK_DECODER_TO_STRONG_DECODER
+# the hops of a weak pool on the chip escalating to a strong pool on the
+# host, each named by the parts at its ends (topology/graph_layout.py)
+_WEAK_TO_FRAME = "weak_to_frame"
+_STRONG_TO_FRAME = "strong_to_frame"
+_WEAK_TO_STRONG = "weak_to_strong"
+_STRONG_TO_WEAK = "strong_to_weak"
+_POOL_HOPS = (
+    route_records.PoolHops(
+        window_records.WEAK_POOL_ID,
+        route_records.FRIDGE,
+        _WEAK_TO_FRAME,
+        "weak_to_weak",
+    ),
+    route_records.PoolHops(
+        window_records.STRONG_POOL_ID,
+        route_records.HOST,
+        _STRONG_TO_FRAME,
+        "strong_to_strong",
+    ),
+)
+# the edge's forward hop, which an escalated region rides
+_REGION_HOP = _WEAK_TO_STRONG
 
 
 class _Transfers:
@@ -125,10 +144,16 @@ def _operation(patch_count: int) -> program_records.Operation:
 
 
 def _routes(answer_route: str = "direct") -> route_records.Routes:
-    """The slotted pools joined by their edge, its answers on answer_route."""
-    edge = routes_build.slotted_edge(answer_route)
+    """The two pools joined by their edge, its answers on answer_route."""
+    edge = route_records.EdgeHops(
+        window_records.WEAK_POOL_ID,
+        window_records.STRONG_POOL_ID,
+        _WEAK_TO_STRONG,
+        _STRONG_TO_WEAK,
+        answer_route=answer_route,
+    )
     return routes_build.generated(
-        routes_build.SLOTTED_POOL_HOPS, (edge,), window_records.WEAK_POOL_ID
+        _POOL_HOPS, (edge,), window_records.WEAK_POOL_ID
     )
 
 
@@ -155,7 +180,7 @@ def _published_bits(tier, logical_observables: tuple) -> int:
 
 
 def test_each_tier_publishes_over_its_own_output_link():
-    """A weak result rides weak_decoder_to_frame, a direct strong one its own.
+    """A weak result rides weak_to_frame, a direct strong one its own.
 
     The direct route is the default: the strong host sends home itself.
     """
@@ -176,8 +201,8 @@ def test_each_tier_publishes_over_its_own_output_link():
     engine.run()
     sends = [(path, bits) for path, _key, _tier, bits in transfers.sent]
     assert sends == [
-        (transfer_records.WEAK_DECODER_TO_FRAME, 1),
-        (transfer_records.STRONG_DECODER_TO_FRAME, 64 + 1),
+        (_WEAK_TO_FRAME, 1),
+        (_STRONG_TO_FRAME, 64 + 1),
     ]
 
 
@@ -219,12 +244,12 @@ def test_a_strong_answer_through_the_weak_chip_commits_there_then_goes_home():
     engine.run()
     assert transfers.sent == [
         (
-            transfer_records.STRONG_DECODER_TO_WEAK_DECODER,
+            _STRONG_TO_WEAK,
             (4, 1),
             strong,
             64 + 1,
         ),
-        (transfer_records.WEAK_DECODER_TO_FRAME, (4, 1), strong, 1),
+        (_WEAK_TO_FRAME, (4, 1), strong, 1),
     ]
     assert transfers.sent_ticks == [0, 8]
     assert frame.commits == [(12, (4, 1), (1,))]
@@ -239,10 +264,10 @@ def _selection_bits(route: str, weak_job) -> int:
     output = decoder_output_module.DecoderOutput(engine, routes)
     output.transfers = transfers
     strong_key = _request_key(window_records.STRONG_POOL_ID)
-    hop = transfer_records.WEAK_DECODER_TO_STRONG_DECODER
+    hop = _WEAK_TO_STRONG
     output.send_selection(hop, weak_job, strong_key, _ignore)
     ((path, _label, _tier, payload_bits),) = transfers.sent
-    assert path == transfer_records.WEAK_DECODER_TO_STRONG_DECODER
+    assert path == _WEAK_TO_STRONG
     return payload_bits
 
 

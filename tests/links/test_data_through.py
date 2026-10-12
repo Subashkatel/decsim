@@ -10,7 +10,7 @@ arithmetic over the extents the plan lays, so a change in the data path
 moves a number a reader can recompute rather than a guess.
 
 Three shapes of the escalation policy, at d=3 and d=5, 15 rounds, on the
-logical_reference card, where every one of the twelve paths is priced.
+reference card, where every hop is priced.
 The switching shape runs with an unreachable gap threshold, so every
 window escalates and the strong tier's traffic is the whole plan rather
 than a sample. The feedback half of the loop needs a second workload: a
@@ -30,7 +30,7 @@ selection, the request's 64-bit name and the one bit of the weak
 crossing commit the strong host joins on the default direct route, and
 then the rounds its strong window reads that the strong syndrome buffer
 lacks behind the same name, so the fifteen rounds cross
-weak_decoder_to_strong_decoder once each and controller_to_strong_buffer
+weak_to_strong once each and controller_to_strong_buffer
 carries nothing. A strong
 answer is its flip behind that name, 65 bits. The strong window is the
 commit region and one buffer ahead, its past face pinned on the
@@ -43,11 +43,11 @@ there already; at d=5 it is 1-10, 6-15 and 11-15, so two regions carry
 between the side that committed it and the side that reads it, one bulk
 layer each. Every window escalates and the boundaries are held, so no
 weak boundary ships: each strong answer's boundary goes down
-strong_decoder_to_weak_decoder to the window after it, behind the
-request's name, and each pinned face is that strong commit, read out of
-the host's own memory on strong_buffer_to_strong_decoder. In the strong
-shape every hand-off is that same read, and decoder_to_decoder, the hop
-between two weak units, carries nothing.
+strong_to_weak to the window after it, behind the request's name, and
+each pinned face is that strong commit, read out of the host's own
+memory on strong_to_strong, the strong pool's hop to itself. In the
+strong shape every hand-off rides that same hop, and weak_to_weak, the
+hop between two weak decodes, carries nothing.
 """
 
 import collections
@@ -64,13 +64,13 @@ import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings_module
-import decsim.windows.settings as window_settings
+import decsim.topology.fabrics as fabrics
 import tests.declared_run as declared_run
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -91,8 +91,8 @@ ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 # is the plan rather than a sample of the weak decoder's confidence
 UNREACHABLE_GAP_DECIBELS = 1000.0
 DECODER_INPUT_PATHS = (
-    "weak_buffer_to_weak_decoder",
-    "strong_buffer_to_strong_decoder",
+    "weak_buffer_to_weak",
+    "strong_buffer_to_strong",
 )
 READOUT_PATH = "qpu_to_controller"
 STORE_PATHS = (
@@ -130,56 +130,62 @@ EXPECTED = {
     ("weak", 3): {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_weak_buffer": Traffic(15, 120),
-        "weak_buffer_to_weak_decoder": Traffic(4, 192),
-        "decoder_to_decoder": Traffic(3, 24),
-        "weak_decoder_to_frame": Traffic(4, 4),
+        "weak_buffer_to_weak": Traffic(4, 192),
+        "weak_to_weak": Traffic(3, 24),
+        "weak_to_frame": Traffic(4, 4),
     },
     ("weak", 5): {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_weak_buffer": Traffic(15, 360),
-        "weak_buffer_to_weak_decoder": Traffic(2, 480),
-        "decoder_to_decoder": Traffic(1, 24),
-        "weak_decoder_to_frame": Traffic(2, 2),
+        "weak_buffer_to_weak": Traffic(2, 480),
+        "weak_to_weak": Traffic(1, 24),
+        "weak_to_frame": Traffic(2, 2),
     },
     ("strong", 3): {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_strong_buffer": Traffic(15, 120),
-        # four windows' inputs and three hand-offs of one bulk layer
-        "strong_buffer_to_strong_decoder": Traffic(7, 216),
+        # four windows' inputs
+        "strong_buffer_to_strong": Traffic(4, 192),
+        # three hand-offs of one bulk layer
+        "strong_to_strong": Traffic(3, 24),
         # four answers of one flip behind a 64-bit name
-        "strong_decoder_to_frame": Traffic(4, 260),
+        "strong_to_frame": Traffic(4, 260),
     },
     ("strong", 5): {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_strong_buffer": Traffic(15, 360),
-        "strong_buffer_to_strong_decoder": Traffic(3, 504),
-        "strong_decoder_to_frame": Traffic(2, 130),
+        "strong_buffer_to_strong": Traffic(2, 480),
+        "strong_to_strong": Traffic(1, 24),
+        "strong_to_frame": Traffic(2, 130),
     },
     ("switching", 3): {
         "qpu_to_controller": Traffic(15, 129),
         "controller_to_weak_buffer": Traffic(15, 120),
-        "weak_buffer_to_weak_decoder": Traffic(5, 220),
+        "weak_buffer_to_weak": Traffic(5, 220),
         # nine names of 64 bits, five selections and four regions, the
         # selections' five crossing-commit bits and the regions' 120 bits
         # of rounds
-        "weak_decoder_to_strong_decoder": Traffic(9, 701),
-        # five strong inputs and four pinned faces of one bulk layer
-        "strong_buffer_to_strong_decoder": Traffic(9, 252),
-        "strong_decoder_to_frame": Traffic(5, 325),
+        "weak_to_strong": Traffic(9, 701),
+        # five strong inputs
+        "strong_buffer_to_strong": Traffic(5, 220),
+        # four pinned faces of one bulk layer
+        "strong_to_strong": Traffic(4, 32),
+        "strong_to_frame": Traffic(5, 325),
         # four held boundaries of one bulk layer behind a 64-bit name
-        "strong_decoder_to_weak_decoder": Traffic(4, 288),
+        "strong_to_weak": Traffic(4, 288),
     },
     ("switching", 5): {
         "qpu_to_controller": Traffic(15, 385),
         "controller_to_weak_buffer": Traffic(15, 360),
-        "weak_buffer_to_weak_decoder": Traffic(3, 612),
+        "weak_buffer_to_weak": Traffic(3, 612),
         # five names of 64 bits, three selections and two regions, the
         # selections' three crossing-commit bits and the regions' 360
         # bits of rounds
-        "weak_decoder_to_strong_decoder": Traffic(5, 683),
-        "strong_buffer_to_strong_decoder": Traffic(5, 660),
-        "strong_decoder_to_frame": Traffic(3, 195),
-        "strong_decoder_to_weak_decoder": Traffic(2, 176),
+        "weak_to_strong": Traffic(5, 683),
+        "strong_buffer_to_strong": Traffic(3, 612),
+        "strong_to_strong": Traffic(2, 48),
+        "strong_to_frame": Traffic(3, 195),
+        "strong_to_weak": Traffic(2, 176),
     },
 }
 # The commit extents the sliding scheme lays for the two distances, read
@@ -234,7 +240,7 @@ def raw_readout_bits(round_index: int, total_rounds: int, distance: int) -> int:
     return ancilla
 
 
-def machine_settings(shape: str, distance: int):
+def memory_graph(shape: str, distance: int):
     """One memory operation on the Stim device, with the reference card."""
     circuit = workload_settings.memory_circuit(
         CODE_TASK, ROUNDS, distance, PROBABILITY
@@ -249,7 +255,7 @@ def machine_settings(shape: str, distance: int):
     device = stim_device.StimDevice()
     source = declared_run.GivenSource(device)
     qpu = qpu_settings.QpuSettings(distance=distance, source=source)
-    links = link_profiles.logical_reference_profile()
+    base = machines.base(workload, qpu)
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     weak = decoder_settings.DecoderPoolSettings(
         algorithm=matching,
@@ -261,12 +267,10 @@ def machine_settings(shape: str, distance: int):
         engine=ENGINE_CARD,
     )
     if shape == "weak":
-        return machine_settings_module.MachineSettings(
-            workload=workload, qpu=qpu, weak_decoder=weak, links=links
-        )
+        return machines.with_pool(base, weak)
     if shape == "strong":
-        return machine_settings_module.MachineSettings(
-            workload=workload, qpu=qpu, strong_decoder=strong, links=links
+        return machines.with_pool(
+            base, strong, machines.STRONG_POOL, fabrics.HOST
         )
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
@@ -275,19 +279,8 @@ def machine_settings(shape: str, distance: int):
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
-    plain_windows = window_settings.WindowSettings()
-    windows = window_settings.switching_windows(
-        plain_windows, switching.strong_window
-    )
-    return machine_settings_module.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak,
-        strong_decoder=strong,
-        switching=switching,
-        windows=windows,
-        links=links,
-    )
+    with_weak = machines.with_pool(base, weak)
+    return machines.with_strong_tier(with_weak, strong, switching)
 
 
 def run_case(shape: str, distance: int):
@@ -296,8 +289,8 @@ def run_case(shape: str, distance: int):
     done = _RUNS.get(case)
     if done is not None:
         return done
-    settings = machine_settings(shape, distance)
-    machine = machine_module.Machine.build(settings, SEED)
+    graph = memory_graph(shape, distance)
+    machine = machine_module.Machine.build(graph, SEED)
     result = machine.run()
     _RUNS[case] = (machine, result)
     return machine, result
@@ -460,8 +453,8 @@ def test_the_boundary_hop_pays_one_bulk_layer_per_hand_off(distance):
     bulk_layer = distance * distance - 1
     sizes = _boundary_sizes_by_path(result)
     assert sizes == {
-        "strong_buffer_to_strong_decoder": {bulk_layer},
-        "strong_decoder_to_weak_decoder": {bulk_layer + NAME_BITS},
+        "strong_to_strong": {bulk_layer},
+        "strong_to_weak": {bulk_layer + NAME_BITS},
     }
 
 
@@ -484,20 +477,18 @@ def bounded_strong_hops_run(distance: int) -> dict:
     """
     data_qubit_count = distance * distance
     syndrome_bits_per_round = data_qubit_count - 1
-    bounded = link_cards.bandwidth_limited_card(
+    bounded = link_cards.bandwidth_limited_fabric(
         syndrome_bits_per_round=syndrome_bits_per_round,
         round_microseconds=1.0,
         commit_rounds=distance,
         buffer_rounds=distance,
     )
-    settings = machine_settings("switching", distance)
-    links = dataclasses.replace(
-        settings.links,
-        weak_decoder_to_strong_decoder=bounded.weak_decoder_to_strong_decoder,
-        strong_decoder_to_frame=bounded.strong_decoder_to_frame,
+    graph = memory_graph("switching", distance)
+    fabric = fabrics.RoleLinks(
+        forward=bounded.forward, answer_host=bounded.answer_host
     )
-    settings = dataclasses.replace(settings, links=links)
-    machine = machine_module.Machine.build(settings, SEED)
+    graph = dataclasses.replace(graph, fabric=fabric)
+    machine = machine_module.Machine.build(graph, SEED)
     result = machine.run()
     return transfers_by_path(result)
 
@@ -511,7 +502,7 @@ def test_a_bounded_escalation_hop_serializes_the_selection():
     """
     distance = 5
     grouped = bounded_strong_hops_run(distance)
-    first_selection = grouped["weak_decoder_to_strong_decoder"][0]
+    first_selection = grouped["weak_to_strong"][0]
     assert first_selection["payload_bits"] == SELECTION_BITS
     assert first_selection["serialization_ticks"] == 664_622
 
@@ -524,7 +515,7 @@ def test_a_bounded_answer_hop_serializes_the_answers_name_and_flip():
     """
     distance = 5
     grouped = bounded_strong_hops_run(distance)
-    first_answer = grouped["strong_decoder_to_frame"][0]
+    first_answer = grouped["strong_to_frame"][0]
     name_and_flip_bits = NAME_BITS + 1
     assert first_answer["payload_bits"] == name_and_flip_bits
     assert first_answer["serialization_ticks"] == 5_000_000
@@ -541,7 +532,7 @@ def escalation_transfers(distance: int) -> tuple:
     grouped = transfers_by_path(result)
     selections = []
     regions = []
-    for transfer in grouped["weak_decoder_to_strong_decoder"]:
+    for transfer in grouped["weak_to_strong"]:
         if transfer["payload_bits"] == SELECTION_BITS:
             selections.append(transfer)
         else:
@@ -573,7 +564,7 @@ def test_every_strong_answer_has_one_selection(distance):
     """The decision names a request, once, and the answer names it back."""
     _machine, result = run_case("switching", distance)
     grouped = transfers_by_path(result)
-    answers = grouped["strong_decoder_to_frame"]
+    answers = grouped["strong_to_frame"]
     selections, _regions = escalation_transfers(distance)
     assert len(selections) == len(answers)
 
@@ -665,11 +656,9 @@ def test_the_feedback_hops_fire_when_an_operation_waits_on_a_result():
         algorithm=matching,
         engine=ENGINE_CARD,
     )
-    links = link_profiles.logical_reference_profile()
-    settings = machine_settings_module.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak, links=links
-    )
-    machine = machine_module.Machine.build(settings, SEED)
+    base = machines.base(workload, qpu)
+    graph = machines.with_pool(base, weak)
+    machine = machine_module.Machine.build(graph, SEED)
     result = machine.run()
     grouped = transfers_by_path(result)
     decisions = traffic_of(grouped["frame_to_controller"])

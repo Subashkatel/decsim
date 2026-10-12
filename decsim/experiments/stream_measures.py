@@ -91,13 +91,13 @@ class StreamMeasures:
 
     def __init__(self, machine: machine_module.Machine) -> None:
         self.machine = machine
-        self.lets_go = machine.settings.observation.folds_windows
+        self.lets_go = machine.graph.observation.folds_windows
         routes = machine.layout.routes()
         self.transfers = transfer_index.TransferIndex(
             routes.name_bits_by_answer_hop
         )
         self.frame_records: dict = {}
-        observation_settings = machine.settings.observation
+        observation_settings = machine.graph.observation
         deadline_us = observation_settings.reaction_deadline_microseconds
         self.folds = _Folds(deadline_us)
         self._connect(machine)
@@ -250,7 +250,7 @@ class StreamMeasures:
             return
         send = measure.last_required_send_ticks(decode, self.transfers.qpu_send)
         self.folds.fold_decoded(frame_record, send)
-        observation_settings = self.machine.settings.observation
+        observation_settings = self.machine.graph.observation
         if not observation_settings.records_round(window.commit_lo):
             return
         sample = self._sample(window, frame_record)

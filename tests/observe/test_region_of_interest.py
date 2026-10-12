@@ -51,7 +51,7 @@ def _copied(accumulator):
 
 
 def _whole_run_and_snapshot():
-    point = gate_point.settings()
+    point = gate_point.point()
     machine = machine_module.Machine.build(point, gate_point.SEED)
     snapshot = _Snapshot(machine.observation.statistics)
     machine.qpu.device.trace.round_emitted.connect(snapshot.round_read_out)

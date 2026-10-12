@@ -16,10 +16,11 @@ import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
 import decsim.ports as ports
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.qpu.code_geometry as code_geometry
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
@@ -30,7 +31,6 @@ import decsim.records.circuits as circuit_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
-import decsim.settings as machine_settings
 import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -257,23 +257,14 @@ def _machine(
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    links = link_profiles.logical_reference_profile()
-    feedback_ticks = config.microseconds_to_ticks(feedback_microseconds)
-    channel = dataclasses.replace(
-        links.frame_to_controller.channel,
-        propagation_latency_ticks=feedback_ticks,
-    )
-    path = dataclasses.replace(links.frame_to_controller, channel=channel)
-    links = dataclasses.replace(links, frame_to_controller=path)
+    # the reference card, the frame's word feedback_microseconds late
+    fabric = link_cards.feedback_fabric(feedback_microseconds)
     observation = observation_settings.ObservationSettings(trace="chrome")
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=decoder,
-        links=links,
-        observation=observation,
+    machine = machines.base(
+        workload, qpu, observation=observation, fabric=fabric
     )
-    return machine_module.Machine.build(settings, 17)
+    graph = machines.with_pool(machine, decoder)
+    return machine_module.Machine.build(graph, 17)
 
 
 def _workload(circuit=None, source_round_count=0, final_round=0):

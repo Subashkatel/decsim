@@ -8,8 +8,6 @@ gate's log hash pins, so a name changes only with that hash.
 
 QPU = "QPU"
 CONTROLLER = "Controller"
-WEAK_BUFFER = "weak syndrome buffer"
-STRONG_BUFFER = "strong syndrome buffer"
 DECODER_MANAGER = "Decoder manager"
 DECODER_UNIT = "Decoder unit"
 PAULI_FRAME = "PauliFrame"

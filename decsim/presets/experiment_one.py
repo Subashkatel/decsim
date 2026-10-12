@@ -126,30 +126,20 @@ def weak_alone(
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=clocks.FRIDGE_CLOCK
     )
-    readout_controller = controller()
-    event_forming = detection_events()
-    union_find_pool = weak_decoder()
-    parts = (
-        graph.Part(machines.QPU, qpu),
-        graph.Part(machines.CONTROLLER, readout_controller),
-        graph.Part("detection_events", event_forming),
-        graph.Part(machines.WINDOWS, windows),
-        graph.Part("decoder_manager", decoder_manager),
-        graph.Part("workload", workload),
-        graph.Part(machines.FRAME, pauli_frame),
-        graph.Part(machines.WEAK_STORE, weak_syndrome_buffer, fabrics.FRIDGE),
-        graph.Part(machines.WEAK_POOL, union_find_pool, fabrics.FRIDGE),
-    )
-    return graph.Machine(
+    machine = machines.base(
+        qpu,
+        controller(),
+        detection_events(),
+        windows,
+        decoder_manager,
+        workload,
+        pauli_frame,
         clock=clocks.FRIDGE_CLOCK,
-        parts=parts,
-        wires=(
-            *machines.LOOP_WIRES,
-            machines.WEAK_STORE_WRITE,
-            *machines.WEAK_TIER_WIRES,
-        ),
-        fabric=FABRIC,
         observation=observation,
+        fabric=FABRIC,
+    )
+    return machines.with_pool(
+        machine, weak_decoder(), store=weak_syndrome_buffer
     )
 
 
@@ -158,19 +148,9 @@ def strong_alone(
     physical_error_probability: float,
     strong_pool: decoder_settings.DecoderPoolSettings,
 ) -> graph.Machine:
-    """The same machine with every window decoded by a strong pool.
-
-    The weak pool is gone; the controller still writes the weak store,
-    and the strong store and pool sit on the host.
-    """
+    """The same machine with every window decoded by a strong pool."""
     machine = weak_alone(distance, physical_error_probability)
-    without_weak = machine.without_part(machines.WEAK_POOL)
-    store = syndrome_buffer_module.SyndromeBufferSettings()
-    strong_store = graph.Part(machines.STRONG_STORE, store, fabrics.HOST)
-    strong = graph.Part(machines.STRONG_POOL, strong_pool, fabrics.HOST)
-    with_store = without_weak.with_part(strong_store)
-    with_pool = with_store.with_part(strong)
-    return with_pool.with_wires(*machines.STRONG_TIER_WIRES)
+    return machines.strong_alone(machine, strong_pool)
 
 
 def switching(

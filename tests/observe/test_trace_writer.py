@@ -20,6 +20,7 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.experiments.collect as collect
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
+import decsim.presets.machines as machines
 import decsim.qpu.magic_state_factories as magic_state_factories
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import tests.declared_run as declared_run
@@ -35,16 +36,14 @@ _METADATA_NAMES = ("process_name", "thread_name", "thread_sort_index")
 
 def _traced_switching_run(trace_path, weak_unit_count=1, **arguments):
     """test_measure's 20 dB switching shot, traced to trace_path."""
-    settings = measure_tests.switching_settings(20.0, **arguments)
-    weak_decoder = dataclasses.replace(
-        settings.weak_decoder, unit_count=weak_unit_count
+    switching = measure_tests.switching_settings(20.0, **arguments)
+    weak_units = switching.with_settings(
+        machines.WEAK_POOL, unit_count=weak_unit_count
     )
     observation = dataclasses.replace(
-        settings.observation, trace=str(trace_path)
+        switching.observation, trace=str(trace_path)
     )
-    traced = dataclasses.replace(
-        settings, weak_decoder=weak_decoder, observation=observation
-    )
+    traced = dataclasses.replace(weak_units, observation=observation)
     task = measure_tests.task_at(
         traced, measure_tests.SWITCHING_ERROR_PROBABILITY
     )
@@ -55,7 +54,7 @@ def _settings(trace_path=None, data_movement=False):
     trace = "off"
     if trace_path is not None:
         trace = str(trace_path)
-    return gate_point.settings(trace=trace, data_movement=data_movement)
+    return gate_point.point(trace=trace, data_movement=data_movement)
 
 
 def _run(trace_path=None, data_movement=False):
@@ -359,11 +358,9 @@ def test_two_decodes_with_no_request_keep_the_lanes_of_their_units():
         production_mode="continuous",
         buffer_capacity=1,
     )
-    point = gate_point.settings(trace="chrome")
-    weak_decoder = dataclasses.replace(point.weak_decoder, unit_count=2)
-    point = dataclasses.replace(
-        point, weak_decoder=weak_decoder, magic_state_factory=factory
-    )
+    point = gate_point.point(trace="chrome")
+    point = point.with_settings(machines.WEAK_POOL, unit_count=2)
+    point = point.with_held("magic_state_factory", factory)
     machine = machine_module.Machine.build(point, SEED)
     machine.run()
 
@@ -441,9 +438,7 @@ def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):
 
     complete_rows = _by_phase(document, "X")
     window_moves = _rows_with(complete_rows, "cat", "window,link")
-    input_moves = _rows_with_arg(
-        window_moves, "channel", "weak_buffer_to_weak_decoder"
-    )
+    input_moves = _rows_with_arg(window_moves, "channel", "weak_buffer_to_weak")
     input_move = input_moves[0]
     assert input_move["args"]["tick"] == 6_008_000
     assert input_move["args"]["bits"] == 44
@@ -526,11 +521,11 @@ def test_the_data_movement_counts_are_the_hop_tables(traced):
     by_path = counts["copies_by_path"]
     assert by_path["readout -> controller intake"]["rounds"] == 30
     assert by_path["controller intake -> controller assembler"]["rounds"] == 30
-    intake = by_path["controller assembler -> weak syndrome buffer"]
-    to_unit = by_path["weak syndrome buffer -> unit default#0 memory"]
+    intake = by_path["controller assembler -> weak_buffer"]
+    to_unit = by_path["weak_buffer -> unit weak#0 memory"]
     assert intake["rounds"] == 30
     assert to_unit["rounds"] == 54
-    assert by_path["unit default#0 memory -> masked view"]["rounds"] == 48
+    assert by_path["unit weak#0 memory -> masked view"]["rounds"] == 48
 
 
 def test_the_movement_counts_group_by_the_memory_class_they_cross(traced):
@@ -584,10 +579,10 @@ def test_a_windows_flow_joins_its_queue_its_moves_its_unit_and_the_frame(
 
     assert lanes == [
         ("s", "Window planner", 6_008_000),
-        ("t", "weak_buffer_to_weak_decoder", 6_008_000),
-        ("t", "Decoder unit default#0", 6_012_000),
-        ("t", "decoder_to_decoder", 6_104_000),
-        ("t", "weak_decoder_to_frame", 6_104_000),
+        ("t", "weak_buffer_to_weak", 6_008_000),
+        ("t", "Decoder unit weak#0", 6_012_000),
+        ("t", "weak_to_weak", 6_104_000),
+        ("t", "weak_to_frame", 6_104_000),
         ("f", "Frame", 6_108_000),
     ]
     assert categories == {"window"}
@@ -815,10 +810,7 @@ def test_a_write_with_no_prediction_is_traced_without_observables(tmp_path):
     trace_path = tmp_path / "timing_only.trace.json"
     point = _settings(trace_path)
     timing_only = decoders.PresetLatencyDecoder.Settings(1.0)
-    weak_decoder = dataclasses.replace(
-        point.weak_decoder, algorithm=timing_only
-    )
-    point = dataclasses.replace(point, weak_decoder=weak_decoder)
+    point = point.with_settings(machines.WEAK_POOL, algorithm=timing_only)
     machine = machine_module.Machine.build(point, SEED)
     result = machine.run()
     machine.observation.trace_writer.write(str(trace_path))
@@ -866,11 +858,11 @@ def test_each_port_access_is_one_span_on_its_ports_lane(tmp_path):
     """
     path = tmp_path / "ported.trace.json"
     point = _settings(path)
-    weak_store = point.weak_syndrome_buffer
+    weak_store = point.part(machines.WEAK_STORE)
     ported = ported_syndrome_buffer.PortedSyndromeBufferSettings(
-        bits=weak_store.bits, clock=weak_store.clock
+        bits=weak_store.settings.bits, clock=weak_store.settings.clock
     )
-    point = dataclasses.replace(point, weak_syndrome_buffer=ported)
+    point = point.with_record(machines.WEAK_STORE, ported)
     machine = machine_module.Machine.build(point, SEED)
     machine.run()
     machine.observation.trace_writer.write(str(path))

@@ -34,8 +34,8 @@ import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.presets.clocks as clocks
 import decsim.records.transfers as transfer_records
-import decsim.settings as machine_settings
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 import examples.two_tiers as two_tiers
 
 PATH_MTU_BYTES = 256
@@ -434,30 +434,28 @@ def test_with_nothing_lost_the_reliable_row_is_the_credit_row_property():
         assert reliable_deliveries == credit_deliveries
 
 
-def _off_board_escalation(protocol) -> machine_settings.MachineSettings:
+def _off_board_escalation(protocol) -> graph.Machine:
     """The two-tier machine with its strong node one chassis hop away.
 
     The escalation hop is the reference card's off-board one: 100 Gb/s,
     400 bits a cycle at 250 MHz, 65 cycles of latency.
     """
-    machine = two_tiers.tasks[0].machine
+    task = two_tiers.tasks[0]
+    machine = task.machine
     off_board = fabrics.ClockedLink(
         clock=clocks.ROOM_CLOCK,
         latency_cycles=65,
         bits_per_cycle=400.0,
         source="the reference card's off-board escalation hop",
     )
-    escalation = machine.links.weak_decoder_to_strong_decoder
-    priced = off_board.priced(
-        "weak_decoder_to_strong_decoder", escalation, None
-    )
+    escalation = task.layout.card.path_settings("weak_to_strong")
+    priced = off_board.priced("weak_to_strong", escalation, None)
     # a clocked link names no protocol, so the channel takes it here
     channel = dataclasses.replace(priced.channel, protocol=protocol)
     card = dataclasses.replace(priced, channel=channel)
-    links = dataclasses.replace(
-        machine.links, weak_decoder_to_strong_decoder=card
-    )
-    return dataclasses.replace(machine, links=links)
+    escalation_link = fabrics.FixedPath(card)
+    fabric = fabrics.RoleLinks(forward=escalation_link, base=machine.fabric)
+    return dataclasses.replace(machine, fabric=fabric)
 
 
 def test_a_reliable_link_at_no_errors_runs_as_its_credit_link_in_a_machine():

@@ -29,7 +29,6 @@ import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.topology.fabrics as fabrics
-import decsim.topology.graph as graph
 
 NAME = "two_tiers"
 DISTANCES = (3, 5)
@@ -79,8 +78,7 @@ for distance in DISTANCES:
         PHYSICAL_ERROR_PROBABILITY,
         ROUND_PERIOD_MICROSECONDS,
     )
-    weak_pool = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    weak_tier = base.with_part(weak_pool)
+    weak_tier = base.with_record(machines.WEAK_POOL, weak_decoder)
     weak_side = fabrics.RoleLinks(
         write_written=weak_communication, base=base.fabric
     )

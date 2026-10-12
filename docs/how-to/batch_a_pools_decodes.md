@@ -38,7 +38,7 @@ clock, behind the redo window.
 Or from the command line:
 
 ```bash
-decsim run run.py --set strong_decoder.batching.type=decode_each --set strong_decoder.batching.law.type=slowest
+decsim run run.py --set strong.batching.type=decode_each --set strong.batching.law.type=slowest
 ```
 
 Only a pool an edge escalates to batches; the row on any other pool is

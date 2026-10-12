@@ -15,17 +15,16 @@ import decsim.controller.policies as idle_policies
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.frontends.settings as workload_settings
-import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
 import decsim.records.program as program_records
-import decsim.records.transfers as transfer_records
-import decsim.settings as machine_settings
+import decsim.topology.fabrics as fabrics
 import tests.declared_run as declared_run
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -609,10 +608,9 @@ def _committed_windows(
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=decoder
-    )
-    machine = machine_module.Machine.build(settings, 5)
+    base = machines.base(workload, qpu)
+    graph = machines.with_pool(base, decoder)
+    machine = machine_module.Machine.build(graph, 5)
     windows = []
     sources = machine.windows.window_manager.window_sources()
     recorder = _window_recorder(windows)
@@ -774,10 +772,9 @@ def _stim_machine(
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=decoder
-    )
-    return machine_module.Machine.build(settings, 5)
+    base = machines.base(workload, qpu)
+    graph = machines.with_pool(base, decoder)
+    return machine_module.Machine.build(graph, 5)
 
 
 def _emitted_rounds(machine: machine_module.Machine) -> list:
@@ -815,10 +812,9 @@ def _shrunk_group_run(blocked_by, idle_policy: IdlePolicySettings) -> dict:
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, weak_decoder=decoder, idle_policy=idle_policy
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    base = machines.base(workload, idle_policy)
+    graph = machines.with_pool(base, decoder)
+    machine = machine_module.Machine.build(graph, 0)
     events, _ = _events_and_end(machine)
     return _ticks_by_event(events)
 
@@ -842,7 +838,7 @@ def _closing_layer_ticks(distance: int) -> int:
     """The closing layer's c/2 events over two links, 125 ticks a bit.
 
     The controller-to-buffer and buffer-to-decoder links move 8000 bits
-    a microsecond (link_profiles.logical_reference_profile).
+    a microsecond (link_profiles.reference_path).
     """
     data_qubit_count = distance * distance
     check_count = data_qubit_count - 1
@@ -886,10 +882,9 @@ def _prefix_run(operations: tuple, mode: str) -> tuple:
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, weak_decoder=decoder
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    base = machines.base(workload)
+    graph = machines.with_pool(base, decoder)
+    machine = machine_module.Machine.build(graph, 0)
     commit_ticks = {}
     sources = machine.windows.window_manager.window_sources()
     recorder = _commit_recorder(machine, commit_ticks)
@@ -988,13 +983,9 @@ def _feedback_run(
         algorithm=matching, engine=engine
     )
     qpu = qpu_settings.QpuSettings(distance=distance)
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=decoder,
-        idle_policy=idle_policy,
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    base = machines.base(workload, qpu, idle_policy)
+    graph = machines.with_pool(base, decoder)
+    machine = machine_module.Machine.build(graph, 0)
     return _events_and_end(machine)
 
 
@@ -1059,18 +1050,13 @@ def _machine(
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    links = _zero_delay_links(data_hop_ticks)
+    fabric = _zero_delay_fabric(data_hop_ticks)
     observation = observation_settings.ObservationSettings(
         trace="chrome", data_movement=True
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=decoder,
-        links=links,
-        observation=observation,
-    )
-    machine = machine_module.Machine.build(settings, 17)
+    base = machines.base(workload, qpu, observation=observation, fabric=fabric)
+    graph = machines.with_pool(base, decoder)
+    machine = machine_module.Machine.build(graph, 17)
     return machine, source
 
 
@@ -1098,21 +1084,34 @@ def _workload(final_round: int) -> workload_settings.WorkloadSettings:
     )
 
 
-def _zero_delay_links(data_hop_ticks: int) -> link_settings.FabricSettings:
-    reference = link_profiles.logical_reference_profile()
-    paths = {}
-    for path in transfer_records.SLOTTED_PATHS:
-        settings = reference.path_settings(path)
+@dataclasses.dataclass(frozen=True)
+class _ReferenceAtLatency:
+    """A hop's reference path with a propagation latency of its own."""
+
+    latency_ticks: int
+
+    def priced(
+        self,
+        name: str,
+        reference: link_settings.PathSettings,
+        machine_clock: Optional[config.Clock],
+    ) -> link_settings.PathSettings:
+        """The reference path, its channel's latency replaced."""
+        del name, machine_clock
         channel = dataclasses.replace(
-            settings.channel, propagation_latency_ticks=0
+            reference.channel, propagation_latency_ticks=self.latency_ticks
         )
-        paths[path] = dataclasses.replace(settings, channel=channel)
-    readout = paths["qpu_to_controller"]
-    channel = dataclasses.replace(
-        readout.channel, propagation_latency_ticks=data_hop_ticks
-    )
-    paths["qpu_to_controller"] = dataclasses.replace(readout, channel=channel)
-    return dataclasses.replace(reference, **paths)
+        return dataclasses.replace(reference, channel=channel)
+
+
+def _zero_delay_fabric(data_hop_ticks: int) -> fabrics.RoleLinks:
+    """The reference card with every hop instant but the readout's."""
+    instant = _ReferenceAtLatency(0)
+    fields = dataclasses.fields(fabrics.RoleLinks)
+    roles = [field.name for field in fields if field.name != "base"]
+    links_by_role = dict.fromkeys(roles, instant)
+    links_by_role["readout"] = _ReferenceAtLatency(data_hop_ticks)
+    return fabrics.RoleLinks(**links_by_role)
 
 
 def _assert_complete_record(

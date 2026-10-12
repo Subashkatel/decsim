@@ -42,10 +42,10 @@ def _task() -> decsim.Task:
     return decsim.Task("memory", machine)
 
 
-def _with(task: decsim.Task, **changes) -> decsim.Task:
-    """The task with its machine's parts replaced, each a whole record."""
-    machine = dataclasses.replace(task.machine, **changes)
-    return dataclasses.replace(task, machine=machine, graph=None)
+def _with(task: decsim.Task, change) -> decsim.Task:
+    """The task with its machine changed by change."""
+    machine = change(task.machine)
+    return dataclasses.replace(task, machine=machine)
 
 
 def test_a_memory_task_streams_and_writes_one_record(tmp_path):
@@ -73,28 +73,31 @@ def test_a_memory_task_streams_and_writes_one_record(tmp_path):
 def test_the_stream_runs_the_tasks_machine_folding_its_windows():
     task = _task()
 
-    settings = stream_command.stream_settings(task, 200, 20)
+    machine = stream_command.stream_machine(task, 200, 20)
 
-    assert settings.observation.folds_windows
-    assert settings.observation.warmup_rounds == 20
-    assert settings.observation.first_recorded_round == 21
-    assert settings.qpu.source.name == "flip_stream"
-    assert settings.weak_decoder == task.machine.weak_decoder
-
-
-def _observation(task, **changes):
-    observation = dataclasses.replace(task.machine.observation, **changes)
-    return {"observation": observation}
+    qpu = machine.held("qpu")
+    weak = machine.part(machines.WEAK_POOL)
+    task_weak = task.machine.part(machines.WEAK_POOL)
+    assert machine.observation.folds_windows
+    assert machine.observation.warmup_rounds == 20
+    assert machine.observation.first_recorded_round == 21
+    assert qpu.source.name == "flip_stream"
+    assert weak.settings == task_weak.settings
 
 
-def _source(task):
+def _observation(machine, **changes):
+    observation = dataclasses.replace(machine.observation, **changes)
+    return dataclasses.replace(machine, observation=observation)
+
+
+def _source(machine):
     source = syndrome_devices.TimingOnlyDevice.Settings()
-    qpu = dataclasses.replace(task.machine.qpu, source=source)
-    return {"qpu": qpu}
+    qpu = machine.held("qpu")
+    timing_qpu = dataclasses.replace(qpu, source=source)
+    return machine.with_held("qpu", timing_qpu)
 
 
-def _double_window(task):
-    del task
+def _double_window(machine):
     strong_window = strong_window_shapes.DoubleWindow.Settings()
     confidence = complementary.ComplementaryGap.Settings()
     threshold = threshold_sources.FixedThreshold.Settings(
@@ -103,22 +106,22 @@ def _double_window(task):
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold, strong_window=strong_window
     )
-    return {"switching": switching}
+    strong = machines.STRONG_BASELINE_POOL
+    return machines.with_strong_tier(machine, strong, switching)
 
 
-def _bulk_strong(task):
-    manager = dataclasses.replace(
-        task.machine.decoder_manager, bulk_strong=True
-    )
-    return {"decoder_manager": manager}
+def _bulk_strong(machine):
+    manager = machine.held("decoder_manager")
+    bulk_manager = dataclasses.replace(manager, bulk_strong=True)
+    return machine.with_held("decoder_manager", bulk_manager)
 
 
 # each change a stream refuses, and the words its refusal says
 REFUSED = [
-    (lambda task: _observation(task, trace="chrome"), "keeps no trace"),
-    (lambda task: _observation(task, log="file"), "keeps no log"),
+    (lambda machine: _observation(machine, trace="chrome"), "keeps no trace"),
+    (lambda machine: _observation(machine, log="file"), "keeps no log"),
     (
-        lambda task: _observation(task, data_movement=True),
+        lambda machine: _observation(machine, data_movement=True),
         "no data movement ledger",
     ),
     (_source, "this task's source is timing_only"),
@@ -130,11 +133,10 @@ REFUSED = [
 @pytest.mark.parametrize("change, words", REFUSED)
 def test_a_shape_a_stream_does_not_build_is_refused_by_name(change, words):
     task = _task()
-    changes = change(task)
-    changed = _with(task, **changes)
+    changed = _with(task, change)
 
     with pytest.raises(refusal.RefusalError) as refused:
-        stream_command.stream_settings(changed, 100, 0)
+        stream_command.stream_machine(changed, 100, 0)
 
     sentence = str(refused.value)
     assert sentence.startswith("not implemented yet")

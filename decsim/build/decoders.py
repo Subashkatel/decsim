@@ -141,8 +141,8 @@ class Decoders:
     ) -> None:
         """Each manager's statistics at its pool's path.
 
-        The entry pool's are at its settings path (weak_decoder, or
-        strong_decoder for a strong-only run), as are each target's.
+        Each pool's are at its part's name, the entry's and each
+        target's alike.
         """
         queues = []
         for pool, manager in zip(self.pools, self.managers, strict=True):

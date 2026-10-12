@@ -4,13 +4,13 @@ A maker is a plain function that returns a records.workload.Workload,
 which WorkloadSettings.running lowers for the machine. A maker written
 outside decsim has the same shape; these are the ones that ship.
 
-A workload lowered in the run file was made at the distance the run
-file gave its maker. A maker row holds a maker's parameters instead and
-is lowered when the task is made (MachineSettings.at_task), against the
-qpu the task has, so an assignment to qpu.distance or to the row's own
-fields makes the circuit again. gem5 resolves a parameter that follows
-another part's the same way, before any object is built: a proxy such
-as `Parent.cache_line_size * Self.num_blocks_per_sector`
+A workload lowered in the run file was made at the distance the run file
+gave its maker. A maker row holds a maker's parameters instead and is
+lowered when the task is made (topology/graph.py Machine.at_task),
+against the qpu the task has, so an assignment to qpu.distance or to the
+row's own fields makes the circuit again. gem5 resolves a parameter that
+follows another part's the same way, before any object is built: a proxy
+such as `Parent.cache_line_size * Self.num_blocks_per_sector`
 (src/mem/cache/tags/Tags.py:139) is resolved by SimObject.unproxyParams
 (src/python/m5/SimObject.py:1117). The task's id hashes the lowered
 workload, so it carries the circuit's text as sinter's strong id does

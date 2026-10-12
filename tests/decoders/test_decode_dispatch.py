@@ -85,14 +85,17 @@ def _manager(engine, unit_count):
     decoder = decoders.PresetLatencyDecoder(DECODE_MICROSECONDS)
     scheduler = schedulers.FifoScheduler()
     pool_settings = decoder_pool.PoolSettings(
-        name="default", unit_count=unit_count
+        name="weak", unit_count=unit_count
     )
     manager = decoder_manager.DecoderManager(
         engine,
         scheduler=scheduler,
         pool_settings=pool_settings,
+        pool_id=window_records.WEAK_POOL_ID,
     )
-    manager.strong_requests = strong_requests_module.StrongRequests()
+    manager.strong_requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     manager.decoder = decoder
     return manager
 

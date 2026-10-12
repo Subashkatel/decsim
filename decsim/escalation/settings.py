@@ -28,8 +28,9 @@ CANCEL_DOWNSTREAM = revision_rules.CancelDownstream.Settings()
 class ThresholdSettings(Protocol):
     """A threshold row's settings record: decibels in, nats out.
 
-    The facts at_task and for_task read are MachineSettings.task_facts,
-    keyed by threshold_sources.TASK_FACTS.
+    The facts at_task and for_task read are the machine's task facts
+    (topology/graph.py Machine.task_facts), keyed by
+    threshold_sources.TASK_FACTS.
     """
 
     threshold_decibels: Optional[float]
@@ -156,14 +157,13 @@ class SwitchingSettings:
 
     strong_answer_route names one of records/routes.py
     ANSWER_ROUTE_NAMES, the way a strong answer reaches the frame.
-    direct, the default: the strong host joins the weak crossing
-    commit, which rides up with the selection, and sends the answer on
-    strong_decoder_to_frame (Toshio 2510.25222 Fig. 1).
-    through_weak_chip: the answer goes down on
-    strong_decoder_to_weak_decoder, the weak chip joins it in one cycle
-    of clock, and sends it on weak_decoder_to_frame (Yang 2605.04892
-    Table I, the Pauli frame update). A run with no switching sends a
-    strong answer direct.
+    direct, the default: the target joins the source's crossing commit,
+    which rides up with the selection, and sends the answer on its own
+    hop to the frame (Toshio 2510.25222 Fig. 1). through_weak_chip: the
+    answer goes down the edge's reverse hop, the source chip joins it
+    in one cycle of clock, and sends it on its own hop to the frame
+    (Yang 2605.04892 Table I, the Pauli frame update). A run with no
+    switching sends a strong answer direct.
     """
 
     confidence: ports.ConfidenceSettings

@@ -24,7 +24,7 @@ class Switching:
     soft output escalates. run_both_at_once starts a speculative strong
     decode with the weak job and cancels it on a keep (Step 1);
     otherwise the strong re-decode starts at the verdict, after the
-    weak_decoder_to_strong_decoder hop. check_plan refuses, once at
+    edge's forward hop. check_plan refuses, once at
     build, a run shape the escalation cannot serve.
     """
 

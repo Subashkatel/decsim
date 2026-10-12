@@ -7,10 +7,10 @@ trigger injects a rescue. On the declared switching machine
 decodes 20-30 us and meets the verdict at 30 us; W1 and W2 arrive at
 18 us and wait for their boundaries. A rescue is the strong decode
 started before the verdict: W0's rounds ride
-weak_decoder_to_strong_decoder (3 us), cross to the strong unit (6 us)
-and decode for 30 us; the answer rides strong_decoder_to_frame (4 us)
+weak_to_strong (3 us), cross to the strong unit (6 us)
+and decode for 30 us; the answer rides strong_to_frame (4 us)
 and commits 1 us later. W1's boundary leaves with the strong answer,
-crosses strong_decoder_to_weak_decoder (4 us) and W1's input (5 us).
+crosses strong_to_weak (4 us) and W1's input (5 us).
 """
 
 import pytest
@@ -172,7 +172,7 @@ def test_the_backlog_trigger_rescues_the_job_that_finds_one_waiting():
     machine = _deadline_run(set(), deadline)
 
     rescue = _log_tick(machine, "deadline trigger")
-    rescued = fabric.log_lines_containing(machine, "deadline trigger")
+    rescued = declared_run.log_lines_containing(machine, "deadline trigger")
     tiers = _tiers(machine)
     counts = _deadline_counts(machine)
 

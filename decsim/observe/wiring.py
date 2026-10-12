@@ -219,9 +219,10 @@ def _data_movement(
     class_by_hop = {}
     for path in links_card.paths:
         class_by_hop[path.name] = data_movement_module.memory_class_of_hop(path)
-    return data_movement_module.DataMovement(
+    classes = data_movement_module.MemoryClasses(
         class_by_hop, frozenset(store_names)
     )
+    return data_movement_module.DataMovement(classes)
 
 
 def _connect_data_movement(

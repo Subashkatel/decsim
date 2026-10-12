@@ -19,7 +19,6 @@ import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
-import decsim.topology.slotted as slotted
 import tests.decoders.windows as windows
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -32,8 +31,7 @@ def _algorithm_spans(strong_algorithm) -> list:
     graph_machine = base.with_settings(
         machines.STRONG_POOL, algorithm=strong_algorithm
     )
-    settings = slotted.resolved(graph_machine)
-    machine = machine_module.Machine.build(settings)
+    machine = machine_module.Machine.build(graph_machine)
     machine.run()
     records = machine.observation.stages.records
     return [

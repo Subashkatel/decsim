@@ -68,13 +68,6 @@ These are not from the papers. The pages use them everywhere.
   `Readout`, `Windows`, `Decoders`, and `Switching` in a switching
   machine) or the links. A part builds its components and binds their
   ports; `Machine.assemble` wires the parts together.
-- **slotted machine**: a machine the two decoder slots of
-  `MachineSettings` hold: one decoder, or a weak one escalating to a
-  strong one (`decsim/topology/slotted.py`). Every preset and example
-  is one. Its parts, hops and records keep the slots' names, and its
-  task id is the hash of that record. A graph of more pools or edges
-  than the slots hold is a new shape
-  (`decsim/topology/graph_layout.py`).
 - **seat**: a place on a round's path where its detection events may
   form, named in the `formed_at` setting of `DetectionEventSettings`.
 - **card**: a set of stated numbers used in place of a measurement. A
@@ -221,27 +214,28 @@ is a field of a part in `decsim/build/` or a pool inside one.
 | ledger of pending regions | the switching part's `pending_strong_windows`, `PendingStrongWindows` in `decsim/escalation/pending_strong_windows.py`, reached by the strong redecode's `pending` port | which held strong windows wait on which weak commits and stored rounds; a window leaves when its conditions fire |
 | strong window manager | the switching part's `shape`, `RedoWindow` or `DoubleWindow` in `decsim/escalation/strong_window_shapes.py`, with its `regions` as its geometry and `strong_redecode` as the side that submits | cuts an escalated window's strong region, names what releases it, builds its job |
 | strong decoder manager | the decoders part's manager of the strong pool (`manager_of`), a second `DecoderManager` over that pool alone, with its own ready queue, staging and outcomes; its `strong_requests` is the ledger every pool's manager shares | gives each strong job a free strong unit and returns its result; halts a request the weak result made unnecessary |
-| the strong decoders, the strong pool's `unit_count` of them | the `strong_decoder` pool's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
+| the strong decoders, the strong pool's `unit_count` of them | the `strong` pool's units, a `Decoder` behind the port of that name | decode a window accurately and slowly |
 
 ## The link paths
 
-Every hop is booked under one path name. A graph names a hop by the
-parts at its ends; a slotted machine's twelve hops are the `SLOTTED_PATHS`
-names in `decsim/records/transfers.py`, below.
+Every hop is booked under one path name: the parts at its ends,
+`<source>_to_<target>`, except the three between parts every machine
+holds once (`decsim/records/transfers.py`). Each hop has a role, which
+the reference card prices it by and a fabric may pick its link by
+(`decsim/records/routes.py` `HopRole`). The names below are the
+presets' parts (`decsim/presets/machines.py`).
 
-| decsim | The hop |
-| --- | --- |
-| `qpu_to_controller` | the readout electronics to the control workstation |
-| `controller_to_weak_buffer` | the packed round into the weak syndrome buffer |
-| `controller_to_strong_buffer` | a strong-only run's round into the strong syndrome buffer |
-| `weak_buffer_to_weak_decoder` | a window's rounds into a weak unit's memory |
-| `strong_buffer_to_strong_decoder` | the strong region into the strong unit, and one strong decode's boundary to another, both read out of the host's memory |
-| `weak_decoder_to_strong_decoder` | the escalation's selection, then the strong window's rounds; and a weak commit's boundary that a strong window pins |
-| `decoder_to_decoder` | one weak window's committed boundary to the next weak window, on the chip |
-| `weak_decoder_to_frame`, `strong_decoder_to_frame` | a correction to the Pauli frame |
-| `strong_decoder_to_weak_decoder` | a strong answer to the weak chip, which joins it and sends it home on `weak_decoder_to_frame` (`switching.strong_answer_route` `through_weak_chip`); and a strong decode's boundary to the weak window after it |
-| `frame_to_controller` | the conditional release |
-| `controller_to_qpu` | the instruction, and its pulse cost |
+| Role | A preset's hop | The hop |
+| --- | --- | --- |
+| `readout` | `qpu_to_controller` | the readout electronics to the control workstation |
+| `write` | `controller_to_weak_buffer` | the packed round into a store, written, or as it lands for a store on the host |
+| `read` | `weak_buffer_to_weak` | a window's rounds into a unit's memory, out of the store its pool reads |
+| `forward` | `weak_to_strong` | the escalation's selection, then the strong window's rounds; and a commit's boundary that a later pool's window pins |
+| `reverse` | `strong_to_weak` | an answer down an edge to the source chip, which joins it and sends it home (`switching.strong_answer_route` `through_weak_chip`); and a boundary to an earlier pool's window |
+| `same_pool` | `weak_to_weak` | one window's committed boundary to the next window of the same pool |
+| `answer` | `weak_to_frame` | a correction to the Pauli frame |
+| `decision` | `frame_to_controller` | the conditional release |
+| `command` | `controller_to_qpu` | the instruction, and its pulse cost |
 
 ## Read next
 

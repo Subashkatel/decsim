@@ -153,8 +153,8 @@ class SyndromeBuffer:
             raise RuntimeError(
                 f"round {round_key!r} of {packet_bits} bits does not fit a "
                 f"syndrome buffer of {self.settings.bits} bits; an escalated "
-                "region lands whole, so strong_syndrome_buffer.bits must "
-                "hold it"
+                "region lands whole, so the bits of the store it lands in "
+                "must hold it"
             )
         assert round_key not in self.round_by_key, (
             f"round {round_key!r} was written twice"

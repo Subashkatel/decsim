@@ -15,7 +15,7 @@ A part's class holds an unrecorded group (every statistic the null
 one), so a part built alone, as a test builds it, records nothing. When
 the machine is built, the part that holds a component attaches it to
 the run's Registry at its path (the path its settings have,
-weak_decoder.queue), as gem5 binds each SimObject's stats into the
+weak.queue), as gem5 binds each SimObject's stats into the
 hierarchy after construction (src/python/m5/stats/__init__.py:277-309).
 The component then gets an accumulator for every statistic the run
 enables and the shared null statistic for the rest (SST's load level:

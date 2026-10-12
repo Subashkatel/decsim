@@ -1,47 +1,55 @@
 """The kinds of part and their ports (topology/part_kinds.py).
 
-The referent for a kind is MachineSettings itself: a record is of the
-kind whose slot's type takes it (parameters/kinds.py), and a slot
-taking it is what the run does with it today.
+A record is of the kind whose type takes it (parameters/kinds.py), and
+a kind a machine holds once runs on its default record when the machine
+holds no part of it.
 """
 
 import collections
-import dataclasses
-import typing
 
 import decsim.frontends.settings as workload_settings
 import decsim.parameters.kinds as kinds
 import decsim.producers as producers
-import decsim.settings as machine_settings
+import decsim.topology.graph as graph
 import decsim.topology.part_kinds as part_kinds
 from decsim.decoders.union_find import decoder as union_find
 from decsim.syndrome_buffer import ported_syndrome_buffer
 
 
-def _slot_records() -> list:
-    """(kind, record class) for each record each kind's slots take."""
-    hints = typing.get_type_hints(machine_settings.MachineSettings)
-    pairs = []
+def test_a_record_is_of_the_kind_whose_type_takes_it():
     for kind in part_kinds.KINDS:
-        for slot in kind.slots:
-            taken = kinds.records_for(hints[slot])
-            pairs.extend((kind, record_class) for record_class in taken)
-    return pairs
+        for record_class in kinds.records_for(kind.hint):
+            assert part_kinds.kind_of(record_class) is kind, record_class
 
 
-def test_a_record_is_of_the_kind_whose_slot_takes_it():
-    for kind, record_class in _slot_records():
-        assert part_kinds.kind_of(record_class) is kind
+def test_a_kind_is_found_by_its_name():
+    for kind in part_kinds.KINDS:
+        assert part_kinds.kind_named(kind.name) is kind
 
 
-def test_every_slot_holding_a_part_belongs_to_one_kind():
-    machine_level = {"clock", "links", "observation"}
-    fields = dataclasses.fields(machine_settings.MachineSettings)
-    slots = [field.name for field in fields if field.name not in machine_level]
+def test_each_kind_held_once_defaults_to_a_record_of_its_own():
+    held_once = [kind for kind in part_kinds.KINDS if not kind.is_many]
+    defaulted = [kind for kind in held_once if kind.default is not None]
 
-    kind_slots = [slot for kind in part_kinds.KINDS for slot in kind.slots]
+    for kind in defaulted:
+        default_class = type(kind.default)
+        assert part_kinds.kind_of(default_class) is kind, kind.name
 
-    assert sorted(kind_slots) == sorted(slots)
+
+def test_only_the_frame_and_the_router_are_absent_when_not_held():
+    held_once = [kind for kind in part_kinds.KINDS if not kind.is_many]
+
+    absent = {kind.name for kind in held_once if kind.default is None}
+
+    assert absent == {"pauli_frame", "router"}
+
+
+def test_a_kind_held_many_times_has_no_default():
+    held_many = [kind for kind in part_kinds.KINDS if kind.is_many]
+
+    defaults = [kind.default for kind in held_many]
+
+    assert defaults == [None] * len(held_many)
 
 
 def test_a_ported_store_is_a_syndrome_buffer():
@@ -89,9 +97,9 @@ def test_a_memory_made_at_the_task_leaves_a_qpus_distance_free():
     assert fields == ()
 
 
-def test_parts_with_no_workload_part_run_the_machines_default():
-    defaults = machine_settings.MachineSettings()
+def test_a_machine_with_no_workload_part_runs_the_kinds_default():
+    machine = graph.Machine()
 
-    workload = part_kinds.workload_of(())
+    workload = machine.held(part_kinds.WORKLOAD)
 
-    assert workload == defaults.workload
+    assert workload == workload_settings.WorkloadSettings()

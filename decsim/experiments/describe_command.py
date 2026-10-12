@@ -3,9 +3,8 @@
     decsim describe <run file> [--only NAME] [--set PATH=VALUE ...] [--json]
 
 It prints the task's machine as the YAML a machine file holds
-(topology/machine_file.py), a task built from MachineSettings written as
-the graph it resolves from (topology/slotted.py), then each path's
-latency and rate as the run prices them. gem5 writes the instantiated
+(topology/machine_file.py), then each path's latency and rate as the
+run prices them. gem5 writes the instantiated
 system as config.ini and config.json for the same reason: what ran is
 read, not inferred from the script (src/python/m5/simulate.py).
 --json writes the same graph and paths as one json object, as
@@ -20,7 +19,6 @@ import decsim.experiments.parameters_command as parameters_command
 import decsim.links.settings as link_settings
 import decsim.parameters.fields as fields
 import decsim.topology.machine_file as machine_file
-import decsim.topology.slotted as slotted
 
 UNBOUNDED = "unbounded"
 # the channel's parameters, which write a latency and a rate as --set does
@@ -35,9 +33,7 @@ def describe(argv: list) -> None:
     parameters_command.put_in_force(parsed.set)
     study = experiment.load_one_task(parsed.run_file, parsed.only)
     task = study.tasks[0]
-    written = task.graph
-    if written is None:
-        written = slotted.graph_of(task.machine)
+    written = task.machine
     if parsed.json:
         _print_json(task, written)
         return
@@ -45,7 +41,7 @@ def describe(argv: list) -> None:
     print(f"# {task.name}, as a graph")
     print(text)
     print("# its paths, as the run prices them: latency, rate")
-    links = task.machine.links
+    links = task.layout.card
     for path in links.path_names():
         path_settings = links.path_settings(path)
         line = path_line(path, path_settings)
@@ -73,7 +69,7 @@ def priced(path_settings: link_settings.PathSettings) -> tuple:
 
 def _print_json(task: object, written: object) -> None:
     """The task's graph and its priced paths as one json object."""
-    links = task.machine.links
+    links = task.layout.card
     paths = {}
     for path in links.path_names():
         path_settings = links.path_settings(path)

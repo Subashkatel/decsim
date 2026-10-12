@@ -20,7 +20,7 @@ def stop(cell: dict) -> decsim.CollectionSettings:
 
 
 def metadata(cell: dict) -> dict:
-    """The cells under the names the collected results carry, so ids hold."""
+    """The cells under the names the collected results carry."""
     probability = constants.physical_error_probability
     period = constants.round_period_microseconds
     return {

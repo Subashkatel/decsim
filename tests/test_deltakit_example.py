@@ -26,6 +26,7 @@ import decsim.machine as machines
 import decsim.producers as producers
 import decsim.qpu.stim_device as sources
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
+import decsim.topology.fabrics as fabrics
 import examples.deltakit_example as example
 import tests.declared_run as declared_run
 
@@ -180,16 +181,16 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
     sampler = faulty.compile_sampler(seed=10)
     measurements = sampler.sample(1)
     workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
-    settings = _settings(workload, 3, 24)
+    graph = _graph(workload, 3, 24)
     source = sources.RecordedStimDevice(
         measurements,
         0,
         measurement_rounds={producers.LIVE_STREAM_ID: mapping},
     )
     source_record = declared_run.GivenSource(source)
-    qpu = dataclasses.replace(settings.qpu, source=source_record)
-    settings = dataclasses.replace(settings, qpu=qpu)
-    machine = machines.Machine.build(settings, 0)
+    qpu = dataclasses.replace(graph.held("qpu"), source=source_record)
+    graph = graph.with_held("qpu", qpu)
+    machine = machines.Machine.build(graph, 0)
     readouts = []
     machine.qpu.device.trace.round_emitted.connect(readouts.append)
     result = machine.run()
@@ -213,8 +214,8 @@ def test_a_protected_stream_cannot_use_truth_from_a_later_final_readout() -> (
     earlier = protected.operations[:-1]
     operations = earlier + (late_readout,)
     workload = dataclasses.replace(protected, operations=operations)
-    settings = _settings(workload, 3, 24)
-    machine = machines.Machine.build(settings, 0)
+    graph = _graph(workload, 3, 24)
+    machine = machines.Machine.build(graph, 0)
     with pytest.raises(RuntimeError, match="its Stim circuit was registered"):
         machine.run()
 
@@ -315,7 +316,7 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
         "rotated_surface", 3, 24, "Z", 0.001
     )
     workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
-    settings = _settings(workload, 3, 24)
+    graph = _graph(workload, 3, 24)
     # twelve rounds of the distance-three memory, the final round's data
     # readout included: 11 * 8 + 17 bits
     twelve_rounds_bits = 11 * 8 + 17
@@ -323,27 +324,23 @@ def test_bounded_buffer_and_unit_memory_use_the_normal_data_path() -> None:
         bits=twelve_rounds_bits
     )
     memory = decoder_settings.UnitMemorySettings(bits=twelve_rounds_bits)
-    decoder = dataclasses.replace(
-        settings.weak_decoder, unit_memory=memory, unit_count=2
-    )
-    settings = dataclasses.replace(
-        settings, weak_syndrome_buffer=buffer, weak_decoder=decoder
-    )
-    machine = machines.Machine.build(settings, 0)
+    graph = graph.with_settings("weak", unit_memory=memory, unit_count=2)
+    graph = graph.with_record("weak_buffer", buffer)
+    machine = machines.Machine.build(graph, 0)
     result = machine.run()
     assert result.terminal_status == "complete"
     assert result.data_movement["rounds"] == 24
     assert result.data_movement["moved_rounds"] > 24
 
 
-def _settings(
+def _graph(
     workload,
     distance,
     round_count,
     period_microseconds=1.1,
     feedback_microseconds=4.0,
 ):
-    return example.supplied_settings(
+    return example.supplied_machine(
         workload,
         distance=distance,
         round_count=round_count,
@@ -354,13 +351,13 @@ def _settings(
 
 def _memory_machine(circuit, mapping, distance, round_count):
     workload = example.memory_workload(circuit, mapping, round_count, "patch")
-    settings = _settings(workload, distance, round_count)
-    return machines.Machine.build(settings, 0)
+    graph = _graph(workload, distance, round_count)
+    return machines.Machine.build(graph, 0)
 
 
 def _repetition_replay(circuit, mapping, measurements, distance, round_count):
     workload = example.memory_workload(circuit, mapping, round_count, "patch")
-    settings = _settings(workload, distance, round_count)
+    graph = _graph(workload, distance, round_count)
     table = formation.build_formation_table(
         circuit, round_count, measurement_rounds=mapping
     )
@@ -375,10 +372,10 @@ def _repetition_replay(circuit, mapping, measurements, distance, round_count):
     card = declared_run.GivenCard(code)
     source_record = declared_run.GivenSource(source)
     qpu = dataclasses.replace(
-        settings.qpu, distance=None, code_card=card, source=source_record
+        graph.held("qpu"), distance=None, code_card=card, source=source_record
     )
-    settings = dataclasses.replace(settings, qpu=qpu)
-    return machines.Machine.build(settings, 0)
+    graph = graph.with_held("qpu", qpu)
+    return machines.Machine.build(graph, 0)
 
 
 def _protected_machine(
@@ -388,26 +385,18 @@ def _protected_machine(
         "rotated_surface", 3, 24, "Z", 0.001
     )
     workload = example.protection_workload(circuit, mapping, 24, 3, "patch")
-    settings = _settings(
+    graph = _graph(
         workload,
         3,
         24,
         period_microseconds,
         feedback_microseconds,
     )
-    instruction_ticks = config.microseconds_to_ticks(instruction_microseconds)
     # a pure delay: the instruction's time is its latency and nothing else
-    channel = dataclasses.replace(
-        settings.links.controller_to_qpu.channel,
-        propagation_latency_ticks=instruction_ticks,
-        capacity=None,
-    )
-    path = dataclasses.replace(
-        settings.links.controller_to_qpu, channel=channel
-    )
-    links = dataclasses.replace(settings.links, controller_to_qpu=path)
-    settings = dataclasses.replace(settings, links=links)
-    return machines.Machine.build(settings, 0)
+    instruction = fabrics.TimedLink(instruction_microseconds)
+    fabric = dataclasses.replace(graph.fabric, command=instruction)
+    graph = dataclasses.replace(graph, fabric=fabric)
+    return machines.Machine.build(graph, 0)
 
 
 def _command_tick(events, kind, operation_id):

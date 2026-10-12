@@ -34,10 +34,11 @@ def stop(cell: dict) -> decsim.CollectionSettings:
     )
 
 
-def metadata(cell: dict, settings: decsim.MachineSettings) -> dict:
-    """The cells under the names the collected results carry, so ids hold."""
+def metadata(cell: dict, task: decsim.Task) -> dict:
+    """The cells under the names the collected results carry."""
     probability = cell["physical_error_probability"]
-    period = settings.qpu.round_period_microseconds
+    qpu = task.machine.held("qpu")
+    period = qpu.round_period_microseconds
     return {
         "workload.arguments.physical_error_probability": probability,
         "qpu.distance": cell["distance"],

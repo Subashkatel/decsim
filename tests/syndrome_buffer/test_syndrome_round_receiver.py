@@ -15,8 +15,9 @@ sends, so the room counts the bits of the writes in flight as taken
 (gem5 src/dev/net/pktfifo.hh, `avail() = _maxsize - _size - _reserved`
 with `reserve(len)`).
 
-The first half drives the written intake, the weak syndrome buffer's;
-the second the landed intake, the strong syndrome buffer's. The
+The first half drives the written intake, the weak store's
+(weak_buffer); the second the landed intake, the strong store's
+(strong_buffer). The
 crossing itself is the sender's and is tested where it is executed: the
 controller's write in tests/controller/test_syndrome_round_sender.py,
 the escalated region's send in tests/escalation/test_strong_redecode.py.
@@ -27,7 +28,6 @@ each of its rounds takes its slot and wakes the window side.
 
 import pytest
 
-import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -49,6 +49,29 @@ LANDED_TICKS = config.microseconds_to_ticks(0.5)
 # every landed round carries one fragment of three bits
 LANDED_BITS_PER_ROUND = 3
 FORMING_CYCLES = 5
+# the controller writes the weak store; an escalated region lands in the
+# strong one, as the layout makes each store's intake from the graph
+_CONTROLLER_LABEL = "controller assembler"
+_WEAK_WRITE = receiver_module.Hop(
+    "controller_to_weak_buffer", _CONTROLLER_LABEL
+)
+_STRONG_WRITE = receiver_module.Hop(
+    "controller_to_strong_buffer", _CONTROLLER_LABEL
+)
+_ESCALATION = receiver_module.Hop("weak_to_strong", "weak")
+WEAK_STORE_INTAKE = receiver_module.StoreIntake(
+    name="weak_buffer",
+    seat="weak_buffer",
+    shape=receiver_module.WRITTEN,
+    controller_write=_WEAK_WRITE,
+)
+STRONG_STORE_INTAKE = receiver_module.StoreIntake(
+    name="strong_buffer",
+    seat="strong_buffer",
+    shape=receiver_module.LANDED,
+    controller_write=_STRONG_WRITE,
+    escalation=_ESCALATION,
+)
 
 
 class _Windows:
@@ -146,7 +169,7 @@ def test_the_intake_copy_is_made_at_the_landing_by_this_end():
             (1, 1),
             2,
             "controller assembler",
-            "weak syndrome buffer",
+            "weak_buffer",
         )
     ]
 
@@ -201,7 +224,7 @@ def test_a_write_still_in_flight_at_the_end_of_a_run_is_a_failure():
     crossing = _packed(1)
     receiver.reserve_write(crossing)
 
-    with pytest.raises(RuntimeError, match="weak syndrome buffer ended with 1"):
+    with pytest.raises(RuntimeError, match="weak_buffer ended with 1"):
         receiver.check_settled()
 
 
@@ -306,7 +329,7 @@ class _ChipSource:
 def _on_the_chip(clock=None, latency_cycles=0):
     """The former seated at this store's receiving end."""
     settings = event_settings.DetectionEventSettings(
-        formed_at=("weak_syndrome_buffer",),
+        formed_at=("weak_buffer",),
         clock=clock,
         latency_cycles=latency_cycles,
     )
@@ -623,7 +646,7 @@ def test_settlement_reports_a_write_still_in_flight():
     receiver.store.register_hold(reads, [(1, 1)])
     cross(engine, receiver, 1)
 
-    with pytest.raises(RuntimeError, match="strong syndrome buffer ended"):
+    with pytest.raises(RuntimeError, match="strong_buffer ended"):
         receiver.check_settled()
 
 
@@ -649,7 +672,7 @@ def test_the_rounds_before_a_region_land_raw_and_cost_no_formation():
     receiver.receive_region(carried, record_stored)
     engine.run()
 
-    seat = "strong_syndrome_buffer"
+    seat = "strong_buffer"
     assert carried.wire_bits == 4 * LANDED_BITS_PER_ROUND
     assert stored_at == [50]
     assert receiver.detection_events.formed == [
@@ -740,7 +763,7 @@ def test_the_room_is_weighed_at_the_width_this_seat_stores():
     """
     engine = engine_module.Engine()
     settings = event_settings.DetectionEventSettings(
-        formed_at=("strong_syndrome_buffer",)
+        formed_at=("strong_buffer",)
     )
     here = formation.SeatedFormation(None, settings)
     receiver = room_side(engine, bits=2, detection_events=here)
@@ -758,7 +781,7 @@ def test_a_region_reserves_its_formed_rounds_and_its_raw_rounds_before():
     """The rounds before land raw; the rounds formed here take one bit."""
     engine = engine_module.Engine()
     settings = event_settings.DetectionEventSettings(
-        formed_at=("strong_syndrome_buffer",)
+        formed_at=("strong_buffer",)
     )
     here = formation.SeatedFormation(None, settings)
     room_bits = 2 * LANDED_BITS_PER_ROUND + 2
@@ -817,14 +840,10 @@ class _ArrivalConsumer:
 
 
 def _written_receiver(engine) -> receiver_module.SyndromeRoundReceiver:
-    """The weak syndrome buffer's end: the controller writes its rounds."""
-    return receiver_module.SyndromeRoundReceiver(
-        engine, layout_module.WEAK_STORE_INTAKE
-    )
+    """The weak store's end: the controller writes its rounds."""
+    return receiver_module.SyndromeRoundReceiver(engine, WEAK_STORE_INTAKE)
 
 
 def _landed_receiver(engine) -> receiver_module.SyndromeRoundReceiver:
-    """The strong syndrome buffer's end: its rounds land whole."""
-    return receiver_module.SyndromeRoundReceiver(
-        engine, layout_module.STRONG_STORE_INTAKE
-    )
+    """The strong store's end: its rounds land whole."""
+    return receiver_module.SyndromeRoundReceiver(engine, STRONG_STORE_INTAKE)

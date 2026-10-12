@@ -21,16 +21,16 @@ import decsim.experiments.run_folder as run_folder
 import decsim.frontends.deltakit as deltakit
 import decsim.frontends.settings as workload_settings
 import decsim.frontends.workload_files as workload_files
-import decsim.links.link_profiles as link_profiles
 import decsim.machine as machine_module
 import decsim.observe.settings as observation_settings
+import decsim.presets.link_cards as link_cards
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
-import decsim.settings as machine_settings
-import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as graph
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -66,7 +66,7 @@ def main() -> None:
             arguments.prefix_rounds,
             arguments.patch,
         )
-    settings = supplied_settings(
+    supplied = supplied_machine(
         workload,
         distance=arguments.distance,
         round_count=arguments.rounds,
@@ -79,20 +79,20 @@ def main() -> None:
             arguments.distance, arguments.rounds
         )
         qpu = dataclasses.replace(
-            settings.qpu, distance=None, code_card=code_card
+            supplied.held("qpu"), distance=None, code_card=code_card
         )
-        settings = dataclasses.replace(settings, qpu=qpu)
-    machine = machine_module.Machine.build(settings, arguments.seed)
+        supplied = supplied.with_held("qpu", qpu)
+    machine = machine_module.Machine.build(supplied, arguments.seed)
     prepared = time.perf_counter()
     setup_seconds = prepared - started
-    task = _task_of(arguments, settings)
+    task = _task_of(arguments, supplied)
     task_ids = [task.strong_id()]
     started_utc = run_folder.start_run(arguments.output, None, task_ids)
     seeds = [(arguments.seed, 1)]
     run_folder.record_task(arguments.output, task, seeds)
     result = machine.run()
     label = f"seed{arguments.seed}"
-    run_folder.write_shot(machine, settings, arguments.output, label, result)
+    run_folder.write_shot(machine, arguments.output, label, result)
     argument_path = arguments.output / "arguments.json"
     selected_arguments = vars(arguments)
     argument_values = collect.json_value(selected_arguments)
@@ -172,7 +172,7 @@ def protection_workload(
     return workload_records.Workload(operations, round_counts, physical)
 
 
-def supplied_settings(
+def supplied_machine(
     workload: workload_records.Workload,
     *,
     distance: int,
@@ -180,7 +180,7 @@ def supplied_settings(
     period_microseconds: float,
     feedback_microseconds: float,
     decoder_microseconds: float = 0.1,
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The machine that samples a finite circuit on the Stim source.
 
     The Stim source is built from the workload's circuit and round map,
@@ -210,27 +210,15 @@ def supplied_settings(
     decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    # the frame's word feedback_microseconds after the decision, at the
-    # reference card's rate; every other hop the reference card's
-    reference = link_profiles.logical_reference_profile()
-    word_capacity = reference.frame_to_controller.channel.capacity
-    feedback = fabrics.TimedLink(
-        feedback_microseconds, word_capacity.input_bits_per_microsecond
-    )
-    fabric = fabrics.PathLinks(frame_to_controller=feedback)
-    routes = fabrics.slotted_routes(fabrics.SLOTTED_SITES)
-    links = fabrics.card(fabric, routes, {}, None)
+    fabric = link_cards.feedback_fabric(feedback_microseconds)
     observation = observation_settings.ObservationSettings(
         trace="chrome",
         data_movement=True,
     )
-    return machine_settings.MachineSettings(
-        workload=lowered,
-        qpu=qpu,
-        weak_decoder=decoder,
-        links=links,
-        observation=observation,
+    machine = machines.base(
+        lowered, qpu, observation=observation, fabric=fabric
     )
+    return machines.with_pool(machine, decoder)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -365,14 +353,14 @@ def _check_replay_parameter(input_folder, name, selected, recorded) -> None:
         raise ValueError(f"{name} differs from the exported circuit parameters")
 
 
-def _task_of(arguments, settings) -> collect.Task:
+def _task_of(arguments, supplied) -> collect.Task:
     """The run's one task, its values the command line's."""
     metadata = {
         "workload.arguments.physical_error_probability": arguments.probability,
         "qpu.distance": arguments.distance,
         "qpu.round_period_microseconds": arguments.period_microseconds,
     }
-    return collect.Task(TASK_NAME, settings, metadata)
+    return collect.Task(TASK_NAME, supplied, metadata)
 
 
 if __name__ == "__main__":

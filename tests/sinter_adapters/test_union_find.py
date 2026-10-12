@@ -48,7 +48,8 @@ def test_the_adapter_answers_as_the_machines_union_find_row_shot_for_shot(
     task = baseline_task(distance, code_task, ERROR_RATE, UNION_FIND)
     seeds = range(SHOT_COUNT)
     events, machine_answers = machine_shots(task, seeds)
-    (operation,) = task.machine.workload.operations
+    workload = task.machine.held("workload")
+    (operation,) = workload.operations
     circuit = operation.circuit
     model = circuit.detector_error_model(
         decompose_errors=True, approximate_disjoint_errors=True
@@ -141,7 +142,8 @@ def machine_shots(task, seeds) -> tuple:
     committed for it.
     """
     built_models = built_window_models.BuiltWindowModels()
-    (operation,) = task.machine.workload.operations
+    workload = task.machine.held("workload")
+    (operation,) = workload.operations
     events = []
     answers = []
     for seed in seeds:

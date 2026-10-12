@@ -66,7 +66,7 @@ class DecoderManager:
         *,
         scheduler: schedulers.Scheduler,
         pool_settings: decoder_pool_module.PoolSettings,
-        pool_id: window_records.PoolId = window_records.WEAK_POOL_ID,
+        pool_id: window_records.PoolId,
         merges_strong: bool = False,
         clock: Optional[config.Clock] = None,
         dispatch_cycles: int = 0,

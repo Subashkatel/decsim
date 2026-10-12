@@ -8,29 +8,38 @@ no-op; version 2 releases the dependency exactly once, and a repeated
 delivery of the current version releases nothing.
 """
 
+import dataclasses
 import types
 
 import pytest
 
-import decsim.build.routes as routes_build
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
-import decsim.links.link_profiles as link_profiles
 import decsim.links.window_transfers as window_transfers
 import decsim.records.program as program_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.round_retention as round_retention
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
+import tests.experiments.run_files as run_files
 
-# the slotted pools joined by their edge, so a strong window can pin a
-# face; the planner's windows on the weak pool
-_EDGE = routes_build.slotted_edge("direct")
-_ROUTES = routes_build.generated(
-    routes_build.SLOTTED_POOL_HOPS, (_EDGE,), window_records.WEAK_POOL_ID
-)
+
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
+# the two pools joined by their edge, so a strong window can pin a face;
+# the planner's windows on the weak pool
+_ROUTES = REFERENCE_LAYOUT.routes()
 
 
 class _EagerPolicy:
@@ -80,7 +89,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         # d*d-1 checks of one d=3 patch
         syndrome_bits_per_round_of=lambda _operation_id: 8,
     )
-    profile = link_profiles.logical_reference_profile()
+    profile = REFERENCE_LAYOUT.card
     links = fabric.LinkFabric(profile, engine)
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(
@@ -218,8 +227,8 @@ class _LandingTicks:
 
 def _reference_latency_ticks(path_name: str) -> int:
     """The reference card's latency on one hop."""
-    profile = link_profiles.logical_reference_profile()
-    path = getattr(profile, path_name)
+    profile = REFERENCE_LAYOUT.card
+    path = profile.path_settings(path_name)
     return path.channel.propagation_latency_ticks
 
 
@@ -264,7 +273,7 @@ def _pinned_courier():
         # d*d-1 checks of one d=3 patch
         syndrome_bits_per_round_of=lambda _operation_id: 8,
     )
-    profile = link_profiles.logical_reference_profile()
+    profile = REFERENCE_LAYOUT.card
     links = fabric.LinkFabric(profile, engine)
     boundary_payload = boundary_payloads.DenseSeamMask()
     interaction = window_interactions.DefaultWindowInteraction(
@@ -390,10 +399,10 @@ def test_a_weak_commit_reaches_a_strong_window_over_the_cable():
     hand_on_path, _attribution, _bits = recording.boundary_sends[0]
     pin_path, _attribution, _bits = recording.boundary_sends[1]
     pin_ticks = courier.windows.ticks[1] - pinned_ticks
-    cable_ticks = _reference_latency_ticks("weak_decoder_to_strong_decoder")
+    cable_ticks = _reference_latency_ticks("weak_to_strong")
     assert pin_ticks >= cable_ticks
-    assert hand_on_path is transfer_records.DECODER_TO_DECODER
-    assert pin_path is transfer_records.WEAK_DECODER_TO_STRONG_DECODER
+    assert hand_on_path == "weak_to_weak"
+    assert pin_path == "weak_to_strong"
 
 
 def test_a_strong_commit_reaches_the_weak_window_after_it_over_the_cable():
@@ -413,9 +422,9 @@ def test_a_strong_commit_reaches_the_weak_window_after_it_over_the_cable():
     courier.send(source, operation, residual, source_request_key=strong_key)
     engine.run()
     path, _attribution, payload_bits = recording.boundary_sends[0]
-    cable_ticks = _reference_latency_ticks("strong_decoder_to_weak_decoder")
+    cable_ticks = _reference_latency_ticks("strong_to_weak")
     assert courier.windows.ticks[0] >= cable_ticks
-    assert path == transfer_records.STRONG_DECODER_TO_WEAK_DECODER
+    assert path == "strong_to_weak"
     assert payload_bits == 8 + window_records.REQUEST_KEY_WIRE_BITS
 
 
@@ -446,7 +455,7 @@ def test_a_strong_commit_reaches_a_strong_window_in_the_hosts_memory():
     )
     engine.run()
     path, _attribution, payload_bits = recording.boundary_sends[1]
-    assert path == transfer_records.STRONG_BUFFER_TO_STRONG_DECODER
+    assert path == "strong_to_strong"
     assert payload_bits == 8
 
 

@@ -110,7 +110,7 @@ def test_a_never_verdict_keeps_every_window_on_the_weak_tier():
     machine = _switching_run(never, ALL_WINDOWS)
 
     counts = machine.decoders.decoder_manager.strong_requests.counts
-    assert fabric.frame_tiers(machine) == WEAK_TIERS
+    assert declared_run.frame_tiers(machine) == WEAK_TIERS
     assert counts.needed == 0
 
 
@@ -121,5 +121,5 @@ def test_an_always_verdict_sends_every_window_to_the_strong_tier():
     machine = _switching_run(always, set())
 
     counts = machine.decoders.decoder_manager.strong_requests.counts
-    assert fabric.frame_tiers(machine) == STRONG_TIERS
+    assert declared_run.frame_tiers(machine) == STRONG_TIERS
     assert counts.needed == 3

@@ -2,11 +2,10 @@
 
 # How to write a machine as a graph
 
-A machine can be written as named parts and the wires between them,
-in Python or in YAML. Each part is a decsim settings record. Its
+A machine is named parts and the wires between them, written in
+Python or in YAML. Each part is a decsim settings record. Its
 parameters sit at its name (`uf.unit_count`), so `--set`, `decsim params`
-and `decsim describe` all reach it. Today the graph runs as the
-`MachineSettings` it resolves to, and a task keeps that record's id.
+and `decsim describe` all reach it. A task is identified by its graph.
 
 ## 1. Name the parts and wire them
 
@@ -37,9 +36,11 @@ machine = graph.Machine(
 task = decsim.Task("uf_d5", machine, collection=collection)
 ```
 
-A part's kind comes from the `MachineSettings` field that takes its
-record, so your own record joins a kind by meeting that field's type.
-The kinds and their ports are in `decsim/topology/part_kinds.py`. A
+A part's kind is the one whose record type takes its record, so your
+own record joins a kind by meeting that type. The kinds, their ports
+and the defaults of the kinds a machine holds once are in
+`decsim/topology/part_kinds.py`; a kind held once that the graph leaves
+out runs on its default. A
 wire runs from an output to an input that carries the same signal. A
 wrong wire is refused when the machine is made. A required port left
 unwired is refused when the task is built.
@@ -63,11 +64,14 @@ two_units = base.with_settings(machines.WEAK_POOL, unit_count=2)
 task = decsim.Task("weak_d5", two_units, collection=collection)
 ```
 
-`with_settings` changes fields of one part's record, `with_part`
-replaces a part of the same name or adds one, `with_wires` adds wires,
-and `without_part` drops a part and its wires.
-`machines.with_strong_tier` adds a strong decoder on the host that the
-weak one escalates to.
+`with_settings` changes fields of one part's record, `with_record`
+replaces its record and keeps its site, `with_held` replaces the record
+of a kind held once, `with_part` replaces a part of the same name or
+adds one, `with_wires` adds wires, and `without_part` drops a part and
+its wires. `machines.base` writes the parts held once with their loop
+wired, `machines.with_pool` adds a pool that reads a store of its own,
+and `machines.with_strong_tier` adds a strong decoder on the host that
+the weak one escalates to.
 
 ## 2. Price the links
 
@@ -89,8 +93,9 @@ host_poll = fabrics.TimedLink(0.0)
 machine = graph.Machine(..., fabric=fabrics.FridgeHostFabric(cable=leg, host_local=host_poll))
 ```
 
-`ReferenceFabric` is the default card, and `PathLinks` gives a link
-to a path by its name.
+`ReferenceFabric` is the default card, and `RoleLinks` gives a link to
+every hop of a role, such as `answer_fridge` or `write_landed`
+(`decsim/records/routes.py`).
 
 ## 3. Or write it in YAML
 
@@ -136,14 +141,11 @@ decsim describe run.py --only uf_d5 --json
 ```
 
 `describe` prints the task's machine as YAML, then every path's
-latency and rate as the run prices them. A task built from
-`MachineSettings` is printed as the graph it resolves from. `--json`
+latency and rate as the run prices them. `--json`
 writes the same graph and paths as one json object, for a script to
 read. A record decsim does not define is written by its import path, so
 the text reads back.
 
-A graph of two pools and one edge at most runs as the `MachineSettings`
-record it resolves to, and keeps that record's task id. A graph of more
-is identified by itself; [How to build a chain of
-decoders](build_a_chain_of_decoders.md) grows one. A pool no edge
+[How to build a chain of decoders](build_a_chain_of_decoders.md)
+grows a graph of more pools. A pool no edge
 reaches, or a store feeding a store, is refused.

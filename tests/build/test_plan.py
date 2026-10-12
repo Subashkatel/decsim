@@ -11,8 +11,6 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.build.layout as layout_module
-import decsim.build.plan as plan_build
 import decsim.confidence.complementary as complementary
 import decsim.controller.policies as policies
 import decsim.decoders.settings as decoder_settings
@@ -22,6 +20,8 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
+import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.streaming_stim_device as streaming_stim_device
@@ -30,7 +30,7 @@ import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
-import decsim.settings as machine_settings
+import decsim.topology.graph_layout as graph_layout
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.settings as window_settings
@@ -64,7 +64,11 @@ def _plan(
     decoder_manager=NO_BULK_STRONG,
     detection_events=CONTROLLER_FORMS,
 ):
-    """The plan of a six-round memory run with the given sections."""
+    """The plan of a six-round memory run with the given sections.
+
+    The run decodes on a weak pool, which escalates to a strong pool
+    under switching when one is given.
+    """
     if idle_policy is None:
         idle_policy = policies.SeparateDecodeJobsSettings()
     if windows is None:
@@ -73,47 +77,38 @@ def _plan(
         qpu = declared_run.declared_qpu()
     if workload is None:
         workload = declared_run.declared_workload(None, 6)
-    links = declared_run.declared_profile()
+    fabric = declared_run.declared_fabric()
     controller = declared_run.declared_controller()
     frame = declared_run.declared_frame()
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        links=links,
-        controller=controller,
-        pauli_frame=frame,
-        windows=windows,
-        idle_policy=idle_policy,
-        decoder_manager=decoder_manager,
-        detection_events=detection_events,
+    base = machines.base(
+        workload,
+        qpu,
+        controller,
+        frame,
+        windows,
+        idle_policy,
+        decoder_manager,
+        detection_events,
+        fabric=fabric,
     )
-    if switching is not None:
-        settings = _with_switching(settings, switching)
-    engine = engine_module.Engine()
-    layout = layout_module.slotted_layout(settings)
-    switching_parts = escalation_build.build_switching(layout, engine)
-    return plan_build.build_plan(
-        settings.qpu,
-        settings.workload,
-        settings.windows,
-        settings.idle_policy,
-        settings.detection_events,
-        settings.switching,
-        settings.decoder_manager.bulk_strong,
-        switching_parts,
-    )
-
-
-def _with_switching(settings, switching):
-    """The settings with both decoders and the switching slot filled."""
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
     decoder = decoder_settings.DecoderPoolSettings(algorithm=matching)
-    return dataclasses.replace(
-        settings,
-        weak_decoder=decoder,
-        strong_decoder=decoder,
-        switching=switching,
-    )
+    graph = machines.with_pool(base, decoder)
+    if switching is not None:
+        # the windows stay as given: with_escalation leaves them alone
+        graph = machines.with_escalation(
+            graph,
+            machines.WEAK_POOL,
+            machines.STRONG_POOL,
+            decoder,
+            switching,
+            switching_name=machines.SWITCHING,
+        )
+    at_task = graph.at_task()
+    layout = graph_layout.layout_of(at_task)
+    engine = engine_module.Engine()
+    switching_parts = escalation_build.build_switching(layout, engine)
+    return machine_module.plan_of(at_task, layout, switching_parts)
 
 
 def _switching(**changes):
@@ -243,7 +238,7 @@ def _second_window_strong_hold(plan) -> tuple:
 
 SWITCHING = declared_run.declared_switching()
 STRONG_SIDE_FORMS = event_settings.DetectionEventSettings(
-    formed_at=("weak_decoder", "strong_decoder")
+    formed_at=("weak", "strong")
 )
 
 
@@ -293,7 +288,7 @@ def test_a_restart_read_holds_no_round_before_its_restart_start():
     double_window = strong_window_shapes.DoubleWindow.Settings()
     switching = declared_run.declared_switching(strong_window=double_window)
     weak_decoder_forms = event_settings.DetectionEventSettings(
-        formed_at=("weak_decoder", "strong_decoder")
+        formed_at=("weak", "strong")
     )
 
     plan = _plan(

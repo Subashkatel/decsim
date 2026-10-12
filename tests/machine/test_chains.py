@@ -4,10 +4,10 @@ The declared switching machine (tests/escalation/declared_fabric.py)
 grows a third pool on the host, deep, behind the strong pool: the weak
 pool escalates to the strong one, which escalates on to deep. Every
 hop of the chain's own is priced at its role's declared latency, so
-strong_to_deep rides as weak_decoder_to_strong_decoder does (3 us),
-deep_buffer_to_deep as strong_buffer_to_strong_decoder (6 us),
-deep_to_frame as strong_decoder_to_frame (4 us) and deep_to_weak as
-strong_decoder_to_weak_decoder (4 us). The deep pool decodes in 50 us.
+strong_to_deep rides as weak_to_strong does (3 us), deep_buffer_to_deep
+as strong_buffer_to_strong (6 us), deep_to_frame as strong_to_frame
+(4 us) and deep_to_weak as strong_to_weak (4 us). The deep pool decodes
+in 50 us.
 
 Each pool declares which windows it doubts, so the three runs are the
 three shapes of a chain: nothing escalates, a window escalates once and
@@ -25,13 +25,9 @@ import decsim.escalation.deadlines as deadlines
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
-import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
-import decsim.topology.graph_layout as graph_layout
-import decsim.topology.slotted as slotted
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
-import tests.topology.test_graph_layout as layout_tests
 
 DEEP_MICROSECONDS = 50.0
 DEEP_POOL = "deep"
@@ -70,34 +66,6 @@ class DeclaredTwoSolves:
         return decoding_records.SoftOutputComputation(soft_output)
 
 
-@dataclasses.dataclass(frozen=True)
-class DeclaredHops:
-    """The declared card; a chain's own hop at its role's declared latency.
-
-    A test's fabric rule: a slotted hop is the card's path as written, and
-    a hop of the graph's own is the card's latency for the slotted hop
-    whose role it carries (fabrics.Route.reference).
-    """
-
-    card: object
-
-    def link_for(self, route: fabrics.Route) -> object:
-        """The card's path, or a timed link at the reference's latency."""
-        names = self.card.path_names()
-        if route.path in names:
-            path = self.card.path_settings(route.path)
-            return fabrics.FixedPath(path)
-        reference = self.card.path_settings(route.reference)
-        channel = reference.channel
-        latency_ticks = channel.propagation_latency_ticks
-        latency_microseconds = config.ticks_to_microseconds(latency_ticks)
-        excludes = reference.excludes_receiver_processing
-        return fabrics.TimedLink(
-            latency_microseconds=latency_microseconds,
-            excludes_receiver_processing=excludes,
-        )
-
-
 def chain_run(
     weak_doubts: set, strong_doubts: set, *, record: bool = False
 ) -> machine_module.Machine:
@@ -113,9 +81,7 @@ def chain_run(
 
 def chain_built(declared: graph.Machine) -> machine_module.Machine:
     """A declared chain built on seed 0, not yet run."""
-    layout = layout_tests.laid_out(declared)
-    entry_settings = graph_layout.entry_settings(declared)
-    return machine_module.Machine.build(entry_settings, 0, layout=layout)
+    return machine_module.Machine.build(declared, 0)
 
 
 def chain_graph(
@@ -138,15 +104,14 @@ def chain_graph(
     the deep edge's declared one-solve signal, and deep_deadline gives
     the deep edge a deadline.
     """
-    settings = fabric.switching_settings(
+    base = fabric.switching_graph(
         rounds=rounds,
         escalated_windows=weak_doubts,
         strong_window=entry_window,
         run_both_at_once=entry_speculates,
         record=record,
     )
-    base = slotted.graph_of(settings)
-    strong_microseconds = fabric.DECLARED_MICROSECONDS["strong"]
+    strong_microseconds = declared_run.DECLARED_MICROSECONDS["strong"]
     is_doubted = fabric.escalate_only(strong_doubts)
     strong_algorithm = declared_run.DeclaredConfidenceDecoder.Settings(
         strong_microseconds, is_doubted
@@ -157,9 +122,7 @@ def chain_graph(
         deep_changes["confidence"] = deep_confidence
     if deep_deadline is not None:
         deep_changes["deadline"] = deep_deadline
-    chain = _with_a_deep_pool(with_doubts, deep_changes)
-    card_fabric = DeclaredHops(settings.links)
-    return dataclasses.replace(chain, fabric=card_fabric)
+    return _with_a_deep_pool(with_doubts, deep_changes)
 
 
 def test_a_chain_that_doubts_nothing_runs_as_the_weak_pool_alone():

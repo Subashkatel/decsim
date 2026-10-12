@@ -18,7 +18,6 @@ follow that packet store with a holder set per round.
 """
 
 import collections
-import dataclasses
 import functools
 import random
 
@@ -27,6 +26,7 @@ import pytest
 import decsim.config as config
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.engine as engine_module
+import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.statistics.registry as statistics_registry
@@ -432,12 +432,12 @@ def test_a_window_waiting_for_a_later_boundary_stops_the_run():
         )
 
 
-def store_of(monkeypatch, field: str, store_settings) -> None:
-    """Every declared run from here on sizes that store so."""
+def store_of(monkeypatch, name: str, store_settings) -> None:
+    """Every declared run from here on sizes the store of that name so."""
     run_machine = declared_run.run_machine
 
-    def run_with_the_store(settings, seed=0, probes=()):
-        sized = dataclasses.replace(settings, **{field: store_settings})
+    def run_with_the_store(graph, seed=0, probes=()):
+        sized = graph.with_record(name, store_settings)
         return run_machine(sized, seed, probes)
 
     monkeypatch.setattr(declared_run, "run_machine", run_with_the_store)
@@ -445,7 +445,7 @@ def store_of(monkeypatch, field: str, store_settings) -> None:
 
 def test_a_strong_store_narrower_than_a_round_stops_the_run(monkeypatch):
     """The strong-primary run writes every round into the strong store."""
-    store_of(monkeypatch, "strong_syndrome_buffer", NARROWER_THAN_A_ROUND)
+    store_of(monkeypatch, machines.STRONG_STORE, NARROWER_THAN_A_ROUND)
     operations = blocked_successor()
 
     with pytest.raises(RuntimeError, match="no round leaving it makes room"):
@@ -458,10 +458,10 @@ def test_a_strong_store_too_small_for_a_region_stops_the_run(monkeypatch):
     Each 6-round region is 48 bits against a store of 8.
     """
     store_of_8_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=8)
-    store_of(monkeypatch, "strong_syndrome_buffer", store_of_8_bits)
+    store_of(monkeypatch, machines.STRONG_STORE, store_of_8_bits)
     operations = blocked_successor()
 
-    with pytest.raises(RuntimeError, match="strong_syndrome_buffer.bits"):
+    with pytest.raises(RuntimeError, match="the bits of the store it lands in"):
         declared_run.switching_run(escalates=True, operations=operations)
 
 
@@ -473,7 +473,7 @@ def test_a_region_held_for_its_restart_window_stops_the_run(monkeypatch):
     must sit beside the 84 of rounds 1 to 11, past an 88-bit store.
     """
     store_of_88_bits = syndrome_buffer_module.SyndromeBufferSettings(bits=88)
-    store_of(monkeypatch, "weak_syndrome_buffer", store_of_88_bits)
+    store_of(monkeypatch, machines.WEAK_STORE, store_of_88_bits)
     operations = blocked_successor()
 
     with pytest.raises(RuntimeError, match=r"round \(1, 12\) needs 96 bits"):
@@ -521,7 +521,7 @@ def test_the_rounds_and_bits_held_are_each_rounds_stay_in_the_store():
     settings = syndrome_buffer_module.SyndromeBufferSettings()
     store = settings.build(engine)
     run_statistics = statistics_registry.Registry(engine)
-    run_statistics.attach(store, "weak_syndrome_buffer")
+    run_statistics.attach(store, "weak_buffer")
 
     first = packet(0)
     store.accept_packed_round(first, publication_tick=None)

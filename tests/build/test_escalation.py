@@ -11,7 +11,6 @@ import dataclasses
 import pytest
 
 import decsim.build.escalation as escalation_build
-import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
 import decsim.confidence.consensus as consensus
 import decsim.confidence.no_signal as no_signal
@@ -24,7 +23,6 @@ import decsim.escalation.verdicts as verdicts
 import decsim.experiments.collect as collect
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
-import decsim.settings as machine_settings
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
@@ -72,10 +70,10 @@ def _built(
 ) -> escalation_build.Switching:
     """The switching part of the one edge a weak and a strong pool make."""
     weak = _weak()
-    machine = machine_settings.MachineSettings(
-        weak_decoder=weak, strong_decoder=weak, switching=settings
-    )
-    layout = layout_module.slotted_layout(machine)
+    base = machines.base()
+    with_weak = machines.with_pool(base, weak)
+    switching_graph = machines.with_strong_tier(with_weak, weak, settings)
+    layout = layout_tests.laid_out(switching_graph)
     switching_parts = escalation_build.build_switching(layout, engine)
     return switching_parts[0]
 
@@ -136,24 +134,24 @@ def test_an_absorbing_window_beside_a_router_is_refused():
 def test_an_agreement_verdict_needs_the_consensus_row():
     agreement = verdicts.Agreement.Settings()
     switching = declared_run.declared_switching(verdict=agreement)
-    settings = declared_fabric.switching_settings(
+    switching_graph = declared_fabric.switching_graph(
         rounds=6, escalated_windows=set(), switching=switching
     )
 
     with pytest.raises(ValueError, match="name confidence consensus"):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(switching_graph, 0)
 
 
 def test_the_consensus_row_needs_the_agreement_verdict():
     """A share of members is not a gap in nats a threshold reads."""
     confidence = consensus.Consensus.Settings()
     switching = declared_run.declared_switching(confidence=confidence)
-    settings = declared_fabric.switching_settings(
+    switching_graph = declared_fabric.switching_graph(
         rounds=6, escalated_windows=set(), switching=switching
     )
 
     with pytest.raises(ValueError, match="name verdict agreement"):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(switching_graph, 0)
 
 
 def test_a_gap_of_two_solves_past_the_entry_needs_a_source_that_pins():

@@ -22,7 +22,6 @@ import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
-import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
@@ -109,7 +108,7 @@ class _OneTable:
 
 
 def _lookback_placement():
-    """The real placement at the weak decoder, over a two-round lookback.
+    """The real placement at the weak pool, over a two-round lookback.
 
     Ten rounds of one qubit; round r's detector is rec[-1] ^ rec[-3], so
     a decoder that joins at round 5 reads rounds 3 and 4 raw.
@@ -122,11 +121,11 @@ def _lookback_placement():
     table = detector_formation.build_formation_table(
         circuit, 10, measurement_rounds=measurement_rounds
     )
-    settings = event_settings.DetectionEventSettings(
-        formed_at=("weak_decoder",)
-    )
+    settings = event_settings.DetectionEventSettings(formed_at=("weak",))
     source = _OneTable(table)
-    return formation.SeatedFormation(source, settings)
+    # the weak pool is a decoder seat: it keeps the landed width
+    decoder_seats = frozenset({"weak"})
+    return formation.SeatedFormation(source, settings, decoder_seats)
 
 
 def _ported_store(engine) -> syndrome_buffer_module.SyndromeBuffer:
@@ -153,10 +152,10 @@ def _output(
 ) -> round_output.SyndromeBufferOutput:
     output = round_output.SyndromeBufferOutput(
         engine,
-        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
-        "weak syndrome buffer",
+        "weak_buffer_to_weak",
+        "weak_buffer",
         reads_in_place,
-        "weak_decoder",
+        "weak",
     )
     output.transfers = transfers
     output.store = store
@@ -263,7 +262,7 @@ def test_a_held_input_rides_no_link_and_lands_now():
     assert delay == 0
     assert landed == [0]
     assert transfers.sends == []
-    assert job.input_source_name == "weak syndrome buffer"
+    assert job.input_source_name == "weak_buffer"
 
 
 def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
@@ -281,7 +280,7 @@ def test_a_store_names_itself_when_the_job_is_bound_and_not_when_it_sends():
 
     output.input_send_for(job, False)
 
-    assert job.input_source_name == "weak syndrome buffer"
+    assert job.input_source_name == "weak_buffer"
     assert transfers.sends == []
 
 

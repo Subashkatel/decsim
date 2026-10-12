@@ -69,9 +69,7 @@ def test_an_unset_environment_assigns_nothing(monkeypatch):
     assert assignments.from_environment() == []
 
 
-@pytest.mark.parametrize("text", ["weak_decoder.unit_count", "=3", "a.b="])
+@pytest.mark.parametrize("text", ["weak.unit_count", "=3", "a.b="])
 def test_a_text_that_is_not_path_equals_value_is_refused(text):
-    with pytest.raises(
-        fields.ParameterError, match="weak_decoder.unit_count=3"
-    ):
+    with pytest.raises(fields.ParameterError, match="weak.unit_count=3"):
         assignments.parse(text, assignments.FLAG)

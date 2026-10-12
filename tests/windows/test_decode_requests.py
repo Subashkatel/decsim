@@ -23,11 +23,9 @@ import decsim.presets.machines as machines
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
-import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-import decsim.topology.slotted as slotted
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.escalate_edges as escalate_edges
@@ -154,9 +152,7 @@ class _Fixture:
         transfers.link = link
         transfers.retention = self.retention
         store_output = round_output.SyndromeBufferOutput(
-            self.engine,
-            transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
-            "weak syndrome buffer",
+            self.engine, "weak_buffer_to_weak", machines.WEAK_STORE
         )
         store_output.transfers = transfers
         store_output.store = self.store
@@ -417,10 +413,10 @@ FOLD_SEEDS = (0, 1, 2, 3, 4)
 FOLD_ROUNDS = 15
 
 
-def _fifteen_rounds(settings, probability: float):
-    """The settings on a memory shot of fifteen rounds at distance 3."""
+def _fifteen_rounds(graph, probability: float):
+    """The graph on a memory shot of fifteen rounds at distance 3."""
     workload = machines.memory_workload(3, probability, FOLD_ROUNDS)
-    return dataclasses.replace(settings, workload=workload)
+    return graph.with_held("workload", workload)
 
 
 @pytest.mark.parametrize("seed", FOLD_SEEDS)
@@ -435,14 +431,13 @@ def test_every_window_with_a_predecessor_folds_its_boundary(probability, seed):
     every one of five seeds still agrees with whole-circuit PyMatching.
     """
     weak_base = machines.weak_baseline(3, probability, 1.0)
-    base = slotted.resolved(weak_base)
-    observation = dataclasses.replace(base.observation, data_movement=True)
-    settings = dataclasses.replace(base, observation=observation)
-    settings = _fifteen_rounds(settings, probability)
-    machine = machine_module.Machine.build(settings, seed)
+    observation = dataclasses.replace(weak_base.observation, data_movement=True)
+    graph = dataclasses.replace(weak_base, observation=observation)
+    graph = _fifteen_rounds(graph, probability)
+    machine = machine_module.Machine.build(graph, seed)
     result = machine.run()
     by_path = result.data_movement["copies_by_path"]
-    folds = by_path["unit default#0 memory -> masked view"]
+    folds = by_path["unit weak#0 memory -> masked view"]
     windows = len(machine.observation.windows.windows)
     loop = decoder_tiers.loop_predictions(result)
     whole_circuit = decoder_tiers.whole_circuit_predictions(machine, result)
@@ -478,25 +473,26 @@ def _fold_run(copies_boundary_fold: bool, probability: float) -> list:
     solves of a complementary gap, both tiers on fixed cards.
     """
     switching = shape_tests.weak_base_switching(3, probability, 1.0)
-    weak_decoder = shape_tests.priced_pool(switching.weak_decoder, 0.028)
+    weak = switching.part(machines.WEAK_POOL)
+    strong = switching.part(machines.STRONG_POOL)
+    weak_decoder = shape_tests.priced_pool(weak.settings, 0.028)
     weak_decoder = dataclasses.replace(
         weak_decoder, copies_boundary_fold=copies_boundary_fold
     )
-    strong_decoder = shape_tests.priced_pool(switching.strong_decoder, 1.0)
-    settings = dataclasses.replace(
-        switching, weak_decoder=weak_decoder, strong_decoder=strong_decoder
-    )
-    settings = _fifteen_rounds(settings, probability)
+    strong_decoder = shape_tests.priced_pool(strong.settings, 1.0)
+    graph = switching.with_record(machines.WEAK_POOL, weak_decoder)
+    graph = graph.with_record(machines.STRONG_POOL, strong_decoder)
+    graph = _fifteen_rounds(graph, probability)
     outcomes = []
     for seed in FOLD_SEEDS:
-        outcome = _fold_outcome(settings, seed)
+        outcome = _fold_outcome(graph, seed)
         outcomes.append(outcome)
     return outcomes
 
 
-def _fold_outcome(settings, seed: int) -> tuple:
+def _fold_outcome(graph, seed: int) -> tuple:
     """One seed's committed corrections, failure and whole-circuit match."""
-    machine = machine_module.Machine.build(settings, seed)
+    machine = machine_module.Machine.build(graph, seed)
     result = machine.run()
     corrections = []
     for record in machine.observation.frame_corrections.committed:
@@ -670,22 +666,19 @@ def test_the_decision_and_the_verdict_run_on_the_machines_clock():
     """No preset clock ticks at 300 MHz, so a part on one fails here."""
     machine_clock = config.Clock.from_megahertz(300.0)
     declared = declared_run.switching_run(escalates=True)
-    windows = dataclasses.replace(declared.settings.windows, decision_cycles=2)
-    switching = dataclasses.replace(
-        declared.settings.switching, threshold_cycles=3
-    )
-    settings = dataclasses.replace(
-        declared.settings,
-        clock=machine_clock,
-        windows=windows,
-        switching=switching,
-    )
+    declared_windows = declared.graph.held(machines.WINDOWS)
+    windows = dataclasses.replace(declared_windows, decision_cycles=2)
+    declared_edge = declared.graph.part(machines.SWITCHING)
+    switching = dataclasses.replace(declared_edge.settings, threshold_cycles=3)
+    graph = dataclasses.replace(declared.graph, clock=machine_clock)
+    graph = graph.with_held(machines.WINDOWS, windows)
+    graph = graph.with_record(machines.SWITCHING, switching)
 
-    machine = machine_module.Machine.build(settings)
+    machine = machine_module.Machine.build(graph)
 
     requester = machine.windows.requester
     (edge,) = requester.edges.edges
-    assert settings.windows.clock is None
-    assert settings.switching.clock is None
+    assert windows.clock is None
+    assert switching.clock is None
     assert requester.clock == machine_clock
     assert edge.rules.costs.clock == machine_clock

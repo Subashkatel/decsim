@@ -323,7 +323,7 @@ class WindowVerdict:
     def __init__(
         self,
         engine: engine_module.Engine,
-        window_pool: window_records.PoolId = window_records.WEAK_POOL_ID,
+        window_pool: window_records.PoolId,
     ) -> None:
         self.engine = engine
         self.window_pool = window_pool

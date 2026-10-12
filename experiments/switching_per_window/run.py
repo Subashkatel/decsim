@@ -45,7 +45,7 @@ def stop(cell: dict) -> decsim.CollectionSettings:
 
 
 def metadata(cell: dict) -> dict:
-    """The cells under the names the collected results carry, so ids hold."""
+    """The cells under the names the collected results carry."""
     probability = cell["physical_error_probability"]
     return {
         "workload.arguments.physical_error_probability": probability,

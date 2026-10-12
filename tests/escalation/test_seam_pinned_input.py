@@ -73,8 +73,8 @@ PHYSICAL_ERROR_PROBABILITY = 0.008
 
 def _machine(distance: int, rounds: int, seed: int, strong_window):
     """The gate's switching card at that distance, on the row given."""
-    settings = shape_tests.gate_switching(distance, rounds, strong_window)
-    return machine_module.Machine.build(settings, seed)
+    gate = shape_tests.gate_switching(distance, rounds, strong_window)
+    return machine_module.Machine.build(gate, seed)
 
 
 def _external_flip_matrix(distance: int, rounds: int):

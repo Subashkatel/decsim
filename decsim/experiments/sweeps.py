@@ -29,7 +29,8 @@ one machine, as a `--set` to the value an argument axis feeds does.
 
 metadata is the cell's values by default, as sinter's json_metadata
 holds a task's swept values; a function of the cell, or of the cell and
-the task's settings, writes them otherwise, so a run that keeps the ids
+the task (its graph and its layout, whose card prices every hop), writes
+them otherwise, so a run that keeps the ids
 of results already collected writes its metadata as it did. stop is
 each task's collection, or a function of the cell; stop_all the
 experiment's. A constants file with a value no cell read is refused,
@@ -137,8 +138,8 @@ class Sweep:
         if len(signature.parameters) == 1:
             written = self.metadata(cell)
             return dict(written)
-        settings_task = collect.Task(task_name, machine)
-        written = self.metadata(cell, settings_task.machine)
+        task = collect.Task(task_name, machine)
+        written = self.metadata(cell, task)
         return dict(written)
 
     def _constants_files(self) -> tuple:

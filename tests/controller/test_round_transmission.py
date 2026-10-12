@@ -5,13 +5,13 @@ A window-input round rides controller_to_weak_buffer and reaches Buffer
 round rides the same hop into the store, as the strong route's rounds
 ride controller_to_strong_buffer, then tells the windows at its delivery
 to the decoder and frees its slot. The sender never waits for a landing:
-two memory rounds one QEC cycle apart on a 5 us weak_buffer_to_weak_decoder
+two memory rounds one QEC cycle apart on a 5 us weak_buffer_to_weak
 land one cycle apart (Yang et al. 2605.04892 and Google 2408.13687 stream
 every round; gem5 src/dev/dma_device.cc transmitList; ns-3
 point-to-point-net-device.cc TransmitComplete). Rounds sent at one tick
 leave in completion order, each at its own write, with no arbitration
 between the routes: the memory round of the reviewed bounded
-weak_buffer_to_weak_decoder shape serializes ahead of the decode input
+weak_buffer_to_weak shape serializes ahead of the decode input
 the windows send one store hop later. The link law itself is the
 channel's (tests/links/test_channel.py).
 """
@@ -20,14 +20,12 @@ import dataclasses
 
 import pytest
 
-import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
-import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.links.window_transfers as window_transfers
 import decsim.observe.link_traffic as link_traffic
@@ -37,16 +35,31 @@ import decsim.records.transfers as transfer_records
 import decsim.syndrome_buffer.round_output as round_output
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
+import decsim.topology.fabrics as fabrics
+import decsim.topology.graph_layout as graph_layout
+import tests.experiments.run_files as run_files
 
 CWB_TICKS = config.microseconds_to_ticks(0.25)
 WBD_TICKS = config.microseconds_to_ticks(5.0)
 CYCLE_TICKS = config.microseconds_to_ticks(1.0)
 MEMORY_ROUTE = round_records.SyndromePacketRoute.feedback_memory_round(7)
-WBD_PATH = transfer_records.WEAK_BUFFER_TO_WEAK_DECODER
+WBD_PATH = "weak_buffer_to_weak"
 ROUND_BITS = 64
 # a pure-delay controller_to_weak_buffer, so a window round publishes
 # one fixed store hop after it is sent
 STORE_HOP_TICKS = config.microseconds_to_ticks(0.04)
+
+
+def _reference_layout():
+    """A weak pool escalating to one on the host, on the reference card."""
+    switching = run_files.switching_machine()
+    reference = fabrics.ReferenceFabric()
+    on_the_reference = dataclasses.replace(switching, fabric=reference)
+    at_task = on_the_reference.at_task()
+    return graph_layout.layout_of(at_task)
+
+
+REFERENCE_LAYOUT = _reference_layout()
 
 
 class RecordingPackingLine:
@@ -113,9 +126,19 @@ def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE, wire_bits=2):
     return round_records.PackedRound(packet, route, wire_bits)
 
 
+def with_paths(card, **paths):
+    """The card with these hops' settings replaced, each in its place."""
+    named = []
+    for hop in card.paths:
+        path_settings = paths.get(hop.name, hop.settings)
+        replaced = dataclasses.replace(hop, settings=path_settings)
+        named.append(replaced)
+    return dataclasses.replace(card, paths=tuple(named))
+
+
 def priced_cwb_profile():
-    reference = link_profiles.logical_reference_profile()
-    base = reference.controller_to_weak_buffer
+    reference = REFERENCE_LAYOUT.card
+    base = reference.path_settings("controller_to_weak_buffer")
     channel = link_settings.ChannelSettings(
         base.channel.name, CWB_TICKS, None, "test"
     )
@@ -125,18 +148,18 @@ def priced_cwb_profile():
         base.actual_payload_source,
         excludes_receiver_processing=base.excludes_receiver_processing,
     )
-    return dataclasses.replace(reference, controller_to_weak_buffer=path)
+    return with_paths(reference, controller_to_weak_buffer=path)
 
 
 def five_microsecond_wbd_profile(bits_per_microsecond=None):
-    """The reference card with a 5 us weak_buffer_to_weak_decoder.
+    """The reference card with a 5 us weak_buffer_to_weak.
 
     With a rate the channel is bandwidth bounded (reviewer A's bounded
     wbd shape); without one it is a pure delay. The store hop in front
     of it is a pure delay of STORE_HOP_TICKS.
     """
-    reference = link_profiles.logical_reference_profile()
-    edge = reference.weak_buffer_to_weak_decoder
+    reference = REFERENCE_LAYOUT.card
+    edge = reference.path_settings(WBD_PATH)
     capacity = None
     if bits_per_microsecond is not None:
         capacity = link_settings.CapacitySettings(bits_per_microsecond, "test")
@@ -149,14 +172,14 @@ def five_microsecond_wbd_profile(bits_per_microsecond=None):
         edge.actual_payload_source,
         excludes_receiver_processing=edge.excludes_receiver_processing,
     )
-    store_hop = reference.controller_to_weak_buffer
+    store_hop = reference.path_settings("controller_to_weak_buffer")
     store_channel = link_settings.ChannelSettings(
         store_hop.channel.name, STORE_HOP_TICKS, None, "test"
     )
     store_path = dataclasses.replace(store_hop, channel=store_channel)
-    return dataclasses.replace(
+    return with_paths(
         reference,
-        weak_buffer_to_weak_decoder=path,
+        weak_buffer_to_weak=path,
         controller_to_weak_buffer=store_path,
     )
 
@@ -175,16 +198,15 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     recorder = round_events.RoundEventRecorder(engine)
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
+    weak_store_plan = REFERENCE_LAYOUT.store("weak_buffer")
     store_output = round_output.SyndromeBufferOutput(
-        engine,
-        transfer_records.WEAK_BUFFER_TO_WEAK_DECODER,
-        "weak syndrome buffer",
+        engine, weak_store_plan.read_hop, weak_store_plan.label
     )
     store_output.transfers = transfers
     store_output.store = store
     store_output.link = links
     weak_receiver = receiver_module.SyndromeRoundReceiver(
-        engine, layout_module.WEAK_STORE_INTAKE
+        engine, weak_store_plan.intake
     )
     weak_receiver.store = store
     weak_receiver.output = store_output
@@ -193,7 +215,7 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     weak_receiver.detection_events = formation.SeatedFormation(
         None, at_the_controller
     )
-    write_path = layout_module.WEAK_STORE_INTAKE.controller_write.path_name
+    write_path = weak_store_plan.intake.controller_write.path_name
     transmitter = round_transmission.RoundTransmitter(engine, write_path)
     transmitter.link = links
     transmitter.memory_arrivals = windows
@@ -328,7 +350,7 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     """The round that reaches the shared wire first serializes first.
 
     A memory round and a decode input share a bandwidth-bounded
-    weak_buffer_to_weak_decoder (5 us, 1000 bits per microsecond,
+    weak_buffer_to_weak (5 us, 1000 bits per microsecond,
     64-bit rounds, so 0.064 us on the wire). Both rounds cross
     controller_to_weak_buffer into the weak syndrome buffer first, and the
     decode input the windows send at the window round's publication
@@ -358,5 +380,5 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     assert windows.memory_rounds == [(memory_delivery, 7)]
     (decode_input,) = windows.decode_inputs_delivered
     assert decode_input.delivery_ticks == input_delivery
-    rounds_on_the_wire = first_rounds_on(ledger, "weak_buffer_to_weak_decoder")
+    rounds_on_the_wire = first_rounds_on(ledger, WBD_PATH)
     assert rounds_on_the_wire == wire_order

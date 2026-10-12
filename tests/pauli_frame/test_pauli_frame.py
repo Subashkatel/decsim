@@ -21,9 +21,7 @@ import decsim.machine as machine_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.presets.machines as machines
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
-import decsim.topology.slotted as slotted
 import examples.two_tiers as two_tiers
 import tests.declared_run as declared_run
 
@@ -171,10 +169,9 @@ def test_a_charged_write_with_no_clock_still_stops():
     workload = declared_run.declared_workload(None, 6)
     qpu = declared_run.declared_qpu()
     frame = pauli_frame_module.PauliFrameConfig(write_cycles=1, clock=None)
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak, pauli_frame=frame
-    )
-    machine = machine_module.Machine.build(settings, 0)
+    base = machines.base(workload, qpu, frame)
+    graph = machines.with_pool(base, weak)
+    machine = machine_module.Machine.build(graph, 0)
 
     with pytest.raises(AttributeError, match="has no attribute 'edge'"):
         machine.run()
@@ -214,13 +211,12 @@ class CountingFrameConfig(pauli_frame_module.PauliFrameConfig):
 def test_a_frame_written_outside_decsim_runs_from_its_record():
     """One record that builds the frame is the whole edit."""
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
-    base = slotted.resolved(weak_base)
-    frame = base.pauli_frame
+    frame = weak_base.held("pauli_frame")
     counting = CountingFrameConfig(
         write_cycles=frame.write_cycles, clock=frame.clock
     )
-    settings = dataclasses.replace(base, pauli_frame=counting)
-    machine = machine_module.Machine.build(settings, 0)
+    graph = weak_base.with_record(machines.FRAME, counting)
+    machine = machine_module.Machine.build(graph, 0)
     result = machine.run()
 
     assert isinstance(machine.control.pauli_frame, CountingFrame)
@@ -276,7 +272,7 @@ def test_the_frames_statistics_are_its_records_on_a_switching_run():
     so the switching side's escalations are the strong commits.
     """
     switching = declared_run.switching_run(escalates=True)
-    machine = machine_module.Machine.build(switching.settings, 0)
+    machine = machine_module.Machine.build(switching.graph, 0)
     machine.run()
 
     groups = machine.observation.statistics.groups
@@ -306,8 +302,8 @@ def test_the_frames_fold_is_the_reported_prediction_on_a_switching_run():
     """
     distance_three = two_tiers.tasks[0]
     workload = machines.memory_workload(3, 0.01, 30)
-    settings = dataclasses.replace(distance_three.machine, workload=workload)
-    machine = machine_module.Machine.build(settings, 0)
+    graph = distance_three.machine.with_held("workload", workload)
+    machine = machine_module.Machine.build(graph, 0)
     result = machine.run()
     (operation_result,) = result.operation_results
     snapshot = machine.control.pauli_frame.snapshot()

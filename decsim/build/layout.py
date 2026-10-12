@@ -18,6 +18,7 @@ from typing import Any, Optional
 import decsim.build.routes as routes_build
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
+import decsim.links.settings as link_settings
 import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
@@ -126,12 +127,14 @@ class Layout:
     The entry pool decodes the planner's windows and reads the entry
     store, the one the controller writes. router, None for most
     machines, sends each window to one of entry_count entry pools, the
-    first pools laid out (windows/routers.py).
+    first pools laid out (windows/routers.py). card prices every hop the
+    machine rides.
     """
 
     pools: tuple
     stores: tuple
     edges: tuple
+    card: link_settings.FabricSettings
     router: Optional[Any] = None
     entry_count: int = 1
 
@@ -216,6 +219,15 @@ class Layout:
             if intake.shape == receiver_module.WRITTEN:
                 return intake.controller_write.path_name
         return None
+
+    def entry_switching(
+        self,
+    ) -> Optional[escalation_settings.SwitchingSettings]:
+        """The entry edge's switching record, at the task; None for none."""
+        if not self.edges:
+            return None
+        entry_edge = self.edges[0]
+        return entry_edge.settings
 
     def entry_escalation_hop(self) -> Optional[str]:
         """The hop the entry edge escalates a window over; None for none."""

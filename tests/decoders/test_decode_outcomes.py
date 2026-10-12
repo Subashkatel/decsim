@@ -35,7 +35,9 @@ class _Policy:
 
 def _outcomes(verdict):
     engine = engine_module.Engine()
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     policy = _Policy(verdict)
     manager = types.SimpleNamespace(
         strong_requests=requests, escalation_policy=policy

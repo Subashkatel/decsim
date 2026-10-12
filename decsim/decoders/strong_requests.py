@@ -30,11 +30,6 @@ from typing import Optional
 import decsim.records.decoding as decoding_records
 import decsim.records.windows as window_records
 
-# the target each source pool escalates to: a slotted machine's one edge
-SLOTTED_TARGET_BY_SOURCE = {
-    window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID,
-}
-
 # the fields a merged batch must leave empty: its members' results are
 # timing alone, so anything here would be dropped without a word
 ACCURACY_FIELDS = (
@@ -137,9 +132,7 @@ class StrongRequests:
     is kept in.
     """
 
-    def __init__(self, target_by_source: Optional[dict] = None) -> None:
-        if target_by_source is None:
-            target_by_source = SLOTTED_TARGET_BY_SOURCE
+    def __init__(self, target_by_source: dict) -> None:
         self.target_by_source = target_by_source
         self.by_window: dict[tuple, WindowRequests] = {}
         # the live requests let run out, whose results are dropped

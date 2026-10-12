@@ -12,7 +12,6 @@ import dataclasses
 
 import pytest
 
-import decsim.build.layout as layout_module
 import decsim.confidence.cluster as cluster
 import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
@@ -22,13 +21,10 @@ import decsim.experiments.collect as collect
 import decsim.presets.machines as machines
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
-import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
 import decsim.topology.machine_file as machine_file
-import decsim.topology.slotted as slotted
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
@@ -67,31 +63,19 @@ def chain_machine(
     The entry edge lays its windows out by entry_window.
     """
     two_pools = _two_pools(entry_window)
-    store = syndrome_buffer.SyndromeBufferSettings()
-    parts = (
-        graph.Part(DEEP_STORE, store, fabrics.HOST),
-        graph.Part(DEEP_POOL, machines.STRONG_BASELINE_POOL, fabrics.HOST),
-        graph.Part(DEEP_SWITCHING, deep_switching),
+    return machines.with_escalation(
+        two_pools,
+        machines.STRONG_POOL,
+        DEEP_POOL,
+        machines.STRONG_BASELINE_POOL,
+        deep_switching,
     )
-    wires = (
-        graph.Wire("controller.rounds", f"{DEEP_STORE}.rounds"),
-        graph.Wire(f"{DEEP_STORE}.reads", f"{DEEP_POOL}.rounds"),
-        graph.Wire(f"{DEEP_POOL}.corrections", "frame.corrections"),
-        graph.Wire("strong.escalate", f"{DEEP_SWITCHING}.results"),
-        graph.Wire(f"{DEEP_SWITCHING}.redecode", f"{DEEP_POOL}.escalated"),
-    )
-    grown = two_pools
-    for part in parts:
-        grown = grown.with_part(part)
-    return grown.with_wires(*wires)
 
 
 def laid_out(machine: graph.Machine):
-    """The machine's layout, from its entry edge's facts."""
-    entry = graph_layout.entry_settings(machine)
-    settings = entry.at_task()
-    facts = settings.task_facts()
-    return graph_layout.layout_of(machine, facts)
+    """The machine's layout, at its task."""
+    at_task = machine.at_task()
+    return graph_layout.layout_of(at_task)
 
 
 def _two_pools(
@@ -102,15 +86,6 @@ def _two_pools(
     weak_base = machines.weak_baseline(3, 0.001, 1.0)
     switching = shape_tests.switching_slot(entry_window)
     return machines.with_strong_tier(weak_base, MIDDLE_POOL, switching)
-
-
-def test_a_chain_is_a_new_shape():
-    chain = chain_machine()
-
-    two_pools = _two_pools()
-
-    assert not slotted.holds(chain)
-    assert slotted.holds(two_pools)
 
 
 def test_a_chains_pools_go_by_their_parts_entry_first():
@@ -135,8 +110,7 @@ def test_a_chain_seeds_its_entry_edge_as_the_two_pool_machine_does():
     chain_graph = chain_machine()
     chain = laid_out(chain_graph)
     two_pool_machine = _two_pools()
-    two_pool_settings = slotted.resolved(two_pool_machine)
-    two_pools = layout_module.slotted_layout(two_pool_settings)
+    two_pools = laid_out(two_pool_machine)
 
     chain_pools = _pool_seeds(chain)
     chain_edges = _policy_seeds(chain)
@@ -205,28 +179,34 @@ def test_a_round_reaches_each_pool_through_one_path_of_seats():
     )
 
 
-def test_the_card_prices_the_graphs_own_hops_beside_the_slotted_twelve():
+def test_the_card_prices_the_graphs_own_hops_after_the_shared_three():
     chain = chain_machine()
-    settings = graph_layout.entry_settings(chain)
+    layout = laid_out(chain)
 
-    card = settings.links
+    card = layout.card
     names = card.path_names()
 
-    assert names[:12] == transfer_records.SLOTTED_PATHS
+    assert names[:3] == (
+        transfer_records.QPU_TO_CONTROLLER,
+        transfer_records.CONTROLLER_TO_QPU,
+        transfer_records.FRAME_TO_CONTROLLER,
+    )
     assert "strong_to_deep" in names
     assert "deep_to_frame" in names
     assert card.path_settings("deep_to_deep") is not None
 
 
-def test_the_entry_settings_hold_the_entry_edge():
+def test_the_layout_holds_the_entry_edge():
     chain = chain_machine()
 
-    settings = graph_layout.entry_settings(chain)
+    layout = laid_out(chain)
 
-    assert settings.weak_decoder == machines.WEAK_BASELINE_POOL
-    assert settings.strong_decoder == MIDDLE_POOL
+    strong_id = window_records.PoolId(machines.STRONG_POOL)
+    strong = layout.pool(strong_id)
+    assert layout.entry_pool.settings == machines.WEAK_BASELINE_POOL
+    assert strong.settings == MIDDLE_POOL
     switching = chain.part("switching")
-    assert settings.switching == switching.settings
+    assert layout.entry_switching() == switching.settings
 
 
 def test_pools_no_edge_joins_are_refused():
@@ -234,7 +214,7 @@ def test_pools_no_edge_joins_are_refused():
     cut = chain.without_part(DEEP_SWITCHING)
 
     with pytest.raises(graph.GraphError, match="reached by no escalate edge"):
-        graph_layout.entry_settings(cut)
+        laid_out(cut)
 
 
 def test_a_router_makes_each_pool_it_feeds_an_entry_pool():
@@ -266,14 +246,15 @@ def test_a_pool_reached_by_no_edge_and_no_router_is_refused():
     cut = routed.without_part(DEEP_SWITCHING)
 
     with pytest.raises(graph.GraphError, match="no escalate edge and no"):
-        graph_layout.entry_settings(cut)
+        laid_out(cut)
 
 
 def test_a_chains_task_is_identified_by_its_graph():
-    """Its entry edge's record is a slotted one, whose id it never takes."""
+    """A pool past the entry edge is part of the id."""
     chain = chain_machine()
     task = collect.Task("chain", chain)
-    two_pools = collect.Task("two_pools", task.machine)
+    two_pool_machine = _two_pools()
+    two_pools = collect.Task("two_pools", two_pool_machine)
 
     assert task.layout is not None
     assert task.strong_id() != two_pools.strong_id()

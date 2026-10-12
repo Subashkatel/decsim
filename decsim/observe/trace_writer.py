@@ -1111,7 +1111,7 @@ def _input_key(job: decoding_records.DecodeJob):
 
 
 def _unit_of_memory(memory_name: str) -> str:
-    """`unit default#0 memory` names the unit `default#0`."""
+    """`unit weak#0 memory` names the unit `weak#0`."""
     without_prefix = memory_name.removeprefix("unit ")
     return without_prefix.removesuffix(" memory")
 

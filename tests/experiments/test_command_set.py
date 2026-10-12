@@ -47,12 +47,12 @@ import decsim.experiments.run_folder as run_folder
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.parameters.assignments as assignments
+import decsim.presets.machines as machines
 import decsim.producers as producers
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.program as program_records
-import decsim.settings as machine_settings
 import tests.experiments.run_files as run_files
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -207,8 +207,7 @@ def test_run_prints_the_result_fields_the_gate_hashes(tmp_path):
     run_file = run_files.write_run_file(tmp_path)
     lines = _run_one_shot(run_file, seed=0, out_dir=tmp_path)
     task = run_files.first_task()
-    settings = task.machine
-    machine = machine_module.Machine.build(settings, 0)
+    machine = machine_module.Machine.build(task.machine, 0)
     result = machine.run()
     row = result.operation_results[0]
     text = "\n".join(lines)
@@ -383,11 +382,12 @@ def test_a_run_folder_holds_the_tasks_values_and_workload(tmp_path):
     inputs_dir = resolved_path.parent / "inputs"
     hashes_text = (inputs_dir / "hashes.json").read_text()
     hashes = json.loads(hashes_text)
+    qpu = _part_record(resolved["settings"], "qpu")
 
     assert "terminal status: complete" in lines[2]
     assert resolved["seeds"] == [[0, 1]]
     assert resolved["built"]["commit_rounds"] == 3
-    assert resolved["settings"]["qpu"]["distance"] == 3
+    assert qpu["settings"]["distance"] == 3
     assert hashes == _hashes_of(
         inputs_dir, "operation_1.stim", "operations.json"
     )
@@ -417,8 +417,8 @@ def three_patch_task() -> collect.Task:
     base = run_files.minimal_machine(cells)
     patches = producers.memory_patches(run_files.CODE_TASK, 15, 3, 3, 0.001)
     workload = workload_settings.WorkloadSettings.running(patches)
-    settings = dataclasses.replace(base, workload=workload)
-    return collect.Task("three_patches", settings, cells)
+    machine = base.with_held("workload", workload)
+    return collect.Task("three_patches", machine, cells)
 
 
 def test_a_streams_rounds_are_its_segments_counted_once():
@@ -451,14 +451,21 @@ def test_a_streams_rounds_are_its_segments_counted_once():
     weak_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=matching, engine=engine
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder
-    )
-    task = collect.Task("segment", settings, {})
+    machine = machines.base(workload, qpu)
+    with_weak = machines.with_pool(machine, weak_decoder)
+    task = collect.Task("segment", with_weak, {})
 
     record = run_folder.task_record(task)
 
     assert record["rounds_per_shot"] == 3
+
+
+def _part_record(machine_record: dict, name: str) -> dict:
+    """One part of a machine's json record, by its name."""
+    for part in machine_record["parts"]:
+        if part["name"] == name:
+            return part
+    raise AssertionError(f"the record holds no part {name!r}")
 
 
 def test_a_task_recorded_again_hashes_only_its_inputs(tmp_path):
@@ -1124,16 +1131,19 @@ def test_a_task_whose_shot_runs_no_round_is_refused_before_its_record(
 ):
     """A shot of no round sizes no piece and decodes nothing.
 
-    MachineSettings() holds the empty workload, so the task is refused
-    where its record is built, before the folder holds any of it.
+    machines.base() holds the empty workload, here beside the weak
+    base's pool, so the task is refused where its record is built,
+    before the folder holds any of it.
     """
     run_file = tmp_path / "empty.py"
     run_file.write_text(
         "import decsim\n"
+        "import decsim.presets.machines as machines\n"
         "\n"
+        "machine = machines.base()\n"
         "experiment = decsim.Experiment(\n"
         '    "empty",\n'
-        '    [decsim.Task("empty", decsim.MachineSettings())],\n'
+        '    [decsim.Task("empty", machine)],\n'
         "    decsim.CollectionSettings(max_shots=1),\n"
         ")\n"
     )
@@ -1567,7 +1577,7 @@ def test_a_record_class_names_settings_and_not_results(tmp_path):
     (record_path,) = out_dir.glob("tasks/*/machine.json")
     record = run_folder.read_json(record_path)
     result_text = (out_dir / "result.json").read_text()
-    assert record["settings"]["class"] == "decsim.settings.MachineSettings"
+    assert record["settings"]["class"] == "decsim.topology.graph.Machine"
     assert '"class"' not in result_text
 
 
@@ -2403,9 +2413,9 @@ def test_run_records_the_assignments_its_tasks_were_built_with(
     variable = assignments.ENVIRONMENT_VARIABLE
     monkeypatch.setenv(variable, "")
     shots = ["--shots", "1"]
-    flags = ["--set", "weak_decoder.unit_count=2"]
+    flags = ["--set", "weak.unit_count=2"]
 
     command.main(["run", str(run_file), "--out", str(out_dir), *shots, *flags])
 
     manifest = _manifest_of(out_dir)
-    assert manifest["assignments"] == "weak_decoder.unit_count=2"
+    assert manifest["assignments"] == "weak.unit_count=2"

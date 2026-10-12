@@ -17,7 +17,6 @@ import pytest
 import stim
 
 import decsim.build.escalation as escalation_build
-import decsim.build.layout as layout_module
 import decsim.confidence.complementary as complementary
 import decsim.config as config
 import decsim.decoders.batching as batching
@@ -33,13 +32,15 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
+import decsim.presets.machines as machines
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
-import decsim.settings as machine_settings
+import decsim.topology.graph as graph
+import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -179,18 +180,24 @@ def test_escalations_equal_gaps_below_the_threshold_equal_strong_frame_writes():
     observation = observe_settings.ObservationSettings(
         record_switching_windows=True
     )
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        windows=windows,
-        decoder_manager=decoder_manager,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
-        pauli_frame=pauli_frame,
+    base = machines.base(
+        workload,
+        qpu,
+        windows,
+        decoder_manager,
+        pauli_frame,
         observation=observation,
     )
-    machine = machine_module.Machine.build(settings, 1)
+    with_weak = machines.with_pool(base, weak_decoder)
+    switching_graph = machines.with_escalation(
+        with_weak,
+        machines.WEAK_POOL,
+        machines.STRONG_POOL,
+        strong_decoder,
+        switching,
+        switching_name=machines.SWITCHING,
+    )
+    machine = machine_module.Machine.build(switching_graph, 1)
     machine.run()
     weak_gaps = _weak_gaps(machine)
     is_below = [gap < threshold_nats for gap in weak_gaps]
@@ -253,9 +260,9 @@ def test_a_pool_that_batches_under_a_double_window_is_refused_for_now():
         )
 
 
-def _double_window_settings(
+def _double_window_graph(
     commit_rounds: int, buffer_rounds: int
-) -> machine_settings.MachineSettings:
+) -> graph.Machine:
     """The gate's switching card with the double window and the sizes.
 
     Every part is written out as its record.
@@ -287,11 +294,15 @@ def _double_window_settings(
         threshold=threshold,
         strong_window=double_window,
     )
-    return machine_settings.MachineSettings(
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
+    base = machines.base(windows)
+    with_weak = machines.with_pool(base, weak_decoder)
+    return machines.with_escalation(
+        with_weak,
+        machines.WEAK_POOL,
+        machines.STRONG_POOL,
+        strong_decoder,
+        switching,
+        switching_name=machines.SWITCHING,
     )
 
 
@@ -381,9 +392,7 @@ class _Draws:
         return 0.0
 
 
-def _serial_switching_settings(
-    boundary_policy,
-) -> machine_settings.MachineSettings:
+def _serial_switching_graph(boundary_policy) -> graph.Machine:
     """Serial switching (no double window) with the boundary policy given."""
     windows = window_settings.WindowSettings(
         terminal_policy="lookahead", boundary_policy=boundary_policy
@@ -402,11 +411,15 @@ def _serial_switching_settings(
     switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
-    return machine_settings.MachineSettings(
-        windows=windows,
-        weak_decoder=weak_decoder,
-        strong_decoder=strong_decoder,
-        switching=switching,
+    base = machines.base(windows)
+    with_weak = machines.with_pool(base, weak_decoder)
+    return machines.with_escalation(
+        with_weak,
+        machines.WEAK_POOL,
+        machines.STRONG_POOL,
+        strong_decoder,
+        switching,
+        switching_name=machines.SWITCHING,
     )
 
 
@@ -418,11 +431,11 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
     hand a successor a correction the strong tier later replaces.
     """
     eager = boundary_policies.Eager.Settings()
-    settings = _serial_switching_settings(eager)
+    serial = _serial_switching_graph(eager)
     with pytest.raises(
         ValueError, match="serial switching requires held boundaries"
     ):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(serial, 0)
 
 
 def test_the_double_window_refuses_held_boundaries_at_build():
@@ -433,7 +446,7 @@ def test_the_double_window_refuses_held_boundaries_at_build():
     weak boundaries until the strong result arrives would deadlock the
     strong window on itself.
     """
-    settings = _double_window_settings(3, 3)
+    double = _double_window_graph(3, 3)
     held = boundary_policies.Held.Settings()
     scheme = sliding_scheme.SlidingWindowScheme.Settings(
         commit_rounds=3, buffer_rounds=3
@@ -441,9 +454,9 @@ def test_the_double_window_refuses_held_boundaries_at_build():
     windows = window_settings.WindowSettings(
         scheme=scheme, terminal_policy="lookahead", boundary_policy=held
     )
-    settings = dataclasses.replace(settings, windows=windows)
+    double = double.with_held(machines.WINDOWS, windows)
     with pytest.raises(ValueError, match="deadlock the strong window"):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(double, 0)
 
 
 class DelegatingWindowScheme:
@@ -533,7 +546,7 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
         scheme=scheme,
     )
     machine.run()
-    assert fabric.frame_tiers(machine) == [
+    assert declared_run.frame_tiers(machine) == [
         ((1, 0), "weak"),
         ((1, 4), "weak"),
         ((1, 1), "strong"),
@@ -543,11 +556,12 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
 def test_a_flush_tail_is_refused_under_switching():
     """A strong recovery reads past the last commit, which flush drops."""
     held = boundary_policies.Held.Settings()
-    settings = _serial_switching_settings(held)
-    windows = dataclasses.replace(settings.windows, terminal_policy="flush")
-    settings = dataclasses.replace(settings, windows=windows)
+    serial = _serial_switching_graph(held)
+    serial_windows = serial.held(machines.WINDOWS)
+    windows = dataclasses.replace(serial_windows, terminal_policy="flush")
+    flushing = serial.with_held(machines.WINDOWS, windows)
     with pytest.raises(ValueError, match="no trailing tail context"):
-        machine_module.Machine.build(settings, 0)
+        machine_module.Machine.build(flushing, 0)
 
 
 def test_a_switching_run_on_a_scheme_that_declares_nothing_still_stops():
@@ -563,15 +577,16 @@ def _switching_policy(threshold_decibels: float):
     threshold = threshold_sources.FixedThreshold.Settings(
         threshold_decibels=threshold_decibels
     )
-    settings = escalation_settings.SwitchingSettings(
+    switching = escalation_settings.SwitchingSettings(
         confidence=confidence, threshold=threshold
     )
     matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
-    weak = decoder_settings.DecoderPoolSettings(algorithm=matching)
-    machine = machine_settings.MachineSettings(
-        weak_decoder=weak, strong_decoder=weak, switching=settings
-    )
-    layout = layout_module.slotted_layout(machine)
+    pool = decoder_settings.DecoderPoolSettings(algorithm=matching)
+    base = machines.base()
+    with_weak = machines.with_pool(base, pool)
+    switching_graph = machines.with_strong_tier(with_weak, pool, switching)
+    at_task = switching_graph.at_task()
+    layout = graph_layout.layout_of(at_task)
     engine = engine_module.Engine()
     switching_parts = escalation_build.build_switching(layout, engine)
     entry_switching = switching_parts[0]

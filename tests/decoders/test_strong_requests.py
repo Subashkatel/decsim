@@ -34,7 +34,9 @@ def _completion(job, now=50):
 
 def test_a_result_before_its_selection_is_not_consumed_yet():
     """The ledger takes no result: the unit that produced it holds it."""
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     key = _request_key(7)
     job = _strong_job(key)
     requests.admit_strong(job, now=0)
@@ -47,7 +49,9 @@ def test_a_result_before_its_selection_is_not_consumed_yet():
 
 
 def test_a_selection_before_the_result_consumes_it_at_once():
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     key = _request_key(7)
     job = _strong_job(key)
     requests.admit_strong(job, now=0)
@@ -61,7 +65,9 @@ def test_a_selection_before_the_result_consumes_it_at_once():
 
 def test_a_selection_the_destination_never_sent_is_ignored():
     """Only the request key the destination selected releases a result."""
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     key = _request_key(7)
     job = _strong_job(key)
     requests.admit_strong(job, now=0)
@@ -73,7 +79,9 @@ def test_a_selection_the_destination_never_sent_is_ignored():
 
 
 def test_a_stale_result_is_refused_once_a_newer_request_owns_the_window():
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     old_key = _request_key(7)
     old_job = _strong_job(old_key)
     requests.admit_strong(old_job, now=0)
@@ -87,7 +95,9 @@ def test_a_stale_result_is_refused_once_a_newer_request_owns_the_window():
 
 
 def test_a_result_nobody_waits_for_is_refused():
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     key = _request_key(7)
     job = _strong_job(key)
     requests.admit_strong(job, now=0)
@@ -98,7 +108,9 @@ def test_a_result_nobody_waits_for_is_refused():
 
 
 def test_a_destination_keeps_at_most_one_unconsumed_strong_result():
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     first_key = _request_key(7)
     first = _strong_job(first_key)
     requests.admit_strong(first, now=0)
@@ -115,7 +127,9 @@ def test_a_windows_attempt_holds_its_forced_class_requests():
     the window's open attempt names both request keys and resolves as
     one when the join hands the window's answer on.
     """
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     first_key = window_records.DecoderRequestKey(
         1, 0, window_records.WEAK_POOL_ID, 0
     )
@@ -179,7 +193,9 @@ def _companion_of(lead, sequence):
 
 def test_a_selection_waits_for_each_forced_class_solve_of_its_attempt():
     """One selection names the attempt; both of its solves reach it."""
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     lead_key = _request_key(7)
     lead = _strong_job(lead_key)
     companion = _companion_of(lead, 8)
@@ -206,7 +222,9 @@ def test_a_selection_waits_for_each_forced_class_solve_of_its_attempt():
 
 def test_a_companion_admitted_after_its_selection_is_owed_too():
     """A held attempt is selected before its jobs are built."""
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     lead_key = _request_key(7)
     lead = _strong_job(lead_key)
     companion = _companion_of(lead, 8)
@@ -227,7 +245,9 @@ def test_a_companion_admitted_after_its_selection_is_owed_too():
 
 
 def test_a_cancel_takes_every_solve_of_the_attempt():
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     lead_key = _request_key(7)
     lead = _strong_job(lead_key)
     companion = _companion_of(lead, 8)
@@ -252,7 +272,9 @@ def _chain_requests():
 
 
 def test_a_merged_batch_splits_into_one_empty_completion_per_member():
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     first_key = _request_key(1)
     second_key = window_records.DecoderRequestKey(
         1, 1, window_records.STRONG_POOL_ID, 2
@@ -283,7 +305,9 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
 
 def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
     """A user decoder may answer a batch; its members would drop the answer."""
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     first_key = _request_key(1)
     first = _strong_job(first_key, window_key=(1, 0))
     second_key = _request_key(2)
@@ -302,7 +326,9 @@ def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
 
 def test_a_batch_left_with_one_member_still_splits_into_an_empty_result():
     """The batch's own result names no window, so it is never delivered."""
-    requests = strong_requests_module.StrongRequests()
+    requests = strong_requests_module.StrongRequests(
+        {window_records.WEAK_POOL_ID: window_records.STRONG_POOL_ID}
+    )
     first_key = _request_key(1)
     first = _strong_job(first_key, window_key=(1, 0))
     second_key = _request_key(2)

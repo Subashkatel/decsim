@@ -27,11 +27,11 @@ import tests.declared_run as declared_run
 import tests.observe.gate_point as gate_point
 
 DECODE_TICKS = config.microseconds_to_ticks(1.0)
-UNITS_PATH = "weak_decoder.units"
+UNITS_PATH = "weak.units"
 
 
 def _settings(unit_count):
-    return decoder_pool.PoolSettings(name="default", unit_count=unit_count)
+    return decoder_pool.PoolSettings(name="weak", unit_count=unit_count)
 
 
 def _pool(unit_count):
@@ -91,7 +91,7 @@ def test_the_busy_integral_equals_the_services_own_spans():
     nine decodes' spans, dispatch to finish, which the decode service
     reports and the pool never sees.
     """
-    point = gate_point.settings()
+    point = gate_point.point()
     machine = machine_module.Machine.build(point, gate_point.SEED)
     decodes = declared_run.FinishedDecodes()
     decodes.attach(machine)

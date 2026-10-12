@@ -14,6 +14,7 @@ import decsim.links.settings as link_settings
 import decsim.ports as ports
 import decsim.presets.clocks as clocks
 import decsim.records.routes as route_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 
@@ -143,6 +144,23 @@ NVQLINK_GPU_FABRIC = fabrics.FridgeHostFabric(
 )
 
 
+def feedback_fabric(feedback_microseconds: float) -> fabrics.RoleLinks:
+    """The frame's word feedback_microseconds after the decision.
+
+    The word rides at the reference card's rate, and every other hop
+    takes the reference card's path.
+    """
+    decision = route_records.HopRole(route_records.DECISION)
+    reference = link_profiles.reference_path(
+        decision, transfer_records.FRAME_TO_CONTROLLER
+    )
+    word_capacity = reference.channel.capacity
+    feedback = fabrics.TimedLink(
+        feedback_microseconds, word_capacity.input_bits_per_microsecond
+    )
+    return fabrics.RoleLinks(decision=feedback)
+
+
 def strong_side(
     base: ports.FabricRule,
     weak_to_strong: ports.LinkCard = ONE_ROOM_CYCLE,
@@ -238,28 +256,28 @@ def bandwidth_limited_fabric(
         link_profiles.INSTRUCTION_WORD_SOURCE + ", one per commit region"
     )
     provisioning = _Provisioning(capacity_scale)
-    qpu_to_controller = provisioning.path(
+    readout = provisioning.path(
         route_records.READOUT,
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one syndrome round per round period",
         link_profiles.READOUT_PAYLOAD_SOURCE,
     )
-    controller_to_weak_buffer = provisioning.path(
+    write_written = provisioning.path(
         f"{route_records.WRITE}_written",
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one packed round per round period",
         link_profiles.ROUND_PAYLOAD_SOURCE,
     )
-    controller_to_strong_buffer = provisioning.path(
+    write_landed = provisioning.path(
         f"{route_records.WRITE}_landed",
         syndrome_bits_per_round,
         round_bits_per_microsecond,
         "one packed round per round period",
         link_profiles.ROUND_PAYLOAD_SOURCE,
     )
-    weak_buffer_to_weak_decoder = provisioning.path(
+    read_written = provisioning.path(
         f"{route_records.READ}_written",
         weak_window_bits,
         weak_window_bits_per_microsecond,
@@ -268,7 +286,7 @@ def bandwidth_limited_fabric(
         '"rcom = rbuf = d")',
         link_profiles.DECODER_INPUT_PAYLOAD_SOURCE,
     )
-    weak_decoder_to_strong_decoder = provisioning.path(
+    forward = provisioning.path(
         route_records.FORWARD,
         region_message_bits,
         escalation_bits_per_microsecond,
@@ -278,7 +296,7 @@ def bandwidth_limited_fabric(
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
         link_profiles.ESCALATION_PAYLOAD_SOURCE,
     )
-    strong_buffer_to_strong_decoder = provisioning.path(
+    read_landed = provisioning.path(
         f"{route_records.READ}_landed",
         strong_window_bits,
         strong_window_bits_per_microsecond,
@@ -287,21 +305,21 @@ def bandwidth_limited_fabric(
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
         link_profiles.DECODER_INPUT_PAYLOAD_SOURCE,
     )
-    weak_decoder_to_frame = provisioning.path(
+    answer_fridge = provisioning.path(
         f"{route_records.ANSWER}_{route_records.FRIDGE}",
         1,
         one_per_region,
         "one frame-update bit per logical observable per commit region",
         link_profiles.RESULT_PAYLOAD_SOURCE,
     )
-    decoder_to_decoder = provisioning.path(
+    same_pool_fridge = provisioning.path(
         f"{route_records.SAME_POOL}_{route_records.FRIDGE}",
         syndrome_bits_per_round,
         boundary_bits_per_microsecond,
         "one dense seam layer per commit region",
         link_profiles.BOUNDARY_PAYLOAD_SOURCE,
     )
-    strong_decoder_to_frame = provisioning.path(
+    answer_host = provisioning.path(
         f"{route_records.ANSWER}_{route_records.HOST}",
         strong_answer_bits,
         strong_answer_bits_per_microsecond,
@@ -309,7 +327,7 @@ def bandwidth_limited_fabric(
         "behind the request's name",
         link_profiles.STRONG_RESULT_PAYLOAD_SOURCE,
     )
-    strong_decoder_to_weak_decoder = provisioning.path(
+    reverse = provisioning.path(
         route_records.REVERSE,
         strong_answer_bits,
         strong_answer_bits_per_microsecond,
@@ -317,14 +335,14 @@ def bandwidth_limited_fabric(
         "behind the request's name",
         link_profiles.STRONG_RESULT_PAYLOAD_SOURCE,
     )
-    frame_to_controller = provisioning.path(
+    decision = provisioning.path(
         route_records.DECISION,
         bus_word_bits,
         bus_word_bits_per_microsecond,
         bus_word_source,
         None,
     )
-    controller_to_qpu = provisioning.path(
+    command = provisioning.path(
         route_records.COMMAND,
         instruction_word_bits,
         instruction_word_bits_per_microsecond,
@@ -332,19 +350,21 @@ def bandwidth_limited_fabric(
         None,
     )
     return fabrics.RoleLinks(
-        readout=fabrics.FixedPath(qpu_to_controller),
-        write_written=fabrics.FixedPath(controller_to_weak_buffer),
-        write_landed=fabrics.FixedPath(controller_to_strong_buffer),
-        read_written=fabrics.FixedPath(weak_buffer_to_weak_decoder),
-        read_landed=fabrics.FixedPath(strong_buffer_to_strong_decoder),
-        forward=fabrics.FixedPath(weak_decoder_to_strong_decoder),
-        reverse=fabrics.FixedPath(strong_decoder_to_weak_decoder),
-        same_pool_fridge=fabrics.FixedPath(decoder_to_decoder),
-        same_pool_host=fabrics.FixedPath(strong_buffer_to_strong_decoder),
-        answer_fridge=fabrics.FixedPath(weak_decoder_to_frame),
-        answer_host=fabrics.FixedPath(strong_decoder_to_frame),
-        decision=fabrics.FixedPath(frame_to_controller),
-        command=fabrics.FixedPath(controller_to_qpu),
+        readout=fabrics.FixedPath(readout),
+        write_written=fabrics.FixedPath(write_written),
+        write_landed=fabrics.FixedPath(write_landed),
+        read_written=fabrics.FixedPath(read_written),
+        read_landed=fabrics.FixedPath(read_landed),
+        forward=fabrics.FixedPath(forward),
+        reverse=fabrics.FixedPath(reverse),
+        same_pool_fridge=fabrics.FixedPath(same_pool_fridge),
+        # a host pool's own boundary is read out of the host's memory,
+        # on the landed read's channel
+        same_pool_host=fabrics.FixedPath(read_landed),
+        answer_fridge=fabrics.FixedPath(answer_fridge),
+        answer_host=fabrics.FixedPath(answer_host),
+        decision=fabrics.FixedPath(decision),
+        command=fabrics.FixedPath(command),
     )
 
 

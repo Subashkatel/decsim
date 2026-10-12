@@ -33,7 +33,7 @@ CIRCUIT = stim.Circuit.generated(
 )
 TABLE = detector_formation.build_formation_table(CIRCUIT, 10)
 FORMER_CLOCK = config.Clock(4000)
-BOTH_TIERS = ("weak_decoder", "strong_decoder")
+BOTH_TIERS = ("weak", "strong")
 
 
 class CircuitSource:
@@ -55,7 +55,8 @@ def placement(source=None):
         latency_cycles=5,
         cycles_per_round=1,
     )
-    return formation.SeatedFormation(source, settings)
+    decoder_seats = frozenset(BOTH_TIERS)
+    return formation.SeatedFormation(source, settings, decoder_seats)
 
 
 def fragment(round_index, bits=(0,) * 8):
@@ -85,7 +86,7 @@ def job(round_indices):
 
 def weak_tier():
     seated = placement()
-    return detection_events.TierFormation(seated, "weak_decoder")
+    return detection_events.TierFormation(seated, "weak")
 
 
 def stage(tier_formation):
@@ -143,7 +144,7 @@ def test_the_stage_counts_on_the_formers_clock():
 def test_a_tier_with_no_recipes_keeps_the_rounds_as_they_landed():
     settings = event_settings.DetectionEventSettings(formed_at=BOTH_TIERS)
     seated = formation.SeatedFormation(None, settings)
-    tier = detection_events.TierFormation(seated, "weak_decoder")
+    tier = detection_events.TierFormation(seated, "weak")
     reading_two_rounds = job([1, 2])
 
     formed = tier.form(reading_two_rounds.payloads)
@@ -167,8 +168,8 @@ def test_an_overlapping_window_pays_only_for_the_rounds_it_brings():
 def test_the_second_tier_charges_its_own_rounds():
     """Two tiers read two stores, so each forms what it reads."""
     seated = placement()
-    weak = detection_events.TierFormation(seated, "weak_decoder")
-    strong = detection_events.TierFormation(seated, "strong_decoder")
+    weak = detection_events.TierFormation(seated, "weak")
+    strong = detection_events.TierFormation(seated, "strong")
     weak_job = job([1, 2, 3])
     strong_job = job([1, 2, 3])
 
@@ -189,7 +190,7 @@ def test_a_claim_lasts_until_its_round_retires():
     a retired round in a run; one that did would be charged for it.
     """
     seated = placement()
-    tier = detection_events.TierFormation(seated, "strong_decoder")
+    tier = detection_events.TierFormation(seated, "strong")
     window_0 = job([1, 2])
     window_1 = job([1, 2, 3])
     tier.rounds_to_form(window_0)

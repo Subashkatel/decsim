@@ -17,7 +17,7 @@ with a number instead of measuring one.
 
 ## Install
 
-Python 3.10 or newer, and the `run` extra: the root imports Stim and
+Python 3.13 or newer, and the `run` extra: the root imports Stim and
 ldpc, and a run on real syndrome data needs PyMatching, numpy and scipy
 as well.
 

@@ -7,7 +7,7 @@ name = "decsim"
 version = "0.1.0"
 description = "QEC control/decoding simulator package scaffold"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = []
 
 [project.scripts]

@@ -51,3 +51,6 @@ the [reference](../reference/README.md) pages.
 - [How to build each switching pattern](build_each_switching_pattern.md):
   every pattern's setting, source and guide on one page, and what is
   still refused.
+- [How to run a memory as a stream](run_a_memory_as_a_stream.md):
+  `decsim stream`, one memory task as a stream of a million rounds in
+  flat memory, measured as it goes.

@@ -126,10 +126,12 @@ def weak_alone(
     pauli_frame = pauli_frame_module.PauliFrameConfig(
         write_cycles=1, clock=clocks.FRIDGE_CLOCK
     )
+    controller_record = controller()
+    detection_event_record = detection_events()
     machine = machines.base(
         qpu,
-        controller(),
-        detection_events(),
+        controller_record,
+        detection_event_record,
         windows,
         decoder_manager,
         workload,
@@ -138,9 +140,8 @@ def weak_alone(
         observation=observation,
         fabric=FABRIC,
     )
-    return machines.with_pool(
-        machine, weak_decoder(), store=weak_syndrome_buffer
-    )
+    weak_pool = weak_decoder()
+    return machines.with_pool(machine, weak_pool, store=weak_syndrome_buffer)
 
 
 def strong_alone(

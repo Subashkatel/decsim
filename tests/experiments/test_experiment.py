@@ -60,10 +60,13 @@ def _online_task_at_distance_5(workload) -> collect.Task:
     confidence = complementary.ComplementaryGap.Settings()
     card = threshold_sources.OnlineThreshold.Settings(threshold_decibels=15.0)
     switching = escalation_settings.SwitchingSettings(confidence, card)
-    qpu = dataclasses.replace(machine.held("qpu"), distance=5)
+    base_qpu = machine.held("qpu")
+    qpu = dataclasses.replace(base_qpu, distance=5)
     running = workload_settings.WorkloadSettings.running(workload)
-    machine = machine.with_held("qpu", qpu).with_held("workload", running)
-    weak_pool = machine.part(machines.WEAK_POOL).settings
+    machine = machine.with_held("qpu", qpu)
+    machine = machine.with_held("workload", running)
+    weak_pool_part = machine.part(machines.WEAK_POOL)
+    weak_pool = weak_pool_part.settings
     machine = machines.with_strong_tier(machine, weak_pool, switching)
     return collect.Task("online", machine)
 

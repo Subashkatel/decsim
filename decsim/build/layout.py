@@ -193,7 +193,8 @@ class Layout:
             if pool is None:
                 stores.append(None)
             else:
-                stores.append(self.pool(pool).store)
+                pool_plan = self.pool(pool)
+                stores.append(pool_plan.store)
         return tuple(stores)
 
     def input_hop_by_pool(self) -> dict:

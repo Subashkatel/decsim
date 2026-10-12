@@ -180,6 +180,15 @@ def check_credit_fields(
     _check_clock(protocol_settings.clock)
 
 
+def credit_latency_ticks(
+    channel_settings: link_settings.ChannelSettings,
+) -> int:
+    """L_c in ticks: the protocol's cycles on the card's clock."""
+    protocol = channel_settings.protocol
+    cycles = protocol.credit_latency_cycles
+    return cycles * protocol.clock.period_ticks
+
+
 def _check_clock(clock) -> None:
     """The credit latency is cycles on the card's own clock.
 
@@ -192,12 +201,3 @@ def _check_clock(clock) -> None:
         "a credit or reliable protocol counts its credit latency in cycles "
         f"of its card's clock, so it needs a clock (got {clock!r})"
     )
-
-
-def credit_latency_ticks(
-    channel_settings: link_settings.ChannelSettings,
-) -> int:
-    """L_c in ticks: the protocol's cycles on the card's clock."""
-    protocol = channel_settings.protocol
-    cycles = protocol.credit_latency_cycles
-    return cycles * protocol.clock.period_ticks

@@ -19,9 +19,8 @@ import decsim.records.transfers as transfer_records
 
 def test_a_structure_no_row_and_no_prefix_names_is_unclassified():
     """Unclassified, not guessed, so the grouped rows still sum."""
-    unknown = data_movement.memory_class_of_structure(
-        "a new cache", frozenset()
-    )
+    no_stores = frozenset()
+    unknown = data_movement.memory_class_of_structure("a new cache", no_stores)
 
     assert unknown is data_movement.MemoryClass.UNCLASSIFIED
 
@@ -127,7 +126,8 @@ class _Delivered:
 
 def _movement() -> data_movement.DataMovement:
     """A tally of a run whose card prices no hop and that has no store."""
-    classes = data_movement.MemoryClasses({}, frozenset())
+    no_stores = frozenset()
+    classes = data_movement.MemoryClasses({}, no_stores)
     return data_movement.DataMovement(classes)
 
 

@@ -331,7 +331,8 @@ def test_public_settings_keep_the_user_patch_in_a_complete_live_run() -> None:
         feedback_microseconds=4.0,
         decoder_microseconds=0.1,
     )
-    owner = graph.held("workload").dynamic_streams[0]
+    workload = graph.held("workload")
+    owner = workload.dynamic_streams[0]
     assert owner.patches == ("user-patch",)
     machine = machine_module.Machine.build(graph, seed=81)
     result = machine.run()

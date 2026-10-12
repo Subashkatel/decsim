@@ -303,8 +303,9 @@ def _gate_on_own_clocks(machine_clock):
         readout_to_bits_cycles=1,
         packing_cycles_per_round=1,
     )
+    gate_events = gate.held("detection_events")
     events = dataclasses.replace(
-        gate.held("detection_events"),
+        gate_events,
         clock=PART_CLOCK,
         latency_cycles=1,
         cycles_per_round=1,
@@ -314,12 +315,14 @@ def _gate_on_own_clocks(machine_clock):
         machines.WEAK_STORE, clock=PART_CLOCK, write_cycles=1, read_cycles=1
     )
     # long enough that the decision outlasts the wait for a free unit
+    gate_windows = gate.held(machines.WINDOWS)
     windows = dataclasses.replace(
-        gate.held(machines.WINDOWS), clock=PART_CLOCK, decision_cycles=50
+        gate_windows, clock=PART_CLOCK, decision_cycles=50
     )
     gate = gate.with_held(machines.WINDOWS, windows)
+    gate_manager = gate.held("decoder_manager")
     manager = dataclasses.replace(
-        gate.held("decoder_manager"), clock=PART_CLOCK, dispatch_cycles=1
+        gate_manager, clock=PART_CLOCK, dispatch_cycles=1
     )
     gate = gate.with_held("decoder_manager", manager)
     gate = gate.with_settings(
@@ -378,8 +381,9 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     )
     plan = machine_module.plan_of(machine_graph, layout, switching_parts)
     formation_paths = layout.formation_paths()
+    detection_events_record = machine_graph.held("detection_events")
     detection_events = readout_part.build_detection_events(
-        machine_graph.held("detection_events"),
+        detection_events_record,
         clock,
         plan.device,
         formation_paths,
@@ -391,9 +395,10 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     links = link_fabric.LinkFabric(layout.card, engine)
     factory = machine_graph.held("magic_state_factory")
     qpu = qpu_part.Qpu.build(factory, engine, plan)
+    pauli_frame_record = machine_graph.held("pauli_frame")
     control = control_part.Control.build(
         controller,
-        machine_graph.held("pauli_frame"),
+        pauli_frame_record,
         clock,
         engine,
         plan,
@@ -409,9 +414,11 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         links,
     )
     built_models = built_window_models.BuiltWindowModels()
+    windows_record = machine_graph.held("windows")
+    workload_record = machine_graph.held("workload")
     windows = windows_part.Windows.build(
-        machine_graph.held("windows"),
-        machine_graph.held("workload"),
+        windows_record,
+        workload_record,
         layout,
         clock,
         engine,
@@ -420,8 +427,9 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
         built_models,
     )
     target_by_source = layout.target_by_source()
+    decoder_manager_record = machine_graph.held("decoder_manager")
     decoders = decoders_part.Decoders.build(
-        machine_graph.held("decoder_manager"),
+        decoder_manager_record,
         clock,
         engine,
         pools,
@@ -566,7 +574,8 @@ def test_zero_delay_terminal_round_uses_its_actual_strong_model(
 ) -> None:
     program = memory_programs.memory_program()
     settings = _settings(program, "live", placement)
-    physical = settings.held("workload").physical_circuits
+    base_workload = settings.held("workload")
+    physical = base_workload.physical_circuits
     workload = _scheduled_workload(final_round, physical)
     fabric = _zero_delay_fabric()
     settings = settings.with_held("workload", workload)
@@ -663,8 +672,9 @@ def test_an_unbuffered_live_reader_forms_each_window_from_its_own_ring(
     """
     program = memory_programs.memory_program()
     settings = _settings(program, "live", "decoder")
+    base_windows = settings.held("windows")
     windows = declared_run.windows_on(
-        settings.held("windows"), commit_rounds=commit_rounds, buffer_rounds=0
+        base_windows, commit_rounds=commit_rounds, buffer_rounds=0
     )
     settings = settings.with_held("windows", windows)
 
@@ -864,12 +874,14 @@ def _weak_tier_on_a_live_stream(
     strong = strong_only.part(machines.STRONG_POOL)
     base = _physical_settings(program, "live", 1.1)
     with_weak = base.with_record(machines.WEAK_POOL, weak_decoder)
+    base_windows = base.held("windows")
     windows = declared_run.windows_on(
-        base.held("windows"), commit_rounds=1, buffer_rounds=0
+        base_windows, commit_rounds=1, buffer_rounds=0
     )
     with_weak = with_weak.with_held("windows", windows)
+    strong_only_detection_events = strong_only.held("detection_events")
     detection_events = dataclasses.replace(
-        strong_only.held("detection_events"), formed_at=formed_at
+        strong_only_detection_events, formed_at=formed_at
     )
     with_weak = with_weak.with_held("detection_events", detection_events)
     switching = declared_run.declared_switching()
@@ -978,7 +990,8 @@ def test_single_terminal_window_matches_direct_pymatching(
 ) -> None:
     program = memory_programs.memory_program(physical_error_probability=0.08)
     settings = _settings(program, "live", placement)
-    physical = settings.held("workload").physical_circuits
+    base_workload = settings.held("workload")
+    physical = base_workload.physical_circuits
     workload = _scheduled_workload(2, physical)
     settings = settings.with_held("workload", workload)
     run = _run(settings)
@@ -1070,7 +1083,8 @@ def test_bb_block_decodes_all_eight_outputs_against_direct_bp_osd(
     pytest.importorskip("deltakit_explorer")
     program = _bb_memory(basis)
     settings = _bb_settings(program, placement, commit_round_count=10)
-    physical = settings.held("workload").physical_circuits
+    base_workload = settings.held("workload")
+    physical = base_workload.physical_circuits
     workload = _scheduled_workload(3, physical)
     workload = _bb_logical_qubits(workload)
     settings = settings.with_held("workload", workload)
@@ -1096,9 +1110,8 @@ def test_bb_live_feedback_preserves_the_full_logical_vector() -> None:
     rounds = round_policies.PerOperationRounds(
         ((100, 0), (1, 2), (2, 0), (3, 1), (4, 0))
     )
-    workload = dataclasses.replace(
-        settings.held("workload"), rounds_policy=rounds
-    )
+    base_workload = settings.held("workload")
+    workload = dataclasses.replace(base_workload, rounds_policy=rounds)
     settings = settings.with_held("workload", workload)
 
     run = _run(settings)
@@ -1125,7 +1138,8 @@ def test_bb_higher_logical_fault_is_reported_as_a_failure(
     )
     settings = _bb_settings(program, placement, commit_round_count=10)
     source_record = declared_run.GivenSource(source)
-    qpu = dataclasses.replace(settings.held("qpu"), source=source_record)
+    base_qpu = settings.held("qpu")
+    qpu = dataclasses.replace(base_qpu, source=source_record)
     owner = program_records.Operation(
         100, "memory", tuple(range(8)), patches=("block",), circuit=circuit
     )
@@ -1178,8 +1192,9 @@ def test_a_recorded_joint_stream_matches_complete_stim_conversion(
     code = finite_example.RepetitionMemory(3, 3)
     source_record = declared_run.GivenSource(source)
     card = declared_run.GivenCard(code)
+    base_qpu = settings.held("qpu")
     qpu = dataclasses.replace(
-        settings.held("qpu"),
+        base_qpu,
         source=source_record,
         code_card=card,
         distance=None,
@@ -1446,8 +1461,9 @@ def test_joint_live_memory_can_use_the_weak_primary_tier(
     without_pool = settings.without_part(machines.STRONG_POOL)
     without_store = without_pool.without_part(machines.STRONG_STORE)
     settings = machines.with_pool(without_store, strong.settings)
+    base_detection_events = settings.held("detection_events")
     detection_events = dataclasses.replace(
-        settings.held("detection_events"),
+        base_detection_events,
         formed_at=WEAK_SEATS_BY_PLACEMENT[placement],
     )
     settings = settings.with_held("detection_events", detection_events)
@@ -3602,8 +3618,9 @@ def _settings(
     weak = base.part(machines.WEAK_POOL)
     strong = dataclasses.replace(weak.settings, algorithm=matching)
     seats = SEATS_BY_PLACEMENT[placement]
+    base_detection_events = base.held("detection_events")
     detection_events = dataclasses.replace(
-        base.held("detection_events"), formed_at=seats
+        base_detection_events, formed_at=seats
     )
     observation = dataclasses.replace(
         base.observation, record_switching_windows=True
@@ -4094,7 +4111,8 @@ def _separate_terminal_settings(placement: str) -> tuple:
     )
     settings = _settings(program, "live", placement)
     source_record = declared_run.GivenSource(source)
-    qpu = dataclasses.replace(settings.held("qpu"), source=source_record)
+    base_qpu = settings.held("qpu")
+    qpu = dataclasses.replace(base_qpu, source=source_record)
     workload = _separate_terminal_workload(circuit)
     settings = settings.with_held("qpu", qpu)
     settings = settings.with_held("workload", workload)
@@ -4162,7 +4180,8 @@ def _last_round_read_with(
 
 def _readout_path(machine: graph.Machine) -> link_settings.PathSettings:
     """The machine's readout hop, as its fabric prices it."""
-    layout = graph_layout.layout_of(machine.at_task())
+    at_task = machine.at_task()
+    layout = graph_layout.layout_of(at_task)
     return layout.card.path_settings(transfer_records.QPU_TO_CONTROLLER)
 
 
@@ -4235,13 +4254,13 @@ def _bb_settings(
         buffer_rounds_override=2,
     )
     card = declared_run.GivenCard(code)
-    qpu = dataclasses.replace(
-        settings.held("qpu"), distance=None, code_card=card
-    )
+    base_qpu = settings.held("qpu")
+    qpu = dataclasses.replace(base_qpu, distance=None, code_card=card)
     price = decoders.PresetLatencyDecoder(0.2)
     backend = belief_propagation_osd.BeliefPropagationOsdDecoder(price)
     algorithm = declared_run.OneDecoder(backend)
-    workload = _bb_logical_qubits(settings.held("workload"))
+    base_workload = settings.held("workload")
+    workload = _bb_logical_qubits(base_workload)
     settings = settings.with_held("qpu", qpu)
     settings = settings.with_settings(machines.STRONG_POOL, algorithm=algorithm)
     return settings.with_held("workload", workload)

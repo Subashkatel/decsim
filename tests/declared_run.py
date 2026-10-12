@@ -444,11 +444,14 @@ def weak_only_graph(
         observation = observe_settings.ObservationSettings(
             log_component_io=io_trace
         )
-    records = [workload, declared_qpu(), controller, declared_frame()]
+    qpu = declared_qpu()
+    frame = declared_frame()
+    records = [workload, qpu, controller, frame]
     if windows is not None:
         records.append(windows)
+    fabric = declared_fabric()
     machine = machines.base(
-        *records, clock=clock, observation=observation, fabric=declared_fabric()
+        *records, clock=clock, observation=observation, fabric=fabric
     )
     return machines.with_pool(machine, weak_decoder, store=weak_syndrome_buffer)
 
@@ -466,13 +469,17 @@ def strong_only_run(
     observation = observe_settings.ObservationSettings(
         log_component_io=io_trace, record_switching_windows=record
     )
+    qpu = declared_qpu()
+    controller = declared_controller()
+    frame = declared_frame()
+    fabric = declared_fabric()
     machine = machines.base(
         workload,
-        declared_qpu(),
-        declared_controller(),
-        declared_frame(),
+        qpu,
+        controller,
+        frame,
         observation=observation,
-        fabric=declared_fabric(),
+        fabric=fabric,
     )
     with_strong = machines.with_pool(
         machine, strong_decoder, machines.STRONG_POOL, fabrics.HOST
@@ -599,15 +606,19 @@ def switching_run(
         log_component_io=io_trace,
         record_switching_windows=record,
     )
+    qpu = declared_qpu(round_microseconds)
+    controller = declared_controller()
+    frame = declared_frame()
+    fabric = declared_fabric()
     machine = machines.base(
         workload,
-        declared_qpu(round_microseconds),
+        qpu,
         windows,
         decoder_manager,
-        declared_controller(),
-        declared_frame(),
+        controller,
+        frame,
         observation=observation,
-        fabric=declared_fabric(),
+        fabric=fabric,
     )
     with_weak = machines.with_pool(machine, weak_decoder)
     with_strong = machines.with_strong_tier(

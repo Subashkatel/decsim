@@ -142,11 +142,11 @@ def base(
     reads out to the controller and takes its pulses, and a frame sends
     the controller its decisions.
     """
+    qpu_kind = part_kinds.kind_named(QPU)
+    controller_kind = part_kinds.kind_named(CONTROLLER)
     parts = {
-        QPU: graph.Part(QPU, part_kinds.kind_named(QPU).default),
-        CONTROLLER: graph.Part(
-            CONTROLLER, part_kinds.kind_named(CONTROLLER).default
-        ),
+        QPU: graph.Part(QPU, qpu_kind.default),
+        CONTROLLER: graph.Part(CONTROLLER, controller_kind.default),
     }
     for record in records:
         name = _held_name(record)
@@ -155,10 +155,12 @@ def base(
     if FRAME in parts:
         decisions = graph.Wire(f"{FRAME}.decisions", f"{CONTROLLER}.decisions")
         wires.append(decisions)
-    wires.append(graph.Wire(f"{CONTROLLER}.pulses", f"{QPU}.pulses"))
+    pulses = graph.Wire(f"{CONTROLLER}.pulses", f"{QPU}.pulses")
+    wires.append(pulses)
+    held_parts = parts.values()
     return graph.Machine(
         clock=clock,
-        parts=tuple(parts.values()),
+        parts=tuple(held_parts),
         wires=tuple(wires),
         fabric=fabric,
         observation=observation,
@@ -181,9 +183,12 @@ def with_pool(
     if store is None:
         store = syndrome_buffer_module.SyndromeBufferSettings()
     store_name = f"{name}{STORE_SUFFIX}"
-    controller = machine.parts_of("controller")[0]
-    grown = machine.with_part(graph.Part(store_name, store, site))
-    grown = grown.with_part(graph.Part(name, pool, site))
+    controllers = machine.parts_of("controller")
+    controller = controllers[0]
+    store_part = graph.Part(store_name, store, site)
+    pool_part = graph.Part(name, pool, site)
+    grown = machine.with_part(store_part)
+    grown = grown.with_part(pool_part)
     wires = [
         graph.Wire(f"{controller.name}.rounds", f"{store_name}.rounds"),
         graph.Wire(f"{store_name}.reads", f"{name}.rounds"),
@@ -191,7 +196,8 @@ def with_pool(
     frames = machine.parts_of("pauli_frame")
     if frames:
         corrections = f"{frames[0].name}.corrections"
-        wires.append(graph.Wire(f"{name}.corrections", corrections))
+        correction_wire = graph.Wire(f"{name}.corrections", corrections)
+        wires.append(correction_wire)
     return grown.with_wires(*wires)
 
 
@@ -205,14 +211,16 @@ def with_frame(
     """
     if frame is None:
         frame = pauli_frame_module.PauliFrameConfig()
-    controller = machine.parts_of("controller")[0]
+    controllers = machine.parts_of("controller")
+    controller = controllers[0]
     wires = [graph.Wire(f"{FRAME}.decisions", f"{controller.name}.decisions")]
     for pool in machine.parts_of("decoder_pool"):
         corrections = graph.Wire(
             f"{pool.name}.corrections", f"{FRAME}.corrections"
         )
         wires.append(corrections)
-    grown = machine.with_part(graph.Part(FRAME, frame))
+    frame_part = graph.Part(FRAME, frame)
+    grown = machine.with_part(frame_part)
     return grown.with_wires(*wires)
 
 
@@ -328,11 +336,11 @@ def with_escalation(
     if switching_name is None:
         switching_name = f"{name}_switching"
     grown = with_pool(machine, pool, name, site)
-    grown = grown.with_part(graph.Part(switching_name, switching))
-    return grown.with_wires(
-        graph.Wire(f"{source}.escalate", f"{switching_name}.results"),
-        graph.Wire(f"{switching_name}.redecode", f"{name}.escalated"),
-    )
+    switching_part = graph.Part(switching_name, switching)
+    grown = grown.with_part(switching_part)
+    results = graph.Wire(f"{source}.escalate", f"{switching_name}.results")
+    redecode = graph.Wire(f"{switching_name}.redecode", f"{name}.escalated")
+    return grown.with_wires(results, redecode)
 
 
 def with_router(
@@ -517,11 +525,12 @@ def _baseline_observation() -> observe_settings.ObservationSettings:
 
 def _held_name(record: Any) -> str:
     """The name a part held once goes by: its kind's, the frame FRAME."""
-    kind = part_kinds.kind_of(type(record))
+    record_class = type(record)
+    kind = part_kinds.kind_of(record_class)
     if kind is None or kind.is_many:
-        raise graph.GraphError(
-            f"a {type(record).__name__} is no part a machine holds once"
-        )
+        class_name = record_class.__name__
+        message = f"a {class_name} is no part a machine holds once"
+        raise graph.GraphError(message)
     if kind.name == "pauli_frame":
         return FRAME
     return kind.name

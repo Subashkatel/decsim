@@ -371,8 +371,14 @@ def _on_protocol(machine, source: str, target: str, protocol) -> graph.Machine:
     the reference path of the hop's role on the clocked wire, its
     channel on the protocol.
     """
-    hop = route_records.hop_between(source.split(".")[0], target.split(".")[0])
-    card = graph_layout.layout_of(machine.at_task()).card
+    source_pieces = source.split(".")
+    source_part = source_pieces[0]
+    target_pieces = target.split(".")
+    target_part = target_pieces[0]
+    hop = route_records.hop_between(source_part, target_part)
+    at_task = machine.at_task()
+    layout = graph_layout.layout_of(at_task)
+    card = layout.card
     (role,) = [path.role for path in card.paths if path.name == hop]
     reference = link_profiles.reference_path(role, hop)
     wire = fabrics.ClockedLink(
@@ -383,9 +389,11 @@ def _on_protocol(machine, source: str, target: str, protocol) -> graph.Machine:
     )
     priced = wire.priced(hop, reference, None)
     channel = dataclasses.replace(priced.channel, protocol=protocol)
-    link = fabrics.FixedPath(dataclasses.replace(priced, channel=channel))
+    on_protocol = dataclasses.replace(priced, channel=channel)
+    link = fabrics.FixedPath(on_protocol)
     without = machine.without_wire(source, target)
-    return without.with_wires(graph.Wire(source, target, link))
+    protocol_wire = graph.Wire(source, target, link)
+    return without.with_wires(protocol_wire)
 
 
 def _recording_derive(derive, seed_rows: list):

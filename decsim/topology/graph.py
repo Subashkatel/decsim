@@ -177,11 +177,13 @@ class Machine:
         None is the distance.
         """
         qpu = self.held(part_kinds.QPU)
-        workload_record = self.held(part_kinds.WORKLOAD).workload_record
+        workload = self.held(part_kinds.WORKLOAD)
+        workload_record = workload.workload_record
         probability = None
         if workload_record is not None:
             probability = workload_record.physical_error_probability
-        scheme = self.held("windows").scheme
+        windows = self.held("windows")
+        scheme = windows.scheme
         return {
             "distance": qpu.distance,
             "physical_error_probability": probability,
@@ -253,7 +255,8 @@ class Machine:
         """
         found = self.parts_of(kind_name)
         if not found:
-            return self.with_part(Part(kind_name, settings))
+            part = Part(kind_name, settings)
+            return self.with_part(part)
         return self.with_record(found[0].name, settings)
 
     def with_record(self, name: str, settings: Any) -> "Machine":
@@ -380,19 +383,26 @@ def _refuse_a_route_on_a_patch_no_operation_has(machine: Machine) -> None:
     patch no operation has is certain to match nothing.
     """
     routes = machine.readout_routes
-    workload_record = machine.held(part_kinds.WORKLOAD).workload_record
+    workload = machine.held(part_kinds.WORKLOAD)
+    workload_record = workload.workload_record
     if not routes or workload_record is None:
         return
     occupied = _patches_read_out(workload_record)
     for route in routes:
-        unknown = [patch for patch in route.patch_ids if patch not in occupied]
-        if unknown:
-            raise ValueError(
-                f"the readout route for patches {list(route.patch_ids)} "
-                f"names {unknown}, which no operation reads out, so it would "
-                "never be taken; the operations read out "
-                f"{sorted(occupied, key=repr)}"
-            )
+        _refuse_a_route_off_the_patches(route, occupied)
+
+
+def _refuse_a_route_off_the_patches(route: Any, occupied: set) -> None:
+    """A route that names a patch outside occupied, refused."""
+    unknown = [patch for patch in route.patch_ids if patch not in occupied]
+    if not unknown:
+        return
+    raise ValueError(
+        f"the readout route for patches {list(route.patch_ids)} "
+        f"names {unknown}, which no operation reads out, so it would "
+        "never be taken; the operations read out "
+        f"{sorted(occupied, key=repr)}"
+    )
 
 
 def _patches_read_out(workload_record: object) -> set:

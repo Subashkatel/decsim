@@ -110,12 +110,14 @@ def switching_graph(
         record_switching_windows=record,
         trace=trace,
     )
+    controller = declared_run.declared_controller()
+    frame = declared_run.declared_frame()
     machine = machines.base(
         workload,
         qpu,
         windows,
-        declared_run.declared_controller(),
-        declared_run.declared_frame(),
+        controller,
+        frame,
         observation=observation,
         fabric=fabric,
     )

@@ -188,7 +188,8 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
         measurement_rounds={producers.LIVE_STREAM_ID: mapping},
     )
     source_record = declared_run.GivenSource(source)
-    qpu = dataclasses.replace(graph.held("qpu"), source=source_record)
+    base_qpu = graph.held("qpu")
+    qpu = dataclasses.replace(base_qpu, source=source_record)
     graph = graph.with_held("qpu", qpu)
     machine = machines.Machine.build(graph, 0)
     readouts = []
@@ -371,8 +372,9 @@ def _repetition_replay(circuit, mapping, measurements, distance, round_count):
     code = example.RepetitionMemory(distance, round_count)
     card = declared_run.GivenCard(code)
     source_record = declared_run.GivenSource(source)
+    base_qpu = graph.held("qpu")
     qpu = dataclasses.replace(
-        graph.held("qpu"), distance=None, code_card=card, source=source_record
+        base_qpu, distance=None, code_card=card, source=source_record
     )
     graph = graph.with_held("qpu", qpu)
     return machines.Machine.build(graph, 0)

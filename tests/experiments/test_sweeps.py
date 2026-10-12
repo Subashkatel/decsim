@@ -33,7 +33,8 @@ def test_an_argument_axis_makes_each_cells_machine():
     tasks = sweep.tasks()
 
     names = [task.name for task in tasks]
-    distances = [task.machine.held("qpu").distance for task in tasks]
+    qpus = [task.machine.held("qpu") for task in tasks]
+    distances = [qpu.distance for qpu in qpus]
     assert names == ["d3", "d5"]
     assert distances == [3, 5]
 
@@ -209,7 +210,8 @@ def _constants(tmp_path: pathlib.Path) -> constants_module.Section:
 
 
 def _probability(task: collect.Task) -> float:
-    record = task.machine.held("workload").workload_record
+    workload = task.machine.held("workload")
+    record = workload.workload_record
     return record.physical_error_probability
 
 
@@ -220,9 +222,11 @@ def _weak_unit_count(task: collect.Task) -> int:
 
 def _qpu_metadata(cell, task) -> dict:
     del cell
-    record = task.machine.held("workload").workload_record
+    workload = task.machine.held("workload")
+    record = workload.workload_record
     rate = record.physical_error_probability
-    distance = task.machine.held("qpu").distance
+    qpu = task.machine.held("qpu")
+    distance = qpu.distance
     return {"qpu.distance": distance, "rate": rate}
 
 

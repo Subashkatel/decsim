@@ -78,8 +78,9 @@ def main() -> None:
         code_card = RepetitionMemory.Settings(
             arguments.distance, arguments.rounds
         )
+        supplied_qpu = supplied.held("qpu")
         qpu = dataclasses.replace(
-            supplied.held("qpu"), distance=None, code_card=code_card
+            supplied_qpu, distance=None, code_card=code_card
         )
         supplied = supplied.with_held("qpu", qpu)
     machine = machine_module.Machine.build(supplied, arguments.seed)

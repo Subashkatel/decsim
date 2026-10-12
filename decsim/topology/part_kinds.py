@@ -149,18 +149,26 @@ _PAULI_FRAME_PORTS = (
 # The parts off the path hold no port: their records set how the parts
 # on it behave. The defaults are a timing-only run of distance-three
 # surface code patches with no frame.
+_DEFAULT_QPU = qpu_settings.QpuSettings()
+_DEFAULT_CONTROLLER = controller_settings.ControllerSettings()
+_DEFAULT_IDLE_POLICY = idle_policies.SeparateDecodeJobsSettings()
+_DEFAULT_DETECTION_EVENTS = detection_event_settings.DetectionEventSettings()
+_DEFAULT_WINDOWS = window_settings.WindowSettings()
+_DEFAULT_DECODER_MANAGER = decoder_settings.DecoderManagerSettings()
+_DEFAULT_WORKLOAD = workload_settings.WorkloadSettings()
+_DEFAULT_FACTORY = magic_state_factories.InfiniteFactory.Settings()
 KINDS = (
     PartKind(
         QPU,
         qpu_settings.QpuSettings,
         _QPU_PORTS,
-        default=qpu_settings.QpuSettings(),
+        default=_DEFAULT_QPU,
     ),
     PartKind(
         "controller",
         controller_settings.ControllerSettings,
         _CONTROLLER_PORTS,
-        default=controller_settings.ControllerSettings(),
+        default=_DEFAULT_CONTROLLER,
     ),
     PartKind(
         "syndrome_buffer",
@@ -184,22 +192,22 @@ KINDS = (
             idle_policies.SeparateDecodeJobsSettings,
             ports.IdlePolicySettings,
         ],
-        default=idle_policies.SeparateDecodeJobsSettings(),
+        default=_DEFAULT_IDLE_POLICY,
     ),
     PartKind(
         "detection_events",
         detection_event_settings.DetectionEventSettings,
-        default=detection_event_settings.DetectionEventSettings(),
+        default=_DEFAULT_DETECTION_EVENTS,
     ),
     PartKind(
         "windows",
         window_settings.WindowSettings,
-        default=window_settings.WindowSettings(),
+        default=_DEFAULT_WINDOWS,
     ),
     PartKind(
         "decoder_manager",
         decoder_settings.DecoderManagerSettings,
-        default=decoder_settings.DecoderManagerSettings(),
+        default=_DEFAULT_DECODER_MANAGER,
     ),
     PartKind(
         SWITCHING,
@@ -211,12 +219,12 @@ KINDS = (
     PartKind(
         WORKLOAD,
         Union[workload_settings.WorkloadSettings, ports.WorkloadMakerSettings],
-        default=workload_settings.WorkloadSettings(),
+        default=_DEFAULT_WORKLOAD,
     ),
     PartKind(
         "magic_state_factory",
         Union[qpu_settings.FactorySettings, ports.MagicStateFactorySettings],
-        default=magic_state_factories.InfiniteFactory.Settings(),
+        default=_DEFAULT_FACTORY,
     ),
 )
 _KIND_BY_NAME = {kind.name: kind for kind in KINDS}
@@ -255,5 +263,6 @@ def run_file_fields(kind: PartKind, workload: object) -> tuple:
     if kind.name == QPU and workload.fixes_the_distance:
         return ("distance",)
     if kind.name == WORKLOAD:
-        return tuple(getattr(workload, "fields_set_in_the_run_file", ()))
+        fields = getattr(workload, "fields_set_in_the_run_file", ())
+        return tuple(fields)
     return ()

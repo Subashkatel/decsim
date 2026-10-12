@@ -1254,7 +1254,8 @@ def _shot_confidence(
         return None
     windows = ledger.windows()
     is_sampled = record_options.samples_confidence_of(seed)
-    signal = layout.entry_switching().confidence.name
+    switching = layout.entry_switching()
+    signal = switching.confidence.name
     sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
 

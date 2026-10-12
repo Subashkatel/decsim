@@ -156,9 +156,10 @@ def _refuse_what_a_stream_does_not_build(
 ) -> None:
     """The first shape a stream does not build yet, refused."""
     reasons = [check(machine) for check in _STREAM_CHECKS]
-    reasons.append(_an_absorbing_strong_window(layout))
-    reasons.append(_bulk_strong_decoding(machine))
-    reasons.append(_batching(layout))
+    absorbing_reason = _an_absorbing_strong_window(layout)
+    bulk_reason = _bulk_strong_decoding(machine)
+    batching_reason = _batching(layout)
+    reasons.extend((absorbing_reason, bulk_reason, batching_reason))
     for reason in reasons:
         if reason is None:
             continue
@@ -168,7 +169,8 @@ def _refuse_what_a_stream_does_not_build(
 
 
 def _another_source(machine) -> Optional[str]:
-    source_name = machine.held("qpu").source.name
+    qpu = machine.held("qpu")
+    source_name = qpu.source.name
     if source_name in STIM_SOURCES:
         return None
     return (
@@ -217,7 +219,8 @@ def _an_absorbing_strong_window(
 
 
 def _bulk_strong_decoding(machine) -> Optional[str]:
-    if not machine.held("decoder_manager").bulk_strong:
+    manager = machine.held("decoder_manager")
+    if not manager.bulk_strong:
         return None
     return (
         "a merged batch files its stages under its own key, which a "

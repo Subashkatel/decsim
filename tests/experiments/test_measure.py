@@ -239,8 +239,9 @@ def slow_unit_settings(
     on the fridge clock.
     """
     base = one_tier_machine(card_microseconds, units)
+    base_windows = base.held(machines.WINDOWS)
     windows = dataclasses.replace(
-        base.held(machines.WINDOWS),
+        base_windows,
         decision_cycles=decision_cycles,
         clock=FRIDGE_CLOCK,
     )
@@ -3125,16 +3126,20 @@ def _with_parts_renamed(machine, names: dict):
 
     def renamed_end(end: str) -> str:
         part, _, port = end.partition(".")
-        return f"{renamed(part)}.{port}"
+        part_name = renamed(part)
+        return f"{part_name}.{port}"
 
     parts = []
     for part in machine.parts:
-        parts.append(dataclasses.replace(part, name=renamed(part.name)))
+        name = renamed(part.name)
+        renamed_part = dataclasses.replace(part, name=name)
+        parts.append(renamed_part)
     wires = []
     for wire in machine.wires:
         source = renamed_end(wire.source)
         target = renamed_end(wire.target)
-        wires.append(dataclasses.replace(wire, source=source, target=target))
+        renamed_wire = dataclasses.replace(wire, source=source, target=target)
+        wires.append(renamed_wire)
     return dataclasses.replace(machine, parts=tuple(parts), wires=tuple(wires))
 
 

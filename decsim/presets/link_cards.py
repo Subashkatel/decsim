@@ -349,23 +349,27 @@ def bandwidth_limited_fabric(
         instruction_word_source,
         None,
     )
-    return fabrics.RoleLinks(
-        readout=fabrics.FixedPath(readout),
-        write_written=fabrics.FixedPath(write_written),
-        write_landed=fabrics.FixedPath(write_landed),
-        read_written=fabrics.FixedPath(read_written),
-        read_landed=fabrics.FixedPath(read_landed),
-        forward=fabrics.FixedPath(forward),
-        reverse=fabrics.FixedPath(reverse),
-        same_pool_fridge=fabrics.FixedPath(same_pool_fridge),
+    path_by_role = {
+        "readout": readout,
+        "write_written": write_written,
+        "write_landed": write_landed,
+        "read_written": read_written,
+        "read_landed": read_landed,
+        "forward": forward,
+        "reverse": reverse,
+        "same_pool_fridge": same_pool_fridge,
         # a host pool's own boundary is read out of the host's memory,
         # on the landed read's channel
-        same_pool_host=fabrics.FixedPath(read_landed),
-        answer_fridge=fabrics.FixedPath(answer_fridge),
-        answer_host=fabrics.FixedPath(answer_host),
-        decision=fabrics.FixedPath(decision),
-        command=fabrics.FixedPath(command),
-    )
+        "same_pool_host": read_landed,
+        "answer_fridge": answer_fridge,
+        "answer_host": answer_host,
+        "decision": decision,
+        "command": command,
+    }
+    links = {
+        role: fabrics.FixedPath(path) for role, path in path_by_role.items()
+    }
+    return fabrics.RoleLinks(**links)
 
 
 class _Provisioning:

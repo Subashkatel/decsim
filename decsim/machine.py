@@ -133,8 +133,9 @@ class Machine:
         )
         plan = plan_of(graph, layout, switching_parts)
         formation_paths = layout.formation_paths()
+        detection_event_settings = graph.held("detection_events")
         detection_events = readout_part.build_detection_events(
-            graph.held("detection_events"),
+            detection_event_settings,
             clock,
             plan.device,
             formation_paths,
@@ -146,9 +147,10 @@ class Machine:
         links = fabric.LinkFabric(layout.card, engine)
         factory = graph.held("magic_state_factory")
         qpu = qpu_part.Qpu.build(factory, engine, plan)
+        frame = graph.held("pauli_frame")
         control = control_part.Control.build(
             controller,
-            graph.held("pauli_frame"),
+            frame,
             clock,
             engine,
             plan,
@@ -163,9 +165,11 @@ class Machine:
             detection_events,
             links,
         )
+        window_settings = graph.held("windows")
+        workload = graph.held("workload")
         windows = windows_part.Windows.build(
-            graph.held("windows"),
-            graph.held("workload"),
+            window_settings,
+            workload,
             layout,
             clock,
             engine,
@@ -174,8 +178,9 @@ class Machine:
             built_models,
         )
         target_by_source = layout.target_by_source()
+        decoder_manager = graph.held("decoder_manager")
         decoders = decoders_part.Decoders.build(
-            graph.held("decoder_manager"),
+            decoder_manager,
             clock,
             engine,
             pools,
@@ -347,13 +352,19 @@ def plan_of(
     batches_each_member = decoders_part.batches_each_member(layout)
     landed_seats = layout.landed_seats()
     decoder_manager = graph.held("decoder_manager")
+    qpu = graph.held("qpu")
+    workload = graph.held("workload")
+    windows = graph.held("windows")
+    idle_policy = graph.held("idle_policy")
+    detection_events = graph.held("detection_events")
+    entry_switching = layout.entry_switching()
     return plan_build.build_plan(
-        graph.held("qpu"),
-        graph.held("workload"),
-        graph.held("windows"),
-        graph.held("idle_policy"),
-        graph.held("detection_events"),
-        layout.entry_switching(),
+        qpu,
+        workload,
+        windows,
+        idle_policy,
+        detection_events,
+        entry_switching,
         decoder_manager.bulk_strong,
         switching_parts,
         batches_each_member,
@@ -473,7 +484,8 @@ def _process_name(
     kind = layout.entry_pool.names.seat
     if layout.edges:
         kind = layout.edges[0].name
-    distance = graph.held("qpu").distance
+    qpu = graph.held("qpu")
+    distance = qpu.distance
     return f"decsim {kind} d{distance} seed{seed}"
 
 

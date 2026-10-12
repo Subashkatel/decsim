@@ -208,6 +208,31 @@ _INSTRUCTION_RATE = settings.CapacitySettings(
 _OFF_BOARD_RATE = settings.CapacitySettings(
     _OFF_BOARD_BITS_PER_MICROSECOND, _OFF_BOARD_RATE_SOURCE
 )
+_BUS_WORD = settings.PayloadSettings(BUS_WORD_BITS, BUS_WORD_SOURCE)
+_INSTRUCTION_WORD = settings.PayloadSettings(
+    INSTRUCTION_WORD_BITS, INSTRUCTION_WORD_SOURCE
+)
+
+
+def reference_path(
+    role: route_records.HopRole, name: transfer_records.LinkPath
+) -> settings.PathSettings:
+    """The reference card's path for a hop of this role, on its own channel.
+
+    A preset's latency is its referent's end-to-end number, so the
+    receiver's processing is inside it.
+    """
+    row = _ROWS[role.key]
+    latency_ticks = config.microseconds_to_ticks(row.latency_microseconds)
+    channel = settings.ChannelSettings(
+        name, latency_ticks, row.capacity, row.latency_source
+    )
+    return settings.PathSettings(
+        channel,
+        row.default_payload,
+        row.actual_payload_source,
+        excludes_receiver_processing=False,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -308,37 +333,12 @@ _ROWS = {
         0.0,
         _DECISION_SOURCE,
         _WORD_RATE,
-        default_payload=settings.PayloadSettings(
-            BUS_WORD_BITS, BUS_WORD_SOURCE
-        ),
+        default_payload=_BUS_WORD,
     ),
     route_records.COMMAND: _Row(
         _PULSE_LATENCY_MICROSECONDS,
         _PULSE_SOURCE,
         _INSTRUCTION_RATE,
-        default_payload=settings.PayloadSettings(
-            INSTRUCTION_WORD_BITS, INSTRUCTION_WORD_SOURCE
-        ),
+        default_payload=_INSTRUCTION_WORD,
     ),
 }
-
-
-def reference_path(
-    role: route_records.HopRole, name: transfer_records.LinkPath
-) -> settings.PathSettings:
-    """The reference card's path for a hop of this role, on its own channel.
-
-    A preset's latency is its referent's end-to-end number, so the
-    receiver's processing is inside it.
-    """
-    row = _ROWS[role.key]
-    latency_ticks = config.microseconds_to_ticks(row.latency_microseconds)
-    channel = settings.ChannelSettings(
-        name, latency_ticks, row.capacity, row.latency_source
-    )
-    return settings.PathSettings(
-        channel,
-        row.default_payload,
-        row.actual_payload_source,
-        excludes_receiver_processing=False,
-    )

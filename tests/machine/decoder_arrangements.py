@@ -85,13 +85,15 @@ def weak_only(kind: str) -> graph.Machine:
     """The weak tier alone, decoding every window in the fridge."""
     weak_decoder = decoder_unit(kind, FRIDGE_CLOCK)
     weak = graph.Part(machines.WEAK_POOL, weak_decoder, fabrics.FRIDGE)
-    return machine().with_part(weak)
+    base = machine()
+    return base.with_part(weak)
 
 
 def strong_only(kind: str) -> graph.Machine:
     """The strong tier alone, decoding every window at room temperature."""
     strong_decoder = decoder_unit(kind, ROOM_CLOCK)
-    return machines.strong_alone(machine(), strong_decoder)
+    base = machine()
+    return machines.strong_alone(base, strong_decoder)
 
 
 def switching(weak_kind: str, strong_kind: str):

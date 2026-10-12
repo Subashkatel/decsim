@@ -354,7 +354,8 @@ def write_task_record(
     task_dir.mkdir(parents=True, exist_ok=True)
     record_path = task_dir / RECORD_FILE
     write_json(record_path, record)
-    workload_record = task.machine.held("workload").workload_record
+    workload = task.machine.held("workload")
+    workload_record = workload.workload_record
     if workload_record is not None:
         inputs_dir = task_dir / INPUTS_FOLDER
         _write_inputs(inputs_dir, workload_record)

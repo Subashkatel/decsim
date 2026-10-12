@@ -222,11 +222,14 @@ def reference_machine(cells: Optional[Mapping] = None) -> graph.Machine:
         )
     # the reference card with every hop of REFERENCE_HOPS priced
     fabric = fabrics.RoleLinks(**links_by_role)
+    base_controller = base.held("controller")
     controller = dataclasses.replace(
-        base.held("controller"), decision_to_pulse_cycles=REFERENCE_ISSUE_CYCLES
+        base_controller, decision_to_pulse_cycles=REFERENCE_ISSUE_CYCLES
     )
-    windows = dataclasses.replace(base.held(machines.WINDOWS), clock=fridge)
-    manager = dataclasses.replace(base.held("decoder_manager"), clock=fridge)
+    base_windows = base.held(machines.WINDOWS)
+    windows = dataclasses.replace(base_windows, clock=fridge)
+    base_manager = base.held("decoder_manager")
+    manager = dataclasses.replace(base_manager, clock=fridge)
     observation = dataclasses.replace(base.observation, trace="chrome")
     priced = dataclasses.replace(base, fabric=fabric, observation=observation)
     machine = priced.with_held("controller", controller)

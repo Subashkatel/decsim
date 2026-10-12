@@ -149,8 +149,9 @@ def _parallel_machine_formed_at(where: str):
     """The weak baseline on Skoric's A/B blocks, formed there."""
     formed_there = _machine_formed_at(where)
     graph = formed_there.graph
+    base_windows = graph.held("windows")
     windows = declared_run.windows_on(
-        graph.held("windows"), parallel_scheme.ParallelWindowScheme
+        base_windows, parallel_scheme.ParallelWindowScheme
     )
     graph = graph.with_held("windows", windows)
     return machine_module.Machine.build(graph, 0)
@@ -165,12 +166,14 @@ def _seated_machine(
     default, the reference card's cost.
     """
     graph = machine_function(3, 0.008, 1.0)
+    base_detection_events = graph.held("detection_events")
     detection_events = dataclasses.replace(
-        graph.held("detection_events"),
+        base_detection_events,
         formed_at=formed_at,
         latency_cycles=latency_cycles,
     )
-    windows = declared_run.windows_on(graph.held("windows"), scheme_row)
+    base_windows = graph.held("windows")
+    windows = declared_run.windows_on(base_windows, scheme_row)
     if graph.parts_of("switching"):
         graph = graph.with_settings(
             machines.SWITCHING, strong_window=strong_window
@@ -269,7 +272,8 @@ def _timing_only_machine_formed_at(where: str):
     formed_there = _machine_formed_at(where)
     graph = formed_there.graph
     timing_only = syndrome_devices.TimingOnlyDevice.Settings()
-    qpu = dataclasses.replace(graph.held("qpu"), source=timing_only)
+    base_qpu = graph.held("qpu")
+    qpu = dataclasses.replace(base_qpu, source=timing_only)
     graph = graph.with_held("qpu", qpu)
     return machine_module.Machine.build(graph, 0)
 
@@ -302,9 +306,8 @@ def _double_window_switching_at_the_decoder():
     graph = shape_tests.weak_base_switching(3, 0.008, 1.0)
     detection_events = _formed_at(graph, "decoder", SWITCHING_SEATS)
     double_window = strong_window_shapes.DoubleWindow.Settings()
-    windows = window_settings.switching_windows(
-        graph.held("windows"), double_window
-    )
+    base_windows = graph.held("windows")
+    windows = window_settings.switching_windows(base_windows, double_window)
     graph = graph.with_settings(machines.SWITCHING, strong_window=double_window)
     graph = graph.with_held("detection_events", detection_events)
     graph = graph.with_held("windows", windows)
@@ -315,8 +318,9 @@ def _formed_at(graph, where: str, seats_by_placement: dict = SEATS):
     """The detection_events card forming at the seats where names."""
     seats = seats_by_placement[where]
     latency_cycles, cycles_per_round = YANG_CYCLES.get(where, (0, 0))
+    base_detection_events = graph.held("detection_events")
     return dataclasses.replace(
-        graph.held("detection_events"),
+        base_detection_events,
         formed_at=seats,
         latency_cycles=latency_cycles,
         cycles_per_round=cycles_per_round,
@@ -899,8 +903,9 @@ def _lookback_switching_machine(formed_at, seed):
     )
     graph = machine.graph
     workload = _lookback_workload()
+    base_windows = graph.held("windows")
     windows = declared_run.windows_on(
-        graph.held("windows"), commit_rounds=2, buffer_rounds=2
+        base_windows, commit_rounds=2, buffer_rounds=2
     )
     host_time = cycle_count_module.HostMeasuredTime()
     union_find_settings = union_find.UnionFindDecoder.Settings(timing=host_time)
@@ -929,8 +934,9 @@ def _parallel_lookback_machine(unit_count: int):
     graph = machine.graph
     # a flipped readout alone, so no fault straddles two blocks' commits
     workload = _lookback_workload("M(0.15) 0\n")
+    base_windows = graph.held("windows")
     windows = declared_run.windows_on(
-        graph.held("windows"),
+        base_windows,
         parallel_scheme.ParallelWindowScheme,
         commit_rounds=1,
         buffer_rounds=1,
@@ -950,8 +956,9 @@ def _parallel_lookback_machine(unit_count: int):
     graph = graph.without_part(machines.SWITCHING)
     graph = graph.without_part(machines.STRONG_POOL)
     graph = graph.without_part(machines.STRONG_STORE)
+    base_detection_events = graph.held("detection_events")
     detection_events = dataclasses.replace(
-        graph.held("detection_events"), formed_at=WEAK_SEATS
+        base_detection_events, formed_at=WEAK_SEATS
     )
     graph = graph.with_held("detection_events", detection_events)
     return machine_module.Machine.build(graph, 0)
@@ -987,8 +994,9 @@ def _reach_growing_machine(formed_at):
     physical = workload_records.FiniteCircuit(circuit, measurement_rounds)
     operation = program_records.Operation(1, "memory", (0,), patches=(0,))
     workload = workload_records.Workload((operation,), {1: 10}, physical)
+    base_windows = graph.held("windows")
     windows = declared_run.windows_on(
-        graph.held("windows"), commit_rounds=2, buffer_rounds=2
+        base_windows, commit_rounds=2, buffer_rounds=2
     )
     weak = declared_run.DeclaredConfidenceDecoder.Settings(
         0.028, _is_window_one
@@ -1050,8 +1058,9 @@ def _every_third_escalating_machine(round_count: int, observed: str = ""):
     workload = workload_records.Workload(
         (operation,), {1: round_count}, physical
     )
+    base_windows = graph.held("windows")
     windows = declared_run.windows_on(
-        graph.held("windows"), commit_rounds=1, buffer_rounds=0
+        base_windows, commit_rounds=1, buffer_rounds=0
     )
     weak = declared_run.DeclaredConfidenceDecoder.Settings(
         0.028, _is_every_third

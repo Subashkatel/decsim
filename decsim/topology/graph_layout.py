@@ -608,28 +608,22 @@ def _pool_routes(
     intake_shape = _intake_shape(shape, pool)
     pool_site = _site(pool)
     store_site = _site(store)
-    read = _route(
-        (store.name, pool.name),
-        (store_site, pool_site),
-        route_records.HopRole(route_records.READ, intake_shape),
-    )
+    read_role = route_records.HopRole(route_records.READ, intake_shape)
+    answer_role = route_records.HopRole(route_records.ANSWER, pool_site)
+    same_pool_role = route_records.HopRole(route_records.SAME_POOL, pool_site)
+    read = _route((store.name, pool.name), (store_site, pool_site), read_role)
     answer = _route(
-        (pool.name, frame_name),
-        (pool_site, fabrics.FRIDGE),
-        route_records.HopRole(route_records.ANSWER, pool_site),
+        (pool.name, frame_name), (pool_site, fabrics.FRIDGE), answer_role
     )
     same_pool = _route(
-        (pool.name, pool.name),
-        (pool_site, pool_site),
-        route_records.HopRole(route_records.SAME_POOL, pool_site),
+        (pool.name, pool.name), (pool_site, pool_site), same_pool_role
     )
     if pool in shape.entries[1:]:
         # the entry store is written once, on the first entry's route
         return (read, answer, same_pool)
+    write_role = route_records.HopRole(route_records.WRITE, intake_shape)
     write = _route(
-        (controller_name, store.name),
-        (fabrics.FRIDGE, store_site),
-        route_records.HopRole(route_records.WRITE, intake_shape),
+        (controller_name, store.name), (fabrics.FRIDGE, store_site), write_role
     )
     return (write, read, answer, same_pool)
 

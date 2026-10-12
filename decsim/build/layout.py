@@ -164,12 +164,16 @@ class Layout:
         """The store the entry pool reads and the entry edge's target's.
 
         The retention calls them weak and strong; either is None when
-        the run has none. A slotted strong-only run's one store is its
-        strong store.
+        the run has none. An entry store its rounds land in, as a host
+        pool's does, is a strong store: the retention counts its
+        arrivals as it stores them.
         """
+        if not self.stores:
+            return (None, None)
         entry = self.entry_pool
-        if entry.store == STRONG_STORE:
-            return (None, STRONG_STORE)
+        entry_store = self.store(entry.store)
+        if entry_store.intake.shape == receiver_module.LANDED:
+            return (None, entry.store)
         if not self.edges:
             return (entry.store, None)
         entry_edge = self.edges[0]
@@ -193,6 +197,13 @@ class Layout:
             for reader in store.other_readers:
                 hops[reader.pool] = reader.read_hop
         return hops
+
+    def entry_escalation_hop(self) -> Optional[str]:
+        """The hop the entry edge escalates a window over; None for none."""
+        if not self.edges:
+            return None
+        entry_edge = self.edges[0]
+        return entry_edge.hops.forward
 
     def statistics_path_by_pool(self) -> dict:
         """The path each pool's statistics sit at."""

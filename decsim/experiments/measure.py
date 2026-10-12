@@ -108,7 +108,7 @@ POINTS = (
     # the verdict, or the committing decode's end when later -> its answer
     # leaving for the frame: a finished strong answer kept in its unit's
     # output slot (decoders/decoder_unit.py hold_output) until the
-    # verdict's selection has crossed weak_decoder_to_strong_decoder, the
+    # verdict's selection has crossed the escalation hop, the
     # wait a strong decode started with the weak one under
     # run_both_at_once has; zero for every other window
     "selection_wait",
@@ -580,6 +580,7 @@ def window_points_us(
     qpu_send: dict,
     input_path: str,
     answer_send: dict,
+    escalation_path: Optional[str],
 ) -> dict:
     """The per-window latency points, in us, for one decoded window.
 
@@ -608,7 +609,7 @@ def window_points_us(
     committed = frame_record.committed_ticks
     handoff_ticks = link_delay.get((BOUNDARY_HOP, operation_id, window_id), 0)
     escalation_ticks = link_delay.get(
-        ("weak_decoder_to_strong_decoder", operation_id, window_id), 0
+        (escalation_path, operation_id, window_id), 0
     )
     accepted = frame_record.accepted_ticks
     output_sent = answer_send.get(window.key, accepted)
@@ -731,13 +732,15 @@ def collect_samples(
     observation_settings: observe_settings.ObservationSettings,
     routes: route_records.Routes,
     input_hops: dict,
+    escalation_hop: Optional[str],
 ) -> tuple:
     """Every recorded point's microsecond samples, and each window's tier.
 
     Every point describes the decode the frame committed, named by the
     frame record's tier and run ordinal; input_hops is the hop each
     pool's input rides (Layout.input_hop_by_pool), keyed by the pool
-    whose decode the frame committed. Only the windows and rounds in
+    whose decode the frame committed, and escalation_hop the entry
+    edge's (Layout.entry_escalation_hop). Only the windows and rounds in
     the measurement interval are sampled, but for the end-of-stream
     reaction, which is the drain the interval leaves out. It stays whole
     past the size
@@ -771,7 +774,9 @@ def collect_samples(
     for window, frame_record in recorded_windows(
         observation, observation_settings
     ):
-        sample = window_sample(window, frame_record, stages, reads, input_hops)
+        sample = window_sample(
+            window, frame_record, stages, reads, input_hops, escalation_hop
+        )
         for name, value in sample.values.items():
             samples[name].append(value)
         window_tiers.append(sample.decode.tier.word)
@@ -811,6 +816,7 @@ def window_sample(
     stages: stage_records.StageLedger,
     reads: TransferReads,
     input_hops: dict,
+    escalation_hop: Optional[str],
 ) -> WindowSample:
     """One decoded window's values, as collect_samples reads every one.
 
@@ -832,6 +838,7 @@ def window_sample(
         reads.qpu_send,
         input_path,
         reads.answer_send,
+        escalation_hop,
     )
     return WindowSample(values, decode)
 
@@ -1128,8 +1135,14 @@ def _measurement(
     rounds_per_output = _one_length(owner_rounds)
     routes = layout.routes()
     input_hops = layout.input_hop_by_pool()
+    escalation_hop = layout.entry_escalation_hop()
     samples, window_tiers = collect_samples(
-        observation, result, settings.observation, routes, input_hops
+        observation,
+        result,
+        settings.observation,
+        routes,
+        input_hops,
+        escalation_hop,
     )
     logical_failure = _logical_failure(owners)
     predictions = _predictions(result)

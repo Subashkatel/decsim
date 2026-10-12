@@ -270,9 +270,11 @@ class StreamMeasures:
             link_delay, input_hop, index.qpu_send, index.answer_send
         )
         stages = self.machine.observation.stages
-        input_hops = self.machine.layout.input_hop_by_pool()
+        layout = self.machine.layout
+        input_hops = layout.input_hop_by_pool()
+        escalation_hop = layout.entry_escalation_hop()
         return measure.window_sample(
-            window, frame_record, stages, reads, input_hops
+            window, frame_record, stages, reads, input_hops, escalation_hop
         )
 
     def _let_go(self, window: window_records.Window) -> None:

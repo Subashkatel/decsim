@@ -193,7 +193,8 @@ def transmitter_with(engine, profile, windows=None, settings=None):
     weak_receiver.detection_events = formation.SeatedFormation(
         None, at_the_controller
     )
-    transmitter = round_transmission.RoundTransmitter(engine)
+    write_path = layout_module.WEAK_STORE_INTAKE.controller_write.path_name
+    transmitter = round_transmission.RoundTransmitter(engine, write_path)
     transmitter.link = links
     transmitter.memory_arrivals = windows
     transmitter.receiver = weak_receiver

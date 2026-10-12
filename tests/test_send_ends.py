@@ -47,7 +47,17 @@ ENDS_OF_PATH = {
 # window side's at both decoders.
 BOUNDARY_ROUTE = "BOUNDARY_ROUTE"
 BOUNDARY_SEND = "send_boundary"
-ENDS_OF_SEND = {**ENDS_OF_PATH, BOUNDARY_ROUTE: ("windows",)}
+# The controller's write into the written store is the layout's hop
+# (build/layout.py Layout.controller_write_hop), which the transmitter
+# holds as write_path; a send on it is read as that hop, from the
+# controller to a store.
+WRITE_PATH = "WRITE_PATH"
+WRITE_PATH_ATTRIBUTE = "write_path"
+ENDS_OF_SEND = {
+    **ENDS_OF_PATH,
+    BOUNDARY_ROUTE: ("windows",),
+    WRITE_PATH: ("controller", "syndrome_buffer"),
+}
 
 # the components on the reaction path; the root wires the paths onto the
 # ports (build, machine), the fabric carries them (links) and the
@@ -141,7 +151,7 @@ def _assigned_names(statement: ast.Assign) -> list:
 DELIVERY_CALLBACKS = {
     ("controller/controller.py", "QPU_TO_CONTROLLER"): ("at_controller",),
     ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): ("delivered",),
-    ("controller/round_transmission.py", "CONTROLLER_TO_WEAK_BUFFER"): (
+    ("controller/round_transmission.py", WRITE_PATH): (
         "_publish",
         "_write_feedback_memory",
     ),
@@ -288,10 +298,12 @@ def _registered_callback(node):
 
 
 def _path_argument(node: ast.Call):
-    """The slotted hop this call names, BOUNDARY_ROUTE, or None."""
+    """The hop this call names, BOUNDARY_ROUTE, WRITE_PATH, or None."""
     if _is_boundary_send(node):
         return BOUNDARY_ROUTE
     for argument in node.args:
+        if _is_write_path(argument):
+            return WRITE_PATH
         member = _link_path_member(argument)
         if member is not None:
             return member
@@ -304,6 +316,16 @@ def _is_boundary_send(node: ast.Call) -> bool:
     if not isinstance(called, ast.Attribute):
         return False
     return called.attr == BOUNDARY_SEND
+
+
+def _is_write_path(argument) -> bool:
+    """Whether the expression reads the transmitter's own write hop."""
+    if not isinstance(argument, ast.Attribute):
+        return False
+    inner = argument.value
+    if not isinstance(inner, ast.Name) or inner.id != "self":
+        return False
+    return argument.attr == WRITE_PATH_ATTRIBUTE
 
 
 def _link_path_member(argument):

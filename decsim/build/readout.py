@@ -99,7 +99,8 @@ class Readout:
         rounds_in_flight = round_assembly.RoundsInFlight(in_flight_bound)
         landing_path = _landing_path(store_plans)
         sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
-        transmitter = round_transmission.RoundTransmitter(engine)
+        write_path = _controller_write_path(store_plans)
+        transmitter = round_transmission.RoundTransmitter(engine, write_path)
         held_rounds = syndrome_round_sender.HeldRounds(engine)
         store_transfers = window_transfers.WindowTransfers(engine)
         memory_arrivals = memory_rounds.MemoryRoundArrivals(engine)
@@ -303,6 +304,15 @@ def _store_parts(
         )
         other_outputs.append((reader.pool, other_output))
     return StoreParts(plan, store, output, receiver, tuple(other_outputs))
+
+
+def _controller_write_path(store_plans: tuple) -> Optional[str]:
+    """The hop the controller writes the written store over, if one is."""
+    for plan in store_plans:
+        intake = plan.intake
+        if intake.shape == receiver_module.WRITTEN:
+            return intake.controller_write.path_name
+    return None
 
 
 def _landing_path(store_plans: tuple) -> Optional[transfer_records.LinkPath]:

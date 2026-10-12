@@ -19,6 +19,8 @@ runs, so `decsim trace` never loads Stim. The console script and
     decsim describe <run file> [--only NAME]
     decsim check <run file> [--only NAME]
     decsim estimates <run dir>
+    decsim stream <run file> --rounds N [--only NAME] [--warmup W]
+        [--seed S] [--out FILE]
 
 Every run form takes --set PATH=VALUE, repeated, to set any parameter
 of every task's machine (decsim/parameters; `decsim params` lists the
@@ -367,6 +369,13 @@ def _check(argv: list) -> None:
     check_command.check(argv)
 
 
+def _stream(argv: list) -> None:
+    """One memory task run as an unbounded stream, measured as it runs."""
+    import decsim.experiments.stream_command as stream_command
+
+    stream_command.stream(argv)
+
+
 def _report_the_refusal(refused: refusal.RefusalError) -> None:
     """One sentence and exit 1, gem5's fatal (src/base/logging.hh)."""
     print(f"decsim: {refused}", file=sys.stderr)
@@ -396,4 +405,5 @@ _RUN_BY_VERB = {
     "describe": _describe,
     "check": _check,
     "estimates": _estimates,
+    "stream": _stream,
 }

@@ -229,6 +229,7 @@ tick (us)  where                        what                                    
 9.408      Decoder unit default#0       stage release                                                 0.000
 9.412      Frame                        residence, unbounded, committed 9.416, freed at end of run    392.284   copy
 9.416      Window planner               W0 committed
+9.416      Window planner               window final
 9.416      Frame                        1:0 committed
 
 copies 1, references 2 jobs and 0 holds, moves 3
@@ -250,6 +251,8 @@ Then, at 9.408, `verdict`. This window's confidence was at or above the
 threshold, so the weak answer was kept: the boundary went to the next
 window on `decoder_to_decoder`, the correction went to the Pauli frame
 on `weak_decoder_to_frame`, and the window committed at 9.416.
+`window final` at the same tick says its record is final: no later
+decode will change it.
 
 Note the cost. Two solves is 2.4 microseconds of decoding, not 1.2, on
 every window, whether or not it escalates. That is what this confidence
@@ -305,6 +308,7 @@ tick (us)  where                            what                                
 98.412     Decoder unit strong#0            stage algorithm                                                0.000
 98.412     Decoder unit strong#0            stage release                                                  0.000
 98.416     Frame                            residence, unbounded, committed 98.420, freed at end of run    303.280   copy
+98.420     Window planner                   window final
 98.420     Frame                            1:3 committed
 
 copies 5, references 3 jobs and 0 holds, moves 7
@@ -359,7 +363,9 @@ eight things happen that did not happen for window 0.
 
 `W3 committed` at 18.408 is worth reading carefully. The window
 provisionally commits on the weak answer as soon as the verdict is in
-(`decsim/windows/window_commits.py`, `commit`). What it does not do is
+(`decsim/windows/window_commits.py`, `commit`), and its record turns
+final only at 98.420, the `window final` line, when the strong answer
+reaches the frame. What it does not do is
 ship its boundary: this run's boundary policy is held, the one the redo
 window's record hands `switching_windows`, because the redo window does
 not absorb the windows it covers. A strong window absorbs a

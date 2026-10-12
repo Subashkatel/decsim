@@ -206,3 +206,10 @@ def test_a_reset_count_and_distribution_keep_nothing_from_before():
         ("minimum", 2),
         ("maximum", 2),
     ]
+
+
+def test_only_a_history_changes_kind_in_a_run_that_keeps_no_series():
+    assert kinds.History.series_free() is kinds.Level
+    assert kinds.Level.series_free() is kinds.Level
+    assert kinds.Count.series_free() is kinds.Count
+    assert kinds.Distribution.series_free() is kinds.Distribution

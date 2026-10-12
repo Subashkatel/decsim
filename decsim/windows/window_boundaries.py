@@ -16,7 +16,7 @@ import collections.abc
 import copy
 import dataclasses
 import functools
-from typing import Optional
+from typing import Any, Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -115,6 +115,20 @@ class BoundaryCourier:
         if record is None:
             return None
         return record.committed
+
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """Let the boundary records of the stream's windows before it go.
+
+        The windows are final (window_release.py): each shipped its
+        boundary, and the windows that read one have committed.
+        """
+        for key in list(self.record_by_window):
+            if key[0] == stream_id and key[1] < window_index:
+                del self.record_by_window[key]
 
     # ---- delivery
 

@@ -17,6 +17,10 @@ derived when the table is read, as gem5 evaluates a Formula at dump.
     History       a Level that also keeps every (tick, level) it was
                   set to, the time series a gate or a plot reads
 
+A run that keeps no time series, a stream that lets its windows go
+(observation.folds_windows), builds each kind's series_free() in its
+place: a History is then a Level, and the others are themselves.
+
 Every kind is built on the run's clock, anything with a `now` in ticks
 (the engine), as every gem5 stat reads curTick(); only a Level reads it.
 
@@ -37,6 +41,11 @@ class Count:
     def __init__(self, clock: Any) -> None:
         del clock
         self.count = 0
+
+    @classmethod
+    def series_free(cls) -> type:
+        """The kind a run that keeps no series builds: a Count keeps none."""
+        return cls
 
     def add(self, amount: int = 1) -> None:
         """Add amount events."""
@@ -71,6 +80,11 @@ class Distribution:
         self.total = 0
         self.minimum: Optional[int] = None
         self.maximum: Optional[int] = None
+
+    @classmethod
+    def series_free(cls) -> type:
+        """The kind a run that keeps no series builds: this one keeps none."""
+        return cls
 
     def add(self, value: int) -> None:
         """One more value."""
@@ -125,6 +139,14 @@ class Level:
         self.area = 0
         self.peak = 0
         self.ticks_by_level: collections.Counter = collections.Counter()
+
+    @classmethod
+    def series_free(cls) -> type:
+        """The kind a run that keeps no series builds: a Level.
+
+        A History built there keeps a Level's fields and no series.
+        """
+        return Level
 
     def set(self, level: int) -> None:
         """The level from now on."""

@@ -176,8 +176,13 @@ class PeriodicFormationTable(formation_records.TableReads):
     def check_extends(self, previous: formation_records.TableReads) -> None:
         """Refuse a longer table that changes a round the previous had.
 
-        A table moved from the same live template keeps every round, so
-        it is checked in a step; another is checked round by round.
+        A table moved from the same live template keeps every round, and
+        a finished table read again off the same template at the same
+        length is the same table, so either is checked in a step; another
+        is checked round by round. A stream's source reads a new finished
+        table every time a seat asks once its final round has run, so a
+        walk over its rounds then would cost each retired round the
+        stream's length.
         """
         if self._continues(previous):
             return
@@ -203,8 +208,14 @@ class PeriodicFormationTable(formation_records.TableReads):
         if previous.stream_template() is not self.template:
             return False
         if previous.is_final:
-            return False
+            return self._is_the_same_finished(previous)
         return previous.round_count <= self.round_count
+
+    def _is_the_same_finished(self, previous) -> bool:
+        """Finished at the same length off one template: one table."""
+        if not self.is_final:
+            return False
+        return previous.round_count == self.round_count
 
     def _source_table(self) -> formation_records.FormationTable:
         if self.is_final:

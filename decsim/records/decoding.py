@@ -83,6 +83,10 @@ class WindowConfidence:
 # stored at once before it ends. Every token also answers
 # holders_waited_for: the holds that end before it can. A bounded store
 # asks both while a round waits for room (syndrome_buffer.py).
+#
+# Every token also answers served_window_key: the window it serves, so
+# a stream that lets its final windows go lets their spent tokens go
+# too (round_holds.py).
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,10 @@ class WindowReads:
         """
         operation_id = self.window_key[0]
         return (operation_id,)
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window whose decode the hold serves."""
+        return self.window_key
 
     def holders_waited_for(self) -> tuple:
         """None: its decode waits for rounds, not for another hold."""
@@ -128,6 +136,10 @@ class PotentialStrong:
     def operation_ids_read_at_once(self) -> tuple:
         """None: the hold ends at a weak verdict that keeps the window."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window whose decode the hold serves."""
+        return self.window_key
 
     def holders_waited_for(self) -> tuple:
         """None: an absorbing strong window may end it unread."""
@@ -155,6 +167,10 @@ class PotentialRestart:
         """None: the hold ends when the window before it commits."""
         return ()
 
+    def served_window_key(self) -> Optional[tuple]:
+        """The window whose decode the hold serves."""
+        return self.window_key
+
     def holders_waited_for(self) -> tuple:
         """None: the window before it may be absorbed rather than read."""
         return ()
@@ -177,6 +193,10 @@ class LaterStreamReads:
     def operation_ids_read_at_once(self) -> tuple:
         """None: the hold moves on as the stream's windows register."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """None: it serves the stream's windows still to come."""
+        return None
 
     def holders_waited_for(self) -> tuple:
         """None: the hold moves on as the stream's windows register."""
@@ -203,6 +223,10 @@ class PendingStrong:
         """The request's operation: its job waits for every round stored."""
         return (self.request_key.operation_id,)
 
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
+
     def holders_waited_for(self) -> tuple:
         """The restart window's read, which ends before its weak commit."""
         if self.restart_key is None:
@@ -223,6 +247,10 @@ class StrongInputInFlight:
     def operation_ids_read_at_once(self) -> tuple:
         """None: its decode has started on rounds already stored."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """None: it ends when its rounds land in unit memory."""
@@ -249,6 +277,10 @@ class DecoderInputHold:
         """None: its decode has started on rounds already stored."""
         return ()
 
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
+
     def holders_waited_for(self) -> tuple:
         """The reads of the windows whose boundaries it waits for."""
         waited = []
@@ -271,6 +303,10 @@ class RephaseGuard:
     def operation_ids_read_at_once(self) -> tuple:
         """None: the hold ends when the strong plan lands."""
         return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window of the request the hold serves."""
+        return (self.request_key.operation_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """None: the hold ends when the strong plan lands."""

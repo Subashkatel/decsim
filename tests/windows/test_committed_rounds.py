@@ -152,3 +152,52 @@ def test_a_contribution_keeps_the_observables_its_decoder_returned(
 
     (operation_result,) = results[0].operation_results
     assert operation_result.logical_observables == (1,)
+
+
+def test_folding_a_prefix_reads_every_interval_from_it_the_same():
+    ledger = _ledger()
+    whole = ledger.observables_for_interval("s", 1, 8, boundary_policy="strict")
+
+    ledger.fold_before("s", 5, cut_rounds=())
+
+    owners = sorted(ledger.contributions, key=repr)
+    assert owners == [("s", "folded", 1), ("s", 2)]
+    assert (
+        ledger.observables_for_interval("s", 1, 8, boundary_policy="strict")
+        == whole
+    )
+
+
+def test_a_fold_starts_a_new_stretch_on_a_segment_cut():
+    ledger = _ledger()
+
+    ledger.fold_before("s", 5, cut_rounds=(3,))
+
+    # the segment from round 4 reads owner 1 alone, as before the fold
+    assert ledger.observables_for_interval(
+        "s", 4, 8, boundary_policy="stream_segment"
+    ) == (1, 0)
+    folded = ledger.get(("s", "folded", 4))
+    assert (folded.commit_lo, folded.commit_hi) == (4, 4)
+
+
+def test_a_timing_only_owner_leaves_its_stretch_timing_only():
+    ledger = _ledger()
+    timing_only = _contribution(1, 4, 4, None)
+    ledger.install(timing_only)
+
+    ledger.fold_before("s", 5, cut_rounds=())
+
+    folded = ledger.get(("s", "folded", 1))
+    assert folded.logical_observables is None
+
+
+def test_folding_over_a_gap_is_refused():
+    ledger = committed_rounds.LogicalLedger()
+    first = _contribution(0, 1, 3, (1, 0))
+    ledger.install(first)
+    after_gap = _contribution(1, 5, 6, (0, 1))
+    ledger.install(after_gap)
+
+    with pytest.raises(RuntimeError, match="no contribution at round 4"):
+        ledger.fold_before("s", 7, cut_rounds=())

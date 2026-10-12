@@ -63,11 +63,14 @@ class ObservationSettings:
     the interval above. 0, the default, measures the whole run.
 
     folds_windows is a stream's: the run keeps no run-long ledger of
-    windows, frame writes, stages, round events or transfers, and a
-    stream's measures (experiments/stream_measures.py) read each window
-    once it is final and let it go, as ns-3's FlowMonitor keeps a
-    running record per flow rather than its packets. measure_shot then
-    has nothing to read. False, the default, keeps every ledger.
+    windows, frame writes, stages, round events, transfers, decode
+    requests, confidence records or log lines,
+    and a stream's measures (experiments/stream_measures.py) read each
+    window once it is final and let it go, as ns-3's FlowMonitor keeps a
+    running record per flow rather than its packets. The machine lets a
+    stream's final windows go a few behind (windows/window_release.py),
+    so a stream's memory stays flat however long it runs. measure_shot
+    then has nothing to read. False, the default, keeps everything.
 
     record_window_outcomes keeps each window's committed answer, and
     its true label when the source keeps its errors
@@ -131,6 +134,9 @@ class ObservationSettings:
             "observation.warmup_rounds", self.warmup_rounds, "rounds", 0
         )
         config.check_boolean("observation.folds_windows", self.folds_windows)
+        _check_folding_keeps_no_outcomes(
+            self.folds_windows, self.record_window_outcomes
+        )
         if self.reaction_deadline_microseconds is not None:
             config.check_microseconds(
                 "observation.reaction_deadline_microseconds",
@@ -166,6 +172,18 @@ class ObservationSettings:
         if self.trace in ("off", CHROME_TRACE):
             return None
         return self.trace
+
+
+def _check_folding_keeps_no_outcomes(
+    folds_windows: bool, record_window_outcomes: bool
+) -> None:
+    """A stream that lets its windows go keeps no window's outcome."""
+    if folds_windows and record_window_outcomes:
+        raise ValueError(
+            "not implemented yet: observation.record_window_outcomes keeps "
+            "every window's answer, and observation.folds_windows lets each "
+            "window go once it is final"
+        )
 
 
 def _check_log(log) -> None:

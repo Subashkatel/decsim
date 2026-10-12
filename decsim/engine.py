@@ -110,7 +110,9 @@ class Engine:
         return not self._event_queue
 
     def log(self, component_name: str, message: str) -> None:
-        """Narrate one timestamped line on the line source."""
+        """Narrate one timestamped line on the line source, when heard."""
+        if not self.line.has_listeners:
+            return
         line = self._line_text(component_name, message)
         self.line.fire(line)
 

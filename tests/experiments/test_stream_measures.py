@@ -8,44 +8,23 @@ leave no window, stage, frame write or round event behind.
 """
 
 import collections
-import dataclasses
 import math
 
 import pytest
 
-import decsim.confidence.complementary as complementary
-import decsim.config as config
-import decsim.decoders.settings as decoder_settings
-import decsim.escalation.settings as escalation_settings
-import decsim.escalation.strong_window_shapes as strong_window_shapes
-import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
 import decsim.experiments.measure as measure
 import decsim.experiments.stream_measures as stream_measures
-import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
-import decsim.observe.settings as observe_settings
-import decsim.pauli_frame.pauli_frame as pauli_frame
-import decsim.qpu.flip_stream_device as flip_stream_device
-import decsim.qpu.round_policies as round_policies
-import decsim.qpu.settings as qpu_settings
-import decsim.records.program as program_records
-import decsim.settings as machine_settings
-import decsim.windows.settings as window_settings
-import tests.qpu.memory_programs as memory_programs
-from decsim.decoders.minimum_weight_perfect_matching import (
-    decoder as minimum_weight_perfect_matching,
-)
+import tests.stream_machines as stream_machines
 
 SEED = 17
-# a window of three rounds commits every 3 us; 4 us of decoding a window
-# overloads the tier, so its reaction grows and misses the deadline
-DEADLINE_MICROSECONDS = 3.0
-# (rounds, weak decode us, first recorded round, escalates)
 RUNS = [
-    (60, 0.5, 1, False),
-    (120, 4.0, 20, False),
-    (90, 0.5, 1, True),
+    stream_machines.StreamRun(60, 0.5, 1, False),
+    stream_machines.StreamRun(120, 4.0, 20, False),
+    stream_machines.StreamRun(90, 0.5, 1, True),
+    # long enough that the machine lets windows go (window_release.py)
+    stream_machines.StreamRun(600, 0.5, 1, True),
 ]
 # measure_shot's names for the pool numbers the stream keeps together
 POOL_FIELDS = (
@@ -56,86 +35,6 @@ POOL_FIELDS = (
     "weak_offered_load",
     "strong_offered_load",
 )
-
-
-def _settings(rounds, latency, first_recorded, escalates, folds):
-    """A d=3 flip stream protected from round 1 and read out at rounds."""
-    program = memory_programs.memory_program(3, "Z", 0.01)
-    workload = _stream_workload(program, rounds)
-    source = flip_stream_device.FlipStreamDevice.Settings()
-    qpu = qpu_settings.QpuSettings(
-        distance=3, source=source, round_period_microseconds=1.0
-    )
-    weak = _pool(latency)
-    observation = observe_settings.ObservationSettings(
-        first_recorded_round=first_recorded,
-        reaction_deadline_microseconds=DEADLINE_MICROSECONDS,
-        backlog_trace=True,
-        record_switching_windows=escalates,
-        folds_windows=folds,
-    )
-    frame = pauli_frame.PauliFrameConfig()
-    settings = machine_settings.MachineSettings(
-        workload=workload,
-        qpu=qpu,
-        weak_decoder=weak,
-        pauli_frame=frame,
-        observation=observation,
-    )
-    if not escalates:
-        return settings
-    return _switching(settings)
-
-
-def _stream_workload(program, rounds: int):
-    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
-    begin = program_records.Operation(
-        1, "protect", (0,), patches=(0,), emits_detector_data=False
-    )
-    finish = dataclasses.replace(
-        begin,
-        id=2,
-        name="readout",
-        predecessors=(1,),
-        scheduled_start_round=rounds,
-    )
-    region = program_records.ProtectedRegion(100, 1, 2)
-    policy = round_policies.PerOperationRounds(((100, 0), (1, 0), (2, 0)))
-    return workload_settings.WorkloadSettings(
-        operations=(begin, finish),
-        dynamic_streams=(owner,),
-        protected_regions=(region,),
-        rounds_policy=policy,
-        physical_circuits=((100, program),),
-    )
-
-
-def _pool(latency: float):
-    clock = config.Clock(1000)
-    engine = decoder_settings.EngineSettings(clock=clock)
-    matching = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
-        preset_latency_microseconds=latency
-    )
-    return decoder_settings.DecoderPoolSettings(
-        algorithm=matching, engine=engine
-    )
-
-
-def _switching(settings):
-    """A strong tier redoing the windows whose gap is under 12 dB."""
-    strong_window = strong_window_shapes.RedoWindow.Settings()
-    confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_decibels=12.0
-    )
-    switching = escalation_settings.SwitchingSettings(
-        confidence=confidence, threshold=threshold, strong_window=strong_window
-    )
-    strong = _pool(6.0)
-    windows = window_settings.switching_windows(settings.windows, strong_window)
-    return dataclasses.replace(
-        settings, switching=switching, strong_decoder=strong, windows=windows
-    )
 
 
 def _run(settings):
@@ -237,11 +136,9 @@ def _same_rate(folded_rate, shot_rate) -> bool:
     return math.isclose(folded_rate, shot_rate, rel_tol=1e-9)
 
 
-@pytest.mark.parametrize("rounds, latency, first_recorded, escalates", RUNS)
-def test_the_stream_measures_what_measure_shot_reads_off_the_whole_run(
-    rounds, latency, first_recorded, escalates
-):
-    settings = _settings(rounds, latency, first_recorded, escalates, False)
+@pytest.mark.parametrize("run", RUNS)
+def test_the_stream_measures_what_measure_shot_reads_off_the_whole_run(run):
+    settings = stream_machines.stream_settings(run, folds=False)
     machine, result, folded = _run(settings)
     task = collect.Task("stream", settings, {})
     shot = collect.Shot(task, SEED, machine, result, 0.0)
@@ -250,16 +147,17 @@ def test_the_stream_measures_what_measure_shot_reads_off_the_whole_run(
 
     assert _differences(folded, measured) == []
     assert folded.decoded_windows > 10
-    assert folded.escalated_windows > 0 or not escalates
-    assert folded.deadline_missed_windows > 0 or latency < 1.0
+    assert folded.escalated_windows > 0 or not run.escalates
+    is_overloaded = run.weak_decode_microseconds > 1.0
+    assert folded.deadline_missed_windows > 0 or not is_overloaded
 
 
-@pytest.mark.parametrize("rounds, latency, first_recorded, escalates", RUNS)
+@pytest.mark.parametrize("run", RUNS)
 def test_a_stream_that_lets_each_window_go_measures_the_same_and_keeps_none(
-    rounds, latency, first_recorded, escalates
+    run,
 ):
-    whole = _settings(rounds, latency, first_recorded, escalates, False)
-    lean = _settings(rounds, latency, first_recorded, escalates, True)
+    whole = stream_machines.stream_settings(run, folds=False)
+    lean = stream_machines.stream_settings(run, folds=True)
     _machine, _result, kept = _run(whole)
 
     machine, _result, folded = _run(lean)

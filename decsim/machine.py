@@ -67,6 +67,7 @@ import decsim.settings as machine_settings
 import decsim.statistics.registry as statistics_registry
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.routers as routers
+import decsim.windows.window_release as window_release
 
 
 @dataclasses.dataclass(frozen=True)
@@ -278,7 +279,10 @@ class Machine:
         parts = (qpu, control, readout, decoders, *switching_parts)
         seed_roots = _seed_roots(plan, links, parts)
         seeding.bind_run_seed(root_seed, seed_roots)
-        run_statistics = statistics_registry.Registry(engine)
+        keeps_series = not settings.observation.folds_windows
+        run_statistics = statistics_registry.Registry(
+            engine, keeps_series=keeps_series
+        )
         decoders.attach_statistics(run_statistics)
         statistics_parts = (control, readout, *switching_parts)
         _attach_statistics(run_statistics, statistics_parts)
@@ -295,6 +299,8 @@ class Machine:
             switching=entry_switching,
             seed=seed,
         )
+        if settings.observation.folds_windows:
+            _connect_window_release(windows, control, readout, switching_parts)
         decoders.read_program(plan.planned_operations)
         program_build.load_program(plan, control, windows)
         return cls(
@@ -420,6 +426,27 @@ def _observe(
         traffic_ledger=traffic_ledger,
         run_statistics=run_statistics,
     )
+
+
+def _connect_window_release(
+    windows: windows_part.Windows,
+    control: control_part.Control,
+    readout: readout_part.Readout,
+    switching_parts: tuple,
+) -> None:
+    """A stream lets its final windows go (windows/window_release.py)."""
+    keepers = [windows.window_manager, windows.courier]
+    for parts in readout.stores:
+        keepers.append(parts.store)
+    if control.pauli_frame is not None:
+        keepers.append(control.pauli_frame)
+    for part in switching_parts:
+        keepers.append(part.strong_redecode)
+    release = window_release.WindowRelease(
+        windows.planner, windows.results, tuple(keepers)
+    )
+    sources = windows.window_manager.window_sources()
+    sources.window_final.connect(release.window_final)
 
 
 def _process_name(

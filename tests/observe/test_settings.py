@@ -48,6 +48,10 @@ PYTHON_REFUSALS = [
         "observation.reaction_deadline_microseconds must be finite and not "
         "negative",
     ),
+    (
+        {"folds_windows": True, "record_window_outcomes": True},
+        "not implemented yet: observation.record_window_outcomes keeps",
+    ),
 ]
 
 

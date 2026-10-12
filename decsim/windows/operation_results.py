@@ -226,6 +226,39 @@ class OperationResults:
         cursor = self._cursor(_FINAL, operation_id)
         return self._joined_prefix(cursor, operation_id, is_final_window)
 
+    def final_window_count(
+        self,
+        operation_id: Any,  # an opaque identity
+    ) -> int:
+        """How many of the operation's windows, in order, are final."""
+        cursor = self._cursor(_EVERY_FINAL, operation_id)
+        self._passed_in_order(cursor, operation_id)
+        return cursor.passed
+
+    # ---- a stream lets its final windows go
+
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """Every cursor past the windows before the index; the ledger folded.
+
+        The windows are final (window_release.py), so each cursor's test
+        holds of them for good: committed, read out whole, final. The
+        cursors stand past them, joined to the last one's commit end, as
+        a walk over them would leave them, and the ledger folds the
+        rounds they commit.
+        """
+        last_key = (stream_id, window_index - 1)
+        last_window = self.planner.window_at(last_key)
+        for kind in _CURSOR_TESTS:
+            cursor = self._cursor(kind, stream_id)
+            _move_past(cursor, window_index, last_window.commit_hi)
+        following = self.planner.window_at((stream_id, window_index))
+        cut_rounds = self.planner.cut_rounds_of(stream_id)
+        self.ledger.fold_before(stream_id, following.commit_lo, cut_rounds)
+
     # ---- private
 
     def _segment(self, operation_id) -> "_Segment":
@@ -245,11 +278,7 @@ class OperationResults:
         self.release_stream_segments_at_commit(stream_id, committed)
 
     def _deliver_result(self, operation: program_records.Operation) -> None:
-        windows = self.planner.windows_of(operation.id)
-        commit_los = [window.commit_lo for window in windows]
-        commit_his = [window.commit_hi for window in windows]
-        commit_lo = min(commit_los)
-        commit_hi = max(commit_his)
+        commit_lo, commit_hi = self.planner.commit_extent_of(operation.id)
         logical_observables = self.ledger.observables_for_interval(
             operation.id, commit_lo, commit_hi, boundary_policy="strict"
         )
@@ -374,9 +403,9 @@ class OperationResults:
         cursor = self._cursor(_EVERY_FINAL, operation_id)
         self._passed_in_order(cursor, operation_id)
         indices = self.planner.window_indices_of(operation_id)
-        open_indices = indices[cursor.passed :]
         windows = []
-        for window_index in open_indices:
+        for position in range(cursor.passed, len(indices)):
+            window_index = indices[position]
             window = self.planner.window_at((operation_id, window_index))
             windows.append(window)
         return windows
@@ -456,6 +485,14 @@ def _is_read_out_whole(
     tracker, rounds_read_out_by_operation: dict, window
 ) -> bool:
     return tracker.is_read_out_whole(window, rounds_read_out_by_operation)
+
+
+def _move_past(cursor: "_Cursor", window_count: int, prefix_end: int) -> None:
+    """The cursor past the first windows, joined through their last round."""
+    if cursor.passed >= window_count:
+        return
+    cursor.passed = window_count
+    cursor.prefix_end = max(cursor.prefix_end, prefix_end)
 
 
 def _stream_place(operation: program_records.Operation, segment) -> tuple:

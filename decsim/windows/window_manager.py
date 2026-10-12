@@ -241,6 +241,20 @@ class WindowManager:
         self.planner.refresh_stream_models(stream_id)
         self._refresh_unqueued_stream_windows(stream_id)
 
+    def let_go_before(
+        self,
+        stream_id: Any,  # an opaque identity
+        window_index: int,
+    ) -> None:
+        """The first open window is past the stream's windows let go.
+
+        They are committed (window_release.py), so the walk from the
+        first open window passes them anyway.
+        """
+        first_open = self.first_open_by_operation.get(stream_id, 0)
+        first_open = max(first_open, window_index)
+        self.first_open_by_operation[stream_id] = first_open
+
     def has_dynamic_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True for a stream whose windows are planned at runtime."""
         return self.planner.has_stream(stream_id)

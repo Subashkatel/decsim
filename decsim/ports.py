@@ -19,6 +19,8 @@ every component runs with no observer.
 from collections.abc import Callable, Mapping
 from typing import Any, Optional, Protocol, Union, runtime_checkable
 
+import stim
+
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
@@ -2380,7 +2382,7 @@ class CircuitNoise(Protocol):
     def generator_noise(self, probability: float) -> object:
         """Stim's four channels for the generator, at the memory's p."""
 
-    def noisy(self, circuit: Any, probability: float) -> object:
+    def noisy(self, circuit: stim.Circuit, probability: float) -> stim.Circuit:
         """The generated circuit with this row's own noise added at p."""
 
 

@@ -242,11 +242,21 @@ def test_a_memory_with_noiseless_time_boundaries_is_lowered_with_them():
     assert operation.circuit == expected
 
 
-def test_noiseless_time_boundaries_refuse_a_circuit_with_no_readout():
-    circuit = stim.Circuit("R 0 1\nX_ERROR(0.1) 0 1\nH 0")
+@pytest.mark.parametrize(
+    ("text", "missing"),
+    [
+        ("R 0 1\nX_ERROR(0.1) 0 1\nH 0", "final data measurement"),
+        ("H 0 1\nX_ERROR(0.1) 0 1\nM 0 1", "first reset"),
+    ],
+)
+def test_noiseless_time_boundaries_refuse_a_circuit_without_them(text, missing):
+    replaced = stim.Circuit(text)
+    noise = _ReplacedCircuit(replaced)
 
-    with pytest.raises(ValueError, match="final data measurement"):
-        workload_settings._without_time_boundary_noise(circuit)
+    with pytest.raises(ValueError, match=missing):
+        workload_settings.memory_circuit(
+            Z_MEMORY, 3, 3, 0.001, noise, noiseless_time_boundaries=True
+        )
 
 
 def test_several_patches_are_the_memory_patches_maker():
@@ -406,3 +416,21 @@ def test_the_live_deltakit_memory_maker_runs_what_the_live_tool_runs():
 
 def _qpu(distance) -> qpu_settings.QpuSettings:
     return qpu_settings.QpuSettings(distance=distance)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ReplacedCircuit:
+    """A noise row whose circuit is the one it holds, whatever Stim made."""
+
+    circuit: stim.Circuit
+    name = "replaced_circuit"
+
+    def generator_noise(
+        self, probability: float
+    ) -> workload_settings.StimNoise:
+        del probability
+        return workload_settings.NO_GENERATOR_NOISE
+
+    def noisy(self, circuit: stim.Circuit, probability: float) -> stim.Circuit:
+        del circuit, probability
+        return self.circuit

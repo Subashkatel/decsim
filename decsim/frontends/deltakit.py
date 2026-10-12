@@ -154,15 +154,14 @@ def css_memory_rounds(
 class SD6Noise:
     """Deltakit's SD6 on a generated memory, a noise row (ports.CircuitNoise).
 
-    The standard depolarising model of Explorer's qpu.SD6Noise, which
-    cites Gidney et al. 2108.10457 Table 2: one- and two-qubit
-    depolarising after each gate, a flip after each reset and on each
-    measurement, and one-qubit depolarising on each qubit idle in a gate
-    layer. Stim's generator puts no noise in, and Explorer's QPU adds
-    SD6 to the circuit it made (qpu/_qpu.py add_noise_to_circuit), each
-    GateLayer a layer of its own as memory_circuit's device keeps them;
-    the circuit keeps Stim's qubit numbers. probability None is the
-    memory's p.
+    Explorer's qpu.SD6Noise, the standard depolarising model of Gidney
+    et al. 2108.10457 Tables 1 and 2: one- and two-qubit depolarising
+    after each gate, a flip after each reset and before each
+    measurement, and one-qubit depolarising on each idle qubit. Stim's
+    generator puts no noise in; Explorer's QPU adds SD6 to the circuit
+    (qpu/_qpu.py add_noise_to_circuit) without merging Stim's time
+    steps, and the circuit keeps Stim's qubit numbers. probability None
+    is the memory's p.
     """
 
     probability: Optional[float] = None

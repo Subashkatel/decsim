@@ -228,7 +228,7 @@ def _first_reset_of(instructions: list, data_qubits: frozenset) -> int:
 
 
 def _next_flip(instructions: list, reset_index: int) -> Optional[int]:
-    """The index of the first flip after the reset, past TICKs; None if not."""
+    """The first instruction past the reset and its TICKs, if a flip."""
     first = reset_index + 1
     count = len(instructions)
     for index in range(first, count):
@@ -242,7 +242,6 @@ def _next_flip(instructions: list, reset_index: int) -> Optional[int]:
 
 
 def _qubits_of(instruction: stim.CircuitInstruction) -> frozenset:
-    """The qubit indices an instruction acts on."""
     targets = instruction.targets_copy()
     return frozenset(target.value for target in targets)
 
@@ -262,6 +261,5 @@ def _without_qubits(
 def _without_arguments(
     measurement: stim.CircuitInstruction,
 ) -> stim.CircuitInstruction:
-    """The measurement with no flip probability of its own."""
     targets = measurement.targets_copy()
     return stim.CircuitInstruction(measurement.name, targets)

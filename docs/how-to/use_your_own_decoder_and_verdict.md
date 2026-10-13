@@ -106,7 +106,7 @@ decsim describe run.py
 ```
 
 A verdict that reads no gap takes the confidence row `none`, which asks
-the decoder for nothing. A machine file names the parts the same way,
-`type: mylab.parts.WeightCut.Settings`, and `describe` writes them so.
+the decoder for nothing. `describe` names the parts the same way,
+`type: mylab.parts.WeightCut.Settings`.
 `switching.verdict.cut` is a path, so a sweep's grid takes it as an
 axis ([How to sweep a machine over a grid](sweep_a_machine_over_a_grid.md)).

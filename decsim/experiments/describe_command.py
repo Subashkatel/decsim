@@ -2,13 +2,12 @@
 
     decsim describe <run file> [--only NAME] [--set PATH=VALUE ...] [--json]
 
-It prints the task's machine as the YAML a machine file holds
-(topology/machine_file.py), then each path's latency and rate as the
-run prices them. gem5 writes the instantiated
-system as config.ini and config.json for the same reason: what ran is
-read, not inferred from the script (src/python/m5/simulate.py).
---json writes the same graph and paths as one json object, as
-config.json holds what config.ini does.
+It prints the task's machine as YAML (topology/machine_file.py), then
+each path's latency and rate as the run prices them. gem5 writes the
+instantiated system as config.ini and config.json for the same reason:
+what ran is read, not inferred from the script
+(src/python/m5/simulate.py). --json writes the same graph and paths as
+one json object, as config.json holds what config.ini does.
 """
 
 import argparse

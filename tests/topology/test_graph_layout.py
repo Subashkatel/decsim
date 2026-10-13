@@ -4,8 +4,7 @@ The referent is a chain written by hand: the weak base escalating to a
 union-find pool on the host, whose cluster gap escalates on to the
 strong base's pool, a third. Its pools, stores and edges go by their
 parts' names, entry first; each hop is named by the parts at its ends
-and priced on the card; the task is identified by the graph itself and
-reads back from YAML as the same graph, with the same id.
+and priced on the card; and the task is identified by the graph itself.
 """
 
 import dataclasses
@@ -24,7 +23,6 @@ import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.machine_file as machine_file
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
@@ -32,7 +30,6 @@ import tests.escalation.test_strong_window_shapes as shape_tests
 DEEP_POOL = "deep"
 DEEP_STORE = "deep_buffer"
 DEEP_SWITCHING = "deep_switching"
-WORKLOAD = "workload"
 # the middle pool: union-find on the host, charged the host's time, whose
 # one solve carries the cluster gap's evidence
 _HOST_TIME = cycle_count.HostMeasuredTime()
@@ -258,32 +255,6 @@ def test_a_chains_task_is_identified_by_its_graph():
 
     assert task.layout is not None
     assert task.strong_id() != two_pools.strong_id()
-
-
-def test_a_chain_read_back_from_its_file_keeps_its_id():
-    chain = chain_machine()
-    workload = chain.part(WORKLOAD)
-    text = machine_file.dumps(chain)
-
-    read = machine_file.loads(text, python_parts={WORKLOAD: workload})
-
-    first = collect.Task("chain", chain)
-    again = collect.Task("chain", read)
-    assert read == chain
-    assert again.strong_id() == first.strong_id()
-
-
-def test_a_routed_machine_read_back_from_its_file_keeps_its_id():
-    routed = _routed_chain()
-    workload = routed.part(WORKLOAD)
-    text = machine_file.dumps(routed)
-
-    read = machine_file.loads(text, python_parts={WORKLOAD: workload})
-
-    first = collect.Task("routed", routed)
-    again = collect.Task("routed", read)
-    assert read == routed
-    assert again.strong_id() == first.strong_id()
 
 
 _ROUTED_POOL = "fpga_b"

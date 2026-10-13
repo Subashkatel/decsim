@@ -1,19 +1,19 @@
 """`decsim describe` (experiments/describe_command.py).
 
 The referent is the task the run file builds: the YAML describe prints
-reads back as the task's graph, and each path line is the task's own
-card, so the printout is never the only record of what ran.
+names the task's parts, the json holds the same graph, and each path
+line is the task's own card.
 """
 
 import json
 import pathlib
 
 import pytest
+import yaml
 
 import decsim.experiments.command as command
 import decsim.parameters.assignments as assignments
 import decsim.topology.graph_layout as graph_layout
-import decsim.topology.machine_file as machine_file
 import tests.experiments.run_files as run_files
 
 # a run file whose one task is a graph
@@ -62,13 +62,11 @@ def test_describe_prints_the_graph_and_every_path(tmp_path, capsys):
     text = _described(run_file, capsys)
 
     graph_text, _, path_text = text.partition("# its paths")
-    workload = {"workload": machine.held("workload")}
-    read = machine_file.loads(graph_text, python_parts=workload)
+    graph_document = yaml.safe_load(graph_text)
     lines = path_text.splitlines()
     path_lines = lines[1:]
-    pool = read.part("weak")
-    expected_pool = machine.part("weak")
-    assert pool.settings == expected_pool.settings
+    part_names = [part.name for part in machine.parts]
+    assert list(graph_document["parts"]) == part_names
     assert len(path_lines) == len(card_paths)
 
 
@@ -97,14 +95,11 @@ def test_describe_json_holds_the_graph_and_paths_the_text_prints(
     graph_text, _, _ = text.partition("# its paths")
     machine = run_files.minimal_machine()
     card_paths = _card_paths(machine)
-    workload = {"workload": machine.held("workload")}
-    from_text = machine_file.loads(graph_text, python_parts=workload)
+    from_text = yaml.safe_load(graph_text)
 
     json_text = _described(run_file, capsys, "--json")
     described = json.loads(json_text)
 
-    graph_json = json.dumps(described["graph"])
-    from_json = machine_file.loads(graph_json, python_parts=workload)
-    assert from_json == from_text
+    assert described["graph"] == from_text
     assert len(described["paths"]) == len(card_paths)
     assert set(described["paths"]["qpu_to_controller"]) == {"latency", "rate"}

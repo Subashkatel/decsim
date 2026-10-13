@@ -27,8 +27,8 @@ the [reference](../reference/README.md) pages.
   declare them on the class, update them where the event happens, and
   read them in the run folder.
 - [How to write a machine as a graph](write_a_machine_as_a_graph.md):
-  named parts, wires and a fabric, in Python or YAML, set and described
-  by the parts' names.
+  named parts, wires and a fabric, in Python, set and described by the
+  parts' names.
 - [How to build a chain of decoders](build_a_chain_of_decoders.md): a
   pool added behind another, the verdict its edge decides on, and what
   the run reports for it.

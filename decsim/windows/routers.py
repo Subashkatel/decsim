@@ -57,7 +57,7 @@ class ByPatch:
         name = "by_patch"
 
         def __post_init__(self) -> None:
-            # a machine file reads each pair back as a list
+            # a pair written in YAML, a constants file's, is a list
             pairs = []
             for patch, pool_name in self.pool_by_patch:
                 pairs.append((patch, pool_name))

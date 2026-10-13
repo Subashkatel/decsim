@@ -23,8 +23,8 @@ routed = machines.with_router(base, rule, (("fpga_b", weak),))
 
 `with_router` rewires `weak_buffer.reads` to the router and the
 router's `windows` to `weak` and to each new pool, which answers the
-frame. In a machine file, the router is a part of type `router` with a
-`rule`, and its wires are `weak_buffer.reads -> router.rounds` and
+frame. `describe` prints the router as a part of type `router` with a
+`rule`, and its wires as `weak_buffer.reads -> router.rounds` and
 `router.windows -> <pool>.rounds`, the first pool wired first.
 
 ## 2. Choose the rule

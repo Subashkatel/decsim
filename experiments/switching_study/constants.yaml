@@ -65,6 +65,24 @@ belief_matching:
   pool:
     unit_count: 1                    # one GPU, chosen
 
+tesseract:                           # the reference decoder, read by tesseract_whole_shot_d_rounds.py alone
+  algorithm:                         # the Tesseract paper's short-beam profile (2503.10988; tesseract-decoder tesseract_sinter_compat.pybind.h)
+    detector_beam: 15
+    beam_climbing: true
+    no_revisit_detectors: true
+    priority_queue_limit: 200_000
+    detector_order_method: index
+    detector_order_count: 16
+    detector_order_seed: 2384753     # the profile's fixed order seed
+    merge_errors: true               # the profile merges columns of the same detectors and observables; the answer flips the same ones
+  engine:                            # a reference decoder: its time is not studied
+    fetch_per_job: 0 cycles
+    fetch_per_round: 0 cycles
+    release_per_job: 0 cycles
+    release_per_round: 0 cycles
+  pool:
+    unit_count: 1
+
 escalation:
   confidence:
     walk: 1us                        # the cluster gap's walk on the weak unit, a chosen value (2602.03336 lines 17-19)

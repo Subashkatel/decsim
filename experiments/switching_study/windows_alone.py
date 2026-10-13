@@ -86,6 +86,7 @@ sweep = decsim.Sweep(
     stop=stop,
     metadata=metadata,
     constants=constants,
+    allow_unread=("tesseract",),
     record_options=record_options,
 )
 experiment = sweep.experiment()

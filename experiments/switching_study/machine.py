@@ -155,6 +155,20 @@ def belief_matching_pool() -> decoder_settings.DecoderPoolSettings:
     )
 
 
+
+def tesseract_pool() -> decoder_settings.DecoderPoolSettings:
+    """One Tesseract unit, the reference decoder, on the paper's profile."""
+    settings = constants.tesseract
+    algorithm = {"type": "tesseract", **settings.algorithm}
+    clock = constants.clocks.chip
+    engine = {"type": "Engine", "clock": clock, **settings.engine}
+    return record(
+        decoder_settings.DecoderPoolSettings,
+        settings.pool,
+        algorithm=algorithm,
+        engine=engine,
+    )
+
 def switching() -> escalation_settings.SwitchingSettings:
     """Belief matching redoes a window whose cluster gap is under 20 dB."""
     settings = constants.escalation

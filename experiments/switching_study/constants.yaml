@@ -1,0 +1,102 @@
+# The switching study's constants: every number its machine and its four
+# run files read, the unit in the value and the source beside it. A time
+# on a clocked part is rounded up to whole cycles of its clock. Override
+# one without editing:
+#   decsim run windows_switching.py --set constants.escalation.threshold.threshold=25dB
+
+shots: 1_000_000                     # per point, fixed, as the paper's (2510.25222 Fig. 15: N = 10^6)
+distances: [3, 5, 7, 9, 11]
+physical_error_probabilities: [0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008]
+
+qpu:
+  round_period: 1us                  # an assumption: SD6 defines no duration; SI1000's cycle is about 1000 ns (2108.10457 Table 2)
+
+clocks:
+  chip: 250MHz                       # the control chip's clock (2605.04892 line 1063)
+  union_find: 100MHz                 # Helios's synthesis target (2406.08491 line 1230)
+
+controller:
+  readout_to_bits: 0 cycles          # the readout hop holds ADC 12 ns, IQ demodulation 32 ns and classification 4 ns, 48 ns (2605.04892 Table 1, links/link_profiles.py); the 222 ns sampling is inside the round
+  packing_per_round: 29ns            # the syndrome aggregator packs a round, 29 +- 3 ns (2603.16203 lines 894-895)
+  decision_to_pulse: 8 cycles        # QubiC's pipeline, decision to pulse trigger (2404.15260 lines 173-191), an estimate
+
+detection_events:
+  latency: 20ns                      # syndrome calculation, pipelined in registers (2605.04892 Table 1, lines 1273-1275)
+  per_round: 1 cycle
+
+windows:
+  decision: 20ns                     # the root gathers rounds and issues a decode, 20 +- 10 ns (2603.16203 lines 897-899)
+  terminal_policy: lookahead         # every run lays out the switching run's last window
+
+frame:
+  write: 4ns                         # one Pauli frame update (2605.04892 Table 1, lines 1051 and 1063)
+
+union_find:
+  algorithm:
+    weight_step: 0.1                 # fails as often as mwpf's weighted union-find at d = 5 to 9 (2508.04969)
+  cycle_count:
+    delay: 3 cycles                  # MAXIMUM_DELAY, Helios_single_FPGA_core.v:76 (yale-paragon/Helios_scalable_QEC 2dda998)
+    cycles_per_edge: 0.0             # a processing element per vertex (2301.08419 lines 764-767)
+    setup: 0 cycles                  # the graph sits in registers (2301.08419 lines 912-913)
+    setup_per_vertex: 0 cycles
+    setup_per_edge: 0 cycles
+  engine:
+    fetch_per_job: 1 cycle           # the header that starts a decode (control_node_single_FPGA.v lines 131-142)
+    fetch_per_round: 1 cycle         # Helios loads a round a cycle (lines 170-182)
+    release_per_job: 25ns            # the correction leaves in one message, 25 +- 3 ns (2603.16203 line 902)
+    release_per_round: 0 cycles
+  pool:
+    unit_count: 1                    # one union-find unit, chosen
+    copies_boundary_fold: false      # the boundary folds into the unit's own copy (2301.08419 lines 632-640)
+
+belief_matching:
+  algorithm:
+    max_iterations: 20               # beliefmatching 0.2.0's default; the paper names none (2510.25222 lines 1662-1668)
+    belief_propagation_method: product_sum
+  timing:
+    iteration: 1us                   # a hypothetical GPU's BP iteration, an assumption
+    matching: 1us                    # a hypothetical GPU's matching, an assumption
+  engine:                            # Backline's measured round trip holds the loading and the unloading
+    fetch_per_job: 0 cycles
+    fetch_per_round: 0 cycles
+    release_per_job: 0 cycles
+    release_per_round: 0 cycles
+  pool:
+    unit_count: 1                    # one GPU, chosen
+
+escalation:
+  confidence:
+    walk: 1us                        # the cluster gap's walk on the weak unit, a chosen value (2602.03336 lines 17-19)
+  threshold:
+    threshold: 20dB                  # the paper's threshold for union-find with the cluster gap (2510.25222 lines 1485, 1497)
+  edge:
+    threshold_cycles: 1 cycle        # one compare, an estimate
+    switch: 1 cycle                  # one state change, an estimate
+
+fiber_loop:                          # the leaf-to-root fiber network in the fridge rack (2603.16203)
+  source: the leaf-to-root fiber loop (2603.16203)
+  up:
+    latency: 157ns                   # a round goes up, 157 +- 16 ns (2603.16203 lines 895-897)
+    bits_per_cycle: 38.79            # four lanes of 38.79 bits a cycle (lines 971-975)
+    lane_count: 4
+  read:
+    latency: 1 cycle                 # the decoder reads its whole frame in a cycle (lines 668-670), an estimate
+    excludes_receiver_processing: false
+  down:
+    latency: 164ns                   # the correction comes back, 155 +- 9 ns fiber and 9 +- 1 ns leaf (lines 903-904)
+    bits_per_cycle: 38.79
+    lane_count: 4
+    excludes_receiver_processing: false
+
+gpu_link:                            # the FPGA controller to a GPU over RoCE v2 (Backline 2609.09270 Table III)
+  source: Backline 2609.09270 Table III GPU echo, FPGA controller to GPU coprocessor over RoCE v2
+  cable:
+    round_trip: 4.5us                # median round trip, measured (2609.09270 line 1632)
+    echo_payload: 128 bits           # the 16-byte payload the echo carried
+    capacity: 100000 bits/us         # a 100 Gb/s Ethernet link to the host's NIC (2510.25213 line 382)
+  host_local:
+    latency: 0us                     # the GPU polls the buffer the write landed in, in its own memory
+
+observation:
+  record_switching_windows: true
+  backlog_trace: true

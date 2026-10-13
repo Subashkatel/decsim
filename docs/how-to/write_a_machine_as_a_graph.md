@@ -3,7 +3,7 @@
 # How to write a machine as a graph
 
 A machine is named parts and the wires between them, written in
-Python or in YAML. Each part is a decsim settings record. Its
+Python. Each part is a decsim settings record. Its
 parameters sit at its name (`uf.unit_count`), so `--set`, `decsim params`
 and `decsim describe` all reach it. A task is identified by its graph.
 
@@ -97,41 +97,7 @@ machine = graph.Machine(..., fabric=fabrics.FridgeHostFabric(cable=leg, host_loc
 every hop of a role, such as `answer_fridge` or `write_landed`
 (`decsim/records/routes.py`).
 
-## 3. Or write it in YAML
-
-```yaml
-clock: 250MHz
-parts:
-  qpu: {type: QpuSettings, distance: 5, round_period: 1us}
-  uf:
-    type: DecoderPoolSettings
-    placed: fridge
-    unit_count: ${union_find.units}
-    algorithm: {type: PyMatchingDecoder, preset_latency: 28ns}
-  workload: python
-wires:
-  - qpu.readout -> controller.readout
-  - wire: uf.corrections -> frame.corrections
-    link: {type: ClockedLink, latency: "${fiber.down}"}
-```
-
-```python
-import decsim.topology.machine_file as machine_file
-
-machine = machine_file.load(
-    "machine.yaml", "constants.yaml", python_parts={"workload": workload}
-)
-```
-
-A part writes only the fields it changes from its record's defaults. A
-part that holds a Python object, such as the workload's Stim circuit, is
-written `python` and given in `python_parts`. `${name}` reads a
-constant from the constants file, where a comment after a value is its
-source. In a flow mapping, `{...}`, quote it. A constant that nothing
-reads is refused. `machine_file.dumps(machine)` writes any graph back as
-YAML.
-
-## 4. Set, list and describe
+## 3. Set, list and describe
 
 ```
 decsim params run.py --only uf_d5
@@ -143,8 +109,8 @@ decsim describe run.py --only uf_d5 --json
 `describe` prints the task's machine as YAML, then every path's
 latency and rate as the run prices them. `--json`
 writes the same graph and paths as one json object, for a script to
-read. A record decsim does not define is written by its import path, so
-the text reads back.
+read. A record decsim does not define is written by its import path,
+the name `--set` takes for it.
 
 [How to build a chain of decoders](build_a_chain_of_decoders.md)
 grows a graph of more pools. A pool no edge

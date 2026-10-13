@@ -3,8 +3,7 @@
     roce:
       round_trip: 2.305us  # Backline 2609.09270 Table III line 1627
 
-A machine file reads one as ${roce.round_trip} (machine_file.py). A
-config.py reads the file with load and a value by attribute,
+A config.py reads the file with load and a value by attribute,
 constants.roce.round_trip; a section is a mapping, so it splats into a
 record's parameters (**constants.roce, machine_file.record). Every value
 read is recorded, and a file holding a value nothing read is refused

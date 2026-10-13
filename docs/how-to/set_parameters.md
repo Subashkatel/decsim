@@ -75,8 +75,10 @@ the same `--set` flags as the run.
 
 The flags are carried in the environment variable DECSIM_SET, `;`
 between assignments, which you can also set yourself; the flags come
-after it and win. `--slurm` writes it into `run.sbatch`, so every job
-builds the tasks the plan holds, and each run's `run.json` records it.
+after it and win. Export it in the shell that submits the jobs, which
+sbatch passes on, or give each job the same `--set` flags as the
+record, so every job builds the tasks the folder recorded; a job that
+builds another is refused. Each run's `run.json` records it.
 
 ## 6. Know what stays in the run file
 

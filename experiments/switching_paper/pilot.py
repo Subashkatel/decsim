@@ -7,12 +7,14 @@ switching run the same seeds, so the same shots.
 Usage
 -----
 
-From this folder, on a cluster (docs/tutorials/first_sweep.md): the
-launch reads seconds_per_shot.csv beside this file, which `decsim
-estimates` writes from a folded run.
+From this folder, on a cluster (docs/how-to/run_on_a_slurm_cluster.md):
+record the folder, run the seeds in jobs of your own, then fold and
+compare.
 
 ```
-decsim run pilot.py --slurm --out $PWD/../../results/switching_paper_pilot
+decsim run pilot.py --record --out ../../results/switching_paper_pilot
+decsim run pilot.py --seeds 0:20000 --out ../../results/switching_paper_pilot
+decsim run --fold --out ../../results/switching_paper_pilot
 python compare.py ../../results/switching_paper_pilot
 ```
 """

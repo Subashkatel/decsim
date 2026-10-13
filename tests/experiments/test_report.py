@@ -23,6 +23,7 @@ import types
 
 import pytest
 
+import decsim.experiments.collect as collect
 import decsim.experiments.collect_command as collect_command
 import decsim.experiments.command as command
 import decsim.experiments.measure as measure
@@ -138,6 +139,103 @@ def test_the_summary_is_derived_from_the_shots_own_statistics(tmp_path):
     assert busy["time_mean"] == pytest.approx(busy_mean)
     assert busy["peak"] == busy_peak
     assert units["per_shot"] == 1
+
+
+# statistics written as each piece's sums, a row per task and key
+SUMMED = collect.RecordOptions(is_statistics_per_shot=False)
+
+
+def _summary_by_key(run_dir) -> dict:
+    """stat_summary.csv's values by task, path, statistic and measure."""
+    summary_path = run_dir / "stat_summary.csv"
+    by_key = {}
+    for row in report.read_rows(summary_path):
+        key = (row["task_id"], row["path"], row["statistic"], row["measure"])
+        by_key[key] = row["value"]
+    return by_key
+
+
+def test_pieces_summed_statistics_fold_to_the_shots_own_summary(tmp_path):
+    """Three shots: per shot in one piece, or summed in pieces of two.
+
+    A peak keeps the largest and every other field adds, both laws
+    associative, so summing first changes no summary, only how many
+    rows shot_stats.csv holds: one per piece per key.
+    """
+    measurements = measured_shots(3)
+    _rows, per_shot_dir = run_files.folded_run(tmp_path, measurements)
+    _rows, summed_dir = run_files.folded_run(
+        tmp_path, measurements, SUMMED, piece_shots=2
+    )
+    per_shot_summary = _summary_by_key(per_shot_dir)
+    summed_summary = _summary_by_key(summed_dir)
+    statistics_path = summed_dir / "shot_stats.csv"
+    summed_statistics = report.read_rows(statistics_path)
+    expected_rows = collections.Counter()
+    for first_seed, piece in ((0, measurements[:2]), (2, measurements[2:])):
+        keys = _statistic_keys(piece)
+        expected_rows[(first_seed, len(piece))] = len(keys)
+    written_rows = collections.Counter()
+    for row in summed_statistics:
+        written_rows[(row["seed"], row["shot_count"])] += 1
+
+    assert summed_summary.keys() == per_shot_summary.keys()
+    for key, value in per_shot_summary.items():
+        assert summed_summary[key] == pytest.approx(value), key
+    assert written_rows == expected_rows
+
+
+def _statistic_keys(measurements: list) -> set:
+    """Every part, statistic and field the shots recorded."""
+    keys = set()
+    for measurement in measurements:
+        for row in measurement.statistics:
+            keys.add((row.path, row.statistic, row.field))
+    return keys
+
+
+def test_pieces_summed_links_add_the_shots_own_counters(tmp_path):
+    """Each link's counters over three shots, two pieces' rows added."""
+    measurements = measured_shots(3)
+    _rows, summed_dir = run_files.folded_run(
+        tmp_path, measurements, SUMMED, piece_shots=2
+    )
+    links_path = summed_dir / "shot_links.csv"
+    summed_links = report.read_rows(links_path)
+    measured = []
+    for measurement in measurements:
+        link_counters = measurement.link_totals.items()
+        measured.extend(link_counters)
+    written = []
+    for row in summed_links:
+        counters = {name: row[name] for name in LINK_COUNTERS}
+        written.append((row["link"], counters))
+    measured_sums = _counter_sums(measured)
+    written_sums = _counter_sums(written)
+    link_paths = {path for path, _counters in measured}
+
+    assert written_sums == pytest.approx(measured_sums)
+    assert len(summed_links) == 2 * len(link_paths)
+
+
+# the counters a link row holds (measure.link_totals)
+LINK_COUNTERS = (
+    "transfers",
+    "payload_bits",
+    "unknown_payload_transfers",
+    "queue_wait_us",
+    "serialization_us",
+    "propagation_us",
+)
+
+
+def _counter_sums(counters_by_link: list) -> dict:
+    """Each link's counters added over (link, counters) pairs."""
+    sums = collections.Counter()
+    for path, counters in counters_by_link:
+        for name, value in counters.items():
+            sums[(path, name)] += value
+    return dict(sums)
 
 
 def test_a_shots_rows_add_up_to_that_shots_own_counters():

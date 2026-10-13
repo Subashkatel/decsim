@@ -33,7 +33,9 @@ the task (its graph and its layout, whose card prices every hop), writes
 them otherwise, so a run that keeps the ids
 of results already collected writes its metadata as it did. stop is
 each task's collection, or a function of the cell; stop_all the
-experiment's. A constants file with a value no cell read is refused,
+experiment's. record_options is every task's (collect.RecordOptions):
+what the run writes beside the results, no part of a task's id.
+A constants file with a value no cell read is refused,
 but the names allow_unread keeps.
 """
 
@@ -75,6 +77,7 @@ class Sweep:
     metadata: Optional[Callable[..., Mapping]] = None
     constants: Optional[constants_module.Section] = None
     allow_unread: Sequence[str] = ()
+    record_options: collect.RecordOptions = collect.DEFAULT_RECORD_OPTIONS
 
     def cells(self) -> list:
         """The grid's cells, in experiment.grid's order."""
@@ -112,7 +115,8 @@ class Sweep:
         task_name = self.task_name.format_map(names)
         stop = self._stop_for(cell)
         metadata = self._metadata_for(cell, task_name, assigned)
-        return collect.Task(task_name, assigned, metadata, stop)
+        options = self.record_options
+        return collect.Task(task_name, assigned, metadata, stop, options)
 
     def _constants_set(self, swept: dict) -> Any:
         if not swept:

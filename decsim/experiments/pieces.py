@@ -22,6 +22,7 @@ import shutil
 import uuid
 from typing import Optional
 
+import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
@@ -49,18 +50,19 @@ def write(
     measurements: list,
     facts: dict,
     state: Optional[ports.ThresholdSource] = None,
+    options: collect.RecordOptions = collect.DEFAULT_RECORD_OPTIONS,
 ) -> pathlib.Path:
     """One piece's files, whole or not at all, and where they went.
 
     state is an adaptive task's calibrator after the piece's last shot,
     which its next piece starts from; it is pickled beside the files with
-    its sha256 in piece.json.
+    its sha256 in piece.json. options is the task's record options.
     """
     count = len(measurements)
     folder = piece_dir(experiment_dir, task_id, first_seed, count)
     staging = _staging_dir(folder)
     staging.mkdir(parents=True)
-    record = report.record_of(measurements)
+    record = report.record_of(measurements, options)
     report.write_record(record, staging, None)
     identity = run_folder.piece_identity()
     confidence_shot_count = report.confidence_shot_count_of(measurements)

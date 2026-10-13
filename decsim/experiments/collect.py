@@ -64,12 +64,15 @@ class RecordOptions:
 
     confidence_shot_count is how many shots, from seed 0, write their
     windows' gaps to window_confidence.csv; None writes every scored shot's.
-    The machine does not read it, so it is no part of a task's id, as
-    sinter keeps output options out of a strong id
-    (sinter/_data/_task.py:167-204).
+    is_statistics_per_shot False writes shot_stats.csv and shot_links.csv
+    as each piece's sums, a row per task and key, where a million shots'
+    own rows would fill terabytes. The machine does not read them, so
+    they are no part of a task's id, as sinter keeps output options out
+    of a strong id (sinter/_data/_task.py:167-204).
     """
 
     confidence_shot_count: Optional[int] = 100
+    is_statistics_per_shot: bool = True
 
     def __post_init__(self) -> None:
         shot_count = self.confidence_shot_count
@@ -84,6 +87,10 @@ class RecordOptions:
         if self.confidence_shot_count is None:
             return True
         return seed < self.confidence_shot_count
+
+
+# what a task records when its run file names no options
+DEFAULT_RECORD_OPTIONS = RecordOptions()
 
 
 @dataclasses.dataclass(frozen=True)

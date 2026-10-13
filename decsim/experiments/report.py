@@ -17,6 +17,7 @@ values wide, and those timing sweeps of hundreds of shots already write
 a row per window in latency_samples.csv.
 """
 
+import collections
 import csv
 import dataclasses
 import functools
@@ -371,6 +372,60 @@ def shot_statistics_rows(measurements: list) -> list:
     return rows
 
 
+def summed_link_rows(measurements: list) -> list:
+    """One row per task and link: its counters added over the shots.
+
+    Every link counter is a count or a time, so it adds. The row keeps
+    the task's first seed, which orders it in a fold, and its
+    shot_count, which tells it from a shot's own row.
+    """
+    sums = {}
+    for measurement in measurements:
+        task_key = measured_task_key(measurement)
+        for path in sorted(measurement.link_totals):
+            counters = measurement.link_totals[path]
+            empty_counters = collections.Counter()
+            summed = sums.setdefault((task_key, path), empty_counters)
+            summed.update(counters)
+    shots_by_task = _first_seed_and_count_by_task(measurements)
+    rows = []
+    for (task_key, path), counters in sums.items():
+        row = _summed_row(task_key, shots_by_task)
+        row["link"] = path
+        row.update(counters)
+        rows.append(row)
+    return rows
+
+
+def summed_statistics_rows(measurements: list) -> list:
+    """One row per task, part, statistic and field: its shots' total.
+
+    Each field adds over the shots as STATISTIC_FIELD_FOLDS says, the
+    same law the fold adds shots' rows by, so stat_summary.csv comes
+    out the same. OMNeT++ records a scalar where a vector would grow
+    too large (docs.omnetpp.org/6.4/tutorials/tictoc/part5).
+    """
+    fields_by_key = {}
+    for measurement in measurements:
+        task_key = measured_task_key(measurement)
+        for statistic_row in measurement.statistics:
+            path = statistic_row.path
+            key = (task_key, path, statistic_row.statistic)
+            fields = fields_by_key.setdefault(key, {})
+            _add_a_field(fields, statistic_row.field, statistic_row.value)
+    shots_by_task = _first_seed_and_count_by_task(measurements)
+    rows = []
+    for (task_key, path, statistic), fields in fields_by_key.items():
+        for field, value in fields.items():
+            row = _summed_row(task_key, shots_by_task)
+            row["path"] = path
+            row["statistic"] = statistic
+            row["field"] = field
+            row["value"] = value
+            rows.append(row)
+    return rows
+
+
 def statistic_value_rows(measurements: list) -> list:
     """One row per task, part, statistic and distinct value: its count.
 
@@ -541,11 +596,22 @@ def confidence_shot_count_of(measurements: list) -> Optional[Union[int, str]]:
     return None
 
 
-def record_of(measurements: list) -> RunRecord:
-    """The additive facts of the shots this process measured."""
+def record_of(
+    measurements: list,
+    options: collect.RecordOptions = collect.DEFAULT_RECORD_OPTIONS,
+) -> RunRecord:
+    """The additive facts of the shots this process measured.
+
+    options.is_statistics_per_shot False writes the links' and the
+    statistics' rows summed over the shots, a row per task and key.
+    """
     shots = shot_rows(measurements)
-    links = shot_link_rows(measurements)
-    statistics = shot_statistics_rows(measurements)
+    if options.is_statistics_per_shot:
+        links = shot_link_rows(measurements)
+        statistics = shot_statistics_rows(measurements)
+    else:
+        links = summed_link_rows(measurements)
+        statistics = summed_statistics_rows(measurements)
     values = statistic_value_rows(measurements)
     movement = shot_data_movement_rows(measurements)
     samples = window_sample_rows(measurements)
@@ -742,8 +808,11 @@ def _add_a_statistic_row(totals: dict, text_row: dict) -> None:
     task_key = task_key_of(row)
     key = (task_key, row["path"], row["statistic"])
     fields = totals.setdefault(key, {})
-    field = row["field"]
-    value = row["value"]
+    _add_a_field(fields, row["field"], row["value"])
+
+
+def _add_a_field(fields: dict, field: str, value) -> None:
+    """One value of a statistic's field onto its total."""
     if field not in fields:
         fields[field] = value
         return
@@ -1592,6 +1661,27 @@ def _shot_statistic_row(task_key: tuple, measurement, statistic_row) -> dict:
     row["statistic"] = statistic_row.statistic
     row["field"] = statistic_row.field
     row["value"] = statistic_row.value
+    return row
+
+
+def _first_seed_and_count_by_task(measurements: list) -> dict:
+    """Each task's first seed and its count of shots."""
+    seeds_by_task = collections.defaultdict(list)
+    for measurement in measurements:
+        task_key = measured_task_key(measurement)
+        seeds_by_task[task_key].append(measurement.seed)
+    shots_by_task = {}
+    for task_key, seeds in seeds_by_task.items():
+        shots_by_task[task_key] = (min(seeds), len(seeds))
+    return shots_by_task
+
+
+def _summed_row(task_key: tuple, shots_by_task: dict) -> dict:
+    """A summed row's task, first seed and shot_count columns."""
+    first_seed, shot_count = shots_by_task[task_key]
+    row = task_columns(task_key)
+    row["seed"] = first_seed
+    row["shot_count"] = shot_count
     return row
 
 

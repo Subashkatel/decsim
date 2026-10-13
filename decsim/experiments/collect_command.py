@@ -845,7 +845,11 @@ def _save_the_piece(
         "packages": outcome.module_versions,
     }
     state = unit.task.online_threshold
-    pieces.write(run_dir, task_id, unit.first_seed, rows, piece_facts, state)
+    options = unit.task.record_options
+    first_seed = unit.first_seed
+    pieces.write(
+        run_dir, task_id, first_seed, rows, piece_facts, state, options
+    )
 
 
 def _say_the_threshold(calibrator) -> None:

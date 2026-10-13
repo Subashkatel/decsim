@@ -2305,8 +2305,7 @@ def test_a_job_of_a_task_whose_threshold_learns_online_is_refused(
         ),
         (
             ["--out", "out", "--share", "2/2"],
-            "a share INDEX/COUNT counts from 0, so 0 <= INDEX < COUNT, "
-            "got 2/2",
+            "a share INDEX/COUNT counts from 0, so 0 <= INDEX < COUNT, got 2/2",
         ),
         (
             ["--out", "out", "--share", "first/2"],

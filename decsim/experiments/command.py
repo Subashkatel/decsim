@@ -373,8 +373,7 @@ def _check_the_record_arguments(parser, parsed) -> None:
     """A record runs no shot, and records every task the fold folds."""
     if parsed.selection is not None:
         parser.error(
-            "--record runs no shot and --share or --seeds runs some; "
-            "give one"
+            "--record runs no shot and --share or --seeds runs some; give one"
         )
     if parsed.only is not None:
         parser.error(

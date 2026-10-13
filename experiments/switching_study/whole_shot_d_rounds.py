@@ -70,7 +70,11 @@ def _in_one_window(machine: graph.Machine, distance: int) -> graph.Machine:
 def _union_find_alone_recording_the_gap(
     machine: graph.Machine,
 ) -> graph.Machine:
-    """No switching and no belief matching; each window's gap recorded."""
+    """No switching and no belief matching; each window's gap recorded.
+
+    window_outcomes.csv writes every shot's window, its gap beside its
+    answer, where window_confidence.csv keeps the first 100 shots.
+    """
     without_switching = machine.without_part(machines.SWITCHING)
     without_pool = without_switching.without_part(machines.STRONG_POOL)
     union_find_alone = without_pool.without_part(machines.STRONG_STORE)
@@ -79,7 +83,11 @@ def _union_find_alone_recording_the_gap(
     )
     windows = union_find_alone.held(machines.WINDOWS)
     recording = dataclasses.replace(windows, recorded_confidence=gap)
-    return union_find_alone.with_held(machines.WINDOWS, recording)
+    with_gap = union_find_alone.with_held(machines.WINDOWS, recording)
+    observation = dataclasses.replace(
+        with_gap.observation, record_window_outcomes=True
+    )
+    return dataclasses.replace(with_gap, observation=observation)
 
 
 def _belief_matching_alone(machine: graph.Machine) -> graph.Machine:

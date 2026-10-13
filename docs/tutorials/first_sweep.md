@@ -180,40 +180,17 @@ picking it up changes nothing about the result. The tick columns do
 move a little between the two, because this run is charged its
 decoder's measured wall clock.
 
-On a cluster the same pieces run as Slurm jobs. `decsim run
-examples/my_first_sweep.py --slurm --out $PWD/results/first_sweep`
-records every task, so a machine that cannot be built stops it before
-anything is queued. Every task must stop at `max_shots` alone, and
-`seconds_per_shot.csv` beside the run file gives each task's core
-seconds a shot (columns `task,core_seconds_per_shot`), read off an
-earlier run's `sim_wall_seconds_per_shot`, so the launch knows each
-task's work (`examples/seconds_per_shot.csv` gives 0.5 s, distance 7's
-mean over 20 shots on della-vis1). The estimate sizes the jobs only; no
-result reads it. It cuts the
-unsaved shots into pieces and packs them onto jobs of `--cores` cores
-(3), longest first, so that every core carries about the same work;
-every job asks for the busiest core's work over 0.8 in whole minutes,
-at least 61 and at most `--hours` (24), so the estimates fill 80
-percent of what it asks. It writes `jobs.json`, each job's pieces;
-`run.sbatch`, the job array whose job `i` runs job `i`'s pieces; and
-`fold.sbatch`, one job that folds every saved piece after the array
-ends, however its jobs ended. It prints the walltime and one line per
-job, its cores, estimated use and pieces, then
-submits them all; `--dry-run` writes and prints them and submits
-nothing. A job asks for `--memory-mb` megabytes; without the flag it
-asks its cores times the largest `peak_memory_mb` the seconds file
-gives, times `--memory-margin` (1.25), or 16384 when a task has none.
-`decsim estimates results/first_sweep > seconds_per_shot.csv` writes
-the file from a folded run: each task's `sim_wall_seconds_per_shot`
-and the largest peak resident memory its pieces recorded. A job logs to
-`logs/<array id>_<i>.log`. A task that stops on failures is refused,
-since its work is unknown before launch; run it without `--slurm`. If a
-job dies or runs out of time, submit the same command again: it packs
-only the pieces not yet saved. `decsim run --fold --out
-results/first_sweep` folds the saved pieces at any time, even while
-jobs run. The launch refuses a checkout with uncommitted changes
-unless `ALLOW_DIRTY=1` is set, and sbatch reads the account, partition
-and QOS from SBATCH_ACCOUNT, SBATCH_PARTITION and SBATCH_QOS.
+On a cluster the same pieces run as jobs you write. `decsim run
+examples/my_first_sweep.py --record --out results/first_sweep` records
+every task once, so a machine that cannot be built stops before
+anything is queued; each job then runs its share of every task's seeds
+with `--share INDEX/COUNT --out results/first_sweep`, skipping the
+seeds a saved piece holds; and `decsim run --fold --out
+results/first_sweep` folds them, as this run did. The jobs share no
+state but the folder, so the split, the job sizes and the scheduler are
+yours. [How to run a sweep on a Slurm
+cluster](../how-to/run_on_a_slurm_cluster.md) has a job array that
+does it.
 
 ## What you learned
 

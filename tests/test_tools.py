@@ -2,10 +2,10 @@
 
 tools/check.sh runs three checkers over the tree, and a checker that
 misreads its arguments fails open: it exits 0 having looked at nothing,
-and the check silently stops holding. `decsim run --slurm` fails the
-same way, by asking for the wrong job or running one on code nobody
-can name, so it is held here beside them, against a stub git and
-sbatch. These tests hold each to what it does with its arguments.
+and the check silently stops holding. `decsim run --record` and
+`--seeds` fail the same way, by running a job on code nobody can name,
+so they are held here beside them, against a stub git. These tests hold
+each to what it does with its arguments.
 """
 
 import ast
@@ -23,9 +23,9 @@ TESTS_PATH = TESTS_FILE.resolve()
 PACKAGE_ROOT = TESTS_PATH.parent.parent
 TOOLS = PACKAGE_ROOT / "tools"
 CHECK_SCRIPT = TOOLS / "check.sh"
-# What a submitting shell could hand `decsim run --slurm`: an excuse for
-# a dirty tree, a tree reading, or the job the suite itself runs in.
-UNSET_FOR_SLURM = (
+# What a submitting shell could hand a job: an excuse for a dirty tree,
+# a tree reading, or the job the suite itself runs in.
+UNSET_FOR_A_JOB = (
     "ALLOW_DIRTY",
     "DECSIM_TREE_DIRTY",
     "DECSIM_TREE_PATCH_SHA256",
@@ -529,31 +529,13 @@ def _stub_git(tmp_path, status):
     stub.chmod(0o755)
 
 
-def _stub_sbatch(tmp_path):
-    """An sbatch that records each submission and answers a job id.
-
-    The ids count up from 1000 in submission order, as --parsable prints
-    them, so no test reaches Slurm and a dependency names the job it
-    follows.
-    """
-    stub = tmp_path / "sbatch"
-    submissions = tmp_path / "submissions.txt"
-    stub.write_text(
-        "#!/usr/bin/env bash\n"
-        f'echo "$*" >> {submissions}\n'
-        f"wc -l < {submissions} | awk '{{print 999 + $1}}'\n"
-    )
-    stub.chmod(0o755)
-
-
-def _slurm_environment(tmp_path, status):
-    """The submitting shell: a stub git and a stub sbatch."""
+def _job_environment(tmp_path, status):
+    """The shell a job starts in: a stub git first on the path."""
     _stub_git(tmp_path, status)
-    _stub_sbatch(tmp_path)
     environment = {
         name: value
         for name, value in os.environ.items()
-        if name not in UNSET_FOR_SLURM
+        if name not in UNSET_FOR_A_JOB
     }
     path = environment.get("PATH", "")
     environment["PATH"] = f"{tmp_path}:{path}"
@@ -562,7 +544,7 @@ def _slurm_environment(tmp_path, status):
 
 
 def _decsim(tmp_path, arguments: list, environment):
-    """One decsim command line, run as the submitting shell runs it."""
+    """One decsim command line, run as a job's shell runs it."""
     command = [sys.executable, "-m", "decsim", *arguments]
     return subprocess.run(
         command,
@@ -588,121 +570,35 @@ experiment = decsim.Experiment("two_tasks", tasks, collection)
 """
 
 
-def _two_task_run_file(tmp_path) -> pathlib.Path:
-    """A run file of two distances."""
-    run_file = tmp_path / "two_tasks.py"
-    run_file.write_text(TWO_TASK_RUN_FILE)
-    seconds_file = tmp_path / "seconds_per_shot.csv"
-    seconds_file.write_text("task,core_seconds_per_shot\nd3,1.0\nd5,1.0\n")
-    return run_file
-
-
-def _slurm_arguments(config_path, results_dir, *extra) -> list:
-    """`decsim run <run file> --slurm`, into results_dir."""
-    return [
-        "run",
-        str(config_path),
-        "--slurm",
-        "--out",
-        str(results_dir),
-        *extra,
-    ]
-
-
-def test_a_launch_submits_the_array_then_the_fold_behind_it(tmp_path):
-    """The fold's dependency names the job id sbatch answered."""
-    config_path = _two_task_run_file(tmp_path)
-    results_dir = tmp_path / "results"
-    environment = _slurm_environment(tmp_path, "clean")
-    arguments = _slurm_arguments(config_path, results_dir)
-
-    completed = _decsim(tmp_path, arguments, environment)
-
-    submissions_path = tmp_path / "submissions.txt"
-    submissions_text = submissions_path.read_text()
-    array_text, fold_text = submissions_text.splitlines()
-    assert completed.returncode == 0, completed.stderr
-    assert array_text == f"--parsable {results_dir / 'run.sbatch'}"
-    assert fold_text == (
-        f"--parsable --dependency=afterany:1000 {results_dir / 'fold.sbatch'}"
-    )
-    assert "job array 1000, fold job 1001" in completed.stdout
-
-
-def _stub_squeue(tmp_path, queued_ids: str):
-    """An squeue that lists queued_ids as this user's queued jobs."""
-    stub = tmp_path / "squeue"
-    stub.write_text(f"#!/usr/bin/env bash\nprintf '{queued_ids}'\n")
-    stub.chmod(0o755)
-
-
-def test_a_relaunch_while_the_last_array_is_queued_is_refused(tmp_path):
-    """Its waiting jobs read jobs.json when they start, so it stays."""
-    config_path = _two_task_run_file(tmp_path)
-    results_dir = tmp_path / "results"
-    environment = _slurm_environment(tmp_path, "clean")
-    arguments = _slurm_arguments(config_path, results_dir)
-    _decsim(tmp_path, arguments, environment)
-    jobs_path = results_dir / "jobs.json"
-    launched_plan = jobs_path.read_text()
-    _stub_squeue(tmp_path, "1000\\n")
-
-    relaunched = _decsim(tmp_path, arguments, environment)
-
-    submissions_path = tmp_path / "submissions.txt"
-    submissions_text = submissions_path.read_text()
-    submissions = submissions_text.splitlines()
-    assert relaunched.returncode != 0
-    assert "jobs 1000, still in the queue" in relaunched.stderr
-    assert jobs_path.read_text() == launched_plan
-    assert len(submissions) == 2
-
-
-def test_a_relaunch_once_the_last_array_left_the_queue_submits(tmp_path):
-    """A queue holding none of the last launch's jobs lets it go on."""
-    config_path = _two_task_run_file(tmp_path)
-    results_dir = tmp_path / "results"
-    environment = _slurm_environment(tmp_path, "clean")
-    arguments = _slurm_arguments(config_path, results_dir)
-    _decsim(tmp_path, arguments, environment)
-    _stub_squeue(tmp_path, "999\\n")
-
-    relaunched = _decsim(tmp_path, arguments, environment)
-
-    assert relaunched.returncode == 0, relaunched.stderr
-    assert "job array 1002, fold job 1003" in relaunched.stdout
-
-
 @pytest.mark.parametrize(
     ("status", "sentence"),
     [("dirty", "has uncommitted changes"), ("unknown", "git says nothing")],
 )
-@pytest.mark.parametrize("where", ["launch", "job"])
+@pytest.mark.parametrize(
+    "flags", [["--record"], ["--seeds", "0:4"]], ids=["record", "seeds"]
+)
 def test_a_tree_git_does_not_vouch_for_is_refused_where_it_starts(
-    tmp_path, status, sentence, where
+    tmp_path, status, sentence, flags
 ):
     """A dirty tree, or one git cannot read, is refused where it starts.
 
     Every job imports the tree as it stands when that job starts, so
-    an array launched from a tree still being edited runs code no piece
-    of it can name. Launching refuses it, so nothing is queued, and so
-    does every job, since the tree may change after submission.
+    jobs queued from a tree still being edited run code no piece of
+    theirs can name. Recording the folder refuses it, so nothing is
+    queued on it, and so does every job, since the tree may change
+    after the record.
     """
-    config_path = _two_task_run_file(tmp_path)
+    config_path = tmp_path / "two_tasks.py"
+    config_path.write_text(TWO_TASK_RUN_FILE)
     results_dir = tmp_path / "results"
-    environment = _slurm_environment(tmp_path, status)
-    arguments = {
-        "launch": _slurm_arguments(config_path, results_dir),
-        "job": ["run", str(config_path), "--out", str(results_dir)]
-        + ["--job", "0"],
-    }
+    environment = _job_environment(tmp_path, status)
+    arguments = ["run", str(config_path), "--out", str(results_dir)]
 
-    completed = _decsim(tmp_path, arguments[where], environment)
+    completed = _decsim(tmp_path, [*arguments, *flags], environment)
 
     assert completed.returncode == 1
     assert sentence in completed.stderr
     assert "ALLOW_DIRTY=1" in completed.stderr
-    assert not (tmp_path / "submissions.txt").exists()
     assert not results_dir.exists()
 
 

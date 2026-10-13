@@ -134,12 +134,11 @@ These are not from the papers. The pages use them everywhere.
   `POINTS`).
 - **piece**: a run of consecutive seeds of one task, run by one
   process and saved whole as one folder of the results folder, sized by
-  the stop rule's `piece_rounds`, and on Slurm also by a twentieth of a
-  core's share of a job (`decsim/experiments/pieces.py`).
-- **Slurm job**: one job of the Slurm job array that `decsim run
-  --slurm` submits. Job i runs the fixed-shot pieces `jobs.json` packs
-  into it (`decsim/experiments/plan_command.py`). It is not a decode
-  job.
+  the stop rule's `piece_rounds` (`decsim/experiments/pieces.py`).
+- **Slurm job**: one job of a script the user writes, which runs its
+  seeds into a recorded folder with `decsim run --share` or `--seeds`
+  (`decsim/experiments/collect_command.py`, `run_seeds`). It is not a
+  decode job.
 - **scored shot**, **unscored shot**: a shot is scored when every
   decode it committed, provisional or final, got a correction from its
   decoder's backend, and unscored when a backend produced none; sinter

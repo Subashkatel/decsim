@@ -168,8 +168,8 @@ def unsaved_ranges(saved: dict, shot_count: int) -> list:
     """The (first seed, count) gaps of [0, shot_count) no saved piece holds.
 
     saved maps each saved piece's first seed to its count, as
-    saved_counts gives it, so a resubmitted plan cuts new pieces only
-    between the saved ones and runs no seed twice.
+    saved_counts gives it, so a job of --seeds run again cuts new pieces
+    only between the saved ones and runs no seed twice.
     """
     ranges = []
     next_seed = 0

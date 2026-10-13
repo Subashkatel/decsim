@@ -56,3 +56,6 @@ the [reference](../reference/README.md) pages.
 - [How to run a memory as a stream](run_a_memory_as_a_stream.md):
   `decsim stream`, one memory task as a stream of a million rounds in
   flat memory, measured as it goes.
+- [How to run a sweep on a Slurm cluster](run_on_a_slurm_cluster.md):
+  record the folder once, run a share of the seeds in each job of your
+  own script, and fold what they saved.

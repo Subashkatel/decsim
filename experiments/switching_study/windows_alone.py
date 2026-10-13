@@ -12,7 +12,8 @@ Usage
 From this folder, on Della:
 
 ```
-decsim run windows_alone.py --slurm --out RESULTS/windows_alone/RUN
+RESULTS=/scratch/gpfs/MARTONOSI/sk2415/decoder/results/switching_study
+decsim run windows_alone.py --slurm --out $RESULTS/windows_alone/RUN
 ```
 """
 
@@ -66,7 +67,11 @@ def _belief_matching_alone(machine: graph.Machine) -> graph.Machine:
     return without_pool.without_part(machines.WEAK_STORE)
 
 
-stop = decsim.CollectionSettings(max_shots=constants.shots)
+stop = decsim.CollectionSettings(
+    max_shots=constants.shots, piece_rounds=constants.piece_rounds
+)
+# each piece's statistics summed: the summary needs no shot's own rows
+record_options = decsim.RecordOptions(is_statistics_per_shot=False)
 sweep = decsim.Sweep(
     "windows_alone",
     machine,
@@ -81,5 +86,6 @@ sweep = decsim.Sweep(
     stop=stop,
     metadata=metadata,
     constants=constants,
+    record_options=record_options,
 )
 experiment = sweep.experiment()

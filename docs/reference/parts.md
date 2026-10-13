@@ -375,10 +375,13 @@ It reads as that record: the results name the inner decoder, and a confidence si
 
 `decsim/decoders/belief_matching/decoder.py`. The belief propagation that reweights the matching graph.
 
+timing is the stated time a decode takes (IterationTime), None for the host's own time around the call.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `max_iterations` | `int` | `30` |
 | `belief_propagation_method` | `str` | `'product_sum'` |
+| `timing` | `Optional[IterationTime]` | `None` |
 
 ## decsim/decoders/belief_propagation_osd
 

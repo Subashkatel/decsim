@@ -10,19 +10,30 @@ observable; the posterior clamp is the one line that may differ (1e-15
 here, 1e-14 there). Its matrices hold one column per distinct hyperedge
 (lines 104-136), and 300 shots reach a syndrome where that merging
 decides the answer (shot 238).
+
+With a stated time, a decode is charged its own BP iterations, the
+count beliefmatching's BP reaches on the same syndrome, at the time per
+iteration, plus the matching's time.
 """
+
+import math
 
 import beliefmatching
 import numpy
 import pymatching
+import pytest
 
+import decsim.config as config
 import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.decoder as decoder_module
 import decsim.records.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 ROUNDS = 3
 SHOTS = 300
 CLAMP = 1e-14
+TIMED_SHOTS = 50
+MAX_ITERATIONS = 20
 
 
 def _reference_prediction(referee: beliefmatching.BeliefMatching, syndrome):
@@ -68,3 +79,44 @@ def test_the_row_predicts_what_beliefmatchings_matching_branch_property():
         result = row.decode(job)
         decoded_observables.append(result.logical_observables)
     assert decoded_observables == expected_observables
+
+
+def test_a_stated_time_charges_each_decodes_own_iterations_property():
+    circuit = windows.memory_circuit(3, ROUNDS, 0.005)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.LINKED_FAULT_MODELS_REQUIRED
+    )
+    detection_events, _ = windows.sampled_shots(circuit, TIMED_SHOTS, 7)
+    detector_error_model = circuit.detector_error_model(decompose_errors=True)
+    referee = beliefmatching.BeliefMatching(
+        detector_error_model,
+        max_bp_iters=MAX_ITERATIONS,
+        bp_method="product_sum",
+    )
+    timing = belief_matching.IterationTime(
+        iteration_microseconds=1.0, matching_microseconds=1.0
+    )
+    settings = belief_matching.BeliefMatchingDecoder.Settings(
+        max_iterations=MAX_ITERATIONS, timing=timing
+    )
+    row = settings.build()
+    expected_ticks = []
+    charged_ticks = []
+    for shot in detection_events:
+        syndrome = numpy.asarray(shot, dtype=numpy.uint8)
+        referee._bpd.decode(syndrome)
+        microseconds = referee._bpd.iter * 1.0 + 1.0
+        expected = config.microseconds_to_ticks(microseconds)
+        expected_ticks.append(expected)
+        job = windows.job_for(model, shot)
+        _result, ticks = decoder_module.timed_decode(row, job, 0)
+        charged_ticks.append(ticks)
+    assert charged_ticks == expected_ticks
+
+
+@pytest.mark.parametrize("microseconds", [-1.0, math.inf, math.nan, True])
+def test_a_stated_time_that_is_no_duration_is_refused(microseconds):
+    with pytest.raises(ValueError, match="matching_microseconds"):
+        belief_matching.IterationTime(
+            iteration_microseconds=1.0, matching_microseconds=microseconds
+        )

@@ -11,6 +11,8 @@ runs, so `decsim trace` never loads Stim. The console script and
     decsim run <run file> --seed S [--only NAME] [--out DIR] [--log ...]
         [--trace]
     decsim run <run file> --record --out DIR
+    decsim run <run file> --share INDEX/COUNT --out DIR [--only NAME]
+        [--processes N]
     decsim run <run file> --seeds FIRST:END --out DIR [--only NAME]
         [--processes N]
     decsim run --fold --out DIR
@@ -27,7 +29,8 @@ of every task's machine (decsim/parameters; `decsim params` lists the
 paths); DECSIM_SET holds more, `;` between them, the flags winning.
 
 decsim writes no job script. A run split over jobs, on Slurm or any
-other scheduler, is --record once, --seeds in each job, then --fold
+other scheduler, is --record once, --share or --seeds in each job,
+then --fold
 (docs/how-to/run_on_a_slurm_cluster.md).
 
 What the experiments layer refuses reaches the user as one sentence and
@@ -92,7 +95,7 @@ def _run(argv: list) -> None:
     if parsed.record:
         _record(parsed)
         return
-    if parsed.seeds is not None:
+    if parsed.selection is not None:
         _run_seeds(parsed)
         return
     if parsed.seed is not None:
@@ -111,14 +114,14 @@ def _record(parsed) -> None:
 
 
 def _run_seeds(parsed) -> None:
-    """One job's range of seeds, run into a recorded folder; no fold."""
+    """One job's seeds, run into a recorded folder; no fold."""
     import decsim.experiments.collect_command as collect_command
 
     run_dir = pathlib.Path(parsed.out)
     collect_command.run_seeds(
         parsed.run_file,
         run_dir,
-        parsed.seeds,
+        parsed.selection,
         only=parsed.only,
         processes=parsed.processes,
     )
@@ -231,13 +234,23 @@ def _run_parser():
         help="record every task into the --out folder that jobs will "
         "share, and run no shot",
     )
-    parser.add_argument(
+    selections = parser.add_mutually_exclusive_group()
+    selections.add_argument(
+        "--share",
+        dest="selection",
+        type=_share,
+        default=None,
+        help="INDEX/COUNT, counted from 0: run job INDEX's share of every "
+        "task's max_shots seeds, or the --only one's, into the recorded "
+        "--out folder, skipping saved seeds, and fold nothing",
+    )
+    selections.add_argument(
         "--seeds",
+        dest="selection",
         type=_seed_range,
         default=None,
-        help="FIRST:END, run seeds FIRST to END - 1 of every task, or the "
-        "--only one, into the recorded --out folder, skipping saved "
-        "seeds, and fold nothing",
+        help="FIRST:END, as --share but seeds FIRST to END - 1 of every "
+        "task, stopped at its max_shots",
     )
     parser.add_argument(
         "--fold",
@@ -260,9 +273,33 @@ def _shot_count(text: str) -> int:
     return count
 
 
-def _seed_range(text: str) -> range:
+def _share(text: str):
+    """INDEX/COUNT, job INDEX of COUNT, with 0 <= INDEX < COUNT."""
+    import argparse
+
+    import decsim.experiments.collect_command as collect_command
+
+    index_text, _slash, count_text = text.partition("/")
+    try:
+        index = int(index_text)
+        count = int(count_text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"a share is INDEX/COUNT, two whole numbers, got {text}"
+        ) from None
+    if not 0 <= index < count:
+        raise argparse.ArgumentTypeError(
+            "a share INDEX/COUNT counts from 0, so 0 <= INDEX < COUNT, "
+            f"got {text}"
+        )
+    return collect_command.Share(index, count)
+
+
+def _seed_range(text: str):
     """FIRST:END, seeds FIRST to END - 1, with 0 <= FIRST < END."""
     import argparse
+
+    import decsim.experiments.collect_command as collect_command
 
     first_text, _colon, end_text = text.partition(":")
     try:
@@ -276,7 +313,7 @@ def _seed_range(text: str) -> range:
         raise argparse.ArgumentTypeError(
             f"a seed range FIRST:END has 0 <= FIRST < END, got {text}"
         )
-    return range(first_seed, end_seed)
+    return collect_command.SeedRange(first_seed, end_seed)
 
 
 def _check_the_run_arguments(parser, parsed) -> None:
@@ -286,7 +323,7 @@ def _check_the_run_arguments(parser, parsed) -> None:
         return
     if parsed.run_file is None:
         parser.error("name the run file")
-    if parsed.record or parsed.seeds is not None:
+    if parsed.record or parsed.selection is not None:
         _check_the_shared_folder_arguments(parser, parsed)
         return
     _check_the_local_arguments(parser, parsed)
@@ -319,14 +356,14 @@ def _check_the_shared_folder_arguments(parser, parsed) -> None:
     """
     if parsed.out is None:
         parser.error(
-            "--record and --seeds work in the folder jobs share; name it "
-            "with --out"
+            "--record, --share and --seeds work in the folder jobs share; "
+            "name it with --out"
         )
     local_options = (parsed.shots, parsed.seed)
     if any(option is not None for option in local_options):
         parser.error(
-            "--record and --seeds take every task to its max_shots, or "
-            "the given seeds; --shots and --seed run locally"
+            "--record, --share and --seeds take every task to its "
+            "max_shots, or the given seeds; --shots and --seed run locally"
         )
     if parsed.record:
         _check_the_record_arguments(parser, parsed)
@@ -334,12 +371,15 @@ def _check_the_shared_folder_arguments(parser, parsed) -> None:
 
 def _check_the_record_arguments(parser, parsed) -> None:
     """A record runs no shot, and records every task the fold folds."""
-    if parsed.seeds is not None:
-        parser.error("--record runs no shot and --seeds runs some; give one")
+    if parsed.selection is not None:
+        parser.error(
+            "--record runs no shot and --share or --seeds runs some; "
+            "give one"
+        )
     if parsed.only is not None:
         parser.error(
             "--record records every task, which the fold folds; --only "
-            "chooses the tasks of --seeds"
+            "chooses the tasks of --share or --seeds"
         )
 
 

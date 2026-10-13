@@ -13,9 +13,10 @@ whatever order pieces end in; only a stop on the time cap depends on
 timing.
 
 On a cluster the user's own jobs share one folder: `decsim run --record`
-records every task once, each job runs a range of seeds with `--seeds`,
-and `--fold` folds what they saved. decsim writes no job script; how
-the seeds are split and submitted is the user's.
+records every task once, each job runs its seeds, a share of every
+task's with `--share` or a range with `--seeds`, and `--fold` folds
+what they saved. decsim writes no job script; how the seeds are split
+and submitted is the user's.
 """
 
 import copy
@@ -207,6 +208,55 @@ class TaskCollection:
         return min(self.piece_shots, remaining)
 
 
+@dataclasses.dataclass(frozen=True)
+class SeedRange:
+    """Seeds first_seed to end_seed - 1 of every task, as --seeds names them."""
+
+    first_seed: int
+    end_seed: int
+
+    def seeds_of(self, _task_name: str, max_shots: Optional[int]) -> range:
+        """The range, stopped at the task's max_shots when it has one."""
+        end_seed = self.end_seed
+        if max_shots is not None:
+            end_seed = min(end_seed, max_shots)
+        return range(self.first_seed, end_seed)
+
+
+@dataclasses.dataclass(frozen=True)
+class Share:
+    """Job index of count jobs: its contiguous share of each task's seeds.
+
+    A task's max_shots seeds are cut into count runs of consecutive
+    seeds, whole numbers apart by at most one, and job index runs run
+    index. Shares count from 0, as a Slurm array's task ids from
+    --array=0-N do (https://slurm.schedmd.com/job_array.html) and
+    Bazel's TEST_SHARD_INDEX does (Bazel's test encyclopedia), so job
+    $SLURM_ARRAY_TASK_ID of $SLURM_ARRAY_TASK_COUNT runs its own.
+    """
+
+    index: int
+    count: int
+
+    def seeds_of(self, task_name: str, max_shots: Optional[int]) -> range:
+        """Run index of the task's seeds; a task with no max_shots is refused.
+
+        A task that stops on failures or time has no seed count to cut.
+        """
+        if max_shots is None:
+            raise refusal.RefusalError(
+                f"--share cuts each task's max_shots seeds, and the task "
+                f"{task_name} has none, since it stops on failures or time; "
+                "name its seeds with --seeds, or give it max_shots"
+            )
+        first_product = self.index * max_shots
+        first_seed = first_product // self.count
+        next_index = self.index + 1
+        end_product = next_index * max_shots
+        end_seed = end_product // self.count
+        return range(first_seed, end_seed)
+
+
 def run_experiment(
     run_file: Union[str, pathlib.Path],
     out_dir: Optional[pathlib.Path] = None,
@@ -303,17 +353,18 @@ def record_the_folder(
 def run_seeds(
     run_file: Union[str, pathlib.Path],
     run_dir: pathlib.Path,
-    seeds: range,
+    selection: Union[SeedRange, Share],
     *,
     only: Optional[str] = None,
     processes: int = 1,
 ) -> None:
-    """The chosen tasks' unsaved seeds in a range, run into a recorded folder.
+    """The chosen tasks' unsaved seeds of one job, run into a recorded folder.
 
-    One job's share of a run. The seeds stop at a task's max_shots, and
-    a seed a saved piece holds is not run again, so a job submitted
-    again runs only what it did not save. The rest are cut into pieces
-    of the task's piece_rounds, which bound what a killed job loses.
+    selection names each task's seeds: a share of its max_shots, or a
+    range stopped there. A seed a saved piece holds is not run again, so
+    a job submitted again runs only what it did not save. The rest are
+    cut into pieces of the task's piece_rounds, which bound what a
+    killed job loses.
 
     A job writes no record, since many jobs share a task: it checks the
     folder ran this tree, this run file and these tasks. It checks
@@ -331,7 +382,7 @@ def run_seeds(
     chosen = _chosen_tasks(study, only)
     units = []
     for task in chosen.tasks:
-        task_units = _unsaved_units(study, run_dir, task, seeds)
+        task_units = _unsaved_units(study, run_dir, task, selection)
         units.extend(task_units)
     measure_shot = _shot_measure(chosen.tasks, run_dir)
     save = functools.partial(_save_the_piece, run_dir)
@@ -759,24 +810,21 @@ def _unsaved_units(
     study: experiment.Experiment,
     run_dir: pathlib.Path,
     task: collect.Task,
-    seeds: range,
+    selection: Union[SeedRange, Share],
 ) -> list:
-    """One task's seeds in the range no saved piece holds, as work units.
+    """The task's selected seeds no saved piece holds, as work units.
 
-    The seeds stop at the task's max_shots, and each unit holds at most
-    a piece of the task's piece_rounds.
+    Each unit holds at most a piece of the task's piece_rounds.
     """
     _refuse_a_task_run_in_order(task)
     record = _task_record(run_dir, task)
     settings = study.collection_of(task)
     rounds_per_shot = record["rounds_per_shot"]
     piece_shots = settings.piece_shots(rounds_per_shot)
-    end_seed = seeds.stop
-    if settings.max_shots is not None:
-        end_seed = min(end_seed, settings.max_shots)
+    seeds = selection.seeds_of(task.name, settings.max_shots)
     task_folders = pieces.folders_of(run_dir, [record["id"]])
     saved = pieces.saved_counts(task_folders)
-    gaps = pieces.unsaved_ranges(saved, end_seed)
+    gaps = pieces.unsaved_ranges(saved, seeds.stop)
     units = []
     for gap_first, gap_count in gaps:
         gap_end = gap_first + gap_count

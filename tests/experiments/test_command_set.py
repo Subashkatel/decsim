@@ -2155,6 +2155,48 @@ def test_jobs_of_seed_ranges_then_the_fold_write_the_local_runs_rows(
     assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)
 
 
+def test_the_shares_of_a_count_run_each_seed_once_in_runs(tmp_path):
+    """Five seeds in three shares: 0, then 1 and 2, then 3 and 4.
+
+    Share i holds seeds i * 5 // 3 up to (i + 1) * 5 // 3, so the shares
+    cover the task's max_shots seeds, each once, a seed apart at most.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--record"])
+
+    command.main(["run", *shared, "--share", "2/3"])
+    command.main(["run", *shared, "--share", "0/3"])
+    command.main(["run", *shared, "--share", "1/3"])
+
+    study = experiment.load(config_path)
+    first_task = study.tasks[0]
+    task_id = first_task.strong_id()
+    task_folders = pieces.folders_of(run_dir, [task_id])
+    assert pieces.saved_counts(task_folders) == {0: 1, 1: 2, 3: 2}
+
+
+def test_a_share_of_a_task_with_no_shot_count_is_refused(tmp_path, capsys):
+    """A task that stops on time has no seeds to cut into shares."""
+    timed = {"collection": {"max_core_seconds": 60.0}}
+    config_path = run_files.write_run_file(tmp_path, **timed)
+    task = run_files.first_task(**timed)
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--record"])
+
+    with pytest.raises(SystemExit):
+        command.main(["run", *shared, "--share", "0/2"])
+
+    printed = capsys.readouterr()
+    assert (
+        "--share cuts each task's max_shots seeds, and the task "
+        f"{task.name} has none, since it stops on failures or time; name "
+        "its seeds with --seeds, or give it max_shots"
+    ) in printed.err
+
+
 def test_a_job_run_again_runs_only_the_seeds_no_piece_saved(tmp_path):
     """Seeds 0 to 2 saved, then 0 to 99 asked: 3 and 4 run, and no more.
 
@@ -2250,11 +2292,25 @@ def test_a_job_of_a_task_whose_threshold_learns_online_is_refused(
 @pytest.mark.parametrize(
     ("arguments", "sentence"),
     [
-        (["--record"], "--record and --seeds work in the folder jobs share"),
-        (["--seeds", "0:5"], "--record and --seeds work in the folder"),
+        (["--record"], "--record, --share and --seeds work in the folder"),
+        (["--seeds", "0:5"], "--record, --share and --seeds work in the"),
+        (["--share", "0/2"], "--record, --share and --seeds work in the"),
         (
             ["--out", "out", "--record", "--seeds", "0:5"],
-            "--record runs no shot and --seeds runs some; give one",
+            "--record runs no shot and --share or --seeds runs some",
+        ),
+        (
+            ["--out", "out", "--share", "0/2", "--seeds", "0:5"],
+            "argument --seeds: not allowed with argument --share",
+        ),
+        (
+            ["--out", "out", "--share", "2/2"],
+            "a share INDEX/COUNT counts from 0, so 0 <= INDEX < COUNT, "
+            "got 2/2",
+        ),
+        (
+            ["--out", "out", "--share", "first/2"],
+            "a share is INDEX/COUNT, two whole numbers, got first/2",
         ),
         (
             ["--out", "out", "--record", "--only", "d3"],

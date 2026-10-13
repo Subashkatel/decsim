@@ -8,8 +8,9 @@ yours: a Slurm array, a loop of `sbatch`, or any other scheduler.
 
 1. `decsim run my_study.py --record --out DIR` records every task into
    the folder the jobs share, once, before any job starts.
-2. `decsim run my_study.py --seeds FIRST:END --out DIR` in each job
-   runs seeds FIRST to END - 1 of every task into that folder.
+2. `decsim run my_study.py --share INDEX/COUNT --out DIR` in each job
+   runs job INDEX's share of every task's seeds into that folder, or
+   `--seeds FIRST:END` runs seeds FIRST to END - 1.
 3. `decsim run --fold --out DIR` folds what the jobs saved.
 
 The folded files are the ones one local run writes, row for row but the
@@ -43,7 +44,7 @@ then go on from the pieces already saved.
 
 ## 3. Write the job script
 
-A job array whose job `i` runs its own thousand seeds of every task:
+A job array of twenty, each job running its twentieth of every task:
 
 ```bash
 #!/bin/bash
@@ -52,33 +53,38 @@ A job array whose job `i` runs its own thousand seeds of every task:
 #SBATCH --mem=16G
 #SBATCH --time=4:00:00
 #SBATCH --output=results/my_study/logs/%A_%a.log
-first=$((SLURM_ARRAY_TASK_ID * 1000))
-end=$((first + 1000))
-python -m decsim run my_study.py --out results/my_study --seeds $first:$end --processes 4
+python -m decsim run my_study.py --out results/my_study --share $SLURM_ARRAY_TASK_ID/$SLURM_ARRAY_TASK_COUNT --processes 4
 ```
 
-Twenty jobs of a thousand seeds run seeds 0 to 19999 of every task.
-What a job does with its range:
+`--share INDEX/COUNT` cuts each task's `max_shots` seeds into COUNT
+runs of consecutive seeds and runs the one numbered INDEX, counted from
+0 as the array's ids are. A task of 2,000,000 shots and one of 20,000 are both
+cut in twenty, so the script needs no shot counts. To name the seeds
+yourself, `--seeds FIRST:END` runs seeds FIRST to END - 1 of every
+task, stopped at its `max_shots`; a task that stops on failures or time
+has no `max_shots` to share, so it needs `--seeds`. What a job does with
+its seeds:
 
-- It runs each task's seeds below its `max_shots` and stops there, so a
-  range past the end runs nothing.
 - It skips seeds a saved piece holds, so a job that ran out of time is
   submitted again as it was and runs only what it did not save.
 - It cuts the rest into pieces of the task's `piece_rounds`, each saved
   the moment it ends, so a killed job loses one piece a process.
 - `--processes N` runs N pieces at once; ask Slurm for N cores.
-- `--only NAME` runs one task, so different tasks can go to jobs of
-  different sizes.
+- `--only NAME` runs one task, so tasks of very different costs can go
+  to arrays of their own: a share holds equal shots, not equal time.
 - It folds nothing.
 
-Give no two jobs the same seeds at once. Size the walltime and memory
-from a pilot: `decsim run my_study.py --shots 20 --out pilot` on one
+Give no two jobs the same seeds at once: the fold refuses a shot two
+pieces hold, so one of them would have to be deleted. Size the walltime
+and memory from a pilot: `decsim run my_study.py --shots 20 --out
+pilot` on one
 compute node writes `sim_wall_seconds_per_shot` per task in
 `pilot/sweep.csv`, and each piece's `piece.json` holds the
 `peak_memory_mb` of the process that ran it.
 
 A task whose threshold learns online runs its pieces one after another,
-each from the state the one before saved, so `--seeds` refuses it; run
+each from the state the one before saved, so `--share` and `--seeds`
+refuse it; run
 it in one job with `decsim run my_study.py --only NAME --out DIR`.
 
 ## 4. Submit, then fold

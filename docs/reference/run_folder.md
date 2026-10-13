@@ -6,8 +6,8 @@ Every `decsim run` writes one results folder,
 `results/<date>_<name>/`, named for the day it started and the
 experiment it ran, and a second one that day gets `_2`
 (`decsim/experiments/run_folder.py`, `new_run_dir`), unless `--out`
-names one. `decsim run --record` fixes the folder once, and every job
-of `--seeds` runs into it.
+names one. `decsim run --record` fixes the folder once, and every job of
+`--share` or `--seeds` runs into it.
 `results/` is output, not code, and git does not track it, which is
 gem5's `m5out/`. `examples/deltakit_example.py` and
 `examples/live_memory_example.py` write the same records into their

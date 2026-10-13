@@ -183,13 +183,14 @@ decoder's measured wall clock.
 On a cluster the same pieces run as jobs you write. `decsim run
 examples/my_first_sweep.py --record --out results/first_sweep` records
 every task once, so a machine that cannot be built stops before
-anything is queued; each job then runs a range of seeds of every task
-with `--seeds FIRST:END --out results/first_sweep`, skipping the seeds
-a saved piece holds; and `decsim run --fold --out results/first_sweep`
-folds them, as this run did. The jobs share no state but the folder, so
-the split, the job sizes and the scheduler are yours. [How to run a
-sweep on a Slurm cluster](../how-to/run_on_a_slurm_cluster.md) has a
-job array that does it.
+anything is queued; each job then runs its share of every task's seeds
+with `--share INDEX/COUNT --out results/first_sweep`, skipping the
+seeds a saved piece holds; and `decsim run --fold --out
+results/first_sweep` folds them, as this run did. The jobs share no
+state but the folder, so the split, the job sizes and the scheduler are
+yours. [How to run a sweep on a Slurm
+cluster](../how-to/run_on_a_slurm_cluster.md) has a job array that
+does it.
 
 ## What you learned
 

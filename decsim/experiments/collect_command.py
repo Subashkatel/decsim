@@ -288,14 +288,16 @@ def run_pieces(
     The launcher recorded every task and wrote run.json and the run
     file's copy, so a job checks the folder ran this tree, this run file
     and these tasks, and writes no record: many jobs share a task. The
-    pieces go to the pool in the order given, which the launcher made
-    longest first, and a piece saved since the launch is skipped. It
-    folds nothing.
+    launch and the fold check every saved piece's tree, so a job checks
+    run.json's alone: a thousand jobs each opening every piece.json is
+    the metadata storm GPFS serves worst. The pieces go to the pool in
+    the order given, which the launcher made longest first, and a piece
+    saved since the launch is skipped. It folds nothing.
     """
     _check_processes(processes)
     run_folder.copy_the_run_file(run_file, run_dir)
     study = experiment.load(run_file)
-    _refuse_another_tree(run_dir)
+    run_folder.refuse_another_tree(run_dir)
     names = [name for name, _first_seed, _count in job_pieces]
     unique_names = dict.fromkeys(names)
     chosen = study.only(*unique_names)

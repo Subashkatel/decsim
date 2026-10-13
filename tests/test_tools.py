@@ -629,6 +629,50 @@ def test_a_launch_submits_the_array_then_the_fold_behind_it(tmp_path):
     assert "job array 1000, fold job 1001" in completed.stdout
 
 
+def _stub_squeue(tmp_path, queued_ids: str):
+    """An squeue that lists queued_ids as this user's queued jobs."""
+    stub = tmp_path / "squeue"
+    stub.write_text(f"#!/usr/bin/env bash\nprintf '{queued_ids}'\n")
+    stub.chmod(0o755)
+
+
+def test_a_relaunch_while_the_last_array_is_queued_is_refused(tmp_path):
+    """Its waiting jobs read jobs.json when they start, so it stays."""
+    config_path = _two_task_run_file(tmp_path)
+    results_dir = tmp_path / "results"
+    environment = _slurm_environment(tmp_path, "clean")
+    arguments = _slurm_arguments(config_path, results_dir)
+    _decsim(tmp_path, arguments, environment)
+    jobs_path = results_dir / "jobs.json"
+    launched_plan = jobs_path.read_text()
+    _stub_squeue(tmp_path, "1000\\n")
+
+    relaunched = _decsim(tmp_path, arguments, environment)
+
+    submissions_path = tmp_path / "submissions.txt"
+    submissions_text = submissions_path.read_text()
+    submissions = submissions_text.splitlines()
+    assert relaunched.returncode != 0
+    assert "jobs 1000, still in the queue" in relaunched.stderr
+    assert jobs_path.read_text() == launched_plan
+    assert len(submissions) == 2
+
+
+def test_a_relaunch_once_the_last_array_left_the_queue_submits(tmp_path):
+    """A queue holding none of the last launch's jobs lets it go on."""
+    config_path = _two_task_run_file(tmp_path)
+    results_dir = tmp_path / "results"
+    environment = _slurm_environment(tmp_path, "clean")
+    arguments = _slurm_arguments(config_path, results_dir)
+    _decsim(tmp_path, arguments, environment)
+    _stub_squeue(tmp_path, "999\\n")
+
+    relaunched = _decsim(tmp_path, arguments, environment)
+
+    assert relaunched.returncode == 0, relaunched.stderr
+    assert "job array 1002, fold job 1003" in relaunched.stdout
+
+
 @pytest.mark.parametrize(
     ("status", "sentence"),
     [("dirty", "has uncommitted changes"), ("unknown", "git says nothing")],

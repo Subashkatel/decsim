@@ -1905,6 +1905,39 @@ def test_a_results_folder_in_the_checkout_leaves_the_tree_clean(
     assert with_an_edit is True
 
 
+@requires_git
+def test_launch_estimates_in_the_checkout_leave_the_tree_clean(
+    tmp_path, monkeypatch
+):
+    """seconds_per_shot.csv sizes a launch's jobs and no result reads it.
+
+    It is corrected between launches into one folder, and the folder
+    refuses another tree, so an edit to it or a new one beside another
+    run file is no change to the code.
+    """
+    tree_folder = tmp_path / "tree"
+    tree = _git_tree_with_maker(tree_folder)
+    estimates = tree / "seconds_per_shot.csv"
+    estimates.write_text("task,core_seconds_per_shot\nd3,1.0\n")
+    commit = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit"]
+    add = ["git", "-C", str(tree), "add", "maker.py", "seconds_per_shot.csv"]
+    subprocess.run(add, check=True)
+    subprocess.run([*commit, "-q", "-m", "one"], cwd=tree, check=True)
+    estimates.write_text("task,core_seconds_per_shot\nd3,2.0\n")
+    study_folder = tree / "experiments" / "study"
+    study_folder.mkdir(parents=True)
+    new_estimates = study_folder / "seconds_per_shot.csv"
+    new_estimates.write_text("task,core_seconds_per_shot\nd5,4.0\n")
+    monkeypatch.setattr(run_folder, "_checkout", lambda: tree)
+
+    _checkout, _commit, with_estimates = run_folder.fresh_tree_reading()
+    (tree / "maker.py").write_text("VALUE = 2\n")
+    _checkout, _commit, with_an_edit = run_folder.fresh_tree_reading()
+
+    assert with_estimates is False
+    assert with_an_edit is True
+
+
 def test_a_pooled_collect_writes_the_serial_collects_rows(tmp_path):
     config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     serial_dir = tmp_path / "serial"

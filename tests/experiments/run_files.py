@@ -365,15 +365,20 @@ def run_sweep(tasks: list, shots: int) -> list:
     return measurements
 
 
-def folded_run(tmp_path, measurements: list) -> tuple:
+def folded_run(
+    tmp_path,
+    measurements: list,
+    options: collect.RecordOptions = collect.DEFAULT_RECORD_OPTIONS,
+    piece_shots: Optional[int] = None,
+) -> tuple:
     """The shots folded into a run folder as a collect folds its pieces.
 
-    Each task's shots are one piece, in the order they are given, and
-    the task's record names no swept path, so the run folder's
-    files hold only what the shots measured. Returns the sweep rows the
-    fold computed, before csv turns an empty cell into text, and the
-    run folder, whose shot_links.csv and shot_data_movement.csv the
-    fold wrote.
+    Each task's shots are pieces of piece_shots, or one piece, in the
+    order they are given, each written under options, and the task's
+    record names no swept path, so the run folder's files hold only
+    what the shots measured. Returns the sweep rows the fold computed,
+    before csv turns an empty cell into text, and the run folder, whose
+    shot_links.csv and shot_data_movement.csv the fold wrote.
     """
     temporary_dir = tempfile.mkdtemp(dir=tmp_path)
     experiment_dir = pathlib.Path(temporary_dir)
@@ -384,9 +389,14 @@ def folded_run(tmp_path, measurements: list) -> tuple:
     folders = []
     for task_id, at_task in measurements_by_task.items():
         _write_a_bare_task_record(experiment_dir, task_id)
-        first_seed = at_task[0].seed
-        folder = pieces.write(experiment_dir, task_id, first_seed, at_task, {})
-        folders.append(folder)
+        shots = piece_shots or len(at_task)
+        for start in range(0, len(at_task), shots):
+            piece = at_task[start : start + shots]
+            first_seed = piece[0].seed
+            folder = pieces.write(
+                experiment_dir, task_id, first_seed, piece, {}, None, options
+            )
+            folders.append(folder)
     task_ids = list(measurements_by_task)
     run_dir = experiment_dir / "run"
     rows = report.fold_pieces(experiment_dir, folders, task_ids, run_dir)

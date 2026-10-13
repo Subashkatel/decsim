@@ -57,9 +57,12 @@ import decsim.parameters.assignments as assignments
 RUN_SCRIPT = "run.sbatch"
 FOLD_SCRIPT = "fold.sbatch"
 JOBS_FILE = "jobs.json"
+# the job ids a launch's sbatch answered, which the next launch into
+# the folder looks for in the queue
+SUBMITTED_FILE = "submitted.json"
 # beside the run file: one row per task, its name and core seconds a
 # shot, and optionally its peak resident memory (decsim estimates)
-SECONDS_FILE = "seconds_per_shot.csv"
+SECONDS_FILE = run_folder.SECONDS_FILE
 # a job's memory when SECONDS_FILE gives no peak for every task
 DEFAULT_MEMORY_MB = 16384
 LOGS_FOLDER = "logs"
@@ -68,7 +71,8 @@ FOLD_SHAPE = "--cpus-per-task=1 --mem=16G --time=12:00:00"
 # the share of its walltime a job's estimated work fills, Princeton
 # Research Computing's request of 2026-10
 USE_TARGET = 0.8
-# a job under an hour lands in Della's test QOS, two jobs at a time
+# a job of an hour or less lands in Della's test QOS, two jobs at a
+# time (/etc/slurm/job_submit.lua, TEST_MINS = 60, read 2026-10-12)
 SHORTEST_WALLTIME_MINUTES = 61
 # a piece is at most this share of a core's budget, so packed cores
 # differ by at most a twentieth of it (Graham 1969: a core ends within
@@ -165,8 +169,9 @@ def launch(
 
     A tree git does not vouch for, and a task the packing cannot size,
     are refused first, before the results folder is made: out_dir, or a
-    new dated one. A dry run writes the files, prints the plan and
-    submits nothing.
+    new dated one. So is a folder whose last launch has a job still in
+    the queue. A dry run writes the files, prints the plan and submits
+    nothing.
     """
     refuse_an_unnamed_tree()
     given_path = pathlib.Path(run_file)
@@ -177,6 +182,7 @@ def launch(
         _refuse_a_task_it_cannot_pack(study, task, seconds_by_task, job)
     named_dir = run_folder.run_dir_for(study.name, out_dir)
     run_dir = named_dir.resolve()
+    _refuse_a_launch_still_queued(run_dir)
     _every_id, collections, _started_utc = collect_command.start_the_folder(
         study, study, run_dir, run_path
     )
@@ -529,7 +535,54 @@ def _submit(run_dir: pathlib.Path) -> None:
     dependency = f"--dependency=afterany:{array_job}"
     fold_script = run_dir / FOLD_SCRIPT
     fold_job = _submitted([dependency, str(fold_script)])
+    submitted = {"array_job": array_job, "fold_job": fold_job}
+    submitted_path = run_dir / SUBMITTED_FILE
+    run_folder.write_json(submitted_path, submitted)
     print(f"job array {array_job}, fold job {fold_job}")
+
+
+def _refuse_a_launch_still_queued(run_dir: pathlib.Path) -> None:
+    """A launch into a folder whose last launch still has a job queued.
+
+    A waiting job reads jobs.json when it starts, and a launch rewrites
+    it, so the job would run the new plan's job of its index: pieces the
+    new array runs too, or an index past the new plan's end.
+    """
+    submitted_path = run_dir / SUBMITTED_FILE
+    if not submitted_path.is_file():
+        return
+    submitted = run_folder.read_json(submitted_path)
+    queued = _queued_job_ids()
+    job_ids = submitted.values()
+    waiting = [job_id for job_id in job_ids if job_id in queued]
+    if not waiting:
+        return
+    waiting_text = ", ".join(waiting)
+    message = (
+        f"{run_dir} was last launched as jobs {waiting_text}, still in "
+        "the queue, which read jobs.json when they start; let them end "
+        "or scancel them before launching into it again"
+    )
+    raise refusal.RefusalError(message)
+
+
+def _queued_job_ids() -> set:
+    """This user's jobs in Slurm's queue, by their base job id.
+
+    %F is a job array's base id, and a lone job's own (squeue(1)).
+    """
+    completed = subprocess.run(
+        ["squeue", "--noheader", "--me", "--format=%F"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        error_text = completed.stderr.strip()
+        message = f"squeue exited {completed.returncode}: {error_text}"
+        raise refusal.RefusalError(message)
+    job_ids = completed.stdout.split()
+    return set(job_ids)
 
 
 def _walltime_text(minutes: int) -> str:

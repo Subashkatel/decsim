@@ -2140,9 +2140,7 @@ def test_jobs_of_seed_ranges_then_the_fold_write_the_local_runs_rows(
     reads a file beside it, as a threshold table is read, and every job
     finds it.
     """
-    config_path = run_files.write_run_file(
-        tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS
-    )
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
     _read_a_file_beside(config_path)
     local_dir = tmp_path / "local"
     split_dir = tmp_path / "split"
@@ -2162,9 +2160,7 @@ def test_a_job_run_again_runs_only_the_seeds_no_piece_saved(tmp_path):
 
     The task stops at five shots, so the range stops there too.
     """
-    config_path = run_files.write_run_file(
-        tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS
-    )
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
     run_dir = tmp_path / "split"
     shared = [str(config_path), "--out", str(run_dir)]
     command.main(["run", *shared, "--record"])
@@ -2181,9 +2177,7 @@ def test_a_job_run_again_runs_only_the_seeds_no_piece_saved(tmp_path):
 
 def test_a_job_refuses_a_run_file_edited_since_the_record(tmp_path, capsys):
     """A job of an edited run file may build other tasks, so it stops."""
-    config_path = run_files.write_run_file(
-        tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS
-    )
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
     run_dir = tmp_path / "split"
     shared = [str(config_path), "--out", str(run_dir)]
     command.main(["run", *shared, "--record"])
@@ -2200,9 +2194,7 @@ def test_a_job_refuses_a_run_file_edited_since_the_record(tmp_path, capsys):
 
 
 def test_a_job_into_a_folder_never_recorded_is_refused(tmp_path, capsys):
-    config_path = run_files.write_run_file(
-        tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS
-    )
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
     run_dir = tmp_path / "split"
     seeds = ["--seeds", "0:5"]
 
@@ -2216,9 +2208,7 @@ def test_a_job_into_a_folder_never_recorded_is_refused(tmp_path, capsys):
     ) in printed.err
 
 
-def test_a_job_of_a_task_the_folder_did_not_record_is_refused(
-    tmp_path, capsys
-):
+def test_a_job_of_a_task_the_folder_did_not_record_is_refused(tmp_path, capsys):
     """A local run of one task records that task alone."""
     config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
     study = experiment.load(config_path)

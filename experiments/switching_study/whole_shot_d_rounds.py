@@ -14,8 +14,18 @@ From this folder, on Della:
 
 ```
 RESULTS=/scratch/gpfs/MARTONOSI/sk2415/decoder/results/switching_study
-decsim run whole_shot_d_rounds.py --slurm --out $RESULTS/whole_shot_d_rounds/RUN
+OUT=$RESULTS/whole_shot_d_rounds/RUN
+# once, before any job:
+decsim run whole_shot_d_rounds.py --record --out $OUT
+# in each job of a Slurm array:
+decsim run whole_shot_d_rounds.py --out $OUT \\
+    --share $SLURM_ARRAY_TASK_ID/$SLURM_ARRAY_TASK_COUNT --processes 3
+# once every job has ended:
+decsim run --fold --out $OUT
 ```
+
+Each step runs as a Slurm job, never on a login node; the job script
+and the fold are in docs/how-to/run_on_a_slurm_cluster.md.
 """
 
 import dataclasses

@@ -5,7 +5,7 @@
 #   decsim run windows_switching.py --set constants.escalation.threshold.threshold=25dB
 
 shots: 1_000_000                     # per point, fixed, as the paper's (2510.25222 Fig. 15: N = 10^6)
-piece_rounds: 100_000                # rounds a piece holds, so a killed job loses at most that; the launcher cuts smaller pieces when a twentieth of a core's budget holds fewer
+piece_rounds: 100_000                # rounds a piece holds, so a killed job loses at most one piece a process
 distances: [3, 5, 7, 9, 11]
 physical_error_probabilities: [0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008]
 

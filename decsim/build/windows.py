@@ -40,8 +40,8 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    gap_join is None on a run with no switching, and router on a run of
-    one entry pool.
+    gap_join is None on a run that computes no confidence, and router on
+    a run of one entry pool.
     """
 
     models: window_planner_module.WindowModels
@@ -73,12 +73,15 @@ class Windows:
         plan: plan_build.Plan,
         links: ports.Link,
         built_models: built_window_models.BuiltWindowModels,
+        recorded_signal: Optional[ports.ConfidenceSignal] = None,
     ) -> "Windows":
         """Every component of the window side, wired to one another.
 
         The entry pool decodes the planner's windows and the entry edge's
         target re-decodes them (layout). built_models is the window
-        error model cache the shot reads and fills.
+        error model cache the shot reads and fills. recorded_signal is
+        the confidence a run with no switching records
+        (recorded_signal below), None for none.
         """
         run_plan = plan.run_plan
         models = window_planner_module.WindowModels(built_models)
@@ -120,7 +123,7 @@ class Windows:
             clock=clocked_windows.clock,
             decision_cycles=clocked_windows.decision_cycles,
         )
-        gap_join = _gap_join(is_switching, engine)
+        gap_join = _gap_join(is_switching, recorded_signal, engine)
         feedback_boundary_mode = workload.feedback_boundary_mode
         window_manager = window_manager_module.WindowManager(
             engine, feedback_boundary_mode=feedback_boundary_mode
@@ -269,6 +272,36 @@ class Windows:
         self.courier.router = router
 
 
+def recorded_signal(
+    windows_settings: window_settings.WindowSettings,
+    layout: layout_module.Layout,
+) -> Optional[ports.ConfidenceSignal]:
+    """The signal a run with no switching computes on each window, or None.
+
+    It is built on the entry pool's algorithm, as a switching edge builds
+    its signal on its source's; it reads no threshold, since it decides
+    nothing.
+    """
+    confidence = windows_settings.recorded_confidence
+    if confidence is None:
+        return None
+    if layout.edges:
+        raise ValueError(
+            "windows.recorded_confidence records a confidence on a run "
+            "with no switching; a switching run records its edge's own "
+            "(switching.confidence)"
+        )
+    if len(layout.entry_pools) > 1:
+        raise ValueError(
+            "windows.recorded_confidence records the entry pool's "
+            "windows, and this run routes its windows to "
+            f"{len(layout.entry_pools)} entry pools"
+        )
+    entry = layout.entry_pool
+    algorithm = entry.settings.algorithm
+    return confidence.build(algorithm, None)
+
+
 def _retention(
     plan: plan_build.Plan,
     window_tier: window_records.PoolId,
@@ -304,9 +337,19 @@ def _router(
 
 
 def _gap_join(
-    is_switching: bool, engine: engine_module.Engine
+    is_switching: bool,
+    recorded_signal: Optional[ports.ConfidenceSignal],
+    engine: engine_module.Engine,
 ) -> Optional[gap_join_module.WindowGapJoin]:
-    """The join of a window's solves; None on a run with no switching."""
+    """The join of a window's solves; None on a run that computes no gap.
+
+    A switching run's join reads its edge's signal, bound when the
+    machine assembles; a recorded signal is bound here.
+    """
+    if recorded_signal is not None:
+        gap_join = gap_join_module.WindowGapJoin(engine)
+        gap_join.signal = recorded_signal
+        return gap_join
     if not is_switching:
         return None
     return gap_join_module.WindowGapJoin(engine)

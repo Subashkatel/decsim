@@ -50,6 +50,12 @@ class WindowSettings:
     (windows/boundary_payloads.py), how the hand-off between windows is
     written on the hop between their decoders. clock and decision_cycles price
     issuing one decode request; clock None is the machine's clock.
+    recorded_confidence is a confidence row's Settings record
+    (decsim/confidence/) that a run with no switching computes on every
+    window and records, deciding nothing, so a decoder run alone gives
+    each window's gap beside its answer; its work is charged as on a
+    switching run. None computes none; a switching run records its own
+    edge's signal.
     """
 
     clock: Optional[config.Clock] = None
@@ -62,6 +68,7 @@ class WindowSettings:
     boundary_payload: BoundaryPayloadSettings = (
         boundary_payloads.DenseSeamMask.Settings()
     )
+    recorded_confidence: Optional[ports.ConfidenceSettings] = None
 
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)

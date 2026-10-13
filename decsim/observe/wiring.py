@@ -13,7 +13,6 @@ from typing import Optional
 
 import decsim.build.control as control_part
 import decsim.build.decoders as decoders_part
-import decsim.build.escalation as escalation_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
@@ -55,7 +54,6 @@ def observe(
     readout: readout_part.Readout,
     windows: windows_part.Windows,
     decoders: decoders_part.Decoders,
-    switching: Optional[escalation_build.Switching],
     process_name: str,
     traffic_ledger: link_traffic.TrafficLedger,
     run_statistics: statistics_registry.Registry,
@@ -92,7 +90,8 @@ def observe(
         )
     decode_records = _decode_records(observation, keeps_records)
     _connect_decode_records(decoder_managers, decode_records)
-    confidence = _connect_confidence(switching, decoder_managers, keeps_records)
+    gap_join = windows.gap_join
+    confidence = _connect_confidence(gap_join, decoder_managers, keeps_records)
     store_names = _store_names(readout)
     trace_writer = _trace_writer(
         observation, engine, process_name, links_card, store_names
@@ -437,14 +436,14 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    switching, decoder_managers: tuple, keeps_records: bool
+    gap_join, decoder_managers: tuple, keeps_records: bool
 ) -> Optional[decode_records_module.ConfidenceLedger]:
-    """The confidence ledger, only on a run whose confidence decides.
+    """The confidence ledger, only on a run that computes a confidence.
 
     It keeps every window's verdict result, which a stream that lets its
     windows go never reads (observation.folds_windows).
     """
-    if switching is None or not keeps_records:
+    if gap_join is None or not keeps_records:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:

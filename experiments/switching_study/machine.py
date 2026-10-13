@@ -53,12 +53,18 @@ def machine(
     distance: int,
     physical_error_probability: float,
     rounds_per_distance: int,
+    strong_window: str = "redo_window",
 ) -> graph.Machine:
-    """The whole switching machine at one d, p and shot length."""
+    """The whole switching machine at one d, p and shot length.
+
+    strong_window is the shape belief matching re-decodes: redo_window,
+    the window union-find decoded, or double_window, the paper's
+    r_com + 2 r_buf rounds (2510.25222 Sec. III C).
+    """
     weak = union_find_machine(
         distance, physical_error_probability, rounds_per_distance
     )
-    edge = switching()
+    edge = switching(strong_window)
     strong = belief_matching_pool()
     return machines.with_strong_tier(weak, strong, edge)
 
@@ -169,18 +175,20 @@ def tesseract_pool() -> decoder_settings.DecoderPoolSettings:
         engine=engine,
     )
 
-def switching() -> escalation_settings.SwitchingSettings:
-    """Belief matching redoes a window whose cluster gap is under 20 dB."""
+def switching(
+    strong_window: str = "redo_window",
+) -> escalation_settings.SwitchingSettings:
+    """Belief matching re-decodes a window whose cluster gap is under 20 dB."""
     settings = constants.escalation
     confidence = {"type": "cluster_gap", **settings.confidence}
     threshold = {"type": "FixedThreshold", **settings.threshold}
-    redo_window = {"type": "redo_window"}
+    shape = {"type": strong_window}
     return record(
         escalation_settings.SwitchingSettings,
         settings.edge,
         confidence=confidence,
         threshold=threshold,
-        strong_window=redo_window,
+        strong_window=shape,
         clock=constants.clocks.chip,
     )
 

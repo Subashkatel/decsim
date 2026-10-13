@@ -175,11 +175,13 @@ class WindowOutcomeRow:
     window_outcomes.py): an ordinary window, or a strong window over the
     windows it absorbed. tier and decode_status are its final decode's;
     detection_events are the set bits that decode read. gap_nats,
-    is_escalated and weak_answer are the verdict's on a switching run,
-    and weak_label is the label of the escalated window's own commit
-    rounds, the extent its weak answer predicted. Answers and labels are
-    json text of Stim's 01 format, as predictions is, and is_right says
-    whether the answer equals the label.
+    is_escalated and weak_answer are the verdict's on a run that computes
+    a confidence: a switching run, or a run with
+    windows.recorded_confidence, where no window escalates. weak_label is
+    the label of the escalated window's own commit rounds, the extent its
+    weak answer predicted. Answers and labels are json text of Stim's 01
+    format, as predictions is, and is_right says whether the answer
+    equals the label.
     """
 
     operation_id: Any  # an opaque identity
@@ -201,7 +203,7 @@ class WindowOutcomeRow:
 
 @dataclasses.dataclass(frozen=True)
 class ShotConfidence:
-    """A shot's windows' confidence gaps, when a signal decided escalation.
+    """A shot's windows' confidence gaps, when a signal ran.
 
     is_sampled says whether the shot is among the first
     observation.confidence_shot_count, whose windows window_confidence.csv
@@ -1180,7 +1182,9 @@ def _measurement(
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
-    confidence = _shot_confidence(layout, observation, seed, record_options)
+    confidence = _shot_confidence(
+        graph, layout, observation, seed, record_options
+    )
     window_outcomes = _shot_window_outcomes(observation, owners)
     statistics = observation.statistics.rows()
     statistic_values = observation.statistics.value_counts()
@@ -1243,6 +1247,7 @@ def _measurement(
 
 
 def _shot_confidence(
+    graph: topology_graph.Machine,
     layout: layout_module.Layout,
     observation: observation_module.Observation,
     seed: int,
@@ -1254,10 +1259,20 @@ def _shot_confidence(
         return None
     windows = ledger.windows()
     is_sampled = record_options.samples_confidence_of(seed)
-    switching = layout.entry_switching()
-    signal = switching.confidence.name
+    signal = _signal_name(graph, layout)
     sampled_shot_count = record_options.confidence_shot_count
     return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
+
+
+def _signal_name(
+    graph: topology_graph.Machine, layout: layout_module.Layout
+) -> str:
+    """The signal's word: the entry edge's, else the recorded one's."""
+    switching = layout.entry_switching()
+    if switching is not None:
+        return switching.confidence.name
+    windows = graph.held("windows")
+    return windows.recorded_confidence.name
 
 
 def _shot_window_outcomes(
@@ -1351,7 +1366,7 @@ def _window_outcome_row(
 
 @dataclasses.dataclass(frozen=True)
 class _Verdict:
-    """What the verdict read and decided for one window; None off switching."""
+    """What the verdict read and decided for one window; None with no signal."""
 
     gap_nats: Optional[float] = None
     is_escalated: Optional[bool] = None

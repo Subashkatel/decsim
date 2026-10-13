@@ -375,10 +375,13 @@ It reads as that record: the results name the inner decoder, and a confidence si
 
 `decsim/decoders/belief_matching/decoder.py`. The belief propagation that reweights the matching graph.
 
+timing is the stated time a decode takes (IterationTime), None for the host's own time around the call.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `max_iterations` | `int` | `30` |
 | `belief_propagation_method` | `str` | `'product_sum'` |
+| `timing` | `Optional[IterationTime]` | `None` |
 
 ## decsim/decoders/belief_propagation_osd
 
@@ -1210,7 +1213,7 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 
 `decsim/windows/settings.py`. The window side's settings.
 
-scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock.
+scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock. recorded_confidence is a confidence row's Settings record (decsim/confidence/) that a run with no switching computes on every window and records, deciding nothing, so a decoder run alone gives each window's gap beside its answer; its work is charged as on a switching run. None computes none; a switching run records its own edge's signal.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -1220,6 +1223,7 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 | `terminal_policy` | `str` | `'flush'` |
 | `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Eager.Settings()` |
 | `boundary_payload` | `BoundaryPayloadSettings` | `boundary_payloads.DenseSeamMask.Settings()` |
+| `recorded_confidence` | `Optional[ports.ConfidenceSettings]` | `None` |
 
 ## decsim/windows/schemes
 

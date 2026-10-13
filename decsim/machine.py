@@ -140,7 +140,11 @@ class Machine:
             plan.device,
             formation_paths,
         )
-        signal_by_pool = escalation_build.signal_by_pool(switching_parts)
+        window_settings = graph.held("windows")
+        recorded_signal = windows_part.recorded_signal(window_settings, layout)
+        signal_by_pool = _signal_by_pool(
+            switching_parts, layout, recorded_signal
+        )
         pools = decoders_part.build_pool_units(
             layout, clock, detection_events, signal_by_pool
         )
@@ -165,7 +169,6 @@ class Machine:
             detection_events,
             links,
         )
-        window_settings = graph.held("windows")
         workload = graph.held("workload")
         windows = windows_part.Windows.build(
             window_settings,
@@ -176,6 +179,7 @@ class Machine:
             plan,
             links,
             built_models,
+            recorded_signal,
         )
         target_by_source = layout.target_by_source()
         decoder_manager = graph.held("decoder_manager")
@@ -264,7 +268,6 @@ class Machine:
         for part in switching_parts:
             part.connect(plan, readout, windows, decoders)
         escalation_build.join_the_chain(switching_parts)
-        entry_switching = None
         if switching_parts:
             entry_switching = switching_parts[0]
             # a window's solves join on the entry edge's signal alone
@@ -295,7 +298,6 @@ class Machine:
             readout=readout,
             windows=windows,
             decoders=decoders,
-            switching=entry_switching,
             seed=seed,
         )
         if graph.observation.folds_windows:
@@ -372,6 +374,24 @@ def plan_of(
     )
 
 
+def _signal_by_pool(
+    switching_parts: tuple,
+    layout: layout_module.Layout,
+    recorded_signal: Optional[ports.ConfidenceSignal],
+) -> dict:
+    """Each pool's confidence signal: its edge's, or the recorded one.
+
+    The build refuses a pool that cannot serve its signal, whether the
+    signal decides or is only recorded.
+    """
+    signals = escalation_build.signal_by_pool(switching_parts)
+    if recorded_signal is None:
+        return signals
+    entry = layout.entry_pool
+    signals[entry.pool] = recorded_signal
+    return signals
+
+
 def _seed_roots(
     plan: plan_build.Plan, links: ports.Link, parts: tuple
 ) -> tuple:
@@ -427,7 +447,6 @@ def _observe(
     readout: readout_part.Readout,
     windows: windows_part.Windows,
     decoders: decoders_part.Decoders,
-    switching: Optional[escalation_build.Switching],
     seed: Optional[int],
 ) -> observation_module.Observation:
     """Connect the run's listeners, before the workload is loaded."""
@@ -443,7 +462,6 @@ def _observe(
         readout=readout,
         windows=windows,
         decoders=decoders,
-        switching=switching,
         process_name=name,
         traffic_ledger=traffic_ledger,
         run_statistics=run_statistics,

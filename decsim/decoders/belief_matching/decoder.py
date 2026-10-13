@@ -9,9 +9,14 @@ window's projection maps them onto matching edges, PyMatching matches
 with -log(posterior) weights. The posterior clamp is 1e-15 here and
 1e-14 there. Toshio et al. 2510.25222 run belief matching as the
 accurate decoder invoked on demand.
+
+The row is timed on the host's clock, or by a stated time per BP
+iteration and a time for the matching (IterationTime), the decode's own
+iteration count deciding how many iterations it pays for.
 """
 
 import dataclasses
+import math
 from typing import Optional
 
 import ldpc
@@ -20,6 +25,7 @@ import pymatching
 import scipy.sparse
 import scipy.special
 
+import decsim.config as config
 import decsim.decoders.backend_outcome as backend_outcome
 import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.basis_split as basis_split
@@ -31,11 +37,39 @@ POSTERIOR_FLOOR = 1e-15
 POSTERIOR_CEILING = 1.0 - POSTERIOR_FLOOR
 
 
+@dataclasses.dataclass(frozen=True)
+class IterationTime:
+    """Belief matching's stated time: each BP iteration, then the matching.
+
+    A decode holds its unit for iteration_microseconds times the
+    iterations BP ran, which ldpc's BpDecoder stops at the first one
+    that converges (BpDecoder.iter), plus matching_microseconds, as the
+    matching runs on every decode. Both numbers are the run's own,
+    stated for a device; no host time enters.
+    """
+
+    iteration_microseconds: float
+    matching_microseconds: float
+
+    def __post_init__(self) -> None:
+        _check_microseconds(
+            self.iteration_microseconds, "iteration_microseconds"
+        )
+        _check_microseconds(self.matching_microseconds, "matching_microseconds")
+
+    def decode_ticks(self, iterations: int) -> int:
+        """The ticks of a decode whose BP ran this many iterations."""
+        belief_propagation = self.iteration_microseconds * iterations
+        microseconds = belief_propagation + self.matching_microseconds
+        return config.microseconds_to_ticks(microseconds)
+
+
 class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
     """Decode one hyperedge-bearing window with belief matching.
 
     Measured mode times the BP-plus-matching call only, never the
     one-time BP build, the same contract as PyMatchingDecoder's warm-up.
+    With an IterationTime, the stated time holds the unit instead.
     """
 
     fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
@@ -53,10 +87,15 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The belief propagation that reweights the matching graph."""
+        """The belief propagation that reweights the matching graph.
+
+        timing is the stated time a decode takes (IterationTime), None
+        for the host's own time around the call.
+        """
 
         max_iterations: int = 30
         belief_propagation_method: str = "product_sum"
+        timing: Optional[IterationTime] = None
         # the word the reports name this row by
         name = "belief_matching"
 
@@ -65,6 +104,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             return BeliefMatchingDecoder(
                 max_iterations=self.max_iterations,
                 belief_propagation_method=self.belief_propagation_method,
+                timing=self.timing,
             )
 
     def __init__(
@@ -72,15 +112,32 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         latency_model: Optional[decoder_module.DecoderBase] = None,
         max_iterations: int = 30,
         belief_propagation_method: str = "product_sum",
+        timing: Optional[IterationTime] = None,
     ):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
         self.max_iterations = max_iterations
         self.belief_propagation_method = belief_propagation_method
+        self.timing = timing
         self.compile_key = (
             BeliefMatchingDecoder,
             max_iterations,
             belief_propagation_method,
         )
+
+    def ticks_after_decode(
+        self,
+        result: Optional[decoding_records.DecodeResult],
+        elapsed_nanoseconds: int,
+        now: int,
+    ) -> int:
+        """The stated time of this decode's iterations, else the host's."""
+        if self.timing is None:
+            return decoder_module.WindowDecoderBase.ticks_after_decode(
+                self, result, elapsed_nanoseconds, now
+            )
+        # a window with no model runs no BP
+        iterations = result.iterations or 0
+        return self.timing.decode_ticks(iterations)
 
     def compile(
         self,
@@ -131,8 +188,10 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         """
         del model
         belief_propagation, edge_from_hyperedge = backend
+        belief_propagation.decode(syndrome)
+        iterations = int(belief_propagation.iter)
         edge_posteriors = _edge_posteriors(
-            belief_propagation, edge_from_hyperedge, syndrome
+            belief_propagation, edge_from_hyperedge
         )
         edge_weights = -numpy.log(edge_posteriors)
         check = faults.check.copy()
@@ -145,13 +204,14 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             if "perfect matching" not in str(error):
                 raise
             fault_count = faults.check.shape[1]
-            return backend_outcome.no_correction_decode(
+            no_correction = backend_outcome.no_correction_decode(
                 decoding_records.BackendDecodeStatus.INVALID_CORRECTION,
                 decoding_records.BackendFailureReason.NO_PERFECT_MATCHING,
                 fault_count,
             )
+            return dataclasses.replace(no_correction, iterations=iterations)
         correction = numpy.asarray(selected, dtype=numpy.uint8)
-        return decoding_records.WindowDecode(correction)
+        return decoding_records.WindowDecode(correction, iterations=iterations)
 
 
 def _distinct_hyperedges(physical) -> tuple:
@@ -182,9 +242,8 @@ def _distinct_hyperedges(physical) -> tuple:
     return columns, priors
 
 
-def _edge_posteriors(belief_propagation, edge_from_hyperedge, syndrome):
-    """Run BP and map hyperedge posteriors onto matching-edge posteriors."""
-    belief_propagation.decode(syndrome)
+def _edge_posteriors(belief_propagation, edge_from_hyperedge):
+    """Map the decoded BP's hyperedge posteriors onto matching edges."""
     log_likelihood_ratios = numpy.asarray(
         belief_propagation.log_prob_ratios, dtype=float
     )
@@ -192,3 +251,14 @@ def _edge_posteriors(belief_propagation, edge_from_hyperedge, syndrome):
     hyperedge_posteriors = scipy.special.expit(-log_likelihood_ratios)
     edge_posteriors = edge_from_hyperedge @ hyperedge_posteriors
     return numpy.clip(edge_posteriors, POSTERIOR_FLOOR, POSTERIOR_CEILING)
+
+
+def _check_microseconds(microseconds, field: str) -> None:
+    """A stated time is a finite number of microseconds at least zero."""
+    is_finite = config.is_number(microseconds) and math.isfinite(microseconds)
+    if is_finite and microseconds >= 0:
+        return
+    raise ValueError(
+        f"{field} must be a finite nonnegative number of microseconds "
+        f"(got {microseconds!r})"
+    )

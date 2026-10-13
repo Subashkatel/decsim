@@ -56,12 +56,21 @@ ORDINARY_FILE_MODE = 0o666
 # where Linux names the processor; another system's piece records the
 # word platform.processor gives
 PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
-# What git reads as the code: the whole checkout but its results folder.
-# A run writes run.json and the run file's copy there, which .gitignore
-# keeps tracked as evidence, so they would make every later reading
-# dirty; dirty says the code differs from its commit, and results are
-# not code.
-CODE_PATHSPEC = ("--", ".", f":(exclude){RESULTS_DIR}")
+# beside a run file: each task's core seconds a shot, which sizes a
+# launch's jobs and that no result reads (plan_command.py)
+SECONDS_FILE = "seconds_per_shot.csv"
+# What git reads as the code: the whole checkout but its results folder
+# and the launch estimates. A run writes run.json and the run file's
+# copy in results, which .gitignore keeps tracked as evidence, so they
+# would make every later reading dirty; dirty says the code differs from
+# its commit, and results are not code. The estimates are corrected
+# between launches of one folder, which refuses another tree.
+CODE_PATHSPEC = (
+    "--",
+    ".",
+    f":(exclude){RESULTS_DIR}",
+    f":(exclude,glob)**/{SECONDS_FILE}",
+)
 
 
 def run_dir_for(

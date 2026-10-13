@@ -15,7 +15,8 @@ Usage
 From this folder, on Della:
 
 ```
-decsim run windows_switching.py --slurm --out RESULTS/windows_switching/RUN
+RESULTS=/scratch/gpfs/MARTONOSI/sk2415/decoder/results/switching_study
+decsim run windows_switching.py --slurm --out $RESULTS/windows_switching/RUN
 ```
 """
 
@@ -49,7 +50,9 @@ def metadata(cell: dict, task: decsim.Task) -> dict:
     }
 
 
-stop = decsim.CollectionSettings(max_shots=constants.shots)
+stop = decsim.CollectionSettings(
+    max_shots=constants.shots, piece_rounds=constants.piece_rounds
+)
 sweep = decsim.Sweep(
     "windows_switching",
     machine,

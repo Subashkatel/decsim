@@ -13,8 +13,9 @@ Usage
 From this folder, on Della:
 
 ```
+RESULTS=/scratch/gpfs/MARTONOSI/sk2415/decoder/results/switching_study
 decsim run whole_shot_10d_rounds.py --slurm \
-    --out RESULTS/whole_shot_10d_rounds/RUN
+    --out $RESULTS/whole_shot_10d_rounds/RUN
 ```
 """
 
@@ -98,7 +99,11 @@ def _belief_matching_alone(machine: graph.Machine) -> graph.Machine:
     return without_pool.without_part(machines.WEAK_STORE)
 
 
-stop = decsim.CollectionSettings(max_shots=constants.shots)
+stop = decsim.CollectionSettings(
+    max_shots=constants.shots, piece_rounds=constants.piece_rounds
+)
+# each piece's statistics summed: the summary needs no shot's own rows
+record_options = decsim.RecordOptions(is_statistics_per_shot=False)
 sweep = decsim.Sweep(
     "whole_shot_10d_rounds",
     machine,
@@ -113,5 +118,6 @@ sweep = decsim.Sweep(
     stop=stop,
     metadata=metadata,
     constants=constants,
+    record_options=record_options,
 )
 experiment = sweep.experiment()

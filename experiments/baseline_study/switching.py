@@ -53,8 +53,9 @@ def metadata(cell: dict, task: decsim.Task) -> dict:
     """The cells under the names the collected results carry."""
     qpu = task.machine.held("qpu")
     weak, strong, strong_window = PAIRS[cell["pair"]]
+    pair = f"{cell['pair']}_{WEAK_SHORT[weak]}_to_{strong}"
     return {
-        "decoding": f"{cell['pair']}_{WEAK_SHORT[weak]}_to_{strong}_{strong_window}",
+        "decoding": f"{pair}_{strong_window}",
         "rounds_per_distance": constants.rounds_per_distance,
         "workload.arguments.physical_error_probability": cell[
             "physical_error_probability"

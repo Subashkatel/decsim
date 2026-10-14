@@ -168,7 +168,7 @@ class IsingMatchingDecoder(decoder_module.WindowDecoderBase):
         elapsed_nanoseconds: int,
         now: int,
     ) -> int:
-        """The stated time per round times the window's rounds, else the host's."""
+        """The stated per-round time times the rounds, else the host's."""
         per_round = self.settings.round_microseconds
         if per_round is None or result is None:
             return decoder_module.WindowDecoderBase.ticks_after_decode(

@@ -89,8 +89,8 @@ belief_matching:
 
 ising:                               # NVIDIA's released Fast pre-decoder, then PyMatching (ising_row.py)
   algorithm:
-    repository_path: /scratch/gpfs/MARTONOSI/sk2415/decoder/ising/Ising-Decoding   # NVIDIA/Ising-Decoding 33acb15
-    checkpoint_path: /scratch/gpfs/MARTONOSI/sk2415/decoder/ising/weights/ising_decoder_surface_code_1_fast_r9_v1.0.77_fp16.safetensors
+    repository_path: /scratch/gpfs/MARTONOSI/sk2415/decoder/ising/Ising-Decoding   # your clone of NVIDIA/Ising-Decoding, commit 33acb15
+    checkpoint_path: /scratch/gpfs/MARTONOSI/sk2415/decoder/ising/weights/ising_decoder_surface_code_1_fast_r9_v1.0.77_fp16.safetensors   # your copy, from huggingface.co/nvidia/Ising-Decoder-SurfaceCode-1-Fast
     device: cpu                      # a CPU node; the card validates GPUs, fp32 here (ising_row.py _network)
     round: 3.72us                    # Fast model plus PyMatching, d = 13, p = 0.003, GB300 + Grace (2604.12841 Table 7)
   engine:                            # Backline's measured round trip holds the loading and the unloading
@@ -101,7 +101,7 @@ ising:                               # NVIDIA's released Fast pre-decoder, then 
   pool:
     unit_count: 1                    # one GPU, chosen
 
-tesseract:                           # the reference decoder, read by tesseract_whole_shot_d_rounds.py alone
+tesseract:                           # the reference decoder, read by tesseract.py alone
   algorithm:                         # the Tesseract paper's short-beam profile (2503.10988; tesseract-decoder tesseract_sinter_compat.pybind.h)
     detector_beam: 15
     beam_climbing: true

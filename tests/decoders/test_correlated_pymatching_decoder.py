@@ -28,7 +28,8 @@ def test_the_row_predicts_what_pymatchings_correlated_decode_does():
     referee = pymatching.Matching.from_detector_error_model(
         detector_error_model, enable_correlations=True
     )
-    row = adapter.CorrelatedPyMatchingDecoder.Settings().build()
+    settings = adapter.CorrelatedPyMatchingDecoder.Settings()
+    row = settings.build()
     expected_observables = []
     decoded_observables = []
     for shot in detection_events:
@@ -48,8 +49,10 @@ def test_the_row_differs_from_plain_matching_on_some_shots():
         circuit, ROUNDS, fault_models.LINKED_FAULT_MODELS_REQUIRED
     )
     detection_events, _ = windows.sampled_shots(circuit, SHOTS, 11)
-    plain = adapter.PyMatchingDecoder.Settings().build()
-    correlated = adapter.CorrelatedPyMatchingDecoder.Settings().build()
+    plain_settings = adapter.PyMatchingDecoder.Settings()
+    plain = plain_settings.build()
+    correlated_settings = adapter.CorrelatedPyMatchingDecoder.Settings()
+    correlated = correlated_settings.build()
     differing_shots = 0
     for shot in detection_events:
         job = windows.job_for(model, shot)

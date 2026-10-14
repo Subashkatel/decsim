@@ -442,6 +442,16 @@ preset_latency_microseconds prices every decode at one fixed core latency (decod
 
 `decsim/decoders/minimum_weight_perfect_matching/decoder.py`. The row has no settings of its own.
 
+### `CorrelatedPyMatchingDecoder.Settings`
+
+`decsim/decoders/minimum_weight_perfect_matching/decoder.py`. The row as a run names it: measured, or at a preset latency.
+
+preset_latency_microseconds is PyMatchingDecoder.Settings' own.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `preset_latency_microseconds` | `Optional[float]` | `None` |
+
 ## decsim/decoders/relay_belief_propagation
 
 ### `RelayBeliefPropagationDecoder.Settings`

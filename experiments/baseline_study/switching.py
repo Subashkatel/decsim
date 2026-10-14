@@ -2,7 +2,7 @@
 
 Every pair of the list, on 10d-round memories in windows of 2d rounds
 committing d, the same seeds as alone.py. Union-find escalates on the
-extra-cluster gap and matching on the complementary gap, both at 20 dB
+cluster gap and matching on the complementary gap, both at 20 dB
 (Toshio et al. 2510.25222 Figs. 15, 16). The strong decoder re-decodes
 the escalated window (redo) or the paper's r_com + 2 r_buf rounds
 (double, Sec. III C). Each shot records its windows' switching and the
@@ -81,11 +81,6 @@ sweep = decsim.Sweep(
     stop=stop,
     metadata=metadata,
     constants=constants,
-    # the cluster gap's walk is read by alone.py only
-    allow_unread=(
-        "tesseract",
-        "tesseract_shots_from_distance_9",
-        "escalation.confidence",
-    ),
+    allow_unread=("tesseract", "tesseract_shots_from_distance_9"),
 )
 experiment = sweep.experiment()

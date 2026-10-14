@@ -6,7 +6,7 @@ The weak decoder, union-find or minimum-weight perfect matching, sits in
 the fridge and decodes every window; a window whose gap is under the
 threshold goes to the strong decoder on a host, belief matching, NVIDIA's
 Ising pre-decoder with PyMatching, or correlated matching. Union-find
-reports the extra-cluster gap (Kishi et al. 2602.03336), matching the
+reports the cluster gap (Meister et al. 2405.07433), matching the
 complementary gap (Gidney et al. 2312.04522), as Toshio et al.
 2510.25222 pair them. Every number is in constants.yaml beside this
 file, each with its source. A rotated surface code Z memory under
@@ -234,8 +234,7 @@ def switching(
 ) -> escalation_settings.SwitchingSettings:
     """The strong decoder re-decodes a window whose gap is under 20 dB.
 
-    Union-find reports the extra-cluster gap, matching the complementary
-    gap.
+    Union-find reports the cluster gap, matching the complementary gap.
     """
     settings = constants.escalation
     confidence = weak_gap(weak)
@@ -253,18 +252,13 @@ def switching(
 
 def weak_gap(weak: str) -> dict:
     """The gap the weak decoder reports, as a confidence slot reads it."""
-    # the extra growth is charged on union-find's own unit, about twice its
-    # time (2602.03336 Sec. V A); the second forced solve is a second job
-    # of the matching unit (2510.25222 Sec. II C)
+    # the cluster gap's walk is charged on union-find's own unit; the
+    # second forced solve is a second job of the matching unit
+    # (2510.25222 Sec. II C)
     if weak == "union_find":
-        return {"type": "extra_cluster_gap"}
+        settings = constants.escalation
+        return {"type": "cluster_gap", **settings.confidence}
     return {"type": "complementary_gap"}
-
-
-def cluster_gap() -> dict:
-    """Union-find's cluster gap (Meister et al. 2405.07433), for comparison."""
-    settings = constants.escalation
-    return {"type": "cluster_gap", **settings.confidence}
 
 
 def fabric() -> fabrics.RoleLinks:

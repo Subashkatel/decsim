@@ -121,7 +121,7 @@ tesseract:                           # the reference decoder, read by tesseract.
 
 escalation:
   confidence:
-    walk: 1us                        # the cluster gap's walk on the weak unit, a chosen value (2602.03336 lines 17-19)
+    walk: 1us                        # the cluster gap's walk on the weak unit, an assumption: no hardware time is published; it is a search beside the decode (2602.03336 Sec. I)
   threshold:
     threshold: 20dB                  # the paper's threshold for both the complementary and the cluster gap (2510.25222 lines 1420, 1485)
   edge:

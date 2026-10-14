@@ -218,6 +218,7 @@ def tesseract_pool() -> decoder_settings.DecoderPoolSettings:
         engine=engine,
     )
 
+
 WEAK_POOLS = {
     "union_find": union_find_pool,
     "minimum_weight_perfect_matching": matching_pool,

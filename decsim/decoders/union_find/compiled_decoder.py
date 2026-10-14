@@ -229,9 +229,23 @@ def cluster_gap(
     Infinite when the growth admits no such walk, which is what a
     window whose logical row the growth never crosses leaves behind.
     """
+    _endpoint_a, _endpoint_b, lengths = graph.edge_arrays
+    return cluster_gap_at_lengths(graph, lengths, edge_intervals)
+
+
+def cluster_gap_at_lengths(
+    graph: evidence_records.UnionFindGraph,
+    lengths: numpy.ndarray,
+    edge_intervals: tuple,
+) -> Union[int, float]:
+    """The same walk with each edge at the given length in half ticks.
+
+    The correlated cluster gap shortens some edges and keeps the growth;
+    each interval is the one the shortened edge was given.
+    """
     edge_count = len(graph.edges)
     _require_one_interval_per_edge(edge_count, edge_intervals)
-    endpoint_a, endpoint_b, lengths = graph.edge_arrays
+    endpoint_a, endpoint_b, _graph_lengths = graph.edge_arrays
     parities = graph.logical_parities
     is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
     gap = numpy.zeros(1, dtype=numpy.int64)

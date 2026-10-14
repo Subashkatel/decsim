@@ -35,6 +35,13 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
     decoder_evidence = decoding_records.CLUSTER_GROWTH_EVIDENCE
+    missing_evidence_reasons = {
+        decoding_records.DecoderEvidence.SPLIT_FAULT_PARTNERS: (
+            "union-find carries the split-fault pairs only with "
+            "split_fault_partners on, which asks each window model for "
+            "Stim's physical-to-graphlike link"
+        ),
+    }
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -47,11 +54,15 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         count (cycle_count.CycleCount) or
         cycle_count.HostMeasuredTime(). A run names one; none is
         refused, since the host's time is no hardware's and is never
-        assumed.
+        assumed. split_fault_partners builds each graph with the edges
+        every piece of a decomposed fault shortens
+        (window_decoder.split_fault_partners), which the correlated
+        cluster gap reads; the decode itself never does.
         """
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
         timing: Optional[cycle_count_module.Timing] = None
+        split_fault_partners: bool = False
         # the word the reports name this row by
         name = "union_find"
 
@@ -77,6 +88,12 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         # absolute natural-log units represented by one weight tick
         self.weight_step = settings.weight_step
         self.timing = settings.timing
+        self.split_fault_partners = settings.split_fault_partners
+        if settings.split_fault_partners:
+            self.fault_model_requirement = (
+                fault_models.LINKED_FAULT_MODELS_REQUIRED
+            )
+            self.decoder_evidence = decoding_records.CORRELATED_CLUSTER_EVIDENCE
 
     def ticks_after_decode(
         self,
@@ -94,12 +111,15 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         model: fault_models.WindowErrorModel,
     ) -> evidence_records.UnionFindGraph:
         """The immutable weighted graph of one placed model."""
-        del model
-        return window_decoder.graph_from_model(
+        graph = window_decoder.graph_from_model(
             faults,
             location="Union-Find window model",
             weight_step=self.weight_step,
         )
+        if not self.split_fault_partners:
+            return graph
+        partners = window_decoder.split_fault_partners(graph, model)
+        return dataclasses.replace(graph, split_fault_partners=partners)
 
     def decode_window(
         self,

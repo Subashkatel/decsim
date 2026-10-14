@@ -89,6 +89,10 @@ class UnionFindGraph:
     # the absolute natural-log weight one tick of an edge length is, so
     # a reader of the growth knows what its distances mean
     weight_step: float = DEFAULT_WEIGHT_STEP
+    # per fault column, the (edge index, conditional half ticks) pairs
+    # its happening shortens (window_decoder.split_fault_partners);
+    # empty when the graph was built without the linked models
+    split_fault_partners: tuple[tuple[tuple[int, int], ...], ...] = ()
 
     @functools.cached_property
     def edge_arrays(self) -> tuple:

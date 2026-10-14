@@ -12,14 +12,21 @@ zero, an edge the growth starts closed.
 The growth, the forest and the peeling run in the compiled decoder
 (compiled_decoder.py); the graph and the evidence a decode leaves behind
 are records in decsim/records/decoder_evidence.py.
+
+The graph can also carry, per fault column, the edges that column makes
+likelier when Stim splits one fault into several graphlike pieces
+(split_fault_partners), by PyMatching 2.4.0's correlated-matching rule;
+the decode never reads them, and a confidence signal does.
 """
 
+import itertools
 import math
 from typing import Optional
 
 import numpy
 
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.detector_error_model.basis_split as basis_split
 import decsim.records.decoder_evidence as evidence_records
@@ -70,6 +77,51 @@ def graph_from_model(
     )
 
 
+def split_fault_partners(
+    graph: evidence_records.UnionFindGraph,
+    model: fault_models.WindowErrorModel,
+) -> tuple:
+    """Per fault column, the edges it shortens and their new lengths.
+
+    PyMatching 2.4.0 (user_graph.cc,
+    add_decomposed_error_to_joint_probabilities and
+    populate_implied_edge_weights): for each ordered pair of pieces of
+    one decomposed error, the joint probability XOR-merges every error
+    holding both, the marginal every error holding the first, and the
+    second's conditional probability is q = min(1/2, joint / marginal),
+    its weight log((1 - q) / q). A reweight only ever lowers a weight
+    (graph.h, apply_reweights), so a pair that would not shorten its
+    edge is left out. The errors are the window's physical faults read
+    through the physical-to-graphlike link, as the correlated matching
+    row writes them for PyMatching (minimum_weight_perfect_matching
+    _correlated_model), at the same finite priors. PyMatching keys a
+    piece by its two detectors and this table by its graphlike column;
+    the two differ only where two columns share both detectors. A fault
+    likelier than one half is the graph's baseline, and its pairs are
+    left out, since its edge's length is the other side's.
+    """
+    physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
+    link = model.physical_to_graphlike_detector_projection
+    physical_priors = weights.finite_priors(physical.priors)
+    joint, marginal = _joint_probabilities(link, physical_priors)
+    edge_by_fault = {}
+    for edge_index, edge in enumerate(graph.edges):
+        edge_by_fault[edge.fault_index] = edge_index
+    partners = []
+    for _fault in range(graph.fault_count):
+        partners.append([])
+    for (cause, partner), joint_probability in joint.items():
+        edge_index = edge_by_fault.get(partner)
+        ratio = joint_probability / marginal[cause]
+        conditional = min(0.5, ratio)
+        _add_partner(graph, partners[cause], cause, edge_index, conditional)
+    sorted_partners = []
+    for pairs in partners:
+        ordered = sorted(pairs)
+        sorted_partners.append(tuple(ordered))
+    return tuple(sorted_partners)
+
+
 def decode_graph(
     graph: evidence_records.UnionFindGraph, syndrome: numpy.ndarray
 ) -> evidence_records.UnionFindHardEvidence:
@@ -104,6 +156,52 @@ def decode_graph(
         growth_steps=outcome.growth_steps,
         forest_depth=outcome.forest_depth,
     )
+
+
+def _joint_probabilities(link, physical_priors) -> tuple:
+    """Each ordered pair's joint probability and each piece's marginal."""
+    joint = {}
+    marginal = {}
+    physical_count = link.shape[1]
+    for physical_column in range(physical_count):
+        pieces = basis_split.column_rows(link, physical_column)
+        prior = float(physical_priors[physical_column])
+        for piece in pieces:
+            merged = marginal.get(piece, 0.0)
+            marginal[piece] = _xor_merged(merged, prior)
+        for pair in itertools.permutations(pieces, 2):
+            merged = joint.get(pair, 0.0)
+            joint[pair] = _xor_merged(merged, prior)
+    return joint, marginal
+
+
+def _xor_merged(first: float, second: float) -> float:
+    """The probability that exactly one of two independent faults fires."""
+    return first * (1.0 - second) + second * (1.0 - first)
+
+
+def _add_partner(
+    graph: evidence_records.UnionFindGraph,
+    pairs: list,
+    cause: int,
+    edge_index: Optional[int],
+    conditional: float,
+) -> None:
+    """Add the partner's edge at its conditional length, if shorter.
+
+    A partner with a certain residual has no edge, and a baseline fault
+    on either side adds nothing.
+    """
+    if edge_index is None:
+        return
+    edge = graph.edges[edge_index]
+    if graph.baseline_faults[cause] or graph.baseline_faults[edge.fault_index]:
+        return
+    weight = _natural_log_odds(conditional)
+    half_ticks = 2 * _quantize_weight_ticks(weight, graph.weight_step)
+    if half_ticks >= edge.length_half_ticks:
+        return
+    pairs.append((edge_index, half_ticks))
 
 
 def _natural_log_odds(residual_probability: float) -> float:

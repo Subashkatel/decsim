@@ -682,13 +682,16 @@ class DecoderEvidence(Enum):
     FORCED_CLASS_WEIGHT is the minimum weight inside a pinned logical
     class, honest only from a decoder that minimises weight inside it (Lee
     et al. 2510.05795 Sec. 2.1.1); CLUSTER_GROWTH is the graph and radii a
-    cluster decode grew (Meister et al. 2405.07433 Algorithm 2); CONSENSUS
-    is the share of an ensemble's members that vote with its majority
-    (Shutty et al. 2401.12434 Sec. V).
+    cluster decode grew (Meister et al. 2405.07433 Algorithm 2);
+    SPLIT_FAULT_PARTNERS is the edges each piece of a decomposed fault
+    makes likelier, at their conditional lengths (PyMatching 2.4.0's
+    correlated matching); CONSENSUS is the share of an ensemble's members
+    that vote with its majority (Shutty et al. 2401.12434 Sec. V).
     """
 
     FORCED_CLASS_WEIGHT = "forced_class_weight"
     CLUSTER_GROWTH = "cluster_growth"
+    SPLIT_FAULT_PARTNERS = "split_fault_partners"
     CONSENSUS = "consensus"
 
 
@@ -696,6 +699,9 @@ class DecoderEvidence(Enum):
 NO_DECODER_EVIDENCE = frozenset()
 FORCED_CLASS_SOLVES = frozenset({DecoderEvidence.FORCED_CLASS_WEIGHT})
 CLUSTER_GROWTH_EVIDENCE = frozenset({DecoderEvidence.CLUSTER_GROWTH})
+CORRELATED_CLUSTER_EVIDENCE = frozenset(
+    {DecoderEvidence.CLUSTER_GROWTH, DecoderEvidence.SPLIT_FAULT_PARTNERS}
+)
 CONSENSUS_EVIDENCE = frozenset({DecoderEvidence.CONSENSUS})
 
 

@@ -42,6 +42,7 @@ import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
+import decsim.confidence.correlated_cluster as correlated_cluster
 import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -1554,6 +1555,9 @@ WEAK_ALGORITHMS = {
     "union_find": union_find_decoder.UnionFindDecoder.Settings(
         timing=HOST_TIME
     ),
+    "union_find_split_faults": union_find_decoder.UnionFindDecoder.Settings(
+        timing=HOST_TIME, split_fault_partners=True
+    ),
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder.Settings(),
     "relay_bp": relay_bp.RelayBeliefPropagationDecoder.Settings(),
     "belief_matching": belief_matching.BeliefMatchingDecoder.Settings(),
@@ -1563,6 +1567,7 @@ WEAK_ALGORITHMS = {
 CONFIDENCE_SIGNALS = {
     "complementary_gap": complementary.ComplementaryGap,
     "cluster_gap": cluster.ClusterGap,
+    "correlated_cluster_gap": correlated_cluster.CorrelatedClusterGap,
 }
 
 
@@ -1718,6 +1723,28 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
     assert None not in soft_outputs
 
 
+def test_a_union_find_tier_with_its_split_faults_serves_the_correlated_gap():
+    """Every window of the memory carries the correlated cluster gap.
+
+    With split_fault_partners on, union-find asks its window models for
+    Stim's physical-to-graphlike link and its graphs carry the pairs
+    the gap shortens, so the machine builds and the verdict reads a gap
+    on every window. A window it escalates ends a strong request too,
+    which carries no confidence of its own.
+    """
+    settings = _switching_memory(
+        "union_find_split_faults", "correlated_cluster_gap"
+    )
+    machine, result, _decodes = _run_hearing_decodes(settings, 1)
+    assert result.terminal_status == "complete"
+    requests = machine.observation.decode_records.requests
+    assert _signal_methods(requests) == {"correlated_cluster_gap"}
+    confidences = machine.observation.confidence.windows()
+    gaps = [window.gap_nats for window in confidences]
+    assert len(gaps) == len(machine.observation.windows.windows)
+    assert None not in gaps
+
+
 @pytest.mark.parametrize(
     "weak_kind, confidence",
     [
@@ -1727,6 +1754,8 @@ def test_the_cluster_gaps_walk_is_charged_on_the_unit_that_grew_it():
         ("belief_matching", "complementary_gap"),
         ("pymatching", "cluster_gap"),
         ("tesseract", "cluster_gap"),
+        ("union_find", "correlated_cluster_gap"),
+        ("pymatching", "correlated_cluster_gap"),
     ],
 )
 def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused(
@@ -1739,7 +1768,8 @@ def test_a_weak_tier_that_cannot_serve_the_confidence_is_refused(
     belief matching could, but only on the posterior graph it matched
     on (Gidney et al. arXiv:2312.04522 lines 843-846), which is not
     built; and no row but Union-Find reports the radii the cluster gap
-    walks (pymatching 2.4.0 Matching).
+    walks (pymatching 2.4.0 Matching), nor, unless asked, the split-fault
+    pairs the correlated cluster gap shortens.
     """
     settings = _switching_memory(weak_kind, confidence)
 

@@ -131,6 +131,14 @@ fragments is a folder of the four fragments and physical.json (workload_files.re
 
 `decsim/confidence/consensus.py`. The consensus row, which takes no setting.
 
+### `CorrelatedClusterGap.Settings`
+
+`decsim/confidence/correlated_cluster.py`. Its settings: walk_microseconds prices the walk, None measures it.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `walk_microseconds` | `Optional[float]` | `None` |
+
 ### `ExtraClusterGap.Settings`
 
 `decsim/confidence/extra_cluster.py`. Its settings: walk_microseconds prices the growth, or None.
@@ -499,12 +507,13 @@ detector_beam, beam_climbing, no_revisit_detectors, priority_queue_limit and mer
 
 `decsim/decoders/union_find/decoder.py`. The union-find row's settings.
 
-weight_step is the growth resolution, the natural-log weight one tick of edge length is (Huang, Newman and Brown 2004.04693): the smaller it is, the longer every edge and the more growth iterations a decode spans. timing prices the decode: a cycle count (cycle_count.CycleCount) or cycle_count.HostMeasuredTime(). A run names one; none is refused, since the host's time is no hardware's and is never assumed.
+weight_step is the growth resolution, the natural-log weight one tick of edge length is (Huang, Newman and Brown 2004.04693): the smaller it is, the longer every edge and the more growth iterations a decode spans. timing prices the decode: a cycle count (cycle_count.CycleCount) or cycle_count.HostMeasuredTime(). A run names one; none is refused, since the host's time is no hardware's and is never assumed. split_fault_partners builds each graph with the edges every piece of a decomposed fault shortens (window_decoder.split_fault_partners), which the correlated cluster gap reads; the decode itself never does.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `weight_step` | `float` | `evidence_records.DEFAULT_WEIGHT_STEP` |
 | `timing` | `Optional[cycle_count_module.Timing]` | `None` |
+| `split_fault_partners` | `bool` | `False` |
 
 ## decsim/detector_error_model
 

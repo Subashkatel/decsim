@@ -64,7 +64,6 @@ minimum_weight_perfect_matching:     # PyMatching as the weak decoder, beside un
     unit_count: 1                    # one matching unit, chosen
 
 correlated_matching:                 # PyMatching's two-pass correlated matching as a strong decoder
-  algorithm: {}                      # no hardware number exists; the decode is timed on the host CPU
   engine:                            # Backline's measured round trip holds the loading and the unloading
     fetch_per_job: 0 cycles
     fetch_per_round: 0 cycles
@@ -123,8 +122,6 @@ tesseract:                           # the reference decoder, read by tesseract_
 escalation:
   confidence:
     walk: 1us                        # the cluster gap's walk on the weak unit, a chosen value (2602.03336 lines 17-19)
-  extra_cluster_confidence: {}       # the extra growth is charged on union-find's own unit, about 2x its time (2602.03336 Sec. V A)
-  complementary_confidence: {}       # the second forced solve is a second job of the matching unit (2510.25222 Sec. II C)
   threshold:
     threshold: 20dB                  # the paper's threshold for both the complementary and the cluster gap (2510.25222 lines 1420, 1485)
   edge:

@@ -39,7 +39,7 @@ WEAK_CELLS = {
     "union_find_extra_cluster_gap": (
         "union_find",
         extra_cluster.ExtraClusterGap.Settings,
-        constants.escalation.extra_cluster_confidence,
+        {},
     ),
     "union_find_cluster_gap": (
         "union_find",
@@ -49,7 +49,7 @@ WEAK_CELLS = {
     "minimum_weight_perfect_matching": (
         "minimum_weight_perfect_matching",
         complementary.ComplementaryGap.Settings,
-        constants.escalation.complementary_confidence,
+        {},
     ),
 }
 STRONG_CELLS = ("belief_matching", "ising", "correlated_matching")

@@ -193,7 +193,8 @@ def ising_pool() -> decoder_settings.DecoderPoolSettings:
 def correlated_matching_pool() -> decoder_settings.DecoderPoolSettings:
     """One host running PyMatching's correlated matching, timed on the host."""
     settings = constants.correlated_matching
-    algorithm = {"type": "correlated_pymatching", **settings.algorithm}
+    # no hardware number exists, so the decode is timed on the host CPU
+    algorithm = {"type": "correlated_pymatching"}
     clock = constants.clocks.chip
     engine = {"type": "Engine", "clock": clock, **settings.engine}
     return record(
@@ -252,10 +253,12 @@ def switching(
 
 def weak_gap(weak: str) -> dict:
     """The gap the weak decoder reports, as a confidence slot reads it."""
-    settings = constants.escalation
+    # the extra growth is charged on union-find's own unit, about twice its
+    # time (2602.03336 Sec. V A); the second forced solve is a second job
+    # of the matching unit (2510.25222 Sec. II C)
     if weak == "union_find":
-        return {"type": "extra_cluster_gap", **settings.extra_cluster_confidence}
-    return {"type": "complementary_gap", **settings.complementary_confidence}
+        return {"type": "extra_cluster_gap"}
+    return {"type": "complementary_gap"}
 
 
 def cluster_gap() -> dict:

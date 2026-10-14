@@ -97,6 +97,7 @@ WALL_CLOCK_POINTS = (
     "qpu_last_round_to_frame",
     "qpu_first_round_to_frame",
     "end_of_stream_reaction",
+    "conditional_reaction",
 )
 WALL_CLOCK_COLUMNS = (
     "load",

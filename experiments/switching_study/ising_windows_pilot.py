@@ -90,7 +90,7 @@ def _pymatching_alone(machine: graph.Machine) -> graph.Machine:
     pool = config.record(
         decoder_settings.DecoderPoolSettings,
         settings.pool,
-        algorithm={"type": "pymatching"},
+        algorithm={"type": "PyMatchingDecoder"},
         engine=engine,
     )
     return alone.with_record(machines.STRONG_POOL, pool)

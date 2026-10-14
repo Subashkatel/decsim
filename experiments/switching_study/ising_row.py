@@ -62,10 +62,14 @@ class IsingMatchingDecoderSettings:
     d = 13, p = 0.003, Fast model plus PyMatching); None times the call
     on the host.
 
-    layout picks among the placements of the window on NVIDIA's grid
-    that fit every stabilizer (layouts): they agree on which data qubits
-    each stabilizer checks but differ in direction, and the network was
-    trained on one gate order, so the direction matters.
+    layout names the placement of the window on NVIDIA's grid, an
+    orientation and a symmetry of the square (_square_symmetries). The
+    eight placements that fit Stim's rotated memory agree on which data
+    qubits each stabilizer checks but differ in direction, and the
+    network was trained on one gate order, so the direction matters.
+    ("XV", 6) is the one with fewest failures on 2,000 calibration shots
+    (d = 9, SD6 at p = 0.006, seed 5, ising_layouts.py): 146 against
+    PyMatching's 184, the other seven 217 to 423.
     applied_channels are the output channels whose flips are applied,
     all four as released; fewer is a diagnostic.
     """
@@ -74,7 +78,7 @@ class IsingMatchingDecoderSettings:
     checkpoint_path: str
     device: str = "cuda"
     microseconds_per_round: Optional[float] = None
-    layout: int = 0
+    layout: tuple = ("XV", 6)
     applied_channels: tuple = (0, 1, 2, 3)
     # the word the reports name this row by
     name = "ising_pymatching"
@@ -365,7 +369,16 @@ def _window_grid(
             f"no orientation of NVIDIA's d = {distance} layout matches the "
             "window's stabilizers"
         )
-    _orientation, _index, stabilizer_by_row, maps = fitting[layout]
+    chosen = None
+    for orientation, index, stabilizers, maps in fitting:
+        if (orientation, index) == layout:
+            chosen = (stabilizers, maps)
+    if chosen is None:
+        raise ValueError(
+            f"the layout {layout} does not fit the window's stabilizers; "
+            f"these do: {[fit[:2] for fit in fitting]}"
+        )
+    stabilizer_by_row, maps = chosen
     times = coordinates[:, 2].astype(int)
     first_time = times.min()
     time_by_row = times - first_time

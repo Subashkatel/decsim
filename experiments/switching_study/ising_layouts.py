@@ -47,13 +47,13 @@ def main() -> None:
     fitting = ising_row.layouts(repository, model)
     print(f"layouts that fit: {fitting}", flush=True)
     for index, layout in enumerate(fitting):
-        settings = dataclasses.replace(base, layout=index)
+        settings = dataclasses.replace(base, layout=layout)
         count = failures(settings.build(), model, events, observables)
         print(f"layout {index} {layout}: failures={count}", flush=True)
     for channels in ((), (0, 1), (2, 3)):
         settings = dataclasses.replace(base, applied_channels=channels)
         count = failures(settings.build(), model, events, observables)
-        print(f"layout 0 channels {channels}: failures={count}", flush=True)
+        print(f"channels {channels}: failures={count}", flush=True)
 
 
 def failures(row, model, events, observables) -> int:

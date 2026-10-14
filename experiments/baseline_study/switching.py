@@ -81,6 +81,11 @@ sweep = decsim.Sweep(
     stop=stop,
     metadata=metadata,
     constants=constants,
-    allow_unread=("tesseract", "tesseract_shots_from_distance_9"),
+    # the cluster gap's walk is read by alone.py only
+    allow_unread=(
+        "tesseract",
+        "tesseract_shots_from_distance_9",
+        "escalation.confidence",
+    ),
 )
 experiment = sweep.experiment()

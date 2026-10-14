@@ -6,8 +6,9 @@ compared with its decoders alone on the same shots. The weak decoders
 record their gap on every window beside its answer (window_outcomes.csv),
 deciding nothing, so which windows switching would escalate, and whether
 the weak decoder needed it, is read off this run. Union-find records the
-extra-cluster gap, the one switching uses, and, in a second cell, the
-cluster gap, to compare the two.
+cluster gap. Its extra-cluster gap, the one switching uses, is grown to
+the threshold, so a run without switching cannot build it; the
+union-find switching runs record it on every window of the same shots.
 
 Usage
 -----
@@ -27,7 +28,6 @@ import dataclasses
 import decsim
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
-import decsim.confidence.extra_cluster as extra_cluster
 import decsim.experiments.sweeps as sweeps
 import decsim.presets.machines as machines
 import decsim.topology.graph as graph
@@ -36,11 +36,6 @@ config = sweeps.load_beside(__file__, "machine.py")
 constants = config.constants
 # the weak decoders alone: the decoder and the gap each window records
 WEAK_CELLS = {
-    "union_find_extra_cluster_gap": (
-        "union_find",
-        extra_cluster.ExtraClusterGap.Settings,
-        {},
-    ),
     "union_find_cluster_gap": (
         "union_find",
         cluster.ClusterGap.Settings,

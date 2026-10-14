@@ -4,7 +4,10 @@ Meister et al. 2405.07433 Definition 9 and Algorithm 2 (lines 518-536):
 the gap is the shortest closed walk of odd logical parity through the
 edge intervals the hard decode grew (Delfosse and Nickerson 1709.06218),
 in half ticks of growth, reported as natural-log weight, the unit the
-switching threshold is held in. It reads the growth the decode returned
+switching threshold is held in. When the graph's boundary splits into
+two inequivalent ones (Kishi et al. 2602.03336 Sec. II A), the walk is
+Algorithm 2's one search from the boundary; otherwise it searches from
+every node. It reads the growth the decode returned
 (DecodeResult.cluster_evidence), so no second decode runs. The walk runs
 in C (union_find/cluster_gap.c), and its time is charged on the unit
 that produced the growth (Toshio et al. 2510.25222 lines 152-160).

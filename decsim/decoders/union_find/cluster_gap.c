@@ -8,6 +8,18 @@
  * (v, 1) on the parity-doubled node set, which is the odd closed walk
  * Meister et al. arXiv:2405.07433 Definition 9 asks for.
  *
+ * A closed walk can start at any node it visits, so when every odd
+ * closed walk passes through the boundary, the search from the
+ * boundary alone reaches that minimum. That holds exactly when the
+ * boundary splits in two (Kishi et al. arXiv:2602.03336 Sec. II A):
+ * the detector parities that split it telescope to zero round any walk
+ * that avoids the boundary, and such a walk can enter a boundary edge's
+ * chain only to turn back, crossing each of its segments twice. The
+ * search from the boundary is then Meister's Algorithm 2, the shortest
+ * path between the two boundaries. The split is checked on every call
+ * with a union-find that carries parities, and a graph that does not
+ * split is searched from every node.
+ *
  * Each source is a Dijkstra with a binary heap over those states,
  * cut off at the best walk found so far. A minimum over sources does
  * not depend on the order the sources are visited nor on the cutoff,
@@ -68,6 +80,16 @@ struct workspace {
   int32_t *heap_state;
 };
 
+/* The detectors joined by the edges off the boundary, each with its
+ * logical parity relative to its parent. Union by size keeps every tree
+ * under log2 of the detector count deep, so a root is found by walking
+ * up without compressing the path. */
+struct parity_forest {
+  int32_t *parent;
+  int32_t *tree_size;
+  uint8_t *parity_to_parent;
+};
+
 /* One source's search over the workspace's arrays. */
 struct search {
   int64_t *heap_distance;
@@ -93,6 +115,93 @@ static void release_workspace(struct workspace *workspace) {
   free(workspace->heap_distance);
   free(workspace->heap_state);
   memset(workspace, 0, sizeof(*workspace));
+}
+
+static void release_parity_forest(struct parity_forest *forest) {
+  free(forest->parent);
+  free(forest->tree_size);
+  free(forest->parity_to_parent);
+  memset(forest, 0, sizeof(*forest));
+}
+
+/* Every detector its own tree; a failed take is released by the same
+ * call that releases a whole forest. */
+static int32_t take_parity_forest(struct parity_forest *forest,
+                                  int32_t detector_count) {
+  int32_t taken = 1;
+  memset(forest, 0, sizeof(*forest));
+  forest->parent = allocate_array(detector_count, sizeof(int32_t), &taken);
+  forest->tree_size =
+      allocate_array(detector_count, sizeof(int32_t), &taken);
+  forest->parity_to_parent =
+      allocate_array(detector_count, sizeof(uint8_t), &taken);
+  if (!taken) {
+    return 0;
+  }
+  for (int32_t detector = 0; detector < detector_count; ++detector) {
+    forest->parent[detector] = detector;
+    forest->tree_size[detector] = 1;
+  }
+  return 1;
+}
+
+/* The root of a detector's tree, and the detector's parity relative to
+ * that root. */
+static int32_t find_root(const struct parity_forest *forest,
+                         int32_t detector, uint8_t *parity) {
+  uint8_t running = 0;
+  while (forest->parent[detector] != detector) {
+    running ^= forest->parity_to_parent[detector];
+    detector = forest->parent[detector];
+  }
+  *parity = running;
+  return detector;
+}
+
+/* Join an edge's two detectors so their parities differ by the edge's.
+ * Zero when they already share a tree at the other difference: the edge
+ * closes a walk of odd logical parity off the boundary. */
+static int32_t join_detectors(struct parity_forest *forest,
+                              int32_t detector_a, int32_t detector_b,
+                              uint8_t edge_parity) {
+  uint8_t parity_a = 0;
+  uint8_t parity_b = 0;
+  int32_t root_a = find_root(forest, detector_a, &parity_a);
+  int32_t root_b = find_root(forest, detector_b, &parity_b);
+  uint8_t between = parity_a ^ parity_b ^ edge_parity;
+  if (root_a == root_b) {
+    return between == 0;
+  }
+  int32_t kept = root_a;
+  int32_t joined = root_b;
+  if (forest->tree_size[root_a] < forest->tree_size[root_b]) {
+    kept = root_b;
+    joined = root_a;
+  }
+  forest->parent[joined] = kept;
+  forest->parity_to_parent[joined] = between;
+  forest->tree_size[kept] += forest->tree_size[joined];
+  return 1;
+}
+
+/* One if every edge off the boundary joins without an odd loop. */
+static uint8_t joins_without_odd_loop(struct parity_forest *forest,
+                                      int32_t edge_count,
+                                      const int32_t *endpoint_a,
+                                      const int32_t *endpoint_b,
+                                      const uint8_t *logical_parity) {
+  for (int32_t edge = 0; edge < edge_count; ++edge) {
+    int32_t detector_a = endpoint_a[edge];
+    int32_t detector_b = endpoint_b[edge];
+    if (detector_a == boundary_detector || detector_b == boundary_detector) {
+      continue;
+    }
+    if (!join_detectors(forest, detector_a, detector_b,
+                        logical_parity[edge])) {
+      return 0;
+    }
+  }
+  return 1;
 }
 
 /* Every pointer is null until it is taken, so a failed take is released
@@ -457,6 +566,38 @@ static int64_t walk_every_node(struct search *search,
   return shortest;
 }
 
+/* The search from the boundary alone when the boundary splits in two,
+ * since every odd closed walk then passes through it; otherwise the
+ * search from every node. */
+static int64_t shortest_odd_walk(struct search *search,
+                                 const struct workspace *workspace,
+                                 int32_t node_count, int32_t boundary_node,
+                                 uint8_t boundary_splits) {
+  if (boundary_splits) {
+    return shortest_odd_walk_from(search, workspace, boundary_node,
+                                  unreachable_distance);
+  }
+  return walk_every_node(search, workspace, node_count);
+}
+
+int32_t union_find_boundary_splits_in_two(int32_t detector_count,
+                                          int32_t edge_count,
+                                          const int32_t *endpoint_a,
+                                          const int32_t *endpoint_b,
+                                          const uint8_t *logical_parity,
+                                          uint8_t *splits) {
+  *splits = 0;
+  struct parity_forest forest;
+  if (!take_parity_forest(&forest, detector_count)) {
+    release_parity_forest(&forest);
+    return union_find_out_of_memory;
+  }
+  *splits = joins_without_odd_loop(&forest, edge_count, endpoint_a,
+                                   endpoint_b, logical_parity);
+  release_parity_forest(&forest);
+  return union_find_ok;
+}
+
 int32_t union_find_cluster_gap(
     int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
     const int32_t *endpoint_b, const int64_t *length_half_ticks,
@@ -474,6 +615,13 @@ int32_t union_find_cluster_gap(
   inputs.interval_lower_tick = interval_lower_tick;
   inputs.interval_upper_tick = interval_upper_tick;
   *gap_half_ticks = union_find_cluster_gap_unreachable;
+  uint8_t boundary_splits = 0;
+  int32_t status = union_find_boundary_splits_in_two(
+      detector_count, edge_count, endpoint_a, endpoint_b, logical_parity,
+      &boundary_splits);
+  if (status != union_find_ok) {
+    return status;
+  }
   struct workspace workspace;
   if (!take_edge_layout(&workspace, edge_count)) {
     release_workspace(&workspace);
@@ -490,7 +638,8 @@ int32_t union_find_cluster_gap(
   place_segments(&inputs, &workspace, node_count);
   struct search search;
   search_over(&search, &workspace, slot_count);
-  int64_t shortest = walk_every_node(&search, &workspace, node_count);
+  int64_t shortest = shortest_odd_walk(&search, &workspace, node_count,
+                                       detector_count, boundary_splits);
   release_workspace(&workspace);
   if (shortest != unreachable_distance) {
     *gap_half_ticks = shortest;

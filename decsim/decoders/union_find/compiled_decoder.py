@@ -2,7 +2,8 @@
 
 The decisions are the C files' (union_find.c grows, takes the contact
 forest and peels, and grows on for the extra-cluster gap; cluster_gap.c
-walks the quotient graph of a growth). This module lays a graph, a
+walks the quotient graph of a growth and checks whether a graph's
+boundary splits in two). This module lays a graph, a
 residual syndrome and a growth out as flat arrays, makes one call, and
 reads the outcome back as the evidence records. It uses ctypes, which is
 in the standard library; one call carries a whole window, so the
@@ -30,6 +31,7 @@ LIBRARY_VARIABLE = "DECSIM_UNION_FIND_LIBRARY"
 _DECODE_SYMBOL = "union_find_decode"
 _CLUSTER_GAP_SYMBOL = "union_find_cluster_gap"
 _EXTRA_GROWTH_SYMBOL = "union_find_extra_growth"
+_BOUNDARY_SPLIT_SYMBOL = "union_find_boundary_splits_in_two"
 
 _OK = 0
 _OUT_OF_MEMORY = 1
@@ -92,6 +94,14 @@ _CLUSTER_GAP_ARGUMENT_TYPES = [
     _TICK_ARRAY,
     _TICK_ARRAY,
     _TICK_ARRAY,
+]
+_BOUNDARY_SPLIT_ARGUMENT_TYPES = [
+    ctypes.c_int32,
+    ctypes.c_int32,
+    _INDEX_ARRAY,
+    _INDEX_ARRAY,
+    _BIT_ARRAY,
+    _BIT_ARRAY,
 ]
 _EXTRA_GROWTH_ARGUMENT_TYPES = [
     ctypes.c_int32,
@@ -245,6 +255,28 @@ def cluster_gap(
     return half_ticks
 
 
+def boundary_splits_in_two(graph: evidence_records.UnionFindGraph) -> bool:
+    """Whether the boundary splits into two inequivalent boundaries.
+
+    Kishi et al. 2602.03336 Sec. II A; when it does, cluster_gap walks
+    one search from the boundary (Meister et al. 2405.07433 Algorithm 2)
+    rather than one from every node.
+    """
+    endpoint_a, endpoint_b, _lengths = graph.edge_arrays
+    splits = numpy.zeros(1, dtype=numpy.uint8)
+    check = boundary_split_entry_point()
+    status = check(
+        graph.detector_count,
+        len(graph.edges),
+        endpoint_a,
+        endpoint_b,
+        graph.logical_parities,
+        splits,
+    )
+    _refuse_failure(status)
+    return bool(splits[0])
+
+
 def extra_growth(
     graph: evidence_records.UnionFindGraph,
     edge_intervals: tuple,
@@ -314,6 +346,12 @@ def entry_point() -> Callable[..., int]:
 def cluster_gap_entry_point() -> Callable[..., int]:
     """The cluster gap walk, bound once per process."""
     return _bound(_CLUSTER_GAP_SYMBOL, _CLUSTER_GAP_ARGUMENT_TYPES)
+
+
+@functools.cache
+def boundary_split_entry_point() -> Callable[..., int]:
+    """The boundary split check, bound once per process."""
+    return _bound(_BOUNDARY_SPLIT_SYMBOL, _BOUNDARY_SPLIT_ARGUMENT_TYPES)
 
 
 @functools.cache

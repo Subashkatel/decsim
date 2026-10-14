@@ -5,9 +5,13 @@ decsim/decoders/union_find/compiled_decoder.py. The gap it must return
 is the one decsim returned before, so cluster_gap_oracle.py, the walk
 that left decsim/confidence/cluster.py, is the oracle on every input.
 independent_cluster_gap.py, an independent reading of Meister et al.
-2405.07433 that runs one all-sources scipy Dijkstra where the other two
-run a per-node search with a running cutoff, is the second oracle on the
-Stim windows.
+2405.07433 that runs one all-sources scipy Dijkstra where the moved walk
+runs a per-node search with a running cutoff, is the second oracle on the
+Stim windows. The compiled walk searches from the boundary alone when the
+boundary splits in two (Kishi et al. 2602.03336 Sec. II A), so both
+oracles, which search from every node, hold that one search to the
+minimum over every node; every Stim window here splits, and the random
+graphs carry both kinds.
 
 The corpus is the decoder's own
 (tests/decoders/test_union_find_compiled_decoder.py): its Stim points,
@@ -101,6 +105,12 @@ LOOP_PRIORS = (0.1, 0.1)
 LOOP_OBSERVABLES = ((1, 0),)
 LOOP_EDGE_HALF_TICKS = 44
 
+# the ring again, with a boundary column on its first detector: the only
+# odd walk through the boundary goes out, round the ring and back
+TAILED_RING_CHECK = ((1, 0, 1, 1), (1, 1, 0, 0), (0, 1, 1, 0))
+TAILED_RING_PRIORS = (0.1, 0.1, 0.1, 0.1)
+TAILED_RING_OBSERVABLES = ((1, 0, 0, 0),)
+
 
 def compare_one_walk(graph, edge_intervals) -> None:
     """One growth's gap, compiled, against the walk it replaced."""
@@ -140,6 +150,7 @@ def walk_corpus_point(distance: int, probability: float, shots: int) -> None:
         weight_step=WEIGHT_STEP,
     )
     _require_the_scipy_reading_can_read(graph)
+    assert compiled_decoder.boundary_splits_in_two(graph)
     sampled, _observables = windows.sampled_shots(circuit, shots, CIRCUIT_SEED)
     for shot in sampled:
         syndrome = windows.row_syndrome(model, shot)
@@ -148,7 +159,11 @@ def walk_corpus_point(distance: int, probability: float, shots: int) -> None:
 
 
 def test_the_property_corpus_of_surface_code_windows_matches_both_walks():
-    """Eight points of Stim's rotated surface code, walk for walk."""
+    """Eight points of Stim's rotated surface code, walk for walk.
+
+    Every window's boundary splits in two, so these are the one search
+    from the boundary held to the search from every node.
+    """
     for distance, probability, shots in CORPUS_POINTS:
         walk_corpus_point(distance, probability, shots)
 
@@ -161,7 +176,8 @@ def test_the_property_corpus_of_random_small_graphs_matches_the_moved_walk():
 def test_the_property_corpus_carries_every_shape_the_walk_must_cross():
     """The random graphs reach the shapes a surface code never produces.
 
-    A growth with no odd walk at all, an edge of length zero, an edge
+    A graph whose boundary does not split, a growth with no odd walk at
+    all, an edge of length zero, an edge
     the growth closed, and an interval whose bound falls on zero or on
     the edge's length: each is a different count of segments, and the
     first segment of an edge is the one that carries the logical
@@ -174,6 +190,8 @@ def test_the_property_corpus_carries_every_shape_the_walk_must_cross():
     assert shapes["closed"] > 0
     assert shapes["bound_at_zero"] > 0
     assert shapes["bound_at_length"] > 0
+    assert shapes["boundary_splits"] > 0
+    assert shapes["boundary_splits"] < RANDOM_GRAPH_COUNT
 
 
 def test_the_shortest_odd_walk_need_not_pass_through_the_boundary():
@@ -192,6 +210,28 @@ def test_the_shortest_odd_walk_need_not_pass_through_the_boundary():
     assert first.length_half_ticks == RING_EDGE_HALF_TICKS
     assert second.length_half_ticks == RING_EDGE_HALF_TICKS
     assert third.length_half_ticks == RING_EDGE_HALF_TICKS
+    quiet = numpy.zeros(graph.detector_count, dtype=numpy.uint8)
+    result = window_decoder.decode_graph(graph, quiet)
+    gap = compiled_decoder.cluster_gap(graph, result.edge_intervals)
+    assert gap == 3 * RING_EDGE_HALF_TICKS
+    compare_one_walk_three_ways(graph, result.edge_intervals)
+
+
+def test_an_odd_ring_off_the_boundary_is_walked_from_every_node():
+    """A ring of odd parity that avoids the boundary keeps it whole.
+
+    With a boundary column on the ring, the one search from the boundary
+    would return the walk out, round the ring and back, two columns
+    longer than the ring; the boundary does not split, so the walk
+    searches from every node and finds the ring itself.
+    """
+    graph = decoder_corpus.graph_of(
+        TAILED_RING_CHECK, TAILED_RING_PRIORS, TAILED_RING_OBSERVABLES
+    )
+    tail = graph.edges[3]
+    assert (tail.detector_a, tail.detector_b) == (0, -1)
+    assert tail.length_half_ticks == RING_EDGE_HALF_TICKS
+    assert not compiled_decoder.boundary_splits_in_two(graph)
     quiet = numpy.zeros(graph.detector_count, dtype=numpy.uint8)
     result = window_decoder.decode_graph(graph, quiet)
     gap = compiled_decoder.cluster_gap(graph, result.edge_intervals)
@@ -316,6 +356,7 @@ def _random_corpus_shapes(count: int, seed: int) -> dict:
         "closed": 0,
         "bound_at_zero": 0,
         "bound_at_length": 0,
+        "boundary_splits": 0,
     }
     rng = random.Random(seed)
     for _ in range(count):
@@ -332,6 +373,8 @@ def _count_graph_shapes(shapes: dict, graph, edge_intervals) -> None:
     gap = compiled_decoder.cluster_gap(graph, edge_intervals)
     if gap == math.inf:
         shapes["unreachable"] += 1
+    if compiled_decoder.boundary_splits_in_two(graph):
+        shapes["boundary_splits"] += 1
     for edge_index, edge in enumerate(graph.edges):
         interval = edge_intervals[edge_index]
         _count_edge_shapes(shapes, edge, interval)

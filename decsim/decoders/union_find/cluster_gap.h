@@ -8,6 +8,11 @@
  * quotient; a covered stretch of an edge therefore costs nothing, and
  * covering a logical operator is a closed walk of odd parity.
  *
+ * When the boundary splits into two inequivalent boundaries (Kishi et
+ * al. arXiv:2602.03336 Sec. II A), every odd closed walk passes through
+ * it, and the walk is Meister's Algorithm 2: one search from the
+ * boundary. Otherwise it is a search from every node.
+ *
  * The caller owns every buffer and passes the growth as flat arrays,
  * the same layout the decode returned it in.
  */
@@ -44,5 +49,26 @@ int32_t union_find_cluster_gap(
     const uint8_t *logical_parity, const uint8_t *interval_is_closed,
     const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
     int64_t *gap_half_ticks);
+
+/* Whether the graph's boundary splits into two inequivalent ones.
+ *
+ * Kishi et al. arXiv:2602.03336 Sec. II A rewires the boundary edges of
+ * one side to a second boundary node, so that a path between the two is
+ * a logical operator. That split exists exactly when every closed walk
+ * that avoids the boundary has even logical parity: each detector then
+ * carries a parity of zero or one whose sum over an edge's two ends is
+ * the edge's logical parity, and a boundary edge goes to the boundary
+ * its detector's parity and its own name.
+ *
+ * The arrays are the ones union_find_cluster_gap reads. splits receives
+ * one when the split exists and zero otherwise. The return value is an
+ * enum union_find_status.
+ */
+int32_t union_find_boundary_splits_in_two(int32_t detector_count,
+                                          int32_t edge_count,
+                                          const int32_t *endpoint_a,
+                                          const int32_t *endpoint_b,
+                                          const uint8_t *logical_parity,
+                                          uint8_t *splits);
 
 #endif

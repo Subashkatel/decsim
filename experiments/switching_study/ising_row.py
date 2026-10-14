@@ -61,12 +61,21 @@ class IsingMatchingDecoderSettings:
     time per window round (2604.12841 Table 7 gives 3.72 us a round at
     d = 13, p = 0.003, Fast model plus PyMatching); None times the call
     on the host.
+
+    layout picks among the placements of the window on NVIDIA's grid
+    that fit every stabilizer (layouts): they agree on which data qubits
+    each stabilizer checks but differ in direction, and the network was
+    trained on one gate order, so the direction matters.
+    applied_channels are the output channels whose flips are applied,
+    all four as released; fewer is a diagnostic.
     """
 
     repository_path: str
     checkpoint_path: str
     device: str = "cuda"
     microseconds_per_round: Optional[float] = None
+    layout: int = 0
+    applied_channels: tuple = (0, 1, 2, 3)
     # the word the reports name this row by
     name = "ising_pymatching"
 
@@ -102,7 +111,9 @@ class IsingMatchingDecoder(decoder_module.WindowDecoderBase):
             self.settings.checkpoint_path,
             self.settings.device,
         )
-        grid = _window_grid(self.settings.repository_path, model)
+        grid = _window_grid(
+            self.settings.repository_path, model, self.settings.layout
+        )
         columns_by_rows = _columns_by_rows(faults)
         check = faults.check.copy()
         edge_weights = weights.matching_weights(faults.priors)
@@ -124,7 +135,9 @@ class IsingMatchingDecoder(decoder_module.WindowDecoderBase):
     ) -> decoding_records.WindowDecode:
         """The applied flips' columns plus the matching of what they leave."""
         del model
-        flips = _predicted_flips(backend, syndrome)
+        predicted = _predicted_flips(backend, syndrome)
+        channels = self.settings.applied_channels
+        flips = [flip for flip in predicted if flip[0] in channels]
         column_count = faults.check.shape[1]
         applied = _applied_columns(backend, flips, column_count)
         lit = faults.check @ applied
@@ -140,7 +153,7 @@ class IsingMatchingDecoder(decoder_module.WindowDecoderBase):
         selected = numpy.bitwise_xor(applied, matched)
         evidence = {
             WINDOW_ROUNDS: float(backend.grid.round_count),
-            PREDICTED_FLIPS: float(len(flips)),
+            PREDICTED_FLIPS: float(len(predicted)),
             APPLIED_FLIPS: float(applied.sum()),
         }
         return decoding_records.WindowDecode(selected, evidence=evidence)
@@ -321,8 +334,18 @@ def _columns_by_rows(faults: fault_models.PlacedFaultModel) -> dict:
     return columns
 
 
+def layouts(repository_path: str, model: fault_models.WindowErrorModel):
+    """Every (orientation, symmetry index) that fits the window's rows."""
+    coordinates = numpy.asarray(model.detector_coordinates, dtype=float)
+    distance = int(coordinates[:, 0].max()) // 2
+    type_by_row = _types_by_row(model)
+    supports = _supports_by_row(coordinates, distance)
+    fitting = _fitting_layouts(repository_path, distance, type_by_row, supports)
+    return [(orientation, index) for orientation, index, _, _ in fitting]
+
+
 def _window_grid(
-    repository_path: str, model: fault_models.WindowErrorModel
+    repository_path: str, model: fault_models.WindowErrorModel, layout: int
 ) -> _WindowGrid:
     """Place the window's rows on NVIDIA's grid by Stim's coordinates.
 
@@ -336,8 +359,13 @@ def _window_grid(
     distance = int(coordinates[:, 0].max()) // 2
     type_by_row = _types_by_row(model)
     supports = _supports_by_row(coordinates, distance)
-    layout = _layout(repository_path, distance, type_by_row, supports)
-    stabilizer_by_row, maps = layout
+    fitting = _fitting_layouts(repository_path, distance, type_by_row, supports)
+    if not fitting:
+        raise ValueError(
+            f"no orientation of NVIDIA's d = {distance} layout matches the "
+            "window's stabilizers"
+        )
+    _orientation, _index, stabilizer_by_row, maps = fitting[layout]
     times = coordinates[:, 2].astype(int)
     first_time = times.min()
     time_by_row = times - first_time
@@ -393,24 +421,19 @@ class _NvidiaMaps:
     stabilizer_by_support: tuple
 
 
-def _layout(repository_path, distance, type_by_row, supports) -> tuple:
-    """The first orientation and square symmetry under which every row fits.
-
-    Refuses a window none fits: the grid would mean nothing.
-    """
+def _fitting_layouts(repository_path, distance, type_by_row, supports):
+    """(orientation, symmetry index, stabilizers, maps) of every fit."""
     symmetries = _square_symmetries(distance)
+    fitting = []
     for orientation in ORIENTATIONS:
         maps = _nvidia_maps(repository_path, distance, orientation)
-        for symmetry in symmetries:
+        for index, symmetry in enumerate(symmetries):
             stabilizers = _stabilizers_under(
                 maps, symmetry, type_by_row, supports
             )
             if stabilizers is not None:
-                return stabilizers, maps
-    raise ValueError(
-        f"no orientation of NVIDIA's d = {distance} layout matches the "
-        "window's stabilizers"
-    )
+                fitting.append((orientation, index, stabilizers, maps))
+    return fitting
 
 
 def _stabilizers_under(maps, symmetry, type_by_row, supports):

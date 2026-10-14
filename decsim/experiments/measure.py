@@ -140,15 +140,20 @@ POINTS = (
     # -> the last correction committed at the frame, whichever window
     # holds it (end_of_stream_reaction_us)
     "end_of_stream_reaction",
+    # per conditional operation: its blocker's body done on the QPU, the
+    # end of the final syndrome round -> its own body started there, the
+    # conditional gate applied (conditional_reaction_us)
+    "conditional_reaction",
 )
 
-# the points sampled once a round or once a shot, not once a window, so
-# no committing tier names their samples
+# the points sampled once a round, a shot or a conditional operation,
+# not once a window, so no committing tier names their samples
 UNTIERED_POINTS = (
     "cwb_per_round",
     "cwb_stall_per_round",
     "csb_stall_per_round",
     "end_of_stream_reaction",
+    "conditional_reaction",
 )
 
 # One count column per status a committed window's decode may carry
@@ -745,7 +750,8 @@ def collect_samples(
     decode the frame committed, the entry edge's escalation, and the
     controller's write. Only the windows and rounds in the measurement
     interval are sampled, but for the end-of-stream reaction, which is
-    the drain the interval leaves out. It stays whole past the size
+    the drain the interval leaves out, and the conditional reaction,
+    one per operation of the program. It stays whole past the size
     prompt: one walk over the windows in key order, read top to bottom.
     """
     routes = layout.routes()
@@ -790,6 +796,7 @@ def collect_samples(
     samples["end_of_stream_reaction"] = end_of_stream_reaction_us(
         decoded, stages, qpu_send
     )
+    samples["conditional_reaction"] = conditional_reaction_us(observation)
     return samples, tuple(window_tiers)
 
 
@@ -950,11 +957,11 @@ def end_of_stream_reaction_us(
     to the frame: the conditional operation's own legs,
     frame_to_controller, the decision-to-pulse cycles and
     controller_to_qpu, run only for an operation another waits on, and
-    are not in it. Google's decoder latency (2408.13687 lines 496-499)
-    stops at the correction too, but starts at the decoder's receipt.
-    Every window of the shot counts, the measurement interval
-    notwithstanding, since the end of the stream is the drain it leaves
-    out.
+    are not in it; conditional_reaction_us holds them. Google's decoder
+    latency (2408.13687 lines 496-499) stops at the correction too, but
+    starts at the decoder's receipt. Every window of the shot counts,
+    the measurement interval notwithstanding, since the end of the
+    stream is the drain it leaves out.
     """
     if not decoded:
         return []
@@ -969,6 +976,36 @@ def end_of_stream_reaction_us(
     last_commit = max(commits)
     reaction = _span_microseconds(last_commit, final_send)
     return [reaction]
+
+
+def conditional_reaction_us(
+    observation: observation_module.Observation,
+) -> list:
+    """Each conditional operation's reaction in us, in the order they start.
+
+    A conditional operation is one another's result releases (blocked_by),
+    as a teleported T gate's S correction waits on its decoded Z
+    measurement (Skoric et al. 2209.08552 Fig. 1). Its reaction runs
+    from its blocker's body done on the QPU, the end of the final
+    syndrome round, to its own body starting there, the conditional gate
+    applied: Riverlane's full decoding response time (2410.05202 lines
+    74-79), the response time of Toshio et al. (2510.25222 lines
+    357-363) and Skoric et al.'s tau (lines 74-79). The decode, every
+    hop of the reaction path, the decision-to-pulse cycles and the wait
+    for the next cycle boundary are in it, and so is any other start
+    gate that opened later, a magic state's among them, which
+    RunResult.magic_state_stall_ticks holds alone.
+    """
+    finished_ticks = observation.runtime_stamps.body_done
+    reactions = []
+    for event in observation.command_events.events:
+        operation = event.command.operation
+        if event.kind != "STARTED" or operation.blocked_by is None:
+            continue
+        blocker_finished = finished_ticks[operation.blocked_by]
+        reaction = _span_microseconds(event.tick, blocker_finished)
+        reactions.append(reaction)
+    return reactions
 
 
 def reaction_growth_rate(

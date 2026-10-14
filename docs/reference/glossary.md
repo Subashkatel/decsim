@@ -35,7 +35,8 @@ part any reader can follow.
   read. The traffic ledger books every hop as one of the three
   (`decsim/observe/data_movement.py`).
 - **reaction time**: the time from a round's measurement to the
-  instruction that acts on its correction. It is what a run measures.
+  instruction that acts on its correction. It is what a run measures:
+  `conditional_reaction` for an operation another's result releases.
 - **tier**: which of the two decoders ran. `weak` is the fast one and
   `strong` the accurate, slower one. A machine with a weak decoder,
   switching or not, starts every window on the weak tier, and a machine

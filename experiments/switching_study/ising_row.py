@@ -57,7 +57,7 @@ class IsingMatchingDecoderSettings:
     """Where NVIDIA's code and model are, and how a decode is timed.
 
     repository_path is the Ising-Decoding checkout, checkpoint_path the
-    .safetensors file. microseconds_per_round prices a decode at that
+    .safetensors file. round_microseconds prices a decode at that
     time per window round (2604.12841 Table 7 gives 3.72 us a round at
     d = 13, p = 0.003, Fast model plus PyMatching); None times the call
     on the host.
@@ -77,7 +77,7 @@ class IsingMatchingDecoderSettings:
     repository_path: str
     checkpoint_path: str
     device: str = "cuda"
-    microseconds_per_round: Optional[float] = None
+    round_microseconds: Optional[float] = None
     layout: tuple = ("XV", 6)
     applied_channels: tuple = (0, 1, 2, 3)
     # the word the reports name this row by
@@ -169,7 +169,7 @@ class IsingMatchingDecoder(decoder_module.WindowDecoderBase):
         now: int,
     ) -> int:
         """The stated time per round times the window's rounds, else the host's."""
-        per_round = self.settings.microseconds_per_round
+        per_round = self.settings.round_microseconds
         if per_round is None or result is None:
             return decoder_module.WindowDecoderBase.ticks_after_decode(
                 self, result, elapsed_nanoseconds, now

@@ -52,7 +52,7 @@ union_find:
 
 belief_matching:
   algorithm:
-    max_iterations: 20               # beliefmatching 0.2.0's default; the paper names none (2510.25222 lines 1662-1668)
+    max_iterations: 30               # the belief matching paper's m_iter = 30 (2203.04948 App. A); 2510.25222 names none
     belief_propagation_method: product_sum
   timing:
     iteration: 1us                   # a hypothetical GPU's BP iteration, an assumption
@@ -87,7 +87,7 @@ escalation:
   confidence:
     walk: 1us                        # the cluster gap's walk on the weak unit, a chosen value (2602.03336 lines 17-19)
   threshold:
-    threshold: 20dB                  # the paper's threshold for union-find with the cluster gap (2510.25222 lines 1485, 1497)
+    threshold: 20dB                  # the paper's threshold for both the complementary and the cluster gap (2510.25222 lines 1420, 1485)
   edge:
     threshold_cycles: 1 cycle        # one compare, an estimate
     switch: 1 cycle                  # one state change, an estimate
@@ -112,7 +112,7 @@ gpu_link:                            # the FPGA controller to a GPU over RoCE v2
   cable:
     round_trip: 4.5us                # median round trip, measured (2609.09270 line 1632)
     echo_payload: 128 bits           # the 16-byte payload the echo carried
-    capacity: 100000 bits/us         # a 100 Gb/s Ethernet link to the host's NIC (2510.25213 line 382)
+    capacity: 100000 bits/us         # the 100 Gb Direct Attach Copper cable to the host's NIC (2609.09270 Sec. V-A)
   host_local:
     latency: 0us                     # the GPU polls the buffer the write landed in, in its own memory
 

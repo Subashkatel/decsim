@@ -2875,6 +2875,9 @@ DECODER_ROWS = {
     "unweighted_pymatching": (
         minimum_weight_perfect_matching.UnweightedPyMatchingDecoder
     ),
+    "correlated_pymatching": (
+        minimum_weight_perfect_matching.CorrelatedPyMatchingDecoder
+    ),
     "belief_matching": belief_matching.BeliefMatchingDecoder,
     "union_find": union_find.UnionFindDecoder,
     "tesseract": tesseract.TesseractDecoder,

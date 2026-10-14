@@ -8,7 +8,7 @@ and the network's average predicted and applied flips. Runs on a GPU
 node from the decsim checkout:
 
     PYTHONPATH=. python experiments/switching_study/ising_check.py \\
-        REPOSITORY CHECKPOINT SHOTS
+        REPOSITORY CHECKPOINT SHOTS [DEVICE]
 """
 
 import pathlib
@@ -33,8 +33,11 @@ POINTS = ((9, 0.003), (9, 0.006), (13, 0.003), (13, 0.006))
 def main() -> None:
     repository, checkpoint, shot_text = sys.argv[1:4]
     shots = int(shot_text)
+    device = "cuda"
+    if len(sys.argv) > 4:
+        device = sys.argv[4]
     settings = ising_row.IsingMatchingDecoder.Settings(
-        repository_path=repository, checkpoint_path=checkpoint
+        repository_path=repository, checkpoint_path=checkpoint, device=device
     )
     for distance, probability in POINTS:
         check_point(settings, distance, probability, shots)

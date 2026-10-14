@@ -501,7 +501,12 @@ def _network(repository_path: str, checkpoint_path: str, device: str):
         checkpoint_path, device=device
     )
     network.eval()
-    return network
+    if device != "cpu":
+        return network
+    # the weights are fp16; a CPU runs the same weights in fp32, since
+    # the card validates GPUs only and CPU half-precision 3D convolution
+    # is slow where PyTorch has it at all
+    return network.float()
 
 
 def _import_path(repository_path: str) -> None:

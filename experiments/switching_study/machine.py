@@ -54,19 +54,22 @@ def machine(
     physical_error_probability: float,
     rounds_per_distance: int,
     strong_window: str = "redo_window",
+    strong: str = "belief_matching",
 ) -> graph.Machine:
     """The whole switching machine at one d, p and shot length.
 
-    strong_window is the shape belief matching re-decodes: redo_window,
-    the window union-find decoded, or double_window, the paper's
-    r_com + 2 r_buf rounds (2510.25222 Sec. III C).
+    strong_window is the shape the strong decoder re-decodes:
+    redo_window, the window union-find decoded, or double_window, the
+    paper's r_com + 2 r_buf rounds (2510.25222 Sec. III C). strong names
+    the strong decoder, belief_matching or ising.
     """
     weak = union_find_machine(
         distance, physical_error_probability, rounds_per_distance
     )
     edge = switching(strong_window)
-    strong = belief_matching_pool()
-    return machines.with_strong_tier(weak, strong, edge)
+    pool = STRONG_POOLS[strong]
+    strong_pool = pool()
+    return machines.with_strong_tier(weak, strong_pool, edge)
 
 
 def union_find_machine(
@@ -161,6 +164,26 @@ def belief_matching_pool() -> decoder_settings.DecoderPoolSettings:
     )
 
 
+def ising_pool() -> decoder_settings.DecoderPoolSettings:
+    """One unit running NVIDIA's pre-decoder, then PyMatching (ising_row.py).
+
+    The row is named by its import path, so this folder is on the path
+    of every process that builds it.
+    """
+    settings = constants.ising
+    algorithm = {
+        "type": "ising_row.IsingMatchingDecoder.Settings",
+        **settings.algorithm,
+    }
+    clock = constants.clocks.chip
+    engine = {"type": "Engine", "clock": clock, **settings.engine}
+    return record(
+        decoder_settings.DecoderPoolSettings,
+        settings.pool,
+        algorithm=algorithm,
+        engine=engine,
+    )
+
 
 def tesseract_pool() -> decoder_settings.DecoderPoolSettings:
     """One Tesseract unit, the reference decoder, on the paper's profile."""
@@ -174,6 +197,9 @@ def tesseract_pool() -> decoder_settings.DecoderPoolSettings:
         algorithm=algorithm,
         engine=engine,
     )
+
+STRONG_POOLS = {"belief_matching": belief_matching_pool, "ising": ising_pool}
+
 
 def switching(
     strong_window: str = "redo_window",

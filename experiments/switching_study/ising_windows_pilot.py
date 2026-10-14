@@ -117,6 +117,12 @@ sweep = decsim.Sweep(
     stop=stop,
     metadata=metadata,
     constants=constants,
-    allow_unread=("tesseract", "belief_matching"),
+    allow_unread=(
+        "tesseract",
+        "belief_matching",
+        "shots",
+        "distances",
+        "physical_error_probabilities",
+    ),
 )
 experiment = sweep.experiment()

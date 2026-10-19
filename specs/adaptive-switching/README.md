@@ -57,8 +57,9 @@ basic case. Tick a box only when its check has passed.
 
 ### Step 5: inner loop, hold a target escalation rate (slice 05)
 
-- [ ] Rate tracker without audits, warm start from a lookup table
-- [ ] Refuse the two broken combinations (extra cluster gap with a moving threshold; deadlines with the online controller)
+- [x] Rate tracker without audits, warm start from the calibration table: `threshold_sources.RateThreshold`
+- [x] Refuse the two broken combinations (extra cluster gap with a moving threshold; deadlines with a learning threshold): `build/escalation.py`, `tests/build/test_escalation.py`
+- [ ] Tracking and accuracy on held-out shots: achieved share against target, and error rate against the static threshold at the same share
 
 ### Step 6: outer loop, set the target from lag (slice 06)
 

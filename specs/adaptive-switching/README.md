@@ -60,6 +60,7 @@ basic case. Tick a box only when its check has passed.
 - [x] Rate tracker without audits, warm start from the calibration table: `threshold_sources.RateThreshold`
 - [x] Refuse the two broken combinations (extra cluster gap with a moving threshold; deadlines with a learning threshold): `build/escalation.py`, `tests/build/test_escalation.py`
 - [ ] Tracking and accuracy on held-out shots: achieved share against target, and error rate against the static threshold at the same share
+- [x] Mid-stream change in p: `experiments/basic_case/drift.py`, `drift_plots.py` (evidence ledger)
 
 ### Step 6: outer loop, set the target from lag (slice 06)
 
@@ -214,6 +215,24 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 - [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
 ## Evidence ledger
+
+- Drift run on 2026-10-19 (`experiments/basic_case/drift.py`, job
+  15824064: a d = 5 and a d = 7 stream of 20,000 rounds, 5 seeds each, p
+  stepping from 0.002 to 0.003 at round 10,000, the decoders keeping
+  0.002's models). The fixed threshold calibrated to escalate 10% at
+  0.002 escalates 8 and 9% before the step and 17% after, past q* at
+  0.003 (11.5 and 14.2%): the weak tier's reaction then grows 0.37 (d =
+  5) and 0.20 (d = 7) us per us of stream and averages 1,980 and 1,108 us
+  over the second half. RateThreshold (target 10%, step 0.25 dB) holds
+  9.9 and 10.0% before; after, its threshold falls from about 21 dB
+  toward the 15 dB calibrated at 0.003 over 2,000 to 5,000 rounds, the
+  share is 11.2 and 11.8% over the second half, and the reaction
+  averages 735 and 134 us. At d = 7 the reaction stops growing (-0.01);
+  at d = 5 the 10% target sits just under q* = 11.5%, so the backlog the
+  transient built still grows (0.08): a target the inner loop holds is
+  not by itself a target the chain sustains, which is step 6's question.
+  Before the step, the stream's 8 to 9% against the 10% calibrated on
+  shots is the shot-boundary windows calibration counted.
 
 - Threshold sweep on 2026-10-19 (`experiments/basic_case/threshold_sweep.py`,
   seeds 0 to 19,999, d = 5 and 7, 0 to 50 dB): the 20 dB cell repeats the

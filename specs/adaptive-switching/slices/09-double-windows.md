@@ -2,36 +2,46 @@
 
 ## Question
 
-What does double-window recovery change in correctness, useful work, boundary
-dependencies and late-result behavior compared with the verified sliding case?
+With belief matching as the strong decoder, what does the paper's double
+window change in correctness, work and latency compared with ordinary redo?
 
-## Deliverable and ownership
+## Current state
 
-A separate experiment using the existing strong-window planner and ownership
-ledger. Keep the ordinary sliding baseline available for comparison.
+- The double window exists (`escalation/strong_window_shapes.py`): on
+  escalation the strong region covers r_com + 2 r_buf rounds from the escalated
+  commit, reads only its commit rounds with both faces pinned (the far face on
+  the restart window's weak commit), absorbs the next two weak windows even
+  if they were confident, and uses eager boundaries so the weak chain keeps
+  committing.
+- It is not the default; Experiment 1 (`experiments/switching_baseline`,
+  `decsim/presets/experiment_one.py`) used it with the Relay-BP measured table
+  and kept unconverged answers. Those results are not reused.
+- Belief matching always runs matching after BP, so every decode returns a
+  valid answer; BP non-convergence costs time, not answers.
+- A scratch check found the double window with every window escalated differs
+  from strong-only (11 of 150 shots at d = 3, 8 of 60 at d = 5): it is a
+  different decoding problem, not a re-decode of the same one.
 
 ## Work
 
-1. Derive actual strong read/commit extents and both boundary dependencies from
-   the chosen scheme. Audit absorbed/restarted weak windows and retained rounds.
-2. Repeat tiny correctness and deterministic timing fixtures before any sweep.
-3. Extend the supplied timing profile for the actual strong job geometries;
-   do not price a larger strong region as an ordinary redo window by default.
-4. Define separate counts for trigger events, strong jobs, covered rounds and
-   service work. A 1% trigger fraction is not a 1% work fraction.
-5. Evaluate fixed threshold, calibrated static routing and only then adaptation.
-   Revisit late results and gate-consumer dependencies explicitly.
+1. Re-run the slice 01 fixtures and the slice 03 oracle for the double window
+   with belief matching.
+2. Extend the timing table for 3d-round strong windows; do not price them as
+   ordinary redo windows.
+3. Count trigger events, strong jobs, covered rounds and service work
+   separately; a 1% trigger fraction is not a 1% work fraction.
+4. Check Theorem 1 (Eqs. 14–15, 18) in stream mode under its linear-service
+   assumption, then with real belief-matching service.
+5. Compare whole-shot, ordinary-redo and double-window LER on the same
+   physical shots, and the static and adaptive policies from 04–06.
 
 ## Gate and evidence
 
-Require unique logical ownership, valid boundary pins, no deadlock, reconciled
-coverage and all costs charged. Match a small example to the paper's geometry
-before comparing its backlog equations under their stated linear-service
-assumption. Compare whole-shot, sliding and double-window LER on the same
-physical workload without assuming their boundary-conditioned inputs are equal.
+Unique ownership, valid pins, no deadlock, reconciled coverage, all costs
+charged. Theorem 1's boundary reproduced under its assumptions.
 
 ## Scope boundary
 
-No inherited audit-based controller assumptions and no automatic reuse of the
-ordinary-window denominator or calibration table. A later response can remain
-on the critical path even if the weak decoder advances independently.
+No reuse of the ordinary-window calibration table or denominator. A late
+strong result can still sit on a gate's critical path even though the weak
+chain advances.

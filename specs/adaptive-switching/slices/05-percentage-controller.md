@@ -1,46 +1,54 @@
-# 05 Percentage controller
+# 05 Rate controller
 
 ## Question
 
-Can we target a specified fraction of windows online, and separately enforce
-the precise admission limit the user chooses?
+Can the threshold be adjusted online so the system escalates a target
+fraction of windows, without simulator truth and without audits?
 
 ## Deliverable and ownership
 
-An audit-free candidate-rate tracker and a separately testable optional quota.
-Integrate at the existing escalation decision boundary. Reuse the useful rate
-recursion if verified; do not rebuild the engine or window manager.
+An audit-free threshold source built from the existing rate tracker, warm
+started from the slice 04 calibration table, plus an optional hard cap.
+It integrates at the existing decision boundary (`ThresholdSource.decide_keep`).
+
+## Current state
+
+`OnlineThreshold` (`escalation/threshold_sources.py`) combines
+`EscalationRateTracker` (escalate if `gap < threshold`, then
+`threshold += step × (target − escalated)`, unclipped) with an audit lane
+whose label is weak/strong disagreement and a slow loop driven by those
+audits. One instance persists across a task's shots; each shot rebuilds the
+machine. Known problems:
+- extra cluster gap freezes its growth limit at the starting threshold, so a
+  rising online threshold reads gaps as infinite and under-escalates;
+- escalations forced by a late result under the deadline row skip the
+  tracker, so realized duty exceeds the target;
+- the audit label is disagreement, not correctness.
 
 ## Work
 
-1. Define an eligible window as one first weak result per original window.
-   Retries and changed geometry require explicit later accounting.
-2. Exercise the tracker on synthetic scores before real held-out score replay.
-   For `escalate if gap < threshold`, use `threshold += step *
-   (target_fraction - candidate_escalated)` after each observation.
-3. Keep rate targets fixed first. Track score ties, startup, abrupt score shifts
-   and unachievable fractions from infinite/missing scores without claiming
-   distribution-free exact finite-interval control.
-4. If a hard 1% cap is selected, use integer credit: start at zero, earn one
-   unit per eligible window, spend 100 per admission, and retain at most
-   `100 * allowed_burst` units. A candidate without credit keeps the weak result.
-5. Count candidate, admitted and budget-denied windows separately. Scope state
-   across a task or continuous stream, not independently per short shot.
-6. Migrate callers/tests before removing the old audit-based online source.
-   Keep one supported owner per behavior and no deprecated compatibility path.
+1. New source: rate tracker only, with bounds on the threshold, start value
+   from the calibration table for (distance, p, target).
+2. Count eligible, candidate, admitted and denied windows separately.
+   Every path that starts strong work counts toward the budget.
+3. Optional hard cap with integer credit: start at zero, earn one unit per
+   eligible window, spend `1 / target` units per admission, hold at most an
+   allowed burst. A candidate without credit keeps the weak result.
+4. Refuse the combinations that break it: extra cluster gap with a moving
+   threshold, deadline-forced escalation without counting.
+5. Run in stream mode (state lives with the machine) and in collect mode
+   (state shared across shots) and compare.
+6. Migrate callers and tests off the audit source before removing it.
 
 ## Gate and evidence
 
-Verify exact decisions on small score sequences and the fixed-rate prefix
-bound `admissions(N) <= floor(N / 100)` with zero startup credit. Verify the
-separate burst bound, not a false promise of 1% in every rolling interval.
-Record unused quota and startup bias. Empirically evaluate approximate tracking
-with a declared tolerance and duration on calibration-independent traces, then
-run the live simulator to expose changed downstream window inputs.
+Exact decisions on small synthetic score sequences. Tracking error against
+target on held-out replayed scores, including a mid-stream change in p.
+At steady state the controller's LER equals the static threshold's LER at the
+same achieved fraction (the controller costs no accuracy). The cap bound
+`admissions(N) ≤ floor(N × target) + burst` holds.
 
 ## Scope boundary
 
-A target is not a hard cap, a window fraction is not service-time utilization,
-and the online rule cannot know the worst future 1%. No audit mechanism or
-simulator-truth feedback. Budget denials must not corrupt candidate-rate
-learning or silently become strong-correctness labels.
+A target is not a cap; a window fraction is not strong-unit busy time; the
+tracker cannot know which future windows are worst. No audits, no truth.

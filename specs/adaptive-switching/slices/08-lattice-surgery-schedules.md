@@ -2,39 +2,56 @@
 
 ## Question
 
-Can an external logical schedule drive the verified timing path without losing
-patch ownership, operation durations or classical feedforward dependencies?
+Can real lattice-surgery schedules drive the decoding system, so gate
+deadlines, decoder load and stall tails come from actual programs rather than
+a synthetic chain?
 
-## Deliverable and ownership
+## Current state
 
-One importer at the existing frontend/program boundary. Select a compiler by
-its actual exported semantics before implementation; do not build a compiler
-inside the simulator. Candidate resources are linked in the [plan](../README.md).
+- A schedule lands as a `decsim.ops/1` operation list
+  (`frontends/workload_files.py`): each operation has `kind`
+  (MERGE/INJECT/MEASURE), `rounds`, `patches`, `predecessors` and
+  `blocked_by`. Round counts per kind come from `qpu/round_policies.py`.
+- One operation is one decoding problem, so a merge is decoded jointly.
+- decsim builds no merged circuit (`frontends/circuit_frontend.py`). With no
+  circuit, a merge is timing-only, sized by patch count plus a seam.
+- A workload holds one stream with one protected region; the critical-path
+  scheduler refuses streams.
+- Patches waiting on a decision send rounds with no syndrome values: decoder
+  load without real syndromes.
+- In a timing-only run there are no gaps, so escalation decisions need a
+  score source: replayed gaps from memory runs or synthetic gaps.
 
 ## Work
 
-1. Audit supported exports for operation IDs, patch/ancilla placement,
-   merge/split intervals, QEC-round durations, outcome identities and dependency
-   edges. Keep unavailable semantics explicit rather than invent them.
-2. Validate a published small lattice-surgery CNOT schedule as a geometry and
-   timing fixture. Then add a supported injection/feedforward schedule or an
-   independently documented explicit dependency overlay.
-3. Map resources and syndrome streams through joint patch operations; a merge
-   is not automatically three independent decoder problems.
-4. Preserve protected memory during schedule stalls and distinguish scheduled
-   starts from starts shifted by classical feedback.
-5. Test a small algorithmic schedule only after the local fixtures agree.
+### 08a: timing through lattice surgery
+
+1. Choose a compiler by what its export actually contains: operation ids,
+   patch placement, merge/split durations in rounds, and which dependencies
+   are classically conditioned. Only conditioned dependencies become
+   `blocked_by`; a plain dependency graph does not say which ones wait on a
+   decode.
+2. Importer at the frontend boundary into `decsim.ops/1`.
+3. Score source for timing-only runs: replay per-window gaps from slice 04
+   runs at the matching distance and p, labeled as replayed.
+4. Validate a small published schedule (a lattice-surgery CNOT, then a T
+   injection with its conditioned S) against an ideal-classical-cost reference,
+   then add the slice 02 timing and explain every extra wait.
+5. Run a small algorithm schedule with the slice 06 loop reading gate stalls.
+
+### 08b: real syndromes through merges
+
+Only if the paper needs LER through lattice-surgery operations (open
+decision). Needs a merged physical circuit from an external tool, fed as
+stream segments, and support for more than one stream or protected region.
 
 ## Gate and evidence
 
-Record compiler/revision and source schedule. Match patch occupancy, rounds,
-dependency graph and expected completion in an ideal-classical-cost reference.
-Then add supplied hardware costs and explain every additional wait. Compare
-like-for-like with an external schedule or published timing model; different
-decoder, noise and hardware assumptions prevent a claim of paper replication.
+Patch occupancy, rounds and dependencies match the source schedule. Every
+wait beyond the ideal reference is attributed to a decoder, link or factory.
+Compiler name and revision are recorded.
 
 ## Scope boundary
 
-An importer that lacks outcome dependencies cannot establish T-gate timing.
-Do not promise arbitrary algorithm correctness or infer complete T support
-from a CNOT example or the ability to export a Stim circuit.
+A CNOT example or a Stim export does not establish T-gate support. Replayed
+gaps are not real gaps of the merged problem.

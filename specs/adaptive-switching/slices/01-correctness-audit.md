@@ -1,42 +1,46 @@
-# 01 Correctness audit
+# 01 Correctness
 
 ## Question
 
-Are the weak, strong and switching answers correct on the intended inputs,
-and can every reported failure and escalation be accounted for?
+Does switching decode correctly, and does each piece match an independent
+reference?
 
 ## Deliverable and ownership
 
-A paired diagnostic report using the frontend's sampled input identities,
-decoder outcomes, window ledger and final logical observable. Existing anchors
-include `tests/observe/test_window_outcomes.py` and
-`tests/escalation/test_strong_redecode.py`; inspect their contracts before reuse.
+Repo tests that pin the switching contract, plus a short report from the pilot.
+Existing anchors: `tests/escalation/test_switching_mode.py` (never
+escalate equals weak alone), `tests/observe/test_window_outcomes.py`,
+`tests/escalation/test_strong_window_shapes.py`.
 
 ## Work
 
-1. Begin with noiseless and hand-selected error fixtures, then a small fixed
-   random sample at the pilot point.
-2. Validate belief matching against the pinned reference implementation on
-   identical adapted window inputs. Compare union-find evidence with an
-   independent existing reference where available.
-3. Run weak alone, strong alone and fixed switching on the same physical samples
-   and documented geometry. Record boundary differences rather than hide them.
-4. For identical-input counterfactuals, count both correct, weak-only correct,
-   strong-only correct and both wrong. Record final shot outcomes separately.
-5. Check forced-keep and forced-escalate single-window cases against direct
-   decodes. Diagnose disagreements before increasing sample size.
+1. **Equivalence tests (new, the main deliverable).** Under ordinary redo
+   on the slice 00 geometry, shot for shot on fixed seeds:
+   - threshold unreachable (every window escalates) equals strong-only;
+   - threshold zero (no window escalates) equals weak-only.
+   A scratch run already found 0 of 215 differing shots at d = 3 and 5. The
+   existing `test_unreachable_threshold_escalates_every_window` checks only
+   transfer counts, not predictions.
+2. **Belief matching reference.** On identical window inputs, decsim's
+   adapter matches the pinned `beliefmatching` package's predictions.
+3. **Cluster gap reference.** On small hand-built and sampled windows, the gap
+   equals an independent Dijkstra on the quotient graph G/C between
+   inequivalent boundaries (the paper's Sec. II.3 definition), in the same
+   units (`cluster.py` reports nats; 20 dB ≈ 4.605 nats).
+4. **Count reconciliation.** At every pilot point, eligible windows, escalated
+   windows, strong commits and shots reconcile with the manifest.
+5. **Outcome classes.** For escalated windows, count fixed, unneeded, broken
+   and both-wrong from the per-window records (`record_window_outcomes`).
 
 ## Gate and evidence
 
-Require exact agreement on logical observables for deterministic reference
-fixtures, no missing/duplicate commits, and reconciled window/shot counts.
-Store seeds, sample/model hashes, gap, threshold, policy decision and output.
-An error identity is not a unique correction. Per-window labels do not replace
-the final shot failure metric. Report disagreements and statistical uncertainty.
+Equivalence tests pass in CI. Belief matching and gap agree with their
+references exactly on deterministic fixtures. Any disagreement is diagnosed
+before sample sizes grow.
 
 ## Scope boundary
 
-Simulator truth is for evaluation only. No strong-perfect assumption, online
-audit labels, controller tuning or claim that independently windowed results
-are interchangeable. Whole-shot decoding is an accuracy reference with a
-different decoding problem, not an equality oracle for windowed decoding.
+Window labels are local and do not replace shot failure. Independently
+windowed weak-only and strong-only runs see different predecessor boundaries,
+so per-shot union bounds across them are not claimed. Whole-shot decoding is
+the paper's accuracy reference, not an equality oracle for windows.

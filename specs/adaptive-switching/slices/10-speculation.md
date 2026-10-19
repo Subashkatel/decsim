@@ -1,42 +1,49 @@
 # 10 Speculation
 
-Status: deferred until the baseline and gate-feedback gates pass.
+Status: last slice, started after 00–09 pass. Part of the paper's second
+contribution.
 
 ## Question
 
-Does a defined speculative hybrid policy improve useful completion and gate
-response after paying for verification, invalidated work and recovery?
+Does speculative hybrid decoding improve gate response and throughput after
+paying for verification, wasted work and recovery?
 
-## Deliverable and ownership
+## Current state
 
-A separate proposal and study on the verified runtime. First distinguish
-parallel weak/strong execution from downstream-window speculation using a
-provisional boundary. They have different work and recovery costs.
+- `Switching(run_both_at_once=True)` is the paper's Step 1: the strong decode
+  starts beside the weak one and is cancelled on keep (`escalation/policies.py`,
+  `decoders/decoder_manager.py`).
+- The deadline row (`escalation/deadlines.py`) starts a strong decode early
+  when slack runs low or the source queue is deep (DART-Q triggers). It
+  cannot be combined with `run_both_at_once`.
+- Serial switching refuses provisional boundaries, so no later window moves
+  ahead on a weak answer; operation results are delivered only when every
+  window is final.
+- A speculative start cannot depend on the gap, because the gap exists only
+  after the weak decode ends.
+- Aborting a running strong job frees its unit instantly, which overstates
+  capacity; a cancellation cost belongs in the timing table.
 
 ## Work
 
-1. State exactly what is provisional: boundary payload, logical frame update,
-   or a quantum operation. Begin with classical-window speculation only.
-2. Define the architectural verifier result without claiming it is perfect
-   ground truth. Label both-decoder failures in separate simulation evaluation.
-3. Specify dependent-window invalidation, checkpoints, re-decoding, result
-   replacement and finalization. Distinguish logical-only revisions from
-   boundary changes that affect downstream work.
-4. Include verification traffic, duplicated compute, cancellation semantics,
-   queue contention, recovery work and the last unresolved result at a gate.
-5. Compare with non-speculative hybrid routing and an applicable SWIPER
-   baseline under matched schedules/resources, after reading its actual method.
+1. Define what is provisional: the boundary passed to the next window, the
+   frame update, or the gate release. Start with classical boundaries only.
+2. Provisional boundaries in serial mode, with invalidation and re-decode of
+   dependent windows when the strong answer differs.
+3. Selective speculation: speculate only on ambiguous windows, using a
+   signal available before or early in the weak decode, or on slack.
+4. Charge verification traffic, duplicated compute, cancellation, recovery
+   and the last unresolved result at each gate.
+5. Compare with non-speculative switching and with SWIPER under matched
+   schedules and resources, after reading SWIPER's method.
 
 ## Gate and evidence
 
-Use injected boundary mismatches and logical-only revisions to verify recovery
-and final outcomes. Require no consumer to use unresolved speculative state
-under the initial model. Report useful throughput, LER where supported, wasted
-work, recovery frequency, tail response and gate stalls. A fast provisional
-answer is not an early finalized correction.
+Injected boundary mismatches recover to the correct final outcome. No gate
+consumes unresolved speculative state. Report useful throughput, wasted
+work, recovery frequency, stall tails and LER.
 
 ## Scope boundary
 
-No speculative execution of irreversible quantum operations in this first
-study. Double-window speculation additionally depends on slice 09. Retain a
-negative result if strong verification or recovery erases the proposed gain.
+No speculative execution of quantum operations in the first study. A
+negative result is kept if recovery erases the gain.

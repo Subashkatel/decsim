@@ -1,271 +1,219 @@
 # Adaptive switching implementation plan
 
-Status: proposed implementation plan. No simulator changes or experimental
-validation have been performed for this plan.
+Status: proposed plan, revised against a full read of the current code and of
+Toshio et al. (arXiv:2510.25222v1). No implementation slice has started.
 
-Planning checkout: `decsim_adaptive`, branch `adaptive-decoding-plan`, based on
-local `main` at `75f157bed3e4d89a67d07491e0fdb25e38b89e7b`.
+Planning checkout: `decsim_adaptive`, branch `adaptive-decoding-plan`.
+Run tests with `../venv/bin/python -m pytest` (Python 3.13); the `python` on
+PATH is 3.9 and cannot import `decsim`.
 
 ## Goal
 
-Establish whether union-find and belief-matching switching has a useful
-correctness and timing trade-off, then build an understandable controller
-that adjusts escalation to the available capacity and feedforward deadlines.
-Use editable hardware timing inputs and the same event path for timing-only
-and real-decoding experiments. Advance only after each slice's gate passes.
+Build a hybrid decoding system (union find + cluster gap on every window,
+belief matching on escalated windows) whose escalation adapts so the system
+keeps up with the QPU and delivers corrections before the operations that
+need them, and report the correctness that costs. Every timing number comes
+from supplied hardware timing, never from the host running the simulation.
 
-## Next Agent Prompt
+## To-do list
 
-The user requested planning before implementation. Start by reviewing
-[slice 00](slices/00-baseline-contract.md) with the user. Confirm unresolved
-baseline choices, then materialize its configuration when implementation is
-requested. Do not launch the production grid, remove the old online controller,
-or implement later slices merely because this plan exists. Read the active
-checkout's `STYLE.md` before changes. Record actual commands and evidence here
-as work proceeds. No implementation slice is complete yet.
+Each step builds one piece and checks it before the next. Steps 1–6 are the
+basic case. Tick a box only when its check has passed.
+
+### Step 1: baseline on fixed data (slices 00, 01)
+
+- [ ] Install the `deltakit` extra in `../venv` (SD6 noise)
+- [ ] Dataset generator: 1M shots per (distance, p), saved with the circuit and a sha256 manifest
+- [ ] Generate the 12 datasets (d = 5, 7, 9, 11 × p = 0.002, 0.003, 0.005)
+- [ ] File-backed syndrome source; check it matches the live sampler for the same seed
+- [ ] Baseline config `experiments/basic_case/`: weak only, strong only, switching, values from [parameters.md](parameters.md)
+- [ ] Test: every window escalated equals strong only, shot for shot
+- [ ] Pilot: first 2,000 shots of every dataset, all three runs; window layout, failure counts, run time per point
+- [ ] Full runs: 1M shots, 36 jobs (heavy ones to the collaborator's farm)
+
+### Step 2: timing table (slice 02)
+
+- [ ] Timing table any decoder can read; exact match, missing cell refuses
+- [ ] Refuse host wall-clock time in timing runs
+- [ ] Calibration script; collaborator measures belief matching on the GPU
+
+### Step 3: long runs (slice 03)
+
+- [ ] `decsim stream` fixes: warmup excluded, lag over time, p50/p99, several seeds
+- [ ] Simulator timestamps match the hand-computed queue on the same inputs
+- [ ] Reproduce the paper's sliding-window backlog result (App. C) with synthetic escalation
+
+### Step 4: does the fixed threshold keep up? (slice 04)
+
+- [ ] Highest escalation rate the hardware sustains, and where 20 dB sits against it
+- [ ] Threshold sweep on calibration shots, evaluated on held-out shots
+
+### Step 5: inner loop, hold a target escalation rate (slice 05)
+
+- [ ] Rate tracker without audits, warm start from a lookup table
+- [ ] Refuse the two broken combinations (extra cluster gap with a moving threshold; deadlines with the online controller)
+
+### Step 6: outer loop, set the target from lag (slice 06)
+
+- [ ] Port giving the controller live state
+- [ ] Beats fixed thresholds when p drifts or belief matching slows
+
+### Later steps
+
+- [ ] Step 7: T gates: gate wait measurement, two hang fixes, T-gate chain on one patch (slice 07)
+- [ ] Step 8: lattice-surgery schedules (slice 08)
+- [ ] Step 9: double window with belief matching (slice 09)
+- [ ] Step 10: speculation (slice 10)
+
+## The basic case in four questions
+
+Everything after these depends on them. Each has its own slice and gate.
+
+| # | Question | Slice | Answered when |
+| --- | --- | --- | --- |
+| Q1 | What exactly is the baseline, and is it decoded correctly? | 00, 01 | One pinned configuration; weak-only, strong-only and switching decode identical window geometry; equivalence tests pass |
+| Q2 | Does the static fixed threshold work, for accuracy and for timing? | 02, 03, 04 | LER-versus-escalation frontier on held-out shots, and the escalation fraction the hardware can sustain, on the same setup |
+| Q3 | Can a first-pass controller hold a target escalation fraction online? | 05 | Achieved fraction tracks the target under noise drift, with no simulator truth and no audits |
+| Q4 | Can a slower loop set that target from throughput and latency feedback? | 06 | Adaptive beats the best static threshold when service time, noise or gate spacing changes |
+
+## How the paper does each aspect, and how we do it
+
+Section numbers refer to arXiv:2510.25222v1.
+
+| Aspect | Paper | This plan |
+| --- | --- | --- |
+| Decoders | MWPM or UF weak; belief matching strong (Sec. IV) | Weighted union find weak; belief matching strong. No Relay-BP anywhere |
+| Confidence | Cluster gap of Meister et al.: shortest path between inequivalent boundaries on the quotient graph G/C (Sec. II.3) | Same definition (`decsim/confidence/cluster.py`), verified against an independent Dijkstra in slice 01 |
+| Protocol | Step 1 runs both decoders in parallel; the variant starts the strong decoder only after the weak verdict (Sec. III.1) | The variant (strong after verdict). Step 1 exists as `Switching(run_both_at_once=True)` and is kept for slice 10 |
+| LER experiment | Whole-shot d-round memories, perfect time boundaries, p = 1e-3; Fig. 15 at 20 dB with 1e6 shots; Fig. 17 sweeps 0–50 dB with 1e8 shots | Windowed 10d-round memories (commit d, buffer d), 1e6 shots per point. The whole-shot reproduction (`experiments/switching_paper`) stays as the accuracy anchor |
+| Threshold choice | Fixed 20 dB; brute-force sweep for g_op (LER within 1% of asymptote); thresholded LER P_L,th(g_th) ≤ ε·P_L,strong (Eqs. 5–7) | Fixed 20 dB baseline; sweep on calibration seeds, evaluate on held-out seeds; then an online rate tracker |
+| Switching rate | γ per d rounds = ∫₀^g_th p(g) dg (Eq. 8); per shot in Figs. 16–17 | Escalation fraction per eligible window, plus per shot for comparison with the paper |
+| Backlog | Not simulated with decoders. Recursion over non-Clifford gates, r_i rounds between gates (Eqs. 9–13), linear decode time, i.i.d. switching; Monte Carlo of 1e3 trajectories × 1e4 gates, diverged if r_i > 1e6 (Figs. 11, 14, 21) | Event simulation with each window's own decode time. First validated against the same abstraction (linear service, synthetic i.i.d. escalation), then run with real decodes |
+| Windows | Naive sliding window: the weak decoder waits for the strong one (App. C, Fig. 19). Double window: r_strong = r_com + 2 r_buf, weak keeps going (Fig. 12) | Ordinary redo with held boundaries is exactly App. C's naive sliding window and is our baseline. Double window is slice 09 |
+| Capacity condition | Weak: τ_weak(r_com + r_buf) ≤ τ_gen r_com (Eq. 16). Double window: τ_strong ≤ γ⁻¹ (d / r_strong) τ_gen (Eq. 14); keep γ under half of Eq. 18 (Fig. 14b). Many patches: γ → γ·N_window | Same weak condition; for ordinary redo, an exact per-window recursion (slice 03) instead of a mean-rate bound |
+| Timing values | Ratios only: T_comm,weak = τ_gen, T_comm,strong = τ_strong = 10 τ_gen, d = 21, r_op = 9d | A sourced timing table per decoder, device and window size (slice 02) |
+
+What the paper does not do, and this plan does: decode real windows and time
+them in one simulation; measure LER under windowing at 10d rounds; adapt
+the threshold online; tie escalation to gate deadlines and tail latency.
 
 ## Starting setup
 
-| Item | Choice | Status |
+The approved setup is in [parameters.md](parameters.md): union find with
+cluster gap, belief matching (20 BP iterations) redoing windows below 20 dB,
+sliding windows of d + d rounds with `lookahead` in all three runs, SD6,
+10d-round shots at 1 µs per round, distances 5, 7, 9, 11, physical error rates
+0.002, 0.003, 0.005, a GPU link of 4.5 µs round trip, and 1,000,000 shots per
+point. A pilot on the first 2,000 shots of every point runs first.
+
+## What the current code already does, and what must change
+
+Inspected in the current tree; file references are current.
+
+| Need | Current code | Change |
 | --- | --- | --- |
-| Weak decoder | Weighted union find | User selected |
-| Confidence | Cluster gap from the weak decode | User selected |
-| Strong decoder | Belief matching | User selected |
-| Shot length | Exactly `10 * distance` QEC rounds | User selected |
-| Production samples | Exactly 1,000,000 shots per distance/error-rate point and decoding configuration | User selected; no early stop at a failure count |
-| Initial scheme | Ordinary sequential sliding windows | User selected |
-| Regular window | Commit `d` rounds, read `d` buffer rounds | Proposed starting geometry |
-| Initial threshold | 20 dB, escalate below it, keep at equality | Existing baseline to retain |
-| Syndrome cadence | One round per microsecond per active patch | Proposed baseline from the meetings |
-| Circuit | Stim rotated surface-code Z memory | Proposed; record exact circuit and version |
-| Noise | Existing SD6 reproduction profile, no bursts, noiseless preparation/readout boundaries | Proposed; resolve channels and boundary convention before running |
-| Strong parameters | Product-sum BP, maximum 20 iterations | Proposed reproduction setting, not a known parameter from the paper |
-| Resources | One weak worker and one strong worker, explicit links and buffers | Proposed baseline; no implicit extra concurrency |
-| First pilot | `d=5`, physical error probability `0.001` | Proposed diagnostic point, not the production grid |
+| Ordinary-redo switching | Escalated window re-decoded on the same extent and predecessor boundary; held boundaries block the next window until the strong answer lands (`escalation/strong_regions.py`, `windows/window_boundaries.py`) | None. Add the equivalence tests (slice 01) |
+| Equal terminal windows | `WindowSettings` defaults to `flush`; adding a strong tier forces `lookahead` (`windows/settings.py`) | Set `lookahead` explicitly for all three modes |
+| Hardware timing | Union find: cycles from the decode's own work. Belief matching: host wall clock unless `IterationTime` is given; the shipped `STRONG_BASELINE_POOL` uses host time. Gap walk: host time unless `walk_microseconds` is set | Timing table and refusal of host time (slice 02) |
+| Long-horizon capacity | Collect mode builds a new `Machine` every shot (`experiments/collect.py`), so queues reset every 10d rounds. `decsim stream` runs one long machine but scores only the end readout, refuses window outcomes, has one seed, and its throughput ignores the warmup | LER stays in collect mode; capacity and latency move to stream mode after fixes (slice 03) |
+| Escalation metrics | `escalated_windows` counts strong-tier commits; false positives are not computed; seeds always run 0..N−1 | Candidate/admitted/denied counts, outcome classes, seed offset (slices 03–05) |
+| Online threshold | `OnlineThreshold`: Gibbs–Candès rate tracker plus an audit lane whose label is weak/strong disagreement | Keep the tracker, drop the audit loop (slice 05) |
+| Live state at decision time | `decide_keep(job, result)` sees only the job and its result; the deadline row's `source_queue` port is the only live read | A state port on the threshold source, bound like `source_queue` (slice 06) |
+| Gate feedback | `blocked_by` release waits for every earlier window and charges frame write, frame→controller, pulse and controller→QPU; tested hop by hop | Stall measurement, two hang fixes (slices 07–08) |
+| Lattice surgery | Operation records carry MERGE/INJECT/MEASURE, rounds, patches, `blocked_by` (`decsim.ops/1`); no merged circuits, so merges are timing-only | Slice 08 |
 
-The distance/error-rate grid remains open. Begin with a single point and a
-small fixed seed range. Preserve seeds as a pilot grows. Production correctness
-uses finite shots; sustained-capacity studies use a continuous workload and
-do not clear queues between artificial shot boundaries.
+## Definitions used in every slice
 
-Terminal windows are part of the scientific setup. Inspect the actual planner
-and list read/commit extents before choosing a shared terminal policy. Switching
-currently selects `lookahead`; weak-only and strong-only comparisons must use
-the intended common convention. A shorter final window needs a declared timing
-entry or an explicit pricing rule. Do not add physical rounds to the promised
-`10d` shot without changing and reporting the workload definition.
-
-## Evidence from the existing checkout
-
-These are inspected implementation entry points, not claims of validation:
-
-| Capability | Existing entry point | Limit relevant to this plan |
-| --- | --- | --- |
-| Threshold choices | `decsim/escalation/threshold_sources.py` | Fixed and table-selected thresholds exist; the online source combines rate tracking with disagreement audits |
-| Online state | `decsim/experiments/collect.py` | Threshold state can persist across shots; each shot still builds a new machine |
-| Weak timing | `decsim/decoders/union_find/cycle_count.py` | A hardware model exists; it needs validation for the selected architecture |
-| Strong timing | `decsim/decoders/belief_matching/decoder.py` | Host measurement or supplied iteration/matching times; no general hardware table contract established here |
-| Cluster-gap timing | `decsim/confidence/cluster.py` | Supplied walk time or host measurement; currently charged on the weak unit |
-| Supplied service time | `decsim/decoders/decoders.py` | A timing-only fixed-latency decoder exists |
-| Timing-only source | `decsim/qpu/syndrome_devices.py` | Generates timing traffic without real logical-failure truth |
-| Windowing | `decsim/windows/schemes/sliding.py` | Geometry and terminal behavior affect ownership and work |
-| Re-decoding shapes | `decsim/escalation/strong_window_shapes.py` | Ordinary redo and double-window decoding have different dependencies and ownership |
-| Measurements | `decsim/experiments/measure.py`, `stream_measures.py` | Existing throughput and reaction metrics need their endpoints checked |
-| Program dependencies | `decsim/records/program.py` | Operations declare dependencies, streams, feedback blocking and result return |
-| Feedback path | `decsim/pauli_frame/decision_dispatch.py`, `decsim/controller/feedback_streams.py` | Reuse and verify these owners rather than create a second runtime |
-
-## Meaning of the requirements
-
-- Throughput is sustained advancement of finalized, consecutively covered
-  syndrome rounds. Decoding overlapping windows repeatedly is not extra useful
-  throughput. Record per-patch coverage as well as aggregate rates.
-- Decoder service time is resource occupancy, separate from input/dependency
-  waits, transfers, and consumer response time. Model initiation interval
-  separately if hardware overlaps multiple jobs.
-- Correction age is the gap between the QPU's progress and finalized coverage;
-  lookahead and unresolved earlier windows contribute to it.
-- Feedback response ends when the relevant result reaches the consuming
-  operation's control path. A Pauli-frame commit is an intermediate endpoint.
-- A reaction budget for memory is an explicit experimental bound. A gate
-  dependency supplies an operation-specific required result and desired start.
-- Table values initially describe assumed hardware. Correct simulation of
-  those values and realism of those values require separate evidence.
-- A 1% escalation fraction is a fraction of eligible windows, not GPU busy
-  time, and not a guarantee that deadlines will be met.
+- **τ_gen**: round period. **Commit stride**: `r_com · τ_gen`, the time the QPU
+  takes to produce one window's worth of new rounds.
+- **Eligible window**: a window's first weak result. **Candidate**: an eligible
+  window whose gap is below the threshold. **Admitted**: a candidate that is
+  actually sent to the strong decoder. Escalation fraction = admitted / eligible.
+- **Outcome classes** on escalated windows (same input, both answers known):
+  fixed (weak wrong, strong right), unneeded (both right), broken (weak right,
+  strong wrong), both wrong. Kept windows need a strong counterfactual, which
+  only diagnostic runs compute. Window labels are local; shot failure is the
+  reported correctness metric.
+- **Lag**: generated round frontier minus finalized round frontier, sampled over
+  time. Throughput is sustained when lag stays bounded over a long horizon.
+- **Reaction time**: a window's data complete to its frame commit.
+- **Gate stall**: consumer start minus the time it was otherwise ready, for an
+  operation released by a decode result. The paper's per-gate overhead is
+  `r_i − r_op` rounds.
+- **Capacity fraction q\***: the largest escalation fraction for which lag stays
+  bounded on the declared hardware.
 
 ## Execution order
 
-| Slice | Depends on | Deliverable | Gate | Status |
-| --- | --- | --- | --- | --- |
-| [00 Baseline contract](slices/00-baseline-contract.md) | None | One reproducible baseline configuration and window manifest | Inputs and terminal extents are explicit | Proposed |
-| [01 Correctness audit](slices/01-correctness-audit.md) | 00 | Paired outcomes and counts at one point | Logical accounting and independent references agree | Proposed |
-| [02 Supplied timing](slices/02-supplied-timing.md) | 00 | Editable timing profile and deterministic timing fixture | Analytical event times agree; no host time leaks | Proposed |
-| [03 Sustained capacity](slices/03-sustained-capacity.md) | 01, 02 | Weak-only and fixed-switching long-run traces | Capacity boundary, upstream backlog and drain are accounted for | Proposed |
-| [04 Static trade-off](slices/04-static-tradeoff.md) | 01, 03 | Held-out correctness/timing frontier | Achieved escalation and uncertainty reported | Proposed |
-| [05 Percentage controller](slices/05-percentage-controller.md) | 04 | Audit-free rate tracker and separate optional hard admission cap | Rate tracking, quota accounting and denied escalations verified | Proposed |
-| [06 Adaptive capacity](slices/06-adaptive-capacity.md) | 03, 05 | Budget adaptation from causal pipeline feedback | Stable behavior, overload recovery and infeasibility measured | Proposed |
-| [07 Gate feedback](slices/07-gate-feedback.md) | 02, 05; 06 for adaptive tests | Small timing-only feedforward workload | Full result-to-consumer release path matches a reference schedule | Proposed |
-| [08 Lattice surgery schedules](slices/08-lattice-surgery-schedules.md) | 07 | One compiler import with preserved dependencies | Geometry, rounds and dependencies match an external fixture | Proposed |
-| [09 Double windows](slices/09-double-windows.md) | 01 through 07 | Separately validated double-window experiment | New geometry, recovery and resource accounting verified | Proposed |
-| [10 Speculation](slices/10-speculation.md) | 07, 08; 09 only if speculating double windows | Defined speculation and recovery study | Dependent recovery, useful completion and tail costs accounted for | Deferred |
+| Slice | Depends on | Answers | Status |
+| --- | --- | --- | --- |
+| [00 Baseline contract](slices/00-baseline-contract.md) | None | Q1 | Proposed |
+| [01 Correctness](slices/01-correctness-audit.md) | 00 | Q1 | Proposed |
+| [02 Timing table](slices/02-supplied-timing.md) | 00 | Q2 timing input | Proposed |
+| [03 Capacity and backlog](slices/03-sustained-capacity.md) | 01, 02 | Q2 timing | Proposed |
+| [04 Static threshold](slices/04-static-tradeoff.md) | 01, 03 | Q2 | Proposed |
+| [05 Rate controller](slices/05-percentage-controller.md) | 04 | Q3 | Proposed |
+| [06 Throughput and latency loop](slices/06-adaptive-capacity.md) | 03, 05; 07–08 for gate stalls | Q4 | Proposed |
+| [07 Gate feedback](slices/07-gate-feedback.md) | 02, 03 | Gate deadlines on one patch | Proposed |
+| [08 Lattice surgery schedules](slices/08-lattice-surgery-schedules.md) | 07 | Gate deadlines from real schedules | Proposed |
+| [09 Double windows](slices/09-double-windows.md) | 01–06 | Paper's recovery scheme with belief matching | Proposed |
+| [10 Speculation](slices/10-speculation.md) | 07, 08; 09 for double windows | Second contribution | Last, after 00–09 pass |
 
-Slices 01 and 02 are independent after configuration is fixed. This is a
-dependency fact, not a request to delegate work. Present each result before
-widening scope. Gate-feedback design can be reviewed early; full compiler
-integration is not a prerequisite for the memory baseline.
-
-## Controller design boundaries
-
-Keep four responsibilities distinguishable:
-
-1. Cluster gap produces a score and has a charged computation cost.
-2. Threshold selection identifies candidate windows, using either fixed
-   calibration or a simple online target-rate tracker.
-3. Admission enforces an explicitly defined quota or resource guard.
-4. A slower capacity loop adjusts the allowed escalation target using observed
-   work, correction age and, later, actual feedforward slack or stalls.
-
-The first experiments have no online audits. Weak/strong agreement is not a
-correctness label. Existing audit code may remain unused until its callers and
-tests are migrated; retirement is a focused change after replacement behavior
-is established, not a wholesale rewrite of the simulator.
-
-Candidate and admitted fractions are different metrics. A quota denial must
-not masquerade as a decoder success or silently feed a different decision into
-the candidate-rate tracker. Every path that starts strong work counts toward
-the applicable budget, including any future retries or audits under a stated
-accounting rule.
-
-Calibrate score thresholds offline on separate samples first. A score
-percentile, an empirical failure probability, and an escalation fraction are
-different quantities. Percentage confidence is optional later research; it is
-not needed for the first rate controller.
+Slices 01 and 02 can proceed in parallel after 00. Slice 06 runs first on a
+memory stream (lag and reaction time) and gains gate stalls as its main input
+once 07 and 08 pass. Lattice surgery is on the critical path of the paper's
+claims, not an optional extension.
 
 ## Global invariants
 
-- Online decisions cannot read simulator truth, future scores, eventual strong
-  answers, or eventual service times before those values are observable.
-- Logical correctness compares observable outcomes, not equality with a unique
-  physical error or correction. Different physical corrections may be valid.
-- Every committed round has one logical owner. Overlapping reads do not create
-  duplicate correction commits or extra throughput.
-- A feedback consumer waits for all its required results; later completed
-  windows do not hide an earlier unresolved dependency.
-- During a feedback stall, continuing protected patches still generate their
-  required syndrome work. A stalled workload must not look stable by pausing
-  the arrival source without reporting it.
-- Timing inputs have explicit units, inclusion boundaries, resource profiles
-  and provenance. Missing timing cells fail or use a declared fallback, never
-  silently borrow RelayBP timing for belief matching.
-- A timing-profile-only change preserves the answers for a fixed, nonadaptive
-  memory workload and routing policy. Feedback-driven routing or altered
-  physical schedules may legitimately change selected work and outcomes.
-- Timing-only runs report no measured logical error rate. Synthetic scores are
-  labeled synthetic; replayed scores identify their source configuration.
-- No controller promises a feasible deadline when weak-only service, required
-  buffering, transport or a committed strong job already makes it impossible.
-- Production correctness uses the agreed million-shot stopping rule. Early
-  pilots, calibration samples, warmup and timing streams are labeled separately.
+- Every LER run decodes a saved, hashed dataset (slice 00), so the data
+  never changes between runs.
+- Online decisions read only what is observable at decision time: no
+  simulator truth, no future scores, no service time before completion.
+- Correctness compares logical observables, not physical corrections.
+- Every committed round has one owner. Overlapping reads add no throughput.
+- A consumer waits for every result it depends on.
+- Timing runs use stated timing for every component; host time is refused.
+- Timing-only runs report no LER. Synthetic or replayed scores are labeled.
+- Production LER uses the million-shot rule. Pilots, calibration seeds,
+  warmup and timing streams are labeled separately.
 - Each completed slice gets a coherent local commit. No push or merge.
-
-## Verification and comparison strategy
-
-Use three layers of evidence:
-
-1. Exact fixtures: deterministic arrivals and service times; a separately
-   calculated queue/dependency schedule, including zero backlog and overload.
-   Agree at simulator tick precision after the documented rounding rule.
-2. Reference behavior: Stim's logical outcomes/detector conversion; the pinned
-   beliefmatching package on identical adapted inputs; existing qLDPC/window
-   referents where their boundary conventions match. Record revisions.
-3. Scientific comparisons: weak alone, strong alone and fixed-20-dB switching;
-   then calibrated static fractions, online fractions and resource adaptation.
-   Hold hardware resources and workload assumptions explicit and constant.
-
-Single-window forced-keep and forced-escalate fixtures must reproduce their
-corresponding decoder answers. Independently windowed weak-only and strong-only
-runs may supply different predecessor boundaries: do not claim per-shot union
-bounds or identical-input counterfactuals unless those inputs actually match.
-On a live switching trajectory, counterfactual decodes can use the same adapted
-input for diagnosis, but an offline selector on that fixed trajectory is only
-an optimistic diagnostic. Changing decisions can change downstream inputs.
-
-For steady workloads, record warmup, a measurement region and drain separately.
-Compare increasing stream lengths rather than declare stability from one flat
-short trace. Retain generated-to-finalized coverage, upstream buffers, queue
-work and resource occupancy so backpressure cannot conceal overload.
-
-Report shot failures with binomial uncertainty, including nonzero upper bounds
-for zero observed failures. Window outcomes within a shot are correlated;
-use shots as the sampling unit for correctness comparisons and uncertainty.
-Tail estimates need sample counts and uncertainty; a sample maximum is not a
-worst-case guarantee. Correlated timing streams require independent repeats or
-an appropriate block-based analysis. Keep initialization and compilation costs
-separate from steady service, charging them where the proposed system needs them.
-
-Full traces are for small diagnostics. Production retains reproducible input
-identities, compact outcomes and aggregates, with sampled detailed records.
-Do not store a million full syndrome vectors by default.
-
-## Research anchors
-
-- [Toshio et al., Decoder Switching, sections III.B, III.C and IV](https://arxiv.org/html/2510.25222v1):
-  fixed-threshold correctness, double-window backlog assumptions and threshold sweeps.
-- [Skoric et al., Parallel window decoding](https://arxiv.org/abs/2209.08552):
-  commit-stride capacity, boundary dependencies and feedforward response.
-- [Caune et al., real-time QEC, section VI](https://arxiv.org/abs/2410.05202):
-  measured separation of decoding and communication/control response costs.
-- [Helios, section VI](https://arxiv.org/abs/2301.08419):
-  hardware-specific cycles and service-time distributions.
-- [RFC 3290, Appendix A](https://www.rfc-editor.org/rfc/rfc3290.html#appendix-A):
-  rate/burst accounting as a reference for a separate admission limiter.
-- [TQEC logical CNOT example](https://tqec.github.io/tqec/auto_examples/cnot.html):
-  candidate external lattice-surgery fixture, not proof of complete T-gate support.
-- [SWIPER](https://arxiv.org/abs/2412.05115):
-  later speculation comparison; select matched schedules and assumptions first.
-
-Do not infer novelty, an optimal hardware design, or replication of an entire
-paper from these limited comparisons.
 
 ## Open decisions
 
-Resolve before slice 00 runs: memory basis, exact noise channels and terminal
-noise, initial point, decoder parameters, resource topology and shared finite
-tail convention. The table above proposes defaults rather than final approval.
+Before slice 00 runs: BP iteration cap, distance/error-rate grid, exact noise
+channels, resource topology.
 
-Resolve before slice 04 production: distance/error-rate grid, calibration
-sample allocation, hardware profiles, and which portion of the static frontier
-is useful enough to justify adaptation. No target LER tolerance is agreed yet.
+Before slice 04 production: what "the static threshold works" means for this
+paper (proposed: switching LER within 10% of strong-only at an escalation
+fraction at or below q\*), calibration seed allocation.
 
-Resolve before slice 05: approximate fraction versus hard cap, quota scope,
-startup credit, allowed burst and policy for denied requests. Recommended first
-cap study: fixed 1% across a task or continuous stream, zero startup credit,
-one stored escalation permit; report the resulting startup bias.
+Before slice 06: correction-age or reaction budget, control cadence, step
+sizes, priority (throughput first, correctness reported).
 
-Resolve before slice 06: throughput-first versus correctness-constrained
-operation, allowed correction age, control cadence and recovery rule. Start
-with throughput-first and report correctness; do not claim an online LER bound.
+Before slice 08: whether the paper needs LER through lattice-surgery
+operations, or timing and stalls through lattice surgery with LER from memory.
 
-Resolve before slice 08: compiler selection based on actual schedule exports
-and feedforward dependencies. Do not assume a tool supports T-gate dependencies
-because it can compile a CNOT or produce a Stim memory circuit.
+## Research anchors
 
-## Scope and deferred work
+- [Toshio et al., Decoder Switching](https://arxiv.org/html/2510.25222v1):
+  Sec. III.1 protocol, III.2 thresholds, III.3 backlog and Theorem 1, IV
+  numerical setup, App. C sliding-window backlog.
+- [Meister et al., cluster gap](https://arxiv.org/abs/2405.07433): the soft output.
+- [Skoric et al., Parallel window decoding](https://arxiv.org/abs/2209.08552):
+  commit stride and boundary dependencies.
+- [Helios](https://arxiv.org/abs/2301.08419): union-find cycle constants.
+- [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
-Core scope ends with supplied timing, a verified sliding-window baseline,
-static and online escalation fractions, causal capacity feedback, and a full
-timing-only gate-feedback path. Lattice-surgery integration extends workload
-realism. Double windows and speculation are separate later experiments.
+## Evidence ledger
 
-Bursts, new weak decoders, neural estimators, multiple strong tiers, spatially
-distributed decoding and algorithmic speed-of-light models stay deferred until
-the core experiment identifies a need. Confidence-computation parallelism is
-an explicit architectural variant with resource costs, not free overlap.
-
-## Evidence ledger and current pickup
-
-- Inspected code and existing tests while planning. No tests were executed and
-  no new performance or correctness measurements were produced.
-- No implementation slice has started. The next review is slice 00.
-- Keep this README as the current handoff; add run evidence under this spec
-  only as it is produced. Large result data belongs in normal result folders.
+- Current-tree review on 2026-10-18: escalation, windows, decoders, links,
+  confidence, experiments, observe, controller and frontends tests pass
+  (about 1,500 tests) with `../venv/bin/python`.
+- Ordinary redo, every window escalated, matched strong-only shot for shot
+  (0 of 215 shots differ, d = 3 and 5); never escalated matched weak-only.
+  Scratch evidence, not yet a repo test.
+- The d = 13, p = 0.005 result where switching failed more shots than either
+  decoder came from Experiment 1 (double window, Relay-BP measured table,
+  unconverged answers kept). It is not evidence about belief matching or
+  ordinary redo.

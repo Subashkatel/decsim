@@ -46,8 +46,8 @@ table loaded before the machine is built: `TableThreshold` in
    windows at each distance, window size and p in the grid; write rows with
    provenance. The decoder's answer still comes from decsim's belief matching;
    only its time comes from the table.
-5. Ask the collaborator to run the calibration for belief matching on the
-   GPU farm (BP iteration time and matching time per window size).
+5. Run the calibration for belief matching on the target GPU (BP
+   iteration time and matching time per window size).
 
 ## Gate and evidence
 

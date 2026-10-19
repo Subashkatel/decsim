@@ -34,13 +34,13 @@ basic case. Tick a box only when its check has passed.
 - [x] Latency audit of one shot's timeline against hand formulas (link hops, fetch/release cycles, gap walk, verdict, strong service, next-window wait, same-seed repeat); three fixes and one parameter change came out of it (evidence ledger, 2026-10-19)
 - [x] Plot script `experiments/basic_case/plots.py`: Toshio Figs. 15, 16, 4–6 style, window latency, backlog, and who answered each window
 - [ ] Pilot: first 2,000 shots of every dataset, all three runs; window layout, failure counts, run time per point
-- [ ] Full runs: 1M shots, 36 jobs (heavy ones to the collaborator's farm)
+- [ ] Full runs: 1M shots, 36 jobs, run here on Della
 
 ### Step 2: timing table (slice 02)
 
 - [ ] Timing table any decoder can read; exact match, missing cell refuses
 - [ ] Refuse host wall-clock time in timing runs
-- [ ] Calibration script; collaborator measures belief matching on the GPU
+- [ ] Calibration script; measure belief matching on the target GPU
 
 ### Step 3: long runs (slice 03)
 

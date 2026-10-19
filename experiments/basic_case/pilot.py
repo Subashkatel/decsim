@@ -1,4 +1,4 @@
-"""The basic case's working set: 20,000 shots at d = 5 and 7.
+r"""The basic case's working set: 20,000 shots at d = 5 and 7.
 
 The same three runs as run.py at d = 5 and 7 and every p, on the first
 20,000 root seeds of each saved dataset, with every window's outcome

@@ -1,4 +1,4 @@
-"""The basic case's threshold sweep: switching at 0 to 50 dB.
+r"""The basic case's threshold sweep: switching at 0 to 50 dB.
 
 Toshio et al. 2510.25222 Fig. 17 sweeps the gap threshold from 0 to
 50 dB. This sweeps it in 5 dB steps at d = 5 and 7 and every p, on the
@@ -14,7 +14,7 @@ From this folder, with this checkout first on the path (STYLE.md):
 
 ```
 export PYTHONPATH=$PWD/../..
-python -m decsim run threshold_sweep.py --slurm \\
+python -m decsim run threshold_sweep.py --slurm \
   --out $PWD/../../results/basic_case_thresholds
 ```
 """

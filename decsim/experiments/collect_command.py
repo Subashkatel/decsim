@@ -917,12 +917,19 @@ def _trajectory_rows(
 
 
 def _threshold_summary_line(summary: dict, threshold_db: float) -> str:
-    """The online threshold's one-line summary for a finished task."""
-    return (
-        f"    online threshold: {summary['windows']} windows, "
-        f"escalation rate {summary['escalation_rate']:.4f}, "
-        f"threshold {threshold_db:.2f} dB, "
-        f"{summary['audited']} audits ({summary['audited_bad']} bad), "
-        f"{summary['raises']} raises, {summary['relaxes']} relaxes, "
-        f"{summary['pending_audits']} pending"
-    )
+    """The online threshold's one-line summary for a finished task.
+
+    The windows, the escalated share and the threshold, then every other
+    counter the calibrator's summary holds, by its name.
+    """
+    parts = [
+        f"{summary['windows']} windows",
+        f"escalation rate {summary['escalation_rate']:.4f}",
+        f"threshold {threshold_db:.2f} dB",
+    ]
+    shown = ("windows", "escalation_rate", "threshold")
+    for name, value in summary.items():
+        if name not in shown:
+            parts.append(f"{name} {value}")
+    joined = ", ".join(parts)
+    return f"    online threshold: {joined}"

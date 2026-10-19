@@ -1326,6 +1326,38 @@ def _lose_the_piece(experiment_dir, name: str) -> None:
     shutil.rmtree(lost_piece)
 
 
+def test_a_rate_tasks_summary_counts_every_window_it_escalated(tmp_path):
+    """With no audits, the tracker's counts are the machine's own.
+
+    Every weak decision is a decoded window and every escalation one
+    the tracker made, so threshold_summary.csv equals the shot sums
+    exactly, and its last trajectory row is the final threshold.
+    """
+    rate = {"target_escalation_rate": 0.2}
+    collection = {"max_shots": 4}
+    config_path = run_files.write_run_file(
+        tmp_path,
+        axes=NOISY_AXES,
+        collection=collection,
+        machine="switching",
+        machine_arguments={"rate": rate},
+    )
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    summary_path = out_dir / "threshold_summary.csv"
+    shots_path = out_dir / "shots.csv"
+    (summary,) = _csv_rows(summary_path)
+    shots = _csv_rows(shots_path)
+    trajectory = _online_trajectory_rows(out_dir)
+    decoded = sum(int(shot["decoded_windows"]) for shot in shots)
+    escalated = sum(int(shot["escalated_windows"]) for shot in shots)
+    assert int(summary["windows"]) == decoded
+    assert int(summary["escalated"]) == escalated
+    assert summary["threshold_db"] == trajectory[-1]["threshold_db"]
+
+
 def _online_config(tmp_path, piece_rounds: int):
     """The noisy task with an online threshold that audits often.
 

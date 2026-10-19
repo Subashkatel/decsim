@@ -12,7 +12,8 @@ From this folder, with this checkout first on the path (STYLE.md):
 
 ```
 export PYTHONPATH=$PWD/../..
-python -m decsim run pilot.py --slurm --out $PWD/../../results/basic_case_pilot \
+python -m decsim run pilot.py --slurm \
+  --out $PWD/../../results/basic_case_pilot \
   --set constants.observation.record_window_outcomes=true
 python plots.py $PWD/../../results/basic_case_pilot
 ```

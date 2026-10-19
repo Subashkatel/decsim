@@ -171,6 +171,23 @@ def test_a_bernoulli_run_repeats_its_seed_and_not_another():
     assert 30 < sum(strong) < 60
 
 
+def test_a_bernoulli_takes_its_later_rate_from_its_window_on():
+    bernoulli = verdicts.Bernoulli.Settings(
+        rate=0.0, later_rate=1.0, from_window=45
+    )
+    switching = declared_run.declared_switching(verdict=bernoulli)
+    graph = fabric.switching_graph(
+        rounds=270, escalated_windows=set(), switching=switching
+    )
+    machine = machine_module.Machine.build(graph, 0)
+
+    machine.run()
+
+    tiers = [tier for _window_key, tier in declared_run.frame_tiers(machine)]
+    assert set(tiers[:45]) == {"weak"}
+    assert set(tiers[45:]) == {"strong"}
+
+
 def test_a_backlog_bernoulli_steps_down_once_its_queue_backs_up():
     """All escalated, the weak queue backs up and the share drops to zero.
 

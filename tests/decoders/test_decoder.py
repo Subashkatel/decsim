@@ -224,3 +224,28 @@ def test_a_window_result_carries_the_detection_events_its_decode_read():
     assert expected.any()
     assert numpy.array_equal(result.detection_events, expected)
     assert not result.detection_events.flags.writeable
+
+
+def test_a_preset_latency_takes_its_later_latency_from_its_window_on():
+    settings = decoders.PresetLatencyDecoder.Settings(
+        2.0, later_latency_microseconds=3.0, from_window=4
+    )
+    row = settings.build()
+    before = decoding_records.DecodeJob(
+        operation_id=1, window_id=3, round_count=2
+    )
+    at = decoding_records.DecodeJob(operation_id=1, window_id=4, round_count=2)
+
+    latencies = (row.latency(before), row.latency(at))
+
+    assert latencies == (
+        config.microseconds_to_ticks(2.0),
+        config.microseconds_to_ticks(3.0),
+    )
+
+
+def test_a_later_latency_without_its_window_is_refused():
+    with pytest.raises(ValueError, match="go together"):
+        decoders.PresetLatencyDecoder.Settings(
+            2.0, later_latency_microseconds=3.0
+        )

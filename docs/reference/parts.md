@@ -217,11 +217,13 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 
 ### `PresetLatencyDecoder.Settings`
 
-`decsim/decoders/decoders.py`. The one latency every job takes.
+`decsim/decoders/decoders.py`. The latency every job takes, and the one from a window on.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `latency_microseconds` | `float` | `1.0` |
+| `later_latency_microseconds` | `Optional[float]` | `None` |
+| `from_window` | `Optional[int]` | `None` |
 
 ### `PoolingSettings`
 
@@ -762,6 +764,8 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | Field | Type | Default |
 | --- | --- | --- |
 | `rate` | `float` | required |
+| `later_rate` | `Optional[float]` | `None` |
+| `from_window` | `Optional[int]` | `None` |
 
 ### `BacklogBernoulli.Settings`
 

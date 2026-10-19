@@ -9,7 +9,8 @@ SWEEP_FOLDER/plots/:
     weak alone and strong alone as lines (Toshio et al. 2510.25222
     Fig. 17), a panel per p;
   - frontier.png: the error rate against the windows escalated, with the
-    escalated share the chain sustains, q*, marked;
+    escalated share the chain sustains, q*, dotted, strong alone dashed
+    and weak alone dash-dotted;
   - calibration.csv: per point, the threshold that escalates each target
     share, interpolated between the swept thresholds, and q*.
 
@@ -131,7 +132,7 @@ def plot_frontier(swept, references, capacities, folder: pathlib.Path):
             _draw_frontier(axes, point, rows, references, capacities)
         axes.set_xscale("log")
         axes.set_xlabel("windows escalated")
-        _finish(axes, f"p = {probability:g}; dotted: q*, dashed: strong")
+        _finish(axes, f"p = {probability:g}")
     _save(figure, folder, "frontier.png")
 
 
@@ -139,13 +140,16 @@ def _draw_frontier(axes, point, rows, references, capacities) -> None:
     """One d's frontier, its strong-alone rate and its q*."""
     distance, _probability = point
     color = COLORS[distance]
-    ordered = sorted(rows, key=_escalated)
+    # a threshold that escalates nothing is weak alone, a line of its own
+    escalating = [row for row in rows if _escalated(row) > 0]
+    ordered = sorted(escalating, key=_escalated)
     fractions = [_escalated(row) for row in ordered]
     rates = [_rate(row) for row in ordered]
     axes.plot(fractions, rates, "o-", ms=3, color=color, label=f"d={distance}")
-    strong = _reference(references, point, "strong_alone")
-    strong_rate = _rate(strong)
-    axes.axhline(strong_rate, color=color, ls="--", lw=1)
+    for decoding, style in (("weak_alone", "-."), ("strong_alone", "--")):
+        reference = _reference(references, point, decoding)
+        rate = _rate(reference)
+        axes.axhline(rate, color=color, ls=style, lw=1)
     axes.axvline(capacities[point], color=color, ls=":", lw=1)
 
 

@@ -266,7 +266,8 @@ operations, or timing and stalls through lattice surgery with LER from memory.
   staircase, below) and costs nothing in accuracy at that share.
 
 - Drift run on 2026-10-19 (`experiments/basic_case/drift.py`, job
-  15824064: a d = 5 and a d = 7 stream of 20,000 rounds, 5 seeds each, p
+  15824064, `results/basic_case_drift_v1`: a d = 5 and a d = 7 stream of
+  20,000 rounds, 5 seeds each, p
   stepping from 0.002 to 0.003 at round 10,000, the decoders keeping
   0.002's models). The fixed threshold calibrated to escalate 10% at
   0.002 escalates 8 and 9% before the step and 17% after, past q* at

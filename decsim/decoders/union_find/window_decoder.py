@@ -40,15 +40,22 @@ def graph_from_model(
 
     Faults likelier than one half are the baseline correction; every
     other column becomes an edge whose length is its residual log-odds
-    in weight ticks.
+    in weight ticks. An edge flips the logical only when the window
+    owns its fault: the window commits its owned faults alone
+    (decoder.result_from_selected_faults), so a walk that crosses the
+    logical in the buffer and leaves by the open future boundary changes
+    nothing it commits, and the cluster gap must not count it (Meister
+    et al. 2405.07433 Definition 9: a path counts when it is a logical
+    operator of what is decoded).
     """
     check = faults.check
     raw_priors = numpy.asarray(faults.priors)
     fault_count = check.shape[1]
     _check_priors(raw_priors, location)
     # observables are few rows; dense per-fault columns are cheap to read
-    observables = faults.observables.toarray()
-    observables = observables.astype(numpy.uint8, copy=False)
+    all_observables = faults.observables.toarray()
+    owned = numpy.asarray(faults.owned, dtype=numpy.uint8)
+    observables = all_observables.astype(numpy.uint8) * owned
     priors = raw_priors.astype(float, copy=False)
     likely = priors > 0.5
     baseline = likely.astype(numpy.uint8)

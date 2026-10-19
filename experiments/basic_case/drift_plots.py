@@ -5,9 +5,9 @@
 DRIFT_FOLDER holds drift.py's stream records, CALIBRATION_CSV is
 threshold_plots.py's calibration.csv. Writes into DRIFT_FOLDER/plots/:
   - drift.png: per d, the escalated share of each hundred windows against
-    the round, static and controller, each seed thin and their mean
+    the round, static, controller and loop, each seed thin and their mean
     thick, the target dotted and q* before and after the drift grey
-    (top); the controller's threshold against the round, the thresholds
+    (top); each moving threshold against the round, the thresholds
     calibrated for the target at the two p grey (bottom);
   - drift.csv: per task, means over its seeds: the escalated share before
     and after the drift, and the drifted half's mean reaction (a
@@ -31,7 +31,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 drift = sweeps.load_beside(__file__, "drift.py")
-CONTROLS = {"static": "tab:red", "rate": "tab:blue"}
+CONTROLS = {"static": "tab:red", "rate": "tab:blue", "loop": "tab:green"}
+# the controls whose threshold moves
+MOVING = ("rate", "loop")
 # the lines of p before the drift and after it
 GUIDE_STYLES = ("--", "-.")
 FIELDS = (
@@ -69,8 +71,9 @@ def plot_drift(records: dict, calibration: dict, out: pathlib.Path) -> None:
             runs = records[(distance, control)]
             _draw_shares(share_axes, control, runs)
         _draw_share_guides(share_axes, calibration, distance)
-        rate_runs = records[(distance, "rate")]
-        _draw_thresholds(threshold_axes, rate_runs)
+        for control in MOVING:
+            runs = records[(distance, control)]
+            _draw_thresholds(threshold_axes, control, runs)
         _draw_threshold_guides(threshold_axes, calibration, distance)
         share_axes.set_title(f"d = {distance}")
         share_axes.set_ylabel("windows escalated")
@@ -111,11 +114,11 @@ def _draw_share_guides(axes, calibration: dict, distance: int) -> None:
     axes.grid(True, alpha=0.3)
 
 
-def _draw_thresholds(axes, runs: list) -> None:
-    """Each seed's controller threshold against the round."""
+def _draw_thresholds(axes, control: str, runs: list) -> None:
+    """Each seed's moving threshold against the round."""
     for run in runs:
         rounds, decibels = _thresholds(run)
-        axes.plot(rounds, decibels, color=CONTROLS["rate"], lw=0.6)
+        axes.plot(rounds, decibels, color=CONTROLS[control], lw=0.6)
 
 
 def _draw_threshold_guides(axes, calibration: dict, distance: int) -> None:

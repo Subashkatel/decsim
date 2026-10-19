@@ -1,4 +1,5 @@
-r"""The rate controller against the static threshold as the noise drifts.
+r"""The rate controller and the outer loop against the static threshold
+as the noise drifts.
 
 Each task streams one memory (decsim stream) whose noise moves from
 p = 0.002 to 1.5 p = 0.003 at round 10,000 (FlipStreamDevice's drift;
@@ -8,7 +9,9 @@ its last calibration does. The static threshold is the one that
 escalated 10% of windows at p = 0.002 (calibration.py); at 0.003 it
 escalates about 25% (threshold_sweep.py), past the share the chain
 sustains, q* of 0.12 to 0.14 (threshold_plots.py). The controller
-(RateThreshold, slice 05) starts there too and holds 10%.
+(RateThreshold, slice 05) starts there too and holds 10%. The loop is
+that controller with the outer loop setting its target from the
+backlog's trend (target_steps.py, slice 06), from 10%.
 
 Each stream records its escalated share every hundredth window and the
 controller's threshold (stream_measures.py); the warmup ends at the
@@ -19,22 +22,23 @@ Usage
 -----
 
 From this folder, with this checkout first on the path (STYLE.md), each
-task at five seeds, a process a stream:
+task at five seeds, a process a stream, 30,000 rounds after the drift:
 
 ```
 export PYTHONPATH=$PWD/../..
 OUT=$PWD/../../results/basic_case_drift; mkdir -p $OUT
-sbatch -N1 -c20 --mem=80G -t 4:00:00 --wrap "for name in \
-  drift_d5_static drift_d5_rate drift_d7_static drift_d7_rate; do \
-  for seed in 1 2 3 4 5; do echo \$name \$seed; done; done | \
-  xargs -P 20 -n 2 sh -c 'python -m decsim stream drift.py --only \$0 \
-  --rounds 20000 --warmup 10000 --seed \$1 --out $OUT/\$0_s\$1.json'"
+sbatch -N1 -c30 --mem=120G -t 4:00:00 --wrap "for d in 5 7; do \
+  for control in static rate loop; do for seed in 1 2 3 4 5; do \
+  echo drift_d\${d}_\$control \$seed; done; done; done | \
+  xargs -P 30 -n 2 sh -c 'python -m decsim stream drift.py --only \$0 \
+  --rounds 40000 --warmup 10000 --seed \$1 --out $OUT/\$0_s\$1.json'"
 ```
 """
 
 import dataclasses
 
 import decsim
+import decsim.escalation.target_steps as target_steps
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.sweeps as sweeps
 import decsim.presets.machines as machines
@@ -50,11 +54,16 @@ DISTANCES = (5, 7)
 
 
 def task(distance: int, control: str) -> decsim.Task:
-    """One distance's drifting stream, static or rate-controlled."""
+    """One distance's drifting stream: static, rate or loop."""
     decibels = calibration.CALIBRATED[(distance, PROBABILITY)][TARGET]
     threshold = threshold_sources.FixedThreshold.Settings(decibels)
     if control == "rate":
         threshold = threshold_sources.RateThreshold.Settings(decibels, TARGET)
+    if control == "loop":
+        steps = target_steps.TargetSteps.Settings(start=TARGET)
+        threshold = threshold_sources.RateThreshold.Settings(
+            decibels, TARGET, steps=steps
+        )
     switching = config.machine("switching", distance, PROBABILITY)
     machine = switching.with_settings(machines.SWITCHING, threshold=threshold)
     source = flip_stream_device.FlipStreamDevice.Settings(
@@ -79,7 +88,7 @@ def task(distance: int, control: str) -> decsim.Task:
 tasks = [
     task(distance, control)
     for distance in DISTANCES
-    for control in ("static", "rate")
+    for control in ("static", "rate", "loop")
 ]
 # decsim stream runs one shot; an experiment still names its collection
 stop = decsim.CollectionSettings(max_shots=1)

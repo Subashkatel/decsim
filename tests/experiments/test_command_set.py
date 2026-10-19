@@ -1161,6 +1161,34 @@ def test_a_task_whose_shot_runs_no_round_is_refused_before_its_record(
     assert not (out_dir / "tasks").exists()
 
 
+def test_a_threshold_stepped_by_the_backlog_is_refused_on_shots(tmp_path):
+    """Each shot starts with no backlog, so the outer loop reads none."""
+    run_file = tmp_path / "loop.py"
+    run_file.write_text(
+        "import decsim\n"
+        "import decsim.escalation.target_steps as target_steps\n"
+        "import tests.experiments.run_files as run_files\n"
+        "\n"
+        "steps = target_steps.TargetSteps.Settings(start=0.1)\n"
+        "rate = {'target_escalation_rate': 0.1, 'steps': steps}\n"
+        "machine = run_files.switching_machine(rate=rate)\n"
+        "experiment = decsim.Experiment(\n"
+        '    "loop",\n'
+        '    [decsim.Task("loop", machine)],\n'
+        "    decsim.CollectionSettings(max_shots=1),\n"
+        ")\n"
+    )
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(run_file, out_dir)
+
+    assert str(refused.value) == (
+        "the task loop's threshold steps its target by the backlog, and "
+        "each shot starts with none; run it as a stream (decsim stream)"
+    )
+
+
 def test_an_online_task_given_a_target_is_refused(tmp_path, capsys):
     """An online task's shots are not independent, so no target stops it."""
     collection = {"max_shots": 1, "max_failures": 5}

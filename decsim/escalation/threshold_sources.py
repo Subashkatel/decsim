@@ -24,6 +24,8 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.escalation.target_steps as target_steps
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 
 # The task's facts a calibration table keys its rows on, each column
@@ -76,6 +78,7 @@ class FixedThreshold:
     """
 
     audits_by_escalating = False
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -368,6 +371,7 @@ class OnlineThreshold:
     """
 
     audits_by_escalating = True
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -535,9 +539,18 @@ class RateThreshold:
     Candes's update, unclipped, which bounds the long-run escalated
     share around the target for any gap sequence (EscalationRateTracker).
     One instance persists across a task's shots.
+
+    With steps, the outer loop (target_steps.TargetSteps, slice 06) sets
+    the target: before each window the source reads the windows waiting
+    for the source pool and the loop steps the share by their trend. The
+    tracker's bound holds for a moving target, its long-run share then
+    the targets' average (Gibbs and Candes, arXiv:2106.00170, Sec. 4).
+    The backlog is a stream's, so a run of shots refuses it
+    (collect_command.py): each shot starts empty.
     """
 
     audits_by_escalating = False
+    source_queue = ports.Port(ports.DecodeQueue, optional=True)
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -546,6 +559,7 @@ class RateThreshold:
         threshold_decibels: float
         target_escalation_rate: float
         step_decibels: float = 0.25
+        steps: Optional[target_steps.TargetSteps.Settings] = None
 
         def __post_init__(self) -> None:
             checked_decibels(self.threshold_decibels, "threshold_decibels")
@@ -579,7 +593,10 @@ class RateThreshold:
                 threshold=self.threshold_nats,
                 step=step_nats,
             )
-            return RateThreshold(tracker)
+            steps = None
+            if self.steps is not None:
+                steps = self.steps.build()
+            return RateThreshold(tracker, steps)
 
         def build(self) -> "RateThreshold":
             """Refused: the source learns across a task's shots."""
@@ -590,8 +607,13 @@ class RateThreshold:
                 "for one machine"
             )
 
-    def __init__(self, tracker: EscalationRateTracker) -> None:
+    def __init__(
+        self,
+        tracker: EscalationRateTracker,
+        steps: Optional[target_steps.TargetSteps] = None,
+    ) -> None:
         self.tracker = tracker
+        self.steps = steps
         # (window count, threshold) at the start and every hundredth window
         self.trajectory: list = []
         self._record("start")
@@ -603,6 +625,8 @@ class RateThreshold:
     ) -> bool:
         """Keep unless the gap is under the tracker's threshold."""
         del job
+        if self.steps is not None:
+            self._step_the_target()
         escalated = self.tracker.observe(result.soft_output.gap)
         if self.tracker.window_count % 100 == 0:
             self._record("sample")
@@ -616,15 +640,29 @@ class RateThreshold:
         del result
 
     def summary(self) -> dict:
-        """The tracker's counters and its live threshold."""
+        """The tracker's counters, its live threshold, the loop's checks."""
         tracker = self.tracker
-        return {
+        summary = {
             "windows": tracker.window_count,
             "escalated": tracker.escalated_count,
             "escalation_rate": tracker.escalation_rate(),
             "threshold": tracker.threshold,
             "target_escalation_rate": tracker.target_escalation_rate,
         }
+        if self.steps is not None:
+            summary["target_steps"] = list(self.steps.trajectory)
+        return summary
+
+    @property
+    def reads_source_queue(self) -> bool:
+        """Whether an outer loop reads the source pool's queue."""
+        return self.steps is not None
+
+    def _step_the_target(self) -> None:
+        """The loop reads the backlog; the tracker takes its share."""
+        waiting = self.source_queue.waiting_jobs()
+        self.steps.observe(waiting)
+        self.tracker.target_escalation_rate = self.steps.target
 
     def _record(self, event: str) -> None:
         tracker = self.tracker

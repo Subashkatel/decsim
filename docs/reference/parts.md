@@ -732,6 +732,7 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | `threshold_decibels` | `float` | required |
 | `target_escalation_rate` | `float` | required |
 | `step_decibels` | `float` | `0.25` |
+| `steps` | `Optional[target_steps.TargetSteps.Settings]` | `None` |
 
 ### `GapThreshold.Settings`
 

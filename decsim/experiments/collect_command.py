@@ -596,11 +596,13 @@ def _resolved_tasks(study: experiment.Experiment) -> list:
     """Each task checked and its record built, in the experiment's order.
 
     Two tasks of one id would share their pieces, so they are refused,
-    and so is a task whose shot runs no round, which sizes no piece.
+    and so is a task whose shot runs no round, which sizes no piece, and
+    one whose threshold steps by a backlog each shot starts without.
     """
     resolved = []
     names_by_id = {}
     for given_task in study.tasks:
+        _refuse_a_backlog_loop_on_shots(given_task)
         task = _with_its_own_calibrator(given_task)
         task_id = task.strong_id()
         earlier_name = names_by_id.setdefault(task_id, task.name)
@@ -632,6 +634,18 @@ def _refuse_two_tasks_of_one_id(first_name: str, second_name: str) -> None:
         f"the tasks {first_name} and {second_name} run the same settings "
         "with the same metadata, so they would share their shots; give "
         "them metadata that tells them apart"
+    )
+
+
+def _refuse_a_backlog_loop_on_shots(task: collect.Task) -> None:
+    """An outer loop reads a stream's backlog, which a shot starts empty."""
+    source = task.online_threshold
+    if source is None or not source.reads_source_queue:
+        return
+    raise refusal.RefusalError(
+        f"the task {task.name}'s threshold steps its target by the "
+        "backlog, and each shot starts with none; run it as a stream "
+        "(decsim stream)"
     )
 
 

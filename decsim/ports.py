@@ -2028,10 +2028,13 @@ class ThresholdSource(Protocol):
     A source that audits by escalating (it labels a kept window by
     re-decoding it on the strong tier) needs one serial strong re-decode
     per window, so Switching refuses it beside run_both_at_once and the
-    double window.
+    double window. A source that reads the source pool's queue (its
+    outer loop steps its target by the backlog) has a source_queue port
+    the build binds.
     """
 
     audits_by_escalating: bool
+    reads_source_queue: bool
 
     def decide_keep(
         self,

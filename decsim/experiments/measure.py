@@ -13,7 +13,8 @@ import json
 import math
 import pathlib
 import statistics
-from typing import Any, Mapping, Optional, Union
+from collections.abc import Mapping
+from typing import Any, Optional, Union
 
 import decsim.build.decoders as decoders_part
 import decsim.build.layout as layout_module

@@ -27,10 +27,12 @@ basic case. Tick a box only when its check has passed.
 
 - [x] Environment with `deltakit` for SD6: `../venv_runs` (see above)
 - [x] Dataset generator: `decsim/qpu/shot_datasets.py`, `experiments/basic_case/make_datasets.py`
-- [ ] Generate the 12 datasets (d = 5, 7, 9, 11 × p = 0.002, 0.003, 0.005): Slurm job 15812841, then seal each point
+- [ ] Generate the 12 datasets (d = 5, 7, 9, 11 × p = 0.002, 0.003, 0.005): Slurm jobs 15812841 and 15812928, then seal each point
 - [x] File-backed syndrome source `DatasetStimDevice`; a run on it equals the live error-model source, seed for seed (`tests/qpu/test_stim_device.py`)
 - [x] Baseline config `experiments/basic_case/`: weak only, strong only, switching; smoke run on 20 shots matched digests and window layout across the three runs
 - [x] Test: every window escalated equals strong only, shot for shot (`tests/escalation/test_switching_mode.py`)
+- [x] Latency audit of one shot's timeline against hand formulas (link hops, fetch/release cycles, gap walk, verdict, strong service, next-window wait, same-seed repeat); three fixes and one parameter change came out of it (evidence ledger, 2026-10-19)
+- [x] Plot script `experiments/basic_case/plots.py`: Toshio Figs. 15, 16, 4–6 style, window latency, backlog, and who answered each window
 - [ ] Pilot: first 2,000 shots of every dataset, all three runs; window layout, failure counts, run time per point
 - [ ] Full runs: 1M shots, 36 jobs (heavy ones to the collaborator's farm)
 
@@ -209,6 +211,39 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 - [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
 ## Evidence ledger
+
+- Latency audit on 2026-10-19 (basic case, d = 5, p = 0.005, 6 seeds, all
+  three runs): every link hop is latency plus bits over rate, union find's
+  fetch is 1 + rounds cycles and its release 3 cycles at 100 MHz, the gap
+  walk is 1 us, the verdict 1 chip cycle to keep and 2 to escalate, the
+  frame write 1 chip cycle, the next window starts when its boundary lands,
+  and a repeat of a seed repeats every timestamp. Four things it found:
+  - A redo window's pin on a union-find commit left only after the
+    escalation landed on the GPU, a 2.25 us leg the chip could not know of.
+    It now leaves with the escalation (Toshio Fig. 12 caption, App. C); a
+    pin on a GPU commit is still read when the escalation lands.
+  - Belief matching always ran the matching. Higgott et al. 2203.04948
+    Algorithm 1 and beliefmatching 0.2.0 (the library Toshio App. B used)
+    return BP's own answer when BP converges; decsim now does too, agrees
+    with the library on 900 of 900 shots, and charges the matching's time
+    only when it runs.
+  - With weight step 0.1 nats, edges are 32 to 89 ticks and union find
+    alone falls behind the rounds at every point (mean decode 4.5 to 10.6
+    us per window against d us of new rounds). Helios grows edges of 2 to
+    w_max ticks and tests w_max up to 16 (2301.08419 Sec. VI-C). Step 0.5
+    gives 6 to 16 ticks, fails as often (d = 5: 246 against 244 of 5,000;
+    d = 7: 100 against 98 of 5,000, p = 0.002; d = 5, p = 0.005: 703
+    against 691 of 2,000) and decodes about 4x faster. The basic case uses
+    0.5. Union find then keeps up at every point: mean 1.1 to 3.5 us, the
+    worst window under d us.
+  - The cluster gap counted a walk that crosses the logical in the buffer
+    and leaves by the window's open future boundary, which changes nothing
+    the window commits (it commits its owned faults only). Escalation sat
+    at about 20% of windows at both d = 5 and d = 7 (p = 0.002). Counting
+    only owned faults' logical bits (Meister et al. 2405.07433 Definition 9:
+    a path counts when it is a logical of what is decoded) gives 9.0% and
+    7.1%, falling with d as Toshio Fig. 16 does, with the same failures
+    (5 and 0 of 200).
 
 - Current-tree review on 2026-10-18: escalation, windows, decoders, links,
   confidence, experiments, observe, controller and frontends tests pass

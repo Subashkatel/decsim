@@ -46,7 +46,7 @@ Relay-BP).
 
 | Value | Setting | Source |
 | --- | --- | --- |
-| Union find | Weight step 0.1; `CycleCount` at 100 MHz, delay 3 cycles, 0 cycles per edge, no setup | Helios RTL, 2301.08419; 2406.08491 |
+| Union find | Weight step 0.5 (edges 6 to 16 ticks, Helios's finest w_max = 16, Sec. VI-C; 0.1 fails as often but is 4x slower and falls behind the rounds); `CycleCount` at 100 MHz, delay 3 cycles, 0 cycles per edge, no setup | Helios RTL, 2301.08419; 2406.08491 |
 | Union-find engine | Fetch 1 cycle per job + 1 per round; release 3 cycles | Helios loading stage; 2603.16203 line 902 |
 | Cluster gap walk | 1.0 µs on the weak unit | Chosen value, 2602.03336 |
 | Verdict | 1 cycle compare, 1 cycle switch, 250 MHz | Estimate |

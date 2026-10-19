@@ -1008,6 +1008,8 @@ stabilizer_randomization draws the random outcomes of the first measurement of e
 | --- | --- | --- |
 | `rollover_rounds` | `int` | `DEFAULT_ROLLOVER_ROUNDS` |
 | `stabilizer_randomization` | `bool` | `True` |
+| `drift_round` | `Optional[int]` | `None` |
+| `drift_factor` | `float` | `1.0` |
 
 ### `UniformLayout.Settings`
 

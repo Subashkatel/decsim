@@ -20,6 +20,13 @@ reading a round's flips copies the record kept since the last rollover
 (probe p8: 30.6 us a round at d=11 every 10 rounds, 43.5 every 100,
 118.4 every round).
 
+A drift multiplies every noise probability of the rounds after
+drift_round by drift_factor: the noise moves while the decoders keep
+the window models of the program as written, as a device whose error
+rates drift away from its last calibration does (Toshio et al.
+2510.25222 Sec. III B calibrates once). Under a noise row linear in p,
+such as SD6, a factor k is the memory at k p.
+
 A round's raw bits are its flips XOR the noiseless reference record,
 read once off a short circuit of the program, as the flips are against
 it (FlipSimulator: "measurement flips ... relative to the noiseless
@@ -30,6 +37,7 @@ circuit's, moved in time likewise (moved_stream_models.py).
 """
 
 import dataclasses
+import math
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -81,6 +89,8 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
 
         rollover_rounds: int = DEFAULT_ROLLOVER_ROUNDS
         stabilizer_randomization: bool = True
+        drift_round: Optional[int] = None
+        drift_factor: float = 1.0
         # the word the reports name this row by
         name = "flip_stream"
 
@@ -93,6 +103,16 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
                 "flip_stream.stabilizer_randomization",
                 self.stabilizer_randomization,
             )
+            if self.drift_round is not None:
+                config.check_whole_count(
+                    "flip_stream.drift_round", self.drift_round, "rounds"
+                )
+            factor = self.drift_factor
+            if not config.is_number(factor) or not 0 <= factor < math.inf:
+                raise ValueError(
+                    "flip_stream.drift_factor must be a finite number of at "
+                    f"least 0, got {factor!r}"
+                )
 
         def build(
             self, code: ports.CodeModel, circuit_arguments: Mapping
@@ -138,7 +158,11 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
         seed = None
         if self._seed is not None:
             seed = seeding.substream_seed(self._seed, (stream_id,))
-        plan = RoundPlan(program, self.settings.rollover_rounds)
+        settings = self.settings
+        drift = None
+        if settings.drift_round is not None:
+            drift = (settings.drift_round, settings.drift_factor)
+        plan = RoundPlan(program, settings.rollover_rounds, drift)
         is_randomized = self.settings.stabilizer_randomization
         history = FlipHistory(plan, seed, is_randomized)
         self._streams_by_id[stream_id] = _Stream(stream_operation, history)
@@ -354,7 +378,7 @@ class FlipHistory:
         """Run the next round; its raw bits, flips against the reference."""
         self.round_count += 1
         name = _fragment_name(self.round_count, is_final)
-        fragment = self.plan.fragments[name]
+        fragment = self.plan.fragment(name, self.round_count)
         self.simulator.do(fragment)
         self.is_final = is_final
         width = fragment.num_measurements
@@ -405,17 +429,26 @@ class RoundPlan:
     """What every round of one program reads: fragments, references, table.
 
     live_reach is the live source's: how many rounds back a round after
-    the first reads (streaming_stim_device._program_reach).
+    the first reads (streaming_stim_device._program_reach). drift is
+    (round, factor): every round after round runs its fragment with each
+    noise probability times factor; None runs the program as written.
     """
 
     def __init__(
         self,
         program: circuit_records.RepeatedStimCircuit,
         rollover_rounds: int,
+        drift: Optional[tuple] = None,
     ) -> None:
         self.fragments = {
             name: getattr(program, name) for name in FRAGMENT_NAMES
         }
+        self.drift_round = None
+        self.drifted = {}
+        if drift is not None:
+            self.drift_round, factor = drift
+            for name, fragment in self.fragments.items():
+                self.drifted[name] = scaled_noise(fragment, factor)
         self.template = periodic_formation.StreamTemplate(program)
         self.references = _references(program, self.template)
         self.rollover_rounds = rollover_rounds
@@ -428,9 +461,43 @@ class RoundPlan:
         self.kept_measurements = max(repeated_back, final_back)
         self.live_reach = _program_reach(program)
 
+    def fragment(self, name: str, round_index: int) -> stim.Circuit:
+        """The named fragment as round round_index runs it."""
+        if self.drift_round is None or round_index <= self.drift_round:
+            return self.fragments[name]
+        return self.drifted[name]
+
     def rolls_over_after(self, round_index: int) -> bool:
         """Whether the simulator lets go of its past after this round."""
         return round_index % self.rollover_rounds == 0
+
+
+def scaled_noise(circuit: stim.Circuit, factor: float) -> stim.Circuit:
+    """The circuit with every noise probability times factor.
+
+    A noisy gate's arguments are its probabilities (stim gate_data
+    is_noisy_gate), a measurement's its flip probability among them;
+    Stim refuses a product past a channel's range.
+    """
+    scaled = stim.Circuit()
+    for instruction in circuit:
+        if isinstance(instruction, stim.CircuitRepeatBlock):
+            body = instruction.body_copy()
+            scaled_body = scaled_noise(body, factor)
+            block = stim.CircuitRepeatBlock(
+                instruction.repeat_count, scaled_body
+            )
+            scaled.append(block)
+            continue
+        gate = stim.gate_data(instruction.name)
+        if not gate.is_noisy_gate:
+            scaled.append(instruction)
+            continue
+        arguments = instruction.gate_args_copy()
+        scaled_arguments = [argument * factor for argument in arguments]
+        targets = instruction.targets_copy()
+        scaled.append(instruction.name, targets, scaled_arguments)
+    return scaled
 
 
 @dataclasses.dataclass(frozen=True)

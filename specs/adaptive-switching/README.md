@@ -231,8 +231,9 @@ operations, or timing and stalls through lattice surgery with LER from memory.
   the most windows waiting in a check, reads the queue's ordinary
   bursts (one escalation holds about 4 windows; at 10% the peak in 100
   windows is often 50) as falling behind. It costs accuracy for no
-  throughput: 2.89 against 2.76% a shot at d = 5. The signal needs
-  changing before the loop is a result (open decision).
+  throughput: 2.89 against 2.76% a shot at d = 5. Results in
+  `results/basic_case_throughput_peak`; the loop now reads the trend
+  instead (entry above).
 
 - Rate controller on 2026-10-19 (`experiments/basic_case/rate_controller.py`,
   job 15823266: RateThreshold at 5 and 10%, from the calibrated threshold

@@ -27,14 +27,14 @@ basic case. Tick a box only when its check has passed.
 
 - [x] Environment with `deltakit` for SD6: `../venv_runs` (see above)
 - [x] Dataset generator: `decsim/qpu/shot_datasets.py`, `experiments/basic_case/make_datasets.py`
-- [ ] Generate the 12 datasets (d = 5, 7, 9, 11 × p = 0.002, 0.003, 0.005): Slurm jobs 15812841 and 15812928, then seal each point
+- [x] Generate the 12 datasets (d = 5, 7, 9, 11 × p = 0.002, 0.003, 0.005), each sealed with its manifest (2026-10-19)
 - [x] File-backed syndrome source `DatasetStimDevice`; a run on it equals the live error-model source, seed for seed (`tests/qpu/test_stim_device.py`)
 - [x] Baseline config `experiments/basic_case/`: weak only, strong only, switching; smoke run on 20 shots matched digests and window layout across the three runs
 - [x] Test: every window escalated equals strong only, shot for shot (`tests/escalation/test_switching_mode.py`)
 - [x] Latency audit of one shot's timeline against hand formulas (link hops, fetch/release cycles, gap walk, verdict, strong service, next-window wait, same-seed repeat); three fixes and one parameter change came out of it (evidence ledger, 2026-10-19)
 - [x] Plot script `experiments/basic_case/plots.py`: Toshio Figs. 15, 16, 4–6 style, window latency, backlog, and who answered each window
-- [ ] Pilot: first 2,000 shots of every dataset, all three runs; window layout, failure counts, run time per point
-- [ ] Full runs: 1M shots, 36 jobs, run here on Della
+- [ ] Pilot, the working set for steps 1–10: first 20,000 shots at d = 5 and 7, every p, all three runs, window outcomes recorded (`experiments/basic_case/pilot.py`; array 15815733, fold 15815734)
+- [ ] Full runs: 1M shots, all 36 tasks, run here on Della (array 15816344, at most 16 jobs at once, fold 15816345)
 
 ### Step 2: timing table (slice 02)
 
@@ -44,13 +44,15 @@ basic case. Tick a box only when its check has passed.
 
 ### Step 3: long runs (slice 03)
 
-- [ ] `decsim stream` fixes: warmup excluded, lag over time, p50/p99, several seeds
-- [ ] Simulator timestamps match the hand-computed queue on the same inputs
-- [ ] Reproduce the paper's sliding-window backlog result (App. C) with synthetic escalation
+- [x] Synthetic escalation: `verdicts.Bernoulli`, each window escalating at a rate, drawn from the run's seed (Toshio Sec. III C's i.i.d. switching)
+- [x] Simulator timestamps match the hand-computed queue: every commit is Lindley's recursion to the tick, services are Toshio's linear times plus fixed hops (`tests/escalation/test_redo_chain_queue.py`)
+- [x] Long horizons without `decsim stream`: one long timing-only shot a stream, its windows read directly (`experiments/backlog/study.py`); stream mode needs a Stim source and stays as it is
+- [ ] Reproduce the paper's sliding-window backlog result (App. C, Figs. 20–21) and the weak-only bound (Eq. 7): `experiments/backlog/`, job 15816899
 
 ### Step 4: does the fixed threshold keep up? (slice 04)
 
 - [ ] Highest escalation rate the hardware sustains, and where 20 dB sits against it
+- [x] Seed offset: `CollectionSettings.first_seed`, so calibration and evaluation shots never overlap
 - [ ] Threshold sweep on calibration shots, evaluated on held-out shots
 
 ### Step 5: inner loop, hold a target escalation rate (slice 05)

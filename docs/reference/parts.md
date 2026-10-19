@@ -707,6 +707,16 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | `min_escalation_rate` | `float` | `1e-05` |
 | `max_escalation_rate` | `float` | `0.3` |
 
+### `RateThreshold.Settings`
+
+`decsim/escalation/threshold_sources.py`. The start in decibels, the target share and the step.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `threshold_decibels` | `float` | required |
+| `target_escalation_rate` | `float` | required |
+| `step_decibels` | `float` | `0.25` |
+
 ### `GapThreshold.Settings`
 
 `decsim/escalation/verdicts.py`. The gap row, which reads the edge's confidence and threshold.

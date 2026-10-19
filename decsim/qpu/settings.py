@@ -29,6 +29,7 @@ SourceSettings = Union[
     flip_stream_device.FlipStreamDevice.Settings,
     stim_device.BurstStimDevice.Settings,
     stim_device.ErrorModelStimDevice.Settings,
+    stim_device.DatasetStimDevice.Settings,
 ]
 # the settings record of whichever code card the run prices
 CodeCardSettings = Union[

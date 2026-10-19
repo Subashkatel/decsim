@@ -244,8 +244,12 @@ operations, or timing and stalls through lattice surgery with LER from memory.
   at d = 5 the 10% target sits just under q* = 11.5%, so the backlog the
   transient built still grows (0.08): a target the inner loop holds is
   not by itself a target the chain sustains, which is step 6's question.
-  Before the step the fixed threshold escalates 8 to 9% on the stream,
-  as it does on held-out shots (8.6 and 8.1%): see the held-out entry.
+  Before the step the fixed threshold escalates 8.0 and 9.0% on the
+  stream. A stream's windows are all middle windows, and on the pilot's
+  shots the middle windows at this threshold escalate 9.2 and 8.8% (the
+  last window, closed by the noiseless readout, escalates 4.2 and 1.4%).
+  At d = 5 the stream is 4 standard errors under the shots' middle
+  windows: open, to check before stream and shot numbers are compared.
 
 - Held-out thresholds on 2026-10-19 (`threshold_heldout.py`, seeds
   20,000 to 39,999, all 18 tasks 20,000 shots): the cluster gap takes

@@ -66,7 +66,7 @@ basic case. Tick a box only when its check has passed.
 
 - [x] Port giving the controller live state: `verdicts.BacklogBernoulli.source_queue`, bound like the deadline's
 - [x] Keeps up where fixed settings fall behind when p rises or belief matching slows, timing-only: `throughput.py`, `throughput_plots.py` (evidence ledger)
-- [ ] The same loop on the real-data stream, setting RateThreshold's target
+- [x] The same loop on the real-data stream, setting RateThreshold's target: `drift.py` loop (evidence ledger)
 
 ### Later steps
 
@@ -216,6 +216,22 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 - [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
 ## Evidence ledger
+
+- Outer loop on real data on 2026-10-19 (`drift.py`, job 15844512,
+  `results/basic_case_drift`: d = 5 and 7 streams of 40,000 rounds, 5
+  seeds, p stepping from 0.002 to 0.003 at round 10,000; the fixed
+  threshold, RateThreshold at a fixed 10%, and RateThreshold with the
+  outer loop setting its target). After the step the fixed threshold
+  escalates 16.9 and 17.0% and falls behind (mean reaction 5,798 and
+  2,897 us, growing 0.38 and 0.18 us per us). The fixed 10% target
+  escalates 10.4 and 10.7%: at d = 7 it keeps up (89 us, growth -0.003),
+  at d = 5 it still falls behind (1,226 us, growth +0.046), q* there
+  being 11.5%. The loop steps its target to 7 to 9% at d = 5 and 8 to 9%
+  at d = 7, escalates 8.1 and 9.4%, and keeps up at both (217 and 68 us,
+  growth -0.016 and -0.001): it holds the case the inner loop alone did
+  not. Its threshold falls further than the rate controller's, to 9 to
+  15 dB. Accuracy is read off the sweep at the share, as in the
+  timing-only study; a stream's one end readout is too few to score.
 
 - Outer loop on the backlog's trend, timing-only, on 2026-10-19
   (`throughput.py`, job 15835849; the same streams as the peak run

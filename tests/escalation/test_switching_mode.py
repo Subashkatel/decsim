@@ -236,6 +236,31 @@ def test_unreachable_threshold_escalates_every_window():
     assert transfers.get("weak_to_frame", 0) == 0
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_a_run_that_escalates_every_window_is_the_strong_tier_alone(seed):
+    """Above every gap every window is redone, and the run is strong-only.
+
+    The redo window re-decodes a window's own extent from its
+    predecessor's final boundary (escalation/strong_regions.py), the
+    input the strong tier alone decodes that window from, so the run
+    predicts what its strong-only twin predicts, shot for shot. The twin
+    is the same machine, its windows included, with the strong pool
+    reading every window.
+    """
+    switching = switching_graph(1e6)
+    strong_part = switching.part(machines.STRONG_POOL)
+    without_switching = switching.without_part(machines.SWITCHING)
+    without_strong = without_switching.without_part(machines.STRONG_POOL)
+    weak_only = without_strong.without_part(machines.STRONG_STORE)
+    strong_only = machines.strong_alone(weak_only, strong_part.settings)
+
+    _machine, result = run_shot(switching, seed)
+    _twin, twin_result = run_shot(strong_only, seed)
+
+    assert predictions(result) == predictions(twin_result)
+    assert failures(result) == failures(twin_result)
+
+
 def gaps_by_window(requests, weak_tier) -> dict:
     """Every window's gap, keyed by the window it decoded.
 

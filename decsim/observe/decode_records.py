@@ -63,13 +63,15 @@ class DecodeRecordLedger:
 class ConfidenceLedger:
     """Each window's confidence record, kept as its requests end.
 
-    A record holds the confidence gap, the verdict and the strong answer.
+    A record holds the confidence gap, the verdict, the strong answer
+    and the strong decoder's own named numbers (DecodeResult.evidence).
     """
 
     def __init__(self) -> None:
         self.verdict_results: dict = {}
         self.escalated_keys: set = set()
         self.strong_observables: dict = {}
+        self.strong_evidence: dict = {}
 
     def request_ended(
         self,
@@ -85,6 +87,7 @@ class ConfidenceLedger:
         key = (job.operation_id, job.window_id)
         if outcome is _STRONG_ANSWER:
             self.strong_observables[key] = result.logical_observables
+            self.strong_evidence[key] = result.evidence
             return
         if outcome not in VERDICT_OUTCOMES:
             return

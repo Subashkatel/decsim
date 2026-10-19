@@ -3070,6 +3070,33 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
     assert "window_outcomes" not in shot_row
 
 
+def test_an_escalated_window_records_whether_belief_matching_matched():
+    """Higgott et al. 2203.04948 Algorithm 1: matching only when BP fails.
+
+    Every window escalates to belief matching, and each row carries the
+    strong decode's own report, so a run's windows split into those BP
+    answered and those the matching answered.
+    """
+    timing = belief_matching.IterationTime(
+        iteration_microseconds=1.0, matching_microseconds=10.0
+    )
+    strong = belief_matching.BeliefMatchingDecoder.Settings(
+        max_iterations=20, timing=timing
+    )
+    settings = switching_settings(
+        1000000.0,
+        observation=("record_window_outcomes",),
+        strong_algorithm=strong,
+    )
+    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+    measurement = measured(task, seed=3)
+    rows = measurement.window_outcomes
+    reports = [json.loads(row.strong_evidence) for row in rows]
+    assert rows
+    assert all(row.is_escalated for row in rows)
+    assert {tuple(report) for report in reports} == {("matched",)}
+
+
 def test_a_chains_deep_windows_are_measured_on_the_deep_pools_input():
     """A window the third pool answered reads that pool's own input hop.
 

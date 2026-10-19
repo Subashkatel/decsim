@@ -446,6 +446,7 @@ text of Stim's 01 format, as in `predictions`.
 | `answer`, `label`, `is_right` | its committed prediction, its true label, and whether they are equal |
 | `gap_nats`, `is_escalated` | on a switching run, the gap the verdict read and whether it escalated |
 | `weak_answer`, `weak_label` | on a switching run, the weak decode's prediction of the window's own commit rounds; for an escalated window, also the label of those rounds |
+| `strong_evidence` | on an escalated window, the strong decode's own named numbers as a json object; belief matching writes `{"matched": 1.0}` when its BP did not converge and the matching ran, `{"matched": 0.0}` when BP's own correction was kept |
 
 ### `confidence_histogram.csv`
 

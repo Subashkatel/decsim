@@ -13,7 +13,7 @@ import json
 import math
 import pathlib
 import statistics
-from typing import Any, Optional, Union
+from typing import Any, Mapping, Optional, Union
 
 import decsim.build.decoders as decoders_part
 import decsim.build.layout as layout_module
@@ -181,7 +181,9 @@ class WindowOutcomeRow:
     the label of the escalated window's own commit rounds, the extent its
     weak answer predicted. Answers and labels are json text of Stim's 01
     format, as predictions is, and is_right says whether the answer
-    equals the label.
+    equals the label. strong_evidence is the escalated window's strong
+    decode's own named numbers as json text, belief matching's
+    {"matched": 1.0} when its BP did not converge and the matching ran.
     """
 
     operation_id: Any  # an opaque identity
@@ -199,6 +201,7 @@ class WindowOutcomeRow:
     is_escalated: Optional[bool]
     weak_answer: Optional[str]
     weak_label: Optional[str]
+    strong_evidence: Optional[str]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1345,6 +1348,7 @@ def _window_outcome_row(
     label = _bit_cell(outcome.label)
     weak_answer = _bit_cell(verdict.weak_answer)
     weak_label = _bit_cell(verdict.weak_label)
+    strong_evidence = _evidence_cell(verdict.strong_evidence)
     return WindowOutcomeRow(
         operation_id=operation_id,
         window_index=window_index,
@@ -1361,6 +1365,7 @@ def _window_outcome_row(
         is_escalated=verdict.is_escalated,
         weak_answer=weak_answer,
         weak_label=weak_label,
+        strong_evidence=strong_evidence,
     )
 
 
@@ -1372,6 +1377,7 @@ class _Verdict:
     is_escalated: Optional[bool] = None
     weak_answer: Optional[tuple] = None
     weak_label: Optional[tuple] = None
+    strong_evidence: Optional[Mapping] = None
 
 
 def _verdict_of(
@@ -1398,7 +1404,10 @@ def _verdict_of(
             window.commit_hi,
             len(weak_answer),
         )
-    return _Verdict(gap_nats, is_escalated, weak_answer, weak_label)
+    strong_evidence = ledger.strong_evidence.get(window.key)
+    return _Verdict(
+        gap_nats, is_escalated, weak_answer, weak_label, strong_evidence
+    )
 
 
 def _window_statuses(observation: observation_module.Observation) -> dict:
@@ -1656,6 +1665,13 @@ def _bit_text(bits: Optional[tuple]) -> Optional[str]:
         return None
     characters = [str(int(bit)) for bit in bits]
     return "".join(characters)
+
+
+def _evidence_cell(evidence: Optional[Mapping]) -> Optional[str]:
+    """A decoder's named numbers as a json object cell, keys in order."""
+    if evidence is None:
+        return None
+    return json.dumps(dict(evidence), sort_keys=True)
 
 
 def _bit_cell(bits: Optional[tuple]) -> Optional[str]:

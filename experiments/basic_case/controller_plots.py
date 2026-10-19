@@ -9,7 +9,8 @@ threshold_heldout.py's. Writes into CONTROLLER_FOLDER/plots/:
     same target on the same seeds, and the shots only one of them failed
     (a paired comparison: McNemar's test reads those two counts);
   - tracking.png: each controller's threshold against the windows it
-    has seen, a panel per point, the calibrated threshold dotted.
+    has seen, a row per d and a column per p, the calibrated threshold
+    dashed.
 """
 
 import collections
@@ -127,20 +128,23 @@ def plot_tracking(controller: pathlib.Path, folder: pathlib.Path) -> None:
     for key, samples in trajectories.items():
         by_point[key[:2]][key] = samples
     points = sorted(by_point)
-    width = 4 * len(points)
-    figure, axes_row = plt.subplots(
-        1, len(points), figsize=(width, 3.6), squeeze=False
-    )
-    panels = zip(axes_row[0], points, strict=True)
-    for axes, point in panels:
+    distances = sorted({distance for distance, _ in points})
+    probabilities = sorted({probability for _, probability in points})
+    rows, columns = len(distances), len(probabilities)
+    size = (4 * columns, 3.2 * rows)
+    figure, axes_grid = plt.subplots(rows, columns, figsize=size, squeeze=False)
+    for point in points:
+        distance, probability = point
+        row = distances.index(distance)
+        column = probabilities.index(probability)
+        axes = axes_grid[row][column]
         for key, samples in by_point[point].items():
             _draw_trajectory(axes, key, samples)
-        distance, probability = point
         axes.set_title(f"d = {distance}, p = {probability:g}")
         axes.set_xlabel("windows")
         axes.set_ylabel("threshold (dB)")
         axes.grid(True, alpha=0.3)
-    axes_row[0][0].legend(fontsize=7)
+    axes_grid[0][0].legend(fontsize=7)
     figure.tight_layout()
     path = folder / "tracking.png"
     figure.savefig(path, dpi=150)

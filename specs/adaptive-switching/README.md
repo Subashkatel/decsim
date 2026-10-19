@@ -245,11 +245,16 @@ operations, or timing and stalls through lattice surgery with LER from memory.
   transient built still grows (0.08): a target the inner loop holds is
   not by itself a target the chain sustains, which is step 6's question.
   Before the step the fixed threshold escalates 8.0 and 9.0% on the
-  stream. A stream's windows are all middle windows, and on the pilot's
-  shots the middle windows at this threshold escalate 9.2 and 8.8% (the
-  last window, closed by the noiseless readout, escalates 4.2 and 1.4%).
-  At d = 5 the stream is 4 standard errors under the shots' middle
-  windows: open, to check before stream and shot numbers are compared.
+  stream, against 9.2 and 8.8% on the pilot shots' middle windows (a
+  stream's windows are all middle windows; the last window of a shot,
+  closed by the noiseless readout, escalates 4.2 and 1.4%). It is
+  chance: 20 streams of 20,000 rounds at d = 5 (no drift, each window's
+  gap recorded) escalate 9.08 +- 0.12% against the shots' 9.19 +- 0.05%,
+  with 10.73 +- 0.02 detection events a window against 10.78 +- 0.02.
+  Seeds 1 to 5, the drift run's, sit low (8.5 to 9.1%), and a stream's
+  share spreads 0.54% from seed to seed, over the binomial 0.45%, since
+  neighbouring windows share rounds. Shots and streams agree, so a
+  share's accuracy measured on shots holds on a stream.
 
 - Held-out thresholds on 2026-10-19 (`threshold_heldout.py`, seeds
   20,000 to 39,999, all 18 tasks 20,000 shots): the cluster gap takes

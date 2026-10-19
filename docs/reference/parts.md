@@ -675,15 +675,15 @@ restart_reread_buffer_regions is how many of the strong region's buffer regions 
 
 ### `TargetSteps.Settings`
 
-`decsim/escalation/target_steps.py`. The levels, the start, the cadence and the two watermarks.
+`decsim/escalation/target_steps.py`. The levels, the start, the cadence and the trend's tests.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `start` | `float` | required |
 | `levels` | `tuple` | `(0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)` |
 | `check_every_windows` | `int` | `100` |
-| `high_backlog_windows` | `int` | `4` |
-| `low_backlog_windows` | `int` | `1` |
+| `rise_checks` | `int` | `2` |
+| `rise_margin_windows` | `float` | `5.0` |
 | `calm_checks` | `int` | `5` |
 
 ### `FixedThreshold.Settings`

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Optional
 
 import decsim.build.layout as layout_module
 import decsim.confidence.consensus as consensus
+import decsim.confidence.extra_cluster as extra_cluster
 import decsim.confidence.gap_join as gap_join_module
 import decsim.confidence.no_signal as no_signal
 import decsim.config as config
@@ -87,6 +88,8 @@ class Switching:
         )
         _refuse_a_threshold_with_no_gap(settings, signal)
         _refuse_agreement_without_consensus(settings, signal)
+        _refuse_a_moving_threshold_past_a_fixed_limit(signal, online_threshold)
+        _refuse_a_moving_threshold_beside_a_deadline(settings, online_threshold)
         threshold = _threshold_source(settings, online_threshold)
         policy = settings.build_policy(threshold)
         regions = strong_regions.StrongRegions()
@@ -338,6 +341,48 @@ def _refuse_a_threshold_with_no_gap(
         f"switching.verdict {verdict.name} reads a confidence gap, and "
         "confidence none gives none; name a status, always or never "
         "verdict, or a confidence row"
+    )
+
+
+def _refuse_a_moving_threshold_past_a_fixed_limit(
+    signal: ports.ConfidenceSignal,
+    online_threshold: Optional[ports.ThresholdSource],
+) -> None:
+    """The extra cluster gap grows only to the threshold it was built at.
+
+    Its limit is the threshold (Kishi et al. 2602.03336 lines 345-347),
+    fixed at build, so a threshold that moves above it would read every
+    gap past the old limit as infinite and keep windows it should
+    escalate.
+    """
+    if online_threshold is None:
+        return
+    if signal.source != extra_cluster.EXTRA_CLUSTER_GAP_SOURCE:
+        return
+    raise ValueError(
+        "confidence extra_cluster_gap grows only to the threshold it is "
+        "built at, and this threshold moves as it learns; use the "
+        "cluster_gap row, or a fixed threshold"
+    )
+
+
+def _refuse_a_moving_threshold_beside_a_deadline(
+    settings: escalation_settings.SwitchingSettings,
+    online_threshold: Optional[ports.ThresholdSource],
+) -> None:
+    """A deadline escalates windows its threshold never decides on.
+
+    A late source result is escalated by the deadline row without the
+    threshold seeing it (deadlines.py), so a threshold that learns from
+    the share it escalates would count fewer than went to the strong
+    tier and settle above its target.
+    """
+    if online_threshold is None or settings.deadline is None:
+        return
+    raise ValueError(
+        "switching.deadline escalates late windows the threshold never "
+        "decides on, and this threshold learns from the windows it "
+        "escalates; use a fixed threshold beside a deadline"
     )
 
 

@@ -16,6 +16,7 @@ import decsim.confidence.consensus as consensus
 import decsim.confidence.no_signal as no_signal
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
@@ -26,6 +27,7 @@ import decsim.presets.machines as machines
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
+import tests.regression.test_shot_results as regression_machines
 import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -140,6 +142,43 @@ def test_an_agreement_verdict_needs_the_consensus_row():
 
     with pytest.raises(ValueError, match="name confidence consensus"):
         machine_module.Machine.build(switching_graph, 0)
+
+
+def test_the_extra_cluster_gap_refuses_a_threshold_that_moves():
+    """A rate threshold builds on the cluster gap and not on the extra one.
+
+    The extra cluster gap grows only to the threshold it was built at.
+    """
+    rate = threshold_sources.RateThreshold.Settings(20.0, 0.1)
+    extra = regression_machines.extra_cluster_gap_switching()
+    plain = regression_machines.cluster_gap_switching()
+    extra = extra.with_settings(machines.SWITCHING, threshold=rate)
+    plain = plain.with_settings(machines.SWITCHING, threshold=rate)
+    extra_task = collect.Task("extra", extra, {})
+    plain_task = collect.Task("plain", plain, {})
+
+    with pytest.raises(ValueError, match="extra_cluster_gap grows only"):
+        collect.run_shot(extra_task, 0)
+    shot = collect.run_shot(plain_task, 0)
+    assert (
+        shot.machine.switching.policy.threshold is plain_task.online_threshold
+    )
+
+
+def test_a_deadline_refuses_a_threshold_that_learns():
+    """Windows a deadline escalates never reach the threshold's count."""
+    rate = threshold_sources.RateThreshold.Settings(20.0, 0.1)
+    deadline = deadlines.Deadline.Settings(slack_microseconds=18.0)
+    switching = declared_run.declared_switching(
+        threshold=rate, deadline=deadline
+    )
+    graph = declared_fabric.switching_graph(
+        rounds=9, escalated_windows=set(), switching=switching
+    )
+    task = collect.Task("deadline", graph, {})
+
+    with pytest.raises(ValueError, match="switching.deadline escalates"):
+        collect.run_shot(task, 0)
 
 
 def test_the_consensus_row_needs_the_agreement_verdict():

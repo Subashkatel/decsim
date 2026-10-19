@@ -7,9 +7,12 @@ backend's own report; always and never decide alone. On the declared
 switching machine, a never verdict leaves every window on the weak
 tier and an always verdict sends every window to the strong one. The
 bernoulli row is Toshio et al.'s i.i.d. switching (Sec. III C): its
-draws come from the run's seed, so a seed repeats them.
+draws come from the run's seed, so a seed repeats them. The
+backlog_bernoulli row reads the weak queue the build binds it to, and
+steps its share down once that queue backs up.
 """
 
+import decsim.escalation.target_steps as target_steps
 import decsim.escalation.verdicts as verdicts
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
@@ -166,3 +169,31 @@ def test_a_bernoulli_run_repeats_its_seed_and_not_another():
     assert first != other
     # 90 windows at rate 0.5: 45 escalate on average, sd 4.7
     assert 30 < sum(strong) < 60
+
+
+def test_a_backlog_bernoulli_steps_down_once_its_queue_backs_up():
+    """All escalated, the weak queue backs up and the share drops to zero.
+
+    The check at the tenth window comes before its draw, so nine
+    windows escalate.
+    """
+    steps = target_steps.TargetSteps.Settings(
+        start=1.0,
+        levels=(0.0, 1.0),
+        check_every_windows=10,
+        high_backlog_windows=1,
+        low_backlog_windows=0,
+        calm_checks=100,
+    )
+    verdict = verdicts.BacklogBernoulli.Settings(steps=steps)
+    switching = declared_run.declared_switching(verdict=verdict)
+    graph = fabric.switching_graph(
+        rounds=270, escalated_windows=set(), switching=switching
+    )
+    machine = machine_module.Machine.build(graph, 0)
+
+    machine.run()
+
+    tiers = [tier for _window_key, tier in declared_run.frame_tiers(machine)]
+    assert tiers[:9] == ["strong"] * 9
+    assert set(tiers[9:]) == {"weak"}

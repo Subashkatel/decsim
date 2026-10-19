@@ -568,13 +568,14 @@ The facts at_task and for_task read are the machine's task facts (topology/graph
 
 `decsim/escalation/settings.py`. A verdict row's settings record (verdicts.py).
 
-reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output.
+reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output; reads_source_queue whether it reads the source pool's waiting jobs, a port the build binds.
 
 | Member | Type |
 | --- | --- |
 | `name` | `str` |
 | `reads_threshold` | `bool` |
 | `reads_consensus` | `bool` |
+| `reads_source_queue` | `bool` |
 | `build(self)` | `ports.EscalationVerdict` |
 
 ### `ReplaceRuleSettings`
@@ -670,6 +671,19 @@ restart_reread_buffer_regions is how many of the strong region's buffer regions 
 | --- | --- | --- |
 | `restart_reread_buffer_regions` | `int` | `1` |
 
+### `TargetSteps.Settings`
+
+`decsim/escalation/target_steps.py`. The levels, the start, the cadence and the two watermarks.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `start` | `float` | required |
+| `levels` | `tuple` | `(0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)` |
+| `check_every_windows` | `int` | `100` |
+| `high_backlog_windows` | `int` | `4` |
+| `low_backlog_windows` | `int` | `1` |
+| `calm_checks` | `int` | `5` |
+
 ### `FixedThreshold.Settings`
 
 `decsim/escalation/threshold_sources.py`. The constant, in decibels.
@@ -748,6 +762,14 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | Field | Type | Default |
 | --- | --- | --- |
 | `rate` | `float` | required |
+
+### `BacklogBernoulli.Settings`
+
+`decsim/escalation/verdicts.py`. The outer loop's settings.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `steps` | `target_steps.TargetSteps.Settings` | required |
 
 ## decsim/frontends
 

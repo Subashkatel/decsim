@@ -10,12 +10,13 @@ Writes into RESULTS_FOLDER/plots/:
     time in Fig. 20's gate steps of 9 d rounds;
   - mean_backlog.png: the mean backlog against gamma, a line per
     tau_weak (Fig. 21 b), the median over seeds with their range;
-  - capacity.png: the share of the stream left undecoded at its end
-    against gamma, each point a stream, beside the queue's 1 - 1 / load
-    (config.load), with the load-1 rate and Fig. 21 a's divergence
-    threshold marked per tau_weak;
-  - weak_only.png: the same share against tau_weak with no escalation,
-    beside 1 - 1 / load and Eq. (7)'s tau_gen / 2.
+  - capacity.png: the last window's backlog over the stream's rounds
+    against gamma, each point a stream, beside the queue's load - 1
+    (config.load): an overloaded server's last commit lags the stream's
+    end by load - 1 of its length, a stable one's by none. Fig. 21 a's
+    divergence threshold is marked per tau_weak;
+  - weak_only.png: the same against tau_weak with no escalation, beside
+    load - 1 and Eq. (7)'s tau_gen / 2.
 """
 
 import collections
@@ -158,8 +159,10 @@ def plot_capacity(rows: list, folder: pathlib.Path) -> None:
         axes.axvline(threshold, color=color, ls=":", lw=1)
     axes.set_xscale("log")
     axes.set_xlabel("switching rate $\\gamma_{switch}$ (per d rounds)")
-    axes.set_ylabel("share of the stream undecoded at its end")
-    axes.set_title("dots: decsim; lines: 1 - 1/load; dotted: Fig. 21a")
+    axes.set_yscale("symlog", linthresh=0.01)
+    axes.set_ylim(bottom=0.0)
+    axes.set_ylabel("last backlog / stream rounds")
+    axes.set_title("dots: decsim; lines: load - 1; dotted: Fig. 21a")
     axes.grid(True, which="both", alpha=0.3)
     axes.legend(fontsize=8)
     _save(figure, folder, "capacity.png")
@@ -177,12 +180,12 @@ def plot_weak_only(rows: list, folder: pathlib.Path) -> None:
         theory.append(share)
     figure, axes = plt.subplots(figsize=(5, 3.6))
     axes.plot(fractions, shares, "o", ms=4, label="decsim")
-    axes.plot(fractions, theory, "-", lw=1, label="1 - 1/load")
+    axes.plot(fractions, theory, "-", lw=1, label="load - 1")
     axes.axvline(0.5, color="gray", ls=":", label="Eq. (7): $\\tau_{gen}$/2")
     axes.set_xlabel(
         "$\\tau^{weak}_{dec} / \\tau_{gen}$ ($r_{com} = r_{buf} = d$)"
     )
-    axes.set_ylabel("share of the stream undecoded at its end")
+    axes.set_ylabel("last backlog / stream rounds")
     axes.grid(True, alpha=0.3)
     axes.legend(fontsize=8)
     _save(figure, folder, "weak_only.png")
@@ -201,14 +204,14 @@ def _by_fraction_and_gamma(rows: list) -> dict:
 
 
 def _queue_share(load: float) -> float:
-    """A queue's undecoded share at load: 1 - 1 / load above 1, else 0."""
+    """The last commit's lag over the stream's length: load - 1, or 0."""
     if load <= 1.0:
         return 0.0
-    return 1.0 - 1.0 / load
+    return load - 1.0
 
 
 def _undecoded_share(row: dict) -> float:
-    """The final backlog over the rounds the stream measured."""
+    """The last window's backlog over the rounds the stream measured."""
     final = float(row["final_backlog_rounds"])
     return final / constants.horizon_rounds
 

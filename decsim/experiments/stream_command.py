@@ -5,7 +5,8 @@
 
 The task's memory circuit becomes a stream of N rounds read out at the
 last (frontends/memory_stream.py), sampled a round at a time by the flip
-stream source (qpu/flip_stream_device.py), on the task's own machine. The
+stream source (qpu/flip_stream_device.py), the task's own when it names
+that source, as a drift study does, on the task's own machine. The
 machine lets each window go once it is final and the stream's measures
 fold it (observation.folds_windows; windows/window_release.py,
 experiments/stream_measures.py), so a stream of 10^6 rounds runs in
@@ -110,7 +111,9 @@ def stream_machine(
     workload = machine.held("workload")
     streamed = _stream_workload(workload, rounds)
     qpu = machine.held("qpu")
-    source = flip_stream_device.FlipStreamDevice.Settings()
+    source = qpu.source
+    if source.name != flip_stream_device.FlipStreamDevice.Settings.name:
+        source = flip_stream_device.FlipStreamDevice.Settings()
     flip_qpu = dataclasses.replace(qpu, source=source)
     first_after_warmup = warmup + 1
     first_recorded = max(

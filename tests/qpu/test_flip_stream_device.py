@@ -195,11 +195,64 @@ def test_a_static_window_plan_is_not_implemented_yet():
             {"stabilizer_randomization": "yes"},
             "flip_stream.stabilizer_randomization must be true or false",
         ),
+        ({"drift_round": 0}, "flip_stream.drift_round must be"),
+        ({"drift_factor": -1.0}, "flip_stream.drift_factor must be"),
     ],
 )
 def test_the_settings_refuse_a_value_by_name(values, sentence):
     with pytest.raises(ValueError, match=sentence):
         flip_stream_device.FlipStreamDevice.Settings(**values)
+
+
+def test_a_drift_by_two_is_the_program_at_twice_the_probability():
+    """Stim's own memory at 2p is the one at p with its noise doubled."""
+    program = memory_programs.memory_program(3, "Z", 0.01)
+    doubled = memory_programs.memory_program(3, "Z", 0.02)
+
+    for name in ("first_round", "repeated_round", "final_round"):
+        fragment = getattr(program, name)
+        scaled = flip_stream_device.scaled_noise(fragment, 2.0)
+        assert scaled == getattr(doubled, name)
+
+
+def test_a_drifted_stream_is_the_plain_one_up_to_its_drift_round():
+    program = _program()
+    plain = flip_stream_device.RoundPlan(program, 3)
+    drifted = flip_stream_device.RoundPlan(program, 3, (5, 3.0))
+
+    plain_bits = _run_plan(plain, 9)
+    drifted_bits = _run_plan(drifted, 9)
+
+    assert drifted_bits[:5] == plain_bits[:5]
+    assert drifted_bits[5:] != plain_bits[5:]
+
+
+def test_a_drift_to_no_noise_repeats_each_round_from_two_after_it():
+    """With no new error, a stabilizer reads the same every round.
+
+    The round after the drift round still reads the errors of the round
+    before it, which its detectors compare against.
+    """
+    program = _program()
+    plan = flip_stream_device.RoundPlan(program, 3, (4, 0.0))
+
+    bits = _run_plan(plan, 12)
+
+    repeated = bits[5:11]
+    assert all(round_bits == repeated[0] for round_bits in repeated)
+    assert bits[0:4] != [bits[0]] * 4
+
+
+def _run_plan(plan, round_count: int) -> list:
+    """Each round's raw bits, the last round the final one."""
+    history = flip_stream_device.FlipHistory(plan, SEED, False)
+    bits = []
+    after_last_round = round_count + 1
+    for round_index in range(1, after_last_round):
+        is_final = round_index == round_count
+        round_bits = history.run_round(is_final)
+        bits.append(round_bits)
+    return bits
 
 
 def _workload(final_round: int) -> workload_settings.WorkloadSettings:

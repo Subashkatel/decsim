@@ -2,10 +2,10 @@ r"""The calibrated thresholds on held-out shots.
 
 threshold_sweep.py ran seeds 0 to 19,999 at 0 to 50 dB, and
 threshold_plots.py's calibration.csv gave, per point, the threshold that
-escalates 5, 10 and 20% of windows on those seeds. This runs each on
-seeds 20,000 to 39,999 of the same datasets, which calibration never
-saw (CollectionSettings.first_seed): a threshold holds when it escalates
-about its target there too.
+escalates 5, 10 and 20% of windows on those seeds (calibration.py).
+This runs each on seeds 20,000 to 39,999 of the same datasets, which
+calibration never saw (CollectionSettings.first_seed): a threshold
+holds when it escalates about its target there too.
 
 Usage
 -----
@@ -23,20 +23,11 @@ import decsim
 import decsim.experiments.sweeps as sweeps
 
 config = sweeps.load_beside(__file__, "config.py")
+calibration = sweeps.load_beside(__file__, "calibration.py")
 constants = config.constants
 FIRST_HELDOUT_SEED = 20_000
 HELDOUT_SHOTS = 20_000
 THRESHOLD = "constants.escalation.threshold.threshold"
-# calibration.csv of the sweep folded on 2026-10-19, in dB, for targets
-# of 5, 10 and 20% of windows escalated
-CALIBRATED = {
-    (5, 0.002): {"0.05": 15.71, "0.1": 20.92, "0.2": 30.9},
-    (5, 0.003): {"0.05": 8.66, "0.1": 14.98, "0.2": 18.49},
-    (5, 0.005): {"0.05": 2.39, "0.1": 4.78, "0.2": 9.89},
-    (7, 0.002): {"0.05": 15.55, "0.1": 21.1, "0.2": 30.62},
-    (7, 0.003): {"0.05": 8.66, "0.1": 14.61, "0.2": 17.87},
-    (7, 0.005): {"0.05": 1.99, "0.1": 3.97, "0.2": 8.16},
-}
 
 
 def point_experiment(point: tuple, targets: dict) -> decsim.Experiment:
@@ -44,7 +35,7 @@ def point_experiment(point: tuple, targets: dict) -> decsim.Experiment:
     distance, probability = point
     thresholds = [f"{decibels}dB" for decibels in targets.values()]
     target_of = {
-        f"{decibels}dB": target for target, decibels in targets.items()
+        f"{decibels}dB": str(target) for target, decibels in targets.items()
     }
 
     def machine():
@@ -78,9 +69,8 @@ def point_experiment(point: tuple, targets: dict) -> decsim.Experiment:
     return sweep.experiment()
 
 
-parts = [
-    point_experiment(point, targets) for point, targets in CALIBRATED.items()
-]
+calibrated = calibration.CALIBRATED.items()
+parts = [point_experiment(point, targets) for point, targets in calibrated]
 tasks = [task for part in parts for task in part.tasks]
 experiment = decsim.Experiment(
     "basic_case_heldout", tasks, constants=parts[0].constants

@@ -263,6 +263,26 @@ def test_a_launch_with_no_seconds_file_is_refused_before_any_folder(
     assert not out_dir.exists()
 
 
+def test_a_first_seed_plans_its_shots_from_that_seed(tmp_path):
+    """Five shots from seed 100 plan seeds 100 to 104 of each task."""
+    collection = {"max_shots": 5, "first_seed": 100}
+    run_file = run_files.write_packed_run_file(
+        tmp_path, PIECE_SECONDS, collection=collection
+    )
+    out_dir = tmp_path / "out"
+    launch = ["run", str(run_file), "--out", str(out_dir), "--slurm"]
+
+    command.main([*launch, "--cores", "1", "--hours", "2", "--dry-run"])
+
+    planned = _planned_seeds(out_dir)
+    seeds = []
+    for _name, first, count in planned:
+        last = first + count
+        piece_seeds = range(first, last)
+        seeds.extend(piece_seeds)
+    assert sorted(seeds) == [100, 101, 102, 103, 104]
+
+
 def _planned_seeds(run_dir) -> list:
     """Every piece jobs.json plans, as [task name, first seed, count]."""
     jobs_path = run_dir / plan_command.JOBS_FILE

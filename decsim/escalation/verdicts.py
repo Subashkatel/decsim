@@ -14,6 +14,9 @@ learns from by the windows it escalates.
     never          keep every window
     bernoulli      escalate each window independently at a rate,
                    drawn from the run's seed (Toshio et al. Sec. III C)
+    backlog_bernoulli
+                   bernoulli at a rate the outer loop steps by the
+                   source pool's backlog (target_steps.py, slice 06)
     agreement      keep an ensemble's answer at or above a share of its
                    members agreeing; all of them by default (Shutty et
                    al. 2401.12434 Sec. V)
@@ -21,6 +24,7 @@ learns from by the windows it escalates.
 
 import dataclasses
 
+import decsim.escalation.target_steps as target_steps
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.seeding as seeding
@@ -43,6 +47,7 @@ class GapThreshold:
         name = "gap_threshold"
         reads_threshold = True
         reads_consensus = False
+        reads_source_queue = False
 
         def build(self) -> "GapThreshold":
             """A verdict on the gap against the threshold."""
@@ -77,6 +82,7 @@ class Status:
         name = "status"
         reads_threshold = False
         reads_consensus = False
+        reads_source_queue = False
 
         def build(self) -> "Status":
             """A verdict on the backend's reported status."""
@@ -119,6 +125,7 @@ class Agreement:
         name = "agreement"
         reads_threshold = False
         reads_consensus = True
+        reads_source_queue = False
 
         def __post_init__(self) -> None:
             if not 0.0 < self.minimum <= 1.0:
@@ -160,6 +167,7 @@ class Always:
         name = "always"
         reads_threshold = False
         reads_consensus = False
+        reads_source_queue = False
 
         def build(self) -> "Always":
             """A verdict that escalates every window."""
@@ -186,6 +194,7 @@ class Never:
         name = "never"
         reads_threshold = False
         reads_consensus = False
+        reads_source_queue = False
 
         def build(self) -> "Never":
             """A verdict that keeps every window."""
@@ -220,6 +229,7 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
         name = "bernoulli"
         reads_threshold = False
         reads_consensus = False
+        reads_source_queue = False
 
         def __post_init__(self) -> None:
             if not 0.0 <= self.rate <= 1.0:
@@ -246,5 +256,54 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
         generator = self.generator()
         draw = generator.random()
         if draw < self.rate:
+            return ESCALATE
+        return KEEP
+
+
+class BacklogBernoulli(seeding.GeneratorSeedConsumer):
+    """Bernoulli at the share the outer loop sets from the backlog.
+
+    The timing-only form of slice 06, as Toshio et al. 2510.25222 Sec.
+    III C model switching: no gap is read, each window escalates at the
+    loop's current share, and the loop (target_steps.TargetSteps) reads
+    the windows waiting for the source pool before each decision.
+    source_queue is the source pool's manager, bound by the build as the
+    deadline's is.
+    """
+
+    source_queue = ports.Port(ports.DecodeQueue)
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The outer loop's settings."""
+
+        steps: target_steps.TargetSteps.Settings
+        name = "backlog_bernoulli"
+        reads_threshold = False
+        reads_consensus = False
+        reads_source_queue = True
+
+        def build(self) -> "BacklogBernoulli":
+            """A verdict at the loop's start share."""
+            steps = self.steps.build()
+            return BacklogBernoulli(steps)
+
+    def __init__(self, steps: target_steps.TargetSteps) -> None:
+        seeding.GeneratorSeedConsumer.__init__(self)
+        self.steps = steps
+
+    def decide(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold: ports.ThresholdSource,
+    ) -> decoding_records.Verdict:
+        """Read the backlog, then escalate at the loop's share."""
+        del job, result, threshold
+        waiting = self.source_queue.waiting_jobs()
+        self.steps.observe(waiting)
+        generator = self.generator()
+        draw = generator.random()
+        if draw < self.steps.target:
             return ESCALATE
         return KEEP

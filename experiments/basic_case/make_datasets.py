@@ -89,7 +89,11 @@ def _description(distance: int, probability: float) -> dict:
 
 
 def _print_sbatch() -> None:
-    """One array task per chunk of every point; each seals nothing."""
+    """One array task per chunk of every point; each seals nothing.
+
+    The tasks run chunk by chunk, so every point's first chunk, which the
+    pilot reads, is written before any point's second.
+    """
     max_shots = config.SHOTS
     chunk_shots = config.CHUNK_SHOTS
     chunk_count = max_shots // chunk_shots
@@ -113,8 +117,8 @@ def _print_sbatch() -> None:
         f"#SBATCH --output={logs}/basic_case_datasets_%A_%a.out",
         f"distances=({distances})",
         f"probabilities=({probabilities})",
-        f"chunk=$((SLURM_ARRAY_TASK_ID % {chunk_count}))",
-        f"point=$((SLURM_ARRAY_TASK_ID / {chunk_count}))",
+        f"chunk=$((SLURM_ARRAY_TASK_ID / {point_count}))",
+        f"point=$((SLURM_ARRAY_TASK_ID % {point_count}))",
         f"distance=${{distances[$((point / {probability_count}))]}}",
         f"probability=${{probabilities[$((point % {probability_count}))]}}",
         f"cd {HERE.parent}",

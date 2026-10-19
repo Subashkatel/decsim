@@ -101,7 +101,8 @@ def _draw_shares(axes, control: str, runs: list) -> None:
 def _draw_share_guides(axes, calibration: dict, distance: int) -> None:
     """The target dotted, q* at each p dashed, the drift a grey line."""
     axes.axhline(drift.TARGET, color="black", ls=":", lw=0.8, label="target")
-    guides = zip(_probabilities(), GUIDE_STYLES, strict=True)
+    probabilities = _probabilities()
+    guides = zip(probabilities, GUIDE_STYLES, strict=True)
     for probability, style in guides:
         q_star = calibration[(distance, probability)]["q_star"]
         label = f"q* at p = {probability:g}"
@@ -120,7 +121,8 @@ def _draw_thresholds(axes, runs: list) -> None:
 def _draw_threshold_guides(axes, calibration: dict, distance: int) -> None:
     """The threshold calibrated for the target at each p, dotted."""
     column = f"target_{drift.TARGET:g}"
-    guides = zip(_probabilities(), GUIDE_STYLES, strict=True)
+    probabilities = _probabilities()
+    guides = zip(probabilities, GUIDE_STYLES, strict=True)
     for probability, style in guides:
         decibels = calibration[(distance, probability)][column]
         label = f"calibrated at p = {probability:g}"

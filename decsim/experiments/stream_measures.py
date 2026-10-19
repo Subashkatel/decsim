@@ -21,6 +21,11 @@ number), the windows by tier and by status, the escalated windows, the
 reaction growth rates (an exact least-squares fit in ticks), the
 deadline misses, the end-of-stream reaction and the throughput. The
 per-round latencies (cwb_per_round and the stalls) are not folded.
+
+Past measure_shot, it samples the escalated share as the stream goes:
+every hundredth committed window, the windows committed so far, the
+escalated among them and the window's first committed round, so a
+stream whose noise drifts shows its share before and after.
 """
 
 import collections
@@ -45,6 +50,8 @@ import decsim.records.windows as window_records
 KEPT_WINDOW_WIDTHS = 4
 # the windows read between two lettings-go of the rounds no window reads
 ROUNDS_LET_GO_EVERY = 64
+# the committed windows between two samples of the escalated share
+ESCALATION_SAMPLED_EVERY = 100
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,6 +91,7 @@ class StreamMeasurement:
     link_totals: dict
     statistics: list
     statistic_values: list
+    escalation_series: list
 
 
 class StreamMeasures:
@@ -188,6 +196,7 @@ class StreamMeasures:
             "strong_service_sum_us": service_us,
             "throughput_windows_per_us": windows_per_us,
             "throughput_rounds_per_us": rounds_per_us,
+            "escalation_series": list(folds.escalation_series),
         }
 
     def _run_numbers(
@@ -251,6 +260,7 @@ class StreamMeasures:
         if decode.tier == strong_pool:
             self.folds.fold_strong(decode)
         self.folds.note_commit(frame_record)
+        self.folds.sample_escalation(window)
         if window.t_done is None:
             return
         send = measure.last_required_send_ticks(decode, self.transfers.qpu_send)
@@ -329,6 +339,8 @@ class _Folds:
         self.reasons: set = set()
         self.growth_by_tier: dict = collections.defaultdict(_Growth)
         self.counts = _Counts(deadline_us=deadline_us)
+        # (committed windows, escalated windows, first committed round)
+        self.escalation_series: list = []
 
     @property
     def decoded_windows(self) -> int:
@@ -385,9 +397,18 @@ class _Folds:
         self, frame_record: decoding_records.PauliFrameCommitRecord
     ) -> None:
         counts = self.counts
+        counts.committed_windows += 1
         counts.last_commit_tick = _higher(
             counts.last_commit_tick, frame_record.committed_ticks
         )
+
+    def sample_escalation(self, window: window_records.Window) -> None:
+        """Every hundredth committed window, the share escalated so far."""
+        counts = self.counts
+        if counts.committed_windows % ESCALATION_SAMPLED_EVERY:
+            return
+        sample = (counts.committed_windows, counts.strong_windows)
+        self.escalation_series.append((*sample, window.commit_lo))
 
     def fold_decoded(
         self,
@@ -533,6 +554,7 @@ class _Counts:
     """The running counts and ticks of the fold."""
 
     folded_windows: int = 0
+    committed_windows: int = 0
     decoded_windows: int = 0
     recorded_windows: int = 0
     provisional_windows: int = 0

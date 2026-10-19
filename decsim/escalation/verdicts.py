@@ -12,6 +12,8 @@ learns from by the windows it escalates.
                    succeeded: nonconverged, invalid or failed
     always         escalate every window
     never          keep every window
+    bernoulli      escalate each window independently at a rate,
+                   drawn from the run's seed (Toshio et al. Sec. III C)
     agreement      keep an ensemble's answer at or above a share of its
                    members agreeing; all of them by default (Shutty et
                    al. 2401.12434 Sec. V)
@@ -21,6 +23,7 @@ import dataclasses
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.seeding as seeding
 
 KEEP = decoding_records.Verdict.KEEP
 ESCALATE = decoding_records.Verdict.ESCALATE
@@ -196,4 +199,52 @@ class Never:
     ) -> decoding_records.Verdict:
         """Keep."""
         del job, result, threshold
+        return KEEP
+
+
+class Bernoulli(seeding.GeneratorSeedConsumer):
+    """Escalate each window independently with probability rate.
+
+    Toshio et al. 2510.25222 Sec. III C model the backlog with switching
+    "independent and identical between different small windows", at
+    γ_switch per window. This row is that model: it ignores the result,
+    so a capacity study sets the escalation rate directly. A run seeds
+    it at the edge's policy path, so a seed repeats its draws.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """rate is the probability that a window escalates."""
+
+        rate: float
+        name = "bernoulli"
+        reads_threshold = False
+        reads_consensus = False
+
+        def __post_init__(self) -> None:
+            if not 0.0 <= self.rate <= 1.0:
+                raise ValueError(
+                    f"switching.verdict.rate must be in [0, 1], got {self.rate}"
+                )
+
+        def build(self) -> "Bernoulli":
+            """A verdict that escalates at the rate."""
+            return Bernoulli(self.rate)
+
+    def __init__(self, rate: float) -> None:
+        seeding.GeneratorSeedConsumer.__init__(self)
+        self.rate = rate
+
+    def decide(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold: ports.ThresholdSource,
+    ) -> decoding_records.Verdict:
+        """Escalate with probability rate."""
+        del job, result, threshold
+        generator = self.generator()
+        draw = generator.random()
+        if draw < self.rate:
+            return ESCALATE
         return KEEP

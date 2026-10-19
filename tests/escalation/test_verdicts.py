@@ -5,10 +5,13 @@ The referents: the gap row is today's switching rule (Toshio et al.
 below it, or with no soft output, escalates; the status row reads the
 backend's own report; always and never decide alone. On the declared
 switching machine, a never verdict leaves every window on the weak
-tier and an always verdict sends every window to the strong one.
+tier and an always verdict sends every window to the strong one. The
+bernoulli row is Toshio et al.'s i.i.d. switching (Sec. III C): its
+draws come from the run's seed, so a seed repeats them.
 """
 
 import decsim.escalation.verdicts as verdicts
+import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
@@ -39,6 +42,18 @@ def _result(**fields) -> decoding_records.DecodeResult:
     return decoding_records.DecodeResult(
         operation_id=1, window_id=0, logical_observables=(0,), **fields
     )
+
+
+def _bernoulli_tiers(seed: int) -> list:
+    """The frame tiers of a 90-window run escalating half its windows."""
+    bernoulli = verdicts.Bernoulli.Settings(rate=0.5)
+    switching = declared_run.declared_switching(verdict=bernoulli)
+    graph = fabric.switching_graph(
+        rounds=270, escalated_windows=set(), switching=switching
+    )
+    machine = machine_module.Machine.build(graph, seed)
+    machine.run()
+    return declared_run.frame_tiers(machine)
 
 
 def _switching_run(verdict, escalated_windows):
@@ -123,3 +138,31 @@ def test_an_always_verdict_sends_every_window_to_the_strong_tier():
     counts = machine.decoders.decoder_manager.strong_requests.counts
     assert declared_run.frame_tiers(machine) == STRONG_TIERS
     assert counts.needed == 3
+
+
+def test_bernoulli_at_rate_zero_keeps_and_at_rate_one_escalates():
+    never = verdicts.Bernoulli(rate=0.0)
+    always = verdicts.Bernoulli(rate=1.0)
+    result = _result()
+
+    kept = never.decide(None, result, None)
+    escalated = always.decide(None, result, None)
+
+    assert kept is KEEP
+    assert escalated is ESCALATE
+
+
+def test_a_bernoulli_run_repeats_its_seed_and_not_another():
+    """Seed 0 twice escalates the same windows; seed 1 others."""
+    first = _bernoulli_tiers(0)
+    again = _bernoulli_tiers(0)
+    other = _bernoulli_tiers(1)
+
+    strong = []
+    for _window_key, tier in first:
+        is_strong = tier == "strong"
+        strong.append(is_strong)
+    assert first == again
+    assert first != other
+    # 90 windows at rate 0.5: 45 escalate on average, sd 4.7
+    assert 30 < sum(strong) < 60

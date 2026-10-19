@@ -12,6 +12,7 @@ from typing import Optional
 import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.refusals as refusals
 
@@ -68,6 +69,12 @@ class Switching:
             plan.strong_window, plan.scheme, plan.boundary_policy
         )
         _refuse_absorbing_window_run(plan)
+
+    def run_seed_children(self) -> tuple:
+        """The verdict, which a seeded row draws from (verdicts.py)."""
+        path = (seed_records.RunSeedPathSegment("field", "verdict"),)
+        child = seed_records.RunSeedChild(path, self.verdict)
+        return (child,)
 
     def decodes_both_at_once(self, window: window_records.Window) -> bool:
         """Whether the strong tier starts beside the weak one (Step 1)."""

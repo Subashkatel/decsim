@@ -731,6 +731,14 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 
 `decsim/escalation/verdicts.py`. The never row, which takes no setting.
 
+### `Bernoulli.Settings`
+
+`decsim/escalation/verdicts.py`. rate is the probability that a window escalates.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `rate` | `float` | required |
+
 ## decsim/frontends
 
 ### `WorkloadSettings`

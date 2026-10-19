@@ -838,6 +838,9 @@ class BoundaryCourier(Protocol):
     ) -> None:
         """Ship a committed boundary to a strong window and fold it in."""
 
+    def committed_pool(self, source_key: tuple) -> window_records.PoolId:
+        """The pool whose decode committed the source window's boundary."""
+
 
 @runtime_checkable
 class EscalateEdge(Protocol):

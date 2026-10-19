@@ -217,6 +217,23 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 
 ## Evidence ledger
 
+- Windowed against whole-shot decoding on 2026-10-19
+  (`experiments/basic_case/window_check.py`, `window_check_plots.py`:
+  the pilot's seeds 0 to 19,999 decoded as one window a shot, paired
+  shot by shot with the pilot's windows of d rounds; Skoric et al.
+  2209.08552 Sec. I C, App. C Fig. 6 a). Union find alone and belief
+  matching alone fail as often either way at every point (e.g. 962
+  against 951 and 517 against 511 at d = 5, p = 0.002; McNemar p from
+  0.04 to 1.0 over 12 pairs, as chance gives): windowing costs them
+  nothing. Switching at 20 dB fails less on whole shots (516 against
+  556) because one gap a shot escalates far more, 35% of shots against
+  8.7% of windows at d = 5, p = 0.002, and 71 to 99% at higher p; at the
+  same escalated share the windowed sweep's rate equals the whole
+  shot's to 1% (0.0259 against 0.0258 at d = 5, p = 0.002; 0.0092
+  against 0.0087 at d = 7, within its 174 failures' noise). Toshio's
+  per-shot switching (Sec. IV) is the same frontier, read at a higher
+  share.
+
 - Outer loop on real data on 2026-10-19 (`drift.py`, job 15844512,
   `results/basic_case_drift`: d = 5 and 7 streams of 40,000 rounds, 5
   seeds, p stepping from 0.002 to 0.003 at round 10,000; the fixed

@@ -33,7 +33,7 @@ basic case. Tick a box only when its check has passed.
 - [x] Test: every window escalated equals strong only, shot for shot (`tests/escalation/test_switching_mode.py`)
 - [x] Latency audit of one shot's timeline against hand formulas (link hops, fetch/release cycles, gap walk, verdict, strong service, next-window wait, same-seed repeat); three fixes and one parameter change came out of it (evidence ledger, 2026-10-19)
 - [x] Plot script `experiments/basic_case/plots.py`: Toshio Figs. 15, 16, 4–6 style, window latency, backlog, and who answered each window
-- [ ] Pilot, the working set for steps 1–10: first 20,000 shots at d = 5 and 7, every p, all three runs, window outcomes recorded (`experiments/basic_case/pilot.py`; array 15815733, fold 15815734)
+- [x] Pilot, the working set for steps 1–10: first 20,000 shots at d = 5 and 7, every p, all three runs, window outcomes recorded (`experiments/basic_case/pilot.py`; array 15815733, fold 15815734)
 - [ ] Full runs: 1M shots, all 36 tasks, run here on Della (array 15816344, at most 16 jobs at once, fold 15816345)
 
 ### Step 2: timing table (slice 02)
@@ -47,7 +47,7 @@ basic case. Tick a box only when its check has passed.
 - [x] Synthetic escalation: `verdicts.Bernoulli`, each window escalating at a rate, drawn from the run's seed (Toshio Sec. III C's i.i.d. switching)
 - [x] Simulator timestamps match the hand-computed queue: every commit is Lindley's recursion to the tick, services are Toshio's linear times plus fixed hops (`tests/escalation/test_redo_chain_queue.py`)
 - [x] Long horizons without `decsim stream`: one long timing-only shot a stream, its windows read directly (`experiments/backlog/study.py`); stream mode needs a Stim source and stays as it is
-- [ ] Reproduce the paper's sliding-window backlog result (App. C, Figs. 20–21) and the weak-only bound (Eq. 7): `experiments/backlog/`, job 15816899
+- [x] Reproduce the paper's sliding-window backlog result (App. C, Figs. 20–21) and the weak-only bound (Eq. 7): `experiments/backlog/` (evidence ledger, 2026-10-19)
 
 ### Step 4: does the fixed threshold keep up? (slice 04)
 
@@ -213,6 +213,38 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 - [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
 ## Evidence ledger
+
+- Backlog study on 2026-10-19 (`experiments/backlog/`, job 15816899: d =
+  21, Toshio's linear decoders, a timing-only stream of 2e5 rounds, 10
+  seeds a point). Weak alone, the last window's backlog over the stream's
+  rounds is the queue's load - 1 at every tau_weak, 0 up to Eq. (7)'s
+  tau_gen / 2 (0.496: 0; 0.6: 0.201 against 0.200). With escalation the
+  streams follow load - 1 above load 1. The gamma where load is 1, against
+  Fig. 21 a's divergence threshold:
+
+  | tau_weak / tau_gen | r_com | load 1 at gamma | Fig. 21 a | ratio |
+  | --- | --- | --- | --- | --- |
+  | 0 | 21 | 2.47e-2 | 2.5e-2 | 0.99 |
+  | 0.1 | 21 | 1.97e-2 | 2e-2 | 0.99 |
+  | 0.4 | 21 | 4.90e-3 | 5e-3 | 0.98 |
+  | 0.7 | 59 | 9.74e-4 | 7e-4 | 1.39 |
+  | 0.9 | 378 | 2.49e-4 | 1.5e-4 | 1.66 |
+
+  This holds when gamma_switch is per d rounds the weak decoder reads,
+  r_com + r_buf; Theorem 1's proof counts r_com only, which would put
+  every threshold 2x higher at r_com = d. The figure's values are read off
+  its grid. Where the paper is lower, r_com is 59 and 378 rounds: one
+  escalation adds 800 to 4,000 us of strong decode against 5% slack, and
+  Fig. 21 calls a trajectory diverged at 1e6 rounds within 1e4 gates with
+  each gate waiting for its feedback; this stream has neither gates nor
+  that cap (step 7).
+- Pilot on 2026-10-19 (20,000 shots, d = 5 and 7): in every one of the
+  20,000 switching shots at d = 5, p = 0.002 a shot fails exactly when an
+  odd number of its windows disagree with their label, and 1,158 of the
+  1,170 shots with two such windows have them adjacent: a chain across a
+  commit boundary that the label and the decoder put in neighbouring
+  windows. A window's "wrong" is that bookkeeping, not a logical failure;
+  shot rates are the measure.
 
 - Latency audit on 2026-10-19 (basic case, d = 5, p = 0.005, 6 seeds, all
   three runs): every link hop is latency plus bits over rate, union find's

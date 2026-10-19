@@ -64,8 +64,9 @@ basic case. Tick a box only when its check has passed.
 
 ### Step 6: outer loop, set the target from lag (slice 06)
 
-- [ ] Port giving the controller live state
-- [ ] Beats fixed thresholds when p drifts or belief matching slows
+- [x] Port giving the controller live state: `verdicts.BacklogBernoulli.source_queue`, bound like the deadline's
+- [x] Keeps up where fixed settings fall behind when p rises or belief matching slows, timing-only: `throughput.py`, `throughput_plots.py` (evidence ledger)
+- [ ] The same loop on the real-data stream, setting RateThreshold's target
 
 ### Later steps
 
@@ -215,6 +216,22 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 - [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
 ## Evidence ledger
+
+- Outer loop on the backlog's trend, timing-only, on 2026-10-19
+  (`throughput.py`, job 15835849; the same streams as the peak run
+  below). The loop keeps up in every case, mean backlog 38 to 75 rounds
+  against thousands for a fixed setting past q*, and holds near the
+  share the chain sustains: steady, 9.0% at d = 5 (q* 13.5%) and 11.7% at
+  d = 7 (q* 17.1%), the latter more than a fixed 10% and so 0.952
+  against 0.965% a shot; when p rises to 0.003, 7.8 and 10.1% (q* 11.5
+  and 14.2%) where the fixed 20 dB threshold escalates 25 and 27% and
+  falls 5,900 rounds behind; when belief matching slows 1.5x, 6.8 and
+  7.4% (q* 9.0 and 11.4%) where a fixed 10% falls behind at d = 5 (906
+  rounds). Error rates are the sweep's at the share
+  (`throughput_plots.py`). It settles under q*, not at it: at d = 7 a
+  fixed 10% keeps up after the slowdown, the loop holds 7.4%. Every
+  decode time is a placeholder (constants.yaml), so q* and the shares
+  move with the GPU measurements.
 
 - Outer loop, timing-only, on 2026-10-19 (`experiments/basic_case/throughput.py`,
   job 15831858: Toshio's random-escalation model at the basic case, each

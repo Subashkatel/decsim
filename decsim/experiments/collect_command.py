@@ -482,7 +482,9 @@ def _recorded_calibrator(
     task_id = record["id"]
     task_folders = pieces.task_folders(folders, task_id)
     saved = pieces.saved_counts(task_folders)
-    prefix = pieces.contiguous_ranges(saved, 0)
+    rule = collection_module.TaskRule.from_record(record)
+    first_seed = rule.first_seed()
+    prefix = pieces.contiguous_ranges(saved, first_seed)
     if not prefix:
         return None
     first_seed, count = prefix[-1]

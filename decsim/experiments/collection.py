@@ -155,6 +155,12 @@ class TaskRule:
     settings: Optional[CollectionSettings] = None
     is_adaptive: bool = False
 
+    def first_seed(self) -> int:
+        """The seed the prefix starts at: the collection's, else 0."""
+        if self.settings is None:
+            return 0
+        return self.settings.first_seed
+
     @classmethod
     def from_record(cls, record: Mapping) -> "TaskRule":
         """The rule a task's machine.json says its prefix is read by.
@@ -189,7 +195,8 @@ class PrefixTracker:
         if not self.is_open:
             return
         seed = fold.number_of(row["seed"])
-        if seed != self.counts.shots:
+        expected = self.rule.first_seed() + self.counts.shots
+        if seed != expected:
             self.is_open = False
             return
         shot_counts = _shot_counts_of(row)

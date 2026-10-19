@@ -216,6 +216,24 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 
 ## Evidence ledger
 
+- Outer loop, timing-only, on 2026-10-19 (`experiments/basic_case/throughput.py`,
+  job 15831858: Toshio's random-escalation model at the basic case, each
+  tier the pilot's mean time, kept 2.400 and escalated 21.783 us against
+  the pilot's 2.386 and 21.769 at d = 5; 40,000 rounds, 10 seeds). The
+  model follows q*: fixed 10% keeps up at both d (mean backlog 38 and 27
+  rounds), 15% falls behind at d = 5 (q* 13.5%: 2,083 rounds) and keeps
+  up at d = 7 (q* 17.1%: 89), 20% falls behind at both. When p rises to
+  0.003 the fixed 20 dB threshold escalates 25 and 27% and falls behind
+  (5,900 rounds); when belief matching slows 1.5x a fixed 10% falls
+  behind at d = 5 (q* 9.0%: 906 rounds). The loop keeps up in every
+  case (backlog 14 to 28 rounds), but at both watermark settings it
+  ends at its lowest level, 5%, where a fixed 10% keeps up: its signal,
+  the most windows waiting in a check, reads the queue's ordinary
+  bursts (one escalation holds about 4 windows; at 10% the peak in 100
+  windows is often 50) as falling behind. It costs accuracy for no
+  throughput: 2.89 against 2.76% a shot at d = 5. The signal needs
+  changing before the loop is a result (open decision).
+
 - Rate controller on 2026-10-19 (`experiments/basic_case/rate_controller.py`,
   job 15823266: RateThreshold at 5 and 10%, from the calibrated threshold
   or cold from 20 dB, seeds 20,000 to 29,999, every d = 5 and 7 point).

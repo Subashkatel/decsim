@@ -295,7 +295,10 @@ def test_a_full_history_task_reproduces_the_retired_direct_columns(
 def test_a_first_seed_runs_the_same_shots_as_those_seeds_of_a_run_from_0(
     tmp_path,
 ):
-    """Seeds 2 to 5 from first_seed 2 are seeds 2 to 5 of a run from 0."""
+    """Seeds 2 to 5 from first_seed 2 are seeds 2 to 5 of a run from 0.
+
+    The fold reads the four as its prefix, which starts at seed 2.
+    """
     late_folder = tmp_path / "late"
     full_folder = tmp_path / "full"
     late_folder.mkdir()
@@ -309,7 +312,7 @@ def test_a_first_seed_runs_the_same_shots_as_those_seeds_of_a_run_from_0(
 
     late_out = tmp_path / "late_out"
     full_out = tmp_path / "full_out"
-    late_dir, _rows = run.run_experiment(late_file, late_out)
+    late_dir, late_rows = run.run_experiment(late_file, late_out)
     full_dir, _rows = run.run_experiment(full_file, full_out)
 
     late_path = late_dir / "shots.csv"
@@ -319,6 +322,9 @@ def test_a_first_seed_runs_the_same_shots_as_those_seeds_of_a_run_from_0(
     late = _digests_by_seed(late_shots)
     full = _digests_by_seed(full_shots)
     assert sorted(late) == [2, 3, 4, 5]
+    (late_row,) = late_rows
+    assert late_row["prefix_shots"] == 4
+    assert late_row["state"] == "cap"
     for seed, digest in late.items():
         assert digest == full[seed]
 

@@ -59,7 +59,7 @@ basic case. Tick a box only when its check has passed.
 
 - [x] Rate tracker without audits, warm start from the calibration table: `threshold_sources.RateThreshold`
 - [x] Refuse the two broken combinations (extra cluster gap with a moving threshold; deadlines with a learning threshold): `build/escalation.py`, `tests/build/test_escalation.py`
-- [ ] Tracking and accuracy on held-out shots: achieved share against target, and error rate against the static threshold at the same share
+- [x] Tracking and accuracy on held-out shots: achieved share against target, and error rate against the static threshold at the same share: `rate_controller.py`, `controller_plots.py` (evidence ledger)
 - [x] Mid-stream change in p: `experiments/basic_case/drift.py`, `drift_plots.py` (evidence ledger)
 
 ### Step 6: outer loop, set the target from lag (slice 06)
@@ -215,6 +215,19 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 - [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
 ## Evidence ledger
+
+- Rate controller on 2026-10-19 (`experiments/basic_case/rate_controller.py`,
+  job 15823266: RateThreshold at 5 and 10%, from the calibrated threshold
+  or cold from 20 dB, seeds 20,000 to 29,999, every d = 5 and 7 point).
+  Over 100,000 windows a task escalates 4.99 to 5.08% and 9.99 to 10.06%,
+  cold or warm alike: the cold start reaches the calibrated threshold in
+  a few hundred windows. Paired against the static threshold on the same
+  shots, where the two escalate the same share the failures match (d =
+  5, p = 0.003, 10%: 929 against 925, 16 and 12 shots only one failed);
+  where they differ the run escalating more fails less, as the sweep's
+  frontier says (d = 7, p = 0.005, 5.0 against 4.5%: 3,450 against
+  3,497). The controller holds a share no fixed threshold can (the gap's
+  staircase, below) and costs nothing in accuracy at that share.
 
 - Drift run on 2026-10-19 (`experiments/basic_case/drift.py`, job
   15824064: a d = 5 and a d = 7 stream of 20,000 rounds, 5 seeds each, p

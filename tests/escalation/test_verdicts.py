@@ -9,7 +9,7 @@ tier and an always verdict sends every window to the strong one. The
 bernoulli row is Toshio et al.'s i.i.d. switching (Sec. III C): its
 draws come from the run's seed, so a seed repeats them. The
 backlog_bernoulli row reads the weak queue the build binds it to, and
-steps its share down once that queue backs up.
+steps its share down once that queue grows.
 """
 
 import decsim.escalation.target_steps as target_steps
@@ -189,17 +189,17 @@ def test_a_bernoulli_takes_its_later_rate_from_its_window_on():
 
 
 def test_a_backlog_bernoulli_steps_down_once_its_queue_backs_up():
-    """All escalated, the weak queue backs up and the share drops to zero.
+    """All escalated, the weak queue grows and the share drops to zero.
 
-    The check at the tenth window comes before its draw, so nine
-    windows escalate.
+    The second check, at the twentieth window and before its draw, sees
+    the mean waiting rise over the first, so nineteen windows escalate.
     """
     steps = target_steps.TargetSteps.Settings(
         start=1.0,
         levels=(0.0, 1.0),
         check_every_windows=10,
-        high_backlog_windows=1,
-        low_backlog_windows=0,
+        rise_checks=1,
+        rise_margin_windows=0.0,
         calm_checks=100,
     )
     verdict = verdicts.BacklogBernoulli.Settings(steps=steps)
@@ -212,5 +212,5 @@ def test_a_backlog_bernoulli_steps_down_once_its_queue_backs_up():
     machine.run()
 
     tiers = [tier for _window_key, tier in declared_run.frame_tiers(machine)]
-    assert tiers[:9] == ["strong"] * 9
-    assert set(tiers[9:]) == {"weak"}
+    assert tiers[:19] == ["strong"] * 19
+    assert set(tiers[19:]) == {"weak"}

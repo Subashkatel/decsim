@@ -1,34 +1,42 @@
-"""The outer loop: step the escalated share between levels by the backlog.
+"""The outer loop: step the escalated share down while the backlog grows.
 
 Slice 06's loop (specs/adaptive-switching/slices/06-adaptive-capacity.md),
-throughput first: every check_every_windows windows it reads the most
-windows that waited for the weak tier since the last check. Above
-high_backlog_windows the chain is falling behind and the share steps one
-level down, fewer windows sent to the strong tier; at or under
-low_backlog_windows for calm_checks checks in a row it steps one level
-up; between the two it holds. The levels are a table of shares, as the
-calibration table holds a threshold per share (experiments/basic_case/
-calibration.py); what a share costs in accuracy is read off that table,
-not decided here. Lowering the share cannot undo a window already sent.
+throughput first. A chain that keeps up holds a backlog that comes and
+goes: one escalated window holds the next windows for its service, so
+bursts are the queue's ordinary state. A chain that falls behind holds
+one that grows. So every check_every_windows windows the loop reads the
+mean windows waiting for the weak tier since the last check, and:
+  - steps one level down, fewer windows to the strong tier, when that
+    mean rose at each of the last rise_checks checks and by more than
+    rise_margin_windows over them;
+  - steps one level up when calm_checks checks have passed with no such
+    rise and the mean is no higher than it was calm_checks checks ago,
+    which it cannot be before that many checks;
+  - holds otherwise.
+The levels are a table of shares, as the calibration table holds a
+threshold per share (experiments/basic_case/calibration.py); what a
+share costs in accuracy is read off that table, not decided here.
+Lowering the share cannot undo a window already sent.
 """
 
+import collections
 import dataclasses
 
 import decsim.config as config
 
 
 class TargetSteps:
-    """The share the inner loop holds, stepped by the backlog it reads."""
+    """The share the inner loop holds, stepped by the backlog's trend."""
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The levels, the start, the cadence and the two watermarks."""
+        """The levels, the start, the cadence and the trend's tests."""
 
         start: float
         levels: tuple = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
         check_every_windows: int = 100
-        high_backlog_windows: int = 4
-        low_backlog_windows: int = 1
+        rise_checks: int = 2
+        rise_margin_windows: float = 5.0
         calm_checks: int = 5
 
         def __post_init__(self) -> None:
@@ -43,9 +51,12 @@ class TargetSteps:
         self.settings = settings
         self.level_index = settings.levels.index(settings.start)
         self.window_count = 0
-        self.peak_waiting = 0
+        self.waiting_sum = 0
         self.calm_count = 0
-        # (window count, share, most windows waiting) at each check
+        reach = max(settings.rise_checks, settings.calm_checks) + 1
+        # the last checks' mean windows waiting, the newest last
+        self.means: collections.deque = collections.deque(maxlen=reach)
+        # (window count, share, mean windows waiting) at each check
         self.trajectory: list = []
 
     @property
@@ -56,33 +67,51 @@ class TargetSteps:
     def observe(self, waiting_windows: int) -> None:
         """One window decided, waiting_windows behind it; check on cadence."""
         self.window_count += 1
-        self.peak_waiting = max(self.peak_waiting, waiting_windows)
-        if self.window_count % self.settings.check_every_windows:
+        self.waiting_sum += waiting_windows
+        every = self.settings.check_every_windows
+        if self.window_count % every:
             return
-        self._check(self.peak_waiting)
-        self.trajectory.append(
-            (self.window_count, self.target, self.peak_waiting)
-        )
-        self.peak_waiting = 0
+        mean = self.waiting_sum / every
+        self.waiting_sum = 0
+        self.means.append(mean)
+        self._check()
+        self.trajectory.append((self.window_count, self.target, mean))
 
-    def _check(self, peak: int) -> None:
-        """Down above the high mark, up after calm checks, else hold."""
-        settings = self.settings
-        if peak > settings.high_backlog_windows:
+    def _check(self) -> None:
+        """Down on a sustained rise, up after calm checks, else hold."""
+        if self._is_rising():
             self.calm_count = 0
             lower = self.level_index - 1
             self.level_index = max(lower, 0)
             return
-        if peak > settings.low_backlog_windows:
-            self.calm_count = 0
-            return
         self.calm_count += 1
-        if self.calm_count < settings.calm_checks:
+        if self.calm_count < self.settings.calm_checks:
             return
         self.calm_count = 0
-        top = len(settings.levels) - 1
+        if not self._is_no_higher_than(self.settings.calm_checks):
+            return
+        top = len(self.settings.levels) - 1
         higher = self.level_index + 1
         self.level_index = min(higher, top)
+
+    def _is_rising(self) -> bool:
+        """The mean rose at each of the last checks, and by the margin."""
+        checks = self.settings.rise_checks
+        if len(self.means) <= checks:
+            return False
+        means = list(self.means)
+        recent = means[-checks - 1 :]
+        steps = zip(recent, recent[1:], strict=False)
+        each_rose = all(later > earlier for earlier, later in steps)
+        total = recent[-1] - recent[0]
+        return each_rose and total > self.settings.rise_margin_windows
+
+    def _is_no_higher_than(self, checks: int) -> bool:
+        """The mean is no higher than checks ago; False before that check."""
+        if len(self.means) <= checks:
+            return False
+        earlier_index = -checks - 1
+        return self.means[-1] <= self.means[earlier_index]
 
 
 def _check_levels(levels: tuple, start: float) -> None:
@@ -100,19 +129,18 @@ def _check_levels(levels: tuple, start: float) -> None:
 
 
 def _check_counts(settings: TargetSteps.Settings) -> None:
-    """Whole counts, and the high watermark above the low one."""
+    """Whole counts, and a margin that is a number of at least 0."""
     counts = (
-        ("check_every_windows", settings.check_every_windows, "windows", 1),
-        ("calm_checks", settings.calm_checks, "checks", 1),
-        ("low_backlog_windows", settings.low_backlog_windows, "windows", 0),
+        ("check_every_windows", settings.check_every_windows, "windows"),
+        ("rise_checks", settings.rise_checks, "checks"),
+        ("calm_checks", settings.calm_checks, "checks"),
     )
-    for name, value, unit, least in counts:
+    for name, value, unit in counts:
         path = f"target_steps.{name}"
-        config.check_whole_count(path, value, unit, least)
-    high = settings.high_backlog_windows
-    low = settings.low_backlog_windows
-    if high <= low:
+        config.check_whole_count(path, value, unit)
+    margin = settings.rise_margin_windows
+    if not config.is_number(margin) or margin < 0:
         raise ValueError(
-            "target_steps.high_backlog_windows must be above "
-            f"low_backlog_windows, got {high} and {low}"
+            "target_steps.rise_margin_windows must be a number of at least "
+            f"0, got {margin!r}"
         )

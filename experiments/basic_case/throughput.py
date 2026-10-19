@@ -16,9 +16,7 @@ reads a run's share off it.
 
 Three studies, each at d = 5 and 7:
   - steady: p = 0.002 throughout; fixed shares of 5 to 20%, and the
-    outer loop (target_steps.py) from 10%, at the approved watermarks
-    (loop) and at them counted in one escalation's backlog
-    (loop_scaled);
+    outer loop (target_steps.py) from 10%;
   - p_rises: p steps from 0.002 to 0.003 halfway, so the decoders take
     the 0.003 times and the fixed 20 dB threshold escalates the share
     the sweep measured at 0.003; the loop from 10%;
@@ -45,7 +43,6 @@ sbatch -N1 -c32 --mem=64G -t 2:00:00 --wrap "python throughput.py \
 import concurrent.futures
 import csv
 import itertools
-import math
 import pathlib
 import statistics
 import sys
@@ -90,11 +87,6 @@ FIXED_20_DB_SHARE = {
 }
 STEADY_SHARES = (0.05, 0.1, 0.15, 0.2)
 LOOP_START = 0.1
-LOOPS = ("loop", "loop_scaled")
-# loop_scaled's watermarks, in one escalation's backlog: the windows
-# that arrive while one escalated window is served
-CALM_ESCALATIONS = 1
-HIGH_ESCALATIONS = 3
 STRONG_SLOWDOWN = 1.5
 STREAM_FIELDS = (
     "study",
@@ -140,9 +132,9 @@ def _runs() -> list:
     """(study, control, d, seed) of every stream."""
     steady = [f"fixed_{share:g}" for share in STEADY_SHARES]
     controls = {
-        "steady": [*steady, *LOOPS],
-        "p_rises": ["fixed_20dB", *LOOPS],
-        "strong_slows": ["fixed_0.1", *LOOPS],
+        "steady": [*steady, "loop"],
+        "p_rises": ["fixed_20dB", "loop"],
+        "strong_slows": ["fixed_0.1", "loop"],
     }
     runs = []
     for study, names in controls.items():
@@ -189,8 +181,8 @@ def _pool(latencies: tuple, change_window: int):
 
 def _verdict(study: str, control: str, distance: int, change_window: int):
     """The loop from 10%, a fixed share, or the 20 dB threshold's shares."""
-    if control in LOOPS:
-        steps = _steps(control, distance)
+    if control == "loop":
+        steps = target_steps.TargetSteps.Settings(start=LOOP_START)
         return verdicts.BacklogBernoulli.Settings(steps=steps)
     if control == "fixed_20dB":
         before = FIXED_20_DB_SHARE[(distance, 0.002)]
@@ -201,25 +193,6 @@ def _verdict(study: str, control: str, distance: int, change_window: int):
     share_word = control.removeprefix("fixed_")
     share = float(share_word)
     return verdicts.Bernoulli.Settings(share)
-
-
-def _steps(control: str, distance: int) -> target_steps.TargetSteps.Settings:
-    """The approved watermarks (4 and 1 windows), or them in escalations.
-
-    One escalated window holds the chain for its service, so about
-    escalated / d windows wait behind it even when the chain keeps up;
-    loop_scaled counts its watermarks in that backlog.
-    """
-    if control == "loop":
-        return target_steps.TargetSteps.Settings(start=LOOP_START)
-    _keep, escalated = MEAN_SERVICE_MICROSECONDS[(distance, 0.002)]
-    windows_behind = escalated / distance
-    one_escalation = math.ceil(windows_behind)
-    high = HIGH_ESCALATIONS * one_escalation
-    low = CALM_ESCALATIONS * one_escalation
-    return target_steps.TargetSteps.Settings(
-        start=LOOP_START, high_backlog_windows=high, low_backlog_windows=low
-    )
 
 
 def _stream(distance: int, weak, strong, verdict):

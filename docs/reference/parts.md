@@ -1084,6 +1084,14 @@ burst_onset_round is the first one-based round with extra noise. It climbs to bu
 
 `decsim/qpu/stim_device.py`. The error model row has no keys: the circuit states its model.
 
+### `DatasetStimDevice.Settings`
+
+`decsim/qpu/stim_device.py`. The dataset row: the folder written by shot_datasets.seal.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `dataset_folder` | `str` | required |
+
 ### `StreamingStimDevice.Settings`
 
 `decsim/qpu/streaming_stim_device.py`. The live source has no keys: the fragments state every width.

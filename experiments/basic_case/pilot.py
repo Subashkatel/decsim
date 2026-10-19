@@ -1,9 +1,9 @@
-"""The basic case's pilot: the first 2,000 shots of every point.
+"""The basic case's working set: 20,000 shots at d = 5 and 7.
 
-The same three runs at the same points as run.py, on the first 2,000
-root seeds of each saved dataset, with every window's outcome recorded:
-it checks the windows match across the runs, the failure counts look
-sane, and how long each full run will take, before the million-shot runs.
+The same three runs as run.py at d = 5 and 7 and every p, on the first
+20,000 root seeds of each saved dataset, with every window's outcome
+recorded. Steps 1 to 10 of the plan are built and checked on it while
+run.py's million-shot runs go in the background.
 
 Usage
 -----
@@ -12,8 +12,9 @@ From this folder, with this checkout first on the path (STYLE.md):
 
 ```
 export PYTHONPATH=$PWD/../..
-python -m decsim run pilot.py \
+python -m decsim run pilot.py --slurm --out $PWD/../../results/basic_case_pilot \
   --set constants.observation.record_window_outcomes=true
+python plots.py $PWD/../../results/basic_case_pilot
 ```
 """
 
@@ -22,7 +23,8 @@ import decsim.experiments.sweeps as sweeps
 
 config = sweeps.load_beside(__file__, "config.py")
 constants = config.constants
-SHOTS = 2_000
+SHOTS = 20_000
+DISTANCES = (5, 7)
 
 
 def metadata(cell: dict, task: decsim.Task) -> dict:
@@ -44,7 +46,7 @@ sweep = decsim.Sweep(
     config.machine,
     grid={
         "decoding": config.DECODINGS,
-        "distance": config.DISTANCES,
+        "distance": DISTANCES,
         "physical_error_probability": config.PHYSICAL_ERROR_PROBABILITIES,
     },
     task_name="{decoding}_d{distance}_p{physical_error_probability}",

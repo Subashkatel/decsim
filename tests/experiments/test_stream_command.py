@@ -14,6 +14,7 @@ import decsim
 import decsim.confidence.complementary as complementary
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.target_steps as target_steps
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.command as command
 import decsim.experiments.refusal as refusal
@@ -99,6 +100,22 @@ def test_a_stream_whose_threshold_moves_records_the_source_beside_it():
     assert summary["windows"] == measurement["decoded_windows"]
     assert summary["escalated"] == measurement["escalated_windows"]
     assert online["trajectory"][0][2] == "start"
+
+
+def test_a_stream_whose_target_steps_by_the_backlog_binds_its_queue():
+    steps = target_steps.TargetSteps.Settings(
+        start=0.2, levels=(0.1, 0.2), check_every_windows=10
+    )
+    rate = {"target_escalation_rate": 0.2, "steps": steps}
+    machine = run_files.switching_machine(rate=rate)
+    task = decsim.Task("loop", machine)
+
+    record = stream_command.stream_record(task, 300, 0, 5)
+
+    summary = record["online_threshold"]["summary"]
+    checks = summary["target_steps"]
+    assert len(checks) == summary["windows"] // 10
+    assert {share for _windows, share, _mean in checks} <= {0.1, 0.2}
 
 
 def _observation(machine, **changes):

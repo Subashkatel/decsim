@@ -17,6 +17,7 @@ import random
 
 import pytest
 
+import decsim.escalation.target_steps as target_steps
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
 import decsim.presets.machines as machines
@@ -696,6 +697,52 @@ def test_a_rate_threshold_decides_by_the_trackers_rule_window_by_window():
     assert rate.audits_by_escalating is False
 
 
+class _Queue:
+    """A source pool whose waiting jobs are given, one count a window."""
+
+    def __init__(self, counts: list) -> None:
+        self.counts = iter(counts)
+
+    def waiting_jobs(self) -> int:
+        return next(self.counts)
+
+
+def test_an_outer_loop_hands_the_tracker_its_stepped_target():
+    """Checks every 2 windows; the mean waiting rises 0, 4, 10: down.
+
+    The third check steps 0.2 to 0.1 before the sixth window's gap, so
+    that gap's update reads the new target.
+    """
+    steps = target_steps.TargetSteps.Settings(
+        start=0.2,
+        levels=(0.1, 0.2),
+        check_every_windows=2,
+        rise_checks=2,
+        rise_margin_windows=3.0,
+    )
+    tracker = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=0.2, threshold=1.0, step=0.5
+    )
+    loop = steps.build()
+    rate = threshold_sources.RateThreshold(tracker, loop)
+    rate.source_queue = _Queue([0, 0, 4, 4, 10, 10])
+    targets = []
+    for _ in range(6):
+        job = _job()
+        result = _result(2.0)
+        rate.decide_keep(job, result)
+        targets.append(tracker.target_escalation_rate)
+
+    summary = rate.summary()
+    assert targets == [0.2, 0.2, 0.2, 0.2, 0.2, 0.1]
+    assert rate.reads_source_queue is True
+    assert [share for _w, share, _m in summary["target_steps"]] == [
+        0.2,
+        0.2,
+        0.1,
+    ]
+
+
 def test_a_rate_threshold_is_built_once_a_task_and_refuses_a_bad_target():
     settings = threshold_sources.RateThreshold.Settings(15.0, 0.1)
 
@@ -752,6 +799,7 @@ class _OwnTaskThreshold:
     """
 
     audits_by_escalating = False
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings(threshold_sources.FixedThreshold.Settings):

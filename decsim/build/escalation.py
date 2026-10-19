@@ -137,7 +137,7 @@ class Switching:
         target_manager.escalation_policy = self.policy
         self._bind_the_source_join(windows, decoders)
         self._bind_the_deadline(decoders)
-        self._bind_the_verdict(decoders)
+        self._bind_the_queue_readers(decoders)
 
     def statistics_parts(self) -> tuple:
         """The strong redecode at the edge's path; its verdict's, deadline's.
@@ -189,12 +189,16 @@ class Switching:
         join.verdict = windows.verdict
         join.decode_queue = decoders.manager_of(source)
 
-    def _bind_the_verdict(self, decoders: "decoders_part.Decoders") -> None:
-        """A verdict stepped by the backlog reads the source pool's queue."""
-        if not self.edge.settings.verdict.reads_source_queue:
-            return
+    def _bind_the_queue_readers(
+        self, decoders: "decoders_part.Decoders"
+    ) -> None:
+        """A verdict or threshold stepped by the backlog reads the queue."""
         source = self.strong_redecode.source
-        self.policy.verdict.source_queue = decoders.manager_of(source)
+        queue = decoders.manager_of(source)
+        if self.edge.settings.verdict.reads_source_queue:
+            self.policy.verdict.source_queue = queue
+        if self.policy.threshold.reads_source_queue:
+            self.policy.threshold.source_queue = queue
 
     def _bind_the_deadline(self, decoders: "decoders_part.Decoders") -> None:
         """The backlog trigger reads the source pool's queue."""

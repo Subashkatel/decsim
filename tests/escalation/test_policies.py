@@ -347,6 +347,7 @@ class _KeepEverything:
     """
 
     audits_by_escalating = False
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings(threshold_sources.FixedThreshold.Settings):

@@ -51,7 +51,7 @@ basic case. Tick a box only when its check has passed.
 
 ### Step 4: does the fixed threshold keep up? (slice 04)
 
-- [ ] Highest escalation rate the hardware sustains, and where 20 dB sits against it
+- [x] Highest escalation rate the hardware sustains, and where 20 dB sits against it: q* = 9 to 17% on the placeholder times; 20 dB escalates 8 to 9% at p = 0.002, 24 to 57% above (evidence ledger)
 - [x] Seed offset: `CollectionSettings.first_seed`, so calibration and evaluation shots never overlap
 - [ ] Threshold sweep on calibration shots, evaluated on held-out shots
 
@@ -213,6 +213,21 @@ operations, or timing and stalls through lattice surgery with LER from memory.
 - [SWIPER](https://arxiv.org/abs/2412.05115): speculation comparison, slice 10.
 
 ## Evidence ledger
+
+- Threshold sweep on 2026-10-19 (`experiments/basic_case/threshold_sweep.py`,
+  seeds 0 to 19,999, d = 5 and 7, 0 to 50 dB): the 20 dB cell repeats the
+  pilot's switching run shot for shot (120,000 of 120,000 digests,
+  failures and escalations); 0 dB is union find alone and 40 to 50 dB is
+  belief matching alone at every point. No threshold beats belief matching
+  alone (Toshio reports a dip for UF + BM; none here). Within 1% of it
+  (g_op) is about 35 dB, escalating 27 to 29% at p = 0.002. With the
+  placeholder belief-matching times the chain sustains q* = 13.5% (d = 5)
+  and 17.1% (d = 7) at p = 0.002, 11.5 and 14.2% at 0.003, 8.6 and 12.0%
+  at 0.005; at q* switching fails 5, 8, 11, 24, 19 and 29% more shots
+  than belief matching alone. A fixed threshold that keeps up costs
+  accuracy that grows with p, the case for steps 5 and 6. The calibrated
+  thresholds run on held-out seeds 20,000 to 39,999
+  (`threshold_heldout.py`).
 
 - Backlog study on 2026-10-19 (`experiments/backlog/`, job 15816899: d =
   21, Toshio's linear decoders, a timing-only stream of 2e5 rounds, 10

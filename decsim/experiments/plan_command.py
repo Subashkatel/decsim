@@ -453,7 +453,9 @@ def _task_pieces(
     whole_shots = slice_seconds // seconds_per_shot
     slice_shots = int(whole_shots)
     piece_shots = min(collection.piece_shots, slice_shots)
-    ranges = pieces.unsaved_ranges(collection.saved, settings.max_shots)
+    ranges = pieces.unsaved_ranges(
+        collection.saved, settings.first_seed, settings.max_shots
+    )
     planned = []
     for first_seed, count in ranges:
         for piece_first, piece_count in _cut(first_seed, count, piece_shots):

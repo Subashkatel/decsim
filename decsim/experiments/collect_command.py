@@ -70,6 +70,7 @@ class TaskCollection:
     def __post_init__(self) -> None:
         rule = self.rule()
         self.tracker = collection_module.PrefixTracker(rule)
+        self.next_seed = self.settings.first_seed
 
     def next_units(self, run_dir: pathlib.Path, wanted: int) -> list:
         """Up to `wanted` unsaved pieces past the prefix, as work units.
@@ -197,7 +198,8 @@ class TaskCollection:
         max_shots = self.settings.max_shots
         if max_shots is None:
             return self.piece_shots
-        seeds_left = max_shots - self.next_seed
+        last_seed_after = self.settings.first_seed + max_shots
+        seeds_left = last_seed_after - self.next_seed
         remaining = max(seeds_left, 0)
         return min(self.piece_shots, remaining)
 

@@ -84,14 +84,16 @@ class Experiment:
         """Every task stopped at its first shot_count shots.
 
         Its target, minimum and time cap are dropped and its piece size
-        kept. The collection is not part of a task's id, so the shots
-        are the first shot_count of the full run's.
+        and first seed kept. The collection is not part of a task's id,
+        so the shots are the first shot_count of the full run's.
         """
         tasks = []
         for task in self.tasks:
             collection = self.collection_of(task)
             capped = collection_module.CollectionSettings(
-                max_shots=shot_count, piece_rounds=collection.piece_rounds
+                max_shots=shot_count,
+                piece_rounds=collection.piece_rounds,
+                first_seed=collection.first_seed,
             )
             capped_task = dataclasses.replace(task, collection=capped)
             tasks.append(capped_task)

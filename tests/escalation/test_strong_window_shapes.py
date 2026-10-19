@@ -653,13 +653,13 @@ def test_the_shipped_components_fill_the_shapes_six_window_side_ports():
 
 
 def test_a_courier_that_only_pins_a_face_fills_the_courier_port():
-    """The port lists the one method the escalation side calls.
+    """The port lists the two methods the escalation side calls.
 
-    strong_job_payloads calls pin_strong_face and nothing else
-    (strong_window_shapes.py, the walk over folded_boundaries), so a
-    courier supplied from outside decsim answers the whole port with
-    that one method. STYLE.md rule 7: a port carries the methods one
-    component needs from another.
+    The redo window asks which pool committed a face, to pin it when
+    that side learns of the escalation, and pins it (strong_window_
+    shapes.py), so a courier supplied from outside decsim answers the
+    whole port with those two. STYLE.md rule 7: a port carries the
+    methods one component needs from another.
     """
     courier = _RecordingCourier()
     assert isinstance(courier, ports.BoundaryCourier)
@@ -705,6 +705,35 @@ def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
 
     window_boundaries.BoundaryCourier._pin_delivered = delivered
     decode_requests.WindowInputGate.mask_input = start
+
+
+def test_a_redo_window_pin_leaves_the_chip_with_its_escalation():
+    """The pin crosses the cable beside the escalation, not after it.
+
+    Under held boundaries the neighbour's commit a redo window pins on
+    is final before the verdict, so the boundary condition is already
+    determined (Toshio et al. 2510.25222 Fig. 12 caption) when the
+    window is assigned to the strong decoder (App. C). Sent only once
+    the rounds land, the pin waited one more leg of the cable, here 400
+    room cycles, that the chip had no message to start it by.
+    """
+    machine = _slow_boundary_machine(declared_run.REDO_WINDOW)
+    result = machine.run()
+    pins = _cable_sends(result, boundary=True)
+    escalations = _cable_sends(result, boundary=False)
+    assert pins
+    assert pins <= escalations
+
+
+def _cable_sends(result, *, boundary: bool) -> set:
+    """(window index, send tick) of the chip's sends up to the host."""
+    transfers = result.link_traffic["transfers"]
+    return {
+        (transfer["attribution"]["window_id"], transfer["send_ticks"])
+        for transfer in transfers
+        if transfer["path"] == "weak_to_strong"
+        and is_boundary(transfer) is boundary
+    }
 
 
 def _slow_boundary_machine(strong_window) -> machine_module.Machine:
@@ -1152,6 +1181,11 @@ class _RecordingCourier:
         self.pinned.append(
             (source_key, destination, model, operation, request_key)
         )
+
+    def committed_pool(self, source_key):
+        """Every face this courier holds was committed on the chip."""
+        del source_key
+        return window_records.WEAK_POOL_ID
 
 
 def _folding_shape(retention, courier):

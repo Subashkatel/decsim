@@ -109,6 +109,13 @@ class BoundaryCourier:
             return False
         return record.committed_request_key is not None
 
+    def committed_pool(self, source_key: tuple) -> window_records.PoolId:
+        """The pool whose decode committed the source window's boundary."""
+        record = self._record(source_key)
+        if record.committed_request_key is None:
+            raise RuntimeError(f"window {source_key} has not committed")
+        return record.committed_request_key.pool
+
     def committed(self, key: tuple) -> object:
         """The boundary the window shipped, or None."""
         record = self.record_by_window.get(key)
@@ -387,7 +394,7 @@ class BoundaryCourier:
     ) -> None:
         """A pinned face's message landed: the strong window may start.
 
-        The fold was written when the job was built, so only the owed
+        The fold was written when the face was pinned, so only the owed
         count drops here, and the waiting decode is released as a weak
         window's is.
         """

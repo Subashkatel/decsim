@@ -213,11 +213,11 @@ print(result.operation_results[0].logical_failure)
 ```
 
 ```text
-complete 289904000
+complete 279904000
 False
 ```
 
-The run took 289.904 microseconds of machine time, and its one memory
+The run took 279.904 microseconds of machine time, and its one memory
 operation came out right. `Machine.build(graph, 0)` builds the same
 machine, and gives the same result.
 

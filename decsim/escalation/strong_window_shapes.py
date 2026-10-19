@@ -153,7 +153,19 @@ class RedoWindow(StrongWindowPorts):
     def plan(
         self, weak_job: decoding_records.DecodeJob
     ) -> pending_strong_windows.StrongAssignment:
-        """The near-pinned job, built now or held for its own rounds."""
+        """The near-pinned job, built now or held for its own rounds.
+
+        A face the chip committed is pinned now, as the window is
+        assigned: under held boundaries the neighbour's commit is final,
+        so the boundary condition is determined (Toshio et al.
+        2510.25222 Fig. 12 caption and Sec. III C) and leaves the chip
+        with the escalation (App. C: a small soft output assigns the
+        window to the strong decoder). Pinned only once the rounds land
+        on the host, it would wait a cable leg the chip cannot know of.
+        A face the strong host committed is read from its own memory
+        when the job is built, as the host learns of the escalation only
+        when it lands.
+        """
         region, folded_boundaries, model = _redo_of(self, weak_job)
         held = _held_redo(
             self,
@@ -161,6 +173,15 @@ class RedoWindow(StrongWindowPorts):
             region,
             model,
             folded_boundaries,
+        )
+        chip_faces = _faces_committed_off(self, held.folded_boundaries, False)
+        pin_faces(
+            self,
+            held.strong_window,
+            held.model,
+            held.operation,
+            held.request_key,
+            chip_faces,
         )
         return _assignment_of(self, held)
 
@@ -555,10 +576,31 @@ def strong_job_payloads(
     gate XORs it into the landed input when the decode starts, as a weak
     window's gate folds its boundary.
     """
+    pin_faces(
+        shape, strong_window, model, operation, request_key, folded_boundaries
+    )
+    return strong_window_reads(shape, strong_window)
+
+
+def pin_faces(
+    shape: StrongWindowPorts,
+    strong_window: window_records.Window,
+    model: object,
+    operation: program_records.Operation,
+    request_key: window_records.DecoderRequestKey,
+    folded_boundaries: tuple,
+) -> None:
+    """Ship each pinned face's committed boundary to the strong host."""
     for source_key in folded_boundaries:
         shape.courier.pin_strong_face(
             source_key, strong_window, model, operation, request_key
         )
+
+
+def strong_window_reads(
+    shape: StrongWindowPorts, strong_window: window_records.Window
+) -> list:
+    """The rounds the strong window reads, from its edge's landing store."""
     target = shape.edge.target
     return shape.retention.strong_window_input(
         shape.builder, strong_window, target
@@ -766,15 +808,20 @@ def _log_hold(
 def _strong_job_of(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> decoding_records.DecodeJob:
-    """The row's job: the rounds its store holds, the faces it pins."""
-    payloads = strong_job_payloads(
+    """The row's job: the rounds its store holds, the host's faces pinned.
+
+    The faces the chip committed were pinned at plan (RedoWindow.plan).
+    """
+    host_faces = _faces_committed_off(shape, held.folded_boundaries, True)
+    pin_faces(
         shape,
         held.strong_window,
         held.model,
         held.operation,
         held.request_key,
-        held.folded_boundaries,
+        host_faces,
     )
+    payloads = strong_window_reads(shape, held.strong_window)
     job = _strong_redecode_job(
         shape,
         held.weak_job,
@@ -786,6 +833,19 @@ def _strong_job_of(
     )
     job.pinned_faces = held.folded_boundaries
     return job
+
+
+def _faces_committed_off(
+    shape: StrongWindowPorts, faces: tuple, on_target: bool
+) -> tuple:
+    """The faces whose neighbour committed on the edge's target, or off it."""
+    target = shape.edge.target
+    chosen = []
+    for source_key in faces:
+        committed_on = shape.courier.committed_pool(source_key)
+        if (committed_on == target) == on_target:
+            chosen.append(source_key)
+    return tuple(chosen)
 
 
 def _strong_redecode_job(

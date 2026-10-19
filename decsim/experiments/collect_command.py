@@ -823,7 +823,8 @@ def _say_the_task_stopped(collection: TaskCollection) -> None:
     shots = collection.tracker.counts.shots
     reason = collection.tracker.stop_kind.value
     line = f"{collection.name}: {shots} shots done ({reason})"
-    past_the_stop = collection.next_seed - shots
+    seeds_handed_out = collection.next_seed - collection.settings.first_seed
+    past_the_stop = seeds_handed_out - shots
     if past_the_stop > 0:
         line += f"; {past_the_stop} more ran past the stop"
     print(line, file=sys.stderr)

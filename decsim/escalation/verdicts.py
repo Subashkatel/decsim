@@ -23,6 +23,7 @@ learns from by the windows it escalates.
 """
 
 import dataclasses
+from typing import Optional
 
 import decsim.escalation.target_steps as target_steps
 import decsim.ports as ports
@@ -218,7 +219,9 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
     "independent and identical between different small windows", at
     γ_switch per window. This row is that model: it ignores the result,
     so a capacity study sets the escalation rate directly. A run seeds
-    it at the edge's policy path, so a seed repeats its draws.
+    it at the edge's policy path, so a seed repeats its draws. A change
+    of conditions mid-stream (slice 06) gives later_rate from window
+    from_window on, as a fixed threshold escalates more when p rises.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -226,24 +229,38 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
         """rate is the probability that a window escalates."""
 
         rate: float
+        later_rate: Optional[float] = None
+        from_window: Optional[int] = None
         name = "bernoulli"
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
 
         def __post_init__(self) -> None:
-            if not 0.0 <= self.rate <= 1.0:
+            _check_rate(self.rate, "rate")
+            if (self.later_rate is None) != (self.from_window is None):
                 raise ValueError(
-                    f"switching.verdict.rate must be in [0, 1], got {self.rate}"
+                    "switching.verdict.later_rate and from_window go "
+                    f"together, got {self.later_rate!r} and "
+                    f"{self.from_window!r}"
                 )
+            if self.later_rate is not None:
+                _check_rate(self.later_rate, "later_rate")
 
         def build(self) -> "Bernoulli":
             """A verdict that escalates at the rate."""
-            return Bernoulli(self.rate)
+            return Bernoulli(self.rate, self.later_rate, self.from_window)
 
-    def __init__(self, rate: float) -> None:
+    def __init__(
+        self,
+        rate: float,
+        later_rate: Optional[float] = None,
+        from_window: Optional[int] = None,
+    ) -> None:
         seeding.GeneratorSeedConsumer.__init__(self)
         self.rate = rate
+        self.later_rate = later_rate
+        self.from_window = from_window
 
     def decide(
         self,
@@ -251,11 +268,15 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
         result: decoding_records.DecodeResult,
         threshold: ports.ThresholdSource,
     ) -> decoding_records.Verdict:
-        """Escalate with probability rate."""
-        del job, result, threshold
+        """Escalate with probability rate, later_rate from its window on."""
+        del result, threshold
+        rate = self.rate
+        changed = self.from_window is not None
+        if changed and job.window_id >= self.from_window:
+            rate = self.later_rate
         generator = self.generator()
         draw = generator.random()
-        if draw < self.rate:
+        if draw < rate:
             return ESCALATE
         return KEEP
 
@@ -307,3 +328,11 @@ class BacklogBernoulli(seeding.GeneratorSeedConsumer):
         if draw < self.steps.target:
             return ESCALATE
         return KEEP
+
+
+def _check_rate(rate, name: str) -> None:
+    """A rate is a probability."""
+    if not 0.0 <= rate <= 1.0:
+        raise ValueError(
+            f"switching.verdict.{name} must be in [0, 1], got {rate}"
+        )

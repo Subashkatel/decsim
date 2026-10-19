@@ -231,9 +231,19 @@ operations, or timing and stalls through lattice surgery with LER from memory.
   at d = 5 the 10% target sits just under q* = 11.5%, so the backlog the
   transient built still grows (0.08): a target the inner loop holds is
   not by itself a target the chain sustains, which is step 6's question.
-  Before the step the fixed threshold escalates 8 to 9% on the stream
-  against the 10% it was calibrated to on shots; not checked yet (a
-  guess: the shots' first and last windows, which a stream lacks).
+  Before the step the fixed threshold escalates 8 to 9% on the stream,
+  as it does on held-out shots (8.6 and 8.1%): see the held-out entry.
+
+- Held-out thresholds on 2026-10-19 (`threshold_heldout.py`, seeds
+  20,000 to 39,999, all 18 tasks 20,000 shots): the cluster gap takes
+  only multiples of union find's weight step, 0.5 nats (2.17 dB), so a
+  fixed threshold's escalated share is a staircase. At d = 5, p = 0.002
+  the pilot's gaps put 8.7% of windows at or under 4.5 nats and 14.4% at
+  or under 5.0: every threshold in (19.5, 21.7] dB escalates 8.7%, none
+  10%. The thresholds interpolated for 5, 10 and 20% escalate 4.0 to
+  7.0, 8.1 to 10.4 and 15.6 to 20.5% held out; where a target falls
+  inside a step no fixed threshold reaches it. A rate tracker reaches it
+  on average by moving across the step, which a fixed threshold cannot.
 
 - Threshold sweep on 2026-10-19 (`experiments/basic_case/threshold_sweep.py`,
   seeds 0 to 19,999, d = 5 and 7, 0 to 50 dB): the 20 dB cell repeats the

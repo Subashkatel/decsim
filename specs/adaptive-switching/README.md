@@ -4,8 +4,11 @@ Status: proposed plan, revised against a full read of the current code and of
 Toshio et al. (arXiv:2510.25222v1). No implementation slice has started.
 
 Planning checkout: `decsim_adaptive`, branch `adaptive-decoding-plan`.
-Run tests with `../venv/bin/python -m pytest` (Python 3.13); the `python` on
-PATH is 3.9 and cannot import `decsim`.
+Run everything with `../venv_runs/bin/python` (Python 3.13, with the
+`deltakit` extra SD6 needs) and `PYTHONPATH` set to this checkout, since that
+venv's editable install points at `decsim_runs`. `../venv` cannot take the
+extra: its constraints pin matplotlib 3.11.2 and `deltakit-explorer` 0.9.2
+needs below 3.11. The `python` on PATH is 3.9 and cannot import `decsim`.
 
 ## Goal
 
@@ -22,12 +25,12 @@ basic case. Tick a box only when its check has passed.
 
 ### Step 1: baseline on fixed data (slices 00, 01)
 
-- [ ] Install the `deltakit` extra in `../venv` (SD6 noise)
-- [ ] Dataset generator: 1M shots per (distance, p), saved with the circuit and a sha256 manifest
-- [ ] Generate the 12 datasets (d = 5, 7, 9, 11 × p = 0.002, 0.003, 0.005)
-- [ ] File-backed syndrome source; check it matches the live sampler for the same seed
-- [ ] Baseline config `experiments/basic_case/`: weak only, strong only, switching, values from [parameters.md](parameters.md)
-- [ ] Test: every window escalated equals strong only, shot for shot
+- [x] Environment with `deltakit` for SD6: `../venv_runs` (see above)
+- [x] Dataset generator: `decsim/qpu/shot_datasets.py`, `experiments/basic_case/make_datasets.py`
+- [ ] Generate the 12 datasets (d = 5, 7, 9, 11 × p = 0.002, 0.003, 0.005): Slurm job 15812841, then seal each point
+- [x] File-backed syndrome source `DatasetStimDevice`; a run on it equals the live error-model source, seed for seed (`tests/qpu/test_stim_device.py`)
+- [x] Baseline config `experiments/basic_case/`: weak only, strong only, switching; smoke run on 20 shots matched digests and window layout across the three runs
+- [x] Test: every window escalated equals strong only, shot for shot (`tests/escalation/test_switching_mode.py`)
 - [ ] Pilot: first 2,000 shots of every dataset, all three runs; window layout, failure counts, run time per point
 - [ ] Full runs: 1M shots, 36 jobs (heavy ones to the collaborator's farm)
 

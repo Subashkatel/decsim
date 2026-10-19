@@ -4,6 +4,12 @@ threshold_plots.py's calibration.csv of the sweep folded on 2026-10-19
 (threshold_sweep.py, seeds 0 to 19,999): per (d, p), the threshold in
 dB that escalated 5, 10 and 20% of windows, interpolated between the
 swept ones. threshold_heldout.py and rate_controller.py read it.
+
+The gap takes only multiples of union find's weight step, 0.5 nats or
+2.17 dB, so the share a fixed threshold escalates is a staircase and
+the interpolated threshold escalates the step below the target: at
+d = 5, p = 0.002 every threshold in (19.5, 21.7] dB escalates 8.7% and
+none 10% (the pilot's window_outcomes.csv; held out, 8.6%).
 """
 
 CALIBRATED = {

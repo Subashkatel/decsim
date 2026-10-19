@@ -38,9 +38,9 @@ basic case. Tick a box only when its check has passed.
 
 ### Step 2: timing table (slice 02)
 
-- [ ] Timing table any decoder can read; exact match, missing cell refuses
-- [ ] Refuse host wall-clock time in timing runs
-- [ ] Calibration script; measure belief matching on the target GPU
+- [x] Placeholder belief-matching times for now (1 us a BP iteration, 10 us a matching, labelled synthetic in `constants.yaml`); no part of the basic case reads the host's clock
+- [x] Test: a slower strong tier changes when windows commit, never what they commit or which tier answers (`tests/escalation/test_switching_mode.py`), so error rates hold while the times are placeholders
+- [ ] Later, when GPU numbers exist: timing table any decoder can read (exact match, missing cell refuses), and a calibration script
 
 ### Step 3: long runs (slice 03)
 

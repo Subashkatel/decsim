@@ -261,6 +261,45 @@ def test_a_run_that_escalates_every_window_is_the_strong_tier_alone(seed):
     assert failures(result) == failures(twin_result)
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_a_slower_strong_tier_changes_when_windows_commit_not_what(seed):
+    """Timing moves a commit's tick, never its answer or its tier.
+
+    The verdict reads the gap and a fixed threshold, and the redo window
+    reads its neighbour's final boundary whenever it starts, so a strong
+    tier a hundred thousand cycles slower per decode escalates the same
+    windows and predicts the same shot. That is why a run's error rates
+    hold while its timing table is still placeholder numbers.
+    """
+    gate = switching_graph(20.0)
+    strong_part = gate.part(machines.STRONG_POOL)
+    engine = strong_part.settings.engine
+    slow_release = engine.release_cycles_per_job + 100_000
+    slow_engine = dataclasses.replace(
+        engine, release_cycles_per_job=slow_release
+    )
+    slow_pool = dataclasses.replace(strong_part.settings, engine=slow_engine)
+    slow = gate.with_record(machines.STRONG_POOL, slow_pool)
+
+    machine, result = run_shot(gate, seed)
+    slow_machine, slow_result = run_shot(slow, seed)
+    tiers = committed_tiers(machine)
+
+    assert predictions(result) == predictions(slow_result)
+    assert tiers == committed_tiers(slow_machine)
+    assert window_records.STRONG_POOL_ID in tiers.values()
+    assert slow_result.fully_done_ticks > result.fully_done_ticks
+
+
+def committed_tiers(machine) -> dict:
+    """The tier whose result each window committed, by window."""
+    windows = machine.observation.windows.windows
+    return {
+        key: window.published_request_key.pool
+        for key, window in windows.items()
+    }
+
+
 def gaps_by_window(requests, weak_tier) -> dict:
     """Every window's gap, keyed by the window it decoded.
 

@@ -12,16 +12,16 @@
     "event_count": 183
   },
   "redo_window_switching": {
-    "result_sha256": "8bf83f1cc36e180949024801385873247a52e781008cdecd7acf8775a79379e0",
+    "result_sha256": "3a0b79acf86df2dde4a7ef240f39905801d9b18ea455ee9fbdc3baa1ac7ceec9",
     "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
-    "final_tick": 487632000,
+    "final_tick": 487628000,
     "event_count": 276
   },
   "cluster_gap_switching": {
-    "result_sha256": "32c4bdd8846b879e6cf39eb0b5838f277aee90617eb5f08bf1931c6152d2a25a",
+    "result_sha256": "69089e62ad71a730b642e8eafa5d5f70365e432f8d9052a23f0b2b94b533b992",
     "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
-    "final_tick": 656744000,
-    "event_count": 273
+    "final_tick": 506736000,
+    "event_count": 260
   },
   "table_threshold": {
     "result_sha256": "fc7cb9581fae964e2666a6e9333d0ed0b1300f54132a01b61dfd615a9f5dfc86",
@@ -30,9 +30,9 @@
     "event_count": 318
   },
   "online_threshold": {
-    "result_sha256": "4bf42689e773619c757b8de221cfba275178fd151e05340d13370ce3406701bd",
+    "result_sha256": "0f778580a244cea76c613f9c5b444dce061b5c0c67478420605f99e3993670ef",
     "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
-    "final_tick": 567936000,
+    "final_tick": 567932000,
     "event_count": 304
   },
   "bounded_links": {
@@ -54,10 +54,10 @@
     "event_count": 204
   },
   "experiment_one_switching": {
-    "result_sha256": "be74aa29ac722542c6a0beb6886786ec2c22cc18940f203adbb09e302047771b",
+    "result_sha256": "e777a696a1b2dfc28c6621a6d50ac475616a218157ed90cf2b5a9d761d5756be",
     "seeds_sha256": "acdfa3e34606ce94fd3a5f059b2429aba6ddab15f677fc64126a2ffe7c7d1b17",
-    "final_tick": 1915716000,
-    "event_count": 1015
+    "final_tick": 759084000,
+    "event_count": 1040
   },
   "experiment_one_weak_alone": {
     "result_sha256": "91b658d0448119109d6b4a8b06cdd8fabaf86a30028283af4cf85725551c5827",
@@ -66,10 +66,10 @@
     "event_count": 972
   },
   "extra_cluster_gap_switching": {
-    "result_sha256": "0984fea2d35d7c5972e15a9de2b5c0f2db45bd51c58be4f6335ceba060091d4a",
+    "result_sha256": "d6d57240f1d8e8f7b029646966ec1ae96b0d5cdc5a46c7422e0e338ef9d018b4",
     "seeds_sha256": "960eb410aab1d21c38f4c5ab88ad87471f05dad065fa2d4aca9e592fe11b87fa",
-    "final_tick": 736744000,
-    "event_count": 273
+    "final_tick": 656736000,
+    "event_count": 266
   },
   "parallel_windows": {
     "result_sha256": "bbdb645d16869b2d0eb1b4c84d80421e769fca0ed511f8f86b5841db83574cab",

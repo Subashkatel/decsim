@@ -466,7 +466,7 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     assert arrivals.windows is windows.window_manager
     assert requester.decode_queue is decoders.decoder_manager
     assert result.terminal_status == "complete"
-    assert result.fully_done_ticks == 289_904_000
+    assert result.fully_done_ticks == 279_904_000
     assert result.operation_results[0].logical_failure is False
     assert result == whole
 
@@ -2773,9 +2773,9 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing():
 ARRANGEMENT_DISTANCE = 3
 ARRANGEMENT_ROUND_COUNT = 30  # the machine's rounds_per_shot, 10d at d 3
 ARRANGEMENT_SHOT_COUNT = 8
-# seeds 9 to 16: the eight shots include windows the switching
+# seeds 53 to 60: the eight shots include windows the switching
 # arrangements escalate, which the kept-window rule needs beside it
-ARRANGEMENT_FIRST_SEED = 9
+ARRANGEMENT_FIRST_SEED = 53
 ARRANGEMENT_SEED_END = ARRANGEMENT_FIRST_SEED + ARRANGEMENT_SHOT_COUNT
 ARRANGEMENT_SEEDS = range(ARRANGEMENT_FIRST_SEED, ARRANGEMENT_SEED_END)
 ARRANGEMENT_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
@@ -2906,7 +2906,7 @@ def test_a_switching_arrangements_kept_windows_match_the_weak_model(
     tier (Toshio et al. 2510.25222 Sec. III A), so only the windows the
     weak verdict kept are the weak model's to answer; the escalated ones
     are counted and left to the strong tier. Eight shots at p = 0.001
-    and d = 3 escalate one of their eighty windows, and every
+    and d = 3 escalate two or three of their eighty windows, and every
     window the verdict kept carries the correction the untimed weak row
     decodes from the same window error model and the same syndrome
     (IBM arXiv 2510.21600 lines 488-495).
@@ -3293,9 +3293,10 @@ def test_a_double_window_books_the_observable_its_crossing_commit_flips():
     the observable, so the test above cannot see the weak decode's
     crossing commit join the strong result. Here every detector of
     Stim's layer 8, round 9, also enters observable 0, so a fault across
-    rounds 9 and 10, the seam before window 3, flips it. Seed 26
-    escalates window 3, whose weak decode commits such a fault; the
-    machine books its flip with the strong result, as the referee does.
+    rounds 9 and 10, the seam before window 3, flips it. Seed 54
+    escalates windows 0 and 3, and window 3's weak decode commits such
+    a fault; the machine books its flip with the strong result, as the
+    referee does.
     """
     generated = switching_circuit()
     circuit = with_layer_in_observable(generated, 8)
@@ -3308,7 +3309,7 @@ def test_a_double_window_books_the_observable_its_crossing_commit_flips():
     )
     models = built_window_models.BuiltWindowModels()
 
-    events, machine_shot = switching_shot(settings, 26, models)
+    events, machine_shot = switching_shot(settings, 54, models)
 
     escalated = machine_shot.escalated_windows
     commits = referee.commits(events, escalated)

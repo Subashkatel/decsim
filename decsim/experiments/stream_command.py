@@ -19,7 +19,9 @@ windows that commit from the round after it
 It writes one record, as json: the task, its id, the rounds, the warmup,
 the seed and the StreamMeasurement, which holds the region of
 interest's latencies, windows, queues, backlog, links and statistics
-and the one logical outcome of the end readout. A logical failure
+and the one logical outcome of the end readout; and, for a task whose
+threshold moves (collect.Task.online_threshold), that source's summary
+and its trajectory of (windows, threshold in nats, event). A logical failure
 inside the stream is not counted: no source defines one inside an
 unbounded stream.
 
@@ -87,7 +89,7 @@ def stream_record(
     measurement = measures.measurement(result)
     measured = dataclasses.asdict(measurement)
     task_id = task.strong_id()
-    return {
+    record = {
         "task": task.name,
         "task_id": task_id,
         "rounds": rounds,
@@ -95,6 +97,14 @@ def stream_record(
         "seed": seed,
         "measurement": measured,
     }
+    source = task.online_threshold
+    if source is not None:
+        summary = source.summary()
+        record["online_threshold"] = {
+            "summary": summary,
+            "trajectory": source.trajectory,
+        }
+    return record
 
 
 def stream_machine(

@@ -60,9 +60,15 @@ warmup, the seed, and the measurement
 | `deadline_missed_windows` | the windows over the reaction budget, when one is set |
 | `max_queued_windows` | the most windows waiting at once |
 | `statistics` | every part's statistic rows over the region of interest |
+| `escalation_series` | every hundredth committed window: the windows committed, the escalated among them and its first committed round |
+
+A task whose threshold moves (a `RateThreshold` or `OnlineThreshold`)
+adds `online_threshold`: the source's summary and its trajectory of
+(windows, threshold in nats, event).
 
 The means are exactly those `decsim run` reports for the same windows,
-and so is every other number both compute
+and so is every other number both compute (`escalation_series` is the
+stream's alone)
 (`tests/experiments/test_stream_measures.py`).
 
 ## What a stream does not build yet

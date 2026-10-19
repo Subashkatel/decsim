@@ -1,7 +1,8 @@
 """`decsim stream` (experiments/stream_command.py).
 
-A memory task runs as a stream and writes one record; each shape a
-stream does not build yet is refused by name, "not implemented yet".
+A memory task runs as a stream and writes one record, with its moving
+threshold's when it has one; each shape a stream does not build yet is
+refused by name, "not implemented yet".
 """
 
 import dataclasses
@@ -20,6 +21,7 @@ import decsim.experiments.stream_command as stream_command
 import decsim.parameters.assignments as assignments
 import decsim.presets.machines as machines
 import decsim.qpu.syndrome_devices as syndrome_devices
+import tests.experiments.run_files as run_files
 
 RUN_FILE = """
 import decsim
@@ -83,6 +85,20 @@ def test_the_stream_runs_the_tasks_machine_folding_its_windows():
     assert machine.observation.first_recorded_round == 21
     assert qpu.source.name == "flip_stream"
     assert weak.settings == task_weak.settings
+
+
+def test_a_stream_whose_threshold_moves_records_the_source_beside_it():
+    machine = run_files.switching_machine(rate={"target_escalation_rate": 0.2})
+    task = decsim.Task("rate", machine)
+
+    record = stream_command.stream_record(task, 300, 0, 5)
+
+    online = record["online_threshold"]
+    measurement = record["measurement"]
+    summary = online["summary"]
+    assert summary["windows"] == measurement["decoded_windows"]
+    assert summary["escalated"] == measurement["escalated_windows"]
+    assert online["trajectory"][0][2] == "start"
 
 
 def _observation(machine, **changes):

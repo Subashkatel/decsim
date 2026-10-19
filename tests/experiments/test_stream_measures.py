@@ -16,6 +16,7 @@ import decsim.experiments.collect as collect
 import decsim.experiments.measure as measure
 import decsim.experiments.stream_measures as stream_measures
 import decsim.machine as machine_module
+import decsim.records.windows as window_records
 import tests.stream_machines as stream_machines
 
 SEED = 17
@@ -168,3 +169,24 @@ def test_a_stream_that_lets_each_window_go_measures_the_same_and_keeps_none(
     assert observation.stages.records_for(100, 0) == ()
     assert observation.frame_corrections.committed == []
     assert observation.round_events.events == []
+
+
+def test_the_escalated_share_is_sampled_off_the_frames_commits_in_order():
+    graph = stream_machines.stream_graph(RUNS[3], folds=False)
+    machine, _result, folded = _run(graph)
+    observation = machine.observation
+    windows = observation.windows.windows
+    _weak_pool, strong_pool = machine.layout.tier_pools()
+    every = stream_measures.ESCALATION_SAMPLED_EVERY
+    expected = []
+    escalated = 0
+    commits = observation.frame_corrections.committed
+    for count, record in enumerate(commits, start=1):
+        escalated += window_records.PoolId(record.tier) == strong_pool
+        if count % every == 0:
+            first_round = windows[record.window_key].commit_lo
+            expected.append((count, escalated, first_round))
+
+    assert folded.escalation_series == expected
+    assert len(expected) >= 2
+    assert expected[-1][1] > 0

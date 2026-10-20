@@ -101,7 +101,8 @@ def check_operation_graph(
     Operation ids are the graph's stable keys: no id twice, no edge
     twice, no cycle (an edge to itself is one); an edge to an unknown id
     stops at its lookup; a blocker, when checked, names a known
-    operation.
+    operation, and its wait is an edge of the cycle check, since an
+    operation released by one that waits on it never starts.
     """
     by_id = _index_by_id(operations)
     external_ids = set(external_blocker_ids)
@@ -117,7 +118,31 @@ def check_operation_graph(
         indegree[operation.id] = len(predecessor_ids)
         if validate_blockers:
             _check_blocker(operation, valid_blocker_ids)
+            _add_blocking_edge(operation, successors, indegree)
     _check_acyclic(by_id, successors, indegree)
+
+
+def check_blockers_decode(
+    operations: list, external_blocker_ids: Iterable[int]
+) -> None:
+    """Refuse a blocker with no windows: its result is never final.
+
+    With no stream a protected wait could bind it to (the caller asks
+    only of a workload with no dynamic stream), an operation that emits
+    no detector data is planned no windows (build/plan.py
+    _decode_plan_operations), so what it blocks waits forever while the
+    idle patches keep the run going.
+    """
+    streamed = [operation.stream_id is not None for operation in operations]
+    if any(streamed):
+        return
+    by_id = _index_by_id(operations)
+    external_ids = set(external_blocker_ids)
+    for operation in operations:
+        blocker = by_id.get(operation.blocked_by)
+        if blocker is None or blocker.id in external_ids:
+            continue
+        _check_blocker_decodes(operation, blocker)
 
 
 def check_workload_identity(
@@ -679,6 +704,24 @@ def _check_blocker(operation, valid_blocker_ids: set) -> None:
         raise ValueError(
             f"operation {operation.id} has unknown blocking operation {blocker}"
         )
+
+
+def _check_blocker_decodes(operation, blocker) -> None:
+    if blocker.emits_detector_data:
+        return
+    raise ValueError(
+        f"operation {operation.id} is blocked by operation {blocker.id}, "
+        "which emits no detector data, so no decode ever releases it"
+    )
+
+
+def _add_blocking_edge(operation, successors: dict, indegree: dict) -> None:
+    """The blocker before the operation it releases; external ones aside."""
+    blocker = operation.blocked_by
+    if blocker not in successors:
+        return
+    successors[blocker].append(operation.id)
+    indegree[operation.id] += 1
 
 
 def _check_acyclic(by_id: dict, successors: dict, indegree: dict) -> None:

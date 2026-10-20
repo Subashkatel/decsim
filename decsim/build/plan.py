@@ -106,6 +106,7 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
+    _check_blockers_decode(operations, dynamic_streams, external_blocker_ids)
     scheme = _scheme(windows)
     boundary_policy = _boundary_policy(windows)
     # the refusals print the strong window's row name, and only a window
@@ -281,6 +282,15 @@ def _with_boundary_mode(
     if mode is None:
         mode = settings.feedback_boundary_mode
     return dataclasses.replace(operation, feedback_boundary_mode=mode)
+
+
+def _check_blockers_decode(
+    operations, dynamic_streams, external_blocker_ids
+) -> None:
+    """A stream may bind a blocker that emits nothing; with none, refuse it."""
+    if dynamic_streams:
+        return
+    planner.check_blockers_decode(list(operations), external_blocker_ids)
 
 
 def _unique_operations(operations) -> tuple:

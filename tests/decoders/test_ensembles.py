@@ -369,7 +369,7 @@ class _WindowMember(decoder_module.DecoderBase):
         table = dict(self.settings.prediction_by_window)
         prediction = table.get(job.window_id, (0,))
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, logical_observables=prediction
+            job.stream_id, job.window_id, logical_observables=prediction
         )
 
 
@@ -455,7 +455,7 @@ def _ensemble(pooling, *members) -> ensembles.EnsembleDecoder:
 
 
 def _job() -> decoding_records.DecodeJob:
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+    job = decoding_records.DecodeJob(stream_id=1, window_id=0, round_count=3)
     job.detector_error_model = MODEL
     return job
 

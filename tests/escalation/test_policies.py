@@ -57,14 +57,14 @@ ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 FRAME_CLOCK = config.Clock(4000)
 SOURCE = decoding_records.SoftOutputSource(method="matching-gap")
 WINDOW = window_records.Window(
-    operation_id=1,
+    stream_id=1,
     window_index=1,
     commit_lo=4,
     commit_hi=6,
     buffer_hi=9,
     round_count=6,
 )
-JOB = decoding_records.DecodeJob(operation_id=1, window_id=1, round_count=6)
+JOB = decoding_records.DecodeJob(stream_id=1, window_id=1, round_count=6)
 BOTH_TIERS = (
     window_records.WEAK_POOL_ID,
     window_records.STRONG_POOL_ID,
@@ -493,7 +493,7 @@ class DelegatingWindowScheme:
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
@@ -501,7 +501,7 @@ class DelegatingWindowScheme:
     ):
         """The windows the sliding scheme lays out."""
         return self.inner.plan_operation(
-            operation_id,
+            stream_id,
             round_count,
             commit_round_count=commit_round_count,
             buffer_round_count=buffer_round_count,
@@ -602,7 +602,7 @@ def test_a_weak_result_with_no_soft_output_escalates_its_window():
     tier rather than being kept on a confidence nobody computed.
     """
     policy = _switching_policy(20.0)
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+    job = decoding_records.DecodeJob(stream_id=1, window_id=0, round_count=3)
     bare = decoding_records.DecodeResult(1, 0)
 
     verdict = policy.verdict_for_weak_result(job, bare)
@@ -629,7 +629,7 @@ def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
     """The equality case is a keep, which is Toshio's Fig. 12 caption."""
     threshold = threshold_sources.decibels_to_nats(20.0)
     policy = _switching_policy(20.0)
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+    job = decoding_records.DecodeJob(stream_id=1, window_id=0, round_count=3)
 
     a_hair_under = threshold - 1e-9
     well_over = threshold + 1.0

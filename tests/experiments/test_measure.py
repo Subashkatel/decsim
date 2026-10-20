@@ -1768,7 +1768,7 @@ def _boundary_row(source_index, destination_index, attributed_index, times):
         "destination_window_key": destination,
     }
     attribution = {
-        "operation_id": operation,
+        "owner_id": operation,
         "window_id": attributed_index,
         "relation": relation,
     }
@@ -3004,7 +3004,7 @@ def _verdicts_of_rows(rows) -> dict:
     """Each row's window: its gap, and whether it escalated."""
     verdicts = {}
     for row in rows:
-        key = (row["operation_id"], row["window_index"])
+        key = (row["stream_id"], row["window_index"])
         verdicts[key] = (row["gap_nats"], row["escalated"])
     return verdicts
 
@@ -3017,7 +3017,7 @@ def _verdicts_of_requests(requests) -> dict:
         if ended.outcome not in decode_records.VERDICT_OUTCOMES:
             continue
         request_key = ended.job.request_key
-        key = (request_key.operation_id, request_key.window_id)
+        key = (request_key.stream_id, request_key.window_id)
         gap = _gap_of(ended.result)
         verdicts[key] = (gap, ended.outcome is escalated)
     return verdicts

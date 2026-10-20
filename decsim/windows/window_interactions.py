@@ -298,7 +298,7 @@ def _seam_round(source, destination) -> int:
     window, whose defects are shifted back into the destination's first
     rounds.
     """
-    if source.operation_id != destination.operation_id:
+    if source.stream_id != destination.stream_id:
         return destination.start_round
     if source.commit_lo > destination.commit_hi:
         return destination.buffer_hi
@@ -336,7 +336,7 @@ def _map_defects(
 ) -> dict:
     """The delivery's defects in the destination's round coordinates."""
     payload = delivery.payload
-    if _is_same_operation_residual(delivery, destination):
+    if _is_same_stream_residual(delivery, destination):
         mapped = _map_detector_identities(payload.detector_ids, destination)
         return mapped
     defects = payload
@@ -345,8 +345,8 @@ def _map_defects(
     if not defects:
         return {}
     shift = 0
-    if delivery.source_key[0] != destination.operation_id:
-        shift = -delivery.source_operation_round_count
+    if delivery.source_key[0] != destination.stream_id:
+        shift = -delivery.source_stream_round_count
     mapped = _map_shifted_defects(defects, shift, destination)
     _check_lands_on_one_seam_layer(mapped, destination)
     return mapped
@@ -380,14 +380,14 @@ def _check_lands_on_one_seam_layer(mapped: dict, destination) -> None:
     )
 
 
-def _is_same_operation_residual(delivery, destination) -> bool:
-    """A same-operation A/B delivery with stable global detector identity."""
+def _is_same_stream_residual(delivery, destination) -> bool:
+    """A same-stream A/B delivery with stable global detector identity."""
     payload = delivery.payload
     if not isinstance(payload, window_records.DependencyResidual):
         return False
     if not payload.detector_ids:
         return False
-    if delivery.source_key[0] != destination.operation_id:
+    if delivery.source_key[0] != destination.stream_id:
         return False
     return destination.detector_positions is not None
 

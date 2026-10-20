@@ -61,7 +61,7 @@ def _weak_job(delivered):
         1, 0, window_records.WEAK_POOL_ID, 0
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=3,
         on_decoded=on_decoded,
@@ -103,7 +103,7 @@ def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     )
     on_decoded = _delivering_to(delivered)
     strong_job = decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=9,
         strong_decode_for=(1, 0),
@@ -134,7 +134,7 @@ def test_a_result_whose_selection_has_not_landed_waits_in_its_unit():
     )
     on_decoded = _delivering_to(delivered)
     strong_job = decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=9,
         strong_decode_for=(1, 0),
@@ -171,7 +171,7 @@ def test_the_terminal_source_carries_every_ended_request():
     )
     job.service_dispatch_ticks = 0
     job.window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,

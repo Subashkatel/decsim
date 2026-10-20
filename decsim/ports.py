@@ -239,7 +239,7 @@ class RetainedRounds(Protocol):
     A hold names the rounds its holder will read from the moment it is
     placed, so the store may hold a round it has not received yet; the
     holder is one of the hold records, which answer
-    referenced_operation_ids, operation_ids_read_at_once and
+    referenced_stream_ids, stream_ids_read_at_once and
     holders_waited_for (records/decoding.py Hold).
     """
 
@@ -281,37 +281,37 @@ class RetainedRounds(Protocol):
     def publication_tick(self, round_key: tuple) -> Optional[int]:
         """When the round became readable, or None while it is not."""
 
-    def open_operation(
+    def open_stream(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> None:
-        """This operation may receive rounds from now on."""
+        """This stream may send rounds from now on."""
 
-    def has_operation(
+    def has_stream(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> bool:
-        """Whether the store still serves this operation."""
+        """Whether the store still serves this stream."""
 
-    def close_operation(
+    def close_stream(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> None:
-        """The operation sends no more rounds; a closed one never reopens.
+        """The stream sends no more rounds; a closed one never reopens.
 
-        A round still crossing a priced link when its operation closes
-        never enters the store: no hold can name a closed operation, so
+        A round still crossing a priced link when its stream closes
+        never enters the store: no hold can name a closed stream, so
         the round has no reader and the receiver drops it at the landing.
         """
 
-    def has_live_operation_reference(
+    def has_live_stream_reference(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> bool:
-        """Whether a live hold still names this operation.
+        """Whether a live hold still names this stream.
 
         A stored round that no hold names has no reader, so it does not
-        keep its operation's result waiting.
+        keep its stream's results waiting.
         """
 
 
@@ -437,7 +437,7 @@ class MemoryRoundArrivals(Protocol):
 
     def receive_memory_round(
         self,
-        source_operation_id: Any,  # an opaque identity
+        source_stream_id: Any,  # an opaque identity
     ) -> None:
         """Take one timing-only round that landed at the decoder side."""
 
@@ -478,12 +478,12 @@ class WindowInput(Protocol):
 
     def accept_feedback_memory_round(
         self,
-        source_operation_id: Any,  # an opaque identity
+        source_stream_id: Any,  # an opaque identity
     ) -> None:
         """Record one idle or memory round and re-check waiting windows."""
 
-    def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
-        """Fold pre-gate idle rounds into a batch-style operation."""
+    def prepend_idle_rounds(self, stream_id: int, round_count: int) -> None:
+        """Fold pre-gate idle rounds into a batch-style operation's stream."""
 
     def has_dynamic_stream(
         self,
@@ -521,7 +521,7 @@ class WindowInput(Protocol):
     def accept_room_round(
         self,
         store: "SyndromeBuffer",
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
         """Record a round that landed in a store a region lands in."""
@@ -560,10 +560,10 @@ class WindowPlan(Protocol):
 
     def later_windows(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window_index: int,
     ) -> list:
-        """The operation's windows past that index, in index order."""
+        """The stream's windows past that index, in index order."""
 
     def check_absorbable(self, window_keys: tuple) -> None:
         """Every listed window is still undecoded and uncommitted."""
@@ -623,10 +623,10 @@ class WindowRetention(Protocol):
 
     def landed_through(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         target: Optional[window_records.PoolId] = None,
     ) -> int:
-        """The operation's highest round the edge's landing store holds."""
+        """The stream's highest round the edge's landing store holds."""
 
     def hold_strong_context(
         self,
@@ -700,16 +700,16 @@ class WindowRetention(Protocol):
 
     def read_keys_for_bounds(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         start_round: int,
         buffer_hi: int,
         window: Optional[window_records.Window] = None,
     ) -> list:
-        """The retained round keys of a possibly cross-operation range."""
+        """The retained round keys of a possibly cross-stream range."""
 
     def strong_rounds_before(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
         last_round: int,
     ) -> list:
@@ -751,17 +751,17 @@ class WindowRounds(Protocol):
 
     def round_count_for_window(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window: window_records.Window,
     ) -> int:
-        """The rounds the window reads of its operation."""
+        """The rounds the window reads of its stream."""
 
     def strong_rounds_arrived(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         store: "SyndromeBuffer",
     ) -> int:
-        """The operation's highest round stored in that store."""
+        """The stream's highest round stored in that store."""
 
 
 @runtime_checkable
@@ -775,7 +775,7 @@ class WindowJobBuilder(Protocol):
 
     def new_request_key(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window_id: int,
         tier: window_records.PoolId,
     ) -> window_records.DecoderRequestKey:
@@ -935,7 +935,7 @@ class EscalateEdge(Protocol):
 
     def submit_if_stored_data_releases(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> None:
         """A round was stored: a window waiting for its tail leaves."""
 
@@ -1603,9 +1603,9 @@ class DetectionEventFormer(Protocol):
 
     def formation_table(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> formation_records.FormationTable:
-        """The operation's formation table, the rounds executed so far."""
+        """The stream's formation table, the rounds executed so far."""
 
 
 @runtime_checkable
@@ -1647,7 +1647,7 @@ class DetectionEventPlacement(Protocol):
     def rounds_needed_before(
         self,
         seat: str,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
         last_round: int,
     ) -> tuple:
@@ -1659,7 +1659,7 @@ class DetectionEventPlacement(Protocol):
 
     def earlier_rounds_read(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
     ) -> tuple[int, ...]:
         """The raw rounds before first_round it or any later round reads.
@@ -2141,13 +2141,13 @@ class WindowingScheme(Protocol):
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
         buffer_round_count: int,
     ) -> window_records.OperationWindowPlan:
-        """The operation's windows and their internal dependencies."""
+        """The stream's windows and their internal dependencies."""
 
     def data_complete(
         self,
@@ -2420,7 +2420,7 @@ class DecoderUnit(Protocol):
 class WindowBacklog(Protocol):
     """The window manager, as the decode backlog sampler reads it."""
 
-    def backlog_round_counts(self, rounds_read_out_by_operation: dict) -> tuple:
+    def backlog_round_counts(self, rounds_read_out_by_stream: dict) -> tuple:
         """Rounds read out whole, not final: (operation id, patch, rounds)."""
 
 

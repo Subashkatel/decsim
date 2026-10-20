@@ -16,12 +16,12 @@ class _Record:
 
     def __init__(
         self,
-        operation_id: int,
+        stream_id: int,
         window_id: int,
         stage: str,
         served_windows: tuple = (),
     ) -> None:
-        self.operation_id = operation_id
+        self.stream_id = stream_id
         self.window_id = window_id
         self.stage = stage
         self.served_windows = served_windows

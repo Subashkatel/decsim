@@ -41,7 +41,7 @@ EDGE_HOPS = route_records.EdgeHops(
 
 def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=2,
         commit_lo=4,
         commit_hi=6,
@@ -50,7 +50,7 @@ def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
     )
     window.deps_remaining = owed_boundaries
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=2,
         round_count=6,
         window=window,
@@ -62,7 +62,7 @@ def _strong_job(sequence: int) -> decoding_records.DecodeJob:
         1, 2, window_records.STRONG_POOL_ID, sequence
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=2,
         round_count=9,
         label="strong(mem1 W2)",
@@ -99,12 +99,12 @@ class _Shape:
 
     def release_conditions(self, assignment):
         del assignment
-        stored_data_of_operation = None
+        stored_data_of_stream = None
         if self.missing_rounds:
-            stored_data_of_operation = 1
+            stored_data_of_stream = 1
         return pending_module.ReleaseConditions(
             committed_windows=self.waits_on,
-            stored_data_of_operation=stored_data_of_operation,
+            stored_data_of_stream=stored_data_of_stream,
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -145,9 +145,9 @@ class _Retention:
     def escalated_rounds(self, round_keys, target=None):
         del target
         packets = []
-        for operation_id, round_index in round_keys:
+        for stream_id, round_index in round_keys:
             fragment = round_records.RetainedSyndromeFragment(
-                operation_id=operation_id,
+                stream_id=stream_id,
                 patch_ids=(0,),
                 round_index=round_index,
                 bits=(1, 0, 1),
@@ -155,7 +155,7 @@ class _Retention:
                 fragment_index=0,
             )
             packet = round_records.SyndromeRoundPacket(
-                operation_id, round_index, (fragment,)
+                stream_id, round_index, (fragment,)
             )
             packets.append(packet)
         return tuple(packets)
@@ -291,11 +291,11 @@ class _Builder:
     def __init__(self) -> None:
         self.sequence = 20
 
-    def new_request_key(self, operation_id, window_id, pool):
+    def new_request_key(self, stream_id, window_id, pool):
         """The next request key of the run."""
         self.sequence += 1
         return window_records.DecoderRequestKey(
-            operation_id, window_id, pool, self.sequence
+            stream_id, window_id, pool, self.sequence
         )
 
 

@@ -71,7 +71,7 @@ def _ignore_result(_job, _result) -> None:
 
 def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=bits,
@@ -108,7 +108,7 @@ class _Fixture:
             1, "memory", (0,), patches=(0,)
         )
         self.window = window_records.Window(
-            operation_id=1,
+            stream_id=1,
             window_index=0,
             commit_lo=1,
             commit_hi=3,
@@ -124,18 +124,18 @@ class _Fixture:
         no_models = types.SimpleNamespace(model_by_window={})
         self.planner = types.SimpleNamespace(
             windows_by_key={(1, 0): self.window},
-            successors_by_operation={1: []},
+            successors_by_stream={1: []},
             models=no_models,
             spatial_node_count_of=lambda _operation_id: 17,
             code_geometry_of=lambda _operation_id: geometry,
-            is_windowed=lambda _operation_id: True,
+            is_windowed=lambda _stream_id: True,
         )
         self.tracker = types.SimpleNamespace(
             operation_by_id={1: self.operation},
-            effective_round_count_for_window=lambda _operation_id, _window: 6,
-            round_count_for_window=lambda _operation_id, _window=None: 6,
-            rounds_arrived=lambda _operation_id: self.arrived,
-            strong_rounds_arrived=lambda _operation_id, _store: 0,
+            effective_round_count_for_window=lambda _stream_id, _window: 6,
+            round_count_for_window=lambda _stream_id, _window=None: 6,
+            rounds_arrived=lambda _stream_id: self.arrived,
+            strong_rounds_arrived=lambda _stream_id, _store: 0,
             has_first_round=self._has_first_round,
             is_data_complete=self._is_data_complete,
             is_buffer_filled_by_memory=lambda _window: False,
@@ -203,7 +203,7 @@ class _Fixture:
             delivery_revision=0,
             latest_source_revision=1,
             latest_delivery_revision=0,
-            source_operation_round_count=6,
+            source_stream_round_count=6,
             dependency_released=True,
             payload=defects,
         )
@@ -396,7 +396,7 @@ def test_a_shared_input_is_written_once_and_the_other_solve_reads_it():
 def _companion_solve(job, memory):
     """The window's other forced-class solve, reading the same input."""
     companion = decoding_records.DecodeJob(
-        operation_id=job.operation_id,
+        stream_id=job.stream_id,
         window_id=job.window_id,
         round_count=job.round_count,
         request_key=job.request_key,
@@ -586,7 +586,7 @@ def _speculative_request_after_decision(machine, requests) -> dict:
     jobs = _speculative_jobs(requests)
     windows = machine.windows.window_manager.planner.windows_by_key
     after = {}
-    for (_operation_id, window_id), window in windows.items():
+    for (_stream_id, window_id), window in windows.items():
         job = jobs[window_id]
         after[window_id] = job.request_created_ticks - window.t_queued
     return after

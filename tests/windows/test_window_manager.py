@@ -108,10 +108,10 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
     return machine_module.Machine.build(graph, 0)
 
 
-def test_a_modelled_window_never_reads_the_next_operations_rounds():
+def test_a_modelled_window_never_reads_the_next_streams_rounds():
     """Its model ends at its own last round, so its decode refuses it."""
     lookahead = _chained_stim_run("lookahead")
-    with pytest.raises(RuntimeError, match="does not match job operation"):
+    with pytest.raises(RuntimeError, match="does not match job stream"):
         lookahead.run()
     machine = _chained_stim_run("flush")
     machine.run()
@@ -151,13 +151,13 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
 def _stream_planner() -> window_planner.WindowPlanner:
     plan = window_records.WindowPlan(
         windows={},
-        window_count={},
-        op_windows={},
-        successors={},
-        rounds_by_operation={},
+        window_count_by_stream={},
+        windows_by_stream={},
+        successors_by_stream={},
+        rounds_by_stream={},
         total_windows=0,
-        windowed_by_operation={},
-        batch_preceding_idle_rounds_by_operation={},
+        windowed_by_stream={},
+        batch_preceding_idle_rounds_by_stream={},
     )
     geometry = types.SimpleNamespace(
         commit_round_count=3, buffer_round_count=2, code_name="surface"
@@ -272,7 +272,7 @@ def test_a_round_arriving_after_the_last_window_committed_is_refused():
     """
     machine = _weak_run()
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=0,
+        stream_id=0,
         patch_ids=(0,),
         round_index=2,
         bits=None,

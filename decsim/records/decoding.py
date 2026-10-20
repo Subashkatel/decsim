@@ -73,13 +73,13 @@ class WindowConfidence:
 
 # ---- consumer hold tokens: who keeps rounds in a syndrome buffer and why
 #
-# Every token answers referenced_operation_ids: the operations it keeps
-# open beyond the ones the rounds it names belong to. A store asks the
+# Every token answers referenced_stream_ids: the streams it keeps open
+# beyond the ones the rounds it names belong to. A store asks the
 # token rather than reading its type, so a token added later is counted
 # by the liveness check like every other one.
 #
-# Every token also answers operation_ids_read_at_once: the operations
-# whose rounds, among those it names, the window side waits to see all
+# Every token also answers stream_ids_read_at_once: the streams whose
+# rounds, among those it names, the window side waits to see all
 # stored at once before it ends. Every token also answers
 # holders_waited_for: the holds that end before it can. A bounded store
 # asks both while a round waits for room (syndrome_buffer.py).
@@ -95,19 +95,19 @@ class WindowReads:
 
     window_key: tuple
 
-    def referenced_operation_ids(self) -> tuple:
+    def referenced_stream_ids(self) -> tuple:
         """None: the rounds held are the reading window's own."""
         return ()
 
-    def operation_ids_read_at_once(self) -> tuple:
-        """The window's operation: its decode waits for every round of it.
+    def stream_ids_read_at_once(self) -> tuple:
+        """The window's stream: its decode waits for every round of it.
 
-        A buffer past the operation's end is filled by memory rounds or
-        by any one successor (windows/schemes/window_data.py), so the
-        rounds of other operations it names are not waited for at once.
+        A buffer past the stream's end is filled by memory rounds or by
+        any one successor (windows/schemes/window_data.py), so the rounds
+        of other streams it names are not waited for at once.
         """
-        operation_id = self.window_key[0]
-        return (operation_id,)
+        stream_id = self.window_key[0]
+        return (stream_id,)
 
     def served_window_key(self) -> Optional[tuple]:
         """The window whose decode the hold serves."""
@@ -129,11 +129,11 @@ class PotentialStrong:
     window_key: tuple
     target: window_records.PoolId = window_records.STRONG_POOL_ID
 
-    def referenced_operation_ids(self) -> tuple:
+    def referenced_stream_ids(self) -> tuple:
         """None: the rounds held are the held window's own."""
         return ()
 
-    def operation_ids_read_at_once(self) -> tuple:
+    def stream_ids_read_at_once(self) -> tuple:
         """None: the hold ends at a weak verdict that keeps the window."""
         return ()
 
@@ -159,11 +159,11 @@ class PotentialRestart:
 
     window_key: tuple
 
-    def referenced_operation_ids(self) -> tuple:
+    def referenced_stream_ids(self) -> tuple:
         """None: the rounds held are the held window's own."""
         return ()
 
-    def operation_ids_read_at_once(self) -> tuple:
+    def stream_ids_read_at_once(self) -> tuple:
         """None: the hold ends when the window before it commits."""
         return ()
 
@@ -186,11 +186,11 @@ class LaterStreamReads:
 
     stream_id: Any  # an opaque identity
 
-    def referenced_operation_ids(self) -> tuple:
+    def referenced_stream_ids(self) -> tuple:
         """None: the rounds held are the stream's own."""
         return ()
 
-    def operation_ids_read_at_once(self) -> tuple:
+    def stream_ids_read_at_once(self) -> tuple:
         """None: the hold moves on as the stream's windows register."""
         return ()
 
@@ -208,24 +208,24 @@ class PendingStrong:
     """A hold: rounds for an admitted, not yet served strong request.
 
     restart_key is the window whose weak commit releases the request, or
-    None at the operation's end (escalation/strong_window_shapes.py,
+    None at the stream's end (escalation/strong_window_shapes.py,
     _far_face_conditions); the request key alone names the hold.
     """
 
     request_key: window_records.DecoderRequestKey
     restart_key: Optional[tuple] = field(default=None, compare=False)
 
-    def referenced_operation_ids(self) -> tuple:
+    def referenced_stream_ids(self) -> tuple:
         """None: the rounds held are the requested window's own."""
         return ()
 
-    def operation_ids_read_at_once(self) -> tuple:
-        """The request's operation: its job waits for every round stored."""
-        return (self.request_key.operation_id,)
+    def stream_ids_read_at_once(self) -> tuple:
+        """The request's stream: its job waits for every round stored."""
+        return (self.request_key.stream_id,)
 
     def served_window_key(self) -> Optional[tuple]:
         """The window of the request the hold serves."""
-        return (self.request_key.operation_id, self.request_key.window_id)
+        return (self.request_key.stream_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """The restart window's read, which ends before its weak commit."""
@@ -240,17 +240,17 @@ class StrongInputInFlight:
 
     request_key: window_records.DecoderRequestKey
 
-    def referenced_operation_ids(self) -> tuple:
+    def referenced_stream_ids(self) -> tuple:
         """None: the rounds held are the requested window's own."""
         return ()
 
-    def operation_ids_read_at_once(self) -> tuple:
+    def stream_ids_read_at_once(self) -> tuple:
         """None: its decode has started on rounds already stored."""
         return ()
 
     def served_window_key(self) -> Optional[tuple]:
         """The window of the request the hold serves."""
-        return (self.request_key.operation_id, self.request_key.window_id)
+        return (self.request_key.stream_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """None: it ends when its rounds land in unit memory."""
@@ -269,17 +269,17 @@ class DecoderInputHold:
     request_key: window_records.DecoderRequestKey
     boundary_window_keys: tuple = field(default=(), compare=False)
 
-    def referenced_operation_ids(self) -> tuple:
+    def referenced_stream_ids(self) -> tuple:
         """None: the rounds held are the job's own."""
         return ()
 
-    def operation_ids_read_at_once(self) -> tuple:
+    def stream_ids_read_at_once(self) -> tuple:
         """None: its decode has started on rounds already stored."""
         return ()
 
     def served_window_key(self) -> Optional[tuple]:
         """The window of the request the hold serves."""
-        return (self.request_key.operation_id, self.request_key.window_id)
+        return (self.request_key.stream_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """The reads of the windows whose boundaries it waits for."""
@@ -296,17 +296,17 @@ class RephaseGuard:
 
     request_key: window_records.DecoderRequestKey
 
-    def referenced_operation_ids(self) -> tuple:
-        """The guarded request's operation, which the suffix may outlive."""
-        return (self.request_key.operation_id,)
+    def referenced_stream_ids(self) -> tuple:
+        """The guarded request's stream, which the suffix may outlive."""
+        return (self.request_key.stream_id,)
 
-    def operation_ids_read_at_once(self) -> tuple:
+    def stream_ids_read_at_once(self) -> tuple:
         """None: the hold ends when the strong plan lands."""
         return ()
 
     def served_window_key(self) -> Optional[tuple]:
         """The window of the request the hold serves."""
-        return (self.request_key.operation_id, self.request_key.window_id)
+        return (self.request_key.stream_id, self.request_key.window_id)
 
     def holders_waited_for(self) -> tuple:
         """None: the hold ends when the strong plan lands."""
@@ -382,7 +382,7 @@ class RequestProcessingOutcome(Enum):
 class MaterializedSyndromeRound:
     """One immutable syndrome round owned by the decoder side."""
 
-    operation_id: Any  # an opaque identity
+    stream_id: Any  # an opaque identity
     round_index: int
     fragments: tuple[round_records.RetainedSyndromeFragment, ...]
 
@@ -391,10 +391,10 @@ class MaterializedSyndromeRound:
 class DecoderInput:
     """Immutable local input for one decoder request.
 
-    Rounds are ordered by operation identity and round index.
+    Rounds are ordered by stream identity and round index.
     """
 
-    operation_id: int
+    stream_id: int
     window_id: int
     request_key: Optional[window_records.DecoderRequestKey]
     rounds: tuple[MaterializedSyndromeRound, ...]
@@ -425,7 +425,7 @@ class DecoderInput:
 
 
 def distinct_round_count(payloads: list) -> int:
-    """The distinct (operation_id, round_index) rounds of the payloads.
+    """The distinct (stream_id, round_index) rounds of the payloads.
 
     A decode job is priced and admitted for these: a sliding-window
     decoder's work scales with its window's rounds (Skoric et al.
@@ -434,21 +434,21 @@ def distinct_round_count(payloads: list) -> int:
     """
     round_identities = set()
     for payload in payloads:
-        round_identities.add((payload.operation_id, payload.round_index))
+        round_identities.add((payload.stream_id, payload.round_index))
     return len(round_identities)
 
 
-def last_round_by_operation(payloads: list) -> tuple:
-    """(operation id, its last round) for every operation the payloads hold.
+def last_round_by_stream(payloads: list) -> tuple:
+    """(stream id, its last round) for every stream the payloads hold.
 
-    A decode reads past its own operation when its buffer runs into the
+    A decode reads past its own stream when its buffer runs into the
     next one, so a reader that asks when its last round was measured
-    needs every operation's.
+    needs every stream's.
     """
     last_rounds = {}
     for payload in payloads:
-        latest = last_rounds.get(payload.operation_id, 0)
-        last_rounds[payload.operation_id] = max(latest, payload.round_index)
+        latest = last_rounds.get(payload.stream_id, 0)
+        last_rounds[payload.stream_id] = max(latest, payload.round_index)
     pairs = last_rounds.items()
     return tuple(pairs)
 
@@ -463,8 +463,8 @@ class DecodeJob:
     unit's memory.
     """
 
-    operation_id: int  # operation the window belongs to
-    window_id: int  # window index within that op
+    stream_id: Any  # the window's decode stream (an opaque identity)
+    window_id: int  # window index within that stream
     # rounds the decoder processes: the distinct rounds landed in its
     # input, plus batched idle rounds
     round_count: int
@@ -534,7 +534,7 @@ class DecodeJob:
     # back-reference to the source window
     window: Optional[window_records.Window] = None
     strong_decode_for: Optional[tuple] = (
-        None  # (operation_id, window_id) this strong job re-decodes
+        None  # (stream_id, window_id) this strong job re-decodes
     )
     # the windows whose committed boundary a target job folds at its
     # faces; a redo of this job at the next edge pins the same faces
@@ -624,7 +624,7 @@ class PauliFrameCommitRecord:
 class DecoderStageRecord:
     """One timed stage of one job."""
 
-    operation_id: int
+    stream_id: int
     window_id: int
     stage: str
     cycles: Optional[int]  # None for the algorithm, priced in time
@@ -634,7 +634,7 @@ class DecoderStageRecord:
     # XRay record carries the thread it ran on
     # (tools/llvm-xray/xray-converter.cc:232-245)
     unit_name: str
-    # the (operation, round) identities a formation stage turned into
+    # the (stream, round) identities a formation stage turned into
     # detection events here; empty for every stage that forms none
     round_keys: tuple = ()
     # the run ordinals of the requests this decode serves, so a reader
@@ -664,11 +664,11 @@ class DecoderStageRecord:
     # the ticks the decode's input read took in its store
     # (DecodeJob.store_read_ticks)
     store_read_ticks: int = 0
-    # (operation id, its last round) for every operation the decode's
-    # input held when the stage closed (last_round_by_operation); a
+    # (stream id, its last round) for every stream the decode's input
+    # held when the stage closed (last_round_by_stream); a
     # strong region reads past the window it answers for
     last_rounds_read: tuple = ()
-    # the (operation id, window id) of every request the decode serves:
+    # the (stream id, window id) of every request the decode serves:
     # a merged batch's are its members' windows, which its own (-1, 0)
     # does not name (observe/stage_records.py files it under each)
     served_windows: tuple = ()
@@ -758,7 +758,7 @@ class Step:
 class DecodeResult:
     """One window result; timing-only decoders leave optional fields unset."""
 
-    operation_id: int
+    stream_id: int
     window_id: int
     # correction operator (None = timing-only)
     correction: Optional[numpy.ndarray] = None

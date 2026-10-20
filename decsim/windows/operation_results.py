@@ -93,7 +93,7 @@ class OperationResults:
         No earlier escalation can re-slice its dependents now, so their
         potential restart reads end.
         """
-        self._update_committed_round_count(window.operation_id)
+        self._update_committed_round_count(window.stream_id)
         for dependent_key in window.dependents:
             self.retention.release_restart_reads(dependent_key)
         if is_final:
@@ -123,8 +123,8 @@ class OperationResults:
         self._deliver_result(operation)
         weak_store = self.retention.weak_store
         if weak_store is not None:
-            weak_store.close_operation(operation.id)
-        self._close_strong_store_operation(operation.id)
+            weak_store.close_stream(operation.id)
+        self._close_strong_store_stream(operation.id)
         self.finish_workload_if_ready()
 
     def finish_workload_if_ready(self) -> None:
@@ -188,16 +188,16 @@ class OperationResults:
 
     def committed_prefix_round_count(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> int:
         """Rounds committed in an unbroken prefix from round 1."""
-        cursor = self._cursor(_COMMITTED, operation_id)
-        return self._joined_prefix(cursor, operation_id, _is_committed)
+        cursor = self._cursor(_COMMITTED, stream_id)
+        return self._joined_prefix(cursor, stream_id, _is_committed)
 
     def read_out_prefix_round_count(
         self,
-        operation_id: Any,  # an opaque identity
-        rounds_read_out_by_operation: dict,
+        stream_id: Any,  # an opaque identity
+        rounds_read_out_by_stream: dict,
     ) -> int:
         """Rounds of the windows read out whole, unbroken from round 1.
 
@@ -208,14 +208,14 @@ class OperationResults:
         wait on the window shape and on no decoder.
         """
         is_whole = functools.partial(
-            _is_read_out_whole, self.tracker, rounds_read_out_by_operation
+            _is_read_out_whole, self.tracker, rounds_read_out_by_stream
         )
-        cursor = self._cursor(_READ_OUT, operation_id)
-        return self._joined_prefix(cursor, operation_id, is_whole)
+        cursor = self._cursor(_READ_OUT, stream_id)
+        return self._joined_prefix(cursor, stream_id, is_whole)
 
     def final_prefix_round_count(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> int:
         """Rounds whose final correction is in place, unbroken from round 1.
 
@@ -223,16 +223,16 @@ class OperationResults:
         until the strong answer lands, so its rounds are not final yet;
         a window it absorbed lies after it and waits with it.
         """
-        cursor = self._cursor(_FINAL, operation_id)
-        return self._joined_prefix(cursor, operation_id, is_final_window)
+        cursor = self._cursor(_FINAL, stream_id)
+        return self._joined_prefix(cursor, stream_id, is_final_window)
 
     def final_window_count(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> int:
-        """How many of the operation's windows, in order, are final."""
-        cursor = self._cursor(_EVERY_FINAL, operation_id)
-        self._passed_in_order(cursor, operation_id)
+        """How many of the stream's windows, in order, are final."""
+        cursor = self._cursor(_EVERY_FINAL, stream_id)
+        self._passed_in_order(cursor, stream_id)
         return cursor.passed
 
     # ---- a stream lets its final windows go
@@ -298,18 +298,18 @@ class OperationResults:
             operation_id, tuple(contributions)
         )
 
-    def _is_final(self, operation_id) -> bool:
+    def _is_final(self, stream_id) -> bool:
         """Every window committed and final, no store holding, sealed."""
-        if not self._are_windows_final(operation_id):
+        if not self._are_windows_final(stream_id):
             return False
         weak_store = self.retention.weak_store
-        if weak_store is not None and weak_store.has_live_operation_reference(
-            operation_id
+        if weak_store is not None and weak_store.has_live_stream_reference(
+            stream_id
         ):
             return False
-        if self._strong_store_references(operation_id):
+        if self._strong_store_references(stream_id):
             return False
-        return self.tracker.is_sealed(operation_id)
+        return self.tracker.is_sealed(stream_id)
 
     def _record_result(self, operation_id, logical_observables) -> None:
         self.trace.operation_result_delivered.fire(
@@ -384,51 +384,51 @@ class OperationResults:
                 return True
         return False
 
-    def _are_windows_final(self, operation_id) -> bool:
-        """Whether every window of the operation is committed and final."""
-        cursor = self._cursor(_EVERY_FINAL, operation_id)
-        self._passed_in_order(cursor, operation_id)
-        window_count = self.planner.window_count_of(operation_id)
+    def _are_windows_final(self, stream_id) -> bool:
+        """Whether every window of the stream is committed and final."""
+        cursor = self._cursor(_EVERY_FINAL, stream_id)
+        self._passed_in_order(cursor, stream_id)
+        window_count = self.planner.window_count_of(stream_id)
         return cursor.passed == window_count
 
     def _is_every_window_final(self) -> bool:
-        """Whether every window of every operation is committed and final."""
-        for operation_id in self.planner.windowed_operation_ids():
-            if not self._are_windows_final(operation_id):
+        """Whether every window of every stream is committed and final."""
+        for stream_id in self.planner.windowed_stream_ids():
+            if not self._are_windows_final(stream_id):
                 return False
         return True
 
-    def _open_windows(self, operation_id) -> list:
-        """The operation's windows from the first one not final on."""
-        cursor = self._cursor(_EVERY_FINAL, operation_id)
-        self._passed_in_order(cursor, operation_id)
-        indices = self.planner.window_indices_of(operation_id)
+    def _open_windows(self, stream_id) -> list:
+        """The stream's windows from the first one not final on."""
+        cursor = self._cursor(_EVERY_FINAL, stream_id)
+        self._passed_in_order(cursor, stream_id)
+        indices = self.planner.window_indices_of(stream_id)
         windows = []
         for position in range(cursor.passed, len(indices)):
             window_index = indices[position]
-            window = self.planner.window_at((operation_id, window_index))
+            window = self.planner.window_at((stream_id, window_index))
             windows.append(window)
         return windows
 
-    def _cursor(self, kind: str, operation_id) -> "_Cursor":
+    def _cursor(self, kind: str, stream_id) -> "_Cursor":
         cursors = self.deliveries.cursors
-        key = (kind, operation_id)
+        key = (kind, stream_id)
         cursor = cursors.get(key)
         if cursor is None:
             cursor = _Cursor(_CURSOR_TESTS[kind])
             cursors[key] = cursor
         return cursor
 
-    def _joined_prefix(self, cursor: "_Cursor", operation_id, passes) -> int:
+    def _joined_prefix(self, cursor: "_Cursor", stream_id, passes) -> int:
         """The rounds the passing windows join from round 1, in window order.
 
         A window joins while it passes and starts no later than the round
         after the prefix, _unbroken_prefix_round_count's rule.
         """
-        indices = self.planner.window_indices_of(operation_id)
+        indices = self.planner.window_indices_of(stream_id)
         while cursor.passed < len(indices):
             window_index = indices[cursor.passed]
-            window = self.planner.window_at((operation_id, window_index))
+            window = self.planner.window_at((stream_id, window_index))
             if window.commit_lo > cursor.prefix_end + 1:
                 break
             if not passes(window):
@@ -437,28 +437,28 @@ class OperationResults:
             cursor.passed += 1
         return cursor.prefix_end
 
-    def _passed_in_order(self, cursor: "_Cursor", operation_id) -> None:
+    def _passed_in_order(self, cursor: "_Cursor", stream_id) -> None:
         """The cursor past every window, in order, its test holds of."""
-        indices = self.planner.window_indices_of(operation_id)
+        indices = self.planner.window_indices_of(stream_id)
         while cursor.passed < len(indices):
             window_index = indices[cursor.passed]
-            window = self.planner.window_at((operation_id, window_index))
+            window = self.planner.window_at((stream_id, window_index))
             if not cursor.passes(window):
                 return
             cursor.passed += 1
 
-    def _strong_store_references(self, operation_id) -> bool:
+    def _strong_store_references(self, stream_id) -> bool:
         """Whether a live hold in a store a region lands in names it."""
         for store in self.retention.landing_stores():
-            if store.has_live_operation_reference(operation_id):
+            if store.has_live_stream_reference(stream_id):
                 return True
         return False
 
-    def _close_strong_store_operation(self, operation_id) -> None:
-        """Retire the operation in every store a region lands in."""
+    def _close_strong_store_stream(self, stream_id) -> None:
+        """Retire the stream in every store a region lands in."""
         for store in self.retention.landing_stores():
-            if store.has_operation(operation_id):
-                store.close_operation(operation_id)
+            if store.has_stream(stream_id):
+                store.close_stream(stream_id)
 
 
 def is_final_window(window: window_records.Window) -> bool:
@@ -482,9 +482,9 @@ def _is_committed(window: window_records.Window) -> bool:
 
 
 def _is_read_out_whole(
-    tracker, rounds_read_out_by_operation: dict, window
+    tracker, rounds_read_out_by_stream: dict, window
 ) -> bool:
-    return tracker.is_read_out_whole(window, rounds_read_out_by_operation)
+    return tracker.is_read_out_whole(window, rounds_read_out_by_stream)
 
 
 def _move_past(cursor: "_Cursor", window_count: int, prefix_end: int) -> None:
@@ -511,12 +511,12 @@ class _Deliveries:
         self.segment_results_sent: set = set()
         self.committed_round_count_by_stream: dict = {}
         self.segment_by_operation: dict = {}
-        # (test, operation id) -> _Cursor
+        # (test, stream id) -> _Cursor
         self.cursors: dict = {}
 
 
 class _Cursor:
-    """How many of an operation's windows, in order, pass one test.
+    """How many of a stream's windows, in order, pass one test.
 
     prefix_end is the last round their commit ranges join from round 1,
     for a cursor that joins them; passes is the test, for one that only

@@ -63,7 +63,7 @@ class SlidingWindowScheme:
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
@@ -86,7 +86,7 @@ class SlidingWindowScheme:
         last_index = window_count - 1
         internal_dependencies = _chain_dependencies(window_count)
         return window_records.OperationWindowPlan(
-            operation_id=operation_id,
+            stream_id=stream_id,
             windows=windows,
             internal_dependencies=internal_dependencies,
             entry_window_indices=(0,),

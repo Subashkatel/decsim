@@ -97,7 +97,7 @@ def fabric_with(engine, listener=None, **paths):
 
 def round_attribution(round_index):
     return transfer_records.TransferAttribution(
-        operation_id=1,
+        owner_id=1,
         patch_ids=(0,),
         window_id=None,
         first_round=round_index,
@@ -107,7 +107,7 @@ def round_attribution(round_index):
 
 def operation_attribution(relation=None):
     return transfer_records.TransferAttribution(
-        operation_id=1,
+        owner_id=1,
         patch_ids=(0,),
         window_id=None,
         first_round=None,
@@ -118,7 +118,7 @@ def operation_attribution(relation=None):
 
 def request_relation_for(window_id):
     request_key = window_records.DecoderRequestKey(
-        operation_id=1,
+        stream_id=1,
         window_id=window_id,
         pool=window_records.WEAK_POOL_ID,
         run_sequence=window_id,
@@ -128,7 +128,7 @@ def request_relation_for(window_id):
 
 def window_attribution(window_id, relation=None):
     return transfer_records.TransferAttribution(
-        operation_id=1,
+        owner_id=1,
         patch_ids=(0,),
         window_id=window_id,
         first_round=window_id,

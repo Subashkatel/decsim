@@ -56,16 +56,16 @@ class FixedRow(decoder_module.DecoderBase):
 
     def decode(self, job):
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, logical_observables=(1,)
+            job.stream_id, job.window_id, logical_observables=(1,)
         )
 
 
 class OneRoundSource:
     """Recipes of a one-round operation: the value is not the law."""
 
-    def formation_table(self, operation_id):
+    def formation_table(self, stream_id):
         """The one table: one event, the round's first outcome."""
-        del operation_id
+        del stream_id
         recipe = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
@@ -86,9 +86,9 @@ class OneRoundSource:
 class TwoRoundSource:
     """Recipes of a two-round operation: round 2 compares against round 1."""
 
-    def formation_table(self, operation_id):
+    def formation_table(self, stream_id):
         """One event a round, the second the XOR of both rounds' outcome."""
-        del operation_id
+        del stream_id
         first = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
@@ -134,7 +134,7 @@ def _manager(engine, row, formation=None, unit_count=1):
 
 def _window_job():
     payload = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=("p",),
         round_index=1,
         bits=(0, 1),
@@ -145,7 +145,7 @@ def _window_job():
         1, 0, window_records.WEAK_POOL_ID, 0
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=1,
         payloads=[payload],
@@ -284,7 +284,7 @@ def test_the_rounds_before_are_held_by_the_tier_and_not_deposited():
     _connect_each(copy_sources, note_deposit)
     job = _window_job()
     round_one = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=("p",),
         round_index=1,
         bits=(1,),
@@ -486,15 +486,15 @@ def _lines_containing(lines: list, text: str) -> list:
 
 def _enqueue_timed_jobs(manager, decode_microseconds, send_input, on_decoded):
     """Job J<n> decodes for decode_microseconds[n]; all ready at tick 0."""
-    for operation_id, microseconds in enumerate(decode_microseconds):
+    for stream_id, microseconds in enumerate(decode_microseconds):
         request_key = window_records.DecoderRequestKey(
-            operation_id, 0, window_records.WEAK_POOL_ID, 0
+            stream_id, 0, window_records.WEAK_POOL_ID, 0
         )
         job = decoding_records.DecodeJob(
-            operation_id=operation_id,
+            stream_id=stream_id,
             window_id=0,
             round_count=microseconds,
-            label=f"J{operation_id}",
+            label=f"J{stream_id}",
             ready_time=0,
             request_key=request_key,
         )
@@ -527,7 +527,7 @@ class RoundsRow(decoder_module.DecoderBase):
         return config.microseconds_to_ticks(job.round_count)
 
     def decode(self, job):
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
 
 def test_a_startable_job_with_input_starts_when_a_central_fifo_queue_would():
@@ -570,8 +570,8 @@ def test_a_startable_job_with_input_starts_when_a_central_fifo_queue_would():
 def _second_operations_job():
     """The window job, reading round 1 of operation 2."""
     job = _window_job()
-    job.operation_id = 2
-    second = dataclasses.replace(job.payloads[0], operation_id=2)
+    job.stream_id = 2
+    second = dataclasses.replace(job.payloads[0], stream_id=2)
     job.payloads = [second]
     return job
 
@@ -644,8 +644,8 @@ def _rescued_memories(doubted: set) -> machine_module.Machine:
         rounds=6, escalated_windows=set(), switching=switching
     )
     operations = []
-    for operation_id in range(1, 5):
-        memory = declared_run.memory_operation(operation_id)
+    for stream_id in range(1, 5):
+        memory = declared_run.memory_operation(stream_id)
         operations.append(memory)
     graph_workload = graph.held("workload")
     workload = dataclasses.replace(graph_workload, operations=operations)
@@ -669,7 +669,7 @@ def _of_operations(operation_ids: set):
     """Whether a job's operation is one of these."""
 
     def is_escalated(job) -> bool:
-        return job.operation_id in operation_ids
+        return job.stream_id in operation_ids
 
     return is_escalated
 

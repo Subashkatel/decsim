@@ -115,7 +115,7 @@ def recorded_device(row, **settings):
 
 def window(commit_lo, commit_hi, buffer_hi, **changes):
     return window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -323,7 +323,7 @@ def test_a_later_stream_segment_reuses_the_streams_shot():
     tail_first = round_payload(device, tail, 1)
     assert tail_first.bits == head_fourth.bits
     assert tail_first.round_index == 4
-    assert tail_first.operation_id == "s"
+    assert tail_first.stream_id == "s"
 
 
 def test_a_segments_observable_truth_is_its_streams_truth():
@@ -553,7 +553,7 @@ def test_a_closed_boundary_needs_a_dependency_edge():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
     closed = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=4,
@@ -577,7 +577,7 @@ def test_a_window_declared_past_the_source_reads_to_its_last_round():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
     past_the_end = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=3,
         commit_hi=4,
@@ -596,7 +596,7 @@ def test_two_shots_of_one_circuit_slice_strong_windows_from_one_slicer(
 ):
     circuit = memory_circuit(3, 5, noise=0.00123)
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=2,
         commit_hi=3,

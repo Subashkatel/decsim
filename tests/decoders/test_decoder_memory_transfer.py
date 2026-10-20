@@ -38,7 +38,7 @@ class _CopyRecorder:
 
 def _fragment(round_index: int) -> round_records.RetainedSyndromeFragment:
     return round_records.RetainedSyndromeFragment(
-        operation_id=41,
+        stream_id=41,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0, 1),
@@ -50,7 +50,7 @@ def _fragment(round_index: int) -> round_records.RetainedSyndromeFragment:
 def _job_with_rounds() -> decoding_records.DecodeJob:
     payloads = [_fragment(0)]
     job = decoding_records.DecodeJob(
-        operation_id=41,
+        stream_id=41,
         window_id=7,
         round_count=1,
         payloads=payloads,

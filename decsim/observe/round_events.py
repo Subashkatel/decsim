@@ -20,14 +20,14 @@ class RoundEventRecorder:
         self.engine = engine
         self.events: list = []
         self.output_events: list = []
-        # (tick, operation_id, round_index) per strong-store landing
+        # (tick, stream_id, round_index) per strong-store landing
         self.stored_rounds: list = []
         # the tick of every round the QPU read out, an idle patch's
         # included, before any departure delay the source states
         self.readout_ticks: list = []
         # the last round the QPU read out of each operation, its rounds
         # generated so far, since it reads an operation's rounds in order
-        self.rounds_read_out_by_operation: dict = {}
+        self.rounds_read_out_by_stream: dict = {}
 
     def record(self, event: round_records.RoundEvent) -> None:
         """One transition of one round."""
@@ -40,9 +40,9 @@ class RoundEventRecorder:
     def round_read_out(self, readout: round_records.QPUReadout) -> None:
         """The QPU read out one round, or one fragment of it."""
         self.note_readout_tick()
-        by_operation = self.rounds_read_out_by_operation
-        latest = by_operation.get(readout.operation_id, 0)
-        by_operation[readout.operation_id] = max(latest, readout.round_index)
+        by_stream = self.rounds_read_out_by_stream
+        latest = by_stream.get(readout.stream_id, 0)
+        by_stream[readout.stream_id] = max(latest, readout.round_index)
 
     def idle_round_read_out(
         self,
@@ -63,8 +63,8 @@ class RoundEventRecorder:
         self, round_key: tuple, _packet: round_records.SyndromeRoundPacket
     ) -> None:
         """A round landed in the strong store."""
-        operation_id, round_index = round_key
-        self.stored_rounds.append((self.engine.now, operation_id, round_index))
+        stream_id, round_index = round_key
+        self.stored_rounds.append((self.engine.now, stream_id, round_index))
 
     def note_readout_tick(self) -> None:
         """The tick the QPU read a round out, an idle patch's included."""

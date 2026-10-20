@@ -526,7 +526,7 @@ class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
             gap=confidence_gap, source=DECLARED_CONFIDENCE_SOURCE
         )
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, soft_output=soft_output
+            job.stream_id, job.window_id, soft_output=soft_output
         )
 
 

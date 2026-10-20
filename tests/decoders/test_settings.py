@@ -92,9 +92,7 @@ def test_a_linear_pool_charges_tau_dec_for_every_round_of_the_job():
         cycles_per_job=engine.fetch_cycles_per_job,
         cycles_per_round=engine.fetch_cycles_per_round,
     )
-    job = decoding_records.DecodeJob(
-        operation_id=0, window_id=0, round_count=10
-    )
+    job = decoding_records.DecodeJob(stream_id=0, window_id=0, round_count=10)
 
     fetch_ticks = fetch.cycles_for(job) * clock.period_ticks
     assert fetch_ticks == config.microseconds_to_ticks(4.0)

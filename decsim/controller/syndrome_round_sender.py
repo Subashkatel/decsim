@@ -61,12 +61,12 @@ class HeldRounds:
 
         A held round is recorded STALLED once.
         """
-        operation_id, round_index = held.round_key
+        stream_id, round_index = held.round_key
         if self._is_holding(held):
             return False
         self.waiting.append((held, admit))
         stalled = round_records.RoundEvent.of(
-            "STALLED", self.engine.now, operation_id, round_index, held.route
+            "STALLED", self.engine.now, stream_id, round_index, held.route
         )
         self.trace.round_event.fire(stalled)
         return False
@@ -92,11 +92,11 @@ class HeldRounds:
 
     def _released(self, held: WaitingRound) -> None:
         """The round left the waiting line: its wait ends at this tick."""
-        operation_id, round_index = held.round_key
+        stream_id, round_index = held.round_key
         released = round_records.RoundEvent.of(
             "RELEASED",
             self.engine.now,
-            operation_id,
+            stream_id,
             round_index,
             held.route,
         )

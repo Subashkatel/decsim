@@ -283,10 +283,10 @@ class DoubleWindow(StrongWindowPorts):
         operation's end, for every round it reads to be stored;
         release_conditions says which.
         """
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         target = self.edge.target
         strong_request_key = self.builder.new_request_key(
-            weak_job.operation_id, weak_job.window_id, target
+            weak_job.stream_id, weak_job.window_id, target
         )
         strong_request_created_ticks = self.engine.now
         near_source_key = self.regions.double_window_near_face(key)
@@ -307,7 +307,7 @@ class DoubleWindow(StrongWindowPorts):
             resolved_region.context_round_keys,
             resolved_region.restart_read_keys,
         )
-        operation = self.regions.operation(weak_job.operation_id)
+        operation = self.regions.operation(weak_job.stream_id)
         label = escalated_label(self, weak_job)
         held = _HeldDoubleWindow(
             key=key,
@@ -411,13 +411,13 @@ class DoubleWindow(StrongWindowPorts):
         restart_key = held.resolved_region.restart_window_key
         if restart_key is None:
             return pending_strong_windows.ReleaseConditions(
-                stored_data_of_operation=held.key[0],
+                stored_data_of_stream=held.key[0],
                 name="terminal_data",
                 released_description="terminal data complete",
             )
         return pending_strong_windows.ReleaseConditions(
             committed_windows=(restart_key,),
-            stored_data_of_operation=held.key[0],
+            stored_data_of_stream=held.key[0],
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -615,7 +615,7 @@ def escalated_label(
     The target's name, then the window: strong(mem1 W0), or deep(mem1 W0)
     for a window a chain escalates again.
     """
-    operation = shape.regions.operation(source_job.operation_id)
+    operation = shape.regions.operation(source_job.stream_id)
     target = shape.edge.target
     return f"{target.word}({operation.name} W{source_job.window_id})"
 
@@ -633,12 +633,12 @@ def forced_class_companion(
     build_forced_companion, for a target job).
     """
     request_key = shape.builder.new_request_key(
-        lead.operation_id, lead.window_id, lead.request_key.pool
+        lead.stream_id, lead.window_id, lead.request_key.pool
     )
     label = f"{lead.label} class {forced_logical_class}"
     payloads = list(lead.payloads)
     job = decoding_records.DecodeJob(
-        operation_id=lead.operation_id,
+        stream_id=lead.stream_id,
         window_id=lead.window_id,
         round_count=lead.round_count,
         ready_time=shape.engine.now,
@@ -676,7 +676,7 @@ def _redo_of(
         region = shape.regions.revision_region(source_job.window)
         model = source_job.detector_error_model
         return region, source_job.pinned_faces, model
-    key = (source_job.operation_id, source_job.window_id)
+    key = (source_job.stream_id, source_job.window_id)
     region = shape.regions.redo_region(key)
     pinned_source_key = shape.regions.redo_pin_source(key)
     faces = _declared_faces(pinned_source_key)
@@ -715,12 +715,12 @@ def _held_redo(
     folded_boundaries: tuple,
 ) -> "_HeldStrongRedo":
     """What a row keeps from its plan: its window, its reads, its faces."""
-    key = (weak_job.operation_id, weak_job.window_id)
+    key = (weak_job.stream_id, weak_job.window_id)
     target = shape.edge.target
     request_key = shape.builder.new_request_key(
-        weak_job.operation_id, weak_job.window_id, target
+        weak_job.stream_id, weak_job.window_id, target
     )
-    operation = shape.regions.operation(weak_job.operation_id)
+    operation = shape.regions.operation(weak_job.stream_id)
     label = escalated_label(shape, weak_job)
     return _HeldStrongRedo(
         key=key,
@@ -766,7 +766,7 @@ def _stored_rounds_conditions(
 ) -> pending_strong_windows.ReleaseConditions:
     """The rounds the row reads, stored in the strong syndrome buffer."""
     return pending_strong_windows.ReleaseConditions(
-        stored_data_of_operation=held.key[0],
+        stored_data_of_stream=held.key[0],
         name="context_stored",
         released_description="strong context stored in strong syndrome buffer",
     )
@@ -858,11 +858,11 @@ def _strong_redecode_job(
     request_created_ticks: int,
 ) -> decoding_records.DecodeJob:
     """The strong job every row submits, its input held until it lands."""
-    key = (weak_job.operation_id, weak_job.window_id)
+    key = (weak_job.stream_id, weak_job.window_id)
     payload_round_count = decoding_records.distinct_round_count(payloads)
     label = escalated_label(shape, weak_job)
     job = decoding_records.DecodeJob(
-        operation_id=key[0],
+        stream_id=key[0],
         window_id=key[1],
         round_count=payload_round_count,
         ready_time=shape.engine.now,

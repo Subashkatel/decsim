@@ -132,7 +132,7 @@ class WindowTransfers:
 
     def _read_keys(self, window: window_records.Window) -> tuple:
         read_keys = self.retention.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
+            window.stream_id, window.start_round, window.buffer_hi, window
         )
         return tuple(read_keys)
 

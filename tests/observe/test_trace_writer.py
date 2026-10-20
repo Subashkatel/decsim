@@ -139,7 +139,7 @@ def _recorded_steps_of(events, round_key: tuple) -> list:
     """(kind, tick) of every recorded event of one round, in order."""
     steps = []
     for event in events:
-        if (event.operation_id, event.round_index) == round_key:
+        if (event.stream_id, event.round_index) == round_key:
             steps.append((event.kind, event.tick))
     return steps
 
@@ -404,7 +404,7 @@ def test_round_ones_first_hops_are_the_notes_worked_example(traced):
 
     complete_rows = _by_phase(document, "X")
     round_moves = _rows_with(complete_rows, "cat", "round,link")
-    moves = _rows_with_arg(round_moves, "rounds_by_operation", {"1": "1..1"})
+    moves = _rows_with_arg(round_moves, "rounds_by_stream", {"1": "1..1"})
     assert [row["args"]["tick"] for row in moves] == [1_000_000, 1_004_000]
     assert [row["args"]["delivery_tick"] for row in moves] == [
         1_004_000,
@@ -442,7 +442,7 @@ def test_window_zeros_service_and_stages_are_the_notes_worked_example(traced):
     input_move = input_moves[0]
     assert input_move["args"]["tick"] == 6_008_000
     assert input_move["args"]["bits"] == 44
-    assert input_move["args"]["rounds_by_operation"] == {"1": "1..6"}
+    assert input_move["args"]["rounds_by_stream"] == {"1": "1..6"}
 
     resident = _one(document, "X", "W0 input in memory")
     assert resident["args"]["tick"] == 6_012_000
@@ -620,7 +620,7 @@ def _last_rounds_data_ready(document, ready) -> list:
     """For each ready window, the data_ready tick of the last round it reads."""
     ticks = []
     for row in ready:
-        (read_rounds,) = row["args"]["rounds_by_operation"].values()
+        (read_rounds,) = row["args"]["rounds_by_stream"].values()
         first_and_last = read_rounds.split("..")
         last_round = first_and_last[1]
         residence = _one(document, "X", f"round {last_round}")

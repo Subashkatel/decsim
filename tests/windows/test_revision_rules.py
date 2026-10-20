@@ -25,7 +25,7 @@ def _revision(status, is_first=False, corrected=True, commit_region=()):
     if corrected:
         observables = (0,)
     result = decoding_records.DecodeResult(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         logical_observables=observables,
         decode_status=status,

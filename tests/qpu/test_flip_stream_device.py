@@ -169,7 +169,7 @@ def test_a_static_window_plan_is_not_implemented_yet():
     device = flip_stream_device.FlipStreamDevice({100: program})
     owner = program_records.Operation(100, "memory", (0,), patches=(0,))
     window = window_records.Window(
-        operation_id=100,
+        stream_id=100,
         window_index=0,
         commit_lo=1,
         commit_hi=3,

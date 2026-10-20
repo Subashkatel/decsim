@@ -129,7 +129,7 @@ class StreamMeasures:
     def round_read_out(self, readout: round_records.QPUReadout) -> None:
         """The QPU read out one round: the generation span and the count."""
         self._readout_now()
-        self.folds.count_round(readout.operation_id, readout.round_index)
+        self.folds.count_round(readout.stream_id, readout.round_index)
 
     def idle_round_read_out(
         self,
@@ -301,22 +301,22 @@ class StreamMeasures:
         self.folds.note_width(window.round_count)
         if self.folds.folded_windows % ROUNDS_LET_GO_EVERY:
             return
-        self._let_go_of_rounds(window.operation_id)
+        self._let_go_of_rounds(window.stream_id)
 
-    def _let_go_of_rounds(self, operation_id: object) -> None:
+    def _let_go_of_rounds(self, stream_id: object) -> None:
         """The sends of rounds below every unread window's reach."""
         windows = self.machine.observation.windows.windows
         starts = [
             each.start_round
             for each in windows.values()
-            if each.operation_id == operation_id
+            if each.stream_id == stream_id
         ]
         if not starts:
             return
         margin = KEPT_WINDOW_WIDTHS * self.folds.widest_window
         kept_from = min(starts) - margin
-        let_go = self.folds.rounds_to_let_go(operation_id, kept_from)
-        self.transfers.forget_rounds(operation_id, let_go)
+        let_go = self.folds.rounds_to_let_go(stream_id, kept_from)
+        self.transfers.forget_rounds(stream_id, let_go)
 
     def _pools(self) -> object:
         machine = self.machine
@@ -443,11 +443,9 @@ class _Folds:
         arrival_us = config_module.ticks_to_microseconds(window.t_data_complete)
         self.counts.count_against_deadline(reaction_us, arrival_us)
 
-    def count_round(self, operation_id: object, round_index: int) -> None:
-        latest = self.counts.latest_round_by_operation.get(operation_id, 0)
-        self.counts.latest_round_by_operation[operation_id] = max(
-            latest, round_index
-        )
+    def count_round(self, stream_id: object, round_index: int) -> None:
+        latest = self.counts.latest_round_by_stream.get(stream_id, 0)
+        self.counts.latest_round_by_stream[stream_id] = max(latest, round_index)
 
     def readout_at(self, tick: int, reset_tick: int) -> None:
         """A readout: the first since the region began, and the last."""
@@ -461,17 +459,15 @@ class _Folds:
         counts = self.counts
         counts.widest_window = max(counts.widest_window, round_count)
 
-    def rounds_to_let_go(self, operation_id: object, kept_from: int) -> range:
+    def rounds_to_let_go(self, stream_id: object, kept_from: int) -> range:
         """The rounds below kept_from not let go yet."""
         counts = self.counts
-        let_go_below = counts.let_go_below_by_operation.get(operation_id, 1)
-        counts.let_go_below_by_operation[operation_id] = max(
-            let_go_below, kept_from
-        )
+        let_go_below = counts.let_go_below_by_stream.get(stream_id, 1)
+        counts.let_go_below_by_stream[stream_id] = max(let_go_below, kept_from)
         return range(let_go_below, kept_from)
 
     def rounds_read_out(self) -> int:
-        rounds = self.counts.latest_round_by_operation.values()
+        rounds = self.counts.latest_round_by_stream.values()
         return sum(rounds)
 
     def value_summaries(self) -> dict:
@@ -566,8 +562,8 @@ class _Counts:
     decoded_commit_tick: Optional[int] = None
     first_readout_tick: Optional[int] = None
     last_readout_tick: Optional[int] = None
-    latest_round_by_operation: dict = dataclasses.field(default_factory=dict)
-    let_go_below_by_operation: dict = dataclasses.field(default_factory=dict)
+    latest_round_by_stream: dict = dataclasses.field(default_factory=dict)
+    let_go_below_by_stream: dict = dataclasses.field(default_factory=dict)
     # (committed windows, escalated windows, first committed round)
     escalation_series: list = dataclasses.field(default_factory=list)
     # the reaction budget (observation.reaction_deadline_microseconds)

@@ -9,7 +9,7 @@ import decsim.records.windows as window_records
 
 def _job():
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,
@@ -21,7 +21,7 @@ def _job():
     )
     service_key = decoding_records.DecoderServiceKey(0)
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=5,
         request_key=request_key,
@@ -52,7 +52,7 @@ def test_a_request_whose_input_was_freed_before_its_end_keeps_its_weight():
     ledger = decode_records.DecodeRecordLedger()
     job = _job()
     first_round = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=0,
         bits=(1, 0, 1),
@@ -60,7 +60,7 @@ def test_a_request_whose_input_was_freed_before_its_end_keeps_its_weight():
         fragment_index=0,
     )
     second_round = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=(0, 1, 1),

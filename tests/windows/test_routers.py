@@ -180,9 +180,9 @@ def _real_two_memories() -> graph.Machine:
     )
     operations = []
     for index in range(2):
-        operation_id = index + 1
+        stream_id = index + 1
         operation = program_records.Operation(
-            id=operation_id,
+            id=stream_id,
             name=f"mem{index}",
             qubits=(index,),
             patches=(index,),

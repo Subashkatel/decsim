@@ -107,9 +107,9 @@ class SyndromeBuffer:
         self.engine = engine
         self.round_by_key = _StoredRounds()
         self.holds = round_holds.RoundHolds()
-        # operation id -> True while it may receive rounds, False once
+        # stream id -> True while it may receive rounds, False once
         # closed; a closed identity never reopens
-        self.operations: dict = {}
+        self.open_by_stream: dict = {}
         self.trace = _TraceSources()
         if settings.bits is not None:
             engine.action_done.connect(self._ask_for_room_again)
@@ -148,7 +148,7 @@ class SyndromeBuffer:
     ) -> None:
         """Keep one landed round, readable at that tick; None publishes none."""
         packet_bits = round_records.fragment_wire_bits(packet.fragments)
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         if not self.has_room(round_key, packet_bits, {}):
             raise RuntimeError(
                 f"round {round_key!r} of {packet_bits} bits does not fit a "
@@ -159,7 +159,7 @@ class SyndromeBuffer:
         assert round_key not in self.round_by_key, (
             f"round {round_key!r} was written twice"
         )
-        self._open(packet.operation_id)
+        self._open(packet.stream_id)
         held_bits = round_records.stated_bits(packet_bits)
         stored = _StoredRound(packet, held_bits)
         stored.publication_tick = publication_tick
@@ -226,28 +226,28 @@ class SyndromeBuffer:
             return None
         return stored.publication_tick
 
-    # ---- operation scope
+    # ---- stream scope
 
-    def open_operation(self, operation_id: Any) -> None:  # an opaque identity
-        """Admit rounds and holds of this operation."""
-        self._open(operation_id)
+    def open_stream(self, stream_id: Any) -> None:  # an opaque identity
+        """Admit rounds and holds of this stream."""
+        self._open(stream_id)
 
-    def has_operation(self, operation_id: Any) -> bool:  # an opaque identity
-        """True while the operation may still receive rounds."""
-        return self.operations.get(operation_id, False)
+    def has_stream(self, stream_id: Any) -> bool:  # an opaque identity
+        """True while the stream may still receive rounds."""
+        return self.open_by_stream.get(stream_id, False)
 
-    def close_operation(self, operation_id: Any) -> None:  # an opaque identity
-        """Retire an operation once none of its rounds or holds are live."""
-        self.operations[operation_id] = False
-        open_ids = self._open_operation_ids()
+    def close_stream(self, stream_id: Any) -> None:  # an opaque identity
+        """Retire a stream once none of its rounds or holds are live."""
+        self.open_by_stream[stream_id] = False
+        open_ids = self._open_stream_ids()
         self.holds.forget_released_outside(open_ids)
 
-    def has_live_operation_reference(
+    def has_live_stream_reference(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> bool:
-        """True while any live hold refers to this operation."""
-        return self.holds.references(operation_id)
+        """True while any live hold refers to this stream."""
+        return self.holds.references(stream_id)
 
     def let_go_before(
         self,
@@ -329,19 +329,19 @@ class SyndromeBuffer:
 
     def held_rounds_description(self) -> str:
         """One compact line of the store's contents, for the I/O trace."""
-        round_indices_by_operation: dict = {}
-        for operation_id, round_index in self.round_by_key:
-            indices = round_indices_by_operation.setdefault(operation_id, [])
+        round_indices_by_stream: dict = {}
+        for stream_id, round_index in self.round_by_key:
+            indices = round_indices_by_stream.setdefault(stream_id, [])
             indices.append(round_index)
-        if not round_indices_by_operation:
+        if not round_indices_by_stream:
             return "empty"
         parts = []
-        for operation_id in sorted(round_indices_by_operation, key=str):
-            round_indices = round_indices_by_operation[operation_id]
+        for stream_id in sorted(round_indices_by_stream, key=str):
+            round_indices = round_indices_by_stream[stream_id]
             ordered = sorted(round_indices)
             ranges = _round_ranges_text(ordered)
             count = len(round_indices)
-            parts.append(f"op {operation_id} rounds {ranges} ({count})")
+            parts.append(f"stream {stream_id} rounds {ranges} ({count})")
         return "; ".join(parts)
 
     # ---- private
@@ -395,20 +395,20 @@ class SyndromeBuffer:
                 kept_bits += stored.held_bits
         return kept_bits
 
-    def _open(self, operation_id) -> None:
-        self.operations[operation_id] = True
+    def _open(self, stream_id) -> None:
+        self.open_by_stream[stream_id] = True
 
-    def _open_operation_ids(self) -> set:
+    def _open_stream_ids(self) -> set:
         open_ids = set()
-        for operation_id, is_open in self.operations.items():
+        for stream_id, is_open in self.open_by_stream.items():
             if is_open:
-                open_ids.add(operation_id)
+                open_ids.add(stream_id)
         return open_ids
 
     def _hold_record(self, holder, round_keys) -> round_holds.HoldRecord:
         """The record of a hold; a hold may name rounds not yet written.
 
-        It keeps open the operations of its rounds and those its token
+        It keeps open the streams of its rounds and those its token
         names.
         """
         unique = dict.fromkeys(round_keys)
@@ -416,10 +416,10 @@ class SyndromeBuffer:
         references = set()
         for round_key in keys:
             references.add(round_key[0])
-        for operation_id in holder.referenced_operation_ids():
-            references.add(operation_id)
-        for operation_id in references:
-            self._open(operation_id)
+        for stream_id in holder.referenced_stream_ids():
+            references.add(stream_id)
+        for stream_id in references:
+            self._open(stream_id)
         referenced = frozenset(references)
         return round_holds.HoldRecord(keys, referenced)
 
@@ -559,7 +559,7 @@ class _StoredRound:
 
 def _reads_a_waiting_round(holder, round_keys, waiting: set) -> bool:
     """Whether the holder reads at once a round still waiting for room."""
-    read_at_once = holder.operation_ids_read_at_once()
+    read_at_once = holder.stream_ids_read_at_once()
     for round_key in round_keys:
         if round_key[0] in read_at_once and round_key in waiting:
             return True

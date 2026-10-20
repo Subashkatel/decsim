@@ -162,10 +162,10 @@ class StreamingStimDevice(seeding.AtomicRunSeedConsumer):
 
     def formation_table(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> formation_records.FormationTable:
         """The recipes of the stream's rounds executed so far."""
-        stream = self._stream_for(operation_id)
+        stream = self._stream_for(stream_id)
         table = stream.history.table
         assert table is not None, "formation follows physical execution"
         return table

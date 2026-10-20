@@ -125,15 +125,15 @@ class RoundTransmitter:
         self, packed: round_records.PackedRound
     ) -> None:
         """The memory round reached the decoder side, which takes it."""
-        source_operation_id = packed.route.source_operation_id
-        self.memory_arrivals.receive_memory_round(source_operation_id)
+        source_stream_id = packed.route.source_stream_id
+        self.memory_arrivals.receive_memory_round(source_stream_id)
         self._fire("FEEDBACK_MEMORY_DELIVERED", packed)
         self._leave()
 
     def _fire(self, kind: str, packed: round_records.PackedRound) -> None:
-        operation_id, round_index = packed.round_key
+        stream_id, round_index = packed.round_key
         event = round_records.RoundEvent.of(
-            kind, self.engine.now, operation_id, round_index, packed.route
+            kind, self.engine.now, stream_id, round_index, packed.route
         )
         self.trace.round_event.fire(event)
 

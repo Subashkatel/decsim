@@ -43,7 +43,7 @@ class _Threshold:
 
 def _result(**fields) -> decoding_records.DecodeResult:
     return decoding_records.DecodeResult(
-        operation_id=1, window_id=0, logical_observables=(0,), **fields
+        stream_id=1, window_id=0, logical_observables=(0,), **fields
     )
 
 
@@ -98,7 +98,7 @@ def test_the_status_row_keeps_a_succeeded_result_and_escalates_the_rest():
     unstated = _result()
     nonconverged = _result(decode_status=STATUS.NONCONVERGED)
     invalid = _result(decode_status=STATUS.INVALID_CORRECTION)
-    uncorrected = decoding_records.DecodeResult(operation_id=1, window_id=0)
+    uncorrected = decoding_records.DecodeResult(stream_id=1, window_id=0)
 
     decided = [
         verdict.decide(None, result, threshold)

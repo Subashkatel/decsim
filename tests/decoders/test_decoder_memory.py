@@ -45,9 +45,9 @@ import tests.declared_run as declared_run
 BITS_PER_ROUND = 2
 
 
-def fragment(operation_id, round_index, fragment_index, bits=(0, 1)):
+def fragment(stream_id, round_index, fragment_index, bits=(0, 1)):
     return round_records.RetainedSyndromeFragment(
-        operation_id=operation_id,
+        stream_id=stream_id,
         patch_ids=(f"patch-{fragment_index}",),
         round_index=round_index,
         bits=bits,
@@ -59,7 +59,7 @@ def fragment(operation_id, round_index, fragment_index, bits=(0, 1)):
 def unsized_fragment(round_index, fragment_index=0):
     """A round as a timing-only device emits it: no bits and no size."""
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(f"patch-{fragment_index}",),
         round_index=round_index,
         bits=None,
@@ -73,7 +73,7 @@ def job_of(payloads, label="w0", window_id=7):
         41, window_id, window_records.WEAK_POOL_ID, 0
     )
     return decoding_records.DecodeJob(
-        operation_id=41,
+        stream_id=41,
         window_id=window_id,
         round_count=len(payloads),
         payloads=list(payloads),
@@ -114,7 +114,7 @@ def test_materialization_orders_the_rounds_and_keeps_each_rounds_order():
     decoder_input = decoder_memory.materialize_decoder_input(job)
 
     identities = [
-        (round_input.operation_id, round_input.round_index)
+        (round_input.stream_id, round_input.round_index)
         for round_input in decoder_input.rounds
     ]
     assert identities == [(1, 2), (1, 4), (2, 1), (2, 3)]
@@ -214,12 +214,12 @@ def test_a_deposited_job_occupies_its_bits_until_it_is_taken():
 def _two_patch_memory_run(bits_per_unit, unit_count):
     """Two three-round memory operations, one memory of the size given."""
     operations = []
-    for operation_id in (1, 2):
+    for stream_id in (1, 2):
         operation = program_records.Operation(
-            id=operation_id,
-            name=f"op {operation_id}",
-            qubits=(operation_id,),
-            patches=(operation_id,),
+            id=stream_id,
+            name=f"op {stream_id}",
+            qubits=(stream_id,),
+            patches=(stream_id,),
         )
         operations.append(operation)
     rounds_policy = round_policies.FixedRounds(3)

@@ -45,7 +45,7 @@ def boundary_transfers(link_traffic: dict) -> list:
 def _source_committing(commit_lo: int, commit_hi: int):
     """A neighbour of operation 1 committing over those rounds."""
     return window_records.WindowInfo(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -102,7 +102,7 @@ def test_the_interaction_counts_the_flips_on_the_destinations_oldest_layer():
         13: (5, 0),
     }
     destination = window_records.WindowInfo(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -151,7 +151,7 @@ def _window_reading(round_count: int) -> window_records.WindowInfo:
     """A window over rounds 4-9 whose planned round count is the caller's."""
     positions = {10: (4, 0), 11: (4, 1), 12: (5, 0)}
     return window_records.WindowInfo(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -300,7 +300,7 @@ def _one_sided_halves() -> tuple:
     """
     positions = {10: (4, 0), 11: (4, 1), 12: (9, 0)}
     strong = window_records.WindowInfo(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,

@@ -57,7 +57,7 @@ class WindowRelease:
 
     def window_final(self, window: window_records.Window) -> None:
         """A window is final: let its stream's old windows go, if enough."""
-        stream_id = window.operation_id
+        stream_id = window.stream_id
         if not self.planner.has_stream(stream_id):
             return
         final_count = self.results.final_window_count(stream_id)

@@ -39,9 +39,9 @@ BOTH_TIERS = ("weak", "strong")
 class CircuitSource:
     """A source whose recipes are one circuit's, for every operation."""
 
-    def formation_table(self, operation_id):
+    def formation_table(self, stream_id):
         """The one table."""
-        del operation_id
+        del stream_id
         return TABLE
 
 
@@ -61,7 +61,7 @@ def placement(source=None):
 
 def fragment(round_index, bits=(0,) * 8):
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=bits,
@@ -77,7 +77,7 @@ def job(round_indices):
         carried = fragment(round_index)
         payloads.append(carried)
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=len(payloads),
         payloads=payloads,
@@ -225,7 +225,7 @@ def test_the_stage_reports_the_rounds_it_formed():
 def test_a_job_that_carries_no_rounds_forms_and_pays_nothing():
     formation_stage = weak_stage()
     windowless = decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=0
+        stream_id=1, window_id=0, round_count=0
     )
 
     cycles = formation_stage.cycles_for(windowless)

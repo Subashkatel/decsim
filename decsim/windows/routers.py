@@ -132,7 +132,7 @@ class Router:
 
     def pool_for(self, window: window_records.Window) -> window_records.PoolId:
         """The entry pool that decodes this window."""
-        operation = self.tracker.operation_by_id[window.operation_id]
+        operation = self.tracker.operation_by_id[window.stream_id]
         name = self.rule.pool_for(operation)
         return window_records.PoolId(name)
 

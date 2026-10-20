@@ -185,7 +185,7 @@ class RoundRetention:
         stop_round = window.commit_hi + 1
         new_reads = []
         for round_index in range(window.start_round, stop_round):
-            new_reads.append((window.operation_id, round_index))
+            new_reads.append((window.stream_id, round_index))
         self.primary_store.replace_hold(reads, new_reads)
 
     def primary_read_keys(self, window: window_records.Window) -> list:
@@ -196,31 +196,29 @@ class RoundRetention:
         reads.
         """
         return self.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
+            window.stream_id, window.start_round, window.buffer_hi, window
         )
 
     def read_keys_for_bounds(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         start_round: int,
         buffer_hi: int,
         window: Optional[window_records.Window] = None,
     ) -> list:
-        """Retained payload round keys for a possibly cross-operation range."""
+        """Retained payload round keys for a possibly cross-stream range."""
         operation_rounds = self.tracker.effective_round_count_for_window(
-            operation_id, window
+            stream_id, window
         )
         last_local_round = min(buffer_hi, operation_rounds)
         stop_round = last_local_round + 1
         reads = []
         for round_index in range(start_round, stop_round):
-            reads.append((operation_id, round_index))
+            reads.append((stream_id, round_index))
         overflow = buffer_hi - operation_rounds
         if overflow <= 0:
             return reads
-        successor_ids = self.planner.successors_by_operation.get(
-            operation_id, []
-        )
+        successor_ids = self.planner.successors_by_stream.get(stream_id, [])
         overflow_stop = overflow + 1
         for successor_id in successor_ids:
             for round_index in range(1, overflow_stop):
@@ -236,17 +234,15 @@ class RoundRetention:
         bounds = window_records.strong_context_bounds(window)
         context_lo, _commit_lo, _commit_hi, context_hi = bounds
         weak = set(weak_reads)
-        strong = self._strong_rounds_read_before(
-            window.operation_id, context_lo
-        )
+        strong = self._strong_rounds_read_before(window.stream_id, context_lo)
         strong += self.read_keys_for_bounds(
-            window.operation_id, context_lo, context_hi, window
+            window.stream_id, context_lo, context_hi, window
         )
         return [round_key for round_key in strong if round_key not in weak]
 
     def strong_rounds_before(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
         last_round: int,
     ) -> list:
@@ -260,11 +256,11 @@ class RoundRetention:
         if self.strong_side_seat is None:
             return []
         needed_rounds = self.detection_events.rounds_needed_before(
-            self.strong_side_seat, operation_id, first_round, last_round
+            self.strong_side_seat, stream_id, first_round, last_round
         )
         round_keys = []
         for round_index in needed_rounds:
-            round_keys.append((operation_id, round_index))
+            round_keys.append((stream_id, round_index))
         return round_keys
 
     # ---- holds moving between owners
@@ -332,25 +328,25 @@ class RoundRetention:
 
     # ---- what a strong window holds
 
-    def open_operation_store(
+    def open_stream_store(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> None:
-        """Open the operation's rounds in the store its windows read.
+        """Open the stream's rounds in the store its windows read.
 
         A run with no decoder has no such store and opens nothing.
         """
         primary_store = self.primary_store
         if primary_store is None:
             return
-        primary_store.open_operation(operation_id)
+        primary_store.open_stream(stream_id)
 
-    def has_operation_store(
+    def has_stream_store(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> bool:
-        """Whether the operation's syndrome RAM is still open."""
-        return self.primary_store.has_operation(operation_id)
+        """Whether the stream's syndrome RAM is still open."""
+        return self.primary_store.has_stream(stream_id)
 
     def strong_window_input(
         self,
@@ -370,12 +366,12 @@ class RoundRetention:
 
     def landed_through(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         target: Optional[window_records.PoolId] = None,
     ) -> int:
-        """The operation's highest round the edge's landing store holds."""
+        """The stream's highest round the edge's landing store holds."""
         _carried_from, landed_in = self._edge_stores(target)
-        return self.tracker.strong_rounds_arrived(operation_id, landed_in)
+        return self.tracker.strong_rounds_arrived(stream_id, landed_in)
 
     def context_rounds_in_flight(
         self,
@@ -665,9 +661,9 @@ class RoundRetention:
             return
         after_commit = window.commit_hi + 1
         read_keys = self._strong_rounds_read_before(
-            window.operation_id, after_commit
+            window.stream_id, after_commit
         )
-        later_reads = decoding_records.LaterStreamReads(window.operation_id)
+        later_reads = decoding_records.LaterStreamReads(window.stream_id)
         if not read_keys:
             self.release_strong_hold_if_live(later_reads)
             return
@@ -693,7 +689,7 @@ class RoundRetention:
 
     def _strong_rounds_read_before(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
     ) -> list:
         """The raw rounds a strong read from first_round on may carry.
@@ -707,11 +703,11 @@ class RoundRetention:
         if self.strong_side_seat is None:
             return []
         read_rounds = self.detection_events.earlier_rounds_read(
-            operation_id, first_round
+            stream_id, first_round
         )
         round_keys = []
         for round_index in read_rounds:
-            round_keys.append((operation_id, round_index))
+            round_keys.append((stream_id, round_index))
         return round_keys
 
     def _strong_context_stores(
@@ -837,13 +833,13 @@ def round_identities_of(payloads: list) -> tuple:
     """The distinct (operation, round) keys of the payloads, in order."""
     identities = {}
     for fragment in payloads:
-        identities[(fragment.operation_id, fragment.round_index)] = None
+        identities[(fragment.stream_id, fragment.round_index)] = None
     return tuple(identities)
 
 
-def _stored_through(tracker, store, operation_id) -> int:
-    """The operation's highest round the store holds, by its arrivals."""
-    return tracker.strong_rounds_arrived(operation_id, store)
+def _stored_through(tracker, store, stream_id) -> int:
+    """The stream's highest round the store holds, by its arrivals."""
+    return tracker.strong_rounds_arrived(stream_id, store)
 
 
 def _replace_or_register(store, holder, round_keys: tuple) -> None:
@@ -886,10 +882,10 @@ def _from_the_first_round_on(identities: tuple, first_of: tuple) -> set:
 
 def _is_released(store, arrived_for, round_key: tuple) -> bool:
     """True when a round that already arrived is no longer in the store."""
-    operation_id, round_index = round_key
-    if not store.has_operation(operation_id):
+    stream_id, round_index = round_key
+    if not store.has_stream(stream_id):
         return True
-    arrived = arrived_for(operation_id)
+    arrived = arrived_for(stream_id)
     if round_index > arrived:
         return False
     fragments = store.retained_fragments(round_key)

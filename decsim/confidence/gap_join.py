@@ -57,7 +57,7 @@ class WindowGapJoin:
         result: decoding_records.DecodeResult,
     ) -> None:
         """One solve finished: hold it, or join the window's solves."""
-        key = (job.operation_id, job.window_id)
+        key = (job.stream_id, job.window_id)
         held = self.held_by_window.setdefault(key, [])
         solve = HeldSolve(job, result)
         held.append(solve)

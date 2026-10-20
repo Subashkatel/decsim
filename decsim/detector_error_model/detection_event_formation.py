@@ -93,7 +93,7 @@ class SeatedFormation:
     def rounds_needed_before(
         self,
         seat: str,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
         last_round: int,
     ) -> tuple:
@@ -107,13 +107,11 @@ class SeatedFormation:
         history = self.history_by_seat.get(seat)
         if history is None:
             return ()
-        return history.rounds_needed_before(
-            operation_id, first_round, last_round
-        )
+        return history.rounds_needed_before(stream_id, first_round, last_round)
 
     def earlier_rounds_read(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
     ) -> tuple[int, ...]:
         """The raw rounds before first_round it or any later round reads.
@@ -123,7 +121,7 @@ class SeatedFormation:
         """
         if self.recipes is None:
             return ()
-        table = self.recipes.formation_table(operation_id)
+        table = self.recipes.formation_table(stream_id)
         return table.earlier_rounds_read(first_round)
 
     def retire_round(self, round_key: tuple) -> None:
@@ -132,9 +130,9 @@ class SeatedFormation:
         The round left the store the plan's windows read, so no window or
         escalation reads it after now.
         """
-        operation_id, round_index = round_key
+        stream_id, round_index = round_key
         for history in self.history_by_seat.values():
-            history.retire(operation_id, round_index)
+            history.retire(stream_id, round_index)
 
     def claim_rounds(self, seat: str, round_keys: tuple) -> tuple:
         """The round keys no earlier job of the seat claimed, now claimed.
@@ -180,7 +178,7 @@ class _SeatHistory:
         # where the seat reports the raw bits it holds; bound by the
         # placement, silent for a history on its own
         self.state_held = trace_source.SILENT
-        self.former_by_operation: dict = {}
+        self.former_by_stream: dict = {}
         self.memory = _SeatMemory()
 
     def form(self, fragments: tuple) -> tuple:
@@ -207,7 +205,7 @@ class _SeatHistory:
         if _joined_bits(fragments) is None:
             return round_records.fragment_wire_bits(fragments)
         first = fragments[0]
-        table = self.recipes.formation_table(first.operation_id)
+        table = self.recipes.formation_table(first.stream_id)
         detectors = table.detectors_of_round(first.round_index)
         return len(detectors)
 
@@ -230,13 +228,13 @@ class _SeatHistory:
             if bits is None:
                 continue
             first = round_fragments[0]
-            former = self._former_for(first.operation_id)
+            former = self._former_for(first.stream_id)
             former.hold_packet(first.round_index, bits)
-            self._report_state(first.operation_id, former)
+            self._report_state(first.stream_id, former)
 
     def retire(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
         """No read forms this round here again; held packets may go.
@@ -245,48 +243,48 @@ class _SeatHistory:
         later. The former takes the newest table first, so a live stream that
         has run its final round keeps no rounds for one still to run.
         """
-        self.memory.retire(operation_id, round_index)
-        if operation_id not in self.former_by_operation:
+        self.memory.retire(stream_id, round_index)
+        if stream_id not in self.former_by_stream:
             return
-        former = self._former_for(operation_id)
+        former = self._former_for(stream_id)
         former.retire_round(round_index)
-        self._report_state(operation_id, former)
+        self._report_state(stream_id, former)
 
     def check_settled(self) -> None:
         """No former of this seat holds a raw round."""
-        for operation_id, former in self.former_by_operation.items():
+        for stream_id, former in self.former_by_stream.items():
             if not former.packets:
                 continue
             held_rounds = sorted(former.packets)
             raise RuntimeError(
                 f"the {self.seat} seat still holds raw rounds {held_rounds} "
-                f"of operation {operation_id!r} at the end of the run, "
+                f"of stream {stream_id!r} at the end of the run, "
                 "though every round has formed or left the store"
             )
 
     def rounds_needed_before(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
         last_round: int,
     ) -> tuple:
         """The raw rounds before first_round the read needs and lacks."""
         if self.recipes is None:
             return ()
-        table = self.recipes.formation_table(operation_id)
+        table = self.recipes.formation_table(stream_id)
         stop_round = last_round + 1
-        unformed_rounds = self._unformed(operation_id, first_round, stop_round)
+        unformed_rounds = self._unformed(stream_id, first_round, stop_round)
         read_rounds = table.rounds_read_by(unformed_rounds)
-        return self._lacking(operation_id, read_rounds, first_round)
+        return self._lacking(stream_id, read_rounds, first_round)
 
     def _lacking(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         read_rounds: set,
         first_round: int,
     ) -> tuple:
         """The read rounds before first_round whose packet the seat lacks."""
-        former = self.former_by_operation.get(operation_id)
+        former = self.former_by_stream.get(stream_id)
         lacking_rounds = []
         for round_index in sorted(read_rounds):
             if round_index >= first_round:
@@ -298,12 +296,12 @@ class _SeatHistory:
 
     def _unformed(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
         stop_round: int,
     ) -> tuple:
         """The rounds from first_round to before stop_round never formed."""
-        done_rounds = self.memory.done_rounds_of(operation_id)
+        done_rounds = self.memory.done_rounds_of(stream_id)
         unformed_rounds = []
         for round_index in range(first_round, stop_round):
             if round_index in done_rounds:
@@ -321,7 +319,7 @@ class _SeatHistory:
         if bits is None:
             return tuple(fragments)
         first = fragments[0]
-        events = self._events(first.operation_id, first.round_index, bits)
+        events = self._events(first.stream_id, first.round_index, bits)
         patches = round_records.fragment_patch_ids(fragments)
         landed_bits = round_records.fragment_wire_bits(fragments)
         formed = dataclasses.replace(
@@ -334,20 +332,20 @@ class _SeatHistory:
 
     def _events(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         round_index: int,
         raw_bits,
     ) -> tuple:
         """The round's events, formed here the first time the seat sees it."""
-        former = self._former_for(operation_id)
-        key = (operation_id, round_index)
+        former = self._former_for(stream_id)
+        key = (stream_id, round_index)
         remembered = self.memory.events_by_round.get(key)
         if remembered is not None:
             former.hold_packet(round_index, raw_bits)
-            self._report_state(operation_id, former)
+            self._report_state(stream_id, former)
             return remembered
         former.take_packet(round_index, raw_bits)
-        self._report_state(operation_id, former)
+        self._report_state(stream_id, former)
         events = former.form_round(round_index)
         values = tuple(value for _, value in events)
         self.memory.events_by_round[key] = values
@@ -355,26 +353,26 @@ class _SeatHistory:
 
     def _report_state(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         former: detector_formation.StreamingDetectorFormer,
     ) -> None:
-        """The raw bits this seat holds for the operation, now."""
+        """The raw bits this seat holds for the stream, now."""
         held_bits = former.held_bits()
-        self.state_held.fire(self.seat, operation_id, held_bits)
+        self.state_held.fire(self.seat, stream_id, held_bits)
 
     def _former_for(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> detector_formation.StreamingDetectorFormer:
-        """The seat's former for the operation, on the newest table."""
-        table = self.recipes.formation_table(operation_id)
-        former = self.former_by_operation.get(operation_id)
+        """The seat's former for the stream, on the newest table."""
+        table = self.recipes.formation_table(stream_id)
+        former = self.former_by_stream.get(stream_id)
         if former is None:
-            done_rounds = self.memory.done_rounds_of(operation_id)
+            done_rounds = self.memory.done_rounds_of(stream_id)
             former = detector_formation.StreamingDetectorFormer(
                 table, done_rounds
             )
-            self.former_by_operation[operation_id] = former
+            self.former_by_stream[stream_id] = former
             return former
         if former.table is not table:
             former.extend_table(table)
@@ -387,7 +385,7 @@ class _SeatMemory:
     def __init__(self) -> None:
         # per operation, the rounds formed here or retired, kept from
         # the first retirement on, so a former made later knows them
-        self.done_by_operation: dict = {}
+        self.done_by_stream: dict = {}
         # the events of rounds formed here and not yet retired, which a
         # second read of the round is answered from
         self.events_by_round: dict = {}
@@ -396,21 +394,21 @@ class _SeatMemory:
 
     def done_rounds_of(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> detector_formation.DoneRounds:
-        """The operation's rounds formed here or retired."""
+        """The stream's rounds formed here or retired."""
         new_record = detector_formation.DoneRounds()
-        return self.done_by_operation.setdefault(operation_id, new_record)
+        return self.done_by_stream.setdefault(stream_id, new_record)
 
     def retire(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
         """The round is done here; its events and claim are asked no more."""
-        done_rounds = self.done_rounds_of(operation_id)
+        done_rounds = self.done_rounds_of(stream_id)
         done_rounds.add(round_index)
-        round_key = (operation_id, round_index)
+        round_key = (stream_id, round_index)
         self.events_by_round.pop(round_key, None)
         self.claimed_keys.discard(round_key)
 
@@ -470,7 +468,7 @@ def _rounds_in_order(fragments) -> list:
     """The fragments grouped by round, each group in measurement order."""
     fragments_by_round: dict = {}
     for fragment in fragments:
-        key = (fragment.operation_id, fragment.round_index)
+        key = (fragment.stream_id, fragment.round_index)
         group = fragments_by_round.setdefault(key, [])
         group.append(fragment)
     by_fragment_index = operator.attrgetter("fragment_index")

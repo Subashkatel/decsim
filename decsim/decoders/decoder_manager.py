@@ -238,7 +238,7 @@ class DecoderManager:
         round credits.
         """
         job = decoding_records.DecodeJob(
-            operation_id=-1,
+            stream_id=-1,
             window_id=0,
             round_count=round_count,
             ready_time=self.engine.now,
@@ -697,7 +697,7 @@ def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:
         return
     raise RuntimeError(
         f"decode job {job.label!r} for window "
-        f"({job.operation_id}, {job.window_id}) has already been {spent}: a "
+        f"({job.stream_id}, {job.window_id}) has already been {spent}: a "
         "DecodeJob is submitted once, build a new one"
     )
 
@@ -715,7 +715,7 @@ def _spent_state(job: decoding_records.DecodeJob) -> Optional[str]:
 def _is_live_weak_window_job(
     job: decoding_records.DecodeJob, window_key: tuple
 ) -> bool:
-    key = (job.operation_id, job.window_id)
+    key = (job.stream_id, job.window_id)
     if key != window_key:
         return False
     if job.kind is not decoding_records.DecodeJobKind.WINDOW:

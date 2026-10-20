@@ -41,11 +41,9 @@ BITS_PER_ROUND = 2
 PROBE_ROUND = ("probe", 0)
 
 
-def packet(
-    round_index: int, operation_id=1
-) -> round_records.SyndromeRoundPacket:
+def packet(round_index: int, stream_id=1) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=operation_id,
+        stream_id=stream_id,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
@@ -53,7 +51,7 @@ def packet(
         fragment_index=0,
     )
     return round_records.SyndromeRoundPacket(
-        operation_id, round_index, (fragment,)
+        stream_id, round_index, (fragment,)
     )
 
 
@@ -67,7 +65,7 @@ def packed(round_index: int) -> round_records.PackedRound:
 def unsized_packet(round_index: int) -> round_records.SyndromeRoundPacket:
     """A timing-only round: it carries no bits and states no size."""
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=None,
@@ -231,9 +229,9 @@ class PacketStoreWithHoldCounts:
 
 
 def sized_packet(round_key, bits: int) -> round_records.SyndromeRoundPacket:
-    operation_id, round_index = round_key
+    stream_id, round_index = round_key
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=operation_id,
+        stream_id=stream_id,
         patch_ids=(0,),
         round_index=round_index,
         bits=None,
@@ -241,7 +239,7 @@ def sized_packet(round_key, bits: int) -> round_records.SyndromeRoundPacket:
         fragment_index=0,
     )
     return round_records.SyndromeRoundPacket(
-        operation_id, round_index, (fragment,)
+        stream_id, round_index, (fragment,)
     )
 
 

@@ -83,7 +83,7 @@ class _Windows:
         self.published = []
 
     def accept_window_input(self, packet) -> None:
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         publication_tick = self.store.publication_tick(round_key)
         self.published.append((self.engine.now, round_key, publication_tick))
 
@@ -103,7 +103,7 @@ def _packed(
     round_index: int, route=round_records.WINDOW_INPUT_ROUTE
 ) -> round_records.PackedRound:
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
@@ -306,9 +306,9 @@ def test_a_priced_write_keeps_its_reservation_until_the_write_edge():
 class _ChipSource:
     """Recipes of a one-round operation: its one event is its first outcome."""
 
-    def formation_table(self, operation_id):
+    def formation_table(self, stream_id):
         """The one table."""
-        del operation_id
+        del stream_id
         recipe = formation_records.DetectorRecipe(
             detector_index=0,
             round_index=1,
@@ -439,7 +439,7 @@ class _RoomAskingStore(syndrome_buffer_module.SyndromeBuffer):
 
 def packet(round_index: int) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0, 1),
@@ -585,7 +585,7 @@ def test_a_round_being_formed_here_keeps_its_room_until_it_is_stored():
     receiver = room_side(
         engine, bits=LANDED_BITS_PER_ROUND, detection_events=former
     )
-    receiver.store.open_operation(1)
+    receiver.store.open_stream(1)
     reads = decoding_records.WindowReads((1, 0))
     receiver.store.register_hold(reads, [(1, 1)])
     asked = packed_round(2)
@@ -622,18 +622,18 @@ def test_a_round_whose_readers_resolved_while_crossing_is_dropped_at_landing():
 def test_a_round_that_lands_after_its_operation_closed_is_dropped():
     engine = engine_module.Engine()
     receiver = room_side(engine, bits=LANDED_BITS_PER_ROUND)
-    receiver.store.open_operation(1)
+    receiver.store.open_stream(1)
     asked = packed_round(2)
     room_before = receiver.has_room(asked)
 
     cross(engine, receiver, 1)
-    receiver.store.close_operation(1)
+    receiver.store.close_stream(1)
     engine.run()
 
     assert room_before is True
     assert receiver.store.retained_fragments((1, 1)) is None
     assert receiver.store.occupancy == 0
-    assert receiver.store.has_operation(1) is False
+    assert receiver.store.has_stream(1) is False
     assert receiver.reserved_bits_by_round == {}
     assert receiver.has_room(asked) is True
     receiver.check_settled()
@@ -741,7 +741,7 @@ def test_a_later_region_forms_after_an_earlier_one_landing_at_once():
 def stated_event_round(round_index: int) -> round_records.PackedRound:
     """A round whose source states its events take one bit."""
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0, 1),
@@ -810,7 +810,7 @@ def test_arrival_can_create_a_windows_first_round_hold() -> None:
     """gem5 base.cc services response targets before freeing their entry."""
     engine = engine_module.Engine()
     receiver = room_side(engine, bits=LANDED_BITS_PER_ROUND)
-    receiver.store.open_operation(1)
+    receiver.store.open_stream(1)
     receiver.windows = _ArrivalConsumer(receiver.store)
 
     cross(engine, receiver, 1)
@@ -831,11 +831,11 @@ class _ArrivalConsumer:
         self.store = store
 
     def accept_room_round(
-        self, store, operation_id: int, round_index: int
+        self, store, stream_id: int, round_index: int
     ) -> None:
         del store
-        reads = decoding_records.WindowReads((operation_id, 0))
-        round_key = (operation_id, round_index)
+        reads = decoding_records.WindowReads((stream_id, 0))
+        round_key = (stream_id, round_index)
         self.store.register_hold(reads, [round_key])
 
 

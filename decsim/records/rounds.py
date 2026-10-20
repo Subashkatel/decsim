@@ -29,16 +29,16 @@ class SyndromePacketRoute:
     """
 
     kind: SyndromePacketRouteKind
-    source_operation_id: Optional[Any] = None  # an opaque identity
+    source_stream_id: Optional[Any] = None  # an opaque identity
 
     @classmethod
     def feedback_memory_round(
         cls,
-        source_operation_id: Any,  # an opaque identity
+        source_stream_id: Any,  # an opaque identity
     ) -> "SyndromePacketRoute":
         """The route of a round that feeds a source operation's memory."""
         return cls(
-            SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND, source_operation_id
+            SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND, source_stream_id
         )
 
 
@@ -49,7 +49,7 @@ WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 class QPUReadout:
     """One readout of one round as it leaves the QPU for the controller.
 
-    bits are raw outcomes, None from a timing-only source. operation_id is
+    bits are raw outcomes, None from a timing-only source. stream_id is
     the decode identity (a segment's stream id; an idle patch's memory round
     names the patch), round_index one-based. size_bits is the wire width,
     None when the source states none. event_bits is the width once formed,
@@ -57,7 +57,7 @@ class QPUReadout:
     a formation table sizes them, or nothing does.
     """
 
-    operation_id: Any  # an opaque identity
+    stream_id: Any  # an opaque identity
     patch_ids: tuple
     round_index: int
     bits: Optional[Union[list, tuple, numpy.ndarray]] = None
@@ -74,7 +74,7 @@ class RetainedSyndromeFragment:
     event_bits is the readout's, until a seat forms the fragment.
     """
 
-    operation_id: Any  # an opaque identity
+    stream_id: Any  # an opaque identity
     patch_ids: tuple
     round_index: int
     bits: Optional[tuple[int, ...]]
@@ -93,7 +93,7 @@ class RetainedSyndromeFragment:
         if readout.bits is not None:
             bits = tuple(int(bit) for bit in readout.bits)
         return cls(
-            operation_id=readout.operation_id,
+            stream_id=readout.stream_id,
             patch_ids=readout.patch_ids,
             round_index=readout.round_index,
             bits=bits,
@@ -107,7 +107,7 @@ class RetainedSyndromeFragment:
 class SyndromeRoundPacket:
     """One complete immutable syndrome round in declared measurement order."""
 
-    operation_id: Any  # an opaque identity
+    stream_id: Any  # an opaque identity
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
 
@@ -179,9 +179,9 @@ class EscalatedRegion:
                 wire_bits = None
                 break
             wire_bits += packet_bits
-        operation_id = request_key.operation_id
+        stream_id = request_key.stream_id
         rounds_before, window_packets = _split_at_the_first_round(
-            packets, operation_id, first_round
+            packets, stream_id, first_round
         )
         return cls(
             request_key=request_key,
@@ -207,10 +207,10 @@ class EscalatedRegion:
 
     @property
     def round_keys(self) -> tuple:
-        """(operation_id, round_index) of every round carried, in order."""
+        """(stream_id, round_index) of every round carried, in order."""
         keys = []
         for packet in self.carried_packets:
-            keys.append((packet.operation_id, packet.round_index))
+            keys.append((packet.stream_id, packet.round_index))
         return tuple(keys)
 
 
@@ -228,8 +228,8 @@ class PackedRound:
 
     @property
     def round_key(self) -> tuple:
-        """(operation_id, round_index), the store's key."""
-        return (self.packet.operation_id, self.packet.round_index)
+        """(stream_id, round_index), the store's key."""
+        return (self.packet.stream_id, self.packet.round_index)
 
 
 @dataclass(frozen=True)
@@ -242,7 +242,7 @@ class RoundEvent:
 
     kind: str
     tick: int
-    operation_id: object
+    stream_id: object
     round_index: int
     patch_ids: tuple = ()
     route: str = ""
@@ -252,14 +252,14 @@ class RoundEvent:
         cls,
         kind: str,
         tick: int,
-        operation_id: object,
+        stream_id: object,
         round_index: int,
         route: SyndromePacketRoute,
         patch_ids: tuple = (),
     ) -> "RoundEvent":
         """One transition on a route, named by the route's kind."""
         return cls(
-            kind, tick, operation_id, round_index, patch_ids, route.kind.name
+            kind, tick, stream_id, round_index, patch_ids, route.kind.name
         )
 
 
@@ -311,7 +311,7 @@ def stated_bits(bits: Optional[int]) -> int:
 
 def _split_at_the_first_round(
     packets: tuple,
-    operation_id: Any,  # an opaque identity
+    stream_id: Any,  # an opaque identity
     first_round: int,
 ) -> tuple:
     """(the rounds before first_round, the rest), each in the order given.
@@ -323,7 +323,7 @@ def _split_at_the_first_round(
     window_packets = []
     for packet in packets:
         is_before = packet.round_index < first_round
-        if is_before and packet.operation_id == operation_id:
+        if is_before and packet.stream_id == stream_id:
             rounds_before.append(packet)
             continue
         window_packets.append(packet)

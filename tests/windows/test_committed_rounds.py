@@ -119,7 +119,7 @@ class _ReusedObservables(decoder_module.DecoderBase):
         if job.window_id == 2:
             self.middle.pop()
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, logical_observables=prediction
+            job.stream_id, job.window_id, logical_observables=prediction
         )
 
 

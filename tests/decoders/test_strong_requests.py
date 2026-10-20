@@ -19,7 +19,7 @@ def _request_key(sequence):
 
 def _strong_job(request_key, window_key=(1, 0)):
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=9,
         strong_decode_for=window_key,
@@ -137,10 +137,10 @@ def test_a_windows_attempt_holds_its_forced_class_requests():
         1, 0, window_records.WEAK_POOL_ID, 1
     )
     first = decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3, request_key=first_key
+        stream_id=1, window_id=0, round_count=3, request_key=first_key
     )
     second = decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3, request_key=second_key
+        stream_id=1, window_id=0, round_count=3, request_key=second_key
     )
     requests.admit(first, now=0)
     requests.admit(second, now=0)
@@ -181,7 +181,7 @@ def _companion_of(lead, sequence):
     """The lead's solve in the other logical class, reading its input."""
     request_key = _request_key(sequence)
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=9,
         strong_decode_for=(1, 0),
@@ -281,7 +281,7 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     )
     first = _strong_job(first_key, window_key=(1, 0))
     second = decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=1,
         round_count=9,
         strong_decode_for=(1, 1),
@@ -290,7 +290,7 @@ def test_a_merged_batch_splits_into_one_empty_completion_per_member():
     requests.admit_strong(first, now=0)
     requests.admit_strong(second, now=0)
     batch = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
+        stream_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
     result = decoding_records.DecodeResult(-1, 0)
@@ -315,7 +315,7 @@ def test_a_merged_batch_may_carry_no_accuracy_bearing_field():
     requests.admit_strong(first, now=0)
     requests.admit_strong(second, now=0)
     batch = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
+        stream_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
     result = decoding_records.DecodeResult(-1, 0, logical_observables=(1,))
@@ -336,7 +336,7 @@ def test_a_batch_left_with_one_member_still_splits_into_an_empty_result():
     requests.admit_strong(first, now=0)
     requests.admit_strong(second, now=0)
     batch = decoding_records.DecodeJob(
-        operation_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
+        stream_id=-1, window_id=0, round_count=18, strong_decode_for=(1, 0)
     )
     requests.register_batch([(1, 0), (1, 1)], [first, second], batch)
     requests.take_live((1, 0), window_records.STRONG_POOL_ID)

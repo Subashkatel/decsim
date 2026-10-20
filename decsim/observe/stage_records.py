@@ -34,11 +34,11 @@ class StageLedger:
 
     def records_for(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window_id: int,
     ) -> tuple:
         """One window's stage records, in stage order."""
-        key = (operation_id, window_id)
+        key = (stream_id, window_id)
         window_records = self._by_window.get(key, ())
         return tuple(window_records)
 
@@ -53,7 +53,7 @@ def _windows_of(record: decoding_records.DecoderStageRecord) -> list:
     A merged batch's own key is (-1, 0), so its stages are filed under
     each member's window too, where a reader of that window looks.
     """
-    own = (record.operation_id, record.window_id)
+    own = (record.stream_id, record.window_id)
     windows = [own]
     for window in record.served_windows:
         if window not in windows:

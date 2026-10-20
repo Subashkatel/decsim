@@ -12,7 +12,7 @@ import decsim.records.windows as window_records
 def _window(operation_id: int, window_index: int):
     """One planned window over rounds 1 to 6, reading three more."""
     return window_records.Window(
-        operation_id=operation_id,
+        stream_id=operation_id,
         window_index=window_index,
         commit_lo=1,
         commit_hi=6,

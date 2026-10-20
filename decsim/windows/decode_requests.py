@@ -133,13 +133,13 @@ class DecodeRequestBuilder:
 
     def new_request_key(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window_id: int,
         tier: window_records.PoolId,
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
         request_key = window_records.DecoderRequestKey(
-            operation_id, window_id, tier, self.next_request_sequence
+            stream_id, window_id, tier, self.next_request_sequence
         )
         self.next_request_sequence += 1
         return request_key
@@ -150,7 +150,7 @@ class DecodeRequestBuilder:
         """Retain arrival provenance for latency accounting."""
         if window.t_first_round is not None:
             return
-        first_round_key = (window.operation_id, window.start_round)
+        first_round_key = (window.stream_id, window.start_round)
         window.t_first_round = store.publication_tick(first_round_key)
 
     def note_data_complete(
@@ -191,7 +191,7 @@ class DecodeRequestBuilder:
         None for the window's own unconstrained decode.
         """
         request_key = self.new_request_key(
-            window.operation_id, window.window_index, tier
+            window.stream_id, window.window_index, tier
         )
         payloads = self.assemble_payloads(window, store)
         payload_round_count = decoding_records.distinct_round_count(payloads)
@@ -203,7 +203,7 @@ class DecodeRequestBuilder:
         model = self.planner.models.model_by_window.get(window.key)
         label = self._job_label(window, operation)
         return decoding_records.DecodeJob(
-            operation_id=window.operation_id,
+            stream_id=window.stream_id,
             window_id=window.window_index,
             round_count=round_count,
             ready_time=self.engine.now,
@@ -231,12 +231,12 @@ class DecodeRequestBuilder:
         receiving them again.
         """
         request_key = self.new_request_key(
-            job.operation_id, job.window_id, job.request_key.pool
+            job.stream_id, job.window_id, job.request_key.pool
         )
         label = f"{job.label} class {forced_logical_class}"
         payloads = list(job.payloads)
         return decoding_records.DecodeJob(
-            operation_id=job.operation_id,
+            stream_id=job.stream_id,
             window_id=job.window_id,
             round_count=job.round_count,
             ready_time=self.engine.now,
@@ -262,14 +262,14 @@ class DecodeRequestBuilder:
         landed input at the decoder when the decode starts.
         """
         operation_rounds = self.tracker.effective_round_count_for_window(
-            window.operation_id, window
+            window.stream_id, window
         )
         end_round = min(window.buffer_hi, operation_rounds)
         window_info = window_records.WindowInfo.from_window(window)
         payloads = []
         stop_round = end_round + 1
         for round_index in range(window.start_round, stop_round):
-            round_key = (window.operation_id, round_index)
+            round_key = (window.stream_id, round_index)
             fragments = store.retained_fragments(round_key)
             self._append_round_payloads(
                 payloads, fragments, window_info, round_index
@@ -277,8 +277,8 @@ class DecodeRequestBuilder:
         overflow = window.buffer_hi - operation_rounds
         if overflow <= 0:
             return payloads
-        successor_ids = self.planner.successors_by_operation.get(
-            window.operation_id, []
+        successor_ids = self.planner.successors_by_stream.get(
+            window.stream_id, []
         )
         for successor_id in successor_ids:
             self._append_overflow_payloads(
@@ -298,7 +298,7 @@ class DecodeRequestBuilder:
         window: window_records.Window,
         operation: program_records.Operation,
     ) -> str:
-        if self.planner.is_windowed(window.operation_id):
+        if self.planner.is_windowed(window.stream_id):
             return (
                 f"{operation.name} W{window.window_index} "
                 f"[commit {window.commit_lo}-{window.commit_hi}]"
@@ -403,9 +403,9 @@ class DecodeRequester:
             self.builder.stamp_first_round(window, store)
         if not self.tracker.is_data_complete(window):
             return
-        operation = self.tracker.operation_by_id[window.operation_id]
+        operation = self.tracker.operation_by_id[window.stream_id]
         read_keys = self.retention.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
+            window.stream_id, window.start_round, window.buffer_hi, window
         )
         self.builder.note_data_complete(window, operation, read_keys)
         # a window still owed a boundary is queued now and takes a unit

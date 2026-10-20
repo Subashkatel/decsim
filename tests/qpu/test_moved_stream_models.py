@@ -45,7 +45,7 @@ def _windows(commit_rounds: int, buffer_rounds: int) -> list:
         buffer_hi = commit_hi + buffer_rounds
         round_count = buffer_hi - commit_lo + 1
         window = window_records.Window(
-            operation_id=100,
+            stream_id=100,
             window_index=len(windows),
             commit_lo=commit_lo,
             commit_hi=commit_hi,
@@ -63,7 +63,7 @@ def _window_at(window_index: int, commit_lo: int) -> window_records.Window:
     commit_hi = commit_lo + 4
     buffer_hi = commit_lo + 9
     return window_records.Window(
-        operation_id=100,
+        stream_id=100,
         window_index=window_index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -260,7 +260,7 @@ def test_a_closed_boundary_and_a_second_finish_are_refused():
     program = _program()
     models = moved_stream_models.MovedStimModels(program, REQUIREMENT)
     window = window_records.Window(
-        operation_id=100,
+        stream_id=100,
         window_index=0,
         commit_lo=1,
         commit_hi=3,

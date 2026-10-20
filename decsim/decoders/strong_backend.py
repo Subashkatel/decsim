@@ -272,7 +272,7 @@ def joined_result(
     status = _joined_status(parts)
     no_correction_reason = _joined_no_correction_reason(parts)
     return decoding_records.DecodeResult(
-        job.operation_id,
+        job.stream_id,
         job.window_id,
         correction=correction,
         logical_observables=observables,
@@ -406,7 +406,7 @@ def _part_job(
 ) -> decoding_records.DecodeJob:
     bits = decoder_module.int_tuple(part_syndrome)
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=job.operation_id,
+        stream_id=job.stream_id,
         patch_ids=(),
         round_index=0,
         bits=bits,

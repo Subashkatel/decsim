@@ -66,7 +66,7 @@ def formed_at_the_controller():
 
 def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE):
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
@@ -189,7 +189,7 @@ def test_a_narrow_round_waits_behind_a_held_round_it_would_fit_beside():
 
 def _one_bit_round(round_index):
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1,),

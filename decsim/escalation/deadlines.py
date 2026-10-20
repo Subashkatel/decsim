@@ -258,4 +258,4 @@ class Deadline:
 
 def _window_key_of(job: decoding_records.DecodeJob) -> tuple:
     request_key = job.request_key
-    return (request_key.operation_id, request_key.window_id)
+    return (request_key.stream_id, request_key.window_id)

@@ -31,7 +31,7 @@ def test_window_info_snapshots_topology_and_detector_positions():
 def test_a_strong_context_starts_at_the_commit_and_ends_a_buffer_past_it():
     """A pinned past face reads no round behind the commit (Bombin 1456)."""
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=2,
         commit_lo=7,
         commit_hi=9,

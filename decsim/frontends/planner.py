@@ -359,12 +359,12 @@ def _plan_syndrome_buffering(
     """
     weak = _HoldSet()
     strong = _HoldSet()
-    for operation_id, indices in execution.op_windows.items():
+    for stream_id, indices in execution.windows_by_stream.items():
         for index in indices:
-            window = execution.windows[(operation_id, index)]
+            window = execution.windows[(stream_id, index)]
             _hold_window(
                 execution,
-                operation_id,
+                stream_id,
                 window,
                 weak,
                 absorbs_weak_windows,
@@ -372,7 +372,7 @@ def _plan_syndrome_buffering(
             )
             _hold_strong_context(
                 execution,
-                operation_id,
+                stream_id,
                 window,
                 strong,
                 retain_strong_context,
@@ -386,7 +386,7 @@ def _plan_syndrome_buffering(
 
 def _hold_window(
     execution,
-    operation_id,
+    stream_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
@@ -396,15 +396,15 @@ def _hold_window(
 
     The weak decode reads the window from its start to its buffer.
     """
-    key = (operation_id, window.window_index)
+    key = (stream_id, window.window_index)
     round_keys = _read_keys(
-        execution, operation_id, window.start_round, window.buffer_hi
+        execution, stream_id, window.start_round, window.buffer_hi
     )
     reads = decoding_records.WindowReads(key)
     weak.add(reads, round_keys)
     _hold_restart_reads(
         execution,
-        operation_id,
+        stream_id,
         window,
         weak,
         absorbs_weak_windows,
@@ -414,7 +414,7 @@ def _hold_window(
 
 def _hold_restart_reads(
     execution,
-    operation_id,
+    stream_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
@@ -432,7 +432,7 @@ def _hold_restart_reads(
     """
     if not absorbs_weak_windows:
         return
-    if not _has_same_operation_dependency(window, operation_id):
+    if not _has_same_stream_dependency(window, stream_id):
         return
     look_ahead = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, look_ahead)
@@ -441,24 +441,22 @@ def _hold_restart_reads(
     )
     lower_start = window.commit_lo - reread_rounds
     lower = max(1, lower_start)
-    round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
-    owner = decoding_records.PotentialRestart(
-        (operation_id, window.window_index)
-    )
+    round_keys = _read_keys(execution, stream_id, lower, window.buffer_hi)
+    owner = decoding_records.PotentialRestart((stream_id, window.window_index))
     weak.add(owner, round_keys)
 
 
-def _has_same_operation_dependency(window, operation_id) -> bool:
-    """Whether an earlier window of the same operation bounds this one."""
+def _has_same_stream_dependency(window, stream_id) -> bool:
+    """Whether an earlier window of the same stream bounds this one."""
     for dependency in window.deps:
-        if dependency[0] == operation_id:
+        if dependency[0] == stream_id:
             return True
     return False
 
 
 def _hold_strong_context(
     execution,
-    operation_id,
+    stream_id,
     window,
     strong: "_HoldSet",
     retain_strong_context: bool,
@@ -470,7 +468,7 @@ def _hold_strong_context(
     No row decodes behind the commit (records/windows.py,
     strong_context_bounds). The redo window reads one buffer past the
     commit; the double-window region reads its own rounds, commit plus two
-    buffers clamped at the operation's end, and no round past them
+    buffers clamped at the stream's end, and no round past them
     (escalation/strong_regions.py, double_window_region). A strong side
     that forms the events also reads the raw rounds before the commit
     that the region's rounds' recipes read.
@@ -480,13 +478,11 @@ def _hold_strong_context(
     bounds = window_records.strong_context_bounds(window)
     context_lo, _commit_lo, _commit_hi, upper = bounds
     if absorbs_weak_windows:
-        round_count = execution.rounds_by_operation[operation_id]
+        round_count = execution.rounds_by_stream[stream_id]
         upper = _double_window_region_end(window, round_count)
-    lower = formation_reads.strong_read_start(operation_id, context_lo, upper)
-    potential = _read_keys(execution, operation_id, lower, upper)
-    owner = decoding_records.PotentialStrong(
-        (operation_id, window.window_index)
-    )
+    lower = formation_reads.strong_read_start(stream_id, context_lo, upper)
+    potential = _read_keys(execution, stream_id, lower, upper)
+    owner = decoding_records.PotentialStrong((stream_id, window.window_index))
     strong.add(owner, potential)
 
 
@@ -502,17 +498,17 @@ def _double_window_region_end(window, round_count: int) -> int:
     return min(round_count, extended)
 
 
-def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
+def _read_keys(execution, stream_id, lower: int, upper: int) -> tuple:
     """The round identities from lower to upper, spilling into successors."""
-    round_count = execution.rounds_by_operation[operation_id]
+    round_count = execution.rounds_by_stream[stream_id]
     last = min(upper, round_count)
     keys = []
     stop = last + 1
     for index in range(lower, stop):
-        keys.append((operation_id, index))
+        keys.append((stream_id, index))
     spill = upper - round_count
-    for successor_id in execution.successors.get(operation_id, ()):
-        successor_rounds = execution.rounds_by_operation[successor_id]
+    for successor_id in execution.successors_by_stream.get(stream_id, ()):
+        successor_rounds = execution.rounds_by_stream[successor_id]
         overflow = min(spill, successor_rounds)
         overflow_stop = overflow + 1
         for index in range(1, overflow_stop):
@@ -551,20 +547,20 @@ def _materialize_execution_plan(
         windows, operations, plan_by_operation_id
     )
     _count_window_dependencies(windows)
-    tables = _operation_tables(rows)
+    tables = _stream_tables(rows)
     return window_records.WindowPlan(
         windows=windows,
-        successors=successors,
+        successors_by_stream=successors,
         total_windows=len(windows),
         **tables,
     )
 
 
-def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
+def _add_operation_windows(windows: dict, stream_id, operation_plan) -> None:
     """One Window per geometry, with the plan's internal dependencies."""
     for window_index, geometry in enumerate(operation_plan.windows):
-        windows[(operation_id, window_index)] = window_records.Window(
-            operation_id=operation_id,
+        windows[(stream_id, window_index)] = window_records.Window(
+            stream_id=stream_id,
             window_index=window_index,
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,
@@ -574,8 +570,8 @@ def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
             closed_temporal_boundaries=geometry.closed_temporal_boundaries,
         )
     for source_index, destination_index in operation_plan.internal_dependencies:
-        destination = windows[(operation_id, destination_index)]
-        destination.deps.append((operation_id, source_index))
+        destination = windows[(stream_id, destination_index)]
+        destination.deps.append((stream_id, source_index))
 
 
 def _link_boundary_windows(
@@ -601,11 +597,11 @@ def _link_boundary_windows(
 
 
 def _link_exits_to_entries(
-    windows, predecessor_id, predecessor_plan, operation_id, destination_plan
+    windows, predecessor_id, predecessor_plan, stream_id, destination_plan
 ) -> None:
     for source_index in predecessor_plan.exit_window_indices:
         for destination_index in destination_plan.entry_window_indices:
-            destination = windows[(operation_id, destination_index)]
+            destination = windows[(stream_id, destination_index)]
             destination.deps.append((predecessor_id, source_index))
 
 
@@ -616,17 +612,15 @@ def _count_window_dependencies(windows: dict) -> None:
             windows[dependency].dependents.append(window_key)
 
 
-def _operation_tables(rows: list) -> dict:
-    """The per-operation tables of a WindowPlan, keyed by operation id."""
+def _stream_tables(rows: list) -> dict:
+    """The per-stream tables of a WindowPlan, keyed by stream id."""
     tables = {
-        "window_count": _table(rows, _window_count_of),
-        "op_windows": _table(rows, _window_indices_of),
-        "rounds_by_operation": _table(rows, _round_count_of),
-        "windowed_by_operation": _table(rows, _windowed_of),
-        "batch_preceding_idle_rounds_by_operation": _table(
-            rows, _batch_idle_of
-        ),
-        "protocol_by_operation": _table(rows, _protocol_of),
+        "window_count_by_stream": _table(rows, _window_count_of),
+        "windows_by_stream": _table(rows, _window_indices_of),
+        "rounds_by_stream": _table(rows, _round_count_of),
+        "windowed_by_stream": _table(rows, _windowed_of),
+        "batch_preceding_idle_rounds_by_stream": _table(rows, _batch_idle_of),
+        "protocol_by_stream": _table(rows, _protocol_of),
     }
     return tables
 

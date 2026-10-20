@@ -108,7 +108,7 @@ class RoundAssembler:
         if self.workspace.context_of(identity) is not None:
             return
         self.workspace.expect_round(identity)
-        round_key = (fragment.operation_id, fragment.round_index)
+        round_key = (fragment.stream_id, fragment.round_index)
         context = _PackingContext(identity, round_key, route, fragment_count)
         self.workspace.waiting_by_identity[identity] = context
         if self.packing_line.count == 0 and self._enter(context):
@@ -124,7 +124,7 @@ class RoundAssembler:
         available = round_records.RoundEvent.of(
             "BINARY_AVAILABLE",
             self.engine.now,
-            fragment.operation_id,
+            fragment.stream_id,
             fragment.round_index,
             route,
             fragment.patch_ids,
@@ -182,7 +182,7 @@ class RoundAssembler:
 
     def _form_round(self, context) -> None:
         """The round is complete: merge, form detection events, hand on."""
-        operation_id, round_index = context.round_key
+        stream_id, round_index = context.round_key
         raw_fragments = _merge_adjacent_fragments(context.fragments)
         # the workspace holds the raw measurement bits the fragments
         # arrived with, whatever width leaves afterwards
@@ -196,7 +196,7 @@ class RoundAssembler:
             "controller assembler",
         )
         packed_event = round_records.RoundEvent.of(
-            "PACKED", self.engine.now, operation_id, round_index, context.route
+            "PACKED", self.engine.now, stream_id, round_index, context.route
         )
         self.trace.round_event.fire(packed_event)
         leaving = self.detection_events.form_at(_SEAT, raw_fragments)
@@ -205,7 +205,7 @@ class RoundAssembler:
         # when a seat after it does
         wire_bits = round_records.fragment_wire_bits(leaving)
         packet = round_records.SyndromeRoundPacket(
-            operation_id=operation_id,
+            stream_id=stream_id,
             round_index=round_index,
             fragments=leaving,
         )
@@ -308,8 +308,8 @@ class _Workspace:
 def _round_identity(fragment, route) -> tuple:
     return (
         route.kind.name,
-        route.source_operation_id,
-        fragment.operation_id,
+        route.source_stream_id,
+        fragment.stream_id,
         fragment.round_index,
     )
 

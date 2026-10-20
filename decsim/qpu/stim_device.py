@@ -177,10 +177,10 @@ class StimDevice(seeding.AtomicRunSeedConsumer):
 
     def formation_table(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> formation_records.FormationTable:
-        """The recipes the operation's rounds are formed by, off its circuit."""
-        shot = self._shot_for(operation_id)
+        """The recipes the stream's rounds are formed by, off its circuit."""
+        shot = self._shot_for(stream_id)
         return shot.table
 
     def round_payloads(

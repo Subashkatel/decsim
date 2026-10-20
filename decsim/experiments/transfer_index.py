@@ -54,13 +54,11 @@ class TransferIndex:
 
     def link_delays_of(self, window_key: tuple) -> dict:
         """One window's span on each hop, keyed as link_delays keys it."""
-        operation_id, window_id = window_key
+        stream_id, window_id = window_key
         spans = self.spans_by_window.get(window_key, {})
         delays = {}
         for hop, (first_request, last_delivery) in spans.items():
-            delays[(hop, operation_id, window_id)] = (
-                last_delivery - first_request
-            )
+            delays[(hop, stream_id, window_id)] = last_delivery - first_request
         return delays
 
     def input_hops(self) -> dict:
@@ -86,10 +84,10 @@ class TransferIndex:
         self.answer_send.pop(window_key, None)
         self.inputs_by_window.pop(window_id, None)
 
-    def forget_rounds(self, operation_id: object, round_indices: range) -> None:
+    def forget_rounds(self, stream_id: object, round_indices: range) -> None:
         """Let the sends of rounds no unmeasured window reads go."""
         for round_index in round_indices:
-            self.qpu_send.pop((operation_id, round_index), None)
+            self.qpu_send.pop((stream_id, round_index), None)
 
     def _add_span(self, row: dict) -> None:
         """A hop's span for a window: the earliest request, latest delivery.
@@ -112,10 +110,10 @@ class TransferIndex:
         if row["path"] not in self.answer_hops or is_boundary(row):
             return
         attribution = row["attribution"]
-        operation_id = identity_records.stable_identity_from_json(
-            attribution["operation_id"]
+        stream_id = identity_records.stable_identity_from_json(
+            attribution["owner_id"]
         )
-        key = (operation_id, attribution["window_id"])
+        key = (stream_id, attribution["window_id"])
         start = hop_start_ticks(row)
         earlier = self.answer_send.get(key, start)
         self.answer_send[key] = min(earlier, start)
@@ -139,11 +137,11 @@ class TransferIndex:
     def _add_qpu_send(self, row: dict) -> None:
         if row["path"] != "qpu_to_controller":
             return
-        (rounds,) = row["attribution"]["rounds_by_operation"]
-        operation_id = identity_records.stable_identity_from_json(
-            rounds["operation_id"]
+        (rounds,) = row["attribution"]["rounds_by_stream"]
+        stream_id = identity_records.stable_identity_from_json(
+            rounds["stream_id"]
         )
-        round_key = (operation_id, rounds["round_lo"])
+        round_key = (stream_id, rounds["round_lo"])
         start = hop_start_ticks(row)
         earlier = self.qpu_send.get(round_key, start)
         self.qpu_send[round_key] = min(earlier, start)
@@ -157,7 +155,7 @@ def hop_of(row: dict) -> str:
 
 
 def waiting_window(row: dict) -> tuple:
-    """(operation_id, window index) of the window the transfer holds up.
+    """(stream_id, window index) of the window the transfer holds up.
 
     A boundary holds up its destination; every other transfer the window
     its attribution names.
@@ -166,11 +164,9 @@ def waiting_window(row: dict) -> tuple:
     if is_boundary(row):
         destination = attribution["relation"]["destination_window_key"]
         return identity_records.stable_identity_from_json(destination)
-    recorded_operation = attribution["operation_id"]
-    operation_id = identity_records.stable_identity_from_json(
-        recorded_operation
-    )
-    return operation_id, attribution["window_id"]
+    recorded_stream = attribution["owner_id"]
+    stream_id = identity_records.stable_identity_from_json(recorded_stream)
+    return stream_id, attribution["window_id"]
 
 
 def is_boundary(row: dict) -> bool:

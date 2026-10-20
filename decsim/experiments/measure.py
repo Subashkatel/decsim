@@ -187,7 +187,7 @@ class WindowOutcomeRow:
     {"matched": 1.0} when its BP did not converge and the matching ran.
     """
 
-    operation_id: Any  # an opaque identity
+    stream_id: Any  # an opaque identity
     window_index: int
     ownership_kind: str
     commit_lo: int
@@ -436,7 +436,7 @@ def link_delay_by_window(transfers: list) -> dict:
 
     A hop's transfers for one window can overlap (the selection and its
     rounds), so the span is what the window waited and a sum would count
-    the overlap twice. A window is keyed by (operation_id, window_index),
+    the overlap twice. A window is keyed by (stream_id, window_index),
     since several streams each have a window 3, as gem5's reorder buffer
     finds an instruction by thread and sequence number
     (src/cpu/o3/rob.hh:131-134). The hop is the path, or BOUNDARY_HOP for
@@ -495,7 +495,7 @@ def controller_write_delays_us(
     for row in transfers:
         if row["path"] != write_hop:
             continue
-        first_rounds = row["attribution"]["rounds_by_operation"][0]
+        first_rounds = row["attribution"]["rounds_by_stream"][0]
         if not observation_settings.records_round(first_rounds["round_lo"]):
             continue
         delay = config_module.ticks_to_microseconds(row["total_delay_ticks"])
@@ -514,7 +514,7 @@ def round_stall_ticks(round_events: list) -> dict:
     held_at = {}
     waits = {}
     for event in round_events:
-        key = (event.operation_id, event.round_index)
+        key = (event.stream_id, event.round_index)
         if event.kind == "STALLED":
             held_at[key] = event.tick
         if event.kind == "RELEASED":
@@ -551,7 +551,7 @@ def weak_store_round_keys(round_events: list) -> list:
     for event in round_events:
         if event.kind != "CWB_SENT":
             continue
-        key = (event.operation_id, event.round_index)
+        key = (event.stream_id, event.round_index)
         keys.append(key)
     return keys
 
@@ -559,8 +559,8 @@ def weak_store_round_keys(round_events: list) -> list:
 def strong_store_round_keys(stored_rounds: list) -> list:
     """Every round landed in the strong syndrome buffer, in landing order."""
     keys = []
-    for _tick, operation_id, round_index in stored_rounds:
-        key = (operation_id, round_index)
+    for _tick, stream_id, round_index in stored_rounds:
+        key = (stream_id, round_index)
         keys.append(key)
     return keys
 
@@ -614,11 +614,11 @@ def window_points_us(
     (inst_queue.cc:1009-1014); Ciw keeps the pre-service wait in named parts
     (ciw/data_record.py lines 3-21).
     """
-    operation_id, window_id = window.key
+    stream_id, window_id = window.key
     committed = frame_record.committed_ticks
-    handoff_ticks = link_delay.get((BOUNDARY_HOP, operation_id, window_id), 0)
+    handoff_ticks = link_delay.get((BOUNDARY_HOP, stream_id, window_id), 0)
     escalation_ticks = link_delay.get(
-        (escalation_path, operation_id, window_id), 0
+        (escalation_path, stream_id, window_id), 0
     )
     accepted = frame_record.accepted_ticks
     output_sent = answer_send.get(window.key, accepted)
@@ -640,7 +640,7 @@ def window_points_us(
     confidence_ticks = _confidence_ticks(window, decode)
     answered = max(window.t_done, decode.done_ticks)
     last_required_send = last_required_send_ticks(decode, qpu_send)
-    first_required_send = qpu_send[(operation_id, window.start_round)]
+    first_required_send = qpu_send[(stream_id, window.start_round)]
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
@@ -697,7 +697,7 @@ def window_points_us(
 def frame_records_by_window(
     observation: observation_module.Observation,
 ) -> dict:
-    """The frame's committed corrections, by (operation_id, window_index).
+    """The frame's committed corrections, by (stream_id, window_index).
 
     Keyed by the index alone, several streams would keep one stream's
     correction per index and measure the others against the wrong decode.
@@ -864,12 +864,12 @@ def committed_decode(
     window decoded more than once never mixes two decodes.
     """
     tier = window_records.PoolId(frame_record.tier)
-    operation_id, window_id = frame_record.window_key
+    stream_id, window_id = frame_record.window_key
     records = _committing_stage_records(
-        stages, operation_id, window_id, frame_record.run_sequence
+        stages, stream_id, window_id, frame_record.run_sequence
     )
     assert records, (
-        f"window ({operation_id}, {window_id}) committed the result of "
+        f"window ({stream_id}, {window_id}) committed the result of "
         f"request {frame_record.run_sequence}, which recorded no stage"
     )
     starts = []
@@ -935,8 +935,8 @@ def last_required_send_ticks(decode: "_CommittedDecode", qpu_send: dict) -> int:
     that operation's rounds.
     """
     sends = []
-    for operation_id, round_index in decode.last_rounds_read:
-        sends.append(qpu_send[(operation_id, round_index)])
+    for stream_id, round_index in decode.last_rounds_read:
+        sends.append(qpu_send[(stream_id, round_index)])
     return max(sends)
 
 
@@ -1334,7 +1334,7 @@ def _window_outcome_row(
     outcome: window_outcomes_module.WindowOutcome,
 ) -> WindowOutcomeRow:
     """One outcome joined with its window's decode and its verdict."""
-    operation_id, window_index = outcome.owner_key
+    stream_id, window_index = outcome.owner_key
     window = observation.windows.windows[outcome.owner_key]
     request_key = window.published_request_key
     tier = None
@@ -1351,7 +1351,7 @@ def _window_outcome_row(
     weak_label = _bit_cell(verdict.weak_label)
     strong_evidence = _evidence_cell(verdict.strong_evidence)
     return WindowOutcomeRow(
-        operation_id=operation_id,
+        stream_id=stream_id,
         window_index=window_index,
         ownership_kind=outcome.ownership_kind,
         commit_lo=outcome.commit_lo,
@@ -1400,7 +1400,7 @@ def _verdict_of(
     weak_label = None
     if is_escalated and weak_answer is not None:
         weak_label = observation.window_outcomes.label_of(
-            window.operation_id,
+            window.stream_id,
             window.commit_lo,
             window.commit_hi,
             len(weak_answer),
@@ -1522,7 +1522,7 @@ def _rounds_by_owner(
 
 def _add_the_emitted_patch_rounds(rounds_by_owner: dict, event) -> None:
     """An emitted round's patch-rounds, added to its scored owner's set."""
-    patch_rounds = rounds_by_owner.get(event.operation_id)
+    patch_rounds = rounds_by_owner.get(event.stream_id)
     if event.kind != "EMITTED" or patch_rounds is None:
         return
     for patch in event.patch_ids:
@@ -1713,7 +1713,7 @@ def _emitted_round_count(observation: observation_module.Observation) -> int:
     for event in observation.round_events.events:
         if event.kind != "EMITTED":
             continue
-        emitted.add((event.operation_id, event.round_index))
+        emitted.add((event.stream_id, event.round_index))
     return len(emitted)
 
 
@@ -2008,9 +2008,9 @@ def _last_rounds_read(records: list) -> tuple:
     """The decode's last round of each operation, as its stages carry it."""
     last_rounds = {}
     for record in records:
-        for operation_id, round_index in record.last_rounds_read:
-            latest = last_rounds.get(operation_id, 0)
-            last_rounds[operation_id] = max(latest, round_index)
+        for stream_id, round_index in record.last_rounds_read:
+            latest = last_rounds.get(stream_id, 0)
+            last_rounds[stream_id] = max(latest, round_index)
     pairs = last_rounds.items()
     return tuple(pairs)
 
@@ -2079,8 +2079,8 @@ def _first_dispatch_ticks(stages, window, frame_record) -> int:
     starts there (Toshio et al. 2510.25222 Sec. III A steps 2 to 4). A
     cancelled decode is not on the window's path, so it is left out.
     """
-    operation_id, window_id = frame_record.window_key
-    records = stages.records_for(operation_id, window_id)
+    stream_id, window_id = frame_record.window_key
+    records = stages.records_for(stream_id, window_id)
     cancelled = _cancelled_run_sequences(records)
     ticks = []
     for record in records:
@@ -2105,11 +2105,11 @@ def _cancelled_run_sequences(records) -> set:
 
 
 def _committing_stage_records(
-    stages, operation_id, window_id, run_sequence: int
+    stages, stream_id, window_id, run_sequence: int
 ) -> list:
     """One window's stage records that belong to one request ordinal."""
     records = []
-    for record in stages.records_for(operation_id, window_id):
+    for record in stages.records_for(stream_id, window_id):
         if run_sequence in record.run_sequences:
             records.append(record)
     return records
@@ -2174,9 +2174,9 @@ def _stage_microseconds(stages, frame_record) -> dict:
     Every decode of a window records under its key, so the stages are the
     committing request's, as for every other point.
     """
-    operation_id, window_id = frame_record.window_key
+    stream_id, window_id = frame_record.window_key
     records = _committing_stage_records(
-        stages, operation_id, window_id, frame_record.run_sequence
+        stages, stream_id, window_id, frame_record.run_sequence
     )
     stage_us = {}
     for record in records:

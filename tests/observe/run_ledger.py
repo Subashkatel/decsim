@@ -259,7 +259,7 @@ def _round_chains(rows: _LedgerRows, events) -> _RoundChains:
     """The controller chain of every round, from the packing records."""
     chains = _RoundChains({}, {}, set())
     for event in events:
-        key = (event.operation_id, event.round_index)
+        key = (event.stream_id, event.round_index)
         status = ""
         if event.kind in _ROUND_TERMINALS:
             status = "terminal"
@@ -269,7 +269,7 @@ def _round_chains(rows: _LedgerRows, events) -> _RoundChains:
         row = rows.add(
             event.kind,
             event.tick,
-            event.operation_id,
+            event.stream_id,
             round=event.round_index,
             patch_ids=event.patch_ids,
             route=event.route,

@@ -3,9 +3,10 @@
 The referent is SWIPER's own reading (github.com/jviszlai/swiper, commit
 1c00e09) of two of its cached schedules, tests/data/swiper_toffoli.lss
 and swiper_msd_15to1.lss: tools/swiper_referent.py wrote each one's
-rounds at d = 7, its LatticeSurgerySchedule.to_dag edges and the
-instructions DeviceManager sets to 0 rounds at seeds 0, 1 and 2 into
-the json beside it. The hand-built T gate is one gate as SWIPER's
+rounds at d = 7, its LatticeSurgerySchedule.to_dag edges, the
+instructions DeviceManager sets to 0 rounds at seeds 0, 1 and 2, each
+instruction's merge faces and whether WindowBuilder decodes its rounds
+into the json beside it. The hand-built T gate is one gate as SWIPER's
 compiler writes it (lattice_surgery_schedule.py inject_T, merge, S).
 """
 
@@ -56,6 +57,25 @@ def rounds_in_order(workload) -> list:
     return [counts[operation.id] for operation in workload.operations]
 
 
+def faces_in_order(workload) -> list:
+    """Each operation's couplings as json lists, in the schedule's order."""
+    return [
+        _json_pairs(operation.couplings) for operation in workload.operations
+    ]
+
+
+def _json_pairs(couplings: tuple) -> list:
+    return [[list(patch) for patch in pair] for pair in couplings]
+
+
+def decoded_with_rounds(reading: dict) -> list:
+    """Per instruction, whether SWIPER decodes it and it runs rounds."""
+    rounds = reading["rounds"]
+    runs = [count > 0 for count in rounds]
+    pairs = zip(reading["decoded"], runs, strict=True)
+    return [all(pair) for pair in pairs]
+
+
 def lowered_edges(workload) -> set:
     """Every (predecessor, operation) edge once the workload is lowered."""
     settings = workload_settings.WorkloadSettings.running(workload)
@@ -76,6 +96,27 @@ def test_a_schedule_takes_swipers_rounds_and_dependencies(name, completions):
     assert rounds_in_order(workload) == reading["rounds"]
     swiper_edges = {tuple(edge) for edge in reading["edges"]}
     assert lowered_edges(workload) == swiper_edges | completions
+
+
+@pytest.mark.parametrize("name", ("toffoli", "msd_15to1"))
+def test_a_merge_couples_the_patches_of_swipers_merge_faces(name):
+    path = DATA / f"swiper_{name}.lss"
+    reading = swiper_reading(name)
+
+    workload = lattice_surgery.read_schedule(path, DISTANCE)
+
+    assert faces_in_order(workload) == reading["merge_faces"]
+
+
+@pytest.mark.parametrize("name", ("toffoli", "msd_15to1"))
+def test_an_operation_emits_the_rounds_swipers_window_builder_decodes(name):
+    path = DATA / f"swiper_{name}.lss"
+    reading = swiper_reading(name)
+
+    workload = lattice_surgery.read_schedule(path, DISTANCE)
+
+    emitting = [op.emits_detector_data for op in workload.operations]
+    assert emitting == decoded_with_rounds(reading)
 
 
 @pytest.mark.parametrize("seed", (0, 1, 2))
@@ -110,8 +151,9 @@ def test_a_t_gates_conditional_s_waits_on_the_t_merge(t_gate_path):
     assert blocked == CONDITIONAL_S
     assert by_id[0].kind == program_records.OpKind.INJECT
     assert by_id[0].needs_magic_state
+    assert by_id[2].kind == program_records.OpKind.DISCARD
     emitting = {key for key, op in by_id.items() if op.emits_detector_data}
-    assert emitting == {0, 1, 3, 4, 5}
+    assert emitting == {1, 3, 4, 5}
 
 
 def test_a_skipped_conditional_s_keeps_its_wait_and_emits_nothing(

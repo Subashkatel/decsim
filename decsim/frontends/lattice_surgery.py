@@ -18,7 +18,12 @@ device rules (swiper/device_manager.py _update_active_instructions):
   - one conditioned on an instruction's completion waits for it to end:
     a predecessor;
   - durations D, HALF_D and HALF_D_PLUS_2 are d, d // 2 and d // 2 + 2
-    rounds (Duration.get_true_duration), a DISCARD 0 rounds.
+    rounds (Duration.get_true_duration), a DISCARD 0 rounds;
+  - a merge couples the patches of its merge faces;
+  - a DISCARD ends the patch's life (DeviceManager
+    _get_initialized_patches);
+  - a T injection's rounds run but are not decoded (swiper/
+    window_builder.py build_windows), so it emits no detector data.
 A conditional S is needed half the time (SWIPER Sec. 4.1): the skipped
 ones keep their wait on the decode and take no rounds, as SWIPER sets
 their durations to 0 (device_manager.py, its __init__).
@@ -41,7 +46,7 @@ KINDS = {
     "INJECT_T": program_records.OpKind.INJECT,
     "Y_MEAS": program_records.OpKind.MEASURE,
     "IDLE": program_records.OpKind.IDLE,
-    "DISCARD": program_records.OpKind.GENERIC,
+    "DISCARD": program_records.OpKind.DISCARD,
 }
 FIELD_COUNT = 11
 
@@ -50,8 +55,9 @@ FIELD_COUNT = 11
 class Instruction:
     """The fields of one .lss line read here, its duration still abstract.
 
-    group holds the indices of the conditional S group the instruction
-    belongs to, empty outside one.
+    merge_faces holds the (patch, patch) pairs a merge joins, each pair
+    and the pairs in sorted order. group holds the indices of the
+    conditional S group the instruction belongs to, empty outside one.
     """
 
     name: str
@@ -60,6 +66,7 @@ class Instruction:
     duration: str
     conditioned_on: tuple
     conditioned_on_completion: tuple
+    merge_faces: tuple
     group: frozenset
 
     @property
@@ -133,7 +140,7 @@ def read_schedule(
 
 
 def _instruction(line: str) -> Instruction:
-    """One line's fields; the merge faces and dependents are unread."""
+    """One line's fields; the dependents, each wait's other side, unread."""
     fields = line.split()
     if len(fields) != FIELD_COUNT:
         raise ValueError(
@@ -146,10 +153,12 @@ def _instruction(line: str) -> Instruction:
     patches = ast.literal_eval(fields[2])
     conditioned_on = ast.literal_eval(fields[4])
     conditioned_on_completion = ast.literal_eval(fields[6])
+    faces = ast.literal_eval(fields[8])
     group = ast.literal_eval(fields[9])
     index = int(fields[1])
     ordered_patches = tuple(sorted(patches))
     completions = tuple(conditioned_on_completion)
+    ordered_faces = _ordered_faces(faces)
     members = frozenset(group)
     return Instruction(
         name=name,
@@ -158,31 +167,44 @@ def _instruction(line: str) -> Instruction:
         duration=fields[3],
         conditioned_on=tuple(conditioned_on),
         conditioned_on_completion=completions,
+        merge_faces=ordered_faces,
         group=members,
     )
 
 
+def _ordered_faces(faces: list) -> tuple:
+    """Each face's two patches in order, and the faces in order."""
+    ordered = [tuple(sorted(face)) for face in faces]
+    ordered.sort()
+    return tuple(ordered)
+
+
 def _operation(instruction: Instruction, rounds: int):
-    """The instruction as an operation; no rounds, no detector data."""
+    """The instruction as an operation.
+
+    It emits detector data when it runs rounds that are decoded: not a
+    skipped or zero-round one, and not a T injection.
+    """
     blocked_by = None
     if instruction.conditioned_on:
         (blocked_by,) = instruction.conditioned_on
     word = instruction.name.lower()
     patches = instruction.patches
     kind = KINDS[instruction.name]
-    is_clifford = instruction.name != "INJECT_T"
-    emits = rounds > 0
+    is_injection = instruction.name == "INJECT_T"
+    emits = rounds > 0 and not is_injection
     name = f"{word}{instruction.index}"
     return program_records.Operation(
         id=instruction.index,
         name=name,
         qubits=patches,
         patches=patches,
+        couplings=instruction.merge_faces,
         kind=kind,
         predecessors=instruction.conditioned_on_completion,
         blocked_by=blocked_by,
         emits_detector_data=emits,
-        clifford=is_clifford,
+        clifford=not is_injection,
     )
 
 

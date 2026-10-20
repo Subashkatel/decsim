@@ -123,7 +123,8 @@ class OpKind(Enum):
     """Logical-op kind vocabulary for a rounds policy.
 
     It lets a RoundsPolicy tell a measurement (1 round) from a merge
-    (m·d rounds) from an injection (O(1)).
+    (m·d rounds) from an injection (O(1)). A discard ends a patch's
+    life: the patch measures no round after it.
     """
 
     IDLE = auto()
@@ -131,6 +132,7 @@ class OpKind(Enum):
     MERGE = auto()
     MEASURE = auto()
     INJECT = auto()
+    DISCARD = auto()
     GENERIC = auto()
 
 
@@ -150,6 +152,9 @@ class Operation:
         None  # override; None = infer from clifford
     )
     patches: tuple = ()  # patch ids whose syndrome streams feed the op
+    # (patch, patch) pairs of code blocks a joint measurement joins, as
+    # the program states them; a window may read across one
+    couplings: tuple = ()
     predecessors: tuple = ()  # workload op ids that must complete first
     # prior decode streams at a boundary
     decoder_boundary_predecessors: tuple = ()

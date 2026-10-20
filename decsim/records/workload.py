@@ -40,6 +40,8 @@ class Workload:
     out of round_counts takes GateRounds' counts. physical is a finite
     circuit, four live fragments, or None. physical_error_probability is the
     noise the maker used, None when unstated: a fact a threshold reads.
+    patch_streams decodes each patch's life as one stream
+    (frontends/patch_lives.py), a lattice-surgery program's decoding.
     """
 
     operations: tuple
@@ -48,6 +50,7 @@ class Workload:
         Union[FiniteCircuit, circuit_records.RepeatedStimCircuit]
     ] = None
     physical_error_probability: Optional[float] = None
+    patch_streams: bool = False
 
     def __post_init__(self) -> None:
         pairs = _held_pairs(self.round_counts)

@@ -98,6 +98,10 @@ class RunOperationBody:
     source_round_count: int
     emits_detector_data: bool = True
     finalizes_stream_round: bool = False
+    # the body as one segment per patch stream it runs on, each a view of
+    # the operation on one patch; empty when the operation is its own
+    # stream or one stream's segment
+    segments: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -117,6 +121,19 @@ class ProtectedRegion:
     stream_id: int
     start_operation_id: int
     end_operation_id: int
+
+
+@dataclass(frozen=True)
+class PatchLife:
+    """One code block's life, decoded as one stream.
+
+    operation_ids are the operations on the patch, in program order, from
+    the first one, or the first after a discard, through the next discard.
+    """
+
+    stream_id: Any  # an opaque identity
+    patch: Any  # an opaque identity
+    operation_ids: tuple
 
 
 class OpKind(Enum):

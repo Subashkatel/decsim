@@ -48,6 +48,7 @@ class Plan:
     decode_operations: tuple
     dynamic_streams: tuple
     protected_regions: tuple
+    patch_lives: tuple
     all_operations: tuple
     planned_operations: tuple
     run_plan: planner.RunPlan
@@ -145,11 +146,13 @@ def build_plan(
         )
         part.policy.check_plan(edge_shape)
         leaves_the_entry_pool = False
+    has_patch_lives = bool(workload.patch_lives)
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,
         dynamic_streams,
         static_decode_selected=has_static_decode_plan,
+        has_patch_lives=has_patch_lives,
     )
     planned_ids = []
     for operation in planned_operations:
@@ -158,6 +161,7 @@ def build_plan(
     physical_tables = _physical_formation_tables(physical_circuits)
     circuit_arguments = _circuit_arguments(physical_circuits, physical_tables)
     device = qpu.source.build(code, circuit_arguments)
+    _check_patch_streams(workload.patch_lives, device, is_switching)
     formation_tables = _formation_tables(
         device, planned_operations, physical_tables, rounds_policy, code
     )
@@ -207,6 +211,7 @@ def build_plan(
         decode_operations=decode_operations,
         dynamic_streams=dynamic_streams,
         protected_regions=tuple(workload.protected_regions),
+        patch_lives=workload.patch_lives,
         all_operations=all_operations,
         planned_operations=planned_operations,
         run_plan=run_plan,
@@ -293,6 +298,23 @@ def _check_blockers_decode(
     planner.check_blockers_decode(list(operations), external_blocker_ids)
 
 
+def _check_patch_streams(lives: tuple, device, is_switching: bool) -> None:
+    """Patch streams are decoded timing only, by one tier.
+
+    An operation on several patch streams has no one stream's
+    observables (windows/operation_results.py), and a strong window over
+    patch streams is not built.
+    """
+    if not lives:
+        return
+    if device.emits_bit_values:
+        raise ValueError(
+            "patch streams run timing only; the syndrome source emits values"
+        )
+    if is_switching:
+        raise ValueError("patch streams are decoded by one tier: no switching")
+
+
 def _unique_operations(operations) -> tuple:
     unique = {}
     for operation in operations:
@@ -302,11 +324,27 @@ def _unique_operations(operations) -> tuple:
 
 
 def _decode_plan_operations(
-    operations, decode_operations, dynamic_streams, *, static_decode_selected
+    operations,
+    decode_operations,
+    dynamic_streams,
+    *,
+    static_decode_selected,
+    has_patch_lives,
 ) -> tuple:
-    """The operations whose windows the plan decodes."""
+    """The operations whose windows the plan decodes.
+
+    Not one when the streams decode them: a segment's rounds fold into
+    its stream, and an operation on patch streams into each of them.
+    """
     if static_decode_selected:
         return decode_operations
+    if has_patch_lives:
+        return ()
+    return _standalone_emitters(operations, dynamic_streams)
+
+
+def _standalone_emitters(operations, dynamic_streams) -> tuple:
+    """The operations that emit detector data into no dynamic stream."""
     dynamic_ids = set()
     for stream in dynamic_streams:
         dynamic_ids.add(stream.id)

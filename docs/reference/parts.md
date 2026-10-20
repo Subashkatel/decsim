@@ -792,6 +792,7 @@ fixes_the_distance and fields_set_in_the_run_file name what an assignment by pat
 | `protected_regions` | `tuple` | `()` |
 | `rounds_policy` | `Optional[ports.RoundsPolicy]` | `None` |
 | `physical_circuits` | `tuple` | `()` |
+| `patch_lives` | `tuple` | `()` |
 | `feedback_boundary_mode` | `str` | `'trailing_buffer'` |
 | `workload_record` | `Optional[workload_records.Workload]` | `None` |
 

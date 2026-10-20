@@ -196,7 +196,7 @@ class StreamMeasures:
             "strong_service_sum_us": service_us,
             "throughput_windows_per_us": windows_per_us,
             "throughput_rounds_per_us": rounds_per_us,
-            "escalation_series": list(folds.escalation_series),
+            "escalation_series": list(folds.counts.escalation_series),
         }
 
     def _run_numbers(
@@ -339,8 +339,6 @@ class _Folds:
         self.reasons: set = set()
         self.growth_by_tier: dict = collections.defaultdict(_Growth)
         self.counts = _Counts(deadline_us=deadline_us)
-        # (committed windows, escalated windows, first committed round)
-        self.escalation_series: list = []
 
     @property
     def decoded_windows(self) -> int:
@@ -408,7 +406,7 @@ class _Folds:
         if counts.committed_windows % ESCALATION_SAMPLED_EVERY:
             return
         sample = (counts.committed_windows, counts.strong_windows)
-        self.escalation_series.append((*sample, window.commit_lo))
+        self.counts.escalation_series.append((*sample, window.commit_lo))
 
     def fold_decoded(
         self,
@@ -570,6 +568,8 @@ class _Counts:
     last_readout_tick: Optional[int] = None
     latest_round_by_operation: dict = dataclasses.field(default_factory=dict)
     let_go_below_by_operation: dict = dataclasses.field(default_factory=dict)
+    # (committed windows, escalated windows, first committed round)
+    escalation_series: list = dataclasses.field(default_factory=list)
     # the reaction budget (observation.reaction_deadline_microseconds)
     deadline_us: Optional[float] = None
     missed: int = 0

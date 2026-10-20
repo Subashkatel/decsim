@@ -203,13 +203,18 @@ class QPUDevice:
                     f"{operation.name} fires round "
                     f"{running.emitted_round_count}/{command.round_count}",
                 )
-                payloads = self.syndrome_source.round_payloads(
-                    operation, running.emitted_round_count
-                )
-                self._deliver(payloads, operation)
+                self._emit_body_round(command, running.emitted_round_count)
             if running.emitted_round_count == command.round_count:
                 del self._live.running_by_operation_id[operation_id]
                 self._finish_command(command)
+
+    def _emit_body_round(
+        self, command: program_records.RunOperationBody, round_index: int
+    ) -> None:
+        """The body's round, one readout group per stream it emits into."""
+        for emitter in _emitters(command):
+            payloads = self.syndrome_source.round_payloads(emitter, round_index)
+            self._deliver(payloads, emitter)
 
     def _start_waiting_commands(self) -> None:
         waiting = self._live.commands_waiting
@@ -230,12 +235,13 @@ class QPUDevice:
             self._run_instant_command(command)
             return
         if command.emits_detector_data:
-            self.syndrome_source.begin_operation(
-                operation,
-                command.round_count,
-                command.source_round_count,
-                round_period_ticks=self.clock.period_ticks,
-            )
+            for emitter in _emitters(command):
+                self.syndrome_source.begin_operation(
+                    emitter,
+                    command.round_count,
+                    command.source_round_count,
+                    round_period_ticks=self.clock.period_ticks,
+                )
         running = _RunningOperation(command, 0)
         self._live.running_by_operation_id[operation.id] = running
 
@@ -255,10 +261,19 @@ class QPUDevice:
         self, command: program_records.RunOperationBody
     ) -> None:
         operation = command.operation
+        if operation.kind is not program_records.OpKind.DISCARD:
+            self._idle_after(operation)
+        self.runtime.body_done(operation)
+
+    def _idle_after(self, operation: program_records.Operation) -> None:
+        """The operation's patches idle until another operation claims them.
+
+        A discarded patch is gone and measures no more rounds
+        (swiper/device_manager.py drops it from the active patches).
+        """
         for patch in program_records.patches_of(operation):
             idle = _IdlePatch(operation.id, 0)
             self._live.idle_by_patch.setdefault(patch, idle)
-        self.runtime.body_done(operation)
 
     def _deliver(
         self,
@@ -330,6 +345,13 @@ class QPUDevice:
         )
         self.trace.round_event.fire(emitted)
         self.readout_receiver.accept_qpu_readout(readout, route)
+
+
+def _emitters(command: program_records.RunOperationBody) -> tuple:
+    """The views the body emits through: its segments, or the operation."""
+    if command.segments:
+        return command.segments
+    return (command.operation,)
 
 
 def _fragment_slots(operation, payload_count: int) -> tuple[int, int]:

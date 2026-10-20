@@ -9,6 +9,7 @@ are derived, so a maker writes none of them.
 import dataclasses
 from typing import Optional
 
+import decsim.frontends.patch_lives as patch_lives
 import decsim.ports as ports
 import decsim.qpu.round_policies as round_policies
 import decsim.records.program as program_records
@@ -21,6 +22,7 @@ class WorkloadProgram:
 
     physical_circuits pairs the stream key that runs the physical circuit
     with that circuit; a workload carries one physical circuit at most.
+    patch_lives are the patch streams, when the workload asks for them.
     """
 
     operations: tuple
@@ -28,6 +30,7 @@ class WorkloadProgram:
     protected_regions: tuple
     rounds_policy: Optional[ports.RoundsPolicy]
     physical_circuits: tuple
+    patch_lives: tuple = ()
 
 
 def lowered(workload: workload_records.Workload) -> WorkloadProgram:
@@ -36,6 +39,8 @@ def lowered(workload: workload_records.Workload) -> WorkloadProgram:
     stream_id = _one_stream_id(operations)
     physical = workload.physical
     round_counts = dict(workload.round_counts)
+    if workload.patch_streams:
+        return _patch_stream_program(operations, round_counts, workload)
     if stream_id is None:
         return _standalone_program(operations, round_counts, physical)
     return _stream_program(operations, round_counts, physical, stream_id)
@@ -143,6 +148,43 @@ def _stream_program(
         rounds_policy=rounds_policy,
         physical_circuits=physical_circuits,
     )
+
+
+def _patch_stream_program(
+    operations: list, round_counts: dict, workload
+) -> WorkloadProgram:
+    """Each patch life one open-ended stream, owned by its patch.
+
+    The program is timing only and names no stream of its own, whose
+    segments would fold into a second kind of stream.
+    """
+    _check_patch_stream_workload(operations, workload)
+    lives = patch_lives.lives(operations)
+    owners = []
+    for life in lives:
+        life_owner = patch_lives.owner(life)
+        owners.append(life_owner)
+        round_counts[life_owner.id] = 0
+    rounds_policy = _rounds_policy(round_counts)
+    return WorkloadProgram(
+        operations=tuple(operations),
+        dynamic_streams=tuple(owners),
+        protected_regions=(),
+        rounds_policy=rounds_policy,
+        physical_circuits=(),
+        patch_lives=lives,
+    )
+
+
+def _check_patch_stream_workload(operations: list, workload) -> None:
+    if workload.physical is not None:
+        raise ValueError("a patch-stream workload is timing only: no circuit")
+    named = []
+    for operation in operations:
+        if operation.stream_id is not None:
+            named.append(operation.id)
+    if named:
+        raise ValueError(f"a patch-stream workload names no stream; {named} do")
 
 
 def _the_one_runner(operations: list):

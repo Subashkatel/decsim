@@ -1805,6 +1805,7 @@ def test_a_lowered_workload_fixes_the_distance_and_its_lowered_fields():
         "workload.protected_regions",
         "workload.physical_circuits",
         "workload.rounds_policy",
+        "workload.patch_lives",
         "workload.workload_record",
     )
 

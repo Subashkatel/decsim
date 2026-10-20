@@ -8,8 +8,12 @@ SWIPER_CHECKOUT. Writes OUT as json: each instruction's rounds at the
 distance (Duration.get_true_duration), the schedule's dependency edges
 (LatticeSurgerySchedule.to_dag), the instructions DeviceManager sets
 to 0 rounds at seeds 0, 1 and 2, the conditional S it skips, each
-instruction's merge faces (Instruction.merge_faces), and whether
-WindowBuilder.build_windows decodes its rounds.
+instruction's merge faces (Instruction.merge_faces), whether
+WindowBuilder.build_windows decodes its rounds, and the patch lives of
+the DeviceManager run at seed 0: each life's patch, the instructions
+that measured rounds in it, and its rounds by kind (an instruction's,
+a T injection's, an idle one), a life starting at a round that
+initializes its patch (SyndromeRound.initialized_patch).
 """
 
 import json
@@ -17,6 +21,7 @@ import pathlib
 import sys
 
 SEEDS = (0, 1, 2)
+CENSUS_SEED = 0
 
 
 def main(
@@ -25,7 +30,7 @@ def main(
     distance: int,
     out: pathlib.Path,
 ) -> None:
-    """SWIPER's rounds, edges, skipped instructions, faces and decodes."""
+    """SWIPER's rounds, edges, skips, faces, decodes and patch lives."""
     folder = str(checkout)
     sys.path.insert(0, folder)
     import swiper.device_manager as device_manager
@@ -41,12 +46,15 @@ def main(
     skipped = _zeroed_by_seed(device_manager, schedule, distance)
     faces = [_faces(instruction) for instruction in schedule.instructions]
     decoded = [_is_decoded(each) for each in schedule.instructions]
+    device = device_manager.DeviceManager(distance, schedule, rng=CENSUS_SEED)
+    lives = _patch_lives(device)
     document = {
         "rounds": rounds,
         "edges": edges,
         "zeroed_by_seed": skipped,
         "merge_faces": faces,
         "decoded": decoded,
+        "patch_lives": lives,
     }
     written = json.dumps(document)
     out.write_text(written)
@@ -61,6 +69,44 @@ def _zeroed_by_seed(device_manager, schedule, distance: int) -> dict:
         zeroed = [index for index, rounds in enumerate(durations) if not rounds]
         skipped[str(seed)] = zeroed
     return skipped
+
+
+def _patch_lives(device) -> list:
+    """Each patch life the device runs, every decode reported done."""
+    open_by_patch = {}
+    lives = []
+    while not device.is_done():
+        for syndrome_round in device.get_next_round(set()):
+            life = _life_of(syndrome_round, open_by_patch, lives)
+            _count(life, syndrome_round)
+    for life in lives:
+        life["instructions"].sort()
+    return lives
+
+
+def _life_of(syndrome_round, open_by_patch: dict, lives: list) -> dict:
+    """The round's life: a new one when it initializes its patch."""
+    patch = syndrome_round.patch
+    is_new = syndrome_round.initialized_patch or patch not in open_by_patch
+    if is_new:
+        life = {"patch": list(patch), "instructions": [], "rounds": {}}
+        open_by_patch[patch] = life
+        lives.append(life)
+    return open_by_patch[patch]
+
+
+def _count(life: dict, syndrome_round) -> None:
+    """One round of the life, by its kind."""
+    kind = "instruction"
+    if syndrome_round.is_unwanted_idle:
+        kind = "idle"
+    elif syndrome_round.instruction.name == "INJECT_T":
+        kind = "injection"
+    rounds = life["rounds"]
+    rounds[kind] = rounds.get(kind, 0) + 1
+    index = syndrome_round.instruction_idx
+    if index >= 0 and index not in life["instructions"]:
+        life["instructions"].append(index)
 
 
 def _faces(instruction) -> list:

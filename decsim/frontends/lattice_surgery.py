@@ -28,7 +28,9 @@ A conditional S is needed half the time (SWIPER Sec. 4.1): the skipped
 ones keep their wait on the decode and take no rounds, as SWIPER sets
 their durations to 0 (device_manager.py, its __init__).
 swiper_skipped_conditional_s draws them as SWIPER does from a seed.
-The schedule is timing only: no instruction carries a circuit.
+The schedule is timing only: no instruction carries a circuit. Each
+patch's life is decoded as one stream (frontends/patch_lives.py), as
+SWIPER's window builder cuts its regions per patch.
 """
 
 import ast
@@ -136,7 +138,9 @@ def read_schedule(
         operation = _operation(instruction, rounds)
         operations.append(operation)
         round_counts[instruction.index] = rounds
-    return workload_records.Workload(tuple(operations), round_counts)
+    return workload_records.Workload(
+        tuple(operations), round_counts, patch_streams=True
+    )
 
 
 def _instruction(line: str) -> Instruction:

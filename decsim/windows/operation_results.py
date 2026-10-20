@@ -53,6 +53,7 @@ class OperationResults:
 
     def __init__(self) -> None:
         self.deliveries = _Deliveries()
+        self.bindings = _Bindings()
         self.trace = _TraceSources()
 
     # ---- what the committer tells
@@ -142,27 +143,14 @@ class OperationResults:
         self,
         stream_id: Any,  # an opaque identity
     ) -> None:
-        """Deliver the segments the stream's committed prefix covers."""
-        committed = self.deliveries.committed_round_count_by_stream.get(
-            stream_id, 0
-        )
-        self.release_stream_segments_at_commit(stream_id, committed)
-
-    def release_stream_segments_at_commit(
-        self,
-        stream_id: Any,  # an opaque identity
-        committed_round_count: int,
-    ) -> None:
         """Deliver the segment results whose full round range committed.
 
         Gated as operations are: no pending strong may still change it.
         """
-        operations = self.tracker.operation_by_id.values()
-        operations = list(operations)
-        for operation in operations:
-            self._release_segment_if_committed(
-                operation, stream_id, committed_round_count
-            )
+        bound = self.bindings.operation_ids_by_stream.get(stream_id, ())
+        for operation_id in list(bound):
+            operation = self.tracker.operation_by_id[operation_id]
+            self._release_segments_if_committed(operation)
 
     # ---- the segment binds
 
@@ -172,17 +160,24 @@ class OperationResults:
         stream_id: Any,  # an opaque identity
         stream_offset: int,
     ) -> None:
-        """Note which stream and offset a segment's rounds fold into."""
-        segment = self._segment(operation_id)
-        segment.stream_id = stream_id
-        segment.stream_offset = stream_offset
+        """Note a stream and offset the operation's rounds fold into.
+
+        An operation on several patch streams is a segment of each.
+        """
+        segment = _Segment(stream_id, stream_offset)
+        segments = self.bindings.segments_by_operation.setdefault(
+            operation_id, []
+        )
+        segments.append(segment)
+        bound = self.bindings.operation_ids_by_stream.setdefault(stream_id, [])
+        bound.append(operation_id)
 
     def bind_required_stream_end(
         self, operation_id: int, required_stream_end: int
     ) -> None:
         """Note the stream round a protected segment's result waits for."""
-        segment = self._segment(operation_id)
-        segment.required_stream_end = required_stream_end
+        segments = self.bindings.segments_by_operation[operation_id]
+        segments[-1].required_stream_end = required_stream_end
 
     # ---- the committed prefix
 
@@ -261,13 +256,6 @@ class OperationResults:
 
     # ---- private
 
-    def _segment(self, operation_id) -> "_Segment":
-        segment = self.deliveries.segment_by_operation.get(operation_id)
-        if segment is None:
-            segment = _Segment()
-            self.deliveries.segment_by_operation[operation_id] = segment
-        return segment
-
     def _update_committed_round_count(self, stream_id) -> None:
         committed = self.committed_prefix_round_count(stream_id)
         by_stream = self.deliveries.committed_round_count_by_stream
@@ -275,7 +263,7 @@ class OperationResults:
         if committed <= cached:
             return
         by_stream[stream_id] = committed
-        self.release_stream_segments_at_commit(stream_id, committed)
+        self.release_committed_segments(stream_id)
 
     def _deliver_result(self, operation: program_records.Operation) -> None:
         commit_lo, commit_hi = self.planner.commit_extent_of(operation.id)
@@ -316,59 +304,65 @@ class OperationResults:
             operation_id, logical_observables
         )
 
-    def _release_segment_if_committed(
-        self,
-        operation: program_records.Operation,
-        stream_id,
-        committed_round_count: int,
+    def _release_segments_if_committed(
+        self, operation: program_records.Operation
     ) -> None:
-        segment = self.deliveries.segment_by_operation.get(operation.id)
-        operation_stream_id, stream_offset = _stream_place(operation, segment)
-        if operation_stream_id != stream_id:
-            return
+        """Deliver once each of the operation's streams committed its part.
+
+        An outcome is usable once every window committing its rounds has
+        committed (Bombín et al. 2303.04846 Eq. 4).
+        """
         if operation.id not in self.tracker.blocking_operation_ids:
             return
         if operation.id in self.deliveries.segment_results_sent:
             return
-        segment_end = self._stream_segment_end(
-            operation, segment, stream_offset
-        )
-        is_final = self._is_segment_final(
-            stream_id, segment_end, committed_round_count
-        )
-        if not is_final:
-            return
-        segment_start = stream_offset + 1
-        logical_observables = self.ledger.observables_for_interval(
-            stream_id,
-            segment_start,
-            segment_end,
-            boundary_policy="stream_segment",
-        )
+        segments = self.bindings.segments_by_operation[operation.id]
+        for segment in segments:
+            if not self._is_segment_final(operation, segment):
+                return
+        logical_observables = self._segments_observables(operation, segments)
         self._record_result(operation.id, logical_observables)
         self.deliveries.segment_results_sent.add(operation.id)
         self.conditional_release.release_waiters(operation)
 
-    def _stream_segment_end(
-        self, operation: program_records.Operation, segment, stream_offset
-    ) -> Optional[int]:
-        if segment is not None and segment.required_stream_end is not None:
-            return segment.required_stream_end
-        if stream_offset is None:
+    def _segments_observables(self, operation, segments: list):
+        """The one stream's committed observables over the segment.
+
+        None for several streams, as patch streams run timing only
+        (build/plan.py refuses a source with values).
+        """
+        if len(segments) > 1:
             return None
+        (segment,) = segments
+        first_round = segment.stream_offset + 1
+        last_round = self._stream_segment_end(operation, segment)
+        return self.ledger.observables_for_interval(
+            segment.stream_id,
+            first_round,
+            last_round,
+            boundary_policy="stream_segment",
+        )
+
+    def _stream_segment_end(
+        self, operation: program_records.Operation, segment: "_Segment"
+    ) -> int:
+        if segment.required_stream_end is not None:
+            return segment.required_stream_end
         round_count = self.planner.round_count_of(operation.id)
-        return stream_offset + round_count
+        return segment.stream_offset + round_count
 
     def _is_segment_final(
-        self,
-        stream_id,
-        segment_end: Optional[int],
-        committed_round_count: int,
+        self, operation: program_records.Operation, segment: "_Segment"
     ) -> bool:
-        """Its end is known and committed, and no strong redo may change it."""
-        if segment_end is None or segment_end > committed_round_count:
+        """Its end is committed, and no strong redo may change it."""
+        committed_by_stream = self.deliveries.committed_round_count_by_stream
+        committed = committed_by_stream.get(segment.stream_id, 0)
+        segment_end = self._stream_segment_end(operation, segment)
+        if segment_end > committed:
             return False
-        is_waiting = self._segment_waits_for_strong(stream_id, segment_end)
+        is_waiting = self._segment_waits_for_strong(
+            segment.stream_id, segment_end
+        )
         return not is_waiting
 
     def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
@@ -495,13 +489,6 @@ def _move_past(cursor: "_Cursor", window_count: int, prefix_end: int) -> None:
     cursor.prefix_end = max(cursor.prefix_end, prefix_end)
 
 
-def _stream_place(operation: program_records.Operation, segment) -> tuple:
-    """The stream and offset the operation sits at; a bound segment's first."""
-    if segment is None or segment.stream_id is None:
-        return operation.stream_id, operation.stream_offset
-    return segment.stream_id, segment.stream_offset
-
-
 class _Deliveries:
     """The progress of the deliveries so far."""
 
@@ -510,9 +497,18 @@ class _Deliveries:
         self.finished_operation_ids: set = set()
         self.segment_results_sent: set = set()
         self.committed_round_count_by_stream: dict = {}
-        self.segment_by_operation: dict = {}
         # (test, stream id) -> _Cursor
         self.cursors: dict = {}
+
+
+class _Bindings:
+    """Where each segment's rounds fold into its streams."""
+
+    def __init__(self) -> None:
+        # operation id -> [_Segment], one per stream it folds into
+        self.segments_by_operation: dict = {}
+        # stream id -> [the operations bound to it, in bind order]
+        self.operation_ids_by_stream: dict = {}
 
 
 class _Cursor:
@@ -535,9 +531,9 @@ class _Segment:
     required_stream_end is the stream round its result waits for.
     """
 
-    def __init__(self) -> None:
-        self.stream_id = None
-        self.stream_offset = None
+    def __init__(self, stream_id, stream_offset: int) -> None:
+        self.stream_id = stream_id
+        self.stream_offset = stream_offset
         self.required_stream_end = None
 
 

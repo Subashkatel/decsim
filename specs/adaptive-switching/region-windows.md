@@ -106,6 +106,31 @@ nothing in the core reads surface-code geometry:
    successor-overflow reads, so one model of "what follows an operation"
    remains (question 2).
 
+### Stage 3 as built, and what it leaves for stage 5
+
+The lives match SWIPER's device at seed 0 on toffoli (36) and msd_15to1
+(65): the same patch, the same instructions, the same instruction rounds
+(tests/frontends/test_patch_lives.py). Each stream's rounds arrive once,
+1 to n, and a two-patch merge releases after both streams commit
+(tests/controller/test_patch_streams.py). Three differences remain,
+each measured in stage 5 rather than guessed at:
+
+- Idle rounds. On toffoli 10 of the 36 lives idle longer in decsim, by
+  1 to 62 rounds: SWIPER starts a patch's first instruction as late as
+  its successors allow (device_manager.py
+  _predict_instruction_start_time), decsim as early as its predecessors
+  allow.
+- A skipped conditional S still sends each of its blocked zero-round
+  instructions down the control path, and the patch idles a round on
+  each with no live stream; SWIPER finishes them in the round they are
+  released and never activates the patch.
+- The windows are today's sliding ones, cut at every segment's ends;
+  SWIPER's d-round regions come with stage 4.
+
+A decoder slower than the rounds arrive falls ever further behind with
+no bound, and the run never drains (one unit at 5 µs a window on
+toffoli); the tests run one that keeps up.
+
 Not needed for timing-only runs: window models, per-patch real syndromes
 of a merge round, escalation over patch streams (refused at build until
 the strong decoder is in play on lattice surgery).

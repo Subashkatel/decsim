@@ -22,7 +22,10 @@ import decsim.frontends.lattice_surgery as lattice_surgery
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
+import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
+import decsim.windows.schemes.swiper_sliding as swiper_sliding
+import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 
 HERE = pathlib.Path(__file__)
@@ -208,7 +211,10 @@ def test_the_conditional_s_starts_after_the_t_merge_is_decoded(t_gate_path):
     pool = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
     )
-    base = machines.base(settings)
+    scheme = swiper_sliding.SwiperSlidingScheme.Settings()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    qpu = qpu_settings.QpuSettings(distance=DISTANCE)
+    base = machines.base(settings, windows, qpu)
     graph = machines.with_pool(base, pool)
 
     machine = machine_module.Machine.build(graph, 0)

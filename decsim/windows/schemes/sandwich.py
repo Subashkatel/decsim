@@ -26,6 +26,7 @@ class TanSandwichScheme:
     # side of it, so the commits are a depth-two graph, not a chain.
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
+    lays_regions = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:

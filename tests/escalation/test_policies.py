@@ -473,6 +473,7 @@ class DelegatingWindowScheme:
     has_trailing_tail_context = True
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
+    lays_regions = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:

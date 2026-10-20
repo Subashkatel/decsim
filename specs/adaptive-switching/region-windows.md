@@ -135,6 +135,49 @@ Not needed for timing-only runs: window models, per-patch real syndromes
 of a merge round, escalation over patch streams (refused at build until
 the strong decoder is in play on lattice surgery).
 
+### Stage 4 as built
+
+A patch-stream run is windowed by a region scheme, the SWIPER sliding
+row (windows/schemes/swiper_sliding.py), over the region layout
+(windows/region_layout.py). The layout cuts each stream into regions of
+at most the card's commit rounds, cut only at a coupled segment's edges
+and at the seal; a window commits one region, reads the next region of
+its stream, and reads each coupled partner's region the scheme orients
+it to read, the partner's window waiting for it. Two port additions
+carry it: WindowingScheme.lays_regions with the RegionScheme port
+(orient_coupling), and WindowInput.couple_segments, which PatchStreams
+calls with a merge's per-patch spans and faces. Readiness waits for the
+spatial reads' rounds, retention holds them and a job's size counts
+them, as SWIPER's volume does.
+
+Checked two ways, number for number:
+
+- The layout fed SWIPER's own seed-0 rounds gives SWIPER's sliding
+  windows and edges: toffoli 102 windows and 105 edges, msd_15to1 149
+  and 168 (tests/windows/test_region_layout.py, against
+  tools/swiper_referent.py's json).
+- decsim's run, its rounds fed to SWIPER's WindowBuilder and
+  SlidingWindowManager, gives decsim's windows and edges: T gate 8 and
+  7, toffoli 144 and 147, msd_15to1 172 and 191 (run by hand at this
+  stage; the in-tree test checks a run's windows against the layout of
+  its own rounds, tests/controller/test_patch_streams.py).
+
+Left as they are, for stage 5 or later:
+
+- lay_windows does not yet replace plan_operation: a static operation
+  under the SWIPER row is its one-stream case, and stage 6 folds the
+  stride-and-cut growth into the schemes.
+- SWIPER cuts where merge rounds meet other rounds, so two merges back
+  to back on a patch can share a region there; here each coupled
+  segment is cut on its own. They agree when merges last whole regions,
+  as on both schedules.
+- decsim knows a merge's cut when the merge starts; SWIPER learns it
+  from the merge's first round, so the window before a merge may be
+  ready a round earlier here.
+- A schedule read at distance d sets its rounds only; the QPU card's
+  distance sets the region length, so a run sets qpu.distance to the
+  same d. Nothing checks the two agree yet.
+
 ## The owner's decisions
 
 1. Release rule. Bombín releases an outcome once the windows committing

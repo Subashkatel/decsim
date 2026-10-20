@@ -1318,3 +1318,14 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 | --- | --- | --- |
 | `commit_rounds` | `Optional[int]` | `None` |
 | `buffer_rounds` | `Optional[int]` | `None` |
+
+### `SwiperSlidingScheme.Settings`
+
+`decsim/windows/schemes/swiper_sliding.py`. The region length; None is the code distance.
+
+A window's buffer is the whole next region (SWIPER's SlidingWindowManager), so no buffer length is set.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `commit_rounds` | `Optional[int]` | `None` |
+| `buffer_rounds` | `Optional[int]` | `None` |

@@ -6,7 +6,9 @@ starts the patch to the discard that ends it (frontends/patch_lives.py;
 SWIPER 2412.05115, swiper/device_manager.py, which emits a round for
 every active patch each cycle). An operation on k patches is a segment
 of k streams, so its body emits one readout per patch stream a round,
-and its result waits for every one of them (operation_results.py).
+and its result waits for every one of them (operation_results.py). A
+joint measurement's segments go to the windows with the patches it
+couples, whose regions read each other (windows/region_layout.py).
 """
 
 import dataclasses
@@ -14,6 +16,7 @@ from typing import Any
 
 import decsim.ports as ports
 import decsim.records.program as program_records
+import decsim.records.windows as window_records
 
 
 class PatchStreams:
@@ -80,6 +83,7 @@ class PatchStreams:
                 segments.append(segment)
         if not segments:
             return command
+        self._couple(command, segments)
         return dataclasses.replace(
             command, segments=tuple(segments), source_round_count=0
         )
@@ -154,6 +158,22 @@ class PatchStreams:
             stream_id=stream_id,
             stream_offset=stream_offset,
         )
+
+    def _couple(self, command, segments: list) -> None:
+        """A joint measurement's segments, by patch, and the faces it joins."""
+        couplings = command.operation.couplings
+        if not couplings:
+            return
+        spans_by_block = {}
+        for segment in segments:
+            (patch,) = segment.patches
+            first_round = segment.stream_offset + 1
+            last_round = segment.stream_offset + command.round_count
+            span = window_records.RoundSpan(
+                segment.stream_id, first_round, last_round
+            )
+            spans_by_block[patch] = span
+        self.windows.couple_segments(spans_by_block, couplings)
 
     def _seal(self, stream_id, live: "_LiveLife") -> None:
         """The QPU attests the stream's length, then the windows close it."""

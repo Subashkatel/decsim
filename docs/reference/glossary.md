@@ -29,7 +29,11 @@ part any reader can follow.
 - **decode stream**: the run of rounds the decoder reads as one, keyed by
   its `stream_id` (`decode_identity` in `decsim/records/program.py`). A
   standalone operation is its own stream; the segments of a feedback
-  stream share one.
+  stream share one, and in a lattice-surgery run each patch life is one.
+- **region**: a `RoundSpan` of one stream, at most its code's commit
+  rounds long; a region scheme's window commits one region and reads
+  others (`decsim/windows/region_layout.py`). SWIPER calls it a
+  `SpacetimeRegion` (arXiv:2412.05115, swiper/window_builder.py).
 - **window key, request, service**: the window is
   `(stream_id, window_index)`; the decode asked for it is a
   `DecoderRequestKey`, which carries the tier; the run of that decode on

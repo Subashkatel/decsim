@@ -382,6 +382,21 @@ BOUNDARY_EDGE_TWICE = (
     memory(2, decoder_boundary_predecessors=(1, 1)),
     memory(3, predecessors=(2,), blocked_by=2),
 )
+BLOCKING_CYCLE_AFTER_A_ROOT = (
+    memory(0),
+    memory(1, predecessors=(0,), blocked_by=2),
+    memory(2, predecessors=(0,), blocked_by=1),
+)
+BLOCKED_BY_ITS_SUCCESSOR = (
+    memory(0),
+    memory(1, predecessors=(0,), blocked_by=2),
+    memory(2, predecessors=(1,)),
+)
+BLOCKED_BY_NO_DATA = (
+    memory(0),
+    memory(1, predecessors=(0,), emits_detector_data=False),
+    memory(2, predecessors=(1,), blocked_by=1),
+)
 
 
 @pytest.mark.parametrize(
@@ -391,12 +406,18 @@ BOUNDARY_EDGE_TWICE = (
         (SELF_BLOCK_AFTER_A_ROOT, "blocked by itself"),
         (BOUNDARY_CYCLE, "cycle"),
         (BOUNDARY_EDGE_TWICE, "more than once"),
+        (BLOCKING_CYCLE_AFTER_A_ROOT, "cycle"),
+        (BLOCKED_BY_ITS_SUCCESSOR, "cycle"),
+        (BLOCKED_BY_NO_DATA, "emits no detector data"),
     ],
     ids=[
         "cycle after a root",
         "self block after a root",
         "boundary cycle",
         "boundary edge twice",
+        "blocking cycle after a root",
+        "blocked by its successor",
+        "blocked by an operation with no data",
     ],
 )
 def test_a_graph_that_waits_forever_after_a_root_is_refused_at_build(

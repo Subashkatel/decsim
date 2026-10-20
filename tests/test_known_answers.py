@@ -235,6 +235,50 @@ def test_a_latency_added_on_the_reaction_path_adds_exactly_that(path_name):
     assert slower_reaction - reaction == one_microsecond
 
 
+def gate_stall(settings):
+    """The second memory's GateStall, and the shot it came from."""
+    shot = run(settings)
+    (stall,) = shot.result.gate_stalls
+    return stall, shot
+
+
+def test_the_gate_stall_is_counted_from_the_round_it_was_otherwise_ready():
+    """Nothing but its release holds the second memory: ready at tick 0.
+
+    Its stall is its start less the first boundary, tick 0, and its
+    reaction is its release less the first memory's body done.
+    """
+    settings = feedback_settings()
+    stall, shot = gate_stall(settings)
+
+    stamps = shot.machine.observation.runtime_stamps
+    assert (stall.operation_id, stall.blocked_by) == (2, 1)
+    assert stall.ready_ticks == 0
+    assert stall.stall_ticks == stall.started_ticks == stamps.op_start[2]
+    assert stall.blocker_done_ticks == stamps.body_done[1]
+    reaction = stall.released_ticks - stall.blocker_done_ticks
+    assert stall.reaction_ticks == reaction > 0
+
+
+@pytest.mark.parametrize("path_name", tuple(REACTION_PATH))
+def test_a_latency_added_on_the_reaction_path_adds_exactly_that_stall(
+    path_name,
+):
+    """The stall moves with the reaction: one microsecond more on a hop.
+
+    The release reaches the runtime after the hop to the QPU, so every
+    hop moves the reaction as well as the stall.
+    """
+    settings = feedback_settings()
+    slower = with_latency_added(settings, path_name, 1.0)
+
+    stall, _ = gate_stall(settings)
+    slower_stall, _ = gate_stall(slower)
+
+    one_microsecond = config.microseconds_to_ticks(1.0)
+    assert slower_stall.stall_ticks - stall.stall_ticks == one_microsecond
+
+
 def committed_rounds(contributions: dict) -> list:
     """Every round some owner of the logical ledger commits, with repeats."""
     rounds = []

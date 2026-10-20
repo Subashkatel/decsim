@@ -456,6 +456,7 @@ def _connect_runtime_stamps(
     execution_runtime, factory, stamps: runtime_stamps_module.RuntimeStamps
 ) -> None:
     """The stamps hear every tick of an operation's life and its waits."""
+    execution_runtime.trace.operation_ready.connect(stamps.operation_ready)
     execution_runtime.trace.operation_issued.connect(stamps.operation_issued)
     execution_runtime.trace.operation_started.connect(stamps.operation_started)
     execution_runtime.trace.body_finished.connect(stamps.body_finished)

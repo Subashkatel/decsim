@@ -50,8 +50,8 @@ class TargetSteps:
     def __init__(self, settings: "TargetSteps.Settings") -> None:
         self.settings = settings
         self.level_index = settings.levels.index(settings.start)
-        self.window_count = 0
-        self.waiting_sum = 0
+        # the windows waiting behind each window decided since the last check
+        self.waiting_since_check: list = []
         self.calm_count = 0
         reach = max(settings.rise_checks, settings.calm_checks) + 1
         # the last checks' mean windows waiting, the newest last
@@ -66,16 +66,17 @@ class TargetSteps:
 
     def observe(self, waiting_windows: int) -> None:
         """One window decided, waiting_windows behind it; check on cadence."""
-        self.window_count += 1
-        self.waiting_sum += waiting_windows
+        self.waiting_since_check.append(waiting_windows)
         every = self.settings.check_every_windows
-        if self.window_count % every:
+        if len(self.waiting_since_check) < every:
             return
-        mean = self.waiting_sum / every
-        self.waiting_sum = 0
+        mean = sum(self.waiting_since_check) / every
+        self.waiting_since_check.clear()
         self.means.append(mean)
         self._check()
-        self.trajectory.append((self.window_count, self.target, mean))
+        check_count = len(self.trajectory) + 1
+        window_count = check_count * every
+        self.trajectory.append((window_count, self.target, mean))
 
     def _check(self) -> None:
         """Down on a sustained rise, up after calm checks, else hold."""

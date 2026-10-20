@@ -440,15 +440,7 @@ class RoundPlan:
         rollover_rounds: int,
         drift: Optional[tuple] = None,
     ) -> None:
-        self.fragments = {
-            name: getattr(program, name) for name in FRAGMENT_NAMES
-        }
-        self.drift_round = None
-        self.drifted = {}
-        if drift is not None:
-            self.drift_round, factor = drift
-            for name, fragment in self.fragments.items():
-                self.drifted[name] = scaled_noise(fragment, factor)
+        self.fragment_eras = _fragment_eras(program, drift)
         self.template = periodic_formation.StreamTemplate(program)
         self.references = _references(program, self.template)
         self.rollover_rounds = rollover_rounds
@@ -463,9 +455,10 @@ class RoundPlan:
 
     def fragment(self, name: str, round_index: int) -> stim.Circuit:
         """The named fragment as round round_index runs it."""
-        if self.drift_round is None or round_index <= self.drift_round:
-            return self.fragments[name]
-        return self.drifted[name]
+        for last_round, fragments in self.fragment_eras:
+            if last_round is None or round_index <= last_round:
+                return fragments[name]
+        raise AssertionError("the last era runs every later round")
 
     def rolls_over_after(self, round_index: int) -> bool:
         """Whether the simulator lets go of its past after this round."""
@@ -506,6 +499,18 @@ class _Stream:
 
     owner: program_records.Operation
     history: "FlipHistory"
+
+
+def _fragment_eras(program, drift: Optional[tuple]) -> tuple:
+    """(last round or None, fragments) in order: as written, then drifted."""
+    fragments = {name: getattr(program, name) for name in FRAGMENT_NAMES}
+    if drift is None:
+        return ((None, fragments),)
+    drift_round, factor = drift
+    drifted = {}
+    for name, fragment in fragments.items():
+        drifted[name] = scaled_noise(fragment, factor)
+    return ((drift_round, fragments), (None, drifted))
 
 
 def _references(program, template) -> dict:

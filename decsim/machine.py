@@ -565,6 +565,7 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
     stamps = machine.observation.runtime_stamps
     waits = stamps.magic_state_wait.values()
     magic_state_stall_ticks = sum(waits)
+    gate_stalls = _gate_stalls(machine, operation_by_id, ordered_ids)
     return result_records.RunResult(
         terminal_status="complete",
         event_queue_empty=True,
@@ -576,7 +577,40 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
         operation_results=tuple(rows),
         link_traffic=link_traffic,
         data_movement=data_movement,
+        gate_stalls=gate_stalls,
     )
+
+
+def _gate_stalls(machine: Machine, operation_by_id: dict, ordered_ids) -> tuple:
+    """A GateStall per feedback-blocked operation, from the stamps."""
+    stamps = machine.observation.runtime_stamps
+    boundary_at_or_after = machine.qpu.device.boundary_at_or_after
+    stalls = []
+    for operation_id in ordered_ids:
+        blocker_id = operation_by_id[operation_id].blocked_by
+        if blocker_id is None:
+            continue
+        blocker_done = stamps.body_done.get(blocker_id)
+        ready = stamps.otherwise_ready[operation_id]
+        released = stamps.decode_release[operation_id]
+        started = stamps.op_start[operation_id]
+        unblocked_start = boundary_at_or_after(ready)
+        reaction = None
+        if blocker_done is not None:
+            reaction = released - blocker_done
+        stall_ticks = started - unblocked_start
+        stall = result_records.GateStall(
+            operation_id=operation_id,
+            blocked_by=blocker_id,
+            blocker_done_ticks=blocker_done,
+            ready_ticks=ready,
+            released_ticks=released,
+            started_ticks=started,
+            stall_ticks=stall_ticks,
+            reaction_ticks=reaction,
+        )
+        stalls.append(stall)
+    return tuple(stalls)
 
 
 def _data_movement_value(

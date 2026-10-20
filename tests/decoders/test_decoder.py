@@ -28,7 +28,7 @@ class FixedRow(decoder_module.DecoderBase):
 
     def decode(self, job):
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, logical_observables=(1,)
+            job.stream_id, job.window_id, logical_observables=(1,)
         )
 
 
@@ -44,7 +44,7 @@ class MeasuredRow(decoder_module.DecoderBase):
         return None
 
     def decode(self, job):
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
     def decode_timed(self, job):
         result = self.decode(job)
@@ -87,7 +87,7 @@ class NoFaultRow(decoder_module.WindowDecoderBase):
 
 def _job(**fields) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=2, label="W0", **fields
+        stream_id=1, window_id=0, round_count=2, label="W0", **fields
     )
 
 
@@ -231,10 +231,8 @@ def test_a_preset_latency_takes_its_later_latency_from_its_window_on():
         2.0, later_latency_microseconds=3.0, from_window=4
     )
     row = settings.build()
-    before = decoding_records.DecodeJob(
-        operation_id=1, window_id=3, round_count=2
-    )
-    at = decoding_records.DecodeJob(operation_id=1, window_id=4, round_count=2)
+    before = decoding_records.DecodeJob(stream_id=1, window_id=3, round_count=2)
+    at = decoding_records.DecodeJob(stream_id=1, window_id=4, round_count=2)
 
     latencies = (row.latency(before), row.latency(at))
 

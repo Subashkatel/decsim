@@ -292,7 +292,7 @@ def _decoder_input_window(args: dict) -> Optional[str]:
     window = args.get("window")
     if window is None:
         return None
-    if args.get("rounds_by_operation") is None:
+    if args.get("rounds_by_stream") is None:
         return None
     if args.get("request") is None:
         return None
@@ -337,7 +337,7 @@ def _rounds_cover(args: dict, key: str) -> bool:
     through the window that reads it.
     """
     operation, index = _key_parts(key)
-    ranges = args.get("rounds_by_operation", {})
+    ranges = args.get("rounds_by_stream", {})
     text = ranges.get(operation)
     if text is None:
         return False
@@ -425,7 +425,7 @@ def _move_phrase(args: dict) -> str:
     """One link hop, and the window whose rounds it carried."""
     words = ["move"]
     window = args.get("window")
-    rounds = args.get("rounds_by_operation")
+    rounds = args.get("rounds_by_stream")
     if window is not None and rounds is not None:
         index = _window_index(window)
         rounds_text = _rounds_text(rounds)

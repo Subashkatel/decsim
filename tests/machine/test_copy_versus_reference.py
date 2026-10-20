@@ -197,7 +197,7 @@ def _landed_rounds(machine) -> list:
         if memory_name == "masked view":
             return
         for fragment in job.decoder_input.fragments():
-            key = (fragment.operation_id, fragment.round_index)
+            key = (fragment.stream_id, fragment.round_index)
             landed.append((key, fragment.bits))
 
     for service in _services(machine):
@@ -343,7 +343,7 @@ def _rounds_read_by_tier(machine) -> dict:
             return
         keys = read.setdefault(job.pool, set())
         for round_input in decoder_input.rounds:
-            keys.add((round_input.operation_id, round_input.round_index))
+            keys.add((round_input.stream_id, round_input.round_index))
 
     for service in _services(machine):
         service.trace.job_started.connect(record)
@@ -378,7 +378,7 @@ def _decoder_inputs(machine) -> list:
         rounds = []
         for fragment in job.decoder_input.fragments():
             rounds.append(
-                (fragment.operation_id, fragment.round_index, fragment.bits)
+                (fragment.stream_id, fragment.round_index, fragment.bits)
             )
         inputs.append((job.label, tuple(rounds)))
 
@@ -1097,7 +1097,7 @@ def _note_packets(held_by_seat: dict, seat, operation_id, bits) -> None:
 def _bookkeeping_of(machine, seat: str) -> dict:
     placement = machine.readout.detection_events
     history = placement.history_by_seat[seat]
-    done_rounds = history.memory.done_by_operation[1]
+    done_rounds = history.memory.done_by_stream[1]
     return {
         "events": len(history.memory.events_by_round),
         "claims": len(history.memory.claimed_keys),

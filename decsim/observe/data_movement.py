@@ -226,21 +226,21 @@ class DataMovement:
     def formation_state_held(
         self,
         seat: str,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         bits: int,
     ) -> None:
-        """A seat's former holds these raw bits of one operation now.
+        """A seat's former holds these raw bits of one stream now.
 
         The most one history held at each seat is kept, reported because no
         referent sizes it.
         """
-        del operation_id
+        del stream_id
         held = self.formation_state_bits_by_seat.get(seat, 0)
         self.formation_state_bits_by_seat[seat] = max(held, bits)
 
     def round_emitted(self, readout: round_records.QPUReadout) -> None:
         """One more round exists, so a per-round rate has a denominator."""
-        self.rounds_seen.add((readout.operation_id, readout.round_index))
+        self.rounds_seen.add((readout.stream_id, readout.round_index))
 
     @property
     def rounds(self) -> int:

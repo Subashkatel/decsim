@@ -123,7 +123,7 @@ def operation_window_plan(operation_id, geometries, dependencies=()):
         if index not in sources:
             exits.append(index)
     return window_records.OperationWindowPlan(
-        operation_id=operation_id,
+        stream_id=operation_id,
         windows=tuple(geometries),
         internal_dependencies=tuple(dependencies),
         entry_window_indices=tuple(entries),
@@ -530,13 +530,13 @@ def overlapping_successor_plan():
     third = window_records.Window(3, 0, 1, 2, 3, 3)
     return window_records.WindowPlan(
         windows={(1, 0): first, (2, 0): second, (3, 0): third},
-        window_count={1: 1, 2: 1, 3: 1},
-        op_windows={1: [0]},
-        successors={1: [2, 3], 2: [3], 3: []},
-        rounds_by_operation={1: 5, 2: 3, 3: 3},
+        window_count_by_stream={1: 1, 2: 1, 3: 1},
+        windows_by_stream={1: [0]},
+        successors_by_stream={1: [2, 3], 2: [3], 3: []},
+        rounds_by_stream={1: 5, 2: 3, 3: 3},
         total_windows=3,
-        windowed_by_operation={1: True, 2: True, 3: True},
-        batch_preceding_idle_rounds_by_operation={1: False, 2: False, 3: False},
+        windowed_by_stream={1: True, 2: True, 3: True},
+        batch_preceding_idle_rounds_by_stream={1: False, 2: False, 3: False},
     )
 
 
@@ -591,13 +591,13 @@ def chained_sliding_windows():
         windows[(1, index)] = window
     return window_records.WindowPlan(
         windows=windows,
-        window_count={1: 4},
-        op_windows={1: [0, 1, 2, 3]},
-        successors={1: []},
-        rounds_by_operation={1: 15},
+        window_count_by_stream={1: 4},
+        windows_by_stream={1: [0, 1, 2, 3]},
+        successors_by_stream={1: []},
+        rounds_by_stream={1: 15},
         total_windows=4,
-        windowed_by_operation={1: True},
-        batch_preceding_idle_rounds_by_operation={1: False},
+        windowed_by_stream={1: True},
+        batch_preceding_idle_rounds_by_stream={1: False},
     )
 
 
@@ -639,13 +639,13 @@ def one_window_with_a_successor():
     window = window_records.Window(1, 0, 3, 4, 6, 7, buffer_lo=2)
     return window_records.WindowPlan(
         windows={(1, 0): window},
-        window_count={1: 1},
-        op_windows={1: [0]},
-        successors={1: [2], 2: []},
-        rounds_by_operation={1: 7, 2: 4},
+        window_count_by_stream={1: 1},
+        windows_by_stream={1: [0]},
+        successors_by_stream={1: [2], 2: []},
+        rounds_by_stream={1: 7, 2: 4},
         total_windows=1,
-        windowed_by_operation={1: True},
-        batch_preceding_idle_rounds_by_operation={1: False},
+        windowed_by_stream={1: True},
+        batch_preceding_idle_rounds_by_stream={1: False},
     )
 
 

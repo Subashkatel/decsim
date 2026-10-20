@@ -256,7 +256,7 @@ class StrongRedecode:
         weak job. One whose input has not landed is held and enqueued
         when its condition fires, so there is no submission.
         """
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         if weak_job.window.deps_remaining > 0:
             self.selections.defer_speculative_decode(key, weak_job)
             return None
@@ -274,12 +274,12 @@ class StrongRedecode:
     def _planned_speculative_decode(
         self, weak_job: decoding_records.DecodeJob
     ) -> Optional[decoding_records.Submission]:
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         assignment = self.shape.plan(weak_job)
         self.selections.remember_speculative_decode(key, assignment.request_key)
         if assignment.job is None:
             self._hold(key, assignment, None)
-            self.submit_if_stored_data_releases(weak_job.operation_id)
+            self.submit_if_stored_data_releases(weak_job.stream_id)
             return None
         send_input = self._strong_input_send(assignment.job, None)
         return decoding_records.Submission(assignment.job, send_input)
@@ -293,7 +293,7 @@ class StrongRedecode:
         under its conditions.
         """
         self.statistics.escalated.add()
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         speculative_request_key = self.selections.take_speculative_decode(key)
         if speculative_request_key is not None:
             self.statistics.speculative_selected.add()
@@ -307,7 +307,7 @@ class StrongRedecode:
             self._enqueue(assignment.job, selection_arrival_ticks)
         else:
             self._hold(key, assignment, selection_arrival_ticks)
-            self.submit_if_stored_data_releases(weak_job.operation_id)
+            self.submit_if_stored_data_releases(weak_job.stream_id)
         self.decode_queue.await_strong_result(key, request_key)
 
     # ---- the two events that meet a declared condition
@@ -319,10 +319,10 @@ class StrongRedecode:
 
     def submit_if_stored_data_releases(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> None:
         """A round is stored: a strong window waiting on that data leaves."""
-        released = self.pending.released_by_stored_data(operation_id)
+        released = self.pending.released_by_stored_data(stream_id)
         self._submit_released(released)
 
     def cancel_strong_request(self, window_key: tuple) -> None:
@@ -574,7 +574,7 @@ class StrongRedecode:
         strong_request_key: window_records.DecoderRequestKey,
     ) -> int:
         """Send the window's selection; returns the tick it is expected."""
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         on_selection_delivered = functools.partial(
             self.decode_queue.accept_selection, key, strong_request_key
         )
@@ -644,7 +644,7 @@ class _StrongSelections:
         """Forget the delivered selections of the stream's windows before it."""
         stale = []
         for request_key in self.delivered_request_keys:
-            if request_key.operation_id != stream_id:
+            if request_key.stream_id != stream_id:
                 continue
             if request_key.window_id < window_index:
                 stale.append(request_key)

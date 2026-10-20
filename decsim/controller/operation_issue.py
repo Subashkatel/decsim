@@ -98,15 +98,15 @@ class OperationIssuer:
         binding = self.streams.binding_for(operation.id)
         if binding is None:
             issued_operation = operation
-            source_operation_id = operation.id
+            source_stream_id = operation.id
         else:
             issued_operation = dataclasses.replace(
                 operation,
                 stream_id=binding.stream_id,
                 stream_offset=binding.stream_offset,
             )
-            source_operation_id = binding.stream_id
-        source = self.resolved_operation_by_id[source_operation_id]
+            source_stream_id = binding.stream_id
+        source = self.resolved_operation_by_id[source_stream_id]
         round_ticks = self.round_ticks_for(operation)
         round_count = self.round_count_for(operation)
         return program_records.RunOperationBody(

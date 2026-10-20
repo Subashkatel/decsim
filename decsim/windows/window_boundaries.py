@@ -226,7 +226,7 @@ class BoundaryCourier:
         boundary = self._pinned_boundary(source_key, destination, record)
         positions = _row_positions(model)
         layer_bits = self.planner.syndrome_bits_per_round_of(
-            destination.operation_id
+            destination.stream_id
         )
         destination_info = window_records.WindowInfo.from_window(
             destination,
@@ -341,7 +341,7 @@ class BoundaryCourier:
             delivery_revision=delivery_revision,
             latest_source_revision=record.version,
             latest_delivery_revision=delivery_revision,
-            source_operation_round_count=source_round_count,
+            source_stream_round_count=source_round_count,
             dependency_released=True,
             payload=boundary,
         )
@@ -383,7 +383,7 @@ class BoundaryCourier:
     ) -> transfer_records.TransferAttribution:
         """The window's attribution, naming every round the window reads."""
         round_keys = self.retention.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
+            window.stream_id, window.start_round, window.buffer_hi, window
         )
         return transfer_records.TransferAttribution.for_window(
             window, operation, request_key, tuple(round_keys)
@@ -491,7 +491,7 @@ class BoundaryCourier:
         if model is not None:
             detector_positions = model.defect_positions
         layer_bits = self.planner.syndrome_bits_per_round_of(
-            destination.operation_id
+            destination.stream_id
         )
         return window_records.WindowInfo.from_window(
             destination,
@@ -507,7 +507,7 @@ class BoundaryCourier:
     def _receive_boundary(
         self,
         key: tuple,
-        source_operation_id,
+        source_stream_id,
         defects,
         source_key: tuple,
         version: int,
@@ -521,7 +521,7 @@ class BoundaryCourier:
         latest_delivery_revision = record.delivery_version_by_dependent.get(
             key, 0
         )
-        source_round_count = self.planner.round_count_of(source_operation_id)
+        source_round_count = self.planner.round_count_of(source_stream_id)
         delivery = window_records.BoundaryDelivery(
             source_key=source_key,
             destination_key=key,
@@ -529,7 +529,7 @@ class BoundaryCourier:
             delivery_revision=delivery_version,
             latest_source_revision=record.version,
             latest_delivery_revision=latest_delivery_revision,
-            source_operation_round_count=source_round_count,
+            source_stream_round_count=source_round_count,
             dependency_released=dependency_released,
             payload=defects,
         )

@@ -52,7 +52,7 @@ class DecodeBacklog:
         view = run_views.backlog_view(
             self.window_manager,
             self.decoder_managers,
-            self.round_events.rounds_read_out_by_operation,
+            self.round_events.rounds_read_out_by_stream,
         )
         if tick != self.tick:
             self.ended_peak = max(self.ended_peak, self.rounds)

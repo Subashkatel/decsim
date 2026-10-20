@@ -329,12 +329,12 @@ def _transfer_json(
         "path": record.path,
         "physical_alias": alias_by_channel[record.channel],
         "attribution": {
-            "operation_id": identity_records.stable_identity_json(
-                attribution.operation_id
+            "owner_id": identity_records.stable_identity_json(
+                attribution.owner_id
             ),
             "patch_ids": patch_ids,
             "window_id": attribution.window_id,
-            "rounds_by_operation": _rounds_json(attribution.round_keys),
+            "rounds_by_stream": _rounds_json(attribution.round_keys),
             "relation": _relation_json(attribution.relation),
         },
         "payload_bits": transfer.payload_bits,
@@ -355,22 +355,22 @@ def _transfer_json(
 
 
 def _rounds_json(round_keys: tuple) -> list:
-    """Each operation's rounds among the keys, as its first and its last.
+    """Each stream's rounds among the keys, as its first and its last.
 
-    A lookahead window reads its operation's last rounds and the next
-    operation's first ones, so one range would name rounds of one
-    operation that the other owns.
+    A lookahead window reads its stream's last rounds and the next
+    stream's first ones, so one range would name rounds of one stream
+    that the other owns.
     """
-    indices_by_operation = {}
-    for operation_id, round_index in round_keys:
-        indices = indices_by_operation.setdefault(operation_id, [])
+    indices_by_stream = {}
+    for stream_id, round_index in round_keys:
+        indices = indices_by_stream.setdefault(stream_id, [])
         indices.append(round_index)
     rounds = []
-    for operation_id, indices in indices_by_operation.items():
-        operation_json = identity_records.stable_identity_json(operation_id)
+    for stream_id, indices in indices_by_stream.items():
+        stream_json = identity_records.stable_identity_json(stream_id)
         rounds.append(
             {
-                "operation_id": operation_json,
+                "stream_id": stream_json,
                 "round_lo": min(indices),
                 "round_hi": max(indices),
             }
@@ -388,9 +388,7 @@ def _relation_json(relation) -> Optional[dict]:
         key = relation.request_key
     value = {
         "request_key": {
-            "operation_id": identity_records.stable_identity_json(
-                key.operation_id
-            ),
+            "stream_id": identity_records.stable_identity_json(key.stream_id),
             "window_id": key.window_id,
             "tier": key.pool.word,
             "run_sequence": key.run_sequence,

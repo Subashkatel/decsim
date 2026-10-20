@@ -16,7 +16,7 @@ def _row(path, window_index, times, run_sequence=None) -> dict:
     """One transfer of operation 1 for a window; times: request, delivery."""
     request, delivery = times
     operation = identity_records.stable_identity_json(1)
-    attribution = {"operation_id": operation, "window_id": window_index}
+    attribution = {"owner_id": operation, "window_id": window_index}
     if run_sequence is not None:
         request_key = {"run_sequence": run_sequence}
         attribution["relation"] = {"request_key": request_key}

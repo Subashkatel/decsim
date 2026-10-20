@@ -64,7 +64,7 @@ class PresetLatencyDecoder(decoder_module.DecoderBase):
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
         """An empty timing-only result."""
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
 
 def _check_a_change(later_latency_microseconds, from_window) -> None:

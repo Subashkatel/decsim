@@ -187,7 +187,7 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
     def decode(
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
 
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
@@ -2519,7 +2519,7 @@ def test_every_program_operation_is_registered_even_with_no_detector_data():
     stamps = machine.observation.runtime_stamps
 
     assert set(tracker.operation_by_id) == {1, 2}
-    assert 1 in tracker.arrivals_by_operation
+    assert 1 in tracker.arrivals_by_stream
     assert set(stamps.body_done) == {1, 2}
 
 
@@ -3817,7 +3817,7 @@ def _split_by_operation(records: list, operation_ids: set) -> tuple:
     inside = []
     outside = []
     for record in records:
-        if record.operation_id in operation_ids:
+        if record.stream_id in operation_ids:
             inside.append(record)
             continue
         outside.append(record)
@@ -4042,7 +4042,7 @@ def _assert_memory_slot_lifetimes(
         (operation, index): tick for tick, operation, index in stored
     }
     for event in arrivals:
-        key = (event.operation_id, event.round_index)
+        key = (event.stream_id, event.round_index)
         assert event.tick == release_ticks_by_round[key]
         expected_delivery = stored_ticks_by_round[key] + 350_000
         assert event.tick == expected_delivery
@@ -4053,7 +4053,7 @@ def _assert_idle_algorithm_charge(run: _Run, load_job_count: int) -> None:
     algorithm = [
         row for row in stages if row.stage == staged_decoder.ALGORITHM_STAGE
     ]
-    memory = [row for row in algorithm if row.operation_id not in (1, 2)]
+    memory = [row for row in algorithm if row.stream_id not in (1, 2)]
     assert len(memory) == load_job_count
     durations = [row.end_ticks - row.start_ticks for row in memory]
     assert durations == [200_000] * load_job_count
@@ -4214,7 +4214,7 @@ def _operations_on_group(operations: tuple, patches: tuple) -> tuple:
 def _assert_joint_acquisitions(run: _Run) -> None:
     source = run.machine.qpu.syndrome_source
     identities = [
-        (packet.operation_id, packet.round_index) for packet in run.packets
+        (packet.stream_id, packet.round_index) for packet in run.packets
     ]
     assert len(identities) == len(set(identities))
     footprints = {packet.patch_ids for packet in run.packets}

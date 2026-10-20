@@ -20,8 +20,8 @@ class _Windows:
     def __init__(self) -> None:
         self.told = []
 
-    def accept_feedback_memory_round(self, source_operation_id) -> None:
-        self.told.append(source_operation_id)
+    def accept_feedback_memory_round(self, source_stream_id) -> None:
+        self.told.append(source_stream_id)
 
 
 def test_a_landed_memory_round_is_counted_and_the_window_side_is_told():
@@ -34,5 +34,5 @@ def test_a_landed_memory_round_is_counted_and_the_window_side_is_told():
     arrivals.receive_memory_round(7)
     arrivals.receive_memory_round(9)
 
-    assert arrivals.landed_by_operation == {7: 2, 9: 1}
+    assert arrivals.landed_by_stream == {7: 2, 9: 1}
     assert windows.told == [7, 7, 9]

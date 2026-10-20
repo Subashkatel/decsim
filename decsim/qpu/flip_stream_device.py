@@ -229,10 +229,10 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
 
     def formation_table(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> formation_records.TableReads:
         """The recipes of the rounds run so far, moved off the template."""
-        stream = self._stream_for(operation_id)
+        stream = self._stream_for(stream_id)
         return stream.history.table()
 
     def logical_observable_truth(

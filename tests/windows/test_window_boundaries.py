@@ -57,7 +57,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
     source = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,
@@ -66,7 +66,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
         dependents=[(1, 1)],
     )
     dependent = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -85,9 +85,9 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     planner = types.SimpleNamespace(
         windows_by_key=windows,
         models=no_models,
-        round_count_of=lambda _operation_id: 20,
+        round_count_of=lambda _stream_id: 20,
         # d*d-1 checks of one d=3 patch
-        syndrome_bits_per_round_of=lambda _operation_id: 8,
+        syndrome_bits_per_round_of=lambda _stream_id: 8,
     )
     profile = REFERENCE_LAYOUT.card
     links = fabric.LinkFabric(profile, engine)
@@ -151,7 +151,7 @@ class _ReadingInteraction:
 def test_an_interaction_picking_targets_reads_any_planned_window():
     """The plan is handed whole, each window as a WindowInfo when read."""
     source = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,
@@ -159,7 +159,7 @@ def test_an_interaction_picking_targets_reads_any_planned_window():
         round_count=5,
     )
     later = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -188,11 +188,9 @@ def _retention_of(round_count: int) -> round_retention.RoundRetention:
         primary_tier=window_records.WEAK_POOL_ID,
     )
     retention.tracker = types.SimpleNamespace(
-        effective_round_count_for_window=lambda _operation_id, _window: (
-            round_count
-        )
+        effective_round_count_for_window=lambda _stream_id, _window: round_count
     )
-    retention.planner = types.SimpleNamespace(successors_by_operation={1: [2]})
+    retention.planner = types.SimpleNamespace(successors_by_stream={1: [2]})
     return retention
 
 
@@ -246,7 +244,7 @@ def _pinned_courier():
         id=1, name="memory", qubits=(0,), patches=(0,)
     )
     source = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,
@@ -255,7 +253,7 @@ def _pinned_courier():
         dependents=[(1, 1)],
     )
     dependent = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -269,9 +267,9 @@ def _pinned_courier():
     planner = types.SimpleNamespace(
         windows_by_key=windows,
         models=no_models,
-        round_count_of=lambda _operation_id: 6,
+        round_count_of=lambda _stream_id: 6,
         # d*d-1 checks of one d=3 patch
-        syndrome_bits_per_round_of=lambda _operation_id: 8,
+        syndrome_bits_per_round_of=lambda _stream_id: 8,
     )
     profile = REFERENCE_LAYOUT.card
     links = fabric.LinkFabric(profile, engine)
@@ -295,7 +293,7 @@ def _pinned_courier():
 def _strong_window_of_the_pin() -> window_records.Window:
     """The near-pinned strong redo of window (1,1): reads 4-9, commits 4-6."""
     return window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,

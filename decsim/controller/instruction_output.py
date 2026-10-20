@@ -108,7 +108,7 @@ class InstructionOutput:
     def _send(self, payload, operation_id, event_kind: str, deliver) -> None:
         """Pay the pulse cost, then cross controller_to_qpu to deliver."""
         attribution = transfer_records.TransferAttribution(
-            operation_id=operation_id,
+            owner_id=operation_id,
             patch_ids=(),
             window_id=None,
             first_round=None,

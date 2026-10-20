@@ -67,16 +67,16 @@ def materialize_decoder_input(
     """Build one immutable decoder memory input from a job's fragments."""
     fragments_by_round: dict = {}
     for payload in job.payloads:
-        identity = (payload.operation_id, payload.round_index)
+        identity = (payload.stream_id, payload.round_index)
         fragments = fragments_by_round.setdefault(identity, [])
         fragments.append(payload)
     rounds_with_fragments = fragments_by_round.items()
     ordered = sorted(rounds_with_fragments, key=_round_order_key)
     rounds = []
     for identity, fragments in ordered:
-        operation_id, round_index = identity
+        stream_id, round_index = identity
         round_input = decoding_records.MaterializedSyndromeRound(
-            operation_id=operation_id,
+            stream_id=stream_id,
             round_index=round_index,
             fragments=tuple(fragments),
         )
@@ -84,7 +84,7 @@ def materialize_decoder_input(
     rounds = tuple(rounds)
     _check_detector_row_layout(job, rounds)
     return decoding_records.DecoderInput(
-        operation_id=job.operation_id,
+        stream_id=job.stream_id,
         window_id=job.window_id,
         request_key=job.request_key,
         rounds=rounds,
@@ -275,8 +275,8 @@ def _drop_reader(
 
 def _round_order_key(item: tuple) -> tuple:
     identity, _fragments = item
-    operation_id, round_index = identity
-    order = identity_records.stable_identity_bytes(operation_id)
+    stream_id, round_index = identity
+    order = identity_records.stable_identity_bytes(stream_id)
     return order, round_index
 
 
@@ -295,7 +295,7 @@ def _check_detector_row_layout(
         return
     input_rows = _input_row_identities(job, rounds)
     model_rows = _model_row_identities(
-        job.operation_id, model.detector_ids, model.defect_positions
+        job.stream_id, model.detector_ids, model.defect_positions
     )
     if input_rows != model_rows:
         raise RuntimeError(
@@ -309,17 +309,17 @@ def _input_row_identities(
     job: decoding_records.DecodeJob,
     rounds: tuple[decoding_records.MaterializedSyndromeRound, ...],
 ) -> tuple:
-    """(operation, round, position) of every bit the input carries."""
+    """(stream, round, position) of every bit the input carries."""
     identities = []
     for round_input in rounds:
-        is_same_operation = identity_records.same_stable_identity(
-            round_input.operation_id, job.operation_id
+        is_same_stream = identity_records.same_stable_identity(
+            round_input.stream_id, job.stream_id
         )
-        if not is_same_operation:
+        if not is_same_stream:
             raise RuntimeError(
-                f"{job.label}: model-backed decoder-input round operation "
-                f"{round_input.operation_id!r} does not match job operation "
-                f"{job.operation_id!r}"
+                f"{job.label}: model-backed decoder-input round stream "
+                f"{round_input.stream_id!r} does not match job stream "
+                f"{job.stream_id!r}"
             )
         round_rows = _round_row_identities(round_input)
         identities.extend(round_rows)
@@ -337,20 +337,18 @@ def _round_row_identities(
         for bit_offset in range(len(fragment.bits)):
             position = position_in_round + bit_offset
             identities.append(
-                (round_input.operation_id, round_input.round_index, position)
+                (round_input.stream_id, round_input.round_index, position)
             )
         position_in_round += len(fragment.bits)
     return identities
 
 
-def _model_row_identities(
-    operation_id, detector_ids, defect_positions
-) -> tuple:
-    """(operation, round, position) of every detector row of the model."""
+def _model_row_identities(stream_id, detector_ids, defect_positions) -> tuple:
+    """(stream, round, position) of every detector row of the model."""
     identities = []
     for detector_id in detector_ids:
         round_index, position_in_round = defect_positions[detector_id]
-        identities.append((operation_id, round_index, position_in_round))
+        identities.append((stream_id, round_index, position_in_round))
     return tuple(identities)
 
 

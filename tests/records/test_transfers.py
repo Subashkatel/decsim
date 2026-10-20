@@ -13,7 +13,7 @@ import decsim.records.windows as window_records
 
 def make_fragment(patch_id):
     return round_records.RetainedSyndromeFragment(
-        operation_id=7,
+        stream_id=7,
         patch_ids=(patch_id,),
         round_index=3,
         bits=(0, 1),
@@ -44,10 +44,10 @@ def test_a_regions_rounds_are_named_under_each_packets_own_operation():
     patch_a = make_fragment("patch-a")
     patch_b = make_fragment("patch-b")
     last_of_the_first = round_records.SyndromeRoundPacket(
-        operation_id=1, round_index=6, fragments=(patch_a,)
+        stream_id=1, round_index=6, fragments=(patch_a,)
     )
     first_of_the_next = round_records.SyndromeRoundPacket(
-        operation_id=2, round_index=1, fragments=(patch_b,)
+        stream_id=2, round_index=1, fragments=(patch_b,)
     )
     request_key = window_records.DecoderRequestKey(
         1, 1, window_records.STRONG_POOL_ID, 0

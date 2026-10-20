@@ -188,7 +188,7 @@ class StrongRequests:
         An attempt is the forced-class requests its window side submits
         together, one or two request keys.
         """
-        window_key = (job.operation_id, job.window_id)
+        window_key = (job.stream_id, job.window_id)
         self._open_attempt(window_key, job)
         job.request_admitted_ticks = now
 
@@ -380,7 +380,7 @@ class StrongRequests:
         """
         request_job = completion.request_job
         request_key = request_job.request_key
-        key = (request_key.operation_id, request_key.window_id)
+        key = (request_key.stream_id, request_key.window_id)
         pool = request_key.pool
         if self._takes_the_awaited_result(key, request_job):
             return True
@@ -430,7 +430,7 @@ class StrongRequests:
         for request in requests:
             key = request.strong_decode_for
             empty = decoding_records.DecodeResult(
-                operation_id=key[0], window_id=key[1]
+                stream_id=key[0], window_id=key[1]
             )
             completion = StrongCompletion(request, empty, now, unit)
             deliveries.append(completion)
@@ -622,7 +622,7 @@ def _is_merged_service(
     """Whether one decode served several requests, or another window's."""
     if len(requests) > 1:
         return True
-    result_identity = (result.operation_id, result.window_id)
+    result_identity = (result.stream_id, result.window_id)
     for request in requests:
         if request.strong_decode_for != result_identity:
             return True

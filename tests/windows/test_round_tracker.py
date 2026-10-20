@@ -22,27 +22,27 @@ class _Planner:
 
     def __init__(self, round_counts: dict, successors: dict) -> None:
         self.round_counts = round_counts
-        self.successors_by_operation = successors
+        self.successors_by_stream = successors
         self.models = types.SimpleNamespace(
             finalize_stream_models=lambda _operation, _count: False
         )
 
-    def round_count_of(self, operation_id) -> int:
-        return self.round_counts[operation_id]
+    def round_count_of(self, stream_id) -> int:
+        return self.round_counts[stream_id]
 
 
-def _operation(operation_id, **fields) -> program_records.Operation:
+def _operation(stream_id, **fields) -> program_records.Operation:
     return program_records.Operation(
-        operation_id, f"op{operation_id}", (0,), **fields
+        stream_id, f"op{stream_id}", (0,), **fields
     )
 
 
 def _window(
-    operation_id, commit_lo, commit_hi, buffer_hi
+    stream_id, commit_lo, commit_hi, buffer_hi
 ) -> window_records.Window:
     round_count = buffer_hi - commit_lo + 1
     return window_records.Window(
-        operation_id=operation_id,
+        stream_id=stream_id,
         window_index=0,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -56,10 +56,10 @@ def _close_boundaries(tracker, stream_id, boundaries) -> None:
         tracker.close_boundary(stream_id, boundary)
 
 
-def _arrive_through(tracker, operation_id, last_round: int) -> None:
+def _arrive_through(tracker, stream_id, last_round: int) -> None:
     past_the_last = last_round + 1
     for round_index in range(1, past_the_last):
-        tracker.note_arrival(operation_id, round_index)
+        tracker.note_arrival(stream_id, round_index)
 
 
 def _tracker(

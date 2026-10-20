@@ -59,12 +59,12 @@ class _FixedDevice:
 
     def result(self, ticket: _Ticket) -> decoding_records.DecodeResult:
         job = ticket.job
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
 
 def _job(label: str, window_id: int) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=window_id, round_count=3, label=label
+        stream_id=1, window_id=window_id, round_count=3, label=label
     )
 
 
@@ -195,7 +195,7 @@ class _FixedAnsweringDevice(_FixedDevice):
         no_correction = numpy.zeros(0, dtype=numpy.uint8)
         no_crossing = window_records.CrossingCommit(nothing, (0,))
         return decoding_records.DecodeResult(
-            job.operation_id,
+            job.stream_id,
             job.window_id,
             correction=no_correction,
             logical_observables=(0,),
@@ -419,7 +419,7 @@ class _HostPathDevice:
         return (launch, work)
 
     def result(self, ticket) -> decoding_records.DecodeResult:
-        return decoding_records.DecodeResult(ticket.operation_id, 0)
+        return decoding_records.DecodeResult(ticket.stream_id, 0)
 
 
 def _host_monitor(arrivals: tuple, workers: int, launch: int, work: int):

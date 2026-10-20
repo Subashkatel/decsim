@@ -26,13 +26,13 @@ BUFFER_ROUNDS = 2
 def _empty_plan() -> window_records.WindowPlan:
     return window_records.WindowPlan(
         windows={},
-        window_count={},
-        op_windows={},
-        successors={},
-        rounds_by_operation={},
+        window_count_by_stream={},
+        windows_by_stream={},
+        successors_by_stream={},
+        rounds_by_stream={},
         total_windows=0,
-        windowed_by_operation={},
-        batch_preceding_idle_rounds_by_operation={},
+        windowed_by_stream={},
+        batch_preceding_idle_rounds_by_stream={},
     )
 
 
@@ -50,8 +50,8 @@ def _resolved(operation_id, round_count: int):
     )
 
 
-def _stream(operation_id="stream"):
-    return program_records.Operation(operation_id, "stream", (0,))
+def _stream(stream_id="stream"):
+    return program_records.Operation(stream_id, "stream", (0,))
 
 
 class _FiniteSource:
@@ -382,7 +382,7 @@ def _shifted_spans(geometries: tuple, round_shift: int) -> list:
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(
-        operation_id=7,
+        stream_id=7,
         window_index=0,
         commit_lo=1,
         commit_hi=6,
@@ -390,7 +390,7 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
         round_count=6,
     )
     plan.windows[(7, 0)] = window
-    plan.batch_preceding_idle_rounds_by_operation[7] = True
+    plan.batch_preceding_idle_rounds_by_stream[7] = True
     built = built_window_models.BuiltWindowModels()
     models = window_planner.WindowModels(built)
     models.decoder = _Decoder()
@@ -410,7 +410,7 @@ def _window_reading_from(index: int, buffer_lo: int, commit_lo: int):
     buffer_hi = commit_lo + 4
     round_count = buffer_hi - buffer_lo + 1
     return window_records.Window(
-        operation_id=7,
+        stream_id=7,
         window_index=index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -432,7 +432,7 @@ def test_the_start_floors_follow_out_of_order_starts_and_a_reslice():
     for index, (buffer_lo, commit_lo) in enumerate(starts):
         window = _window_reading_from(index, buffer_lo, commit_lo)
         plan.windows[(7, index)] = window
-    plan.op_windows[7] = [0, 1, 2, 3]
+    plan.windows_by_stream[7] = [0, 1, 2, 3]
     planner = window_planner.WindowPlanner((), plan, ())
     floors = planner.start_floors_of(7)
     assert list(floors) == [1, 4, 4, 9]

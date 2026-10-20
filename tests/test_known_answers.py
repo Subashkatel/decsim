@@ -169,7 +169,7 @@ def last_round_tick(shot: collect.Shot, operation_id: int) -> int:
     """The tick the operation's last round left the QPU."""
     ticks = []
     for event in shot.machine.observation.round_events.events:
-        if event.kind != "EMITTED" or event.operation_id != operation_id:
+        if event.kind != "EMITTED" or event.stream_id != operation_id:
             continue
         ticks.append(event.tick)
     return max(ticks)

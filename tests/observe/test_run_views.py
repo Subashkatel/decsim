@@ -23,8 +23,8 @@ class _WindowManager:
         self.backlog_rounds = backlog_rounds
         self.rounds_read_out = None
 
-    def backlog_round_counts(self, rounds_read_out_by_operation):
-        self.rounds_read_out = rounds_read_out_by_operation
+    def backlog_round_counts(self, rounds_read_out_by_stream):
+        self.rounds_read_out = rounds_read_out_by_stream
         return self.backlog_rounds
 
 
@@ -49,6 +49,6 @@ def test_the_rounds_are_summed_per_operation_per_patch_and_over_the_run():
     view = run_views.backlog_view(windows, decoders, rounds_read_out)
 
     assert windows.rounds_read_out == rounds_read_out
-    assert view.per_op_rounds == ((1, 4), (2, 3), (3, 2))
+    assert view.per_stream_rounds == ((1, 4), (2, 3), (3, 2))
     assert view.per_patch_rounds == (("p0", 7), ("p1", 2))
     assert view.total_rounds == 9

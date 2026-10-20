@@ -336,7 +336,7 @@ class Machine:
         region = self.observation.region_of_interest
         if region is not None:
             round_events = self.observation.round_events
-            region.check_begun(round_events.rounds_read_out_by_operation)
+            region.check_begun(round_events.rounds_read_out_by_stream)
         for part in self.switching_parts:
             part.check_settled()
         self.windows.check_settled()

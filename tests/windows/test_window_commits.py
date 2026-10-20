@@ -129,7 +129,7 @@ class _Fixture:
     ) -> None:
         self.engine = engine_module.Engine()
         self.window = window_records.Window(
-            operation_id=4,
+            stream_id=4,
             window_index=1,
             commit_lo=4,
             commit_hi=6,
@@ -205,7 +205,7 @@ class _Fixture:
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
         request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)
         job = decoding_records.DecodeJob(
-            operation_id=4, window_id=1, round_count=5, request_key=request_key
+            stream_id=4, window_id=1, round_count=5, request_key=request_key
         )
         self.verdicts[request_key] = awaiting
         return job

@@ -290,10 +290,10 @@ class StagedDecoder(decoder_module.DecoderBase):
         job = running.job
         sequences = _run_sequences(job)
         fragments = _fragments_read(job)
-        last_rounds_read = decoding_records.last_round_by_operation(fragments)
+        last_rounds_read = decoding_records.last_round_by_stream(fragments)
         served_windows = _served_windows(job)
         record = decoding_records.DecoderStageRecord(
-            job.operation_id,
+            job.stream_id,
             job.window_id,
             step.name,
             step.cycles,
@@ -389,7 +389,7 @@ def _served_windows(job: decoding_records.DecodeJob) -> tuple:
     """The windows of every request this decode serves, each once."""
     windows = []
     for key in job.service_original_request_keys:
-        window = (key.operation_id, key.window_id)
+        window = (key.stream_id, key.window_id)
         if window not in windows:
             windows.append(window)
     return tuple(windows)
@@ -430,7 +430,7 @@ def _round_widths(job: decoding_records.DecodeJob) -> list:
     """
     bits_by_round: dict = {}
     for fragment in _fragments_of(job):
-        round_key = (fragment.operation_id, fragment.round_index)
+        round_key = (fragment.stream_id, fragment.round_index)
         fragment_bits = round_records.stated_bits(fragment.size_bits)
         bits_by_round.setdefault(round_key, 0)
         bits_by_round[round_key] += fragment_bits

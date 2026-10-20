@@ -198,7 +198,7 @@ def test_protected_segments_emit_one_faulted_history_without_resampling() -> (
     emitted = tuple(bit for packet in readouts for bit in packet.bits)
     assert emitted == tuple(measurements[0])
     assert [packet.round_index for packet in readouts] == list(range(1, 25))
-    assert {packet.operation_id for packet in readouts} == {
+    assert {packet.stream_id for packet in readouts} == {
         producers.LIVE_STREAM_ID
     }
     assert result.operation_results[-1].observable_truth == (1,)

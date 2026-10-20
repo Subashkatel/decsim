@@ -44,13 +44,13 @@ class ReleaseConditions:
     """What must happen before a held strong job may be built.
 
     committed_windows are the weak windows whose commits the row waits
-    on; stored_data_of_operation is the operation whose stored rounds
+    on; stored_data_of_stream is the stream whose stored rounds
     release it. name labels the wait in the run's view,
     released_description in the log.
     """
 
     committed_windows: tuple = ()
-    stored_data_of_operation: Optional[int] = None
+    stored_data_of_stream: Any = None  # an opaque identity
     name: str = "nothing"
     released_description: str = ""
 
@@ -82,7 +82,7 @@ class PendingStrongWindows:
     def register(self, held: PendingStrongWindow) -> None:
         """Hold the assignment under the conditions its row declared."""
         conditions = held.conditions
-        waits_on_data = conditions.stored_data_of_operation is not None
+        waits_on_data = conditions.stored_data_of_stream is not None
         has_condition = bool(conditions.committed_windows) or waits_on_data
         if not has_condition:
             raise RuntimeError(
@@ -97,7 +97,7 @@ class PendingStrongWindows:
         if waits_on_data:
             _index(
                 self.keys_by_stored_operation,
-                conditions.stored_data_of_operation,
+                conditions.stored_data_of_stream,
                 held.key,
             )
 
@@ -114,10 +114,10 @@ class PendingStrongWindows:
 
     def released_by_stored_data(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> tuple:
-        """The entries of this operation whose weak commits have landed."""
-        waiting = _waiting_on(self.keys_by_stored_operation, operation_id)
+        """The entries of this stream whose weak commits have landed."""
+        waiting = _waiting_on(self.keys_by_stored_operation, stream_id)
         released = []
         for held_key in waiting:
             if self.uncommitted_windows[held_key]:
@@ -132,9 +132,9 @@ class PendingStrongWindows:
         del self.uncommitted_windows[held.key]
         for window_key in held.conditions.committed_windows:
             _unindex(self.keys_by_committed_window, window_key, held.key)
-        operation_id = held.conditions.stored_data_of_operation
-        if operation_id is not None:
-            _unindex(self.keys_by_stored_operation, operation_id, held.key)
+        stream_id = held.conditions.stored_data_of_stream
+        if stream_id is not None:
+            _unindex(self.keys_by_stored_operation, stream_id, held.key)
 
     def held_for(self, window_key: tuple) -> Optional[PendingStrongWindow]:
         """The entry held for one escalated window, or None."""
@@ -160,9 +160,9 @@ def waiting_text(conditions: ReleaseConditions) -> str:
     parts = []
     for window_key in conditions.committed_windows:
         parts.append(f"commit of window {window_key}")
-    operation_id = conditions.stored_data_of_operation
-    if operation_id is not None:
-        parts.append(f"stored rounds of operation {operation_id}")
+    stream_id = conditions.stored_data_of_stream
+    if stream_id is not None:
+        parts.append(f"stored rounds of stream {stream_id}")
     return ", ".join(parts)
 
 

@@ -44,7 +44,7 @@ class ReadoutLog:
         self.rounds.append(
             (
                 self.engine.now,
-                payload.operation_id,
+                payload.stream_id,
                 payload.patch_ids,
                 payload.round_index,
             )

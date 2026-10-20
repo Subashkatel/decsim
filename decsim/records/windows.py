@@ -52,7 +52,7 @@ class DecoderRequestKey:
     distinct from the request it replaces.
     """
 
-    operation_id: Any  # an opaque identity
+    stream_id: Any  # an opaque identity
     window_id: int
     pool: PoolId
     run_sequence: int
@@ -81,16 +81,16 @@ REQUEST_KEY_WIRE_BITS = 64
 
 @dataclass
 class Window:
-    """One decoder window inside an operation's syndrome stream.
+    """One decoder window inside a decode stream.
 
     Rounds are 1-based and ranges inclusive: the window reads rounds
     [start_round, buffer_hi] and commits corrections for
     [commit_lo, commit_hi].
     """
 
-    operation_id: int  # operation that owns the stream
-    # the window's index within the operation;
-    # key = (operation_id, window_index)
+    stream_id: Any  # the decode stream the window reads (an opaque identity)
+    # the window's index within the stream;
+    # key = (stream_id, window_index)
     window_index: int
     commit_lo: int  # first round this window commits
     commit_hi: int  # last round this window commits
@@ -166,8 +166,8 @@ class Window:
 
     @property
     def key(self) -> tuple:
-        """(operation_id, window_index), the key window collections use."""
-        return (self.operation_id, self.window_index)
+        """(stream_id, window_index), the key window collections use."""
+        return (self.stream_id, self.window_index)
 
 
 @dataclass(frozen=True)
@@ -177,7 +177,7 @@ class WindowInfo:
     It holds the window's geometry and topology, read-only.
     """
 
-    operation_id: int
+    stream_id: int
     window_index: int
     commit_lo: int
     commit_hi: int
@@ -204,7 +204,7 @@ class WindowInfo:
         if detector_positions is not None:
             positions = dict(detector_positions)
         return cls(
-            operation_id=window.operation_id,
+            stream_id=window.stream_id,
             window_index=window.window_index,
             commit_lo=window.commit_lo,
             commit_hi=window.commit_hi,
@@ -243,9 +243,9 @@ class WindowGeometry:
 
 @dataclass(frozen=True)
 class OperationWindowPlan:
-    """One scheme's complete immutable result for one operation."""
+    """One scheme's complete immutable result for one stream."""
 
-    operation_id: int
+    stream_id: Any  # an opaque identity
     windows: tuple[WindowGeometry, ...]
     internal_dependencies: tuple[tuple[int, int], ...]
     entry_window_indices: tuple[int, ...]
@@ -259,16 +259,18 @@ class OperationWindowPlan:
 class WindowPlan:
     """Compile-time window layout handed to the window manager."""
 
-    windows: dict  # (operation_id, window_index) -> Window
-    window_count: dict  # operation_id -> number of windows
-    # operation_id -> [window keys, in window_index order]
-    op_windows: dict
-    successors: dict  # operation_id -> [op ids listing it as predecessor]
-    rounds_by_operation: dict  # operation_id -> resolved positive round count
+    windows: dict  # (stream_id, window_index) -> Window
+    window_count_by_stream: dict  # stream_id -> number of windows
+    # stream_id -> [window keys, in window_index order]
+    windows_by_stream: dict
+    # stream_id -> [the streams that follow it, whose first rounds its
+    # last windows may read]
+    successors_by_stream: dict
+    rounds_by_stream: dict  # stream_id -> resolved positive round count
     total_windows: int
-    windowed_by_operation: dict
-    batch_preceding_idle_rounds_by_operation: dict
-    protocol_by_operation: dict = field(default_factory=dict)
+    windowed_by_stream: dict
+    batch_preceding_idle_rounds_by_stream: dict
+    protocol_by_stream: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -304,7 +306,7 @@ class BoundaryDelivery:
     delivery_revision: int
     latest_source_revision: int
     latest_delivery_revision: int
-    source_operation_round_count: int
+    source_stream_round_count: int
     dependency_released: bool
     payload: object  # opaque to all but the window interaction
 
@@ -396,13 +398,13 @@ class StrongRegionPlan:
 
 @dataclass(frozen=True)
 class SuccessorReadiness:
-    """How many rounds of a dependent operation have arrived, of how many.
+    """How many rounds of a following stream have arrived, of how many.
 
-    A window at the end of an operation waits on the operation that
-    follows it, so a scheme reads the successor's arrivals too.
+    A window at the end of a stream waits on the stream that follows
+    it, so a scheme reads the successor's arrivals too.
     """
 
-    operation_id: int
+    stream_id: Any  # an opaque identity
     rounds_arrived: int
     round_count: int
 
@@ -434,12 +436,12 @@ class FormationReads:
 
     def strong_read_start(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         first_round: int,
         last_round: int,
     ) -> int:
         """The first round a strong read of these rounds holds."""
-        table = self.tables.get(operation_id)
+        table = self.tables.get(stream_id)
         if self.strong_side_seat is None or table is None:
             return first_round
         stop_round = last_round + 1

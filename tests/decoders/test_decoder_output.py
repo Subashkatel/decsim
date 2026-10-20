@@ -129,7 +129,7 @@ class _Frame:
 
 def _window() -> window_records.Window:
     return window_records.Window(
-        operation_id=4,
+        stream_id=4,
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -274,7 +274,7 @@ def _selection_bits(route: str, weak_job) -> int:
 def _timing_only_job(patch_ids: tuple) -> decoding_records.DecodeJob:
     """A weak job with no error model, reading one round of those patches."""
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=4,
+        stream_id=4,
         patch_ids=patch_ids,
         round_index=2,
         bits=None,
@@ -282,7 +282,7 @@ def _timing_only_job(patch_ids: tuple) -> decoding_records.DecodeJob:
         fragment_index=0,
     )
     return decoding_records.DecodeJob(
-        operation_id=4, window_id=1, round_count=5, payloads=[fragment]
+        stream_id=4, window_id=1, round_count=5, payloads=[fragment]
     )
 
 
@@ -317,7 +317,7 @@ def test_a_direct_selection_carries_a_crossing_bit_per_observable():
         physical_faults=placed,
     )
     weak_job = decoding_records.DecodeJob(
-        operation_id=4, window_id=1, round_count=5, detector_error_model=model
+        stream_id=4, window_id=1, round_count=5, detector_error_model=model
     )
     assert _selection_bits("direct", weak_job) == 64 + 2
 
@@ -395,7 +395,7 @@ def _region() -> round_records.EscalatedRegion:
     packets = []
     for round_index in (2, 3):
         fragment = round_records.RetainedSyndromeFragment(
-            operation_id=4,
+            stream_id=4,
             patch_ids=(0,),
             round_index=round_index,
             bits=None,

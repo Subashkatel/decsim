@@ -82,7 +82,7 @@ class WindowManager:
         self.feedback_boundary_mode = feedback_boundary_mode
         # operation id -> position of its first window neither queued nor
         # committed; both hold until a withdrawal moves it back
-        self.first_open_by_operation: dict = {}
+        self.first_open_by_stream: dict = {}
 
     def start(self) -> None:
         """Give every window the plan laid its first boundary.
@@ -102,7 +102,7 @@ class WindowManager:
         """Track an operation's rounds, payload RAM, and feedback role."""
         is_new = self.tracker.register_operation(operation)
         if is_new:
-            self.retention.open_operation_store(operation.id)
+            self.retention.open_stream_store(operation.id)
 
     def register_stream(
         self,
@@ -116,7 +116,7 @@ class WindowManager:
         stream_operation = dataclasses.replace(
             stream_operation, feedback_boundary_mode=resolved_feedback_mode
         )
-        self.retention.open_operation_store(stream_operation.id)
+        self.retention.open_stream_store(stream_operation.id)
         source_round_limit = self.planner.register_stream(
             stream_operation, physical_round_limit
         )
@@ -130,18 +130,18 @@ class WindowManager:
 
     # ---- dynamic streams: their windows are planned as rounds arrive
 
-    def _update_stream(self, operation_id) -> None:
+    def _update_stream(self, stream_id) -> None:
         """Grow (and maybe seal) the stream as one more round arrives."""
-        if not self.planner.has_stream(operation_id):
+        if not self.planner.has_stream(stream_id):
             return
-        highest_known_round = self.tracker.rounds_arrived(operation_id)
-        self._grow_stream(operation_id, highest_known_round, None)
-        if self.tracker.is_sealed(operation_id):
+        highest_known_round = self.tracker.rounds_arrived(stream_id)
+        self._grow_stream(stream_id, highest_known_round, None)
+        if self.tracker.is_sealed(stream_id):
             return
-        if self.tracker.reaches_source_limit(operation_id):
+        if self.tracker.reaches_source_limit(stream_id):
             # the source declared this limit, so it needs no attesting
-            limit = self.tracker.source_round_limit(operation_id)
-            self.seal_stream(operation_id, limit)
+            limit = self.tracker.source_round_limit(stream_id)
+            self.seal_stream(stream_id, limit)
 
     def _grow_stream(
         self, stream_id, highest_known_round: int, round_cap: Optional[int]
@@ -162,7 +162,7 @@ class WindowManager:
             window_info
         )
         if window.window_index > 0:
-            previous_key = (window.operation_id, window.window_index - 1)
+            previous_key = (window.stream_id, window.window_index - 1)
             self._link_to_previous_window(previous_key, window.key, window)
         self.planner.attach_stream_model(window)
         self.retention.register_window(window.key, window)
@@ -203,7 +203,7 @@ class WindowManager:
             self.planner.refresh_stream_models(stream_id)
         self.tracker.seal(stream_id, stream_round_count)
         self.retention.release_later_stream_reads(stream_id)
-        self.check_windows_for_operation(stream_id)
+        self.check_windows_of_stream(stream_id)
         self.results.finish_workload_if_ready()
 
     def close_stream_boundary(
@@ -224,7 +224,7 @@ class WindowManager:
         if not self.planner.is_finite_stream(stream_id):
             self.planner.trim_stream_tail(stream_id, stream_round_count)
         self._refresh_unqueued_stream_windows(stream_id)
-        self.check_windows_for_operation(stream_id)
+        self.check_windows_of_stream(stream_id)
 
     def _refresh_unqueued_stream_windows(self, stream_id) -> None:
         """Refresh retained reads once a stream boundary closes the tail."""
@@ -251,9 +251,9 @@ class WindowManager:
         They are committed (window_release.py), so the walk from the
         first open window passes them anyway.
         """
-        first_open = self.first_open_by_operation.get(stream_id, 0)
+        first_open = self.first_open_by_stream.get(stream_id, 0)
         first_open = max(first_open, window_index)
-        self.first_open_by_operation[stream_id] = first_open
+        self.first_open_by_stream[stream_id] = first_open
 
     def has_dynamic_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True for a stream whose windows are planned at runtime."""
@@ -270,7 +270,7 @@ class WindowManager:
         No decoder input moves here: a window's input leaves its store
         when its decode request is admitted.
         """
-        operation = self.tracker.operation_by_id[packet.operation_id]
+        operation = self.tracker.operation_by_id[packet.stream_id]
         self._refuse_unplanned_round(packet, operation)
         # The weak syndrome buffer publication is the readiness authority
         # for the weak lane; a strong-primary run's rounds never come here
@@ -283,7 +283,7 @@ class WindowManager:
         # a round whose every consumer already resolved (an absorbed window's
         # tail) frees its weak syndrome buffer slot on arrival, the same
         # drop-on-arrival rule the strong syndrome buffer applies
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         self.retention.release_round_if_unheld(round_key)
 
     def _refuse_unplanned_round(
@@ -292,7 +292,7 @@ class WindowManager:
         operation: program_records.Operation,
     ) -> None:
         """A round past the plan is the device's mistake (it is a plug-in)."""
-        if not self.retention.has_operation_store(operation.id):
+        if not self.retention.has_stream_store(operation.id):
             raise RuntimeError(
                 f"round {packet.round_index} of {operation.name} arrived "
                 f"after the op's last window committed and its syndrome RAM "
@@ -308,16 +308,16 @@ class WindowManager:
 
     def accept_feedback_memory_round(
         self,
-        source_operation_id: Any,  # an opaque identity
+        source_stream_id: Any,  # an opaque identity
     ) -> None:
         """Record one idle or memory round and re-check waiting windows."""
-        self.tracker.note_memory_round(source_operation_id)
-        self.check_windows_for_operation(source_operation_id)
+        self.tracker.note_memory_round(source_stream_id)
+        self.check_windows_of_stream(source_stream_id)
 
     def accept_room_round(
         self,
         store: ports.SyndromeBuffer,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
         """A store a region lands in stored a round.
@@ -325,14 +325,14 @@ class WindowManager:
         Wake every edge's listeners, and drive readiness when the store
         is the one the primary tier reads.
         """
-        self.tracker.note_room_round(store, operation_id, round_index)
-        self._wake_strong_tier(operation_id)
+        self.tracker.note_room_round(store, stream_id, round_index)
+        self._wake_strong_tier(stream_id)
         if self.retention.primary_store is not store:
             return
-        operation = self.tracker.operation_by_id[operation_id]
-        stored_through = self.tracker.strong_rounds_arrived(operation_id, store)
+        operation = self.tracker.operation_by_id[stream_id]
+        stored_through = self.tracker.strong_rounds_arrived(stream_id, store)
         self._count_arrival(operation, stored_through)
-        self._update_stream(operation_id)
+        self._update_stream(stream_id)
         self._wake_windows(operation)
 
     def _count_arrival(
@@ -346,24 +346,24 @@ class WindowManager:
             f"(op now has rounds 1..{arrived_now})",
         )
 
-    def _wake_strong_tier(self, operation_id) -> None:
+    def _wake_strong_tier(self, stream_id) -> None:
         """A round is stored: a terminal strong window may have its tail."""
         for edge in self.edges.edges:
-            edge.submit_if_stored_data_releases(operation_id)
+            edge.submit_if_stored_data_releases(stream_id)
 
     def _wake_windows(self, operation: program_records.Operation) -> None:
-        self.check_windows_for_operation(operation.id)
+        self.check_windows_of_stream(operation.id)
         for predecessor_id in operation.decoder_boundary_predecessors:
-            self.check_windows_for_operation(predecessor_id)
+            self.check_windows_of_stream(predecessor_id)
 
-    def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
-        """Fold pre-gate idle rounds into a batch-style operation."""
-        self.planner.prepend_idle_rounds(operation_id, round_count)
+    def prepend_idle_rounds(self, stream_id: int, round_count: int) -> None:
+        """Fold pre-gate idle rounds into a batch-style operation's stream."""
+        self.planner.prepend_idle_rounds(stream_id, round_count)
 
     # ---- readiness: a window with its data and no owed boundary is requested
 
-    def check_windows_for_operation(self, operation_id: int) -> None:
-        """Request every complete window of the operation, in index order.
+    def check_windows_of_stream(self, stream_id: int) -> None:
+        """Request every complete window of the stream, in index order.
 
         The windows before its first open one are passed by, as a request
         leaves a queued or committed window alone, and the walk ends where
@@ -373,7 +373,7 @@ class WindowManager:
         of it), so the end is read off the planner's start floors. A long
         run costs its open windows a round rather than all of them.
         """
-        windows = self._windows_from_the_first_open(operation_id)
+        windows = self._windows_from_the_first_open(stream_id)
         self.requester.request_ready_windows(windows)
 
     def check_window(self, key: tuple) -> None:
@@ -393,10 +393,10 @@ class WindowManager:
 
     # ---- observation
 
-    def backlog_round_counts(self, rounds_read_out_by_operation: dict) -> tuple:
-        """The rounds read out whole and not yet final, per operation.
+    def backlog_round_counts(self, rounds_read_out_by_stream: dict) -> tuple:
+        """The rounds read out whole and not yet final, per stream.
 
-        A row is (operation id, patch, rounds), per operation in stable
+        A row is (stream id, patch, rounds), per stream in stable
         order: the unbroken prefix of windows whose rounds are all read
         out, less the unbroken prefix of final windows. Terhal's backlog
         is syndrome data generated and not yet processed (quoted in
@@ -415,15 +415,15 @@ class WindowManager:
             self.tracker.operation_by_id,
             key=identity_records.stable_identity_bytes,
         )
-        for operation_id in ordered_ids:
-            operation = self.tracker.operation_by_id[operation_id]
+        for stream_id in ordered_ids:
+            operation = self.tracker.operation_by_id[stream_id]
             whole = self.results.read_out_prefix_round_count(
-                operation_id, rounds_read_out_by_operation
+                stream_id, rounds_read_out_by_stream
             )
-            final = self.results.final_prefix_round_count(operation_id)
+            final = self.results.final_prefix_round_count(stream_id)
             waiting = whole - final
             patch = _representative_patch(operation)
-            rows.append((operation_id, patch, waiting))
+            rows.append((stream_id, patch, waiting))
         return tuple(rows)
 
     def window_sources(self) -> WindowTraceSources:
@@ -502,36 +502,36 @@ class WindowManager:
         """Note the stream round a protected segment's result waits for."""
         self.results.bind_required_stream_end(operation_id, required_stream_end)
 
-    def _windows_from_the_first_open(self, operation_id: int) -> list:
-        """The operation's windows from its first open one to the last begun."""
-        indices = self.planner.window_indices_of(operation_id)
-        first_open = self._first_open_after_withdrawals(operation_id, indices)
+    def _windows_from_the_first_open(self, stream_id: int) -> list:
+        """The stream's windows from its first open one to the last begun."""
+        indices = self.planner.window_indices_of(stream_id)
+        first_open = self._first_open_after_withdrawals(stream_id, indices)
         while first_open < len(indices):
             window_index = indices[first_open]
-            window = self.planner.window_at((operation_id, window_index))
+            window = self.planner.window_at((stream_id, window_index))
             if not window.queued and not window.committed:
                 break
             first_open += 1
-        self.first_open_by_operation[operation_id] = first_open
-        floors = self.planner.start_floors_of(operation_id)
-        arrived = self.tracker.rounds_arrived(operation_id)
+        self.first_open_by_stream[stream_id] = first_open
+        floors = self.planner.start_floors_of(stream_id)
+        arrived = self.tracker.rounds_arrived(stream_id)
         windows = []
         for position in range(first_open, len(indices)):
             if floors[position] > arrived:
                 break
             window_index = indices[position]
-            window = self.planner.window_at((operation_id, window_index))
+            window = self.planner.window_at((stream_id, window_index))
             windows.append(window)
         return windows
 
     def _first_open_after_withdrawals(
-        self, operation_id: int, indices: list
+        self, stream_id: int, indices: list
     ) -> int:
         """The cursor, back at the earliest window withdrawn since."""
-        first_open = self.first_open_by_operation.get(operation_id, 0)
+        first_open = self.first_open_by_stream.get(stream_id, 0)
         withdrawn = self.requester.withdrawn_keys
         for key in list(withdrawn):
-            if key[0] != operation_id:
+            if key[0] != stream_id:
                 continue
             withdrawn.discard(key)
             position = indices.index(key[1])

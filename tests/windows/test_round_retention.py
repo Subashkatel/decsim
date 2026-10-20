@@ -39,15 +39,15 @@ def _store() -> syndrome_buffer_module.SyndromeBuffer:
 
 
 def _retention(store, round_counts: dict, successors: dict):
-    planner = types.SimpleNamespace(successors_by_operation=successors)
+    planner = types.SimpleNamespace(successors_by_stream=successors)
 
-    def effective_round_count_for_window(operation_id, _window):
-        return round_counts[operation_id]
+    def effective_round_count_for_window(stream_id, _window):
+        return round_counts[stream_id]
 
     tracker = types.SimpleNamespace(
         effective_round_count_for_window=effective_round_count_for_window,
-        rounds_arrived=lambda _operation_id: 0,
-        strong_rounds_arrived=lambda _operation_id, _store: 0,
+        rounds_arrived=lambda _stream_id: 0,
+        strong_rounds_arrived=lambda _stream_id, _store: 0,
     )
     retention = round_retention.RoundRetention(
         is_strong_context_retained=False,
@@ -59,16 +59,16 @@ def _retention(store, round_counts: dict, successors: dict):
     return retention
 
 
-def _publish_rounds(store, operation_id: int, round_indices) -> None:
+def _publish_rounds(store, stream_id: int, round_indices) -> None:
     """Each round stored at the tick of its own index."""
     for round_index in round_indices:
-        packet = _packet(operation_id, round_index)
+        packet = _packet(stream_id, round_index)
         store.accept_packed_round(packet, publication_tick=round_index)
 
 
-def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
+def _packet(stream_id, round_index) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=operation_id,
+        stream_id=stream_id,
         patch_ids=(0,),
         round_index=round_index,
         bits=None,
@@ -76,17 +76,17 @@ def _packet(operation_id, round_index) -> round_records.SyndromeRoundPacket:
         fragment_index=0,
     )
     return round_records.SyndromeRoundPacket(
-        operation_id, round_index, (fragment,)
+        stream_id, round_index, (fragment,)
     )
 
 
 def _strong_retention(strong_store, rounds_arrived: int):
     """A retention whose strong syndrome buffer is the one under test."""
-    planner = types.SimpleNamespace(successors_by_operation={1: []})
+    planner = types.SimpleNamespace(successors_by_stream={1: []})
     tracker = types.SimpleNamespace(
-        effective_round_count_for_window=lambda _operation_id, _window: 9,
-        rounds_arrived=lambda _operation_id: rounds_arrived,
-        strong_rounds_arrived=lambda _operation_id, _store: 0,
+        effective_round_count_for_window=lambda _stream_id, _window: 9,
+        rounds_arrived=lambda _stream_id: rounds_arrived,
+        strong_rounds_arrived=lambda _stream_id, _store: 0,
     )
     weak_store = _store()
     retention = round_retention.RoundRetention(
@@ -106,9 +106,9 @@ class _OneTable:
     def __init__(self, table) -> None:
         self.table = table
 
-    def formation_table(self, operation_id):
+    def formation_table(self, stream_id):
         """The one table."""
-        del operation_id
+        del stream_id
         return self.table
 
 
@@ -190,7 +190,7 @@ def test_a_strong_read_carries_the_round_a_later_round_of_it_reads():
 def _raw_fragment(round_index: int) -> round_records.RetainedSyndromeFragment:
     """One raw bit of a one-qubit round, as the QPU emits it."""
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(0,),
@@ -278,7 +278,7 @@ def test_a_window_holds_its_read_range_plus_the_successor_overflow():
     store = _store()
     retention = _retention(store, {1: 4, 2: 9}, {1: [2]})
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,
@@ -295,7 +295,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
     store = _store()
     retention = _retention(store, {1: 6}, {1: []})
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,
@@ -308,7 +308,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
         1, 0, window_records.WEAK_POOL_ID, 0
     )
     job = decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=5, request_key=request_key
+        stream_id=1, window_id=0, round_count=5, request_key=request_key
     )
     reads = decoding_records.WindowReads((1, 0))
     retention.bind_input_hold(job, reads)
@@ -334,7 +334,7 @@ def test_a_clipped_tail_keeps_only_its_commit_range():
     store = _store()
     retention = _retention(store, {"stream": 9}, {"stream": []})
     window = window_records.Window(
-        operation_id="stream",
+        stream_id="stream",
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -354,7 +354,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     store = _store()
     retention = _retention(store, {1: 12}, {1: []})
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=4,
         commit_hi=6,
@@ -370,7 +370,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
         1, 1, window_records.WEAK_POOL_ID, 0
     )
     job = decoding_records.DecodeJob(
-        operation_id=1, window_id=1, round_count=6, request_key=request_key
+        stream_id=1, window_id=1, round_count=6, request_key=request_key
     )
     reads = decoding_records.WindowReads((1, 1))
     retention.bind_input_hold(job, reads)
@@ -459,7 +459,7 @@ def _chain_retention():
 
 def _chain_window() -> window_records.Window:
     return window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=3,
@@ -521,7 +521,7 @@ def test_a_middle_jobs_rounds_stay_held_for_the_edge_after_it():
         fragment = _raw_fragment(round_index)
         payloads.append(fragment)
     job = decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=7,
         strong_decode_for=(1, 0),

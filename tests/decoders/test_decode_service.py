@@ -42,7 +42,7 @@ class _Gate:
 
 def _job(index, gate=None):
     payload = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=("p",),
         round_index=index,
         bits=(0, 1),
@@ -53,7 +53,7 @@ def _job(index, gate=None):
         1, index, window_records.WEAK_POOL_ID, index
     )
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=index,
         commit_lo=1,
         commit_hi=1,
@@ -61,7 +61,7 @@ def _job(index, gate=None):
         round_count=1,
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=index,
         round_count=1,
         payloads=[payload],

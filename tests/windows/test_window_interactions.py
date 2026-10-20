@@ -21,7 +21,7 @@ def _weak_window_info(commit_lo: int) -> window_records.WindowInfo:
     commit_hi = commit_lo + 2
     buffer_hi = commit_lo + 5
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=1,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -106,12 +106,12 @@ def _delivery(defects: dict, destination) -> window_records.BoundaryDelivery:
     """One current same-operation delivery carrying round-keyed defects."""
     return window_records.BoundaryDelivery(
         source_key=(1, 0),
-        destination_key=(destination.operation_id, destination.window_index),
+        destination_key=(destination.stream_id, destination.window_index),
         source_revision=1,
         delivery_revision=1,
         latest_source_revision=1,
         latest_delivery_revision=1,
-        source_operation_round_count=30,
+        source_stream_round_count=30,
         dependency_released=False,
         payload=defects,
     )

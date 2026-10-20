@@ -290,7 +290,7 @@ class QPUDevice:
         if stated_tick < now:
             raise RuntimeError(
                 f"the syndrome source sends readout {readout.round_index} "
-                f"of operation {readout.operation_id!r} at tick "
+                f"of operation {readout.stream_id!r} at tick "
                 f"{stated_tick}, before tick {now} it was read out at"
             )
         waiting_until = self._last_departure_of(readout.patch_ids)
@@ -323,7 +323,7 @@ class QPUDevice:
         emitted = round_records.RoundEvent.of(
             "EMITTED",
             self.engine.now,
-            readout.operation_id,
+            readout.stream_id,
             readout.round_index,
             route,
             readout.patch_ids,

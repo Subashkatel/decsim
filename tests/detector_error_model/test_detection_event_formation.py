@@ -35,9 +35,9 @@ class CircuitSource:
     def __init__(self, table=TABLE):
         self.table = table
 
-    def formation_table(self, operation_id):
+    def formation_table(self, stream_id):
         """The one table."""
-        del operation_id
+        del stream_id
         return self.table
 
 
@@ -60,21 +60,21 @@ def seated(formed_at, latency_cycles=0, cycles_per_round=0):
     return formation.SeatedFormation(source, settings, DECODER_SEATS)
 
 
-def rounds(*round_indices, operation_id=1) -> tuple:
+def rounds(*round_indices, stream_id=1) -> tuple:
     """One zero fragment of each round, in the order given."""
     fragments = []
     for round_index in round_indices:
-        carried = fragment(round_index, operation_id=operation_id)
+        carried = fragment(round_index, stream_id=stream_id)
         fragments.append(carried)
     return tuple(fragments)
 
 
-def fragment(round_index, bits=None, operation_id=1):
+def fragment(round_index, bits=None, stream_id=1):
     if bits is None:
         width = TABLE.packet_width_by_round[round_index]
         bits = (0,) * width
     return round_records.RetainedSyndromeFragment(
-        operation_id=operation_id,
+        stream_id=stream_id,
         patch_ids=(0,),
         round_index=round_index,
         bits=tuple(bits),
@@ -97,7 +97,7 @@ def test_a_timing_only_round_is_handed_on_as_it_is():
     """A round with no bits has no outcomes to form events from."""
     placement = seated(("controller",))
     timing_only = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=None,
@@ -129,7 +129,7 @@ def test_a_charged_cost_with_no_clock_is_refused():
 def stated(bits=None, size_bits=17, event_bits=12):
     """A circuit-less source's last round: its raw and its events' width."""
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=4,
         bits=bits,
@@ -179,7 +179,7 @@ def lookback_seated(formed_at):
 def timing_only_round():
     """A round with no bits, eight wide on the wire."""
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=None,
@@ -359,8 +359,8 @@ def test_a_seat_reports_the_raw_packets_its_recipes_still_read():
     placement = seated(("weak",))
     reported = []
 
-    def state_held(seat, operation_id, bits) -> None:
-        del seat, operation_id
+    def state_held(seat, stream_id, bits) -> None:
+        del seat, stream_id
         reported.append(bits)
 
     placement.trace.state_held.connect(state_held)
@@ -380,7 +380,7 @@ def test_a_round_that_left_the_store_lets_its_seat_go_of_what_it_read():
     placement.retire_round((1, 2))
 
     history = placement.history_by_seat["strong"]
-    assert history.former_by_operation[1].packets == {}
+    assert history.former_by_stream[1].packets == {}
 
 
 def test_a_seat_that_joins_late_knows_the_rounds_that_left_before_it():
@@ -397,7 +397,7 @@ def test_a_seat_that_joins_late_knows_the_rounds_that_left_before_it():
     placement.form_at("strong", third, first)
 
     history = placement.history_by_seat["strong"]
-    assert history.former_by_operation[1].packets == {}
+    assert history.former_by_stream[1].packets == {}
 
 
 def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
@@ -411,7 +411,7 @@ def test_a_seat_keeps_nothing_of_the_rounds_that_left_the_store():
     placement.retire_round((1, 2))
 
     history = placement.history_by_seat["weak"]
-    done_rounds = history.memory.done_by_operation[1]
+    done_rounds = history.memory.done_by_stream[1]
     assert history.memory.events_by_round == {}
     assert done_rounds.through == 3
     assert done_rounds.above == set()
@@ -431,7 +431,7 @@ def test_each_operation_is_formed_from_its_own_first_round():
     placement = seated(("controller",))
     first = rounds(1)
     second = rounds(2)
-    other_first = rounds(1, operation_id=2)
+    other_first = rounds(1, stream_id=2)
     placement.form_at("controller", first)
     placement.form_at("controller", second)
 

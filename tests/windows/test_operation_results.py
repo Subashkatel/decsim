@@ -27,20 +27,20 @@ class _Store:
     def __init__(self) -> None:
         self.closed = []
 
-    def has_live_operation_reference(self, _operation_id) -> bool:
+    def has_live_stream_reference(self, _stream_id) -> bool:
         return False
 
-    def has_operation(self, _operation_id) -> bool:
+    def has_stream(self, _stream_id) -> bool:
         return True
 
-    def close_operation(self, operation_id) -> None:
-        self.closed.append(operation_id)
+    def close_stream(self, stream_id) -> None:
+        self.closed.append(stream_id)
 
 
-def _window(operation_id, index, commit_lo, commit_hi) -> window_records.Window:
+def _window(stream_id, index, commit_lo, commit_hi) -> window_records.Window:
     round_count = commit_hi - commit_lo + 1
     return window_records.Window(
-        operation_id=operation_id,
+        stream_id=stream_id,
         window_index=index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -73,18 +73,18 @@ class _Fixture:
         }
         plan = types.SimpleNamespace(
             windows_by_key=self.windows,
-            window_count_of=lambda _operation_id: 2,
+            window_count_of=lambda _stream_id: 2,
             window_indices_of=self._window_indices_of,
             window_at=self.windows.__getitem__,
-            windowed_operation_ids=self._windowed_operation_ids,
+            windowed_stream_ids=self._windowed_stream_ids,
             windows_of=self._windows_of,
             commit_extent_of=self._commit_extent_of,
             total_windows=2,
-            round_count_of=lambda _operation_id: 6,
+            round_count_of=lambda _stream_id: 6,
         )
         tracker = types.SimpleNamespace(
             operation_by_id={1: self.operation},
-            is_sealed=lambda _operation_id: True,
+            is_sealed=lambda _stream_id: True,
             has_unsealed_streams=lambda: False,
             blocking_operation_ids=set(),
         )
@@ -111,14 +111,14 @@ class _Fixture:
             self.delivered.operation_result_delivered
         )
 
-    def _windows_of(self, _operation_id) -> list:
+    def _windows_of(self, _stream_id) -> list:
         windows = self.windows.values()
         return list(windows)
 
-    def _window_indices_of(self, _operation_id) -> list:
+    def _window_indices_of(self, _stream_id) -> list:
         return [0, 1]
 
-    def _commit_extent_of(self, _operation_id) -> tuple:
+    def _commit_extent_of(self, _stream_id) -> tuple:
         windows = self.windows.values()
         commit_los = [window.commit_lo for window in windows]
         commit_his = [window.commit_hi for window in windows]
@@ -126,7 +126,7 @@ class _Fixture:
         commit_hi = max(commit_his)
         return commit_lo, commit_hi
 
-    def _windowed_operation_ids(self) -> list:
+    def _windowed_stream_ids(self) -> list:
         return [1]
 
     def commit(

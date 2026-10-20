@@ -182,9 +182,9 @@ class WindowPlanner:
         self.planned_operations = planned_operations
         self.growth_by_stream: dict = {}
         self.trace = _TraceSources()
-        # operation id -> per window position, the least start round of
+        # stream id -> per window position, the least start round of
         # that window and every later one; see start_floors_of
-        self.start_floors_by_operation: dict = {}
+        self.start_floors_by_stream: dict = {}
 
     def start(self) -> None:
         """Build the model of every window the plan laid.
@@ -199,13 +199,13 @@ class WindowPlanner:
 
     @property
     def windows_by_key(self) -> dict:
-        """Every window by (operation id, index)."""
+        """Every window by (stream id, index)."""
         return self.plan.windows
 
     @property
-    def successors_by_operation(self) -> dict:
-        """The operations whose rounds a window's overflow may read."""
-        return self.plan.successors
+    def successors_by_stream(self) -> dict:
+        """The streams whose rounds a window's overflow may read."""
+        return self.plan.successors_by_stream
 
     @property
     def total_windows(self) -> int:
@@ -213,7 +213,7 @@ class WindowPlanner:
         return self.plan.total_windows
 
     def window_at(self, key: tuple) -> window_records.Window:
-        """The window at (operation id, index)."""
+        """The window at (stream id, index)."""
         window = self.plan.windows.get(key)
         if window is None:
             raise KeyError(
@@ -224,14 +224,14 @@ class WindowPlanner:
 
     def later_windows(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window_index: int,
     ) -> list:
-        """The operation's windows past that index, in index order."""
+        """The stream's windows past that index, in index order."""
         later = []
-        for index in self.window_indices_of(operation_id):
+        for index in self.window_indices_of(stream_id):
             if index > window_index:
-                later.append(self.plan.windows[(operation_id, index)])
+                later.append(self.plan.windows[(stream_id, index)])
         return later
 
     def absorb_window(
@@ -319,16 +319,16 @@ class WindowPlanner:
 
     def window_indices_of(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> list:
-        """The operation's window indices in order; none when unplanned."""
-        return self.plan.op_windows.get(operation_id, [])
+        """The stream's window indices in order; none when unplanned."""
+        return self.plan.windows_by_stream.get(stream_id, [])
 
-    def windowed_operation_ids(self) -> list:
-        """Every operation with windows planned, streams included."""
-        return list(self.plan.op_windows)
+    def windowed_stream_ids(self) -> list:
+        """Every stream with windows planned."""
+        return list(self.plan.windows_by_stream)
 
-    def start_floors_of(self, operation_id: Any) -> list:  # an opaque identity
+    def start_floors_of(self, stream_id: Any) -> list:  # an opaque identity
         """Per window position, the least start round from it to the last.
 
         Once a position's floor passes the rounds arrived, no window from
@@ -338,46 +338,46 @@ class WindowPlanner:
         lowers them; one that moves it later leaves a floor low, which
         only lets a reader look further.
         """
-        floors = self._floors(operation_id)
-        indices = self.window_indices_of(operation_id)
+        floors = self._floors(stream_id)
+        indices = self.window_indices_of(stream_id)
         while len(floors) < len(indices):
             window_index = indices[len(floors)]
-            window = self.plan.windows[(operation_id, window_index)]
+            window = self.plan.windows[(stream_id, window_index)]
             before = len(floors) - 1
             floors.append(window.start_round)
             _lower_the_floors(floors, before, window.start_round)
         return floors
 
-    def window_count_of(self, operation_id: Any) -> int:  # an opaque identity
-        """How many windows the operation has."""
-        return self.plan.window_count[operation_id]
+    def window_count_of(self, stream_id: Any) -> int:  # an opaque identity
+        """How many windows the stream has."""
+        return self.plan.window_count_by_stream[stream_id]
 
-    def windows_of(self, operation_id: Any) -> list:  # an opaque identity
-        """The operation's windows still kept, in index order.
+    def windows_of(self, stream_id: Any) -> list:  # an opaque identity
+        """The stream's windows still kept, in index order.
 
         A stream that lets its final windows go keeps the later ones
         only (window_release.py).
         """
         windows = []
-        for window_index in self.window_indices_of(operation_id):
-            windows.append(self.plan.windows[(operation_id, window_index)])
+        for window_index in self.window_indices_of(stream_id):
+            windows.append(self.plan.windows[(stream_id, window_index)])
         return windows
 
     def commit_extent_of(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> tuple:
-        """The first and the last round the operation's windows commit.
+        """The first and the last round the stream's windows commit.
 
         A stream's windows tile it from round 1 (_StreamGrowth), so one
         that let its first windows go still commits from round 1.
         """
-        windows = self.windows_of(operation_id)
+        windows = self.windows_of(stream_id)
         commit_los = [window.commit_lo for window in windows]
         commit_his = [window.commit_hi for window in windows]
         commit_lo = min(commit_los)
         commit_hi = max(commit_his)
-        indices = self.window_indices_of(operation_id)
+        indices = self.window_indices_of(stream_id)
         if len(windows) < len(indices):
             commit_lo = 1
         return commit_lo, commit_hi
@@ -407,26 +407,26 @@ class WindowPlanner:
         floors = self._floors(stream_id)
         floors.let_go_before(window_index)
 
-    def is_windowed(self, operation_id: Any) -> bool:  # an opaque identity
-        """False for an operation decoded as one whole batch."""
-        return self.plan.windowed_by_operation[operation_id]
+    def is_windowed(self, stream_id: Any) -> bool:  # an opaque identity
+        """False for a stream decoded as one whole batch."""
+        return self.plan.windowed_by_stream[stream_id]
 
     def batches_idle_rounds(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> bool:
-        """Whether idle rounds before the operation fold into its batch."""
-        return self.plan.batch_preceding_idle_rounds_by_operation.get(
-            operation_id, False
+        """Whether idle rounds before the stream fold into its batch."""
+        return self.plan.batch_preceding_idle_rounds_by_stream.get(
+            stream_id, False
         )
 
-    def prepend_idle_rounds(self, operation_id: int, round_count: int) -> None:
-        """Fold pre-gate idle rounds into a batch-style operation."""
+    def prepend_idle_rounds(self, stream_id: int, round_count: int) -> None:
+        """Fold pre-gate idle rounds into a batch-style stream."""
         if round_count <= 0:
             return
-        if not self.batches_idle_rounds(operation_id):
+        if not self.batches_idle_rounds(stream_id):
             return
-        window = self.plan.windows[(operation_id, 0)]
+        window = self.plan.windows[(stream_id, 0)]
         window.batched_preceding_idle_round_count += round_count
 
     # ---- the resolved operations
@@ -466,11 +466,13 @@ class WindowPlanner:
     ) -> Optional[int]:
         """Open a stream with agreeing physical and model limits, if finite."""
         stream_id = stream_operation.id
-        self.plan.window_count[stream_id] = 0
-        self.plan.op_windows[stream_id] = window_positions.WindowPositions()
-        self.plan.successors.setdefault(stream_id, [])
-        self.plan.windowed_by_operation[stream_id] = True
-        self.plan.batch_preceding_idle_rounds_by_operation[stream_id] = False
+        self.plan.window_count_by_stream[stream_id] = 0
+        self.plan.windows_by_stream[stream_id] = (
+            window_positions.WindowPositions()
+        )
+        self.plan.successors_by_stream.setdefault(stream_id, [])
+        self.plan.windowed_by_stream[stream_id] = True
+        self.plan.batch_preceding_idle_rounds_by_stream[stream_id] = False
         resolved = self.resolved_operation_by_id[stream_id]
         model_round_limit = self.models.register_stream(
             stream_operation, resolved
@@ -531,7 +533,7 @@ class WindowPlanner:
 
     def attach_stream_model(self, window: window_records.Window) -> None:
         """Give a new stream window its model, when the source has one."""
-        model = self.models.model_for_stream(window.operation_id, window)
+        model = self.models.model_for_stream(window.stream_id, window)
         if model is not None:
             self.models.model_by_window[window.key] = model
 
@@ -652,7 +654,7 @@ class WindowPlanner:
         if not windows:
             return
         resolved = self.resolved_operation_by_id[operation.id]
-        protocol = self.plan.protocol_by_operation.get(
+        protocol = self.plan.protocol_by_stream.get(
             operation.id, window_records.WindowProtocol.GENERIC
         )
         models = self.models.models_for_operation(
@@ -670,7 +672,7 @@ class WindowPlanner:
         buffer_lo = geometry.commit_lo
         round_count = geometry.buffer_hi - buffer_lo + 1
         window = window_records.Window(
-            operation_id=stream_id,
+            stream_id=stream_id,
             window_index=window_index,
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,
@@ -679,29 +681,29 @@ class WindowPlanner:
             buffer_lo=buffer_lo,
         )
         self.plan.windows[window.key] = window
-        self.plan.op_windows[stream_id].append(window_index)
-        self.plan.window_count[stream_id] += 1
+        self.plan.windows_by_stream[stream_id].append(window_index)
+        self.plan.window_count_by_stream[stream_id] += 1
         self.plan.total_windows += 1
         growth.next_window_index += 1
         growth.next_commit_lo = geometry.commit_hi + 1
         self.trace.window_planned.fire(window)
         return window
 
-    def _floors(self, operation_id) -> window_positions.WindowPositions:
-        """The operation's start floors, by window position."""
-        floors = self.start_floors_by_operation.get(operation_id)
+    def _floors(self, stream_id) -> window_positions.WindowPositions:
+        """The stream's start floors, by window position."""
+        floors = self.start_floors_by_stream.get(stream_id)
         if floors is None:
             floors = window_positions.WindowPositions()
-            self.start_floors_by_operation[operation_id] = floors
+            self.start_floors_by_stream[stream_id] = floors
         return floors
 
     def _lower_the_floors_to(self, key: tuple, start_round: int) -> None:
         """A window's start moved: the floors up to it lowered to it."""
-        operation_id, window_index = key
-        floors = self.start_floors_by_operation.get(operation_id)
+        stream_id, window_index = key
+        floors = self.start_floors_by_stream.get(stream_id)
         if not floors:
             return
-        indices = self.window_indices_of(operation_id)
+        indices = self.window_indices_of(stream_id)
         position = indices.index(window_index)
         if position < len(floors):
             _lower_the_floors(floors, position, start_round)

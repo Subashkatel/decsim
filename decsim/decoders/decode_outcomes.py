@@ -150,7 +150,7 @@ class DecodeOutcomes:
         """Leave the result in its producing unit's output slot."""
         unit = completion.unit
         request_key = completion.request_job.request_key
-        window_key = (request_key.operation_id, request_key.window_id)
+        window_key = (request_key.stream_id, request_key.window_id)
         # every finished strong result was produced by a unit, and the
         # unit is read at the decode's end, before its slot frees
         unit.hold_output(window_key, completion)
@@ -170,7 +170,7 @@ def _destination_of(job: decoding_records.DecodeJob) -> tuple:
     """The window a job decodes for: its own, or the one it re-decodes."""
     if job.strong_decode_for is not None:
         return job.strong_decode_for
-    return (job.operation_id, job.window_id)
+    return (job.stream_id, job.window_id)
 
 
 @dataclasses.dataclass(frozen=True)

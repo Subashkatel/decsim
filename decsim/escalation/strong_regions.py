@@ -88,18 +88,18 @@ class StrongRegions:
             source_window.buffer_hi,
         )
         strong_window = _window_over(
-            source_window.operation_id, source_window.window_index, bounds
+            source_window.stream_id, source_window.window_index, bounds
         )
         return self._region_over(strong_window)
 
     def _region_over(self, strong_window: window_records.Window) -> RedoRegion:
         """The redo of strong_window: its recipes' earlier rounds, its own."""
-        operation_id = strong_window.operation_id
+        stream_id = strong_window.stream_id
         read_keys = self.retention.strong_rounds_before(
-            operation_id, strong_window.buffer_lo, strong_window.buffer_hi
+            stream_id, strong_window.buffer_lo, strong_window.buffer_hi
         )
         read_keys += self.retention.read_keys_for_bounds(
-            operation_id,
+            stream_id,
             strong_window.buffer_lo,
             strong_window.buffer_hi,
             strong_window,
@@ -201,12 +201,10 @@ class StrongRegions:
         self, key: tuple
     ) -> "_DoubleWindowProposal":
         """The extent the interaction proposes, with what it was read on."""
-        operation_id, escalated_index = key
+        stream_id, escalated_index = key
         weak_window = self.planner.window_at(key)
-        round_count = self.round_count_for(operation_id, weak_window)
-        later_windows = self.planner.later_windows(
-            operation_id, escalated_index
-        )
+        round_count = self.round_count_for(stream_id, weak_window)
+        later_windows = self.planner.later_windows(stream_id, escalated_index)
         plan = self._plan_region(weak_window, later_windows, round_count)
         return _DoubleWindowProposal(
             round_count=round_count,
@@ -221,7 +219,7 @@ class StrongRegions:
         near_source_key: Optional[tuple],
     ) -> DoubleWindowRegion:
         """The proposed extent checked against the windows that exist."""
-        operation_id = key[0]
+        stream_id = key[0]
         round_count = proposal.round_count
         later_windows = proposal.later_windows
         plan = proposal.plan
@@ -231,9 +229,9 @@ class StrongRegions:
         restart_key = _restart_window_key(later_windows, plan)
         restart_reads = self._restart_reads(restart_key, plan)
         context_keys = self.retention.strong_rounds_before(
-            operation_id, plan.context_lo, plan.context_hi
+            stream_id, plan.context_lo, plan.context_hi
         )
-        context_keys += _context_round_keys(operation_id, plan)
+        context_keys += _context_round_keys(stream_id, plan)
         self._require_reads_retained(key, context_keys, restart_reads)
         return self._modelled_region(
             key,
@@ -248,18 +246,18 @@ class StrongRegions:
 
     def operation(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> program_records.Operation:
         """The operation record a strong window's transfers are named by."""
-        return self.tracker.operation(operation_id)
+        return self.tracker.operation(stream_id)
 
     def round_count_for(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window: window_records.Window,
     ) -> int:
-        """The rounds the operation runs, as this window is planned."""
-        return self.tracker.round_count_for_window(operation_id, window)
+        """The rounds the stream runs, as this window is planned."""
+        return self.tracker.round_count_for_window(stream_id, window)
 
     def _plan_region(
         self,
@@ -286,7 +284,7 @@ class StrongRegions:
             return ()
         restart = self.planner.window_at(restart_key)
         reads = self.retention.read_keys_for_bounds(
-            restart.operation_id,
+            restart.stream_id,
             plan.restart_buffer_lo,
             restart.buffer_hi,
             restart,
@@ -426,9 +424,7 @@ def _near_pinned_window_of(
 ) -> window_records.Window:
     """The weak window's commit rounds plus one trailing buffer region."""
     bounds = window_records.strong_context_bounds(weak_window)
-    return _window_over(
-        weak_window.operation_id, weak_window.window_index, bounds
-    )
+    return _window_over(weak_window.stream_id, weak_window.window_index, bounds)
 
 
 def _left_fault_exclusions(commit_lo: int) -> tuple:
@@ -439,13 +435,13 @@ def _left_fault_exclusions(commit_lo: int) -> tuple:
 
 
 def _context_round_keys(
-    operation_id, plan: window_records.StrongRegionPlan
+    stream_id, plan: window_records.StrongRegionPlan
 ) -> list:
-    """The (operation, round) keys of the strong window's whole context."""
+    """The (stream, round) keys of the strong window's whole context."""
     stop_round = plan.context_hi + 1
     round_keys = []
     for round_index in range(plan.context_lo, stop_round):
-        round_keys.append((operation_id, round_index))
+        round_keys.append((stream_id, round_index))
     return round_keys
 
 
@@ -457,13 +453,13 @@ def _strong_window_of(
 
 
 def _window_over(
-    operation_id, window_index: int, bounds: tuple
+    stream_id, window_index: int, bounds: tuple
 ) -> window_records.Window:
     """The strong window over (context_lo, commit_lo, commit_hi, context_hi)."""
     context_lo, commit_lo, commit_hi, context_hi = bounds
     round_count = context_hi - context_lo + 1
     return window_records.Window(
-        operation_id=operation_id,
+        stream_id=stream_id,
         window_index=window_index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,

@@ -85,7 +85,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
         bits.append(int(bit))
     bits = tuple(bits)
     payload = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=bits,
@@ -93,7 +93,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
         fragment_index=0,
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=1,
         detector_error_model=model,

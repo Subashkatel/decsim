@@ -246,7 +246,7 @@ class PortOnlyDecoder:
 
     def decode(self, job):
         """A correction of nothing; the trace is what this row is for."""
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
     def latency(self, job) -> int:
         del job
@@ -257,7 +257,7 @@ class PortOnlyDecoder:
         result = self.decode(job)
         end_tick = engine.now + self.latency_ticks
         record = decoding_records.DecoderStageRecord(
-            job.operation_id,
+            job.stream_id,
             job.window_id,
             "algorithm",
             None,

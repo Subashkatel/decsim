@@ -484,7 +484,7 @@ class OnlineThreshold:
         if self.controller.tracker.window_count % 100 == 0:
             self._record("sample")
         if audited:
-            key = (job.operation_id, job.window_id)
+            key = (job.stream_id, job.window_id)
             self._pending_audits[key] = tuple(result.logical_observables)
             self._record("audit")
             return False

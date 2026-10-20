@@ -84,7 +84,7 @@ class ConfidenceLedger:
         del decode_output_ticks
         if result is None:
             return
-        key = (job.operation_id, job.window_id)
+        key = (job.stream_id, job.window_id)
         if outcome is _STRONG_ANSWER:
             self.strong_observables[key] = result.logical_observables
             self.strong_evidence[key] = result.evidence
@@ -121,8 +121,8 @@ class ConfidenceLedger:
 
 def _window_order(key: tuple) -> tuple:
     """A window key's place: its operation's identity, then its index."""
-    operation_id, window_id = key
-    operation_order = identity_records.stable_identity_bytes(operation_id)
+    stream_id, window_id = key
+    operation_order = identity_records.stable_identity_bytes(stream_id)
     return (operation_order, window_id)
 
 

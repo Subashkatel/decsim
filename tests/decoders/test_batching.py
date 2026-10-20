@@ -114,7 +114,7 @@ def test_each_member_of_a_batch_is_answered_with_its_own_result():
     for request in ended.of_tier(window_records.STRONG_POOL_ID):
         result = request.result
         answer = (
-            result.operation_id,
+            result.stream_id,
             result.window_id,
             result.logical_observables,
         )
@@ -135,8 +135,8 @@ def test_each_member_of_a_batch_is_answered_with_its_own_result():
 def _four_memories(law, probes=()) -> machine_module.Machine:
     """The declared four-memory run, its strong pool decoding each member."""
     operations = []
-    for operation_id in range(1, 5):
-        memory = declared_run.memory_operation(operation_id)
+    for stream_id in range(1, 5):
+        memory = declared_run.memory_operation(stream_id)
         operations.append(memory)
     decode_each = batching.DecodeEach.Settings(law=law)
     strong = _PatchLatency.Settings()
@@ -183,11 +183,11 @@ class _PatchLatency(decoder_module.DecoderBase):
             return _PatchLatency()
 
     def latency(self, job) -> int:
-        microseconds = 10.0 * job.operation_id
+        microseconds = 10.0 * job.stream_id
         return _ticks(microseconds)
 
     def decode(self, job) -> decoding_records.DecodeResult:
-        parity = job.operation_id % 2
+        parity = job.stream_id % 2
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, logical_observables=(parity,)
+            job.stream_id, job.window_id, logical_observables=(parity,)
         )

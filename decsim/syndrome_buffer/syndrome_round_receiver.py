@@ -198,7 +198,7 @@ class SyndromeRoundReceiver:
         widths = self._stored_widths(region)
         carried = region.carried_packets
         for packet, bits in zip(carried, widths, strict=True):
-            round_key = (packet.operation_id, packet.round_index)
+            round_key = (packet.stream_id, packet.round_index)
             stated = round_records.stated_bits(bits)
             self.reserved_bits_by_round[round_key] = stated
 
@@ -288,8 +288,8 @@ class SyndromeRoundReceiver:
         self.output.send_memory_round(packed, delivered)
 
     def _deliver_memory_round(self, packed: round_records.PackedRound) -> None:
-        source_operation_id = packed.route.source_operation_id
-        self.memory_arrivals.receive_memory_round(source_operation_id)
+        source_stream_id = packed.route.source_stream_id
+        self.memory_arrivals.receive_memory_round(source_stream_id)
         self._fire_event("FEEDBACK_MEMORY_DELIVERED", packed)
 
     def _stored_widths(self, region: round_records.EscalatedRegion) -> list:
@@ -464,9 +464,9 @@ class SyndromeRoundReceiver:
         clears its reserve only in the push that fills the slot
         (src/dev/net/pktfifo.hh).
         """
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         del self.reserved_bits_by_round[round_key]
-        if self.store.has_operation(packet.operation_id):
+        if self.store.has_stream(packet.stream_id):
             self._store_landing(packet, packet_bits, hop)
             return
         self._drop_landing(packet, packet_bits, hop)
@@ -478,11 +478,11 @@ class SyndromeRoundReceiver:
         hop: Hop,
     ) -> None:
         self.store.accept_packed_round(packet, publication_tick=self.engine.now)
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         self._narrate_intake(round_key, packet_bits, packet, hop)
         if self.windows is not None:
             self.windows.accept_room_round(
-                self.store, packet.operation_id, packet.round_index
+                self.store, packet.stream_id, packet.round_index
             )
         # Arrival can create a live window's first hold. Publish before
         # reclamation, as gem5 services targets before freeing an entry
@@ -502,7 +502,7 @@ class SyndromeRoundReceiver:
         round must not enter the store. The copy still fires: the bits
         crossed the hop and the link charged them.
         """
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         self.trace.copy_made.fire(
             round_key, packet_bits, hop.source_name, self.intake.name
         )
@@ -516,7 +516,7 @@ class SyndromeRoundReceiver:
         defects = packet.defects_text()
         holds = self.store.held_rounds_description()
         return (
-            f"received round {packet.round_index} of op {packet.operation_id} "
+            f"received round {packet.round_index} of stream {packet.stream_id} "
             f"from {hop.path_name}; {defects}; holds {holds}"
         )
 
@@ -525,8 +525,8 @@ class SyndromeRoundReceiver:
     ) -> str:
         holds = self.store.held_rounds_description()
         return (
-            f"dropped round {packet.round_index} of op {packet.operation_id} "
-            f"from {hop.path_name}: op {packet.operation_id} "
+            f"dropped round {packet.round_index} of stream {packet.stream_id} "
+            f"from {hop.path_name}: stream {packet.stream_id} "
             f"closed while the round crossed; holds {holds}"
         )
 
@@ -534,9 +534,9 @@ class SyndromeRoundReceiver:
         self._fire_event("PUBLISHED", packed)
 
     def _fire_event(self, kind: str, packed: round_records.PackedRound) -> None:
-        operation_id, round_index = packed.round_key
+        stream_id, round_index = packed.round_key
         event = round_records.RoundEvent.of(
-            kind, self.engine.now, operation_id, round_index, packed.route
+            kind, self.engine.now, stream_id, round_index, packed.route
         )
         self.trace.round_event.fire(event)
 

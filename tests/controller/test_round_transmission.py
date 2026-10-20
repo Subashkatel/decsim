@@ -84,8 +84,8 @@ class RecordingWindows:
     def accept_window_input(self, packet):
         self.published.append((self.engine.now, packet.round_index))
 
-    def receive_memory_round(self, source_operation_id):
-        self.memory_rounds.append((self.engine.now, source_operation_id))
+    def receive_memory_round(self, source_stream_id):
+        self.memory_rounds.append((self.engine.now, source_stream_id))
 
 
 class DispatchingWindows:
@@ -98,8 +98,8 @@ class DispatchingWindows:
         self.memory_rounds = []
         self.decode_inputs_delivered = []
 
-    def receive_memory_round(self, source_operation_id):
-        self.memory_rounds.append((self.engine.now, source_operation_id))
+    def receive_memory_round(self, source_stream_id):
+        self.memory_rounds.append((self.engine.now, source_stream_id))
 
     def accept_window_input(self, packet):
         self.published.append((self.engine.now, packet.round_index))
@@ -115,7 +115,7 @@ class DispatchingWindows:
 
 def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE, wire_bits=2):
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
@@ -239,7 +239,7 @@ def first_rounds_on(ledger, path: str) -> list:
     for transfer in traffic["transfers"]:
         if transfer["path"] != path:
             continue
-        (rounds,) = transfer["attribution"]["rounds_by_operation"]
+        (rounds,) = transfer["attribution"]["rounds_by_stream"]
         first_rounds.append(rounds["round_lo"])
     return first_rounds
 

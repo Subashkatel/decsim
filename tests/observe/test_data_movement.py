@@ -67,7 +67,7 @@ def test_a_move_counts_the_rounds_its_attribution_names():
     movement = _movement()
     terminal = _Delivered(payload_bits=24, header_bits=0)
     terminal.attribution = transfer_records.TransferAttribution(
-        operation_id=1,
+        owner_id=1,
         patch_ids=(0,),
         window_id=1,
         first_round=4,
@@ -96,8 +96,8 @@ def test_the_same_round_emitted_twice_is_one_round():
 class _Readout:
     """The two fields the round counter reads off a readout."""
 
-    def __init__(self, operation_id: int, round_index: int) -> None:
-        self.operation_id = operation_id
+    def __init__(self, stream_id: int, round_index: int) -> None:
+        self.stream_id = stream_id
         self.round_index = round_index
 
 

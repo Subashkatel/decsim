@@ -40,7 +40,7 @@ def _result(
 
 def _job(window_id: int = 4) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=window_id, round_count=3
+        stream_id=1, window_id=window_id, round_count=3
     )
 
 

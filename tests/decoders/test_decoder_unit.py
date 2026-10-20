@@ -21,7 +21,7 @@ def _unit(capacity_bits=None):
 
 def _job(label, rounds=1):
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=rounds, label=label
+        stream_id=1, window_id=0, round_count=rounds, label=label
     )
 
 
@@ -37,7 +37,7 @@ def _carrying_job(label, rounds):
     payloads = []
     for round_index in range(rounds):
         fragment = round_records.RetainedSyndromeFragment(
-            operation_id=1,
+            stream_id=1,
             patch_ids=("patch-0",),
             round_index=round_index,
             bits=(0, 1),
@@ -46,7 +46,7 @@ def _carrying_job(label, rounds):
         )
         payloads.append(fragment)
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=rounds,
         payloads=payloads,

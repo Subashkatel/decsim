@@ -1637,11 +1637,11 @@ def _window_confidence_row(
 ) -> dict:
     """One window of one shot, as window_confidence.csv writes it."""
     task_key = measured_task_key(measurement)
-    operation_id, window_index = window.window_key
+    stream_id, window_index = window.window_key
     row = task_columns(task_key)
     row["seed"] = measurement.seed
     row["signal"] = confidence.signal
-    row["operation_id"] = operation_id
+    row["stream_id"] = stream_id
     row["window_index"] = window_index
     row["gap_nats"] = window.gap_nats
     row["escalated"] = window.is_escalated

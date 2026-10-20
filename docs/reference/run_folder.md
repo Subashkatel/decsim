@@ -415,7 +415,7 @@ success, and sweep.csv's `unscored_shots` counts it.
 | --- | --- |
 | `task_id`, the swept paths, `algorithm`, `seed` | the shot |
 | `signal` | the confidence the verdict read, the `name` of the run's `switching.confidence` record (the signals are under `decsim/confidence` in [parts.md](parts.md)) |
-| `operation_id`, `window_index` | the window: its operation and its index within it |
+| `stream_id`, `window_index` | the window: its decode stream and its index within it |
 | `gap_nats` | the window's gap, ln of the likelihood ratio; empty when the signal gave none, a window the escalation then escalates |
 | `escalated` | whether the verdict sent the window to the strong tier |
 | `strong_revised` | for an escalated window, whether the strong decode predicted other observables than the weak one; empty for a kept window |
@@ -438,7 +438,7 @@ text of Stim's 01 format, as in `predictions`.
 | Column | What it is |
 | --- | --- |
 | `task_id`, the swept paths, `algorithm`, `seed` | the shot |
-| `operation_id`, `window_index` | the window that owns the rows: its operation and its index |
+| `stream_id`, `window_index` | the window that owns the rows: its decode stream and its index |
 | `ownership_kind` | `ordinary_window`, or `strong_window` for a double window's extent |
 | `commit_lo`, `commit_hi` | the rounds it owns |
 | `tier`, `decode_status` | the tier and the status of its final decode; an empty status is a decode that succeeded |

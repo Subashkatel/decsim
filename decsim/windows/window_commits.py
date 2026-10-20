@@ -427,7 +427,7 @@ class WindowVerdict:
         result: decoding_records.DecodeResult,
     ) -> Revision:
         window = self._window_of(job)
-        operation = self.tracker.operation_by_id[window.operation_id]
+        operation = self.tracker.operation_by_id[window.stream_id]
         request_key = job.request_key
         is_first = self._is_an_entry_pool(request_key.pool)
         commit_region = _commit_region_of(job, window)
@@ -439,7 +439,7 @@ class WindowVerdict:
         self, job: decoding_records.DecodeJob
     ) -> window_records.Window:
         request_key = job.request_key
-        key = (request_key.operation_id, request_key.window_id)
+        key = (request_key.stream_id, request_key.window_id)
         return self.planner.windows_by_key[key]
 
     def _queue_of(self, pool: window_records.PoolId) -> ports.DecodeQueue:

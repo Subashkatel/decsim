@@ -12,7 +12,7 @@ import decsim.records.identity as identity_records
 
 @dataclasses.dataclass(frozen=True)
 class BacklogView:
-    """Decode backlog at one instant, per lane, per op, per patch, total.
+    """Decode backlog at one instant, per lane, stream, patch, and total.
 
     The rounds are those of windows the QPU read out whole whose final
     correction is not in place yet.
@@ -20,7 +20,7 @@ class BacklogView:
 
     ready_jobs: int  # jobs waiting across every queue
     per_lane: tuple  # ((pool, queued_jobs), ...), the entry pool first
-    per_op_rounds: tuple  # ((operation_id, rounds_waiting), ...)
+    per_stream_rounds: tuple  # ((stream_id, rounds_waiting), ...)
     per_patch_rounds: tuple  # ((patch, rounds_waiting), ...)
     total_rounds: int  # system-level depth
 
@@ -28,7 +28,7 @@ class BacklogView:
 def backlog_view(
     window_manager: ports.WindowBacklog,
     decoder_managers: tuple,
-    rounds_read_out_by_operation: dict,
+    rounds_read_out_by_stream: dict,
 ) -> BacklogView:
     """Snapshot the job queues and the per-op, per-patch, system backlog.
 
@@ -46,22 +46,22 @@ def backlog_view(
         per_lane.append((lane, queue_length))
         ready_jobs += queue_length
     backlog_rounds = window_manager.backlog_round_counts(
-        rounds_read_out_by_operation
+        rounds_read_out_by_stream
     )
-    per_op = []
+    per_stream = []
     per_patch: dict = {}
     total_rounds = 0
-    for operation_id, patch, waiting in backlog_rounds:
-        per_op.append((operation_id, waiting))
+    for stream_id, patch, waiting in backlog_rounds:
+        per_stream.append((stream_id, waiting))
         per_patch[patch] = per_patch.get(patch, 0) + waiting
         total_rounds += waiting
-    per_op_rounds = sorted(per_op, key=_first_identity_order)
+    per_stream_rounds = sorted(per_stream, key=_first_identity_order)
     patch_items = per_patch.items()
     per_patch_rounds = sorted(patch_items, key=_first_identity_order)
     return BacklogView(
         ready_jobs=ready_jobs,
         per_lane=tuple(per_lane),
-        per_op_rounds=tuple(per_op_rounds),
+        per_stream_rounds=tuple(per_stream_rounds),
         per_patch_rounds=tuple(per_patch_rounds),
         total_rounds=total_rounds,
     )

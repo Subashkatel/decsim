@@ -75,7 +75,7 @@ def _store(engine, **port_keys) -> ported_syndrome_buffer.PortedSyndromeBuffer:
 
 def _packet(round_index: int, bits: int) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=None,

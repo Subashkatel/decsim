@@ -185,7 +185,7 @@ def weak_decode_stages(machine) -> list:
     """Every decode stage the run timed: window, stage, unit and ticks."""
     stages = []
     for record in machine.observation.stages.records:
-        window_key = (record.operation_id, record.window_id)
+        window_key = (record.stream_id, record.window_id)
         stages.append(
             (
                 window_key,
@@ -314,7 +314,7 @@ def gaps_by_window(requests, weak_tier) -> dict:
         if record.soft_output is None:
             continue
         window_key = (
-            record.request_key.operation_id,
+            record.request_key.stream_id,
             record.request_key.window_id,
         )
         gaps[window_key] = record.soft_output.gap
@@ -465,7 +465,7 @@ def test_the_speculative_decode_waits_for_the_context_it_reads():
         log_lines, "strong(mem1 W0): strong start deferred"
     )
     last_context_round = declared_run.log_tick(
-        log_lines, "strong_buffer: received round 6 of op 1"
+        log_lines, "strong_buffer: received round 6 of stream 1"
     )
     submitted = declared_run.log_tick(
         log_lines,
@@ -520,7 +520,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
 
     assert lanes[slice_row["tid"]] == "Strong tier"
     assert args["request"] == "1:0:strong:1"
-    assert args["waits_for"] == "stored rounds of operation 1"
+    assert args["waits_for"] == "stored rounds of stream 1"
     assert args["outcome"] == "strong context stored in strong syndrome buffer"
     assert args["round_count"] == 6
     assert args["tick"] == expected_held

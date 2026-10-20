@@ -96,14 +96,14 @@ class SyndromeBufferOutput:
         if self.detection_events is None or not job.payloads:
             return
         first = job.payloads[0]
-        operation_id = first.operation_id
-        last_round = _last_round_of(job.payloads, operation_id)
+        stream_id = first.stream_id
+        last_round = _last_round_of(job.payloads, stream_id)
         needed_rounds = self.detection_events.rounds_needed_before(
-            self.reader_seat, operation_id, first.round_index, last_round
+            self.reader_seat, stream_id, first.round_index, last_round
         )
         rounds_before = []
         for round_index in needed_rounds:
-            round_key = (operation_id, round_index)
+            round_key = (stream_id, round_index)
             in_order = self._retained_round_before(round_key)
             rounds_before.extend(in_order)
         job.rounds_before = tuple(rounds_before)
@@ -229,16 +229,16 @@ def _payload_round_keys(payloads) -> tuple:
     """The stored rounds a job's payloads come from, once each, in order."""
     round_keys = []
     for payload in payloads:
-        round_keys.append((payload.operation_id, payload.round_index))
+        round_keys.append((payload.stream_id, payload.round_index))
     unique = dict.fromkeys(round_keys)
     return tuple(unique)
 
 
-def _last_round_of(payloads, operation_id) -> int:
-    """The last round of the operation a job's payloads carry."""
+def _last_round_of(payloads, stream_id) -> int:
+    """The last round of the stream a job's payloads carry."""
     last_round = 0
     for fragment in payloads:
-        if fragment.operation_id != operation_id:
+        if fragment.stream_id != stream_id:
             continue
         last_round = max(last_round, fragment.round_index)
     return last_round

@@ -204,10 +204,17 @@ one link per hop; the presets' links and fabrics are in
   `window_data.check_window_sizes(self.commit_rounds, self.buffer_rounds)`
   (`decsim/windows/schemes/window_data.py`) in `__post_init__`, and add
   your row to `SCHEME_ROWS` in `tests/windows/test_settings.py`.
-- **Component:** fills `ports.WindowingScheme`. Set its three flags;
+- **Component:** fills `ports.WindowingScheme`. Set its four flags;
   the port's docstring says what each one means. `data_complete` says
   when a window has its rounds; `window_data.sliding_data_complete` is
   the rule every shipped row uses.
+- **A region scheme** (`lays_regions = True`) also fills
+  `ports.RegionScheme`: `orient_coupling` says which block of a joint
+  measurement reads the other's region. A lattice-surgery run's patch
+  streams take one, and its windows are laid by the region layout
+  (`decsim/windows/region_layout.py`), not by `plan_operation`. Worked
+  example: `decsim/windows/schemes/swiper_sliding.py`, checked against
+  SWIPER's own windows in `tests/windows/test_region_layout.py`.
 - **The plan:** `plan_operation` returns an `OperationWindowPlan`
   (`decsim/records/windows.py`). Rounds count from 1.
   - `windows`: one `WindowGeometry` per window, `buffer_lo` to

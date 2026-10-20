@@ -19,6 +19,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.region_layout as region_layout
 import decsim.windows.window_positions as window_positions
 
 
@@ -158,13 +159,19 @@ class WindowModels:
 class WindowPlanner:
     """Which windows exist.
 
-    The plan lays some up front, and a stream lays its own as it grows.
-    Trace source: window_planned(window) for every window a stream lays
-    after build; the plan's own windows exist before anyone listens.
+    The plan lays some up front, and a stream lays its own as it grows:
+    by stride and cut, or, under a scheme that lays regions, a window on
+    each region of the region layout. Trace source:
+    window_planned(window) for every window a stream lays after build;
+    the plan's own windows exist before anyone listens.
     """
 
     scheme = ports.Port(ports.WindowingScheme)
     models = ports.Port(WindowModels)
+    # the scheme as a region scheme, and the run's regions; both unbound
+    # when the scheme lays none
+    region_scheme = ports.Port(ports.RegionScheme, optional=True)
+    regions = ports.Port(region_layout.RegionLayout, optional=True)
 
     def __init__(
         self,
@@ -481,6 +488,9 @@ class WindowPlanner:
             physical_round_limit, model_round_limit
         )
         geometry = resolved.code_geometry
+        if self.regions is not None:
+            commit_round_count = geometry.commit_round_count
+            self.regions.open_stream(stream_id, commit_round_count)
         finite_geometries = None
         if source_round_limit is not None:
             finite_plan = self.scheme.plan_operation(
@@ -518,6 +528,8 @@ class WindowPlanner:
         tables and without their model (attach_stream_model), so the
         caller can link each one's boundary before the model exists.
         """
+        if self.regions is not None:
+            return self._grow_regions(stream_id, highest_known_round)
         growth = self.growth_by_stream[stream_id]
         if growth.finite_geometries is not None:
             geometries = growth.finite_geometries_begun(highest_known_round)
@@ -596,7 +608,131 @@ class WindowPlanner:
             self._replan_finite_after(stream_id, growth, last_round)
         return clipped
 
+    # ---- a stream laid in regions
+
+    @property
+    def lays_regions(self) -> bool:
+        """Whether the run's streams are laid in regions."""
+        return self.regions is not None
+
+    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> None:
+        """Cut each segment into its own regions, and read across couplings.
+
+        The region scheme orients each coupling; a coupling it orients
+        neither way is read by neither side.
+        """
+        for span in spans_by_block.values():
+            self.regions.cut_segment(span)
+        for blocks in couplings:
+            oriented = self.region_scheme.orient_coupling(blocks)
+            if oriented is None:
+                continue
+            reader, read = oriented
+            reader_span = spans_by_block[reader]
+            read_span = spans_by_block[read]
+            self.regions.couple(reader_span, read_span)
+
+    def seal_regions(
+        self,
+        stream_id: Any,  # an opaque identity
+        stream_round_count: int,
+    ) -> None:
+        """The stream's last region ends on its last round."""
+        if self.regions is None:
+            return
+        self.regions.seal(stream_id, stream_round_count)
+
+    def refresh_regions(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> list:
+        """Lay each open window on its region again; returns those that moved.
+
+        A cut or the seal ends the last region begun earlier than its
+        stride, and so the buffer of the window before it.
+        """
+        moved = []
+        for window in self.windows_of(stream_id):
+            if window.queued or window.committed:
+                continue
+            reads_before = (window.commit_hi, window.buffer_hi)
+            self._lay_on_region(window)
+            reads_after = (window.commit_hi, window.buffer_hi)
+            if reads_after != reads_before:
+                moved.append(window)
+        return moved
+
+    def reader_keys_of(self, window: window_records.Window) -> list:
+        """The window of each region reading this one; None if not begun."""
+        region = _region_of(window)
+        readers = self.regions.readers_of(region)
+        return self._window_keys(readers)
+
+    def begun_read_keys_of(self, window: window_records.Window) -> list:
+        """The window of each region this one reads that has begun."""
+        region = _region_of(window)
+        reads = self.regions.reads_of(region)
+        keys = self._window_keys(reads)
+        return [key for key in keys if key is not None]
+
+    def reader_keys_at(
+        self,
+        stream_id: Any,  # an opaque identity
+        round_index: int,
+    ) -> list:
+        """The windows reading the stream's region that holds the round."""
+        if self.regions is None:
+            return []
+        region = self.regions.region_holding(stream_id, round_index)
+        readers = self.regions.readers_of(region)
+        keys = self._window_keys(readers)
+        return [key for key in keys if key is not None]
+
     # ---- private
+
+    def _grow_regions(self, stream_id, highest_known_round: int) -> list:
+        """A window on each region that began, laid as the layout reads it."""
+        growth = self.growth_by_stream[stream_id]
+        begun = self.regions.extend(stream_id, highest_known_round)
+        created = []
+        for region in begun:
+            geometry = window_records.WindowGeometry(
+                buffer_lo=region.first_round,
+                commit_lo=region.first_round,
+                commit_hi=region.last_round,
+                buffer_hi=region.last_round,
+            )
+            window = self._create_stream_window(stream_id, growth, geometry)
+            self._lay_on_region(window)
+            created.append(window)
+        return created
+
+    def _lay_on_region(self, window: window_records.Window) -> None:
+        """Its commit, buffer and spatial reads, as its region now ends.
+
+        Its rounds are its own stream's from its start to the end of the
+        next region, and every round of each region it reads across.
+        """
+        region = self.regions.region_from(window.stream_id, window.commit_lo)
+        window.commit_hi = region.last_round
+        window.buffer_hi = self.regions.buffer_last_round(region)
+        spatial_reads = self.regions.reads_of(region)
+        window.spatial_reads = spatial_reads
+        read_rounds = [span.round_count for span in spatial_reads]
+        local_rounds = window.buffer_hi - window.start_round + 1
+        spatial_rounds = sum(read_rounds)
+        window.round_count = local_rounds + spatial_rounds
+
+    def _window_keys(self, regions: tuple) -> list:
+        """The key of the window on each region; None for one not begun."""
+        keys = []
+        for region in regions:
+            window_index = self.regions.index_of(region)
+            key = None
+            if window_index is not None:
+                key = (region.stream_id, window_index)
+            keys.append(key)
+        return keys
 
     def _replan_finite_after(
         self,
@@ -716,6 +852,13 @@ def _lower_the_floors(
     while position >= floors.first_kept and floors[position] > start_round:
         floors[position] = start_round
         position -= 1
+
+
+def _region_of(window: window_records.Window) -> window_records.RoundSpan:
+    """The region a region window commits."""
+    return window_records.RoundSpan(
+        window.stream_id, window.commit_lo, window.commit_hi
+    )
 
 
 def _model_key(

@@ -333,12 +333,14 @@ class RoundTracker:
         is_tail_closed = closed_boundary is not None
         local_rounds_arrived = rounds_of(window.stream_id)
         memory_rounds_arrived = self.memory_rounds(window.stream_id)
+        spatial_reads_arrived = _spatial_reads_arrived(window, rounds_of)
         return window_records.WindowReadiness(
             local_rounds_arrived=local_rounds_arrived,
             local_round_count=local_round_count,
             successors=tuple(successors),
             memory_rounds_arrived=memory_rounds_arrived,
             tail_closed=is_tail_closed,
+            spatial_reads_arrived=spatial_reads_arrived,
         )
 
 
@@ -391,6 +393,17 @@ class _StreamLength:
         if not covered:
             return None
         return min(covered)
+
+
+def _spatial_reads_arrived(
+    window: window_records.Window, rounds_of: Callable[[Any], int]
+) -> bool:
+    """Whether every region the window reads on another stream is in."""
+    for span in window.spatial_reads:
+        arrived = rounds_of(span.stream_id)
+        if arrived < span.last_round:
+            return False
+    return True
 
 
 def _rounds_read_out(

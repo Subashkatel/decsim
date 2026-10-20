@@ -256,7 +256,10 @@ class DecodeRequestBuilder:
     def assemble_payloads(
         self, window: window_records.Window, store: ports.RetainedRounds
     ) -> list:
-        """Collect this window's raw payloads, with successor overflow rounds.
+        """Collect this window's raw payloads, with the rounds it reads besides.
+
+        Those are its successors' overflow rounds and each region it
+        reads on another stream.
 
         The boundary is never folded here: the mask is XORed into the
         landed input at the decoder when the decode starts.
@@ -274,6 +277,8 @@ class DecodeRequestBuilder:
             self._append_round_payloads(
                 payloads, fragments, window_info, round_index
             )
+        for span in window.spatial_reads:
+            self._append_span_payloads(payloads, store, span, window_info)
         overflow = window.buffer_hi - operation_rounds
         if overflow <= 0:
             return payloads
@@ -329,6 +334,16 @@ class DecodeRequestBuilder:
             shifted_round_index = operation_rounds + round_index
             self._append_round_payloads(
                 payloads, fragments, window_info, shifted_round_index
+            )
+
+    def _append_span_payloads(self, payloads, store, span, window_info) -> None:
+        """Every round of a region of another stream, at its own index."""
+        stop_round = span.last_round + 1
+        for round_index in range(span.first_round, stop_round):
+            round_key = (span.stream_id, round_index)
+            fragments = store.retained_fragments(round_key)
+            self._append_round_payloads(
+                payloads, fragments, window_info, round_index
             )
 
     def _append_round_payloads(

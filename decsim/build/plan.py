@@ -146,6 +146,7 @@ def build_plan(
         )
         part.policy.check_plan(edge_shape)
         leaves_the_entry_pool = False
+    _check_region_scheme(scheme, workload.patch_lives, dynamic_streams)
     has_patch_lives = bool(workload.patch_lives)
     planned_operations = _decode_plan_operations(
         operations,
@@ -161,7 +162,7 @@ def build_plan(
     physical_tables = _physical_formation_tables(physical_circuits)
     circuit_arguments = _circuit_arguments(physical_circuits, physical_tables)
     device = qpu.source.build(code, circuit_arguments)
-    _check_patch_streams(workload.patch_lives, device, is_switching)
+    _check_patch_streams(workload.patch_lives, device)
     formation_tables = _formation_tables(
         device, planned_operations, physical_tables, rounds_policy, code
     )
@@ -298,12 +299,13 @@ def _check_blockers_decode(
     planner.check_blockers_decode(list(operations), external_blocker_ids)
 
 
-def _check_patch_streams(lives: tuple, device, is_switching: bool) -> None:
-    """Patch streams are decoded timing only, by one tier.
+def _check_patch_streams(lives: tuple, device) -> None:
+    """Patch streams are decoded timing only.
 
     An operation on several patch streams has no one stream's
-    observables (windows/operation_results.py), and a strong window over
-    patch streams is not built.
+    observables (windows/operation_results.py). A strong window over
+    patch streams is not built either: switching refuses a region
+    scheme, whose last window reads nothing past its commit.
     """
     if not lives:
         return
@@ -311,8 +313,29 @@ def _check_patch_streams(lives: tuple, device, is_switching: bool) -> None:
         raise ValueError(
             "patch streams run timing only; the syndrome source emits values"
         )
-    if is_switching:
-        raise ValueError("patch streams are decoded by one tier: no switching")
+
+
+def _check_region_scheme(scheme, lives: tuple, dynamic_streams) -> None:
+    """Patch streams are laid in regions, and only they are.
+
+    A merge's windows read across its patches (windows/region_layout.py),
+    which a scheme that lays no regions cannot do; a region scheme cuts a
+    stream at its joint measurements only, so a feedback stream, whose
+    every segment must start a window, is laid by stride and cut.
+    """
+    if lives and not scheme.lays_regions:
+        raise ValueError(
+            "a lattice-surgery run decodes in regions across its patches; "
+            "set windows.scheme to a region scheme, such as "
+            "windows/schemes/swiper_sliding.py SwiperSlidingScheme.Settings()"
+        )
+    if lives or not scheme.lays_regions:
+        return
+    if dynamic_streams:
+        raise ValueError(
+            "a region scheme lays the windows of patch streams only; a "
+            "feedback stream takes a scheme that lays no regions"
+        )
 
 
 def _unique_operations(operations) -> tuple:

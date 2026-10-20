@@ -193,11 +193,16 @@ class RoundRetention:
 
         The rounds before its start stay with the earlier window's read,
         whose decoder forms them and keeps each packet a later round
-        reads.
+        reads. A region window also reads each region it reads across.
         """
-        return self.read_keys_for_bounds(
+        reads = self.read_keys_for_bounds(
             window.stream_id, window.start_round, window.buffer_hi, window
         )
+        for span in window.spatial_reads:
+            stop_round = span.last_round + 1
+            for round_index in range(span.first_round, stop_round):
+                reads.append((span.stream_id, round_index))
+        return reads
 
     def read_keys_for_bounds(
         self,

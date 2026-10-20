@@ -513,6 +513,12 @@ class WindowInput(Protocol):
     ) -> None:
         """Note which stream and offset a segment's rounds fold into."""
 
+    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> None:
+        """A joint measurement's segments, by block, and the blocks it couples.
+
+        Each span is a RoundSpan of one block's stream.
+        """
+
     def bind_required_stream_end(
         self, operation_id: int, required_stream_end: int
     ) -> None:
@@ -2133,11 +2139,15 @@ class WindowingScheme(Protocol):
         stride order, which the double window absorbs.
     supports_dynamic_streams: an operation whose round count is not known
         at build can be windowed by this scheme.
+    lays_regions: a decode stream is cut into regions and a window reads
+        regions of other streams across couplings
+        (windows/region_layout.py); such a scheme is a RegionScheme too.
     """
 
     has_trailing_tail_context: bool
     commits_in_one_serial_chain: bool
     supports_dynamic_streams: bool
+    lays_regions: bool
 
     def plan_operation(
         self,
@@ -2156,6 +2166,19 @@ class WindowingScheme(Protocol):
         readiness: window_records.WindowReadiness,
     ) -> bool:
         """Whether the window has every round it reads."""
+
+
+class RegionScheme(Protocol):
+    """A scheme that lays regions: which side of a coupling reads the other.
+
+    A joint measurement couples code blocks, as the program states them
+    (Operation.couplings); the scheme decides which block's window reads
+    the other's region and which waits (Bombín et al. 2303.04846 lines
+    720-723: the order of a shared face is the scheme's choice).
+    """
+
+    def orient_coupling(self, blocks: tuple) -> Optional[tuple]:
+        """The two coupled blocks as (reader, read); None when neither reads."""
 
 
 @runtime_checkable

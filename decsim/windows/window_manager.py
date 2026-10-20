@@ -164,6 +164,8 @@ class WindowManager:
         if window.window_index > 0:
             previous_key = (window.stream_id, window.window_index - 1)
             self._link_to_previous_window(previous_key, window.key, window)
+        if self.planner.lays_regions:
+            self._link_across_couplings(window)
         self.planner.attach_stream_model(window)
         self.retention.register_window(window.key, window)
 
@@ -176,9 +178,35 @@ class WindowManager:
             self.courier.merge_available(previous_key, window, boundary)
             return
         window.deps.append(previous_key)
-        window.deps_remaining = 1
+        window.deps_remaining += 1
         previous = self.planner.windows_by_key[previous_key]
         previous.dependents.append(key)
+
+    def _link_across_couplings(self, window: window_records.Window) -> None:
+        """The window waits for each region reading it, and is waited for.
+
+        The window laid second makes the link: a window counts every
+        reader it waits for when it is laid, laid or not, and a reader
+        laid later links itself to each window it reads that is laid. A
+        reader needs every round of the region it reads, and the window
+        on that region is laid at its first, so no reader has committed
+        when the window it reads is laid.
+        """
+        for reader_key in self.planner.reader_keys_of(window):
+            window.deps_remaining += 1
+            if reader_key is not None:
+                self._link_reader(reader_key, window.key)
+        for read_key in self.planner.begun_read_keys_of(window):
+            self._link_reader(window.key, read_key)
+
+    def _link_reader(self, reader_key: tuple, read_key: tuple) -> None:
+        assert not self.courier.has_committed(reader_key), (
+            f"{reader_key} committed before the window it reads was laid"
+        )
+        reader = self.planner.windows_by_key[reader_key]
+        read = self.planner.windows_by_key[read_key]
+        reader.dependents.append(read_key)
+        read.deps.append(reader_key)
 
     def seal_stream(
         self,
@@ -192,19 +220,35 @@ class WindowManager:
         models_changed = self.planner.models.finalize_stream_models(
             stream_operation, stream_round_count
         )
+        self.planner.seal_regions(stream_id, stream_round_count)
         self._grow_stream(stream_id, stream_round_count, stream_round_count)
-        if not self.planner.is_finite_stream(stream_id):
-            clipped = self.planner.trim_stream_tail(
-                stream_id, stream_round_count
-            )
-            if clipped is not None:
-                self.retention.reset_clipped_window_reads(clipped)
+        self._trim_stream_tail(stream_id, stream_round_count)
         if models_changed:
             self.planner.refresh_stream_models(stream_id)
         self.tracker.seal(stream_id, stream_round_count)
         self.retention.release_later_stream_reads(stream_id)
         self.check_windows_of_stream(stream_id)
         self.results.finish_workload_if_ready()
+
+    def _trim_stream_tail(self, stream_id, stream_round_count: int) -> None:
+        """The window across the seal commits through it and reads no further.
+
+        A region window reads the next region, which the seal ends, so
+        each open one is laid on its region again.
+        """
+        if self.planner.lays_regions:
+            self._refresh_regions(stream_id)
+            return
+        if self.planner.is_finite_stream(stream_id):
+            return
+        clipped = self.planner.trim_stream_tail(stream_id, stream_round_count)
+        if clipped is not None:
+            self.retention.reset_clipped_window_reads(clipped)
+
+    def _refresh_regions(self, stream_id) -> None:
+        """Lay the open windows on their regions; re-point those that moved."""
+        for window in self.planner.refresh_regions(stream_id):
+            self.retention.replace_window_reads(window.key, window)
 
     def close_stream_boundary(
         self,
@@ -280,6 +324,7 @@ class WindowManager:
         self._update_stream(operation.id)
         self._wake_strong_tier(operation.id)
         self._wake_windows(operation)
+        self._wake_readers(packet.stream_id, packet.round_index)
         # a round whose every consumer already resolved (an absorbed window's
         # tail) frees its weak syndrome buffer slot on arrival, the same
         # drop-on-arrival rule the strong syndrome buffer applies
@@ -355,6 +400,12 @@ class WindowManager:
         self.check_windows_of_stream(operation.id)
         for predecessor_id in operation.decoder_boundary_predecessors:
             self.check_windows_of_stream(predecessor_id)
+
+    def _wake_readers(self, stream_id, round_index: int) -> None:
+        """A round of a region read across a coupling: check its readers."""
+        reader_keys = self.planner.reader_keys_at(stream_id, round_index)
+        for reader_key in reader_keys:
+            self.check_window(reader_key)
 
     def prepend_idle_rounds(self, stream_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style operation's stream."""
@@ -491,10 +542,25 @@ class WindowManager:
         self.results.bind_stream_segment(operation_id, stream_id, stream_offset)
         if not self.planner.has_stream(stream_id):
             return
+        # a region scheme cuts a stream at its coupled segments only
+        # (couple_segments)
+        if self.planner.lays_regions:
+            return
         round_count = self.planner.round_count_of(operation_id)
         segment_end = stream_offset + round_count
         self._cut_stream_after(stream_id, stream_offset)
         self._cut_stream_after(stream_id, segment_end)
+
+    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> None:
+        """A joint measurement's segments start and end regions, read across.
+
+        A cut can end the last region begun early, and with it the
+        buffer of the window before, so its stream's windows are checked.
+        """
+        self.planner.couple_segments(spans_by_block, couplings)
+        for span in spans_by_block.values():
+            self._refresh_regions(span.stream_id)
+            self.check_windows_of_stream(span.stream_id)
 
     def bind_required_stream_end(
         self, operation_id: int, required_stream_end: int

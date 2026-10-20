@@ -103,6 +103,9 @@ class Window:
     )
     closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
+    # the regions of other streams it reads, RoundSpans, a merge's
+    # spatial buffers (windows/region_layout.py)
+    spatial_reads: tuple = ()
     deps: list = field(default_factory=list)  # window keys this one waits on
     dependents: list = field(
         default_factory=list
@@ -239,6 +242,24 @@ class WindowGeometry:
     def round_count(self) -> int:
         """The rounds the interval spans, both buffers included."""
         return self.buffer_hi - self.buffer_lo + 1
+
+
+@dataclass(frozen=True)
+class RoundSpan:
+    """Rounds first_round to last_round of one decode stream: a region.
+
+    SWIPER's SpacetimeRegion (2412.05115, swiper/window_builder.py) is one
+    patch over a run of rounds; a stream here is any code block's rounds.
+    """
+
+    stream_id: Any  # an opaque identity
+    first_round: int
+    last_round: int
+
+    @property
+    def round_count(self) -> int:
+        """The rounds the span holds."""
+        return self.last_round - self.first_round + 1
 
 
 @dataclass(frozen=True)
@@ -418,6 +439,8 @@ class WindowReadiness:
     successors: tuple[SuccessorReadiness, ...]
     memory_rounds_arrived: int
     tail_closed: bool
+    # every round of every region of another stream the window reads
+    spatial_reads_arrived: bool = True
 
 
 @dataclass(frozen=True)

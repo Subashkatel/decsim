@@ -449,6 +449,30 @@ def test_patch_streams_whose_source_gives_values_are_refused(tmp_path):
         _plan(workload=workload, windows=windows, qpu=bits)
 
 
+def test_a_patch_stream_blocker_that_emits_no_rounds_is_refused():
+    patch = ((0, 0),)
+    silent = program_records.Operation(
+        0,
+        "inject",
+        patch,
+        patches=patch,
+        emits_detector_data=False,
+    )
+    waiter = program_records.Operation(
+        1, "measure", patch, patches=patch, predecessors=(0,), blocked_by=0
+    )
+    rounds = {0: 1, 1: 1}
+    program = workload_records.Workload(
+        (silent, waiter), rounds, patch_streams=True
+    )
+    workload = workload_settings.WorkloadSettings.running(program)
+    scheme = region_sliding.RegionSlidingScheme.Settings()
+    windows = window_settings.WindowSettings(scheme=scheme)
+
+    with pytest.raises(ValueError, match="emits no detector data"):
+        _plan(workload=workload, windows=windows)
+
+
 def test_waiting_for_ancestors_off_patch_streams_is_refused():
     rule = release_rules.DecodedAncestors.Settings()
     windows = window_settings.WindowSettings(release_rule=rule)

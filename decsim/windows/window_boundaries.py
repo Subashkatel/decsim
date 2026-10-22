@@ -10,6 +10,15 @@ Every send bumps the source's version and each delivery's version, and a
 receiver accepts only the latest, so a late delivery is harmless. A held
 boundary waits for a final result. A strong window whose face is pinned
 reads the same records (pin_strong_face).
+
+A record outlives every delivery it sent. The input of a later task is
+its syndrome plus the corrections the earlier tasks committed on the
+face they share (Bombín et al. 2303.04846 lines 775-788), so a delivery
+still on its hop needs its source's version to be accepted. A window's
+reader across a coupling is on another stream, which may lag its own by
+any number of windows, so a stream that lets its windows go
+(window_release.py) lets go only the records with nothing in flight,
+and the rest once their last delivery lands.
 """
 
 import collections.abc
@@ -64,6 +73,10 @@ class BoundaryCourier:
     def __init__(self, routes: route_records.Routes) -> None:
         self.routes = routes
         self.record_by_window: dict = {}
+        # source window key -> its deliveries sent and not landed yet
+        self.in_flight_by_source: collections.Counter = collections.Counter()
+        # stream id -> the index its windows before were let go
+        self.let_go_before_by_stream: dict = {}
 
     # ---- what the committer asks
 
@@ -131,11 +144,13 @@ class BoundaryCourier:
         """Let the boundary records of the stream's windows before it go.
 
         The windows are final (window_release.py): each shipped its
-        boundary, and the windows that read one have committed.
+        boundary. A record with a delivery still in flight is kept until
+        that delivery lands (_forget_if_let_go).
         """
+        self.let_go_before_by_stream[stream_id] = window_index
         for key in list(self.record_by_window):
             if key[0] == stream_id and key[1] < window_index:
-                del self.record_by_window[key]
+                self._forget_if_let_go(key)
 
     # ---- delivery
 
@@ -458,6 +473,7 @@ class BoundaryCourier:
         window_pool = self._pool_of(dependent_key)
         route = self.routes.boundary(source_request_key.pool, window_pool)
         payload_bits = _wire_bits(seam_bits, route)
+        self.in_flight_by_source[window.key] += 1
         self.transfers.send_boundary(
             route.path, attribution, payload_bits, receive
         )
@@ -515,7 +531,8 @@ class BoundaryCourier:
         _transfer=None,
     ) -> None:
         """A delivery landed: merge it if current, release the edge once."""
-        record = self._record(source_key)
+        record = self.record_by_window[source_key]
+        self.in_flight_by_source[source_key] -= 1
         window = self.planner.windows_by_key[key]
         dependency_released = key in record.released_dependents
         latest_delivery_revision = record.delivery_version_by_dependent.get(
@@ -540,7 +557,19 @@ class BoundaryCourier:
                 record.released_dependents.add(key)
                 window.deps_remaining -= 1
         is_unblocked = self._is_unblocked_now(window)
+        self._forget_if_let_go(source_key)
         self.windows.accept_boundary(key, is_unblocked)
+
+    def _forget_if_let_go(self, source_key: tuple) -> None:
+        """Drop a let-go window's record once no delivery of it is in flight."""
+        stream_id, window_index = source_key
+        let_go_before = self.let_go_before_by_stream.get(stream_id, 0)
+        if window_index >= let_go_before:
+            return
+        if self.in_flight_by_source[source_key] > 0:
+            return
+        del self.in_flight_by_source[source_key]
+        self.record_by_window.pop(source_key, None)
 
     @staticmethod
     def _is_unblocked_now(window: window_records.Window) -> bool:

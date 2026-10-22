@@ -419,7 +419,6 @@ class _OutputRows:
 
     decision_of_op: dict
     decision_issued_of_op: dict
-    command_issued_by_identity: dict
     preloaded_by_identity: dict
 
 
@@ -428,11 +427,11 @@ def _output_path(
 ) -> _OutputRows:
     """The controller's digital-to-QPU path from its own payload records.
 
-    A release is available after the frame's decision reaches the
-    controller; its real command then crosses controller output and
-    the command link before it arrives and starts at the QPU.
+    A decision reaches the controller, then crosses controller output
+    and the command link; a release there lets its queued command
+    arrive and start at the QPU.
     """
-    outputs = _OutputRows({}, {}, {}, {})
+    outputs = _OutputRows({}, {}, {})
     for event in output_events:
         _output_row(rows, event, operations, committed_of_op, outputs)
     return outputs
@@ -449,11 +448,6 @@ def _output_row(
         prev = committed_of_op.get(blocking_op)
         row = rows.add(event.kind, event.tick, operation_id, prev=prev)
         outputs.decision_of_op[operation_id] = row
-        return
-    if event.kind == "CONTROL_PULSE_COMMAND_ISSUED":
-        prev = outputs.decision_of_op.get(operation_id)
-        row = rows.add(event.kind, event.tick, operation_id, prev=prev)
-        outputs.command_issued_by_identity[id(event.payload)] = row
         return
     if event.kind == "PRELOADED_COMMAND":
         row = rows.add(event.kind, event.tick, operation_id)
@@ -476,7 +470,9 @@ def _releases(
     released_of_op = {}
     release_items = release_time.items()
     for operation_id, tick in sorted(release_items, key=repr):
-        prev = outputs.decision_of_op.get(operation_id)
+        prev = outputs.decision_issued_of_op.get(operation_id)
+        if prev is None:
+            prev = outputs.decision_of_op.get(operation_id)
         if prev is None:
             operation = operations.get(operation_id)
             blocking_op = getattr(operation, "blocked_by", None)
@@ -490,8 +486,8 @@ def _releases(
 def _rewire_commands_through_releases(
     outputs: _OutputRows, released_of_op: dict
 ) -> None:
-    """A dynamic command's issue follows the runtime's release at that tick."""
-    for row in outputs.command_issued_by_identity.values():
+    """A blocked operation's queued command follows the runtime's release."""
+    for row in outputs.preloaded_by_identity.values():
         release = released_of_op.get(row["op"])
         if release is not None:
             row["prev"] = release
@@ -504,7 +500,7 @@ def _qpu_commands(rows: _LedgerRows, command_events, outputs: _OutputRows):
         command_identity = id(event.command)
         operation_id = event.command.operation.id
         if event.kind == "ARRIVED":
-            prev = _issue_of_command(outputs, command_identity)
+            prev = outputs.preloaded_by_identity.get(command_identity)
             row = rows.add(
                 "QPU_COMMAND_ARRIVED", event.tick, operation_id, prev=prev
             )
@@ -519,14 +515,6 @@ def _qpu_commands(rows: _LedgerRows, command_events, outputs: _OutputRows):
                 prev=prev,
                 status="terminal",
             )
-
-
-def _issue_of_command(outputs: _OutputRows, command_identity: int):
-    """The row that issued a command: dynamic, else preloaded, else none."""
-    issued = outputs.command_issued_by_identity.get(command_identity)
-    if issued is not None:
-        return issued
-    return outputs.preloaded_by_identity.get(command_identity)
 
 
 def _result_returns(

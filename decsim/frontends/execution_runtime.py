@@ -107,7 +107,7 @@ class ExecutionRuntime:
             self._maybe_begin(operation)
 
     def on_decision(self, decision: program_records.Decision) -> None:
-        """A decision reached the controller: a release starts its operation."""
+        """A decision crossed the output path: a release lets it start."""
         operation_id = decision.target_operation_id
         operation = self.schedule.operations[operation_id]
         if not decision.releases_operation:

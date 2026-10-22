@@ -1377,7 +1377,7 @@ class OperationRuntime(Protocol):
         """A body finished: record it, free resources, release successors."""
 
     def on_decision(self, decision: program_records.Decision) -> None:
-        """A decision reached the controller: a release starts its operation."""
+        """A decision crossed the output path: a release lets it start."""
 
     def retry_ready_operations(self) -> None:
         """Retry every state-ready operation after a cadence change."""

@@ -3392,7 +3392,7 @@ def test_a_released_pulse_on_a_protected_patch_waits_for_one_boundary():
     machine.run()
 
     decided = outputs[("DECISION_AVAILABLE", 3)]
-    issued = outputs[("CONTROL_PULSE_COMMAND_ISSUED", 3)]
+    issued = outputs[("CONTROL_DECISION_ISSUED", 3)]
     arrived = commands[("ARRIVED", 3)]
     started = commands[("STARTED", 3)]
     assert issued == decided

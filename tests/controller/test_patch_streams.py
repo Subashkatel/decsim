@@ -166,8 +166,26 @@ def test_a_patch_stream_is_cut_into_regions_at_its_merges(t_gate):
 
     commits = [(window.commit_lo, window.commit_hi) for window in control]
     buffer_ends = [window.buffer_hi for window in control]
-    assert commits == [(1, 7), (8, 14), (15, 19), (20, 26), (27, 32)]
-    assert buffer_ends == [14, 19, 26, 32, 32]
+    assert commits == [(1, 7), (8, 14), (15, 19), (20, 26), (27, 31)]
+    assert buffer_ends == [14, 19, 26, 31, 31]
+
+
+def test_a_released_correction_runs_on_without_a_gap(t_gate):
+    """The S merge's successors start on the boundary it ends on.
+
+    Their releases landed with the merge's, long before, so their queued
+    commands fire on schedule (eQASM 1808.02449 Sec. 3.5): the branch
+    cost is paid once per decision, not once per instruction (Skoric et
+    al. 2209.08552 Sec. D, a response time per T gate).
+    """
+    _settings, machine, _result = t_gate
+
+    stamps = machine.observation.runtime_stamps
+    merge_done = stamps.body_done[CONDITIONAL_S_MERGE]
+    y_measurement, s_idle = CONDITIONAL_S_MERGE + 1, CONDITIONAL_S_MERGE + 2
+    assert stamps.decode_release[y_measurement] < merge_done
+    assert stamps.op_start[y_measurement] == merge_done
+    assert stamps.op_start[s_idle] == merge_done
 
 
 def test_a_merge_window_reads_its_partners_region_and_is_waited_for(t_gate):

@@ -2,8 +2,9 @@
 
 The result is the ledger's XOR over [1, rounds], delivered once after
 every window committed and no strong wait; a segment releases when the
-committed prefix covers it (Skoric et al. 2209.08552: the logical
-correction of a stream is the sum over its committed windows).
+committed prefix covers it, its value the stream's from round 1 (Skoric
+et al. 2209.08552: the logical correction of a stream is the sum over
+its committed windows).
 """
 
 import types
@@ -200,6 +201,21 @@ def test_a_segment_releases_when_the_committed_prefix_covers_it():
     assert fixture.release.released[0] == 2
     assert fixture.delivered.result_by_operation[2] == (1, 1)
     assert fixture.results.committed_prefix_round_count(1) == 3
+
+
+def test_a_later_segment_carries_every_correction_before_it():
+    """Rounds 1-3 flip the observable and rounds 4-6 do not: still (1,)."""
+    fixture = _Fixture()
+    segment = program_records.Operation(
+        2, "segment", (0,), blocked_by=1, stream_id=1
+    )
+    fixture.results.tracker.operation_by_id[2] = segment
+    fixture.results.tracker.blocking_operation_ids.add(2)
+    fixture.results.bind_stream_segment(2, 1, 3)
+    fixture.results.bind_required_stream_end(2, 6)
+    fixture.commit((1, 0), (1,))
+    fixture.commit((1, 1), (0,))
+    assert fixture.delivered.result_by_operation[2] == (1,)
 
 
 def test_the_workload_is_not_final_until_every_stream_is_sealed():

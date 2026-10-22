@@ -107,7 +107,9 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
-    _check_blockers_decode(operations, dynamic_streams, external_blocker_ids)
+    _check_blockers_decode(
+        operations, dynamic_streams, workload.patch_lives, external_blocker_ids
+    )
     scheme = _scheme(windows)
     boundary_policy = _boundary_policy(windows)
     # the refusals print the strong window's row name, and only a window
@@ -295,10 +297,15 @@ def _with_boundary_mode(
 
 
 def _check_blockers_decode(
-    operations, dynamic_streams, external_blocker_ids
+    operations, dynamic_streams, lives: tuple, external_blocker_ids
 ) -> None:
-    """A stream may bind a blocker that emits nothing; with none, refuse it."""
-    if dynamic_streams:
+    """A feedback stream may bind a blocker that emits nothing; else refuse.
+
+    A patch stream binds only an operation that emits rounds
+    (controller/patch_streams.py bind_at_start), so on a lattice-surgery
+    run a blocker that emits none would never release its waiter.
+    """
+    if dynamic_streams and not lives:
         return
     planner.check_blockers_decode(list(operations), external_blocker_ids)
 

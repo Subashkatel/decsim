@@ -651,11 +651,12 @@ def _operation_result(
 
 
 def _operation_truth(operation, binding, truth_for):
-    """A segment contribution has no independently sampled logical truth.
+    """A segment has no independently sampled logical truth.
 
     Sinter's _CompiledStimThenDecodeSampler.sample compares predictions
-    and actual_obs for the same complete circuit shot. A stream segment
-    contributes only its commit interval, so only its owner is scored.
+    and actual_obs for the same complete circuit shot. A segment's value
+    is its stream's frame through the segment's end, which the source
+    samples no observable for, so only the stream's owner is scored.
     """
     stream_id = operation.stream_id
     if binding is not None:

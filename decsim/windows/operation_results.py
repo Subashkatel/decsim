@@ -351,19 +351,21 @@ class OperationResults:
         return True
 
     def _segments_observables(self, operation, segments: list):
-        """The one stream's committed observables over the segment.
+        """The one stream's committed observables from round 1 to its end.
 
-        None for several streams, as patch streams run timing only
-        (build/plan.py refuses a source with values).
+        A measured outcome depends on every error since the patch was
+        prepared, so its frame is the XOR of every committed correction
+        before it, not of the segment's own rounds (Bombín et al.
+        2303.04846 Eq. 4). None for several streams, as patch streams
+        run timing only (build/plan.py refuses a source with values).
         """
         if len(segments) > 1:
             return None
         (segment,) = segments
-        first_round = segment.stream_offset + 1
         last_round = self._stream_segment_end(operation, segment)
         return self.ledger.observables_for_interval(
             segment.stream_id,
-            first_round,
+            1,
             last_round,
             boundary_policy="stream_segment",
         )

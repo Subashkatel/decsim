@@ -28,6 +28,7 @@ import pytest
 
 import decsim.confidence.complementary as complementary
 import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -504,6 +505,15 @@ def test_a_re_read_width_with_no_referent_is_refused():
         strong_window_shapes.DoubleWindow.Settings(
             restart_reread_buffer_regions=2
         )
+
+
+def test_a_timing_only_strong_tier_over_a_decoding_weak_tier_is_refused():
+    """A timing-only redo has no value to replace the weak one with."""
+    decoding = weak_base_switching(3, 0.01, 1.0)
+    timing_only = decoders.PresetLatencyDecoder.Settings(10.0)
+    mixed = decoding.with_settings(machines.STRONG_POOL, algorithm=timing_only)
+    with pytest.raises(ValueError, match="whose redo would leave"):
+        machine_module.Machine.build(mixed, 0)
 
 
 def test_the_double_window_lands_in_the_declared_backlog_regime():

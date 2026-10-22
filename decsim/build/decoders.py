@@ -235,6 +235,43 @@ def build_pool_units(
     return tuple(built)
 
 
+def refuse_timing_only_redo(
+    pools: tuple, target_by_source: dict, device: ports.SyndromeSource
+) -> None:
+    """Refuse a timing-only pool redoing a pool that returns values.
+
+    A strong redo replaces its window's prediction in the frame
+    (window_commits.py, finish_strong), and a timing-only redo has none
+    to give, so the frame would keep the value the run says was redone.
+    The other way round is sound: the timing-only windows leave the
+    stream's result None, as the ledger reads any timing-only part.
+    """
+    if not device.emits_bit_values:
+        return
+    unit_by_pool = {pool.plan.pool: pool.unit for pool in pools}
+    for source, target in target_by_source.items():
+        source_returns = _returns_values(unit_by_pool[source])
+        target_returns = _returns_values(unit_by_pool[target])
+        if source_returns and not target_returns:
+            raise ValueError(
+                f"the {source.word} pool returns logical values and "
+                f"escalates to the timing-only {target.word} pool, whose "
+                f"redo would leave the {source.word} value in the frame; "
+                "both must be the same: both returning values or both "
+                "timing only"
+            )
+
+
+def _returns_values(unit: ports.Decoder) -> bool:
+    """Whether the unit returns logical values.
+
+    A logical flip is a fault's observable column, so a decoder that
+    reads no fault model has none to return.
+    """
+    requirement = unit.fault_model_requirement
+    return bool(requirement.representations)
+
+
 def batches_each_member(layout: layout_module.Layout) -> bool:
     """Whether any pool decodes its merged batches member by member."""
     for plan in layout.pools:

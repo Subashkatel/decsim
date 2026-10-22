@@ -182,6 +182,9 @@ class Machine:
             recorded_signal,
         )
         target_by_source = layout.target_by_source()
+        decoders_part.refuse_timing_only_redo(
+            pools, target_by_source, plan.device
+        )
         decoder_manager = graph.held("decoder_manager")
         decoders = decoders_part.Decoders.build(
             decoder_manager,

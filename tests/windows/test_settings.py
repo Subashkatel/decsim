@@ -11,6 +11,7 @@ import pytest
 
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.release_rules as release_rules
 import decsim.windows.schemes.naive_online as naive_online_scheme
 import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.schemes.sandwich as sandwich_scheme
@@ -93,3 +94,28 @@ def test_switching_windows_take_the_strong_windows_row_over_the_default():
 
     assert switched.boundary_policy == redo_window.boundary_policy
     assert again == switched
+
+
+def test_a_lattice_surgery_run_waits_for_its_decoded_ancestors():
+    windows = window_settings.WindowSettings()
+
+    rule = window_settings.release_rule_for(windows, patch_lives=("life",))
+
+    assert rule == release_rules.DecodedAncestors.Settings()
+
+
+def test_any_other_run_waits_for_its_own_streams():
+    windows = window_settings.WindowSettings()
+
+    rule = window_settings.release_rule_for(windows, patch_lives=())
+
+    assert rule == release_rules.OwnStreams.Settings()
+
+
+def test_a_release_rule_set_on_the_record_is_the_runs():
+    own_streams = release_rules.OwnStreams.Settings()
+    windows = window_settings.WindowSettings(release_rule=own_streams)
+
+    rule = window_settings.release_rule_for(windows, patch_lives=("life",))
+
+    assert rule == own_streams

@@ -147,6 +147,10 @@ def build_plan(
         part.policy.check_plan(edge_shape)
         leaves_the_entry_pool = False
     _check_region_scheme(scheme, workload.patch_lives, dynamic_streams)
+    release_rule = window_settings.release_rule_for(
+        windows, workload.patch_lives
+    )
+    _check_release_rule(release_rule, workload.patch_lives)
     has_patch_lives = bool(workload.patch_lives)
     planned_operations = _decode_plan_operations(
         operations,
@@ -335,6 +339,21 @@ def _check_region_scheme(scheme, lives: tuple, dynamic_streams) -> None:
         raise ValueError(
             "a region scheme lays the windows of patch streams only; a "
             "feedback stream takes a scheme that lays no regions"
+        )
+
+
+def _check_release_rule(rule, lives: tuple) -> None:
+    """A rule that waits for ancestors runs on patch streams only.
+
+    It reads each ancestor's stream segments, which patch streams bind
+    for every operation; a static operation has none, so a blocker after
+    one would wait for ever.
+    """
+    if rule.awaits_ancestors and not lives:
+        raise ValueError(
+            f"release rule {rule.name} waits for earlier operations' "
+            "decodes, which only a lattice-surgery run's patch streams "
+            "track; use windows/release_rules.py OwnStreams.Settings()"
         )
 
 

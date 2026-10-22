@@ -13,6 +13,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.operation_results as operation_results
+import decsim.windows.release_rules as release_rules
 
 
 class _Release:
@@ -106,6 +107,7 @@ class _Fixture:
         self.results.ledger = self.ledger
         self.results.conditional_release = self.release
         self.results.factory = self.factory
+        self.results.release_rule = release_rules.OwnStreams()
         self.delivered = result_ledger.ResultLedger()
         self.results.trace.operation_result_delivered.connect(
             self.delivered.operation_result_delivered

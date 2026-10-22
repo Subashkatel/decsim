@@ -3,8 +3,9 @@
 Timing only, as SWIPER-SIM is: each patch life is one decode stream,
 every round its patch measures that stream's next round (SWIPER
 2412.05115, swiper/device_manager.py _generate_syndrome_round), and an
-operation on several patches releases its waiters once each of its
-streams committed its rounds (Bombín et al. 2303.04846 Eq. 4). The
+operation on several patches releases its waiters once its streams and
+those of its decoded ancestors committed (windows/release_rules.py
+DecodedAncestors, a lattice-surgery run's rule). The
 windows are SWIPER's sliding ones (swiper/window_manager.py
 SlidingWindowManager), laid by the region layout as the run's merges
 start and its rounds arrive; the layout itself is checked against

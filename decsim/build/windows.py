@@ -116,6 +116,10 @@ class Windows:
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
+        rule_settings = window_settings.release_rule_for(
+            windows_settings, workload.patch_lives
+        )
+        results.release_rule = rule_settings.build(plan.operations)
         courier = window_boundaries.BoundaryCourier(routes)
         committer = window_commits.WindowCommitter(engine)
         verdict = window_commits.WindowVerdict(engine, window_tier)

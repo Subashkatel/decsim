@@ -113,18 +113,24 @@ def test_feedback_restart_obeys_the_declared_clock(
         period_microseconds, 4.0, instruction_microseconds
     )
     readouts = []
+    decisions = []
     machine.qpu.device.trace.round_emitted.connect(readouts.append)
+    output_trace = machine.control.instruction_output.trace
+    output_trace.output_event.connect(decisions.append)
     result = machine.run()
     events = machine.observation.command_events.events
     arrival = _command_tick(events, "ARRIVED", 3)
     started = _command_tick(events, "STARTED", 3)
-    release = machine.observation.runtime_stamps.decode_release[3]
+    (decided,) = [
+        event.tick for event in decisions if event.kind == "DECISION_AVAILABLE"
+    ]
     period_ticks = config.microseconds_to_ticks(period_microseconds)
     clock = config.Clock(period_ticks)
     instruction_ticks = config.microseconds_to_ticks(instruction_microseconds)
-    # the pulse leaves as the decision lands and plays at the next timing
-    # point after it arrives (QubiC 2404.15260 lines 286-290)
-    assert arrival == release + instruction_ticks
+    # the release leaves as the decision lands, and the queued command
+    # plays at the next timing point after it arrives (QubiC 2404.15260
+    # lines 286-290)
+    assert arrival == decided + instruction_ticks
     assert started == clock.edge(0, arrival)
     assert [packet.round_index for packet in readouts] == list(range(1, 25))
     assert sum(packet.size_bits for packet in readouts) == 201

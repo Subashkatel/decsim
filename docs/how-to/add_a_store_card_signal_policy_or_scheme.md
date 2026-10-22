@@ -208,13 +208,23 @@ one link per hop; the presets' links and fabrics are in
   the port's docstring says what each one means. `data_complete` says
   when a window has its rounds; `window_data.sliding_data_complete` is
   the rule every shipped row uses.
-- **A region scheme** (`lays_regions = True`) also fills
-  `ports.RegionScheme`: `orient_coupling` says which block of a joint
-  measurement reads the other's region. A lattice-surgery run's patch
-  streams take one, and its windows are laid by the region layout
-  (`decsim/windows/region_layout.py`), not by `plan_operation`. Worked
-  example: `decsim/windows/schemes/swiper_sliding.py`, checked against
-  SWIPER's own windows in `tests/windows/test_region_layout.py`.
+- **A growing stream** (`supports_dynamic_streams = True`): the row's
+  `stream_layouts()` returns a `ports.StreamLayouts`, which lays each
+  stream's windows as its rounds arrive. Most rows build one from
+  `decsim/windows/region_streams.py`, choosing three things: the buffer
+  rule (`FixedBuffer` or `NextRegionBuffer`), whether every segment
+  edge cuts a region, and a coupling order. Worked example:
+  `decsim/windows/schemes/sliding_streams.py`.
+- **Reading across couplings** (`reads_across_couplings = True`): a
+  window also reads the regions of streams coupled to its own. A
+  lattice-surgery run's patch streams need such a row. A
+  `ports.CouplingOrder` (`decsim/windows/coupling_orders.py`) says
+  which block of a joint measurement reads the other's region. To
+  decode a code whose blocks are not grid coordinates, add an order;
+  the layout does not change. Worked example:
+  `decsim/windows/schemes/region_sliding.py`. With
+  `CoordinateOrder` it lays SWIPER's windows, checked in
+  `tests/windows/test_region_layout.py`.
 - **The plan:** `plan_operation` returns an `OperationWindowPlan`
   (`decsim/records/windows.py`). Rounds count from 1.
   - `windows`: one `WindowGeometry` per window, `buffer_lo` to

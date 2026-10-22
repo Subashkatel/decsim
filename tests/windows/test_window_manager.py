@@ -174,6 +174,7 @@ def _stream_planner() -> window_planner.WindowPlanner:
     scheme = sliding_scheme.SlidingWindowScheme()
     planner = window_planner.WindowPlanner([resolved], plan, ())
     planner.scheme = scheme
+    planner.layouts = scheme.stream_layouts()
     planner.models = built
     planner.start()
     return planner

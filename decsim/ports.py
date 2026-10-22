@@ -2128,9 +2128,11 @@ class BoundaryPayload(Protocol):
 class WindowingScheme(Protocol):
     """How an operation's rounds are cut into windows.
 
-    The static window graph of an operation, and when a window has its
-    data. Three facts about the layout are declared, never read off the
-    class (gem5's port API, arXiv 2007.03152 lines 489-491):
+    The static window graph of an operation, the layouts of the streams
+    that grow as their rounds arrive (stream_layouts, asked only of a
+    scheme that supports them), and when a window has its data. Four
+    facts about the layout are declared, never read off the class
+    (gem5's port API, arXiv 2007.03152 lines 489-491):
 
     has_trailing_tail_context: the last window this scheme lays out
         reads rounds past its own commit, which is what the switching
@@ -2139,15 +2141,15 @@ class WindowingScheme(Protocol):
         stride order, which the double window absorbs.
     supports_dynamic_streams: an operation whose round count is not known
         at build can be windowed by this scheme.
-    lays_regions: a decode stream is cut into regions and a window reads
-        regions of other streams across couplings
-        (windows/region_layout.py); such a scheme is a RegionScheme too.
+    reads_across_couplings: a window reads the regions of other streams
+        coupled to its own (windows/region_layout.py), so its stream
+        layouts couple segments.
     """
 
     has_trailing_tail_context: bool
     commits_in_one_serial_chain: bool
     supports_dynamic_streams: bool
-    lays_regions: bool
+    reads_across_couplings: bool
 
     def plan_operation(
         self,
@@ -2159,6 +2161,9 @@ class WindowingScheme(Protocol):
     ) -> window_records.OperationWindowPlan:
         """The stream's windows and their internal dependencies."""
 
+    def stream_layouts(self) -> "StreamLayouts":
+        """A run's layouts of its dynamic streams, one per stream."""
+
     def data_complete(
         self,
         window: window_records.Window,
@@ -2168,17 +2173,86 @@ class WindowingScheme(Protocol):
         """Whether the window has every round it reads."""
 
 
-class RegionScheme(Protocol):
-    """A scheme that lays regions: which side of a coupling reads the other.
+class StreamLayouts(Protocol):
+    """A run's dynamic streams, each laid by its scheme as rounds arrive.
 
-    A joint measurement couples code blocks, as the program states them
-    (Operation.couplings); the scheme decides which block's window reads
-    the other's region and which waits (Bombín et al. 2303.04846 lines
-    720-723: the order of a shared face is the scheme's choice).
+    couple_segments is asked only of a scheme that reads across
+    couplings: a joint measurement couples code blocks, as the program
+    states them (Operation.couplings), and the scheme's coupling order
+    says which block's window reads the other's region and which waits.
     """
 
-    def orient_coupling(self, blocks: tuple) -> Optional[tuple]:
+    def open_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+        round_limit: Optional[int],
+        *,
+        commit_round_count: int,
+        buffer_round_count: int,
+    ) -> "StreamLayout":
+        """The stream's layout; round_limit is its length, if known."""
+
+    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> None:
+        """A joint measurement's segments, by block, and its couplings."""
+
+
+class CouplingOrder(Protocol):
+    """Which block of a coupling reads the other's region, and which waits.
+
+    The order of a shared face is the scheme's choice (Bombín et al.
+    2303.04846 lines 720-723); windows/coupling_orders.py holds the rows.
+    """
+
+    def orient(self, blocks: tuple) -> Optional[tuple]:
         """The two coupled blocks as (reader, read); None when neither reads."""
+
+
+class CouplingOrderSettings(Protocol):
+    """A coupling order row's settings record."""
+
+    name: str
+
+    def build(self) -> CouplingOrder:
+        """The coupling order."""
+
+
+class StreamLayout(Protocol):
+    """Where one dynamic stream's windows begin and end as its rounds arrive.
+
+    The planner keeps the windows' tables; the layout says each window's
+    rounds and moves the windows laid, not yet queued, when a segment
+    ends, the tail closes or the stream's regions change.
+    """
+
+    def begun(self, highest_known_round: int, round_cap: Optional[int]) -> list:
+        """The next WindowGeometries whose commit has begun, in order.
+
+        round_cap is the stream's length once it is known; the planner
+        lays each geometry returned.
+        """
+
+    def cut_after(self, windows: list, last_round: int) -> list:
+        """A segment ends on the round: the laid windows it moved."""
+
+    def close_tail(
+        self, windows: list, last_round: int
+    ) -> window_records.TailChange:
+        """The stream's rounds end on the round, for now or for good."""
+
+    def relay(self, windows: list) -> list:
+        """Lay the open windows again after their regions changed."""
+
+    def cut_rounds(self) -> tuple:
+        """The rounds a segment of the stream ends on, a window with it."""
+
+    def reads_of(self, window: window_records.Window) -> tuple:
+        """The (stream id, index) of each begun window this one reads."""
+
+    def readers_of(self, window: window_records.Window) -> tuple:
+        """The key of each window reading this one; None for one not begun."""
+
+    def readers_at(self, round_index: int) -> tuple:
+        """The keys of the begun windows reading the region of the round."""
 
 
 @runtime_checkable

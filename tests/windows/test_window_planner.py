@@ -115,6 +115,7 @@ def _planner(source=None) -> window_planner.WindowPlanner:
     plan = _empty_plan()
     planner = window_planner.WindowPlanner(resolved, plan, ())
     planner.scheme = scheme
+    planner.layouts = scheme.stream_layouts()
     planner.models = models
     planner.start()
     return planner
@@ -188,7 +189,6 @@ def test_a_finite_source_fixes_the_stream_windows_in_its_own_order(
     stream = _stream()
     limit = planner.register_stream(stream, physical_round_limit)
     assert limit == 5
-    assert planner.is_finite_stream("stream")
     assert planner.grow_stream("stream", 0, None) == []
     created = planner.grow_stream("stream", 5, None)
     geometries = [
@@ -206,11 +206,25 @@ def test_the_seal_clips_the_window_holding_the_last_round():
     planner.grow_stream("stream", 5, 5)
     first, second = planner.windows_of("stream")
     assert (second.commit_lo, second.commit_hi) == (4, 5)
-    clipped = planner.trim_stream_tail("stream", 5)
-    assert clipped is second
+    change = planner.close_stream_tail("stream", 5)
+    assert change.clipped == (second,)
     assert (second.commit_hi, second.buffer_hi, second.round_count) == (5, 7, 4)
     assert (first.commit_hi, first.buffer_hi) == (3, 5)
-    assert planner.trim_stream_tail("stream", 20) is None
+
+
+def test_a_cut_keeps_the_read_start_a_restart_moved_back():
+    planner = _planner()
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.grow_stream("stream", 5, None)
+    restart = planner.reslice_window(("stream", 1), 2, None)
+    assert restart.round_count == 7
+
+    moved = planner.cut_stream_after("stream", 6)
+
+    assert moved == []
+    assert (restart.buffer_lo, restart.buffer_hi) == (2, 8)
+    assert restart.round_count == 7
 
 
 @pytest.mark.parametrize("boundary", [1, 2, 3, 4, 5, 6, 7])
@@ -227,11 +241,12 @@ def test_a_closed_boundary_ends_a_commit_region_and_restarts_the_stride(
     stream = _stream()
     planner.register_stream(stream, None)
     planner.grow_stream("stream", boundary, None)
-    clipped = planner.trim_stream_tail("stream", boundary)
+    change = planner.close_stream_tail("stream", boundary)
+    (clipped,) = change.clipped
     assert clipped.commit_hi == boundary
     stream_round_count = boundary + 7
     planner.grow_stream("stream", stream_round_count, stream_round_count)
-    planner.trim_stream_tail("stream", stream_round_count)
+    planner.close_stream_tail("stream", stream_round_count)
     commits = _commit_spans(planner)
     after = _spans_after(commits, boundary)
     first_round_after = boundary + 1
@@ -279,7 +294,7 @@ def test_a_cut_on_a_window_edge_leaves_the_stride():
     stream = _stream()
     planner.register_stream(stream, None)
     planner.grow_stream("stream", 4, None)
-    assert planner.cut_stream_after("stream", 6) is None
+    assert planner.cut_stream_after("stream", 6) == []
     planner.grow_stream("stream", 7, None)
     commits = _commit_spans(planner)
     assert commits == [(1, 3), (4, 6), (7, 9)]

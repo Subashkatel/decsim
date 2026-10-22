@@ -35,7 +35,7 @@ import decsim.topology.graph_layout as graph_layout
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.release_rules as release_rules
-import decsim.windows.schemes.swiper_sliding as swiper_sliding
+import decsim.windows.schemes.region_sliding as region_sliding
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.frontends.test_patch_lives as patch_lives_test
@@ -431,7 +431,7 @@ def test_a_lattice_surgery_run_on_a_scheme_laying_no_regions_is_refused(
 def test_a_region_scheme_refuses_a_feedback_stream():
     program = memory_programs.memory_program(3, "Z", 0.01)
     workload = stream_machines.stream_workload(program, 6)
-    scheme = swiper_sliding.SwiperSlidingScheme.Settings()
+    scheme = region_sliding.RegionSlidingScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
 
     with pytest.raises(ValueError, match="windows of patch streams only"):
@@ -440,7 +440,7 @@ def test_a_region_scheme_refuses_a_feedback_stream():
 
 def test_patch_streams_whose_source_gives_values_are_refused(tmp_path):
     workload = _t_gate_workload(tmp_path)
-    scheme = swiper_sliding.SwiperSlidingScheme.Settings()
+    scheme = region_sliding.RegionSlidingScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
     bits_source = syndrome_devices.SyndromeBitDevice.Settings()
     bits = qpu_settings.QpuSettings(source=bits_source, distance=3)

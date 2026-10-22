@@ -26,7 +26,6 @@ import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.operation_results as operation_results
-import decsim.windows.region_layout as region_layout
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.routers as routers
@@ -41,9 +40,8 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    gap_join is None on a run that computes no confidence, router on
-    a run of one entry pool, and regions on a run whose scheme lays no
-    regions.
+    gap_join is None on a run that computes no confidence, and router
+    on a run of one entry pool.
     """
 
     models: window_planner_module.WindowModels
@@ -63,7 +61,6 @@ class Windows:
     gap_join: Optional[gap_join_module.WindowGapJoin]
     window_manager: window_manager_module.WindowManager
     router: Optional[routers.Router] = None
-    regions: Optional[region_layout.RegionLayout] = None
 
     @classmethod
     def build(
@@ -135,7 +132,6 @@ class Windows:
         window_manager = window_manager_module.WindowManager(
             engine, feedback_boundary_mode=feedback_boundary_mode
         )
-        regions = _regions(plan.scheme)
         windows = cls(
             models=models,
             planner=planner,
@@ -154,7 +150,6 @@ class Windows:
             gap_join=gap_join,
             window_manager=window_manager,
             router=router,
-            regions=regions,
         )
         windows._wire_the_plan(plan)
         windows._wire_the_window_chain(links)
@@ -219,9 +214,8 @@ class Windows:
         self.models.provider = plan.error_model_provider
         self.planner.scheme = plan.scheme
         self.planner.models = self.models
-        if self.regions is not None:
-            self.planner.region_scheme = plan.scheme
-            self.planner.regions = self.regions
+        if plan.scheme.supports_dynamic_streams:
+            self.planner.layouts = plan.scheme.stream_layouts()
         self.tracker.scheme = plan.scheme
         self.tracker.planner = self.planner
         self.gate.interaction = interaction
@@ -417,12 +411,3 @@ def _copies_the_boundary_fold(
     if decoder is None:
         return True
     return decoder.copies_boundary_fold
-
-
-def _regions(
-    scheme: ports.WindowingScheme,
-) -> Optional[region_layout.RegionLayout]:
-    """The run's region layout, when its scheme lays regions."""
-    if not scheme.lays_regions:
-        return None
-    return region_layout.RegionLayout()

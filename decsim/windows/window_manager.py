@@ -164,8 +164,7 @@ class WindowManager:
         if window.window_index > 0:
             previous_key = (window.stream_id, window.window_index - 1)
             self._link_to_previous_window(previous_key, window.key, window)
-        if self.planner.lays_regions:
-            self._link_across_couplings(window)
+        self._link_across_couplings(window)
         self.planner.attach_stream_model(window)
         self.retention.register_window(window.key, window)
 
@@ -220,9 +219,8 @@ class WindowManager:
         models_changed = self.planner.models.finalize_stream_models(
             stream_operation, stream_round_count
         )
-        self.planner.seal_regions(stream_id, stream_round_count)
         self._grow_stream(stream_id, stream_round_count, stream_round_count)
-        self._trim_stream_tail(stream_id, stream_round_count)
+        self._close_stream_tail(stream_id, stream_round_count)
         if models_changed:
             self.planner.refresh_stream_models(stream_id)
         self.tracker.seal(stream_id, stream_round_count)
@@ -230,24 +228,20 @@ class WindowManager:
         self.check_windows_of_stream(stream_id)
         self.results.finish_workload_if_ready()
 
-    def _trim_stream_tail(self, stream_id, stream_round_count: int) -> None:
-        """The window across the seal commits through it and reads no further.
+    def _close_stream_tail(self, stream_id, stream_round_count: int) -> None:
+        """The windows the seal moved read as far as they now reach.
 
-        A region window reads the next region, which the seal ends, so
-        each open one is laid on its region again.
+        A clipped window reads no round past the seal; a window laid
+        again reads its whole new extent (window_records.TailChange).
         """
-        if self.planner.lays_regions:
-            self._refresh_regions(stream_id)
-            return
-        if self.planner.is_finite_stream(stream_id):
-            return
-        clipped = self.planner.trim_stream_tail(stream_id, stream_round_count)
-        if clipped is not None:
-            self.retention.reset_clipped_window_reads(clipped)
+        change = self.planner.close_stream_tail(stream_id, stream_round_count)
+        for window in change.clipped:
+            self.retention.reset_clipped_window_reads(window)
+        self._replace_reads_of(change.relaid)
 
-    def _refresh_regions(self, stream_id) -> None:
-        """Lay the open windows on their regions; re-point those that moved."""
-        for window in self.planner.refresh_regions(stream_id):
+    def _replace_reads_of(self, windows) -> None:
+        """Re-point the retained reads of each window laid again."""
+        for window in windows:
             self.retention.replace_window_reads(window.key, window)
 
     def close_stream_boundary(
@@ -265,22 +259,24 @@ class WindowManager:
             return
         self.tracker.close_boundary(stream_id, stream_round_count)
         self._grow_stream(stream_id, stream_round_count, None)
-        if not self.planner.is_finite_stream(stream_id):
-            self.planner.trim_stream_tail(stream_id, stream_round_count)
+        self.planner.close_stream_tail(stream_id, stream_round_count)
         self._refresh_unqueued_stream_windows(stream_id)
         self.check_windows_of_stream(stream_id)
 
     def _refresh_unqueued_stream_windows(self, stream_id) -> None:
         """Refresh retained reads once a stream boundary closes the tail."""
-        for window in self.planner.windows_of(stream_id):
-            if window.queued or window.committed:
-                continue
-            self.retention.replace_window_reads(window.key, window)
+        windows = self.planner.windows_of(stream_id)
+        unqueued = [
+            window
+            for window in windows
+            if not window.queued and not window.committed
+        ]
+        self._replace_reads_of(unqueued)
 
     def _cut_stream_after(self, stream_id, last_round: int) -> None:
-        """End a window of the stream on the round; refresh one clipped."""
-        clipped = self.planner.cut_stream_after(stream_id, last_round)
-        if clipped is None:
+        """End a window of the stream on the round; refresh those moved."""
+        moved = self.planner.cut_stream_after(stream_id, last_round)
+        if not moved:
             return
         self.planner.refresh_stream_models(stream_id)
         self._refresh_unqueued_stream_windows(stream_id)
@@ -542,10 +538,6 @@ class WindowManager:
         self.results.bind_stream_segment(operation_id, stream_id, stream_offset)
         if not self.planner.has_stream(stream_id):
             return
-        # a region scheme cuts a stream at its coupled segments only
-        # (couple_segments)
-        if self.planner.lays_regions:
-            return
         round_count = self.planner.round_count_of(operation_id)
         segment_end = stream_offset + round_count
         self._cut_stream_after(stream_id, stream_offset)
@@ -559,7 +551,8 @@ class WindowManager:
         """
         self.planner.couple_segments(spans_by_block, couplings)
         for span in spans_by_block.values():
-            self._refresh_regions(span.stream_id)
+            moved = self.planner.relay_stream(span.stream_id)
+            self._replace_reads_of(moved)
             self.check_windows_of_stream(span.stream_id)
 
     def bind_required_stream_end(

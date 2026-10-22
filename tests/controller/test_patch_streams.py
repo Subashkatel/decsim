@@ -26,8 +26,9 @@ import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.qpu.settings as qpu_settings
 import decsim.records.windows as window_records
+import decsim.windows.coupling_orders as coupling_orders
 import decsim.windows.region_layout as region_layout
-import decsim.windows.schemes.swiper_sliding as swiper_sliding
+import decsim.windows.schemes.region_sliding as region_sliding
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.frontends.test_patch_lives as patch_lives_test
@@ -54,7 +55,7 @@ def run(workload, decode_microseconds: float):
     pool = decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
     )
-    scheme = swiper_sliding.SwiperSlidingScheme.Settings()
+    scheme = region_sliding.RegionSlidingScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
     qpu = qpu_settings.QpuSettings(distance=DISTANCE)
     base = machines.base(settings, windows, qpu)
@@ -202,11 +203,11 @@ def _layout_of_the_run(settings, machine):
     for life in settings.patch_lives:
         layout.open_stream(life.stream_id, DISTANCE)
     bindings = machine.windows.results.bindings
-    scheme = swiper_sliding.SwiperSlidingScheme()
+    order = coupling_orders.CoordinateOrder()
     for operation in settings.operations:
         segments = bindings.segments_by_operation.get(operation.id, ())
         if operation.couplings and segments:
-            _couple(layout, scheme, operation, segments)
+            _couple(layout, order, operation, segments)
     for life in settings.patch_lives:
         round_count = len(lengths[life.stream_id])
         layout.extend(life.stream_id, round_count)
@@ -214,7 +215,7 @@ def _layout_of_the_run(settings, machine):
     return layout
 
 
-def _couple(layout, scheme, operation, segments) -> None:
+def _couple(layout, order, operation, segments) -> None:
     spans_by_patch = {}
     for segment in segments:
         first_round = segment.stream_offset + 1
@@ -222,11 +223,13 @@ def _couple(layout, scheme, operation, segments) -> None:
         span = window_records.RoundSpan(
             segment.stream_id, first_round, last_round
         )
-        layout.cut_segment(span)
+        round_before = first_round - 1
+        layout.cut_after(span.stream_id, round_before)
+        layout.cut_after(span.stream_id, last_round)
         patch = segment.stream_id[1]
         spans_by_patch[patch] = span
     for blocks in operation.couplings:
-        reader, read = scheme.orient_coupling(blocks)
+        reader, read = order.orient(blocks)
         layout.couple(spans_by_patch[reader], spans_by_patch[read])
 
 

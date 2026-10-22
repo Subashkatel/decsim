@@ -35,7 +35,7 @@ import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.qpu.settings as qpu_settings
 import decsim.windows.release_rules as release_rules
-import decsim.windows.schemes.swiper_sliding as swiper_sliding
+import decsim.windows.schemes.region_sliding as region_sliding
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.frontends.test_patch_lives as patch_lives_test
@@ -65,7 +65,7 @@ def decsim_run(name: str, latency_rounds: int):
     """The schedule run by decsim on SWIPER's machine."""
     workload = patch_lives_test.seed_zero_workload(name)
     settings = workload_settings.WorkloadSettings.running(workload)
-    scheme = swiper_sliding.SwiperSlidingScheme.Settings()
+    scheme = region_sliding.RegionSlidingScheme.Settings()
     rule = release_rules.DecodedAncestors.Settings()
     windows = window_settings.WindowSettings(scheme=scheme, release_rule=rule)
     qpu = qpu_settings.QpuSettings(

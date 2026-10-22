@@ -327,13 +327,13 @@ def _check_region_scheme(scheme, lives: tuple, dynamic_streams) -> None:
     stream at its joint measurements only, so a feedback stream, whose
     every segment must start a window, is laid by stride and cut.
     """
-    if lives and not scheme.lays_regions:
+    if lives and not scheme.reads_across_couplings:
         raise ValueError(
             "a lattice-surgery run decodes in regions across its patches; "
             "set windows.scheme to a region scheme, such as "
-            "windows/schemes/swiper_sliding.py SwiperSlidingScheme.Settings()"
+            "windows/schemes/region_sliding.py RegionSlidingScheme.Settings()"
         )
-    if lives or not scheme.lays_regions:
+    if lives or not scheme.reads_across_couplings:
         return
     if dynamic_streams:
         raise ValueError(

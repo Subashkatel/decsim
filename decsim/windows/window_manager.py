@@ -316,11 +316,12 @@ class WindowManager:
         # for the weak lane; a strong-primary run's rounds never come here
         # (controller/syndrome_round_sender.py writes them to the strong
         # store alone)
+        arrived_before = self.tracker.rounds_arrived(operation.id)
         self._count_arrival(operation, packet.round_index)
         self._update_stream(operation.id)
         self._wake_strong_tier(operation.id)
         self._wake_windows(operation)
-        self._wake_readers(packet.stream_id, packet.round_index)
+        self._wake_readers(operation.id, arrived_before)
         # a round whose every consumer already resolved (an absorbed window's
         # tail) frees its weak syndrome buffer slot on arrival, the same
         # drop-on-arrival rule the strong syndrome buffer applies
@@ -372,9 +373,11 @@ class WindowManager:
             return
         operation = self.tracker.operation_by_id[stream_id]
         stored_through = self.tracker.strong_rounds_arrived(stream_id, store)
+        arrived_before = self.tracker.rounds_arrived(stream_id)
         self._count_arrival(operation, stored_through)
         self._update_stream(stream_id)
         self._wake_windows(operation)
+        self._wake_readers(stream_id, arrived_before)
 
     def _count_arrival(
         self, operation: program_records.Operation, round_index: int
@@ -397,9 +400,21 @@ class WindowManager:
         for predecessor_id in operation.decoder_boundary_predecessors:
             self.check_windows_of_stream(predecessor_id)
 
-    def _wake_readers(self, stream_id, round_index: int) -> None:
-        """A round of a region read across a coupling: check its readers."""
-        reader_keys = self.planner.reader_keys_at(stream_id, round_index)
+    def _wake_readers(self, stream_id, arrived_before: int) -> None:
+        """Check the readers of each region the newly arrived rounds fall in.
+
+        A round past a gap is published with the round that fills it
+        (round_tracker.py note_arrival), so every round published now is
+        walked, not only the one that landed.
+        """
+        first_new = arrived_before + 1
+        after_last = self.tracker.rounds_arrived(stream_id) + 1
+        # each reader once, in the order the rounds reach it
+        reader_keys: dict = {}
+        for round_index in range(first_new, after_last):
+            keys = self.planner.reader_keys_at(stream_id, round_index)
+            for key in keys:
+                reader_keys[key] = None
         for reader_key in reader_keys:
             self.check_window(reader_key)
 

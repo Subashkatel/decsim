@@ -273,12 +273,15 @@ class QPUDevice:
     def _idle_after(self, operation: program_records.Operation) -> None:
         """The operation's prepared patches idle until another claims them.
 
-        A patch holds a logical qubit once a body has run a round on it,
-        and until its discard: before, its qubits store nothing and no
-        outcome depends on them (Bombín et al. 2303.04846 Eq. 4, an outcome
-        reads only its membrane). So an operation that runs no round, a
-        skipped conditional correction, prepares nothing, and a discarded
-        patch measures no more rounds (swiper/device_manager.py
+        A patch is prepared just in time: an X or Z eigenstate is made at
+        the start of the first operation that measures the patch, and an
+        injection measures rounds itself (Litinski 1808.02892 Sec. 1:
+        initialization "can be done simultaneously with the subsequent
+        lattice surgery"). Before that a patch holds a state that can be
+        made again at any time, so no outcome depends on its rounds
+        (Bombín et al. 2303.04846 Eq. 4). So an operation that runs no
+        round, a skipped conditional correction, prepares nothing, and a
+        discarded patch measures no more rounds (swiper/device_manager.py
         _generate_syndrome_round activates only the patches a running
         instruction measures, and a DISCARD drops them).
         """

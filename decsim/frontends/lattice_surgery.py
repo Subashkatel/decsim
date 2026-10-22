@@ -37,7 +37,7 @@ import ast
 import dataclasses
 import pathlib
 
-import numpy as np
+import numpy
 
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
@@ -108,12 +108,12 @@ def swiper_skipped_conditional_s(instructions: tuple, seed: int) -> frozenset:
     numpy.random.default_rng(seed), skipped below 0.5, with the members
     of its group (device_manager.py, its __init__).
     """
-    rng = np.random.default_rng(seed)
+    generator = numpy.random.default_rng(seed)
     skipped = set()
     for instruction in instructions:
         if not instruction.is_conditional_s:
             continue
-        if rng.random() < 0.5:
+        if generator.random() < 0.5:
             skipped.add(instruction.index)
             skipped.update(instruction.group)
     return frozenset(skipped)

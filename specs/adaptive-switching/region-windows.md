@@ -354,6 +354,23 @@ checked against the code before acting:
 | a job's graph size is its home stream's, not each read stream's | 4 | open, moot while one code per run |
 | region starts are kept for the whole run, even when windows fold | 6 | open, small (one int a region) |
 
+An end-to-end walk of toffoli at d = 7 on the reference card (1.1 us
+rounds, 2.727 us decodes, two units; 2026-10-22) checked every
+transfer, round, window, decode, commit and release against its rule
+and found two more, both in the controller and QPU, not the windows:
+
+| finding | state |
+|---|---|
+| each instruction after a conditional S group's first paid the decision-to-pulse path again, though its release had long landed, so each started a cycle late | fixed: a release crosses the output path once, when it lands, and every command is queued ahead (QICK 2110.00557 Sec. III.A; eQASM 1808.02449 Sec. 3.5); tests added |
+| a skipped conditional S made its never-prepared ancilla idle, so its rounds were decoded as idle jobs | fixed: a patch idles only once a body has run a round on it, until its discard (swiper/device_manager.py _generate_syndrome_round; Bombín Eq. 4); test added |
+
+After both, toffoli ends at 259.9 us (274.2 before), with no decode
+outside a window; 21 of its 28 conditional instructions had their
+release before they were otherwise ready and start exactly then. The
+memory throughput study's machine (d = 7, 10% escalated) passes the
+same checks. The SWIPER referent is unchanged: it runs with free hops,
+where neither finding shows.
+
 
 ## The owner's decisions
 

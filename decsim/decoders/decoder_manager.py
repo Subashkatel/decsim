@@ -228,8 +228,6 @@ class DecoderManager:
         round_count: int,
         on_done: Callable[[], None],
         label: str = "external",
-        code: Optional[str] = None,
-        spatial_nodes: Optional[int] = None,
     ) -> None:
         """Queue a self-contained decode: a factory correction, an idle decode.
 
@@ -244,8 +242,6 @@ class DecoderManager:
             ready_time=self.engine.now,
             on_done=on_done,
             label=label,
-            code=code,
-            spatial_nodes=spatial_nodes,
             kind=decoding_records.DecodeJobKind.SELF_CONTAINED,
         )
         self.queue.add(job)

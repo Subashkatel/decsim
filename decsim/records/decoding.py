@@ -521,10 +521,6 @@ class DecodeJob:
     ready_time: int = 0
     on_done: Optional[Callable[[], None]] = None  # completion callback
     label: str = ""  # log label
-    spatial_nodes: Optional[int] = (
-        None  # decoding-graph nodes per round (latency models)
-    )
-    code: Optional[str] = None  # code name, a latency function may read it
     kind: DecodeJobKind = DecodeJobKind.WINDOW  # what this job is
     # the logical class this decode is pinned to, or None to decode
     # normally; a forced solve reports that class's minimum weight

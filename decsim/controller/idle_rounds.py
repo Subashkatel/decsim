@@ -174,8 +174,6 @@ class IdleRoundAccounting:
         self.decode_queue.enqueue_without_input(
             rounds,
             on_done=_ignore_completion,
-            code=geometry.code_name,
-            spatial_nodes=patch_record.spatial_node_count,
             label=f"mem({operation.name},r{round_index})",
         )
 

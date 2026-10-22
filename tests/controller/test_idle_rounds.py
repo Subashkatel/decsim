@@ -55,25 +55,14 @@ class RecordingDecodeQueue:
     def __init__(self):
         self.demands = []
 
-    def enqueue_without_input(
-        self, round_count, on_done, label, code, spatial_nodes
-    ):
+    def enqueue_without_input(self, round_count, on_done, label):
         del on_done
-        self.demands.append(
-            {
-                "rounds": round_count,
-                "code": code,
-                "spatial_nodes": spatial_nodes,
-                "label": label,
-            }
-        )
+        self.demands.append({"rounds": round_count, "label": label})
 
 
 def patch_record():
-    geometry = types.SimpleNamespace(
-        commit_round_count=2, buffer_round_count=1, code_name="surface-code"
-    )
-    return types.SimpleNamespace(code_geometry=geometry, spatial_node_count=17)
+    geometry = types.SimpleNamespace(commit_round_count=2, buffer_round_count=1)
+    return types.SimpleNamespace(code_geometry=geometry)
 
 
 def accounting_with(policy, streams=None):

@@ -40,13 +40,11 @@ def _resolved(operation_id, round_count: int):
     geometry = types.SimpleNamespace(
         commit_round_count=COMMIT_ROUNDS,
         buffer_round_count=BUFFER_ROUNDS,
-        code_name="surface",
     )
     return types.SimpleNamespace(
         operation_id=operation_id,
         code_geometry=geometry,
         round_count=round_count,
-        spatial_node_count=17,
     )
 
 

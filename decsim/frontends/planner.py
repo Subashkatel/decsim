@@ -48,7 +48,6 @@ def plan_execution(
     round_ticks = _resolve_round_ticks(code, fallback_round_microseconds)
     _check_geometry_counts(code)
     patch_count_by_id = _patch_count_by_operation_id(operations)
-    base_nodes = _base_nodes_by_patch_count(code, patch_count_by_id)
     geometry = _resolve_geometry(code)
     resolved = []
     patches_by_key = {}
@@ -62,12 +61,11 @@ def plan_execution(
             geometry,
             round_ticks,
             patch_count,
-            base_nodes,
         )
         resolved.append(planning)
         _note_patches(operation, patches_by_key)
     patches = _resolve_patches(
-        patches_by_key, code, layout, geometry, round_ticks, base_nodes[1]
+        patches_by_key, code, layout, geometry, round_ticks
     )
     planned_views, planned_resolved = _planned(
         operations, resolved, planned_operation_ids
@@ -212,20 +210,10 @@ def _patch_count_by_operation_id(operations) -> dict:
     return counts
 
 
-def _base_nodes_by_patch_count(code, patch_count_by_id: dict) -> dict:
-    """The code's spatial node count for one patch and for every used count."""
-    counts = {1, *patch_count_by_id.values()}
-    base_nodes = {}
-    for count in counts:
-        base_nodes[count] = code.spatial_nodes(count)
-    return base_nodes
-
-
 def _resolve_geometry(code):
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     return program_records.ResolvedCodeGeometry(
-        code_name=code.name,
         distance=code.distance,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
@@ -240,7 +228,6 @@ def _resolve_operation(
     geometry,
     round_ticks,
     patch_count,
-    base_nodes,
 ) -> program_records.ResolvedOperationPlanning:
     operation_code = layout.code_for_operation(operation)
     if operation_code is not code:
@@ -249,16 +236,12 @@ def _resolve_operation(
             "from the resolved run code"
         )
     round_count = rounds_policy.rounds_for(operation, code)
-    spatial_node_count = layout.spatial_nodes_for(
-        operation, base_spatial_node_count=base_nodes[patch_count]
-    )
     syndrome_bits_per_round = code.syndrome_bits_per_round(patch_count)
     return program_records.ResolvedOperationPlanning(
         operation_id=operation.id,
         code_geometry=geometry,
         round_count=round_count,
         round_ticks=round_ticks,
-        spatial_node_count=spatial_node_count,
         syndrome_bits_per_round=syndrome_bits_per_round,
     )
 
@@ -274,7 +257,7 @@ def _note_patches(operation, patches_by_key: dict) -> None:
 
 
 def _resolve_patches(
-    patches_by_key, code, layout, geometry, round_ticks, base_nodes
+    patches_by_key, code, layout, geometry, round_ticks
 ) -> list[program_records.ResolvedPatchPlanning]:
     patches = []
     for patch_id in patches_by_key.values():
@@ -284,14 +267,10 @@ def _resolve_patches(
                 f"layout patch {patch_id!r} selected a code different from "
                 "the resolved run code"
             )
-        spatial_node_count = layout.patch_spatial_nodes_for(
-            patch_id, base_spatial_node_count=base_nodes
-        )
         planning = program_records.ResolvedPatchPlanning(
             patch_identity=patch_id,
             code_geometry=geometry,
             round_ticks=round_ticks,
-            spatial_node_count=spatial_node_count,
         )
         patches.append(planning)
     return patches

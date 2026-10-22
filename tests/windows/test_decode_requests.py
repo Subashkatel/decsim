@@ -120,14 +120,11 @@ class _Fixture:
             settings, self.engine
         )
         self.arrived = 0
-        geometry = types.SimpleNamespace(code_name="surface")
         no_models = types.SimpleNamespace(model_by_window={})
         self.planner = types.SimpleNamespace(
             windows_by_key={(1, 0): self.window},
             successors_by_stream={1: []},
             models=no_models,
-            spatial_node_count_of=lambda _operation_id: 17,
-            code_geometry_of=lambda _operation_id: geometry,
             is_windowed=lambda _stream_id: True,
         )
         self.tracker = types.SimpleNamespace(

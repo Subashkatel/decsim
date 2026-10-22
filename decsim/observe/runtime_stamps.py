@@ -40,7 +40,7 @@ class RuntimeStamps:
         self.body_done[operation_id] = tick
 
     def decode_released(self, operation_id: int, tick: int) -> None:
-        """The blocked operation's release reached the controller."""
+        """The blocked operation's release crossed the output path."""
         self.decode_release[operation_id] = tick
 
     def result_returned(self, operation_id: int, tick: int) -> None:

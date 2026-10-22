@@ -1202,6 +1202,14 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 
 `decsim/windows/boundary_policies.py`. The held row, which takes no setting.
 
+### `OwnStreams.Settings`
+
+`decsim/windows/release_rules.py`. The own-streams row, which takes no setting.
+
+### `DecodedAncestors.Settings`
+
+`decsim/windows/release_rules.py`. The decoded-ancestors row, which takes no setting.
+
 ### `LatestRevision.Settings`
 
 `decsim/windows/revision_rules.py`. The latest row, which takes no setting.
@@ -1257,6 +1265,16 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 | `buffer_rounds` | `Optional[int]` |
 | `build(self, terminal_policy: str)` | `ports.WindowingScheme` |
 
+### `ReleaseRuleSettings`
+
+`decsim/windows/settings.py`. A release rule row's settings record (windows/release_rules.py).
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `awaits_ancestors` | `bool` |
+| `build(self, operations: tuple)` | `release_rules.ReleaseRule` |
+
 ### `BoundaryPayloadSettings`
 
 `decsim/windows/settings.py`. A payload row's settings record (windows/boundary_payloads.py).
@@ -1269,7 +1287,7 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 
 `decsim/windows/settings.py`. The window side's settings.
 
-scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock. recorded_confidence is a confidence row's Settings record (decsim/confidence/) that a run with no switching computes on every window and records, deciding nothing, so a decoder run alone gives each window's gap beside its answer; its work is charged as on a switching run. None computes none; a switching run records its own edge's signal.
+scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock. recorded_confidence is a confidence row's Settings record (decsim/confidence/) that a run with no switching computes on every window and records, deciding nothing, so a decoder run alone gives each window's gap beside its answer; its work is charged as on a switching run. None computes none; a switching run records its own edge's signal. release_rule is a release rule row's Settings record (windows/release_rules.py), the decodes a blocking operation's outcome waits for; None is release_rule_for's choice by the run.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -1280,6 +1298,7 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 | `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Eager.Settings()` |
 | `boundary_payload` | `BoundaryPayloadSettings` | `boundary_payloads.DenseSeamMask.Settings()` |
 | `recorded_confidence` | `Optional[ports.ConfidenceSettings]` | `None` |
+| `release_rule` | `Optional[ReleaseRuleSettings]` | `None` |
 
 ## decsim/windows/schemes
 

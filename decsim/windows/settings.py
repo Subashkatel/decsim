@@ -8,6 +8,7 @@ import decsim.ports as ports
 import decsim.records.windows as window_records
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.release_rules as release_rules
 import decsim.windows.schemes.sliding as sliding_scheme
 
 
@@ -24,6 +25,17 @@ class SchemeSettings(Protocol):
 
     def build(self, terminal_policy: str) -> ports.WindowingScheme:
         """A fresh scheme of these sizes."""
+
+
+class ReleaseRuleSettings(Protocol):
+    """A release rule row's settings record (windows/release_rules.py)."""
+
+    name: str
+    # whether a blocker waits for operations before it, not itself only
+    awaits_ancestors: bool
+
+    def build(self, operations: tuple) -> release_rules.ReleaseRule:
+        """The rule over the workload's operations."""
 
 
 class BoundaryPayloadSettings(Protocol):
@@ -55,7 +67,9 @@ class WindowSettings:
     window and records, deciding nothing, so a decoder run alone gives
     each window's gap beside its answer; its work is charged as on a
     switching run. None computes none; a switching run records its own
-    edge's signal.
+    edge's signal. release_rule is a release rule row's Settings record
+    (windows/release_rules.py), the decodes a blocking operation's
+    outcome waits for; None is release_rule_for's choice by the run.
     """
 
     clock: Optional[config.Clock] = None
@@ -69,6 +83,7 @@ class WindowSettings:
         boundary_payloads.DenseSeamMask.Settings()
     )
     recorded_confidence: Optional[ports.ConfidenceSettings] = None
+    release_rule: Optional[ReleaseRuleSettings] = None
 
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
@@ -88,6 +103,23 @@ def switching_windows(
     return dataclasses.replace(
         windows, terminal_policy="lookahead", boundary_policy=boundary_policy
     )
+
+
+def release_rule_for(
+    windows: WindowSettings, patch_lives: tuple
+) -> ReleaseRuleSettings:
+    """The release rule row the run takes: the one set, else by its shape.
+
+    A lattice-surgery run waits for its decoded ancestors, as SWIPER and
+    Triage do, since a merge's outcome is read in a Pauli frame that
+    earlier merges with other patches set; any other run waits for its
+    own streams, which is then the whole of its outcome's history.
+    """
+    if windows.release_rule is not None:
+        return windows.release_rule
+    if patch_lives:
+        return release_rules.DecodedAncestors.Settings()
+    return release_rules.OwnStreams.Settings()
 
 
 def _check_terminal_policy(terminal_policy) -> None:

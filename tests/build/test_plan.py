@@ -34,6 +34,7 @@ import decsim.records.workload as workload_records
 import decsim.topology.graph_layout as graph_layout
 import decsim.trace_source as trace_source
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.release_rules as release_rules
 import decsim.windows.schemes.swiper_sliding as swiper_sliding
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
@@ -446,3 +447,11 @@ def test_patch_streams_whose_source_gives_values_are_refused(tmp_path):
 
     with pytest.raises(ValueError, match="patch streams run timing only"):
         _plan(workload=workload, windows=windows, qpu=bits)
+
+
+def test_waiting_for_ancestors_off_patch_streams_is_refused():
+    rule = release_rules.DecodedAncestors.Settings()
+    windows = window_settings.WindowSettings(release_rule=rule)
+
+    with pytest.raises(ValueError, match="only a lattice-surgery run"):
+        _plan(windows=windows)

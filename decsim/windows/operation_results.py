@@ -27,6 +27,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.committed_rounds as committed_rounds
+import decsim.windows.release_rules as release_rules
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.window_planner as window_planner
@@ -50,6 +51,8 @@ class OperationResults:
     conditional_release = ports.Port(ports.ReleaseReceiver)
     # the last result of the workload stops the factory producing
     factory = ports.Port(ports.MagicStateFactory)
+    # which segments a blocker's release waits for
+    release_rule = ports.Port(release_rules.ReleaseRule)
 
     def __init__(self) -> None:
         self.deliveries = _Deliveries()
@@ -146,11 +149,13 @@ class OperationResults:
         """Deliver the segment results whose full round range committed.
 
         Gated as operations are: no pending strong may still change it.
+        A commit may release any blocker the release rule makes wait for
+        an operation bound to the stream.
         """
         bound = self.bindings.operation_ids_by_stream.get(stream_id, ())
         for operation_id in list(bound):
-            operation = self.tracker.operation_by_id[operation_id]
-            self._release_segments_if_committed(operation)
+            blocker_ids = self.release_rule.awaiting(operation_id)
+            self._release_if_committed(blocker_ids)
 
     # ---- the segment binds
 
@@ -307,23 +312,40 @@ class OperationResults:
     def _release_segments_if_committed(
         self, operation: program_records.Operation
     ) -> None:
-        """Deliver once each of the operation's streams committed its part.
+        """Deliver once every segment the release rule awaits is final.
 
-        An outcome is usable once every window committing its rounds has
-        committed (Bombín et al. 2303.04846 Eq. 4).
+        Its own segments always, and under SWIPER's rule those of its
+        decoded ancestors too (release_rules.py).
         """
         if operation.id not in self.tracker.blocking_operation_ids:
             return
         if operation.id in self.deliveries.segment_results_sent:
             return
-        segments = self.bindings.segments_by_operation[operation.id]
-        for segment in segments:
-            if not self._is_segment_final(operation, segment):
+        awaited_ids = self.release_rule.awaited_by(operation.id)
+        for awaited_id in awaited_ids:
+            if not self._are_segments_final(awaited_id):
                 return
+        segments = self.bindings.segments_by_operation[operation.id]
         logical_observables = self._segments_observables(operation, segments)
         self._record_result(operation.id, logical_observables)
         self.deliveries.segment_results_sent.add(operation.id)
         self.conditional_release.release_waiters(operation)
+
+    def _release_if_committed(self, operation_ids: tuple) -> None:
+        for operation_id in operation_ids:
+            operation = self.tracker.operation_by_id[operation_id]
+            self._release_segments_if_committed(operation)
+
+    def _are_segments_final(self, operation_id) -> bool:
+        """Whether the operation has begun and every segment of it is final."""
+        segments = self.bindings.segments_by_operation.get(operation_id)
+        if segments is None:
+            return False
+        operation = self.tracker.operation_by_id[operation_id]
+        for segment in segments:
+            if not self._is_segment_final(operation, segment):
+                return False
+        return True
 
     def _segments_observables(self, operation, segments: list):
         """The one stream's committed observables over the segment.

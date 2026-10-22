@@ -14,9 +14,9 @@ import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.release_rules as release_rules
 import decsim.windows.schemes.naive_online as naive_online_scheme
 import decsim.windows.schemes.parallel as parallel_scheme
+import decsim.windows.schemes.region_sliding as region_sliding_scheme
 import decsim.windows.schemes.sandwich as sandwich_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
-import decsim.windows.schemes.swiper_sliding as swiper_sliding_scheme
 import decsim.windows.settings as window_settings
 
 # every windowing scheme decsim ships
@@ -25,7 +25,7 @@ SCHEME_ROWS = (
     parallel_scheme.ParallelWindowScheme,
     sandwich_scheme.TanSandwichScheme,
     naive_online_scheme.NaiveOnlineScheme,
-    swiper_sliding_scheme.SwiperSlidingScheme,
+    region_sliding_scheme.RegionSlidingScheme,
 )
 
 

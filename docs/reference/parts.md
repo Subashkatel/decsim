@@ -49,6 +49,15 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 | `name` | `str` |
 | `build(self, weak_algorithm: DecoderSettings, threshold_nats: Optional[float])` | `ConfidenceSignal` |
 
+### `CouplingOrderSettings`
+
+`decsim/ports.py`. A coupling order row's settings record.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `build(self)` | `CouplingOrder` |
+
 ### `IdlePolicySettings`
 
 `decsim/ports.py`. An idle policy's row: the record that builds the policy.
@@ -1202,6 +1211,10 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 
 `decsim/windows/boundary_policies.py`. The held row, which takes no setting.
 
+### `CoordinateOrder.Settings`
+
+`decsim/windows/coupling_orders.py`. The coordinate order, which takes no setting.
+
 ### `OwnStreams.Settings`
 
 `decsim/windows/release_rules.py`. The own-streams row, which takes no setting.
@@ -1320,6 +1333,18 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 | `commit_rounds` | `Optional[int]` | `None` |
 | `buffer_rounds` | `Optional[int]` | `None` |
 
+### `RegionSlidingScheme.Settings`
+
+`decsim/windows/schemes/region_sliding.py`. The region length, None being the code distance, and the order.
+
+A window's buffer is the whole next region, so no buffer length is set. coupling_order is a row of windows/coupling_orders.py.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `commit_rounds` | `Optional[int]` | `None` |
+| `buffer_rounds` | `Optional[int]` | `None` |
+| `coupling_order` | `ports.CouplingOrderSettings` | `coupling_orders.CoordinateOrder.Settings()` |
+
 ### `TanSandwichScheme.Settings`
 
 `decsim/windows/schemes/sandwich.py`. The sandwich row's window sizes; None is the code distance.
@@ -1332,17 +1357,6 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 ### `SlidingWindowScheme.Settings`
 
 `decsim/windows/schemes/sliding.py`. The sliding row's window sizes; None is the code distance.
-
-| Field | Type | Default |
-| --- | --- | --- |
-| `commit_rounds` | `Optional[int]` | `None` |
-| `buffer_rounds` | `Optional[int]` | `None` |
-
-### `SwiperSlidingScheme.Settings`
-
-`decsim/windows/schemes/swiper_sliding.py`. The region length; None is the code distance.
-
-A window's buffer is the whole next region (SWIPER's SlidingWindowManager), so no buffer length is set.
 
 | Field | Type | Default |
 | --- | --- | --- |

@@ -1,21 +1,21 @@
-"""The region layout: decode streams cut into regions, a window on each.
+"""The region layout: decode streams cut into commit regions.
 
-A stream is cut into regions of at most its code's commit rounds; a
-coupled segment, the rounds of a joint measurement, begins and ends
-regions, and the seal ends the last (SWIPER 2412.05115,
-swiper/window_builder.py build_windows; the commit regions partition the
-rounds, Bombín et al. 2303.04846 Eq. 2). A window commits one region and
-reads the next region of its stream as its buffer; a coupled region also
-reads the region it is coupled to on another stream, and that region's
-window waits for it (swiper/window_manager.py
-SlidingWindowManager.process_round). Streams are opaque and the caller
-orients each coupling, so nothing here reads a code's geometry.
+A stream is cut into regions of at most its code's commit rounds, each
+ending early at a cut, and the seal ends the last; the commit regions
+partition the rounds (Bombín et al. 2303.04846 Eq. 2). The caller says
+where the cuts fall (windows/region_streams.py). A region may read the
+region it is coupled to on another stream, at the same offset of one
+joint measurement, and that region's window waits for it; the caller
+orients each coupling. Streams are opaque, so nothing here reads a
+code's geometry.
 
-SWIPER cuts where merge rounds meet other rounds, so a merge that runs
-straight into another merge on the same patch shares a region with it;
-here each coupled segment is cut on its own. The two agree whenever such
-a merge lasts a whole number of regions, as on every schedule the tests
-replay (tests/windows/test_region_layout.py).
+SWIPER (2412.05115, swiper/window_builder.py build_windows) cuts where
+merge rounds meet other rounds, so a merge that runs straight into
+another merge on the same patch shares a region with it; cut at each
+coupled segment's edges, as region_streams.py does, each is cut on its
+own. The two agree whenever such a merge lasts a whole number of
+regions, as on every schedule the tests replay
+(tests/windows/test_region_layout.py).
 """
 
 import bisect
@@ -50,12 +50,14 @@ class RegionLayout:
         regions = _StreamRegions(stream_id, commit_round_count)
         self.regions_by_stream[stream_id] = regions
 
-    def cut_segment(self, segment: window_records.RoundSpan) -> None:
-        """A coupled segment's rounds: regions begin and end with it."""
-        regions = self.regions_by_stream[segment.stream_id]
-        round_before = segment.first_round - 1
-        regions.cut_after(round_before)
-        regions.cut_after(segment.last_round)
+    def cut_after(
+        self,
+        stream_id: Any,  # an opaque identity
+        last_round: int,
+    ) -> None:
+        """A region of the stream ends on the round; the next starts after."""
+        regions = self.regions_by_stream[stream_id]
+        regions.cut_after(last_round)
 
     def couple(
         self,
@@ -65,11 +67,20 @@ class RegionLayout:
         """Each region of reader reads the region of read at its offset.
 
         The two are one joint measurement's segments, of one length, on
-        two streams of one region length, each cut by cut_segment, so
-        both are cut into regions at the same offsets.
+        two streams of one region length, each cut at its edges, so both
+        are cut into regions at the same offsets. Streams of different
+        region lengths, blocks of two codes, are refused: their regions
+        would not line up.
         """
         regions = self.regions_by_stream[reader.stream_id]
         stride = regions.commit_round_count
+        read_stride = self.regions_by_stream[read.stream_id].commit_round_count
+        if read_stride != stride:
+            raise ValueError(
+                f"streams {reader.stream_id} and {read.stream_id} are coupled "
+                f"but their regions last {stride} and {read_stride} rounds; "
+                "coupling blocks of different codes is not supported"
+            )
         offsets = range(0, reader.round_count, stride)
         for offset in offsets:
             reading_first = reader.first_round + offset

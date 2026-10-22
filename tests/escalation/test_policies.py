@@ -464,7 +464,7 @@ class DelegatingWindowScheme:
     """A windowing scheme row a study adds: sliding windows, wrapped.
 
     It fills the WindowingScheme port by holding a sliding scheme and
-    passing every call to it, and it declares the three facts the port
+    passing every call to it, and it declares the facts the port
     asks a row to declare. That is what a new row is: one class, the
     declarations, and nothing else changes (gem5's port API, arXiv
     2007.03152 lines 489-491).
@@ -473,7 +473,7 @@ class DelegatingWindowScheme:
     has_trailing_tail_context = True
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
-    lays_regions = False
+    reads_across_couplings = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -507,6 +507,10 @@ class DelegatingWindowScheme:
             commit_round_count=commit_round_count,
             buffer_round_count=buffer_round_count,
         )
+
+    def stream_layouts(self):
+        """The sliding scheme's stream layouts."""
+        return self.inner.stream_layouts()
 
     def data_complete(self, window, *, readiness) -> bool:
         """Whether the window has every round it reads."""

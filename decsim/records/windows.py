@@ -230,18 +230,36 @@ class WindowInfo:
 
 @dataclass(frozen=True)
 class WindowGeometry:
-    """One immutable static window interval."""
+    """One immutable window interval, and the regions it reads elsewhere."""
 
     buffer_lo: int
     commit_lo: int
     commit_hi: int
     buffer_hi: int
     closed_temporal_boundaries: bool = False
+    # RoundSpans of other streams read across couplings (Window.spatial_reads)
+    spatial_reads: tuple = ()
 
     @property
     def round_count(self) -> int:
-        """The rounds the interval spans, both buffers included."""
-        return self.buffer_hi - self.buffer_lo + 1
+        """The rounds it reads: its interval, both buffers, and its spans."""
+        local_round_count = self.buffer_hi - self.buffer_lo + 1
+        read_round_counts = [span.round_count for span in self.spatial_reads]
+        spatial_round_count = sum(read_round_counts)
+        return local_round_count + spatial_round_count
+
+
+@dataclass(frozen=True)
+class TailChange:
+    """The laid windows a stream's closing tail moved, by how they read.
+
+    clipped windows were cut short at the tail and read nothing past
+    their commit; relaid windows were laid again and read their whole
+    new extent.
+    """
+
+    clipped: tuple = ()
+    relaid: tuple = ()
 
 
 @dataclass(frozen=True)

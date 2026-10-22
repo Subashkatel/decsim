@@ -18,8 +18,8 @@ import pathlib
 import pytest
 
 import decsim.records.windows as window_records
+import decsim.windows.coupling_orders as coupling_orders
 import decsim.windows.region_layout as region_layout
-import decsim.windows.schemes.swiper_sliding as swiper_sliding
 
 HERE = pathlib.Path(__file__)
 DATA = HERE.parents[1] / "data"
@@ -31,12 +31,19 @@ def span(stream_id, first_round: int, last_round: int):
     return window_records.RoundSpan(stream_id, first_round, last_round)
 
 
+def cut_segment(layout, segment) -> None:
+    """The segment's rounds begin and end regions."""
+    round_before = segment.first_round - 1
+    layout.cut_after(segment.stream_id, round_before)
+    layout.cut_after(segment.stream_id, segment.last_round)
+
+
 def stream_layout(round_count: int, *segments):
     """One stream of 7-round regions, its coupled segments cut, sealed."""
     layout = region_layout.RegionLayout()
     layout.open_stream("a", 7)
     for segment in segments:
-        layout.cut_segment(segment)
+        cut_segment(layout, segment)
     layout.extend("a", round_count)
     layout.seal("a", round_count)
     return layout
@@ -86,7 +93,7 @@ def test_the_last_region_begun_ends_early_at_a_later_cut():
     (begun,) = layout.extend("a", 2)
     merge = span("a", 6, 12)
 
-    layout.cut_segment(merge)
+    cut_segment(layout, merge)
     region = layout.region_from("a", 1)
 
     assert begun == span("a", 1, 7)
@@ -99,8 +106,8 @@ def test_a_reader_reads_the_region_it_is_coupled_to_and_is_read_by_it():
     layout.open_stream("b", 7)
     reader = span("a", 1, 7)
     read = span("b", 3, 9)
-    layout.cut_segment(reader)
-    layout.cut_segment(read)
+    cut_segment(layout, reader)
+    cut_segment(layout, read)
 
     layout.couple(reader, read)
     layout.extend("a", 7)
@@ -173,7 +180,7 @@ class _Replay:
 
     def __init__(self, reading: dict) -> None:
         self.layout = region_layout.RegionLayout()
-        self.scheme = swiper_sliding.SwiperSlidingScheme()
+        self.order = coupling_orders.CoordinateOrder()
         # stream id -> the cycle of its first decoded round
         self.first_cycle_by_stream: dict = {}
         # cycle -> what happens in it: merges starting, rounds, seals
@@ -247,9 +254,9 @@ class _Replay:
 
     def _couple(self, spans_by_patch: dict, couplings: list) -> None:
         for segment in spans_by_patch.values():
-            self.layout.cut_segment(segment)
+            cut_segment(self.layout, segment)
         for blocks in couplings:
-            reader, read = self.scheme.orient_coupling(blocks)
+            reader, read = self.order.orient(blocks)
             reader_span = spans_by_patch[reader]
             read_span = spans_by_patch[read]
             self.layout.couple(reader_span, read_span)

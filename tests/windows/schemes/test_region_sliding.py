@@ -1,17 +1,16 @@
-"""The SWIPER sliding row: its regions, its orientation, its readiness.
+"""The region sliding row: its regions and its readiness.
 
-SWIPER 2412.05115 and its code (github.com/jviszlai/swiper,
+Its windows match SWIPER's on SWIPER's own schedules (2412.05115;
 swiper/window_builder.py build_windows: regions of d rounds;
 swiper/window_manager.py SlidingWindowManager.process_round: the next
-region as the buffer, and a merge face read by the patch whose
-coordinates are both at least the other's). The whole layout is checked
-against SWIPER's own windows in tests/windows/test_region_layout.py.
+region as the buffer), checked in tests/windows/test_region_layout.py.
 """
 
 import pytest
 
 import decsim.records.windows as window_records
-import decsim.windows.schemes.swiper_sliding as swiper_sliding
+import decsim.windows.coupling_orders as coupling_orders
+import decsim.windows.schemes.region_sliding as region_sliding
 
 
 def readiness(local_rounds_arrived: int, spatial_reads_arrived: bool):
@@ -37,7 +36,8 @@ def window():
 
 
 def test_a_stream_is_laid_in_regions_each_reading_the_next():
-    row = swiper_sliding.SwiperSlidingScheme()
+    order = coupling_orders.CoordinateOrder()
+    row = region_sliding.RegionSlidingScheme(order)
 
     plan = row.plan_operation(1, 20, commit_round_count=7, buffer_round_count=7)
 
@@ -50,26 +50,9 @@ def test_a_stream_is_laid_in_regions_each_reading_the_next():
     assert plan.exit_window_indices == (2,)
 
 
-def test_the_patch_whose_coordinates_are_both_at_least_reads_the_other():
-    row = swiper_sliding.SwiperSlidingScheme()
-
-    beside = row.orient_coupling(((0, 0), (0, 1)))
-    below = row.orient_coupling(((1, 0), (0, 0)))
-
-    assert beside == ((0, 1), (0, 0))
-    assert below == ((1, 0), (0, 0))
-
-
-def test_patches_neither_of_which_is_at_least_the_other_read_nothing():
-    row = swiper_sliding.SwiperSlidingScheme()
-
-    oriented = row.orient_coupling(((0, 1), (1, 0)))
-
-    assert oriented is None
-
-
 def test_a_window_waits_for_the_regions_it_reads_across():
-    row = swiper_sliding.SwiperSlidingScheme()
+    order = coupling_orders.CoordinateOrder()
+    row = region_sliding.RegionSlidingScheme(order)
     merge = window()
     partner_missing = readiness(14, False)
     partner_in = readiness(14, True)
@@ -83,4 +66,4 @@ def test_a_window_waits_for_the_regions_it_reads_across():
 
 def test_a_buffer_length_is_refused_since_the_buffer_is_a_region():
     with pytest.raises(ValueError, match="reads the whole next region"):
-        swiper_sliding.SwiperSlidingScheme.Settings(buffer_rounds=3)
+        region_sliding.RegionSlidingScheme.Settings(buffer_rounds=3)

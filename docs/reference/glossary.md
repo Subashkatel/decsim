@@ -31,9 +31,11 @@ part any reader can follow.
   standalone operation is its own stream; the segments of a feedback
   stream share one, and in a lattice-surgery run each patch life is one.
 - **region**: a `RoundSpan` of one stream, at most its code's commit
-  rounds long; a region scheme's window commits one region and reads
-  others (`decsim/windows/region_layout.py`). SWIPER calls it a
-  `SpacetimeRegion` (arXiv:2412.05115, swiper/window_builder.py).
+  rounds long. A growing stream's window commits one region and reads
+  past it, and under a row that reads across couplings it also reads
+  coupled streams' regions (`decsim/windows/region_layout.py`). SWIPER
+  calls it a `SpacetimeRegion` (arXiv:2412.05115,
+  swiper/window_builder.py).
 - **window key, request, service**: the window is
   `(stream_id, window_index)`; the decode asked for it is a
   `DecoderRequestKey`, which carries the tier; the run of that decode on

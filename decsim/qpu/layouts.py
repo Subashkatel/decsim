@@ -42,26 +42,6 @@ class UniformLayout:
         del operation
         return self.code
 
-    def spatial_nodes_for(
-        self,
-        operation: program_records.OperationPlanningView,
-        *,
-        base_spatial_node_count: int,
-    ) -> int:
-        """The base node count, unchanged."""
-        del operation
-        return base_spatial_node_count
-
-    def patch_spatial_nodes_for(
-        self,
-        patch_identity: Any,  # an opaque identity
-        *,
-        base_spatial_node_count: int,
-    ) -> int:
-        """The base node count, unchanged."""
-        del patch_identity
-        return base_spatial_node_count
-
     def resources_for(
         self, operation: program_records.OperationPlanningView
     ) -> list[program_records.ResourceClaim]:

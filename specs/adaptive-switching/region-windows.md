@@ -85,10 +85,11 @@ nothing in the core reads surface-code geometry:
   spatial edge are the lattice-surgery frontend's and SWIPER's scheme's
   data, read only there; a qLDPC surgery program states its couplings
   (its ancilla blocks among them) the same way and uses another scheme.
-- A job's size is per stream: each stream's rounds weighed by its own
-  card's graph size per round (spatial_nodes), so blocks of different
-  codes price correctly; the surface-only run reduces to SWIPER's
-  patch-round volume.
+- A job's size is per stream: it is priced by its distinct (stream,
+  round) pairs, and each payload carries its own card's bits, so blocks
+  of different codes move and store correctly; the surface-only run
+  reduces to SWIPER's patch-round volume. A latency model that needs a
+  graph's size reads the window's detector error model.
 
 ## Stages, each committed with the full suite and the digests green
 

@@ -388,7 +388,6 @@ def _streams(
 def _resolved_operation(operation_id: int):
     """The planning facts the table reads for one operation."""
     geometry = program_records.ResolvedCodeGeometry(
-        code_name="rotated surface code (d=3)",
         distance=3,
         commit_round_count=3,
         buffer_round_count=3,
@@ -398,7 +397,6 @@ def _resolved_operation(operation_id: int):
         code_geometry=geometry,
         round_count=6,
         round_ticks=1000,
-        spatial_node_count=9,
         syndrome_bits_per_round=8,
     )
 
@@ -594,7 +592,6 @@ def test_the_empty_row_answers_every_call_the_real_one_does():
 def _resolved_patch(patch_identity):
     """The cadence facts the protected region reads for one patch."""
     geometry = program_records.ResolvedCodeGeometry(
-        code_name="rotated surface code (d=3)",
         distance=3,
         commit_round_count=3,
         buffer_round_count=3,
@@ -603,7 +600,6 @@ def _resolved_patch(patch_identity):
         patch_identity=patch_identity,
         code_geometry=geometry,
         round_ticks=1000,
-        spatial_node_count=9,
     )
 
 

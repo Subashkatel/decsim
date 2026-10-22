@@ -1090,8 +1090,6 @@ class DecodeQueue(Protocol):
         round_count: int,
         on_done: Callable[[], None],
         label: str = "external",
-        code: Optional[str] = None,
-        spatial_nodes: Optional[int] = None,
     ) -> None:
         """Queue a decode with no syndrome data; on_done at its end."""
 
@@ -2384,9 +2382,6 @@ class CodeModel(Protocol):
     def buffer_rounds(self) -> int:
         """Look-ahead rounds per decode window."""
 
-    def spatial_nodes(self, patch_count: int) -> int:
-        """The per-round graph size a latency model prices this card at."""
-
     def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Syndrome bits one round of this many patches produces."""
 
@@ -2411,22 +2406,6 @@ class LayoutModel(Protocol):
 
     def codes(self) -> list:
         """Every code the layout declares."""
-
-    def spatial_nodes_for(
-        self,
-        operation: program_records.OperationPlanningView,
-        *,
-        base_spatial_node_count: int,
-    ) -> int:
-        """Decoding-graph nodes per round of the operation."""
-
-    def patch_spatial_nodes_for(
-        self,
-        patch_identity: Any,  # an opaque identity
-        *,
-        base_spatial_node_count: int,
-    ) -> int:
-        """Decoding-graph nodes per round of the patch."""
 
     def resources_for(
         self, operation: program_records.OperationPlanningView

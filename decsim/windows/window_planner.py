@@ -439,20 +439,6 @@ class WindowPlanner:
         """The root-resolved round count of an operation."""
         return self.resolved_operation_by_id[operation_id].round_count
 
-    def code_geometry_of(
-        self,
-        operation_id: Any,  # an opaque identity
-    ) -> program_records.ResolvedCodeGeometry:
-        """The resolved code geometry of an operation."""
-        return self.resolved_operation_by_id[operation_id].code_geometry
-
-    def spatial_node_count_of(
-        self,
-        operation_id: Any,  # an opaque identity
-    ) -> int:
-        """The decoding-graph nodes per round of an operation."""
-        return self.resolved_operation_by_id[operation_id].spatial_node_count
-
     def syndrome_bits_per_round_of(
         self,
         operation_id: Any,  # an opaque identity

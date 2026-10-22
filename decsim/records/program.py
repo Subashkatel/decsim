@@ -18,7 +18,6 @@ import stim
 class ResolvedCodeGeometry:
     """Canonical planning/control geometry resolved once for one run."""
 
-    code_name: str
     distance: int
     commit_round_count: int
     buffer_round_count: int
@@ -32,7 +31,6 @@ class ResolvedOperationPlanning:
     code_geometry: ResolvedCodeGeometry
     round_count: int
     round_ticks: int
-    spatial_node_count: int
     # the code card's checks over the operation's patches, one round
     syndrome_bits_per_round: int
 
@@ -47,7 +45,6 @@ class ResolvedPatchPlanning:
     patch_identity: Any  # an opaque identity
     code_geometry: ResolvedCodeGeometry
     round_ticks: int
-    spatial_node_count: int
 
 
 @dataclass(frozen=True)

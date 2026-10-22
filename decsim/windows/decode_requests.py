@@ -198,8 +198,6 @@ class DecodeRequestBuilder:
         round_count = (
             payload_round_count + window.batched_preceding_idle_round_count
         )
-        spatial_nodes = self.planner.spatial_node_count_of(operation.id)
-        geometry = self.planner.code_geometry_of(operation.id)
         model = self.planner.models.model_by_window.get(window.key)
         label = self._job_label(window, operation)
         return decoding_records.DecodeJob(
@@ -207,10 +205,8 @@ class DecodeRequestBuilder:
             window_id=window.window_index,
             round_count=round_count,
             ready_time=self.engine.now,
-            spatial_nodes=spatial_nodes,
             payloads=payloads,
             detector_error_model=model,
-            code=geometry.code_name,
             window=window,
             label=label,
             request_key=request_key,
@@ -240,10 +236,8 @@ class DecodeRequestBuilder:
             window_id=job.window_id,
             round_count=job.round_count,
             ready_time=self.engine.now,
-            spatial_nodes=job.spatial_nodes,
             payloads=payloads,
             detector_error_model=job.detector_error_model,
-            code=job.code,
             window=job.window,
             label=label,
             request_key=request_key,

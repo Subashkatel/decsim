@@ -80,23 +80,6 @@ class SurfaceCodeModel:
             return self.buffer_rounds_override
         return self.distance
 
-    def spatial_nodes(self, patch_count: int) -> int:
-        """Per-round graph size for a latency model: d*d per patch, plus a seam.
-
-        A size knob, not the detector count: a patch has d*d - 1 detectors a
-        round (Stim's bulk layer: 8, 24 and 48 at d=3, 5, 7). No shipped decoder
-        row reads it; for a supplied latency model the difference is a scale
-        factor and reaches no correction. The seam is the one line of d qubits a
-        two-patch lattice-surgery merge adds (Horsman et al. 1111.4022 Sec.
-        3.1); for more patches the paper gives no count.
-        """
-        node_count_per_patch = self.distance * self.distance
-        seam_node_count = 0
-        if patch_count > 1:
-            seam_node_count = self.distance
-        patch_node_count = patch_count * node_count_per_patch
-        return patch_node_count + seam_node_count
-
     def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Bits read out per round: the d*d - 1 stabilizers of every patch."""
         qubit_count = self.distance * self.distance
@@ -221,10 +204,6 @@ class BivariateBicycleCodeModel:
                 "buffers d rounds)"
             )
         return self.buffer_rounds_override
-
-    def spatial_nodes(self, patch_count: int) -> int:
-        """Per-round graph size for a latency model: n per patch."""
-        return patch_count * self.settings.qubit_count
 
     def syndrome_bits_per_round(self, patch_count: int) -> int:
         """Bits read out per round: the n X-plus-Z checks of every patch."""

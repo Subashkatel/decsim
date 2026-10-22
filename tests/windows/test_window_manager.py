@@ -159,14 +159,11 @@ def _stream_planner() -> window_planner.WindowPlanner:
         windowed_by_stream={},
         batch_preceding_idle_rounds_by_stream={},
     )
-    geometry = types.SimpleNamespace(
-        commit_round_count=3, buffer_round_count=2, code_name="surface"
-    )
+    geometry = types.SimpleNamespace(commit_round_count=3, buffer_round_count=2)
     resolved = types.SimpleNamespace(
         operation_id="stream",
         code_geometry=geometry,
         round_count=9,
-        spatial_node_count=17,
     )
     cache = built_window_models.BuiltWindowModels()
     built = window_planner.WindowModels(cache)

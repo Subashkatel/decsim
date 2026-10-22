@@ -87,9 +87,8 @@ def planning_view(operation):
     return program_records.OperationPlanningView.from_operation(operation)
 
 
-def resolved_geometry(name="surface"):
+def resolved_geometry():
     return program_records.ResolvedCodeGeometry(
-        code_name=name,
         distance=3,
         commit_round_count=2,
         buffer_round_count=1,
@@ -103,7 +102,6 @@ def resolved_operation(operation_id):
         code_geometry=geometry,
         round_count=4,
         round_ticks=config.TICKS_PER_MICROSECOND,
-        spatial_node_count=10,
         syndrome_bits_per_round=8,
     )
 
@@ -140,14 +138,13 @@ def window_geometry(commit_lo, commit_hi):
 
 
 class RecordingCode:
-    """A code card that records which patch counts it was sized for."""
+    """A code card with its own cadence."""
 
     name = "surface"
     distance = 3
 
     def __init__(self, cadence=1.25):
         self.cadence = cadence
-        self.spatial_node_calls = []
 
     def rounds_per_logical_cycle(self):
         return 5
@@ -161,21 +158,15 @@ class RecordingCode:
     def buffer_rounds(self):
         return 1
 
-    def spatial_nodes(self, patch_count):
-        self.spatial_node_calls.append(patch_count)
-        return patch_count * 10
-
     def syndrome_bits_per_round(self, patch_count):
         return patch_count * 8
 
 
-class RecordingLayout:
-    """A layout that adds one node per operation and two per patch."""
+class OneCodeLayout:
+    """A layout that gives every operation and every patch the one code."""
 
     def __init__(self, code):
         self.code = code
-        self.operation_calls = []
-        self.patch_calls = []
 
     def code_for_operation(self, operation):
         del operation
@@ -184,16 +175,6 @@ class RecordingLayout:
     def code_for_patch(self, patch_identity):
         del patch_identity
         return self.code
-
-    def spatial_nodes_for(self, operation, *, base_spatial_node_count):
-        self.operation_calls.append(operation.id)
-        return base_spatial_node_count + 1
-
-    def patch_spatial_nodes_for(
-        self, patch_identity, *, base_spatial_node_count
-    ):
-        self.patch_calls.append(patch_identity)
-        return base_spatial_node_count + 2
 
 
 class RecordingScheme:
@@ -224,7 +205,7 @@ def compiled_plan(operations, planned_ids, **overrides):
         code = RecordingCode()
     layout = overrides.pop("layout", None)
     if layout is None:
-        layout = RecordingLayout(code)
+        layout = OneCodeLayout(code)
     scheme = overrides.pop("scheme", None)
     if scheme is None:
         scheme = RecordingScheme()
@@ -257,17 +238,16 @@ def compiled_plan(operations, planned_ids, **overrides):
     )
 
 
-def test_the_plan_sizes_every_operation_and_every_patch_through_the_layout():
-    """One geometry for the run, one node count per operation and patch.
+def test_the_plan_resolves_each_patch_once_in_the_order_it_appears():
+    """One geometry for the run; each patch identity resolved once.
 
-    The card sizes a patch count and the layout may adjust it, so a
-    two-patch operation is priced from the card's two-patch figure and
-    each patch identity is resolved once, in the order it appears.
+    1 and "1" are two identities, and the card's cadence is None, so the
+    run's fallback sets the round.
     """
     first = operation_of(10, qubits=("q0",), patches=(1, "1"))
     second = operation_of(20, qubits=("q1", "q2"))
     code = RecordingCode(cadence=None)
-    layout = RecordingLayout(code)
+    layout = OneCodeLayout(code)
     scheme = RecordingScheme()
 
     plan = compiled_plan(
@@ -279,14 +259,10 @@ def test_the_plan_sizes_every_operation_and_every_patch_through_the_layout():
         fallback_round_microseconds=2.5,
     )
 
-    operation_nodes = [
-        resolved.spatial_node_count for resolved in plan.resolved_operations
-    ]
     patch_identities = [
         resolved.patch_identity for resolved in plan.resolved_patches
     ]
     assert plan.round_ticks == 2_500_000
-    assert operation_nodes == [21, 21]
     assert patch_identities == [1, "1", "q1", "q2"]
     assert scheme.plan_calls == [(10, 4, 2, 1), (20, 4, 2, 1)]
 

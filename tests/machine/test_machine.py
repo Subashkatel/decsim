@@ -2148,9 +2148,6 @@ class OutsideCodeCard:
     def buffer_rounds(self):
         return 0
 
-    def spatial_nodes(self, patch_count):
-        return 4 * patch_count
-
     def syndrome_bits_per_round(self, patch_count):
         return 3 * patch_count
 
@@ -2187,7 +2184,7 @@ def test_a_code_card_written_outside_decsim_runs_with_no_registration():
     result = machine.run()
     geometry = _resolved_geometry(machine)
     assert result.terminal_status == "complete"
-    assert geometry.code_name == "outside code card"
+    assert geometry.commit_round_count == 2
 
 
 def test_the_default_code_card_resolves_the_distance_three_surface():
@@ -2196,7 +2193,6 @@ def test_the_default_code_card_resolves_the_distance_three_surface():
     machine = machine_module.Machine.build(settings)
     machine.run()
     geometry = _resolved_geometry(machine)
-    assert geometry.code_name == "rotated surface code (d=3)"
     assert geometry.distance == 3
 
 

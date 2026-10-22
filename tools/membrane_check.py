@@ -12,8 +12,8 @@ with B; the decision reads v, that A-B merge's outcome, the product of
 its new seam stabilizers in the first merged round (Horsman et al.
 1111.4022).
 
-For each case the script asks, exactly over GF(2), whether some
-membrane of the decision is flipped by no single fault in C's past: a
+For each case the script asks, over GF(2), whether some membrane of
+the decision is flipped by no single fault in C's past: a
 data qubit's X or Z error, or a stabilizer measurement's flip, on C
 alone, before the A-B merge. If one is, no decode of C's past is needed.
 The membrane reads nothing after the decision's round, since a decision
@@ -39,6 +39,7 @@ import itertools
 import sys
 from typing import Optional
 
+import ldpc.mod2 as mod2
 import numpy
 import stim
 
@@ -313,8 +314,7 @@ def _in_span(line, supports) -> bool:
     stacked = numpy.array(columns)
     matrix = stacked.T
     target = _indicator(line, index)
-    solution = solve(matrix, target)
-    return solution is not None
+    return is_solvable(matrix, target)
 
 
 def _indicator(support, index) -> numpy.ndarray:
@@ -324,70 +324,22 @@ def _indicator(support, index) -> numpy.ndarray:
     return row
 
 
-# ---- GF(2)
+# ---- GF(2), by ldpc.mod2 (a run dependency)
 
 
-def solve(matrix, target) -> Optional[numpy.ndarray]:
-    """An x with matrix @ x = target over GF(2), or None."""
+def is_solvable(matrix, target) -> bool:
+    """Whether some x has matrix @ x = target over GF(2)."""
     column = target.reshape(-1, 1)
     augmented = numpy.hstack([matrix, column])
-    reduced, pivots = _row_reduce(augmented)
-    variable_count = matrix.shape[1]
-    # a pivot in the target's column is a row 0 = 1
-    if variable_count in pivots:
-        return None
-    solution = numpy.zeros(variable_count, dtype=numpy.uint8)
-    for row, pivot in enumerate(pivots):
-        solution[pivot] = reduced[row, variable_count]
-    return solution
+    return mod2.rank(matrix) == mod2.rank(augmented)
 
 
 def null_space(matrix) -> numpy.ndarray:
     """A basis of {x : matrix @ x = 0} over GF(2), as columns."""
-    reduced, pivots = _row_reduce(matrix)
-    column_count = reduced.shape[1]
-    free = [column for column in range(column_count) if column not in pivots]
-    basis = numpy.zeros((column_count, len(free)), dtype=numpy.uint8)
-    for position, column in enumerate(free):
-        basis[column, position] = 1
-        basis[pivots, position] = reduced[: len(pivots), column]
-    return basis
-
-
-def _row_reduce(matrix) -> tuple:
-    """The matrix in reduced row echelon form over GF(2), and its pivots."""
-    as_bits = numpy.array(matrix, dtype=numpy.uint8)
-    reduced = as_bits % 2
-    row_count, column_count = reduced.shape
-    pivots = []
-    for column in range(column_count):
-        row = len(pivots)
-        if row == row_count:
-            break
-        pivot = _pivot_row(reduced, row, column)
-        if pivot is None:
-            continue
-        _eliminate(reduced, row, pivot, column)
-        pivots.append(column)
-    return reduced, pivots
-
-
-def _pivot_row(reduced, row, column) -> Optional[int]:
-    """The first row from this one with a 1 in the column, or None."""
-    below = reduced[row:, column]
-    hits = numpy.flatnonzero(below)
-    if len(hits) == 0:
-        return None
-    return row + hits[0]
-
-
-def _eliminate(reduced, row, pivot, column) -> None:
-    """Swap the pivot row up and clear the column everywhere else."""
-    reduced[[row, pivot]] = reduced[[pivot, row]]
-    holders = numpy.flatnonzero(reduced[:, column])
-    for other in holders:
-        if other != row:
-            reduced[other] ^= reduced[row]
+    as_bits = numpy.array(matrix, dtype=numpy.uint8) % 2
+    sparse_rows = mod2.nullspace(as_bits)
+    basis_rows = sparse_rows.toarray()
+    return basis_rows.T.astype(numpy.uint8)
 
 
 # ---- the layout
@@ -690,8 +642,7 @@ def has_membrane_avoiding(experiment, owner) -> bool:
     ones = numpy.ones(len(decision_rows), dtype=numpy.uint8)
     zeros = numpy.zeros(len(sites), dtype=numpy.uint8)
     wanted = numpy.concatenate([ones, zeros])
-    solution = solve(conditions, wanted)
-    return solution is not None
+    return is_solvable(conditions, wanted)
 
 
 def _past_sites(recording, owner) -> list:

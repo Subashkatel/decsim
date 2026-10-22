@@ -25,7 +25,9 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.records.workload as workload_records
 import decsim.windows.coupling_orders as coupling_orders
 import decsim.windows.region_layout as region_layout
 import decsim.windows.schemes.region_sliding as region_sliding
@@ -183,6 +185,41 @@ def test_a_merge_window_reads_its_partners_region_and_is_waited_for(t_gate):
     assert s_merge.spatial_reads == (s_region,)
     assert t_merge.key in control_t_merge.deps
     assert s_merge.key in control_s_merge.deps
+
+
+@pytest.mark.parametrize("patches", [((0, 0), (0, 1)), ((0, 1), (0, 0))])
+def test_a_reader_on_a_host_pool_wakes_when_its_partner_lands(patches):
+    """A host pool's rounds land in the store it reads (accept_room_round).
+
+    The reader's own region may land before the region it reads, in
+    either patch order, and it must still be decoded once both are in.
+    """
+    merge = program_records.Operation(
+        0,
+        "merge",
+        patches,
+        patches=patches,
+        couplings=(patches,),
+        kind=program_records.OpKind.MERGE,
+    )
+    workload = workload_records.Workload((merge,), {0: 1}, patch_streams=True)
+    settings = workload_settings.WorkloadSettings.running(workload)
+    scheme = region_sliding.RegionSlidingScheme.Settings()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    qpu = qpu_settings.QpuSettings(distance=3)
+    free_hops = dict.fromkeys(declared_run.DECLARED_HOP_MICROSECONDS, 0.0)
+    fabric = declared_run.declared_fabric(**free_hops)
+    base = machines.base(settings, windows, qpu, fabric=fabric)
+    algorithm = decoders.PresetLatencyDecoder.Settings(0.1)
+    pool = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    graph = machines.with_pool(base, pool, name="strong", site="host")
+    machine = machine_module.Machine.build(graph, 0)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
 
 
 def test_a_runs_windows_are_the_region_layout_of_its_rounds(toffoli):

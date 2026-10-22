@@ -315,9 +315,12 @@ class OperationResults:
         """Deliver once every segment the release rule awaits is final.
 
         Its own segments always, and under SWIPER's rule those of its
-        decoded ancestors too (release_rules.py).
+        decoded ancestors too (release_rules.py). Only a needed outcome is
+        delivered: one an operation waits on, or one the QPU needs back.
         """
-        if operation.id not in self.tracker.blocking_operation_ids:
+        is_awaited = operation.id in self.tracker.blocking_operation_ids
+        is_needed = is_awaited or operation.requires_result_return_to_qpu
+        if not is_needed:
             return
         if operation.id in self.deliveries.segment_results_sent:
             return

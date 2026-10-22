@@ -30,6 +30,7 @@ import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
 import decsim.windows.coupling_orders as coupling_orders
 import decsim.windows.region_layout as region_layout
+import decsim.windows.release_rules as release_rules
 import decsim.windows.schemes.region_sliding as region_sliding
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
@@ -49,6 +50,9 @@ CONDITIONAL_S_MERGE = 3
 CONTROL_STREAM = ("patch", (0, 0), 0)
 T_STREAM = ("patch", (0, 1), 0)
 S_ANCILLA_STREAM = ("patch", (1, 0), 0)
+OWN_STREAMS = release_rules.OwnStreams.Settings()
+DECODED_ANCESTORS = release_rules.DecodedAncestors.Settings()
+RELEASE_RULES = (OWN_STREAMS, DECODED_ANCESTORS)
 
 
 def run(workload, decode_microseconds: float):
@@ -238,6 +242,44 @@ def test_a_reader_on_a_host_pool_wakes_when_its_partner_lands(patches):
     result = machine.run()
 
     assert result.terminal_status == "complete"
+
+
+@pytest.mark.parametrize("rule", RELEASE_RULES)
+def test_a_measurement_nothing_waits_on_returns_its_result(rule):
+    """The QPU needs the outcome back, so it comes once it is decoded.
+
+    No operation is blocked on the measurement, yet it asks for its
+    result (requires_result_return_to_qpu), and either release rule
+    delivers it as it would a blocker's (release_rules.py).
+    """
+    measurement = program_records.Operation(
+        0,
+        "measure",
+        ((0, 0),),
+        patches=((0, 0),),
+        kind=program_records.OpKind.MEASURE,
+        requires_result_return_to_qpu=True,
+    )
+    workload = workload_records.Workload(
+        (measurement,), {0: 1}, patch_streams=True
+    )
+    settings = workload_settings.WorkloadSettings.running(workload)
+    scheme = region_sliding.RegionSlidingScheme.Settings()
+    windows = window_settings.WindowSettings(scheme=scheme, release_rule=rule)
+    qpu = qpu_settings.QpuSettings(distance=3)
+    base = machines.base(settings, windows, qpu)
+    algorithm = decoders.PresetLatencyDecoder.Settings(0.1)
+    pool = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    graph = machines.with_pool(base, pool)
+    machine = machine_module.Machine.build(graph, 0)
+
+    result = machine.run()
+
+    assert result.terminal_status == "complete"
+    returned = machine.observation.runtime_stamps.result_return
+    assert list(returned) == [0]
 
 
 def test_a_runs_windows_are_the_region_layout_of_its_rounds(toffoli):

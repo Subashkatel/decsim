@@ -12,11 +12,22 @@ import math
 
 import pytest
 
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.experiments.collect as collect
 import decsim.experiments.measure as measure
 import decsim.experiments.stream_measures as stream_measures
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
+import decsim.presets.machines as machines
+import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
 import decsim.records.windows as window_records
+import decsim.records.workload as workload_records
+import decsim.windows.schemes.region_sliding as region_sliding
+import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 import tests.stream_machines as stream_machines
 
 SEED = 17
@@ -190,3 +201,54 @@ def test_the_escalated_share_is_sampled_off_the_frames_commits_in_order():
     assert folded.escalation_series == expected
     assert len(expected) >= 2
     assert expected[-1][1] > 0
+
+
+READ_HOP_MICROSECONDS = 5.0
+
+
+def _two_patch_graph(folds: bool):
+    """Two patches idling a round each, decoded on two units at once.
+
+    Each stream counts its windows from 0, so both lay a window 0, and
+    every decode's input rides the one read hop.
+    """
+    memory = program_records.OpKind.MEMORY
+    operations = tuple(
+        program_records.Operation(
+            index, f"memory {index}", ((0, index),), kind=memory
+        )
+        for index in range(2)
+    )
+    program = workload_records.Workload(
+        operations, {0: 1, 1: 1}, patch_streams=True
+    )
+    settings = workload_settings.WorkloadSettings.running(program)
+    scheme = region_sliding.RegionSlidingScheme.Settings()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    hops = dict.fromkeys(declared_run.DECLARED_HOP_MICROSECONDS, 0.0)
+    hops["read_written"] = READ_HOP_MICROSECONDS
+    fabric = declared_run.declared_fabric(**hops)
+    observation = observe_settings.ObservationSettings(folds_windows=folds)
+    qpu = qpu_settings.QpuSettings(distance=3)
+    base = machines.base(
+        settings, windows, qpu, observation=observation, fabric=fabric
+    )
+    algorithm = decoders.PresetLatencyDecoder.Settings(0.1)
+    pool = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE, unit_count=2
+    )
+    pooled = machines.with_pool(base, pool)
+    return machines.with_frame(pooled)
+
+
+def test_each_streams_window_0_keeps_its_own_input_hop_when_let_go():
+    whole = _two_patch_graph(folds=False)
+    lean = _two_patch_graph(folds=True)
+    _machine, _result, kept = _run(whole)
+
+    _machine, _result, folded = _run(lean)
+
+    input_hop = folded.values["input_link_per_window"]
+    assert input_hop["count"] == 2
+    assert input_hop["mean"] == READ_HOP_MICROSECONDS
+    assert folded == kept

@@ -468,7 +468,7 @@ def answer_send_ticks(transfers: list, answer_hops: dict) -> dict:
 
 
 def input_hop_by_request(transfers: list) -> dict:
-    """(path, window id, run ordinal) -> (delay ticks, last delivery tick).
+    """(path, stream, window, run ordinal) -> (delay ticks, last delivery).
 
     A window decoded more than once has one entry per decode, so a point
     reads the hop of the decode it describes. The landing is the latest
@@ -624,7 +624,7 @@ def window_points_us(
     output_sent = answer_send.get(window.key, accepted)
     output_ticks = accepted - output_sent
     attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
-    input_key = (input_path, window_id, decode.run_sequence)
+    input_key = (input_path, stream_id, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
     input_sent = input_landed - input_ticks
     startable = _startable_ticks(decode, input_landed)

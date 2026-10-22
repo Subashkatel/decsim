@@ -1,4 +1,8 @@
-"""When a blocking operation's outcome is usable: which decodes it waits for.
+"""When an outcome is usable: which decodes it waits for.
+
+An outcome is needed when an operation is blocked on it or the QPU
+needs it returned (requires_result_return_to_qpu); either waits on the
+same decodes, so a "blocker" below is either.
 
 The windows package's own seam: OperationResults asks its row which
 operations' segments must be final before a blocker releases its
@@ -62,7 +66,7 @@ class OwnStreams:
 
 
 class DecodedAncestors:
-    """A blocker waits for itself and every decoded operation before it.
+    """A needed outcome waits for itself and every decoded operation before it.
 
     An ancestor is reached through predecessors that each decode rounds;
     one that decodes none ends the walk, as SWIPER's walk passes only
@@ -91,6 +95,8 @@ class DecodedAncestors:
         for operation in operations:
             if operation.blocked_by is not None:
                 self._await(operation.blocked_by, operation_by_id)
+            if operation.requires_result_return_to_qpu:
+                self._await(operation.id, operation_by_id)
 
     def awaited_by(self, operation_id: int) -> tuple:
         """The operations whose segments the blocker's release waits for."""

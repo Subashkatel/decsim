@@ -110,6 +110,7 @@ def build_plan(
     _check_blockers_decode(
         operations, dynamic_streams, workload.patch_lives, external_blocker_ids
     )
+    _check_returns_decode(operations, workload.patch_lives)
     scheme = _scheme(windows)
     boundary_policy = _boundary_policy(windows)
     # the refusals print the strong window's row name, and only a window
@@ -308,6 +309,23 @@ def _check_blockers_decode(
     if dynamic_streams and not lives:
         return
     planner.check_blockers_decode(list(operations), external_blocker_ids)
+
+
+def _check_returns_decode(operations, lives: tuple) -> None:
+    """Refuse a result returned from a patch-stream operation with no rounds.
+
+    No patch stream binds it (controller/patch_streams.py bind_at_start),
+    so its result would never come.
+    """
+    if not lives:
+        return
+    for operation in operations:
+        returns = operation.requires_result_return_to_qpu
+        if returns and not operation.emits_detector_data:
+            raise ValueError(
+                f"{operation.name} returns its result to the QPU but emits "
+                "no rounds, so no patch stream binds it"
+            )
 
 
 def _check_patch_streams(lives: tuple, device) -> None:

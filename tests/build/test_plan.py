@@ -473,6 +473,28 @@ def test_a_patch_stream_blocker_that_emits_no_rounds_is_refused():
         _plan(workload=workload, windows=windows)
 
 
+def test_a_patch_stream_result_return_with_no_rounds_is_refused():
+    patch = ((0, 0),)
+    silent = program_records.Operation(
+        0,
+        "measure",
+        patch,
+        patches=patch,
+        emits_detector_data=False,
+        requires_result_return_to_qpu=True,
+    )
+    memory = program_records.Operation(1, "memory", patch, patches=patch)
+    program = workload_records.Workload(
+        (silent, memory), {0: 1, 1: 1}, patch_streams=True
+    )
+    workload = workload_settings.WorkloadSettings.running(program)
+    scheme = region_sliding.RegionSlidingScheme.Settings()
+    windows = window_settings.WindowSettings(scheme=scheme)
+
+    with pytest.raises(ValueError, match="no patch stream binds it"):
+        _plan(workload=workload, windows=windows)
+
+
 def test_waiting_for_ancestors_off_patch_streams_is_refused():
     rule = release_rules.DecodedAncestors.Settings()
     windows = window_settings.WindowSettings(release_rule=rule)

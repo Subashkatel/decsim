@@ -351,9 +351,9 @@ checked against the code before acting:
 | coupling streams of different region lengths laid wrong reads | 4 | refused (one code per run) |
 | folding let a boundary record go while a delivery to another stream was in flight: a hang | 4 | fixed: the courier keeps a record until its last delivery lands (Bombín lines 775-788), test added |
 | input-hop timings were keyed by window index alone, so streams' window 0s collided | before this plan | fixed: keyed by (stream, window), test added |
-| requires_result_return_to_qpu is ignored for a patch-stream measurement nothing waits on | 3 | open |
-| a job's graph size is its home stream's, not each read stream's | 4 | open, moot while one code per run |
-| region starts are kept for the whole run, even when windows fold | 6 | open, small (one int a region) |
+| requires_result_return_to_qpu is ignored for a patch-stream measurement nothing waits on | 3 | fixed: a needed result is one awaited or returned to the QPU, and one that emits no rounds is refused at build; tests added |
+| a job's graph size is its home stream's, not each read stream's | 4 | fixed: nothing read it; the graph size chain is gone, and a job is priced by its distinct rounds and payload bits |
+| region starts are kept for the whole run, even when windows fold | 6 | fixed: a region goes once its window and every region it couples to are let go; test added |
 
 An end-to-end walk of toffoli at d = 7 on the reference card (1.1 us
 rounds, 2.727 us decodes, two units; 2026-10-22) checked every
@@ -371,6 +371,15 @@ release before they were otherwise ready and start exactly then. The
 memory throughput study's machine (d = 7, 10% escalated) passes the
 same checks. The SWIPER referent is unchanged: it runs with free hops,
 where neither finding shows.
+
+An audit of the Pauli frame against Bombín Eq. 4, PyMatching and the
+sliding-window papers found it sound (45 of 45 shots equal a global
+PyMatching decode) but for two:
+
+| finding | state |
+|---|---|
+| a timing-only strong tier over a weak tier that returns values left the weak value in the frame for a window it said was redone | refused at build: on a source with values, a pool that returns values may not escalate to a timing-only one (the reverse leaves the result None, which is honest); test added |
+| a later segment's value XORed only its own rounds, though an outcome depends on every error since the patch was prepared | fixed: a segment reads its stream from round 1 through its end (Bombín Eq. 4); test added |
 
 
 ## The owner's decisions

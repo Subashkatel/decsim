@@ -569,7 +569,7 @@ class BoundaryCourier:
         if self.in_flight_by_source[source_key] > 0:
             return
         del self.in_flight_by_source[source_key]
-        self.record_by_window.pop(source_key, None)
+        del self.record_by_window[source_key]
 
     @staticmethod
     def _is_unblocked_now(window: window_records.Window) -> bool:

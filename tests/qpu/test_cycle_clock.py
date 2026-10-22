@@ -667,6 +667,45 @@ def test_a_two_patch_body_reads_out_as_one_group_and_idles_on_both() -> None:
     ]
 
 
+def test_a_patch_no_body_has_run_a_round_on_does_not_idle() -> None:
+    """A skipped operation runs no round, so it prepares no patch.
+
+    The merge's patch 0 idles once its body is done; patch 1, which only
+    a zero-round operation named, holds no logical qubit, so no round of
+    it is measured or decoded (swiper/device_manager.py activates only
+    the patches a running instruction measures). A discard ends patch
+    0's idling.
+    """
+    engine, qpu, log = clocked_qpu(10)
+    merge = program_records.Operation(
+        id=1, name="merge", qubits=(0,), patches=(0,)
+    )
+    skipped = program_records.Operation(
+        id=2, name="skipped", qubits=(1,), patches=(1,)
+    )
+    discard = program_records.Operation(
+        id=3,
+        name="discard",
+        qubits=(0,),
+        patches=(0,),
+        kind=program_records.OpKind.DISCARD,
+    )
+    silent = functools.partial(
+        program_records.RunOperationBody, emits_detector_data=False
+    )
+    merge_body = program_records.RunOperationBody(merge, 10, 2, 2)
+    skipped_body = silent(skipped, 10, 0, 0)
+    discard_body = silent(discard, 10, 0, 0)
+    issue_discard = functools.partial(qpu.issue, discard_body)
+    qpu.issue(merge_body)
+    qpu.issue(skipped_body)
+    engine.schedule(35, issue_discard)
+    engine.schedule(65, qpu.finish)
+    engine.run()
+
+    assert _idle_patch_ticks(log) == [(30, 0), (40, 0)]
+
+
 def _observe_group_idleness(
     qpu: cycle_clock.QPUDevice, engine: decsim.engine.Engine, observations: list
 ) -> None:

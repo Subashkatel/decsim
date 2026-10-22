@@ -231,6 +231,8 @@ class QPUDevice:
         operation = command.operation
         for patch in program_records.patches_of(operation):
             self._live.idle_by_patch.pop(patch, None)
+            if command.round_count:
+                self._live.prepared_patches.add(patch)
         if command.round_count == 0:
             self._run_instant_command(command)
             return
@@ -261,17 +263,28 @@ class QPUDevice:
         self, command: program_records.RunOperationBody
     ) -> None:
         operation = command.operation
-        if operation.kind is not program_records.OpKind.DISCARD:
+        patches = program_records.patches_of(operation)
+        if operation.kind is program_records.OpKind.DISCARD:
+            self._live.prepared_patches.difference_update(patches)
+        else:
             self._idle_after(operation)
         self.runtime.body_done(operation)
 
     def _idle_after(self, operation: program_records.Operation) -> None:
-        """The operation's patches idle until another operation claims them.
+        """The operation's prepared patches idle until another claims them.
 
-        A discarded patch is gone and measures no more rounds
-        (swiper/device_manager.py drops it from the active patches).
+        A patch holds a logical qubit once a body has run a round on it,
+        and until its discard: before, its qubits store nothing and no
+        outcome depends on them (Bombín et al. 2303.04846 Eq. 4, an outcome
+        reads only its membrane). So an operation that runs no round, a
+        skipped conditional correction, prepares nothing, and a discarded
+        patch measures no more rounds (swiper/device_manager.py
+        _generate_syndrome_round activates only the patches a running
+        instruction measures, and a DISCARD drops them).
         """
         for patch in program_records.patches_of(operation):
+            if patch not in self._live.prepared_patches:
+                continue
             idle = _IdlePatch(operation.id, 0)
             self._live.idle_by_patch.setdefault(patch, idle)
 
@@ -404,11 +417,14 @@ class _LiveOperations:
 
     scheduled_boundaries and last_emitted_boundary keep a boundary from
     being scheduled or emitted twice; departure_tick_by_patch is the latest
-    waiting readout's tick, so a later one queues behind it.
+    waiting readout's tick, so a later one queues behind it;
+    prepared_patches are those a body has run a round on since their
+    last discard.
     """
 
     running_by_operation_id: dict = dataclasses.field(default_factory=dict)
     idle_by_patch: dict = dataclasses.field(default_factory=dict)
+    prepared_patches: set = dataclasses.field(default_factory=set)
     commands_waiting: list = dataclasses.field(default_factory=list)
     scheduled_boundaries: set = dataclasses.field(default_factory=set)
     last_emitted_boundary: int = 0

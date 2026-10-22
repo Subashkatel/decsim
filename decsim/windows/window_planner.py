@@ -410,6 +410,9 @@ class WindowPlanner:
         indices.let_go_before(window_index)
         floors = self._floors(stream_id)
         floors.let_go_before(window_index)
+        layout = self.layout_by_stream.get(stream_id)
+        if layout is not None:
+            layout.let_go_before(window_index)
 
     def is_windowed(self, stream_id: Any) -> bool:  # an opaque identity
         """False for a stream decoded as one whole batch."""

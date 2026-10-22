@@ -137,6 +137,15 @@ class FiniteStream:
         del round_index
         return ()
 
+    def let_go_before(self, window_index: int) -> None:
+        """A declared stream's plan is laid whole from its start.
+
+        Its geometries end with the stream, whose length the source
+        declared, and no window reads across a coupling, so nothing
+        here outlives a window for want of being let go.
+        """
+        del window_index
+
     def _clip(self, window: window_records.Window, last_round: int) -> None:
         """The window commits through the round and reads its buffer past it."""
         window.commit_hi = last_round

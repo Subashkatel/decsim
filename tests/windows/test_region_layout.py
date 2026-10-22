@@ -130,6 +130,53 @@ def test_a_region_not_begun_has_no_place_yet():
     assert place is None
 
 
+def test_a_let_go_region_goes_and_a_later_one_keeps_its_index():
+    layout = stream_layout(70)
+
+    layout.let_go_before("a", 6)
+
+    starts = layout.regions_by_stream["a"].starts
+    first_kept = span("a", 43, 49)
+    assert starts.first_kept == 6
+    assert list(starts) == [43, 50, 57, 64]
+    assert layout.index_of(first_kept) == 6
+    assert layout.region_holding("a", 45) == first_kept
+
+
+def test_a_region_a_lagging_partner_reads_stays_until_the_partner_goes():
+    """A decode reads a past region only on the face it shares with it.
+
+    Stream b lets its region on rounds 8-14 go while a's window that
+    reads it is still kept, so the region stays and a still finds it;
+    once a lets its window go too, both go with their couplings
+    (Bombín et al. 2303.04846 lines 775-788).
+    """
+    layout = region_layout.RegionLayout()
+    layout.open_stream("a", 7)
+    layout.open_stream("b", 7)
+    reader = span("a", 8, 14)
+    read = span("b", 8, 14)
+    cut_segment(layout, reader)
+    cut_segment(layout, read)
+    layout.couple(reader, read)
+    layout.extend("a", 28)
+    layout.extend("b", 28)
+
+    layout.let_go_before("b", 3)
+
+    b_starts = layout.regions_by_stream["b"].starts
+    assert b_starts.first_kept == 1
+    assert layout.reads_of(reader) == (read,)
+    assert layout.index_of(read) == 1
+
+    layout.let_go_before("a", 3)
+
+    a_starts = layout.regions_by_stream["a"].starts
+    assert (a_starts.first_kept, b_starts.first_kept) == (3, 3)
+    assert layout.reads_by_region == {}
+    assert layout.readers_by_region == {}
+
+
 @pytest.mark.parametrize("name", ("toffoli", "msd_15to1"))
 def test_the_layout_of_swipers_rounds_is_swipers_sliding_windows(name):
     reading = _referent(name)

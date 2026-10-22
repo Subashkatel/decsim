@@ -2252,6 +2252,9 @@ class StreamLayout(Protocol):
     def readers_at(self, round_index: int) -> tuple:
         """The keys of the begun windows reading the region of the round."""
 
+    def let_go_before(self, window_index: int) -> None:
+        """The windows before the index are gone: forget what only they read."""
+
 
 @runtime_checkable
 class RoundsPolicy(Protocol):

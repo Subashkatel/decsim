@@ -277,10 +277,9 @@ class StreamMeasures:
         frame_record: decoding_records.PauliFrameCommitRecord,
     ) -> measure.WindowSample:
         """The window's latencies off its own keys of the running index."""
-        _operation_id, window_id = window.key
         index = self.transfers
         link_delay = index.link_delays_of(window.key)
-        input_hop = index.input_hops_of(window_id)
+        input_hop = index.input_hops_of(window.key)
         reads = measure.TransferReads(
             link_delay, input_hop, index.qpu_send, index.answer_send
         )

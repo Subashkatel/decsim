@@ -32,7 +32,8 @@ class TransferIndex:
         self.spans_by_window: dict = {}
         # (operation, window) -> the tick its answer first left
         self.answer_send: dict = {}
-        # window id -> {(path, run ordinal): (delay sum, last delivery)}
+        # (stream, window) -> {(path, run ordinal): (delay sum, last
+        # delivery)}
         self.inputs_by_window: dict = {}
         # (operation, round) -> the tick the round first left the QPU
         self.qpu_send: dict = {}
@@ -62,27 +63,31 @@ class TransferIndex:
         return delays
 
     def input_hops(self) -> dict:
-        """(path, window id, run ordinal) -> (delay ticks, last delivery)."""
+        """(path, stream, window, run ordinal) -> (delay, last delivery)."""
         hops = {}
-        for window_id in self.inputs_by_window:
-            window_hops = self.input_hops_of(window_id)
+        for window_key in self.inputs_by_window:
+            window_hops = self.input_hops_of(window_key)
             hops.update(window_hops)
         return hops
 
-    def input_hops_of(self, window_id: int) -> dict:
-        """One window's input hops, keyed as input_hops keys them."""
-        inputs = self.inputs_by_window.get(window_id, {})
+    def input_hops_of(self, window_key: tuple) -> dict:
+        """One window's input hops, keyed as input_hops keys them.
+
+        A window is its (stream, index): every stream counts its windows
+        from 0, so an index alone names one window of each stream.
+        """
+        stream_id, window_id = window_key
+        inputs = self.inputs_by_window.get(window_key, {})
         hops = {}
         for (path, run_sequence), hop in inputs.items():
-            hops[(path, window_id, run_sequence)] = hop
+            hops[(path, stream_id, window_id, run_sequence)] = hop
         return hops
 
     def forget_window(self, window_key: tuple) -> None:
         """Let a measured window's keys go."""
-        _operation_id, window_id = window_key
         self.spans_by_window.pop(window_key, None)
         self.answer_send.pop(window_key, None)
-        self.inputs_by_window.pop(window_id, None)
+        self.inputs_by_window.pop(window_key, None)
 
     def forget_rounds(self, stream_id: object, round_indices: range) -> None:
         """Let the sends of rounds no unmeasured window reads go."""
@@ -126,8 +131,8 @@ class TransferIndex:
         run_sequence = request_run_sequence(row)
         if run_sequence is None:
             return
-        window_id = row["attribution"]["window_id"]
-        inputs = self.inputs_by_window.setdefault(window_id, {})
+        window_key = waiting_window(row)
+        inputs = self.inputs_by_window.setdefault(window_key, {})
         key = (row["path"], run_sequence)
         delay, landing = inputs.get(key, (0, 0))
         delay += row["total_delay_ticks"]

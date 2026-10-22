@@ -102,9 +102,11 @@ nothing in the core reads surface-code geometry:
    own window builder on toffoli (same regions, volumes and edges).
 5. The referent run: SWIPER-SIM and decsim on the same schedules, each
    conditional S's reaction time compared, within a stated tolerance.
-6. Fold the dynamic-stream growth into the sliding scheme, so one law
-   lays every window.
-7. SWIPER's parallel windows.
+6. Fold the dynamic-stream growth into the schemes, so one law lays
+   every growing stream's windows.
+7. Give the existing parallel scheme (Skoric's A/B blocks) growing
+   streams and reads across couplings, through the same region law and
+   coupling order; skipped if the experiments need sliding windows only.
 8. Move multi-operation runs onto patch streams and delete the old
    successor-overflow reads, so one model of "what follows an operation"
    remains (question 2).
@@ -266,10 +268,92 @@ d = 3 and 5, with the A-B seam either way:
 | other logical type | needed | needed |
 | same type, its outcome a Pauli frame update on A | needed | needed |
 
-So DecodedAncestors over-waits only where an earlier merge on a patch
-has the later one's type and its outcome sets nothing in the frame the
-later one reads. The exact rule needs the program's frame logic, which
-SWIPER's schedule format does not carry; it is a possible refinement.
+So, on these circuits, DecodedAncestors over-waits where an earlier
+merge on a patch has the later one's type and its outcome sets nothing
+in the frame the later one reads. It over-waits in a second way too: it
+walks every scheduling predecessor the schedule lists
+(conditioned_on_completion), as SWIPER's walk does, which can reach
+patches never coupled to the blocker's, where Triage's
+cone follows only qubits correlated "through a chain of multi-qubit
+operations" (2605.04459 lines 411-415). The exact rule needs the
+program's frame logic, which SWIPER's schedule format does not carry;
+it is a possible refinement.
+
+### Stage 6 as built
+
+Before this stage two pieces of code did the same thing. The planner's
+stride-and-cut growth laid sliding windows, and the region layout laid
+SWIPER's. Both cut a stream into commit regions of at most F rounds,
+ended early at a cut or at the end (Bombín et al. 2303.04846 Eq. 2).
+Now one law does it: windows/region_layout.py, behind
+ports.StreamLayouts, which the scheme returns (stream_layouts). The
+planner only keeps the tables.
+
+A row picks three things on top of that law
+(windows/region_streams.py):
+
+| choice | sliding | region sliding | where it comes from |
+|---|---|---|---|
+| how far a window reads | B rounds (FixedBuffer) | the next region (NextRegionBuffer) | Skoric et al. Sec. I.B; Bombín lines 1262-1265 |
+| which segment edges cut | every one | coupled ones only | a segment's result sums whole windows (operation_results.py) |
+| who reads across a coupling | no one | a CouplingOrder | Bombín lines 720-723: the scheme's choice |
+
+None of these is SWIPER's own. SWIPER is one setting of them: region
+sliding with CoordinateOrder. CoordinateOrder is the one place that
+reads a block's coordinates. A qLDPC run, whose blocks are not grid
+patches, adds its own order (windows/coupling_orders.py) and keeps
+everything else.
+
+The scheme was SwiperSlidingScheme. It is now RegionSlidingScheme
+("region_sliding"), because STYLE rule 2 says a paper's design never
+names a component. The flag lays_regions is now
+reads_across_couplings, since sliding streams are laid in regions
+too.
+
+A source that declares its length keeps the row's finite construction
+(sliding_streams.py FiniteStream). After each cut it plans the rest
+again, stretch by stretch, through plan_operation. That is on purpose:
+the finite construction drains its last window as the terminal policy
+says, and the open law cannot, because it does not know the end yet.
+
+How a moved window's reads are kept follows from the buffer rule, not
+from which scheme it is (records/windows.py TailChange). A FixedBuffer
+window at the seal is clipped: its buffer counts past the seal but
+reads nothing there. A NextRegionBuffer window is laid again and reads
+its whole new extent.
+
+Implications:
+
+- Every growing stream now asks its layout for coupled readers, so the
+  sliding path does a few dictionary lookups it skipped before. They
+  return nothing.
+- For a region stream, cut_rounds now lists its coupled cuts. Only the
+  ledger reads it.
+- A new row of either kind is a scheme class plus its three choices.
+  The planner and the window manager have no branch on scheme kind.
+
+Checked: the 19 regression digests are unchanged; the region layout
+still gives SWIPER's own windows and edges (tests/windows/test_region_layout.py);
+the SWIPER reaction referent still holds (toffoli equal, msd_15to1
+within one round); tests for windows, controller, frontends, build,
+escalation, qpu, machine and experiments pass.
+
+Two independent reviews (Codex, read-only, 2026-10-21) found these, each
+checked against the code before acting:
+
+| finding | stage | state |
+|---|---|---|
+| a cut recounted a restarted window's rounds from its commit, losing its leading buffer | 6 (my audit) | fixed, test added |
+| a host pool's arrivals (accept_room_round) never woke coupled readers: a hang | 4 | fixed, test added |
+| readers were woken only for the round that landed, not every round a filled gap publishes | 4 | fixed with the above |
+| a patch-stream blocker that emits no rounds built, then hung | 3 | refused at build, test added |
+| coupling streams of different region lengths laid wrong reads | 4 | refused (one code per run) |
+| folding lets a boundary record go while a delivery to another stream is in flight: a hang | 4 | open |
+| input-hop timings are keyed by window index alone, so streams' window 0s collide | before this plan | open |
+| requires_result_return_to_qpu is ignored for a patch-stream measurement nothing waits on | 3 | open |
+| a job's graph size is its home stream's, not each read stream's | 4 | open, moot while one code per run |
+| region starts are kept for the whole run, even when windows fold | 6 | open, small (one int a region) |
+
 
 ## The owner's decisions
 

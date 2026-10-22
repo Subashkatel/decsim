@@ -348,8 +348,8 @@ checked against the code before acting:
 | readers were woken only for the round that landed, not every round a filled gap publishes | 4 | fixed with the above |
 | a patch-stream blocker that emits no rounds built, then hung | 3 | refused at build, test added |
 | coupling streams of different region lengths laid wrong reads | 4 | refused (one code per run) |
-| folding lets a boundary record go while a delivery to another stream is in flight: a hang | 4 | open |
-| input-hop timings are keyed by window index alone, so streams' window 0s collide | before this plan | open |
+| folding let a boundary record go while a delivery to another stream was in flight: a hang | 4 | fixed: the courier keeps a record until its last delivery lands (Bombín lines 775-788), test added |
+| input-hop timings were keyed by window index alone, so streams' window 0s collided | before this plan | fixed: keyed by (stream, window), test added |
 | requires_result_return_to_qpu is ignored for a patch-stream measurement nothing waits on | 3 | open |
 | a job's graph size is its home stream's, not each read stream's | 4 | open, moot while one code per run |
 | region starts are kept for the whole run, even when windows fold | 6 | open, small (one int a region) |

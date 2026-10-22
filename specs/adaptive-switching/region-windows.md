@@ -26,8 +26,11 @@ checked number for number against SWIPER's sliding and parallel windows.
   choice (Bombín L720-723; SWIPER Sec. 3; Tan; Lin).
 - Ready: every round of its regions arrived and every predecessor
   committed (Bombín L884-887).
-- Release: an operation's outcome is usable once every window committing
-  its rounds has committed (Bombín Eq. 4 and L1295-1297).
+- Release: an operation's outcome is usable once every task that can flip
+  it has committed: Eq. 4's relevant tasks T(M) of its membrane, which
+  "continues towards the past and depends on the history of the two
+  qubits" and branches through earlier merges (Bombín Sec. I.A, Fig. 1,
+  L1295-1297). Stage 5 below says how the rows bound that set.
 
 Buffer width is where they differ: Bombín b ≥ d (proved), SWIPER one
 whole neighbouring region, Tan and Lin about d/2. It is the scheme's
@@ -178,11 +181,103 @@ Left as they are, for stage 5 or later:
   distance sets the region length, so a run sets qpu.distance to the
   same d. Nothing checks the two agree yet.
 
+### Stage 5 as built
+
+The release rule is a row (windows/release_rules.py, set by
+WindowSettings.release_rule, None choosing by the run in
+release_rule_for):
+
+- OwnStreams: a blocker waits for each of its streams committed from
+  round 1 through its rounds, its membrane's history along its own
+  patches. The default off lattice surgery, where it is the whole
+  history.
+- DecodedAncestors: SWIPER's (decoder_manager.py
+  get_incomplete_instruction_indices) and Triage's causal cone
+  (2605.04459 Sec. II-B); a blocker also waits for every ancestor reached
+  through operations that decode rounds. The default on a lattice-surgery
+  run. It reads each ancestor's stream segments, which only patch
+  streams bind for every operation, so build refuses it on any other run.
+
+tools/swiper_reaction.py runs SWIPER-SIM on toffoli and msd_15to1 at
+d = 7, sliding windows, no speculation, unlimited decoders, every
+window decoded in 1, 5 or 10 rounds, seed 0, and writes each
+conditioned instruction's wait (tests/data/swiper_*_d7_reaction.json).
+decsim runs the same on SWIPER's machine (a round a microsecond, free
+hops, 200 units, PresetLatencyDecoder) with DecodedAncestors; its
+GateStall.stall_ticks is SWIPER's wait
+(tests/controller/test_swiper_reaction.py):
+
+- toffoli: every wait equal at all three latencies, including the
+  10-round run whose backlog stretches it to 840 rounds.
+- msd_15to1: every wait SWIPER's or one round less. SWIPER cuts a
+  region at a merge's edge only once a round from beyond it arrives
+  (window_builder.py build_windows), one round after decsim, which
+  knows the merge when it binds; msd's half-distance merges cut
+  mid-stride. toffoli's merges end on strides, so it shows no gap.
+
+The referent is SWIPER started as soon as possible, as decsim's
+controller starts operations (the tool's "asap" runs, a subclass of its
+DeviceManager). SWIPER's own start rule, fresh patches as late as their
+successors allow, is also written ("alap"): it changes msd_15to1 not at
+all and two toffoli waits (instruction 74 at 5 rounds, 12 against 15;
+instruction 67 at 10 rounds, 231 against 262). It is a device choice,
+not a decoding one, so decsim does not copy it; that is also stage 3's
+idle-round difference.
+
+The two rules, decsim against SWIPER-ASAP:
+
+| schedule, latency | DecodedAncestors | OwnStreams |
+|---|---|---|
+| toffoli, 1 / 5 / 10 | equal | equal but two waits a round short at 5 |
+| msd_15to1, 1 | within 1 | 5 against 5 to 8 |
+| msd_15to1, 5 | within 1 | 9 to 48 against 33 to 49 |
+| msd_15to1, 10 | within 1 | 17 to 113 against 68 to 114 |
+
+On msd_15to1 OwnStreams releases up to 4× sooner: its later merges read
+patches whose earlier merge partners are still being decoded.
+
+What the literature requires, each source read in full: every source that says which decodes a feed-forward outcome waits for
+asks for its whole past.
+
+| Source | Says | Rule |
+|---|---|---|
+| Bombín 2303.04846 | the membrane "continues towards the past"; "each logical membrane ... must be fully decoded" | membrane |
+| SWIPER 2412.05115 Sec. 5.1 | "fully decoded (and verified) the instruction history up to and including the blocking operation" | ancestors |
+| Triage 2605.04459 Sec. II-B | "all undecoded historical slices ... of any logical qubit ... correlated with the target through a chain of multi-qubit operations" | ancestors |
+| Terhal 1302.3428 Sec. VI | "best to know the logical Pauli frame of the data qubit and the ancilla qubit" before going past the T gate | history |
+| Skoric 2209.08552 Sec. I | response time from "the last round for which the full syndrome history has been decoded" | history |
+| Chamberland 2109.02746 Sec. III | data errors on the patches "prior to the merge" flip its outcome | history |
+| Sahay 2408.01393 | the partner "can only begin after the target is decoded" | partners |
+| Zhou 2406.17653 | "all accessible syndrome information up to a logical measurement" | history |
+
+Riverlane's deltakit 0.9 decodes whole shots offline, with no windows or
+feed-forward, so it does not answer this.
+
+The exact set is the membrane's, and tools/membrane_check.py measures it
+with Stim. Three rotated patches start in logical Bell pairs with
+noiseless references; A merges with C, splits, then merges with B, and
+the script asks, over GF(2), whether a membrane of the A-B outcome that
+reads nothing after its round avoids every single fault in C's past. At
+d = 3 and 5, with the A-B seam either way:
+
+| earlier A-C merge | C's past | A's past (control) |
+|---|---|---|
+| same logical type as A-B | not needed | needed |
+| other logical type | needed | needed |
+| same type, its outcome a Pauli frame update on A | needed | needed |
+
+So DecodedAncestors over-waits only where an earlier merge on a patch
+has the later one's type and its outcome sets nothing in the frame the
+later one reads. The exact rule needs the program's frame logic, which
+SWIPER's schedule format does not carry; it is a possible refinement.
+
 ## The owner's decisions
 
-1. Release rule. Bombín releases an outcome once the windows committing
-   it have committed; SWIPER also waits for the windows of every earlier
-   instruction. Proposed: Bombín's, with stage 5 measuring the gap.
+1. Release rule. Decided after stage 5: DecodedAncestors on a
+   lattice-surgery run, OwnStreams on any other; a setting overrides
+   either. A merge's outcome is read in a Pauli frame that earlier merges
+   with other patches set, which the literature and the Stim check agree
+   on.
 2. Stage 8, one model of what follows an operation: proposed yes, after
    stage 5 validates.
 3. A discarded patch: the QPU keeps idling it today. Proposed: a DISCARD

@@ -239,6 +239,15 @@ class RegionStream:
         keys = self.layouts.window_keys(readers)
         return tuple(key for key in keys if key is not None)
 
+    def let_go_before(self, window_index: int) -> None:
+        """The regions before the index go once their partners have gone.
+
+        The segment cuts stay: a segment's result may still be read from
+        its first round over folded windows (committed_rounds.py
+        fold_before), and they number the segments, not the rounds.
+        """
+        self.layouts.regions.let_go_before(self.stream_id, window_index)
+
     def _geometry(
         self, region: window_records.RoundSpan
     ) -> window_records.WindowGeometry:

@@ -132,13 +132,32 @@ def _coupled_run(folds: bool):
     )
     graph = machines.with_router(framed, by_patch, (("b", pool),))
     machine = machine_module.Machine.build(graph, 0)
-    return machine.run()
+    return machine, machine.run()
 
 
 def test_a_boundary_still_on_its_hop_to_another_stream_is_not_let_go():
-    kept = _coupled_run(folds=False)
-    folded = _coupled_run(folds=True)
+    _kept_machine, kept = _coupled_run(folds=False)
+    _folded_machine, folded = _coupled_run(folds=True)
 
     assert folded.terminal_status == "complete"
     assert folded.operation_results == kept.operation_results
     assert folded.fully_done_ticks == kept.fully_done_ticks
+
+
+def test_a_folded_patch_stream_keeps_a_region_only_while_it_keeps_a_window():
+    """Each stream's region starts go with its windows (region_layout.py).
+
+    The merge's regions go once both coupled windows have gone, so at
+    the end each stream keeps the regions of the windows it keeps.
+    """
+    machine, _result = _coupled_run(folds=True)
+
+    planner = machine.windows.planner
+    regions = planner.layouts.regions
+    for stream_id, stream_regions in regions.regions_by_stream.items():
+        indices = planner.window_indices_of(stream_id)
+        starts = stream_regions.starts
+        assert indices.first_kept > 0
+        assert starts.first_kept == indices.first_kept
+        assert len(starts.kept) == len(indices.kept)
+    assert regions.reads_by_region == {}

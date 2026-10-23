@@ -137,7 +137,7 @@ class EntrySide:
     decode_queue: Any
     store_output: Any
     gap_join: Optional[Any] = None
-    store: Optional[Any] = None
+    store: Optional[ports.RetainedRounds] = None
     is_store_written: bool = True
 
 

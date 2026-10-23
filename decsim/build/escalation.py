@@ -295,19 +295,21 @@ def join_the_chain(switching_parts: tuple) -> None:
     the signal of the edge out reads them before its verdict, as the
     entry edge's signal reads the entry pool's solves. It also starts
     the edge out beside each target job it queues, and passes a keep's
-    cancel on to it.
+    cancel on to it. A pool several edges enter, a shared target, has
+    every one of them wired on, so each source's windows climb past it.
     """
-    redecode_by_target = {}
+    entering_by_target = {}
     for part in switching_parts:
         redecode = part.strong_redecode
-        redecode_by_target[redecode.target] = redecode
+        entering = entering_by_target.setdefault(redecode.target, [])
+        entering.append(redecode)
     for part in switching_parts:
         if part.source_join is None:
             continue
         source = part.strong_redecode.source
-        entering = redecode_by_target[source]
-        entering.target_join = part.source_join
-        entering.next_edge = part.strong_redecode
+        for entering in entering_by_target[source]:
+            entering.target_join = part.source_join
+            entering.next_edge = part.strong_redecode
 
 
 def bind_strong_result_learners(

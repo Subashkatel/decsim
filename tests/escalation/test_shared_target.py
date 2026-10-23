@@ -287,3 +287,60 @@ def _decoded_at_once(spans: list) -> int:
     # each decode beside the one that started next
     pairs = zip(spans, spans[1:], strict=False)
     return sum(later[0] < earlier[1] for earlier, later in pairs)
+
+
+def test_both_pools_windows_start_deep_beside_the_shared_strong_decode():
+    """Every edge into a shared target is wired on to the edge out of it.
+
+    Deep runs at once with strong (Toshio 2510.25222 Step 1, lines
+    598-601), so each window strong decodes, from weak's patch and from
+    fpga_b's, starts deep before strong's decode ends; an edge into
+    strong left unwired would start deep only after strong answered.
+    Deep has a unit per window, so no decode waits for a unit.
+    """
+    graph = _shared_strong("direct")
+    doubting, _strong = declared_run.switching_decoders(True)
+    graph = graph.with_settings("strong", algorithm=doubting)
+    deep_algorithm = decoders.PresetLatencyDecoder.Settings(50.0)
+    deep_pool = decoder_settings.DecoderPoolSettings(
+        algorithm=deep_algorithm,
+        engine=declared_run.DECLARED_ENGINE,
+        unit_count=4,
+    )
+    at_once = declared_run.declared_switching(run_both_at_once=True)
+    graph = machines.with_escalation(
+        graph, "strong", "deep", deep_pool, at_once
+    )
+    machine = machine_module.Machine.build(graph, 0)
+
+    result = machine.run()
+
+    started_during_strong = _deep_started_during_strong(machine)
+    assert result.terminal_status == "complete"
+    assert started_during_strong == {
+        (1, 0): True,
+        (1, 1): True,
+        (2, 0): True,
+        (2, 1): True,
+    }
+
+
+def _deep_started_during_strong(machine) -> dict:
+    """Each window's: did deep's decode start before strong's ended."""
+    starts = {}
+    ends = {}
+    for record in machine.observation.stages.records:
+        if record.stage != "algorithm":
+            continue
+        pool, _unit = record.unit_name.split("#")
+        key = (pool, record.stream_id, record.window_id)
+        starts[key] = record.start_ticks
+        ends[key] = record.end_ticks
+    started = {}
+    for pool, stream_id, window_id in ends:
+        if pool != "strong":
+            continue
+        deep_start = starts[("deep", stream_id, window_id)]
+        strong_end = ends[("strong", stream_id, window_id)]
+        started[(stream_id, window_id)] = deep_start < strong_end
+    return started

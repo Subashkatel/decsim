@@ -335,6 +335,19 @@ def test_a_router_that_feeds_both_a_store_and_a_pool_is_refused():
         laid_out(mixed)
 
 
+def test_a_router_that_feeds_a_store_no_pool_reads_is_refused():
+    stored = _store_per_pool_chain()
+    unread = stored.without_part(_ROUTED_POOL)
+
+    with pytest.raises(graph.GraphError) as refusal:
+        laid_out(unread)
+
+    assert str(refusal.value) == (
+        "the router feeds the store fpga_b_buffer, which no pool reads: a "
+        "router before the stores feeds one store per entry pool"
+    )
+
+
 def test_a_device_shared_by_a_sites_pools_is_laid_out_at_that_site():
     chain = chain_machine()
     slots = execution_slots.ExecutionSlots.Settings(2)
@@ -385,7 +398,8 @@ def test_a_pool_the_router_feeds_and_an_edge_reaches_is_refused():
 
 
 def test_the_tier_measures_over_two_entry_pools_are_refused():
-    layout = laid_out(_routed_chain())
+    routed = _routed_chain()
+    layout = laid_out(routed)
 
     with pytest.raises(NotImplementedError, match="over 2 entry pools"):
         layout.tier_pools()

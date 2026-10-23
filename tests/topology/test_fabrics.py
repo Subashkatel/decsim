@@ -420,3 +420,49 @@ def test_two_site_links_for_one_pair_of_sites_are_refused():
 
     with pytest.raises(ValueError, match="two site links join"):
         fabrics.SiteLinks((first, second))
+
+
+def test_a_site_link_of_three_sites_is_refused():
+    sites = (fabrics.FRIDGE, GPU_SITE, fabrics.HOST)
+
+    with pytest.raises(ValueError) as refusal:
+        fabrics.SiteLink(sites, CABLE)
+
+    assert str(refusal.value) == (
+        "a site link joins two sites, or one site to itself; got "
+        "('fridge', 'gpu0', 'host')"
+    )
+
+
+def test_a_site_link_from_a_site_to_itself_prices_the_routes_inside_it():
+    """A link inside the GPU prices its pool's own hops, not the ones in."""
+    inside_link = fabrics.SiteLink((GPU_SITE, GPU_SITE), CABLE)
+    rule = fabrics.SiteLinks((inside_link,))
+    inside = fabrics.Route("strong_to_strong", GPU_SITE, GPU_SITE, FORWARD)
+    up = fabrics.Route("weak_to_strong", fabrics.FRIDGE, GPU_SITE, FORWARD)
+
+    assert rule.link_for(inside) is CABLE
+    assert rule.link_for(up) is None
+
+
+def test_a_route_between_no_listed_sites_takes_the_base_rules_link():
+    gpu_link = fabrics.SiteLink((fabrics.FRIDGE, GPU_SITE), CABLE)
+    base = fabrics.RoleLinks(forward=ONE_FRIDGE_CYCLE)
+    rule = fabrics.SiteLinks((gpu_link,), base)
+    inside = fabrics.Route(
+        "weak_to_weak", fabrics.FRIDGE, fabrics.FRIDGE, FORWARD
+    )
+
+    assert rule.link_for(inside) is ONE_FRIDGE_CYCLE
+
+
+def test_a_shared_channel_puts_both_ways_on_its_one_channel():
+    """Used as a link of its own, it is a half-duplex wire."""
+    bus = fabrics.SharedChannel(CABLE, "bus")
+    rule = fabrics.RoleLinks(forward=bus)
+    up = fabrics.Route("weak_to_strong", fabrics.FRIDGE, GPU_SITE, FORWARD)
+    down = fabrics.Route("strong_to_weak", GPU_SITE, fabrics.FRIDGE, FORWARD)
+
+    channels = [_priced_channel(rule, up), _priced_channel(rule, down)]
+
+    assert channels == ["bus", "bus"]

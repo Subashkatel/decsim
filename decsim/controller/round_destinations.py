@@ -15,6 +15,11 @@ boundaries after a commit (windows/window_boundaries.py).
 The holds decide: a store holds a round from the moment its reader is
 known, before the round is stored (syndrome_buffer.py is_round_held),
 so who reads what has one owner, the retention, and no table here.
+
+A round copied to several stores leaves each when its readers there
+are done, at different times. The seats form a round's events until it
+leaves the last of them, so each store tells the destinations, which
+know how many stores the round went to, and the seats hear it once.
 """
 
 import dataclasses
@@ -46,11 +51,17 @@ class RoundDestinations:
 
     # which entry pool decodes a stream, so which store is a round's own
     router = ports.Port(ports.StreamRouting)
+    # the run's former seats, told when a round left every store it went
+    # to; bound only with several entry stores, which tell these
+    # destinations rather than the seats
+    detection_events = ports.Port(ports.RoundRetirement, optional=True)
 
     def __init__(self, side_by_pool: dict) -> None:
         self.side_by_pool = side_by_pool
         self.sides = _distinct_sides(side_by_pool)
         self.last_written_by_stream: dict = {}
+        # with several entry stores, how many still keep each round
+        self.stores_left_by_round: dict = {}
 
     def stores_for(self, packed: round_records.PackedRound) -> tuple:
         """The round's own store side first, then each that holds it.
@@ -71,11 +82,33 @@ class RoundDestinations:
                 sides.append(side)
         return tuple(sides)
 
-    def note_written(self, packed: round_records.PackedRound) -> None:
-        """The round left for its stores; a later reader gets no copy."""
+    def note_written(
+        self, packed: round_records.PackedRound, store_count: int
+    ) -> None:
+        """The round left for store_count stores; a later reader gets no copy.
+
+        One store tells the seats itself, so nothing is counted for it.
+        """
         stream_id, round_index = packed.round_key
         last_written = self.last_written_by_stream.get(stream_id, 0)
         self.last_written_by_stream[stream_id] = max(last_written, round_index)
+        if len(self.sides) == 1:
+            return
+        self.stores_left_by_round[packed.round_key] = store_count
+
+    def retire_round(self, round_key: tuple) -> None:
+        """One store let the round go; the seats hear when the last does."""
+        stores_left = self.stores_left_by_round.get(round_key)
+        if stores_left is None:
+            raise RuntimeError(
+                f"round {round_key} left an entry store it was never written to"
+            )
+        if stores_left > 1:
+            self.stores_left_by_round[round_key] = stores_left - 1
+            return
+        del self.stores_left_by_round[round_key]
+        if self.detection_events is not None:
+            self.detection_events.retire_round(round_key)
 
     def last_round_written(
         self,

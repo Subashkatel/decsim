@@ -376,6 +376,40 @@ def test_a_clipped_tail_keeps_only_its_commit_range():
     assert held == (("stream", 4), ("stream", 5))
 
 
+def test_a_clipped_merge_window_keeps_the_region_it_reads_across():
+    """The seal clips the window's own stream, not the partner region.
+
+    With a store per pool those rounds are copies only this window
+    holds (controller/round_destinations.py).
+    """
+    store = _store()
+    retention = _retention(
+        store, {"stream": 9, "partner": 9}, {"stream": [], "partner": []}
+    )
+    partner = window_records.RoundSpan("partner", 2, 3)
+    window = window_records.Window(
+        stream_id="stream",
+        window_index=1,
+        commit_lo=4,
+        commit_hi=6,
+        buffer_hi=8,
+        round_count=7,
+        spatial_reads=(partner,),
+    )
+    retention.register_window(("stream", 1), window)
+    window.commit_hi = 5
+    window.buffer_hi = 7
+    retention.reset_clipped_window_reads(window)
+    reads = decoding_records.WindowReads(("stream", 1))
+    held = store.hold_round_identities(reads)
+    assert held == (
+        ("stream", 4),
+        ("stream", 5),
+        ("partner", 2),
+        ("partner", 3),
+    )
+
+
 def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     store = _store()
     retention = _retention(store, {1: 12}, {1: []})

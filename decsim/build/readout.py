@@ -248,13 +248,20 @@ class Readout:
 
         Each tells the seats what leaves it: every read holds its rounds
         there until they have landed and formed, so a round that leaves
-        it is formed nowhere after.
+        it is formed nowhere after. With a store per entry pool a round
+        may sit in several, so each tells the destinations, which tell
+        the seats when it left the last.
         """
-        for name in layout.entry_stores():
+        names = layout.entry_stores()
+        retirement = self.detection_events
+        if len(names) > 1:
+            self.destinations.detection_events = self.detection_events
+            retirement = self.destinations
+        for name in names:
             parts = self.store_parts(name)
             if parts is None:
                 continue
-            parts.store.detection_events = self.detection_events
+            parts.store.detection_events = retirement
 
 
 def build_detection_events(

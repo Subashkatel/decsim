@@ -93,10 +93,11 @@ class SyndromeBuffer:
     # a store built with no waiting line in front of it frees its slots
     # with nobody to tell
     held_rounds = ports.Port(ports.HeldRounds, optional=True)
-    # the run's former seats, told when a round leaves the store the
-    # plan's windows read, which no read forms after; None on the other
-    # store
-    detection_events = ports.Port(ports.DetectionEventPlacement, optional=True)
+    # told when a round leaves an entry store, which no read there forms
+    # after: the run's former seats, or, with a store per entry pool, the
+    # controller's destinations, which tell the seats once every store
+    # the round went to let it go; None on a store no window reads
+    detection_events = ports.Port(ports.RoundRetirement, optional=True)
 
     def __init__(
         self,

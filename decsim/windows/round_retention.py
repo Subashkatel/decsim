@@ -261,7 +261,9 @@ class RoundRetention:
         A window already queued has handed its reads to its decode
         request (decode_requests.py, _bind_input_hold), so it has none
         left to shrink. A measurement_closed boundary queues the last
-        window before the seal reaches it.
+        window before the seal reaches it. The regions it reads across
+        are not clipped, so it keeps them: with a store per pool they are
+        copies only this window holds.
         """
         reads = decoding_records.WindowReads(window.key)
         store = self.store_of_stream(window.stream_id)
@@ -271,6 +273,8 @@ class RoundRetention:
         new_reads = []
         for round_index in range(window.start_round, stop_round):
             new_reads.append((window.stream_id, round_index))
+        spatial_reads = _spatial_read_keys(window)
+        new_reads.extend(spatial_reads)
         store.replace_hold(reads, new_reads)
 
     def primary_read_keys(self, window: window_records.Window) -> list:
@@ -283,10 +287,8 @@ class RoundRetention:
         reads = self.read_keys_for_bounds(
             window.stream_id, window.start_round, window.buffer_hi, window
         )
-        for span in window.spatial_reads:
-            stop_round = span.last_round + 1
-            for round_index in range(span.first_round, stop_round):
-                reads.append((span.stream_id, round_index))
+        spatial_reads = _spatial_read_keys(window)
+        reads.extend(spatial_reads)
         return reads
 
     def read_keys_for_bounds(
@@ -1020,6 +1022,16 @@ def _release_from_each(stores: tuple, owner) -> None:
     """The strong input landed in its unit: both stores let it go."""
     for store in stores:
         store.release_hold(owner)
+
+
+def _spatial_read_keys(window: window_records.Window) -> list:
+    """The round keys of each region the window reads across."""
+    keys = []
+    for span in window.spatial_reads:
+        stop_round = span.last_round + 1
+        for round_index in range(span.first_round, stop_round):
+            keys.append((span.stream_id, round_index))
+    return keys
 
 
 def _holds_store(stores: list, store) -> bool:

@@ -174,7 +174,7 @@ class SyndromeRoundSender:
         sides = self.destinations.stores_for(packed)
         if not _have_room(sides, packed):
             return self.held_rounds.refuse(packed, self._write)
-        self.destinations.note_written(packed)
+        self.destinations.note_written(packed, len(sides))
         own, *copies = sides
         self._send(packed, own, False)
         for side in copies:

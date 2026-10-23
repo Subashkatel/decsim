@@ -11,13 +11,18 @@ gem5's FUPool count, shared by every thread, oldest first
 FPGA and ASIC instances each have logic of their own (DecoNet
 2504.11805 p7-p10), so they need no device: a pool's units are its own.
 
-A decode takes a slot when it starts and gives it back when its compute
-ends; one with no free slot waits with its input landed, and the oldest
-waiting decode on the device starts when a slot frees. A pool's
+A decode takes a slot when it starts and gives it back when its unit
+frees: when its compute ends, or, for a tier whose result occupies the
+unit until it is read, then, as a GPU stream is busy until its worker
+sends the result. One with no free slot waits with its input landed,
+and the oldest waiting decode on the device starts when a slot frees.
+A pool's
 unit_count still caps the pool; a device with as many slots as its pools
 have units never makes a decode wait. No slowdown with load is modelled:
 one measured curve exists (NVIDIA 2604.12841 Table XI), for batches,
-not concurrent streams.
+not concurrent streams. A unit's predicted free time (DecodeService
+_predict_compute_free) does not count a wait for a slot, so a scheduler
+that reads it sees a waiting unit as freeing sooner than it will.
 """
 
 import collections

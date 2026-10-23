@@ -442,14 +442,24 @@ class RoundWrites(Protocol):
 
 
 @runtime_checkable
-class RoundDestinations(RoundWrites, Protocol):
+class RoundRetirement(Protocol):
+    """Who an entry store tells when a round leaves it for good."""
+
+    def retire_round(self, round_key: tuple) -> None:
+        """The round left the store; no read there forms it after."""
+
+
+@runtime_checkable
+class RoundDestinations(RoundWrites, RoundRetirement, Protocol):
     """Where the controller writes each round: its own store, then copies."""
 
     def stores_for(self, packed: round_records.PackedRound) -> tuple:
         """The round's own store side first, then each copy's."""
 
-    def note_written(self, packed: round_records.PackedRound) -> None:
-        """The round left for every store stores_for named."""
+    def note_written(
+        self, packed: round_records.PackedRound, store_count: int
+    ) -> None:
+        """The round left for the store_count stores stores_for named."""
 
 
 @runtime_checkable

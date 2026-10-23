@@ -110,8 +110,8 @@ the site a device with that many execution slots:
 shared = machines.with_device(machine, "gpu0", 2, "gpu0")
 ```
 
-A decode takes a slot when it starts and gives it back when its compute
-ends. One with no free slot waits with its input landed, and the oldest
+A decode takes a slot when it starts and gives it back when its unit
+frees, as a GPU stream is busy until its result is sent. One with no free slot waits with its input landed, and the oldest
 waiting decode on the device starts when a slot frees, whichever pool
 it is from. A pool's `unit_count` still caps the pool, so a device with
 a slot for each unit of its pools changes nothing. The device keeps a

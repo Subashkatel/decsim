@@ -16,20 +16,28 @@ read on each escalate edge, in the store the edge carries from and the
 one it lands in, until the window is final.
 """
 
+import dataclasses
 import types
 
 import pytest
 import stim
 
+import decsim.controller.policies as controller_policies
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.settings as event_settings
 import decsim.engine as engine_module
+import decsim.machine as machine_module
+import decsim.presets.machines as machines
+import decsim.qpu.round_policies as round_policies
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.round_retention as round_retention
+import decsim.windows.routers as routers
+import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
 import tests.one_entry as one_entry
 
 
@@ -665,8 +673,13 @@ def test_a_deep_edge_carries_its_rounds_from_the_middle_store():
     assert packets == (packet,)
 
 
-def _two_store_retention(last_written: int):
-    """Stream 1 enters at weak, stream 2 at fpga_b, each its own store."""
+def _two_store_retention(
+    last_written: int, round_count: int = 7, successors: tuple = ()
+):
+    """Stream 1 enters at weak, stream 2 at fpga_b, each its own store.
+
+    Each stream runs round_count rounds; successors are stream 1's.
+    """
     weak = _store()
     fpga = _store()
     entry_by_stream = {1: window_records.WEAK_POOL_ID, 2: FPGA_POOL}
@@ -682,10 +695,10 @@ def _two_store_retention(last_written: int):
         last_round_written=lambda _stream_id: last_written
     )
     retention.planner = types.SimpleNamespace(
-        successors_by_stream={1: [], 2: []}
+        successors_by_stream={1: list(successors), 2: []}
     )
     retention.tracker = types.SimpleNamespace(
-        effective_round_count_for_window=lambda _stream_id, _window: 7
+        effective_round_count_for_window=lambda _stream_id, _window: round_count
     )
     retention.open_stream_store(1)
     retention.open_stream_store(2)
@@ -774,3 +787,134 @@ def test_a_stream_whose_entry_pool_escalates_nowhere_has_no_strong_hold():
 
     assert not strong.has_hold(later_reads)
     assert not fpga.has_hold(later_reads)
+
+
+def _successor_retention(rounds_arrived: int):
+    """Stream 1 at weak runs 3 rounds, then stream 2 at fpga_b, its successor.
+
+    Stream 2's own store has its rounds 1..rounds_arrived; stream 1's
+    last window reads two of them past its end.
+    """
+    retention, weak, fpga = _two_store_retention(
+        last_written=0, round_count=3, successors=(2,)
+    )
+    retention.tracker.rounds_arrived = lambda _stream_id: rounds_arrived
+    _publish_rounds(weak, 1, range(1, 4))
+    stop_round = rounds_arrived + 1
+    _publish_rounds(fpga, 2, range(1, stop_round))
+    window = window_records.Window(
+        stream_id=1,
+        window_index=0,
+        commit_lo=1,
+        commit_hi=3,
+        buffer_hi=5,
+        round_count=3,
+    )
+    return retention, weak, window
+
+
+def test_a_successor_round_arrived_but_not_copied_yet_is_awaited():
+    """Round 1 of the successor is in its own store; its copy is not here."""
+    retention, _weak, window = _successor_retention(rounds_arrived=1)
+
+    assert not retention.copied_reads_landed(window)
+
+
+def test_a_successor_round_not_yet_arrived_is_left_to_the_scheme():
+    """No successor round exists yet: whether to wait is the scheme's rule.
+
+    With one store the window would read whatever is there; a copy of a
+    round never written cannot be waited for.
+    """
+    retention, _weak, window = _successor_retention(rounds_arrived=0)
+
+    assert retention.copied_reads_landed(window)
+
+
+LOOKAHEAD = window_settings.WindowSettings(terminal_policy="lookahead")
+STREAM_2_ON_ITS_OWN_POOL = routers.ByPatch.Settings(((1, "weak"), (2, "other")))
+NO_IDLE_ROUNDS = controller_policies.IgnoreSettings()
+
+
+def _short_successor_graph():
+    """Three rounds of stream 1, then one of stream 2, its successor."""
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(
+        2, decoder_boundary_predecessors=(1,)
+    )
+    graph = declared_run.weak_only_graph(
+        operations=[first, second], windows=LOOKAHEAD
+    )
+    per_operation = round_policies.PerOperationRounds(((1, 3), (2, 1)))
+    workload = graph.held("workload")
+    workload = dataclasses.replace(workload, rounds_policy=per_operation)
+    graph = graph.with_held("workload", workload)
+    return graph.with_held("idle_policy", NO_IDLE_ROUNDS)
+
+
+def _blocked_successor_graph():
+    """Stream 2 waits on stream 1's result, so 1's tail reads memory rounds."""
+    first = declared_run.memory_operation(1)
+    second = declared_run.memory_operation(
+        2, decoder_boundary_predecessors=(1,), blocked_by=1, predecessors=(1,)
+    )
+    graph = declared_run.weak_only_graph(
+        rounds=3, operations=[first, second], windows=LOOKAHEAD
+    )
+    return graph.with_held("idle_policy", NO_IDLE_ROUNDS)
+
+
+def _window_times(graph, builder) -> dict:
+    """Each window's data-complete tick, run with stream 2 on its own pool."""
+    weak = graph.part("weak")
+    pools = (("other", weak.settings),)
+    routed = builder(graph, STREAM_2_ON_ITS_OWN_POOL, pools)
+    machine = machine_module.Machine.build(routed, 0)
+    # a window waiting on a copy that never comes leaves the memory
+    # rounds ticking forever, so the run fails here instead of hanging
+    guard = _refuse_past(1_000_000_000)
+    machine.engine.action_done.connect(guard)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    windows = machine.windows.planner.windows_by_key
+    times = {}
+    for key, window in windows.items():
+        times[key] = window.t_data_complete
+    return times
+
+
+def _refuse_past(limit_ticks: int):
+    """A listener that fails a run still going past the limit."""
+
+    def listener(now: int) -> None:
+        assert now <= limit_ticks, f"the run did not end by tick {limit_ticks}"
+
+    return listener
+
+
+def test_a_lookahead_past_a_shorter_successor_on_another_pool_is_one_stores():
+    """Stream 1's last window reads rounds 1-3 of a one-round successor.
+
+    Only round 1 is ever written, so a store per pool waits for no copy
+    of rounds 2 and 3, and every window is complete when one store's is.
+    """
+    graph = _short_successor_graph()
+
+    one_store = _window_times(graph, machines.with_router)
+    store_per_pool = _window_times(graph, machines.with_store_per_pool)
+
+    assert store_per_pool == one_store
+
+
+def test_a_tail_a_blocked_successor_waits_on_reads_memory_rounds_and_ends():
+    """Stream 2 starts only once stream 1's tail is decoded.
+
+    The tail reads memory rounds in place of stream 2's (Skoric et al.
+    2209.08552's buffer); no copy of stream 2 can come first.
+    """
+    graph = _blocked_successor_graph()
+
+    one_store = _window_times(graph, machines.with_router)
+    store_per_pool = _window_times(graph, machines.with_store_per_pool)
+
+    assert store_per_pool == one_store

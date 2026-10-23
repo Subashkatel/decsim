@@ -192,19 +192,40 @@ class RoundRetention:
         """Whether every round the window reads of another pool is here.
 
         Its own stream's rounds are ready by the tracker's count; a copy
-        is ready once stored in the store the window reads.
+        is ready once stored in the store the window reads. A region read
+        across is always awaited. A successor's round past the window's
+        end is awaited only once it has arrived in its own store: whether
+        the window waits for it at all is the scheme's rule (a shorter
+        successor, memory rounds), as with one store.
         """
         entry_stores = self.entry_stores()
         if len(entry_stores) == 1:
             # one store takes every round, so nothing is a copy
             return True
         store = self.store_of_stream(window.stream_id)
-        for round_key in self.primary_read_keys(window):
+        for round_key in self._awaited_read_keys(window):
             if self.store_of_stream(round_key[0]) is store:
                 continue
             if store.retained_fragments(round_key) is None:
                 return False
         return True
+
+    def _awaited_read_keys(self, window: window_records.Window) -> list:
+        """The copies the window waits for before it can be decoded.
+
+        Each region read across, and each successor round past the
+        window's end that has arrived in its own store.
+        """
+        awaited = _spatial_read_keys(window)
+        reads = self.read_keys_for_bounds(
+            window.stream_id, window.start_round, window.buffer_hi, window
+        )
+        for stream_id, round_index in reads:
+            if stream_id == window.stream_id:
+                continue
+            if self.tracker.rounds_arrived(stream_id) >= round_index:
+                awaited.append((stream_id, round_index))
+        return awaited
 
     # ---- a window's reads
 
